@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "458576897499",
+    "project_id": "kuchupuchuff2026",
+    "storage_bucket": "kuchupuchuff2026.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:458576897499:android:a2f2607e6913105a7d33fe",
+        "android_client_info": {
+          "package_name": "app.kuchupuchu.android"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDQSxFVAc_aZH-rPUkOtmot5Jp9uwYQAU0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./lib/auth";
-import { getStoredSessionToken } from "./lib/api";
 import { AppLayout } from "./components/Layout";
 import { Spinner } from "./components/ui";
 import {
@@ -34,7 +33,7 @@ import { AdminPage } from "./pages/admin";
 
 function Guard({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
-  if (loading || (!user && getStoredSessionToken())) return <Spinner />;
+  if (loading) return <Spinner />;
   if (!user) return <Navigate to="/login" replace />;
   return children;
 }

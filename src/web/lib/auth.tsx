@@ -1,9 +1,16 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
-import { api, getStoredSessionToken, setStoredSessionToken } from "./api";
+import {
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut,
+  updateProfile,
+  type User,
+} from "firebase/auth";
+import { firebaseAuth, explainFirebaseError } from "./firebase";
+import { setStoredSessionToken } from "./api";
 import type { Me } from "./types";
-
-type SessionResponse = { token?: string; user?: Me };
 
 type AuthState = {
   user: Me | null;
@@ -23,12 +30,82 @@ type AuthState = {
 
 const Ctx = createContext<AuthState | null>(null);
 
-function applySession(session: SessionResponse): Me {
-  if (session.token) setStoredSessionToken(session.token);
-  if (!session.user) {
-    throw new Error("Server did not return a user profile.");
-  }
-  return session.user;
+function slugFrom(value: string) {
+  const cleaned = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 18);
+  return cleaned || "player";
+}
+
+function meFromFirebase(fb: User, extras?: { displayName?: string; username?: string }): Me {
+  const email = fb.email ?? "";
+  const displayName = extras?.displayName || fb.displayName || email.split("@")[0] || "Player";
+  const username = extras?.username || slugFrom(displayName);
+  const now = new Date().toISOString();
+  return {
+    id: fb.uid,
+    email: email || null,
+    emailVerified: Boolean(fb.emailVerified),
+    username,
+    displayName,
+    avatarUrl: fb.photoURL,
+    bio: null,
+    country: "Bangladesh",
+    district: null,
+    approximateArea: null,
+    status: "ACTIVE",
+    referralCode: fb.uid.slice(0, 8).toUpperCase(),
+    referralLink: "",
+    lastActiveAt: now,
+    createdAt: fb.metadata.creationTime ? new Date(fb.metadata.creationTime).toISOString() : now,
+    reputation: 0,
+    adminRole: null,
+    wallet: { balance: 0 },
+    profile: {
+      ffUid: null,
+      ffIgn: null,
+      serverRegion: "SOUTH_ASIA",
+      level: null,
+      rank: null,
+      preferredModes: [],
+      playStyle: null,
+      languages: ["bn"],
+      availability: [],
+      micPreference: null,
+      ageRange: null,
+      gender: null,
+      genderPreference: null,
+      relationshipStatus: null,
+      facebookId: null,
+      instagram: null,
+      whatsapp: null,
+      verifiedFf: false,
+      verifiedIdentity: false,
+      onboardingComplete: true,
+    },
+    privacy: {
+      showCountry: true,
+      showDistrict: false,
+      showApproximateArea: false,
+      showRelationship: false,
+      showFfUid: false,
+      allowMessages: "EVERYONE",
+      allowRequests: "EVERYONE",
+      allowGifts: "FRIENDS",
+      discoverable: true,
+    },
+    notificationPreferences: {
+      social: true,
+      matching: true,
+      messaging: true,
+      gifting: true,
+      wallet: true,
+      payment: true,
+      referral: true,
+    },
+  };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -36,27 +113,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [offline, setOffline] = useState(!navigator.onLine);
 
-  async function loadMe(): Promise<Me | null> {
-    if (!getStoredSessionToken()) {
-      flushSync(() => setUser(null));
-      return null;
-    }
-    const data = await api<{ user: Me }>("/api/me");
-    flushSync(() => setUser(data.user));
-    return data.user;
-  }
-
   useEffect(() => {
     const on = () => setOffline(false);
     const off = () => setOffline(true);
     window.addEventListener("online", on);
     window.addEventListener("offline", off);
-    void loadMe()
-      .catch(() => setUser(null))
-      .finally(() => setLoading(false));
+    const unsub = onAuthStateChanged(firebaseAuth, (fb) => {
+      flushSync(() => setUser(fb ? meFromFirebase(fb) : null));
+      setLoading(false);
+    });
     return () => {
       window.removeEventListener("online", on);
       window.removeEventListener("offline", off);
+      unsub();
     };
   }, []);
 
@@ -65,27 +134,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       loading,
       offline,
-      refresh: () => loadMe().catch(() => null),
+      refresh: async () => {
+        const fb = firebaseAuth.currentUser;
+        const next = fb ? meFromFirebase(fb) : null;
+        flushSync(() => setUser(next));
+        return next;
+      },
       signIn: async (email, password) => {
-        const session = await api<SessionResponse>("/api/auth/session", {
-          method: "POST",
-          body: JSON.stringify({ email: email.trim(), password }),
-        });
-        const me = applySession(session);
-        flushSync(() => setUser(me));
-        return me;
+        try {
+          const cred = await signInWithEmailAndPassword(firebaseAuth, email.trim(), password);
+          const me = meFromFirebase(cred.user);
+          flushSync(() => setUser(me));
+          return me;
+        } catch (err) {
+          throw new Error(explainFirebaseError(err));
+        }
       },
       signUp: async (input) => {
-        const created = await api<SessionResponse>("/api/auth/register", {
-          method: "POST",
-          body: JSON.stringify(input),
-        });
-        const me = applySession(created);
-        flushSync(() => setUser(me));
-        return me;
+        try {
+          const cred = await createUserWithEmailAndPassword(
+            firebaseAuth,
+            input.email.trim(),
+            input.password,
+          );
+          await updateProfile(cred.user, { displayName: input.displayName.trim() });
+          const me = meFromFirebase(cred.user, {
+            displayName: input.displayName.trim(),
+            username: input.username,
+          });
+          flushSync(() => setUser(me));
+          return me;
+        } catch (err) {
+          throw new Error(explainFirebaseError(err));
+        }
       },
       logout: async () => {
-        await api("/api/auth/logout", { method: "POST" }).catch(() => undefined);
+        await signOut(firebaseAuth).catch(() => undefined);
         setStoredSessionToken(null);
         flushSync(() => setUser(null));
       },
