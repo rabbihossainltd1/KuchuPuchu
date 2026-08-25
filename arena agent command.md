@@ -48,4 +48,4 @@ Before release, verify:
 
 
 
-update korar jonno pat token: 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
+Secrets must never be stored in this file. Use repository secret managers.

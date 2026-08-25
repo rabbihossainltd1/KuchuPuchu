@@ -1,0 +1,561 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String     @id
+  email           String?    @unique
+  emailVerifiedAt DateTime?
+  passwordHash    String?
+  googleId        String?    @unique
+  username        String     @unique
+  displayName     String
+  avatarUrl       String?
+  bio             String?
+  country         String?
+  district        String?
+  approximateArea String?
+  status          String     @default("ACTIVE")
+  referralCode    String     @unique
+  referredById    String?
+  lastActiveAt    DateTime   @default(now())
+  deletedAt       DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  referredBy          User?              @relation("Referrals", fields: [referredById], references: [id])
+  referralsMade       User[]             @relation("Referrals")
+  sessions            Session[]
+  emailTokens         EmailToken[]
+  profile             Profile?
+  privacy             PrivacySettings?
+  wallet              Wallet?
+  ledger              CoinLedger[]
+  inventory           InventoryItem[]
+  storeOrders         StoreOrder[]
+  paymentOrders       PaymentOrder[]
+  giftsSent           Gift[]             @relation("GiftsSent")
+  giftsReceived       Gift[]             @relation("GiftsReceived")
+  notifications       Notification[]
+  notificationPref    NotificationPreference?
+  reportsFiled        Report[]           @relation("ReportsFiled")
+  reportsAgainst      Report[]           @relation("ReportsAgainst")
+  reputationEvents    ReputationEvent[]
+  duoRequested        DuoRequest[]       @relation("DuoRequested")
+  duoReceived         DuoRequest[]       @relation("DuoReceived")
+  matchesA            Match[]            @relation("MatchA")
+  matchesB            Match[]            @relation("MatchB")
+  conversationsA      Conversation[]     @relation("ConvA")
+  conversationsB      Conversation[]     @relation("ConvB")
+  messages            Message[]
+  followsFrom         Relationship[]     @relation("RelFrom")
+  followsTo           Relationship[]     @relation("RelTo")
+  blocksFrom          Block[]            @relation("BlockFrom")
+  blocksTo            Block[]            @relation("BlockTo")
+  friendRequestsSent  FriendRequest[]    @relation("FriendSent")
+  friendRequestsRecv  FriendRequest[]    @relation("FriendRecv")
+  dismissals          DiscoveryDismissal[]
+  referralRecords     Referral[]         @relation("ReferralReferrer")
+  referredRecord      Referral?          @relation("ReferralReferee")
+  adminUser           AdminUser?
+  auditActor          AuditLog[]
+  dailyRewards        DailyReward[]
+  boosts              ProfileBoost[]
+
+  @@index([status, lastActiveAt])
+  @@index([country, district])
+  @@index([referredById])
+}
+
+model Session {
+  id        String   @id
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  userAgent String?
+  ipHash    String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model EmailToken {
+  id        String    @id
+  userId    String
+  type      String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+}
+
+model Profile {
+  userId             String   @id
+  ffUid              String?
+  ffIgn              String?
+  serverRegion       String?
+  level              Int?
+  rank               String?
+  preferredModesJson String   @default("[]")
+  playStyle          String?
+  languagesJson      String   @default("[]")
+  availabilityJson   String   @default("[]")
+  micPreference      String?
+  ageRange           String?
+  gender             String?
+  genderPreference   String?
+  relationshipStatus String?
+  verifiedFf         Boolean  @default(false)
+  verifiedIdentity   Boolean  @default(false)
+  onboardingComplete Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([serverRegion, rank])
+}
+
+model PrivacySettings {
+  userId                String   @id
+  showCountry           Boolean  @default(true)
+  showDistrict          Boolean  @default(true)
+  showApproximateArea   Boolean  @default(false)
+  showRelationship      Boolean  @default(false)
+  showFfUid             Boolean  @default(false)
+  allowMessages         String   @default("EVERYONE")
+  allowRequests         String   @default("EVERYONE")
+  allowGifts            String   @default("EVERYONE")
+  discoverable          Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Wallet {
+  userId    String   @id
+  balance   Int      @default(0)
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model CoinLedger {
+  id             String   @id
+  userId         String
+  type           String
+  amount         Int
+  balanceAfter   Int
+  source         String
+  referenceId    String?
+  status         String   @default("POSTED")
+  idempotencyKey String   @unique
+  metadataJson   String   @default("{}")
+  createdAt      DateTime @default(now())
+  user           User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId, createdAt])
+  @@index([referenceId])
+}
+
+model CoinPackage {
+  id          String   @id
+  name        String
+  coins       Int
+  priceBdt    Int
+  active      Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  orders      PaymentOrder[]
+}
+
+model PaymentOrder {
+  id               String    @id
+  userId           String
+  packageId        String
+  coins            Int
+  amountBdt        Int
+  status           String    @default("CREATED")
+  idempotencyKey   String    @unique
+  provider         String    @default("SPV")
+  providerPaymentId String?  @unique
+  checkoutUrl      String?
+  checkoutToken    String?
+  failureCode      String?
+  paidAt           DateTime?
+  settledAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  user             User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  package          CoinPackage @relation(fields: [packageId], references: [id])
+  events           PaymentEvent[]
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
+model PaymentEvent {
+  id        String   @id
+  orderId   String
+  fromStatus String?
+  toStatus  String
+  note      String?
+  rawJson   String   @default("{}")
+  createdAt DateTime @default(now())
+  order     PaymentOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
+}
+
+model Product {
+  id            String   @id
+  name          String
+  description   String
+  category      String
+  priceCoins    Int
+  imageKey      String
+  rarity        String   @default("COMMON")
+  status        String   @default("ACTIVE")
+  giftable      Boolean  @default(true)
+  limited       Boolean  @default(false)
+  stock         Int?
+  maxPerUser    Int      @default(1)
+  uniqueItem    Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  inventory     InventoryItem[]
+  storeOrders   StoreOrder[]
+
+  @@index([status, category])
+}
+
+model InventoryItem {
+  id          String   @id
+  ownerId     String
+  productId   String
+  quantity    Int      @default(1)
+  giftable    Boolean  @default(true)
+  equipped    Boolean  @default(false)
+  acquiredAt  DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  owner       User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  product     Product  @relation(fields: [productId], references: [id])
+  gifts       Gift[]
+
+  @@index([ownerId, productId])
+  @@index([ownerId, equipped])
+}
+
+model StoreOrder {
+  id             String   @id
+  userId         String
+  productId      String
+  priceCoins     Int
+  quantity       Int      @default(1)
+  inventoryId    String?
+  idempotencyKey String   @unique
+  status         String   @default("COMPLETED")
+  createdAt      DateTime @default(now())
+  user           User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  product        Product  @relation(fields: [productId], references: [id])
+
+  @@index([userId, createdAt])
+}
+
+model Gift {
+  id             String   @id
+  senderId       String
+  receiverId     String
+  inventoryId    String
+  productId      String
+  message        String?
+  idempotencyKey String   @unique
+  createdAt      DateTime @default(now())
+  sender         User     @relation("GiftsSent", fields: [senderId], references: [id], onDelete: Restrict)
+  receiver       User     @relation("GiftsReceived", fields: [receiverId], references: [id], onDelete: Restrict)
+  inventory      InventoryItem @relation(fields: [inventoryId], references: [id])
+
+  @@index([senderId, createdAt])
+  @@index([receiverId, createdAt])
+}
+
+model Referral {
+  id             String    @id
+  referrerId     String
+  refereeId      String    @unique
+  codeUsed       String
+  status         String    @default("PENDING")
+  rewardAmount   Int
+  rewardedAt     DateTime?
+  holdReason     String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  referrer       User      @relation("ReferralReferrer", fields: [referrerId], references: [id], onDelete: Restrict)
+  referee        User      @relation("ReferralReferee", fields: [refereeId], references: [id], onDelete: Restrict)
+
+  @@index([referrerId, status])
+}
+
+model DailyReward {
+  id        String   @id
+  userId    String
+  dayKey    String
+  amount    Int
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dayKey])
+}
+
+model ProfileBoost {
+  id        String   @id
+  userId    String
+  inventoryId String
+  startsAt  DateTime
+  endsAt    DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, endsAt])
+}
+
+model Relationship {
+  id         String   @id
+  fromUserId String
+  toUserId   String
+  type       String
+  createdAt  DateTime @default(now())
+  fromUser   User     @relation("RelFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser     User     @relation("RelTo", fields: [toUserId], references: [id], onDelete: Cascade)
+
+  @@unique([fromUserId, toUserId, type])
+  @@index([toUserId, type])
+}
+
+model FriendRequest {
+  id         String    @id
+  fromUserId String
+  toUserId   String
+  status     String    @default("PENDING")
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  fromUser   User      @relation("FriendSent", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser     User      @relation("FriendRecv", fields: [toUserId], references: [id], onDelete: Cascade)
+
+  @@index([toUserId, status])
+  @@index([fromUserId, status])
+}
+
+model Block {
+  id         String   @id
+  fromUserId String
+  toUserId   String
+  createdAt  DateTime @default(now())
+  fromUser   User     @relation("BlockFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser     User     @relation("BlockTo", fields: [toUserId], references: [id], onDelete: Cascade)
+
+  @@unique([fromUserId, toUserId])
+  @@index([toUserId])
+}
+
+model DuoRequest {
+  id               String    @id
+  requesterId      String
+  targetId         String?
+  mode             String
+  preferredRankMin String?
+  preferredRankMax String?
+  availabilityJson String    @default("[]")
+  message          String?
+  expiresAt        DateTime
+  status           String    @default("PENDING")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  requester        User      @relation("DuoRequested", fields: [requesterId], references: [id], onDelete: Cascade)
+  target           User?     @relation("DuoReceived", fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@index([requesterId, status])
+  @@index([targetId, status])
+  @@index([status, expiresAt])
+}
+
+model Match {
+  id         String   @id
+  userAId    String
+  userBId    String
+  requestId  String?
+  mode       String
+  createdAt  DateTime @default(now())
+  userA      User     @relation("MatchA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB      User     @relation("MatchB", fields: [userBId], references: [id], onDelete: Cascade)
+
+  @@index([userAId, createdAt])
+  @@index([userBId, createdAt])
+}
+
+model Conversation {
+  id         String    @id
+  userAId    String
+  userBId    String
+  lastMessageAt DateTime @default(now())
+  createdAt  DateTime  @default(now())
+  userA      User      @relation("ConvA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB      User      @relation("ConvB", fields: [userBId], references: [id], onDelete: Cascade)
+  messages   Message[]
+
+  @@unique([userAId, userBId])
+  @@index([lastMessageAt])
+}
+
+model Message {
+  id             String   @id
+  conversationId String
+  senderId       String
+  body           String
+  readAt         DateTime?
+  createdAt      DateTime @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
+
+model Notification {
+  id        String   @id
+  userId    String
+  type      String
+  title     String
+  body      String
+  link      String?
+  readAt    DateTime?
+  dedupeKey String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+  @@unique([userId, dedupeKey])
+}
+
+model NotificationPreference {
+  userId     String  @id
+  social     Boolean @default(true)
+  matching   Boolean @default(true)
+  messaging  Boolean @default(true)
+  gifting    Boolean @default(true)
+  wallet     Boolean @default(true)
+  payment    Boolean @default(true)
+  referral   Boolean @default(true)
+  user       User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Report {
+  id           String    @id
+  reporterId   String
+  targetUserId String
+  category     String
+  details      String
+  status       String    @default("SUBMITTED")
+  resolution   String?
+  assignedTo   String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  reporter     User      @relation("ReportsFiled", fields: [reporterId], references: [id], onDelete: Cascade)
+  target       User      @relation("ReportsAgainst", fields: [targetUserId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([targetUserId])
+}
+
+model ReputationEvent {
+  id        String   @id
+  userId    String
+  kind      String
+  delta     Int
+  source    String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model DiscoveryDismissal {
+  id          String   @id
+  userId      String
+  dismissedId String
+  until       DateTime
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dismissedId])
+  @@index([userId, until])
+}
+
+model AdminUser {
+  userId    String   @id
+  role      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([role])
+}
+
+model AuditLog {
+  id         String   @id
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String
+  metadataJson String @default("{}")
+  ipHash     String?
+  createdAt  DateTime @default(now())
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([actorId, createdAt])
+  @@index([createdAt])
+}
+
+model SystemSetting {
+  key       String   @id
+  valueJson String
+  updatedAt DateTime @updatedAt
+}
+
+model IdempotencyRecord {
+  key       String   @id
+  userId    String
+  route     String
+  responseJson String
+  status    Int
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model RateLimitHit {
+  id        String   @id
+  bucket    String
+  createdAt DateTime @default(now())
+
+  @@index([bucket, createdAt])
+}
+
+model DevMailbox {
+  id        String   @id
+  toEmail   String
+  subject   String
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([toEmail, createdAt])
+}
