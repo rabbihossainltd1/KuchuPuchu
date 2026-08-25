@@ -9,7 +9,9 @@ export function isNativeApp() {
 }
 
 export function getApiBase() {
-  return fromEnv;
+  if (fromEnv) return fromEnv;
+  if (isNativeApp()) return PRODUCTION_API;
+  return "";
 }
 
 export function apiUrl(path: string) {

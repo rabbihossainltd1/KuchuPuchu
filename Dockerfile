@@ -8,6 +8,7 @@ RUN npx prisma generate && npm run build
 FROM node:20-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production
+RUN mkdir -p /app/data /app/uploads
 COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
