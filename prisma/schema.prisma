@@ -66,6 +66,13 @@ model User {
   auditActor          AuditLog[]
   dailyRewards        DailyReward[]
   boosts              ProfileBoost[]
+  posts               Post[]
+  postLikes           PostLike[]
+  postComments        PostComment[]
+  callsOutgoing       Call[]             @relation("CallCaller")
+  callsIncoming       Call[]             @relation("CallCallee")
+  stories             Story[]
+  storyViews          StoryView[]
 
   @@index([status, lastActiveAt])
   @@index([country, district])
@@ -114,6 +121,9 @@ model Profile {
   gender             String?
   genderPreference   String?
   relationshipStatus String?
+  facebookId         String?
+  instagram          String?
+  whatsapp           String?
   verifiedFf         Boolean  @default(false)
   verifiedIdentity   Boolean  @default(false)
   onboardingComplete Boolean  @default(false)
@@ -540,6 +550,102 @@ model IdempotencyRecord {
   createdAt DateTime @default(now())
 
   @@index([userId, createdAt])
+}
+
+model Story {
+  id        String      @id
+  authorId  String
+  body      String?
+  imageUrl  String?
+  createdAt DateTime    @default(now())
+  expiresAt DateTime
+  author    User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  views     StoryView[]
+
+  @@index([authorId, expiresAt])
+  @@index([expiresAt])
+}
+
+model StoryView {
+  id        String   @id
+  storyId   String
+  viewerId  String
+  createdAt DateTime @default(now())
+  story     Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  viewer    User     @relation(fields: [viewerId], references: [id], onDelete: Cascade)
+
+  @@unique([storyId, viewerId])
+  @@index([viewerId])
+}
+
+model Post {
+  id         String   @id
+  authorId   String
+  body       String
+  visibility String   @default("PUBLIC")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  author     User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  likes      PostLike[]
+  comments   PostComment[]
+
+  @@index([authorId, createdAt])
+  @@index([visibility, createdAt])
+}
+
+model PostLike {
+  id        String   @id
+  postId    String
+  userId    String
+  createdAt DateTime @default(now())
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@index([userId])
+}
+
+model PostComment {
+  id        String   @id
+  postId    String
+  authorId  String
+  body      String
+  createdAt DateTime @default(now())
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([postId, createdAt])
+}
+
+model Call {
+  id         String    @id
+  callerId   String
+  calleeId   String
+  kind       String
+  status     String    @default("RINGING")
+  offerSdp   String?
+  answerSdp  String?
+  createdAt  DateTime  @default(now())
+  answeredAt DateTime?
+  endedAt    DateTime?
+  endedById  String?
+  caller     User      @relation("CallCaller", fields: [callerId], references: [id], onDelete: Cascade)
+  callee     User      @relation("CallCallee", fields: [calleeId], references: [id], onDelete: Cascade)
+  signals    CallSignal[]
+
+  @@index([calleeId, status])
+  @@index([callerId, status])
+}
+
+model CallSignal {
+  id         String   @id
+  callId     String
+  fromUserId String
+  payload    String
+  createdAt  DateTime @default(now())
+  call       Call     @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@index([callId, createdAt])
 }
 
 model RateLimitHit {

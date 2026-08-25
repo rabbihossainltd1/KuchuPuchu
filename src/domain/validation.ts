@@ -30,8 +30,16 @@ export const usernameSchema = z
   .max(24)
   .regex(/^[a-zA-Z0-9_]+$/, "Username may contain letters, numbers, and underscore");
 
+export const emailSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .min(5)
+  .max(160)
+  .regex(/^[^\s@]+@[^\s@]+(\.[^\s@]+)?$/, "Enter a valid email address");
+
 export const registerSchema = z.object({
-  email: z.string().email().max(160),
+  email: emailSchema,
   password: passwordSchema,
   displayName: z.string().trim().min(2).max(40),
   username: usernameSchema.optional(),
@@ -39,12 +47,12 @@ export const registerSchema = z.object({
 });
 
 export const loginSchema = z.object({
-  email: z.string().email(),
+  email: emailSchema,
   password: z.string().min(1).max(128),
 });
 
 export const passwordResetRequestSchema = z.object({
-  email: z.string().email(),
+  email: emailSchema,
 });
 
 export const passwordResetSchema = z.object({
@@ -63,7 +71,14 @@ export const profilePatchSchema = z.object({
   country: z.string().trim().min(2).max(56).optional().nullable(),
   district: z.string().trim().min(2).max(80).optional().nullable(),
   approximateArea: z.string().trim().min(2).max(80).optional().nullable(),
-  avatarUrl: z.string().url().max(500).optional().nullable(),
+  avatarUrl: z
+    .string()
+    .trim()
+    .max(500)
+    .optional()
+    .nullable()
+    .transform((value) => (value ? value : null))
+    .refine((value) => value === null || /^https?:\/\//i.test(value), "Enter a valid image URL"),
   ffUid: z.string().trim().min(5).max(20).optional().nullable(),
   ffIgn: z.string().trim().min(2).max(24).optional().nullable(),
   serverRegion: z.enum(SERVER_REGIONS).optional().nullable(),
@@ -78,6 +93,27 @@ export const profilePatchSchema = z.object({
   gender: z.enum(GENDERS).optional().nullable(),
   genderPreference: z.enum(GENDER_PREFERENCES).optional().nullable(),
   relationshipStatus: z.enum(RELATIONSHIP_STATUSES).optional().nullable(),
+  facebookId: z
+    .string()
+    .trim()
+    .max(80)
+    .optional()
+    .nullable()
+    .transform((value) => (value ? value : null)),
+  instagram: z
+    .string()
+    .trim()
+    .max(80)
+    .optional()
+    .nullable()
+    .transform((value) => (value ? value : null)),
+  whatsapp: z
+    .string()
+    .trim()
+    .max(24)
+    .optional()
+    .nullable()
+    .transform((value) => (value ? value : null)),
 });
 
 export const privacyPatchSchema = z.object({
@@ -131,6 +167,38 @@ export const conversationCreateSchema = z.object({
 
 export const messageCreateSchema = z.object({
   body: z.string().trim().min(1).max(MESSAGE_MAX_LENGTH),
+});
+
+export const postCreateSchema = z.object({
+  body: z.string().trim().min(1).max(500),
+  visibility: z.enum(["PUBLIC", "FRIENDS"]).default("PUBLIC"),
+});
+
+export const commentCreateSchema = z.object({
+  body: z.string().trim().min(1).max(280),
+});
+
+export const storyCreateSchema = z
+  .object({
+    body: z.string().trim().max(200).optional().nullable(),
+    imageData: z.string().max(1_800_000).optional().nullable(),
+  })
+  .refine((value) => Boolean(value.body?.trim() || value.imageData), {
+    message: "Add a photo or a short caption.",
+  });
+
+export const callCreateSchema = z.object({
+  userId: z.string().min(8),
+  kind: z.enum(["AUDIO", "VIDEO"]),
+  offerSdp: z.string().min(10).max(40_000),
+});
+
+export const callAnswerSchema = z.object({
+  answerSdp: z.string().min(10).max(40_000),
+});
+
+export const callIceSchema = z.object({
+  candidate: z.unknown(),
 });
 
 export const storeOrderSchema = z.object({

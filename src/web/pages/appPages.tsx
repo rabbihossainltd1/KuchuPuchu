@@ -1,9 +1,11 @@
-import { FormEvent, useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, RequestError, idempotencyKey } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { Empty, Notice, PlayerCard, Spinner, Avatar } from "../components/ui";
+import { PlayerActions } from "../components/actions";
 import { label, type PublicUser } from "../lib/types";
+import { ItemPreview } from "../components/ItemPreview";
 import {
   AGE_RANGES,
   GAME_MODES,
@@ -12,10 +14,14 @@ import {
   LANGUAGES,
   MIC_PREFERENCES,
   PLAY_STYLES,
+  PRODUCT_CATEGORIES,
   RANKS,
   RELATIONSHIP_STATUSES,
   SERVER_REGIONS,
 } from "../../shared/constants";
+import "./store.css";
+
+const AVAILABILITY = ["morning", "afternoon", "evening", "night", "weekend"] as const;
 
 export function OnboardingPage() {
   const { refresh } = useAuth();
@@ -40,9 +46,10 @@ export function OnboardingPage() {
           playStyle: form.get("playStyle"),
           languages: [String(form.get("language"))],
           micPreference: form.get("micPreference"),
+          ageRange: form.get("ageRange") || null,
           gender: form.get("gender") || null,
           genderPreference: form.get("genderPreference") || "ANY",
-          availability: ["evening"],
+          availability: [String(form.get("availability") || "evening")],
         }),
       });
       await refresh();
@@ -54,10 +61,10 @@ export function OnboardingPage() {
 
   return (
     <div>
-      <h1 className="page-title">Set up your player card</h1>
+      <h1 className="page-title">Set up matching</h1>
       <p className="lede">
-        We ask for region and rank so recommendations stay compatible. Exact address is never
-        collected or shown.
+        We ask for region, rank, mode, and availability so recommendations stay compatible. Exact
+        address is never collected or shown.
       </p>
       {error ? <Notice tone="danger">{error}</Notice> : null}
       <form className="card grid" style={{ marginTop: 18 }} onSubmit={onSubmit}>
@@ -132,9 +139,30 @@ export function OnboardingPage() {
           </select>
         </label>
         <label className="field">
+          <span>Availability</span>
+          <select name="availability" defaultValue="evening">
+            {AVAILABILITY.map((item) => (
+              <option key={item} value={item}>
+                {label(item)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
           <span>Mic</span>
           <select name="micPreference" defaultValue="OPTIONAL">
             {MIC_PREFERENCES.map((item) => (
+              <option key={item} value={item}>
+                {label(item)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Age range (for matching only)</span>
+          <select name="ageRange" defaultValue="">
+            <option value="">Skip</option>
+            {AGE_RANGES.map((item) => (
               <option key={item} value={item}>
                 {label(item)}
               </option>
@@ -146,7 +174,7 @@ export function OnboardingPage() {
           <select name="gender" defaultValue="UNDISCLOSED">
             {GENDERS.map((item) => (
               <option key={item} value={item}>
-                {item}
+                {label(item)}
               </option>
             ))}
           </select>
@@ -156,7 +184,7 @@ export function OnboardingPage() {
           <select name="genderPreference" defaultValue="ANY">
             {GENDER_PREFERENCES.map((item) => (
               <option key={item} value={item}>
-                {item}
+                {label(item)}
               </option>
             ))}
           </select>
@@ -170,26 +198,36 @@ export function OnboardingPage() {
 export function HomePage() {
   const { user } = useAuth();
   const [recs, setRecs] = useState<PublicUser[] | null>(null);
+  const [online, setOnline] = useState<PublicUser[]>([]);
+  const [requests, setRequests] = useState<Array<Record<string, unknown>>>([]);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    void api<{ items: PublicUser[] }>("/api/discover/recommendations")
-      .then((data) => setRecs(data.items))
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed"));
+    void Promise.all([
+      api<{ items: PublicUser[] }>("/api/discover/recommendations"),
+      api<{ items: PublicUser[] }>("/api/discover?online=true"),
+      api<{ items: Array<Record<string, unknown>> }>("/api/duo-requests"),
+    ])
+      .then(([r, o, d]) => {
+        setRecs(r.items);
+        setOnline(o.items);
+        setRequests(d.items.filter((item) => String(item.status) === "PENDING"));
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load home"));
   }, []);
 
   return (
     <div>
-      <h1 className="page-title">Good to see you, {user?.displayName}</h1>
-      <p className="lede">Recommended players are ranked for compatibility, then recency.</p>
-      <div className="grid cols-3" style={{ margin: "18px 0" }}>
+      <h1 className="page-title">Home</h1>
+      <p className="lede">Hello {user?.displayName}. Recommendations are ranked for compatibility.</p>
+      <div className="grid cols-3" style={{ margin: "16px 0" }}>
         <Link className="card" to="/discover">
           <h3>Discover</h3>
           <p className="meta">Filter the full player list.</p>
         </Link>
         <Link className="card" to="/wallet">
           <h3>{user?.wallet.balance ?? 0} coins</h3>
-          <p className="meta">Buy, earn or review the ledger.</p>
+          <p className="meta">Buy, earn, or review the ledger.</p>
         </Link>
         <Link className="card" to="/referrals">
           <h3>{user?.referralCode}</h3>
@@ -197,6 +235,8 @@ export function HomePage() {
         </Link>
       </div>
       {error ? <Notice tone="danger">{error}</Notice> : null}
+
+      <h2 className="section-title">Recommended players</h2>
       {!recs ? (
         <Spinner />
       ) : recs.length === 0 ? (
@@ -216,24 +256,99 @@ export function HomePage() {
           ))}
         </div>
       )}
+
+      <h2 className="section-title">Online / available</h2>
+      {online.length === 0 ? (
+        <p className="meta">No one is marked online right now.</p>
+      ) : (
+        <div className="grid cols-2">
+          {online.map((player) => (
+            <PlayerCard key={player.userId} player={player} />
+          ))}
+        </div>
+      )}
+
+      <h2 className="section-title">Active Duo / Squad requests</h2>
+      {requests.length === 0 ? (
+        <p className="meta">
+          No pending requests. <Link to="/discover">Invite someone from Discover</Link>.
+        </p>
+      ) : (
+        <div className="grid">
+          {requests.map((item) => {
+            const requester = item.requester as PublicUser | undefined;
+            return (
+              <article key={String(item.id)} className="card">
+                <strong>{requester?.displayName ?? "Player"}</strong>
+                <div className="meta">
+                  {label(String(item.mode))} · {String(item.status).toLowerCase()}
+                </div>
+                <Link className="btn-secondary" to="/requests" style={{ marginTop: 10 }}>
+                  Review
+                </Link>
+              </article>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
 
+type DiscoverFilters = {
+  q: string;
+  serverRegion: string;
+  country: string;
+  district: string;
+  rankMin: string;
+  rankMax: string;
+  mode: string;
+  playStyle: string;
+  language: string;
+  availability: string;
+  micPreference: string;
+  ageRange: string;
+  genderPreference: string;
+  online: string;
+  verified: string;
+};
+
+const emptyFilters: DiscoverFilters = {
+  q: "",
+  serverRegion: "",
+  country: "",
+  district: "",
+  rankMin: "",
+  rankMax: "",
+  mode: "",
+  playStyle: "",
+  language: "",
+  availability: "",
+  micPreference: "",
+  ageRange: "",
+  genderPreference: "",
+  online: "",
+  verified: "",
+};
+
 export function DiscoverPage() {
   const [items, setItems] = useState<PublicUser[] | null>(null);
-  const [filters, setFilters] = useState({ q: "", mode: "", rankMin: "", online: "" });
+  const [filters, setFilters] = useState<DiscoverFilters>(emptyFilters);
   const [error, setError] = useState("");
 
-  async function load() {
+  function set<K extends keyof DiscoverFilters>(key: K, value: DiscoverFilters[K]) {
+    setFilters((current) => ({ ...current, [key]: value }));
+  }
+
+  async function load(next = filters) {
     const params = new URLSearchParams();
-    if (filters.q) params.set("q", filters.q);
-    if (filters.mode) params.set("mode", filters.mode);
-    if (filters.rankMin) params.set("rankMin", filters.rankMin);
-    if (filters.online) params.set("online", filters.online);
+    for (const [key, value] of Object.entries(next)) {
+      if (value) params.set(key, value);
+    }
     try {
       const data = await api<{ items: PublicUser[] }>(`/api/discover?${params}`);
       setItems(data.items);
+      setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
     }
@@ -257,12 +372,46 @@ export function DiscoverPage() {
         <input
           placeholder="Search name or IGN"
           value={filters.q}
-          onChange={(e) => setFilters({ ...filters, q: e.target.value })}
+          onChange={(e) => set("q", e.target.value)}
+          aria-label="Search name or IGN"
         />
-        <select
-          value={filters.mode}
-          onChange={(e) => setFilters({ ...filters, mode: e.target.value })}
-        >
+        <select value={filters.serverRegion} onChange={(e) => set("serverRegion", e.target.value)} aria-label="Server">
+          <option value="">Any server</option>
+          {SERVER_REGIONS.map((item) => (
+            <option key={item} value={item}>
+              {label(item)}
+            </option>
+          ))}
+        </select>
+        <input
+          placeholder="Country"
+          value={filters.country}
+          onChange={(e) => set("country", e.target.value)}
+          aria-label="Country"
+        />
+        <input
+          placeholder="District"
+          value={filters.district}
+          onChange={(e) => set("district", e.target.value)}
+          aria-label="District"
+        />
+        <select value={filters.rankMin} onChange={(e) => set("rankMin", e.target.value)} aria-label="Minimum rank">
+          <option value="">Rank min</option>
+          {RANKS.map((item) => (
+            <option key={item} value={item}>
+              {label(item)}
+            </option>
+          ))}
+        </select>
+        <select value={filters.rankMax} onChange={(e) => set("rankMax", e.target.value)} aria-label="Maximum rank">
+          <option value="">Rank max</option>
+          {RANKS.map((item) => (
+            <option key={item} value={item}>
+              {label(item)}
+            </option>
+          ))}
+        </select>
+        <select value={filters.mode} onChange={(e) => set("mode", e.target.value)} aria-label="Game mode">
           <option value="">Any mode</option>
           {GAME_MODES.map((item) => (
             <option key={item} value={item}>
@@ -270,42 +419,101 @@ export function DiscoverPage() {
             </option>
           ))}
         </select>
-        <select
-          value={filters.rankMin}
-          onChange={(e) => setFilters({ ...filters, rankMin: e.target.value })}
-        >
-          <option value="">Any rank</option>
-          {RANKS.map((item) => (
+        <select value={filters.playStyle} onChange={(e) => set("playStyle", e.target.value)} aria-label="Play style">
+          <option value="">Any play style</option>
+          {PLAY_STYLES.map((item) => (
             <option key={item} value={item}>
-              {label(item)}+
+              {label(item)}
             </option>
           ))}
         </select>
-        <button className="btn-secondary" type="submit">
+        <select value={filters.language} onChange={(e) => set("language", e.target.value)} aria-label="Language">
+          <option value="">Any language</option>
+          {LANGUAGES.map((item) => (
+            <option key={item} value={item}>
+              {label(item)}
+            </option>
+          ))}
+        </select>
+        <select
+          value={filters.availability}
+          onChange={(e) => set("availability", e.target.value)}
+          aria-label="Availability"
+        >
+          <option value="">Any availability</option>
+          {AVAILABILITY.map((item) => (
+            <option key={item} value={item}>
+              {label(item)}
+            </option>
+          ))}
+        </select>
+        <select
+          value={filters.micPreference}
+          onChange={(e) => set("micPreference", e.target.value)}
+          aria-label="Mic preference"
+        >
+          <option value="">Any mic</option>
+          {MIC_PREFERENCES.map((item) => (
+            <option key={item} value={item}>
+              {label(item)}
+            </option>
+          ))}
+        </select>
+        <select value={filters.ageRange} onChange={(e) => set("ageRange", e.target.value)} aria-label="Age range">
+          <option value="">Any age range</option>
+          {AGE_RANGES.map((item) => (
+            <option key={item} value={item}>
+              {label(item)}
+            </option>
+          ))}
+        </select>
+        <select
+          value={filters.genderPreference}
+          onChange={(e) => set("genderPreference", e.target.value)}
+          aria-label="Gender preference"
+        >
+          <option value="">Any gender preference</option>
+          {GENDER_PREFERENCES.map((item) => (
+            <option key={item} value={item}>
+              {label(item)}
+            </option>
+          ))}
+        </select>
+        <select value={filters.online} onChange={(e) => set("online", e.target.value)} aria-label="Online status">
+          <option value="">Any status</option>
+          <option value="true">Online now</option>
+          <option value="false">Offline</option>
+        </select>
+        <select value={filters.verified} onChange={(e) => set("verified", e.target.value)} aria-label="Verified status">
+          <option value="">Any verification</option>
+          <option value="true">Verified IGN</option>
+        </select>
+        <button className="btn" type="submit">
           Apply filters
+        </button>
+        <button
+          className="btn-secondary"
+          type="button"
+          onClick={() => {
+            setFilters(emptyFilters);
+            void load(emptyFilters);
+          }}
+        >
+          Reset
         </button>
       </form>
       {error ? <Notice tone="danger">{error}</Notice> : null}
       {!items ? (
         <Spinner />
       ) : items.length === 0 ? (
-        <Empty
-          title="No players match"
-          body="Try fewer filters. New players appear as they finish onboarding."
-        />
+        <Empty title="No players match" body="Try fewer filters. New players appear as they finish onboarding." />
       ) : (
         <div className="grid cols-2">
           {items.map((player) => (
             <PlayerCard
               key={player.userId}
               player={player}
-              extra={
-                <div className="row">
-                  <Link className="btn" to={`/players/${player.userId}`}>
-                    View
-                  </Link>
-                </div>
-              }
+              extra={<PlayerActions player={player} />}
             />
           ))}
         </div>
@@ -316,7 +524,6 @@ export function DiscoverPage() {
 
 export function PlayerPage() {
   const { id } = useParams();
-  const navigate = useNavigate();
   const [player, setPlayer] = useState<PublicUser | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -332,6 +539,7 @@ export function PlayerPage() {
     try {
       await api(path, { method: "POST", body: body ? JSON.stringify(body) : undefined });
       setNotice("Done.");
+      setError("");
     } catch (err) {
       setError(err instanceof RequestError ? err.body.message : "Action failed.");
     }
@@ -340,51 +548,59 @@ export function PlayerPage() {
   if (!player && !error) return <Spinner />;
   if (!player) return <Notice tone="danger">{error}</Notice>;
 
+  const location = [player.approximateArea, player.district, player.country].filter(Boolean).join(" · ");
+
   return (
     <div>
       <div className="card" style={{ display: "grid", gap: 14 }}>
-        <div className="player-head">
+        <div className="player-head" style={{ marginTop: 0, padding: 0 }}>
           <Avatar name={player.displayName} url={player.avatarUrl} online={player.online} large />
           <div>
             <h1 className="page-title">{player.displayName}</h1>
             <div className="meta">
               @{player.username} · reputation {player.reputation}
-              {player.verifiedFf ? " · verified IGN" : ""}
+              {player.online ? " · online" : ""}
             </div>
             <p className="lede">{player.bio || "No bio yet."}</p>
           </div>
         </div>
         <div className="chips">
+          {player.verifiedFf ? <span className="chip accent">Verified IGN</span> : null}
+          {player.verifiedIdentity ? <span className="chip accent">Identity verified</span> : null}
           <span className="chip">{label(player.rank)}</span>
+          {player.level ? <span className="chip">Lv {player.level}</span> : null}
           <span className="chip">{label(player.serverRegion)}</span>
-          {player.country ? <span className="chip">{player.country}</span> : null}
-          {player.district ? <span className="chip">{player.district}</span> : null}
           {player.ffIgn ? <span className="chip">IGN {player.ffIgn}</span> : null}
           {player.ffUid ? <span className="chip">UID {player.ffUid}</span> : null}
+          {player.playStyle ? <span className="chip">{label(player.playStyle)}</span> : null}
+          {player.micPreference ? <span className="chip">{label(player.micPreference)}</span> : null}
+          {player.relationshipStatus ? <span className="chip">{label(player.relationshipStatus)}</span> : null}
+          {player.facebookId ? <span className="chip">Facebook {player.facebookId}</span> : null}
+          {player.whatsapp ? <span className="chip">WhatsApp {player.whatsapp}</span> : null}
+          {player.instagram ? <span className="chip">Instagram {player.instagram}</span> : null}
+          {player.preferredModes.map((mode) => (
+            <span className="chip" key={mode}>
+              {label(mode)}
+            </span>
+          ))}
+          {player.languages.map((lang) => (
+            <span className="chip" key={lang}>
+              {label(lang)}
+            </span>
+          ))}
+          {player.availability.map((slot) => (
+            <span className="chip" key={slot}>
+              {label(slot)}
+            </span>
+          ))}
         </div>
+        {location ? <p className="meta">Approximate location: {location}</p> : null}
         {notice ? <Notice tone="ok">{notice}</Notice> : null}
         {error ? <Notice tone="danger">{error}</Notice> : null}
+        <PlayerActions player={player} />
         <div className="row">
           <button className="btn" onClick={() => void act(`/api/users/${player.userId}/follow`)}>
             Follow
-          </button>
-          <button
-            className="btn-secondary"
-            onClick={() => void act("/api/friend-requests", { userId: player.userId })}
-          >
-            Add friend
-          </button>
-          <button
-            className="btn-secondary"
-            onClick={async () => {
-              const data = await api<{ conversation: { id: string } }>("/api/conversations", {
-                method: "POST",
-                body: JSON.stringify({ userId: player.userId }),
-              });
-              navigate(`/messages/${data.conversation.id}`);
-            }}
-          >
-            Message
           </button>
           <button
             className="btn-secondary"
@@ -492,9 +708,7 @@ export function RequestsPage() {
                     <button
                       className="btn"
                       onClick={() =>
-                        void api(`/api/duo-requests/${item.id}/accept`, { method: "POST" }).then(
-                          load,
-                        )
+                        void api(`/api/duo-requests/${item.id}/accept`, { method: "POST" }).then(load)
                       }
                     >
                       Accept
@@ -512,9 +726,7 @@ export function RequestsPage() {
                     <button
                       className="btn-ghost"
                       onClick={() =>
-                        void api(`/api/duo-requests/${item.id}/cancel`, { method: "POST" }).then(
-                          load,
-                        )
+                        void api(`/api/duo-requests/${item.id}/cancel`, { method: "POST" }).then(load)
                       }
                     >
                       Cancel
@@ -538,9 +750,7 @@ export function MessagesPage() {
     unread: number;
   }> | null>(null);
   useEffect(() => {
-    void api<{ items: typeof items }>("/api/conversations").then((data) =>
-      setItems(data.items ?? []),
-    );
+    void api<{ items: typeof items }>("/api/conversations").then((data) => setItems(data.items ?? []));
   }, []);
   return (
     <div>
@@ -548,10 +758,7 @@ export function MessagesPage() {
       {!items ? (
         <Spinner />
       ) : items.length === 0 ? (
-        <Empty
-          title="No conversations"
-          body="Open a player profile and send a message when they allow it."
-        />
+        <Empty title="No conversations" body="Open a player profile and send a message when they allow it." />
       ) : (
         <div className="grid" style={{ marginTop: 16 }}>
           {items.map((item) => (
@@ -671,41 +878,45 @@ export function ProfilePage() {
         </label>
         <label className="field">
           <span>Relationship status</span>
-          <select
-            name="relationshipStatus"
-            defaultValue={user.profile.relationshipStatus ?? "PREFER_NOT"}
-          >
+          <select name="relationshipStatus" defaultValue={user.profile.relationshipStatus ?? "PREFER_NOT"}>
             {RELATIONSHIP_STATUSES.map((item) => (
               <option key={item} value={item}>
-                {item}
+                {label(item)}
               </option>
             ))}
           </select>
         </label>
-        <p className="meta">Age ranges exist only for matching filters: {AGE_RANGES.join(", ")}</p>
         <button className="btn">Save profile</button>
       </form>
     </div>
   );
 }
 
+type StoreProduct = {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  priceCoins: number;
+  rarity: string;
+  imageKey: string;
+};
+
 export function StorePage() {
   const { refresh } = useAuth();
-  const [items, setItems] = useState<Array<{
-    id: string;
-    name: string;
-    description: string;
-    category: string;
-    priceCoins: number;
-    rarity: string;
-  }> | null>(null);
+  const [items, setItems] = useState<StoreProduct[] | null>(null);
+  const [category, setCategory] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
+  async function load(next = category) {
+    const query = next ? `?category=${encodeURIComponent(next)}` : "";
+    const data = await api<{ items: StoreProduct[] }>(`/api/store/products${query}`);
+    setItems(data.items);
+  }
+
   useEffect(() => {
-    void api<{ items: NonNullable<typeof items> }>("/api/store/products").then((d) =>
-      setItems(d.items),
-    );
+    void load();
   }, []);
 
   async function buy(productId: string) {
@@ -723,31 +934,45 @@ export function StorePage() {
   }
 
   return (
-    <div>
+    <div className="store-page">
       <h1 className="page-title">Store</h1>
-      <p className="lede">
-        Prices are taken from the server at purchase time. The client price is display-only.
-      </p>
+      <p className="lede">Prices are taken from the server at purchase time. The client price is display-only.</p>
+      <div className="tabs" style={{ margin: "14px 0" }}>
+        <button className={category === "" ? "tab active" : "tab"} type="button" onClick={() => { setCategory(""); void load(""); }}>
+          All
+        </button>
+        {PRODUCT_CATEGORIES.map((item) => (
+          <button
+            key={item}
+            className={category === item ? "tab active" : "tab"}
+            type="button"
+            onClick={() => {
+              setCategory(item);
+              void load(item);
+            }}
+          >
+            {label(item)}
+          </button>
+        ))}
+      </div>
       {error ? <Notice tone="danger">{error}</Notice> : null}
       {notice ? <Notice tone="ok">{notice}</Notice> : null}
       {!items ? (
         <Spinner />
+      ) : items.length === 0 ? (
+        <Empty title="Nothing in this category" body="Try another category or check back later." />
       ) : (
-        <div className="grid cols-3" style={{ marginTop: 16 }}>
+        <div className="store-grid" style={{ marginTop: 16 }}>
           {items.map((item) => (
-            <article key={item.id} className="card">
-              <div className="item-art">{label(item.category)}</div>
-              <h3 style={{ marginTop: 12 }}>{item.name}</h3>
+            <article key={item.id} className="card store-card">
+              <ItemPreview imageKey={item.imageKey} name={item.name} />
+              <h3>{item.name}</h3>
               <p className="meta">{item.description}</p>
-              <div className="row" style={{ marginTop: 10 }}>
+              <div className="row">
                 <span className="chip">{item.priceCoins} coins</span>
-                <span className="chip">{item.rarity}</span>
+                <span className={`chip rarity-${item.rarity}`}>{label(item.rarity)}</span>
               </div>
-              <button
-                className="btn"
-                style={{ marginTop: 12, width: "100%" }}
-                onClick={() => void buy(item.id)}
-              >
+              <button className="btn" onClick={() => void buy(item.id)}>
                 Buy
               </button>
             </article>
@@ -758,35 +983,84 @@ export function StorePage() {
   );
 }
 
+type InventoryItem = {
+  id: string;
+  equipped: boolean;
+  giftable: boolean;
+  product: { name: string; category: string; imageKey?: string };
+};
+
 export function InventoryPage() {
-  const [params] = [new URLSearchParams(window.location.search)];
+  const [params] = useSearchParams();
   const giftTo = params.get("gift");
-  const [items, setItems] = useState<Array<{
-    id: string;
-    equipped: boolean;
-    giftable: boolean;
-    product: { name: string; category: string };
-  }> | null>(null);
+  const [tab, setTab] = useState<"owned" | "equipped" | "giftable" | "history">("owned");
+  const [items, setItems] = useState<InventoryItem[] | null>(null);
+  const [orders, setOrders] = useState<Array<{ id: string; createdAt: string; product: { name: string } }>>([]);
   const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
 
   async function load() {
-    const data = await api<{ items: NonNullable<typeof items> }>("/api/inventory");
+    const data = await api<{ items: InventoryItem[] }>("/api/inventory");
     setItems(data.items);
+    const history = await api<{ items: typeof orders }>("/api/store/orders");
+    setOrders(history.items);
   }
   useEffect(() => {
     void load();
   }, []);
+
+  const visible = useMemo(() => {
+    if (!items) return [];
+    if (tab === "equipped") return items.filter((item) => item.equipped);
+    if (tab === "giftable") return items.filter((item) => item.giftable);
+    return items;
+  }, [items, tab]);
 
   return (
     <div>
       <h1 className="page-title">Inventory</h1>
       {giftTo ? <Notice>Select a giftable item to send.</Notice> : null}
       {notice ? <Notice tone="ok">{notice}</Notice> : null}
-      {!items ? (
+      {error ? <Notice tone="danger">{error}</Notice> : null}
+      <div className="tabs" style={{ margin: "14px 0" }}>
+        {(["owned", "equipped", "giftable", "history"] as const).map((item) => (
+          <button key={item} className={tab === item ? "tab active" : "tab"} type="button" onClick={() => setTab(item)}>
+            {item === "owned"
+              ? "Owned"
+              : item === "equipped"
+                ? "Equipped"
+                : item === "giftable"
+                  ? "Giftable"
+                  : "Purchase history"}
+          </button>
+        ))}
+      </div>
+      {tab === "history" ? (
+        orders.length === 0 ? (
+          <Empty title="No purchases yet" body="Visit the store to buy banners, frames and boosts." />
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>When</th>
+              </tr>
+            </thead>
+            <tbody>
+              {orders.map((order) => (
+                <tr key={order.id}>
+                  <td>{order.product.name}</td>
+                  <td className="meta">{new Date(order.createdAt).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )
+      ) : !items ? (
         <Spinner />
-      ) : items.length === 0 ? (
+      ) : visible.length === 0 ? (
         <Empty
-          title="Nothing owned yet"
+          title="Nothing here yet"
           body="Visit the store to buy banners, frames and boosts."
           action={
             <Link className="btn" to="/store">
@@ -796,11 +1070,13 @@ export function InventoryPage() {
         />
       ) : (
         <div className="grid cols-2" style={{ marginTop: 16 }}>
-          {items.map((item) => (
+          {visible.map((item) => (
             <article key={item.id} className="card">
+              <div className="item-art">{label(item.product.category)}</div>
               <h3>{item.product.name}</h3>
               <p className="meta">
                 {label(item.product.category)} {item.equipped ? "· equipped" : ""}
+                {item.giftable ? " · giftable" : ""}
               </p>
               <div className="row">
                 <button
@@ -824,7 +1100,11 @@ export function InventoryPage() {
                           receiverId: giftTo,
                           idempotencyKey: idempotencyKey("gift"),
                         }),
-                      }).then(() => setNotice("Gift sent."))
+                      })
+                        .then(() => setNotice("Gift sent."))
+                        .catch((err) =>
+                          setError(err instanceof RequestError ? err.body.message : "Gift failed."),
+                        )
                     }
                   >
                     Send gift
@@ -841,58 +1121,89 @@ export function InventoryPage() {
 
 export function WalletPage() {
   const { user, refresh } = useAuth();
-  const [packs, setPacks] = useState<
-    Array<{ id: string; name: string; coins: number; priceBdt: number }>
-  >([]);
+  const [packs, setPacks] = useState<Array<{ id: string; name: string; coins: number; priceBdt: number }>>(
+    [],
+  );
   const [tx, setTx] = useState<
     Array<{ id: string; type: string; amount: number; source: string; createdAt: string }>
   >([]);
+  const [payments, setPayments] = useState<
+    Array<{ id: string; status: string; amountBdt?: number; createdAt: string }>
+  >([]);
+  const [referrals, setReferrals] = useState<Array<{ id: string; status: string; rewardAmount: number }>>(
+    [],
+  );
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
 
-  useEffect(() => {
-    void Promise.all([
+  async function load() {
+    const [p, t, pay, refs] = await Promise.all([
       api<{ items: typeof packs }>("/api/payments/packages"),
       api<{ items: typeof tx }>("/api/wallet/transactions"),
-    ]).then(([p, t]) => {
-      setPacks(p.items);
-      setTx(t.items);
-    });
+      api<{ items: typeof payments }>("/api/payments/orders"),
+      api<{ items: typeof referrals }>("/api/wallet/referrals"),
+    ]);
+    setPacks(p.items);
+    setTx(t.items);
+    setPayments(pay.items);
+    setReferrals(refs.items);
+  }
+
+  useEffect(() => {
+    void load();
   }, []);
+
+  const pending = payments.filter((row) => row.status === "CREATED" || row.status === "PENDING");
+  const referralEarned = referrals
+    .filter((row) => row.status === "REWARDED" || row.status === "PAID")
+    .reduce((sum, row) => sum + (row.rewardAmount || 0), 0);
 
   async function daily() {
     try {
       await api("/api/wallet/daily-reward", { method: "POST" });
       await refresh();
+      await load();
+      setNotice("Daily reward credited.");
+      setError("");
     } catch (err) {
       setError(err instanceof RequestError ? err.body.message : "Could not claim.");
     }
   }
 
   async function buy(packageId: string) {
-    const order = await api<{ order: { id: string; checkoutUrl: string } }>(
-      "/api/payments/orders",
-      {
-        method: "POST",
-        body: JSON.stringify({ packageId, idempotencyKey: idempotencyKey("pay") }),
-      },
-    );
+    const order = await api<{ order: { id: string; checkoutUrl: string } }>("/api/payments/orders", {
+      method: "POST",
+      body: JSON.stringify({ packageId, idempotencyKey: idempotencyKey("pay") }),
+    });
     window.location.href = order.order.checkoutUrl;
   }
 
   return (
     <div>
       <h1 className="page-title">Wallet</h1>
-      <p className="lede">
-        Balance is {user?.wallet.balance ?? 0} coins. Credits only happen after server verification.
-      </p>
-      {error ? <Notice tone="danger">{error}</Notice> : null}
-      <div className="row" style={{ margin: "16px 0" }}>
-        <button className="btn" onClick={() => void daily()}>
-          Claim daily reward
-        </button>
+      <p className="lede">Credits only happen after server verification. The client never changes balances.</p>
+      <div className="grid cols-3" style={{ margin: "16px 0" }}>
+        <article className="card">
+          <h3>{user?.wallet.balance ?? 0} coins</h3>
+          <p className="meta">Current balance</p>
+        </article>
+        <article className="card">
+          <h3>{referralEarned}</h3>
+          <p className="meta">Referral earnings</p>
+        </article>
+        <article className="card">
+          <h3>Earn</h3>
+          <p className="meta">Claim the daily reward once per day.</p>
+          <button className="btn" style={{ marginTop: 12 }} onClick={() => void daily()}>
+            Claim daily reward
+          </button>
+        </article>
       </div>
-      <h3>Buy coins</h3>
-      <div className="grid cols-2" style={{ margin: "12px 0 24px" }}>
+      {error ? <Notice tone="danger">{error}</Notice> : null}
+      {notice ? <Notice tone="ok">{notice}</Notice> : null}
+
+      <h2 className="section-title">Buy coins</h2>
+      <div className="grid cols-2">
         {packs.map((pack) => (
           <article key={pack.id} className="card">
             <h3>{pack.name}</h3>
@@ -905,7 +1216,30 @@ export function WalletPage() {
           </article>
         ))}
       </div>
-      <h3>Ledger</h3>
+
+      <h2 className="section-title">Pending transactions</h2>
+      {pending.length === 0 ? (
+        <p className="meta">No pending payments.</p>
+      ) : (
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>When</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pending.map((row) => (
+              <tr key={row.id}>
+                <td>{row.status}</td>
+                <td className="meta">{new Date(row.createdAt).toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <h2 className="section-title">Ledger</h2>
       <table className="table">
         <thead>
           <tr>
@@ -924,6 +1258,9 @@ export function WalletPage() {
           ))}
         </tbody>
       </table>
+      <p className="meta" style={{ marginTop: 16 }}>
+        Invite friends from <Link to="/referrals">Referrals</Link> to earn after they verify email.
+      </p>
     </div>
   );
 }
@@ -935,13 +1272,9 @@ export function PaymentReturnPage() {
     if (!id) return;
     void api<{ order: { status: string } }>(`/api/payments/orders/${id}/sync`, { method: "POST" })
       .then((data) =>
-        setStatus(
-          `Order ${data.order.status.toLowerCase()}. Coins are added only after verification.`,
-        ),
+        setStatus(`Order ${data.order.status.toLowerCase()}. Coins are added only after verification.`),
       )
-      .catch(() =>
-        setStatus("Could not confirm this payment yet. It will be reconciled automatically."),
-      );
+      .catch(() => setStatus("Could not confirm this payment yet. It will be reconciled automatically."));
   }, [id]);
   return (
     <div className="card">
@@ -972,9 +1305,8 @@ export function SandboxPayPage() {
         <div className="kicker">SPV sandbox</div>
         <h1 className="page-title">Confirm test payment</h1>
         <p className="lede">
-          This is the server-side sandbox checkout used when live SPV credentials are not
-          configured. Completing it still goes through the same settlement path as a live verified
-          payment.
+          This is the server-side sandbox checkout used when live SPV credentials are not configured.
+          Completing it still goes through the same settlement path as a live verified payment.
         </p>
         <p className="meta">Amount ৳{amount ?? "…"}</p>
         {done ? <Notice tone="ok">{done}</Notice> : null}
@@ -1008,9 +1340,7 @@ export function SandboxPayPage() {
 
 export function ReferralsPage() {
   const { user } = useAuth();
-  const [items, setItems] = useState<Array<{ id: string; status: string; rewardAmount: number }>>(
-    [],
-  );
+  const [items, setItems] = useState<Array<{ id: string; status: string; rewardAmount: number }>>([]);
   useEffect(() => {
     void api<{ items: typeof items }>("/api/wallet/referrals").then((d) => setItems(d.items));
   }, []);
@@ -1060,9 +1390,7 @@ export function NotificationsPage() {
         <h1 className="page-title">Notifications</h1>
         <button
           className="btn-secondary"
-          onClick={() =>
-            void api("/api/notifications/read", { method: "POST", body: "{}" }).then(load)
-          }
+          onClick={() => void api("/api/notifications/read", { method: "POST", body: "{}" }).then(load)}
         >
           Mark all read
         </button>

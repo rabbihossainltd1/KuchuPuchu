@@ -30,6 +30,9 @@ export type PublicProfileView = {
   availability: string[];
   micPreference: string | null;
   relationshipStatus: string | null;
+  facebookId: string | null;
+  instagram: string | null;
+  whatsapp: string | null;
   verifiedFf: boolean;
   verifiedIdentity: boolean;
   reputation: number;

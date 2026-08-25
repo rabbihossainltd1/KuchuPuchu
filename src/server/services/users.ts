@@ -474,6 +474,9 @@ export async function publicUser(viewerId: string | null, targetId: string, isAd
       availability: parseJsonArray(profile?.availabilityJson),
       micPreference: profile?.micPreference ?? null,
       relationshipStatus: profile?.relationshipStatus ?? null,
+      facebookId: profile?.facebookId ?? null,
+      instagram: profile?.instagram ?? null,
+      whatsapp: profile?.whatsapp ?? null,
       verifiedFf: Boolean(profile?.verifiedFf),
       verifiedIdentity: Boolean(profile?.verifiedIdentity),
       reputation,
@@ -670,6 +673,9 @@ function serializeMe(
       gender: string | null;
       genderPreference: string | null;
       relationshipStatus: string | null;
+      facebookId: string | null;
+      instagram: string | null;
+      whatsapp: string | null;
       verifiedFf: boolean;
       verifiedIdentity: boolean;
       onboardingComplete: boolean;
@@ -725,6 +731,9 @@ function serializeMe(
       gender: user.profile?.gender ?? null,
       genderPreference: user.profile?.genderPreference ?? null,
       relationshipStatus: user.profile?.relationshipStatus ?? null,
+      facebookId: user.profile?.facebookId ?? null,
+      instagram: user.profile?.instagram ?? null,
+      whatsapp: user.profile?.whatsapp ?? null,
       verifiedFf: Boolean(user.profile?.verifiedFf),
       verifiedIdentity: Boolean(user.profile?.verifiedIdentity),
       onboardingComplete: Boolean(user.profile?.onboardingComplete),

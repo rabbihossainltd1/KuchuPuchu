@@ -1,31 +1,49 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { api, RequestError } from "./api";
+import { flushSync } from "react-dom";
+import { api, getStoredSessionToken, setStoredSessionToken } from "./api";
 import type { Me } from "./types";
+
+type SessionResponse = { token?: string; user?: Me };
 
 type AuthState = {
   user: Me | null;
   loading: boolean;
   offline: boolean;
-  refresh: () => Promise<void>;
+  refresh: () => Promise<Me | null>;
+  signIn: (email: string, password: string) => Promise<Me>;
+  signUp: (input: {
+    email: string;
+    password: string;
+    displayName: string;
+    username?: string;
+    referralCode?: string;
+  }) => Promise<Me>;
   logout: () => Promise<void>;
 };
 
 const Ctx = createContext<AuthState | null>(null);
+
+function applySession(session: SessionResponse): Me {
+  if (session.token) setStoredSessionToken(session.token);
+  if (!session.user) {
+    throw new Error("Server did not return a user profile.");
+  }
+  return session.user;
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
   const [offline, setOffline] = useState(!navigator.onLine);
 
-  async function refresh() {
-    try {
-      const data = await api<{ user: Me }>("/api/me");
-      setUser(data.user);
-    } catch (error) {
-      if (error instanceof RequestError && error.status === 401) setUser(null);
-      else if (!navigator.onLine) setOffline(true);
-      else throw error;
+  async function loadMe(): Promise<Me | null> {
+    if (!getStoredSessionToken()) {
+      flushSync(() => setUser(null));
+      return null;
     }
+    const data = await api<{ user: Me }>("/api/me");
+    flushSync(() => setUser(data.user));
+    return data.user;
   }
 
   useEffect(() => {
@@ -33,7 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const off = () => setOffline(true);
     window.addEventListener("online", on);
     window.addEventListener("offline", off);
-    void refresh()
+    void loadMe()
       .catch(() => setUser(null))
       .finally(() => setLoading(false));
     return () => {
@@ -47,12 +65,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       loading,
       offline,
-      refresh: async () => {
-        await refresh();
+      refresh: () => loadMe().catch(() => null),
+      signIn: async (email, password) => {
+        const session = await api<SessionResponse>("/api/auth/session", {
+          method: "POST",
+          body: JSON.stringify({ email: email.trim(), password }),
+        });
+        const me = applySession(session);
+        flushSync(() => setUser(me));
+        return me;
+      },
+      signUp: async (input) => {
+        const created = await api<SessionResponse>("/api/auth/register", {
+          method: "POST",
+          body: JSON.stringify(input),
+        });
+        const me = applySession(created);
+        flushSync(() => setUser(me));
+        return me;
       },
       logout: async () => {
-        await api("/api/auth/logout", { method: "POST" });
-        setUser(null);
+        await api("/api/auth/logout", { method: "POST" }).catch(() => undefined);
+        setStoredSessionToken(null);
+        flushSync(() => setUser(null));
       },
     }),
     [user, loading, offline],

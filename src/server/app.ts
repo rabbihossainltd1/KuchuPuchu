@@ -31,13 +31,15 @@ export function createApiApp() {
   );
   app.use(
     express.json({
-      limit: "32kb",
+      limit: "2mb",
       verify: (req, _res, buf) => {
         (req as express.Request & { rawBody?: string }).rawBody = buf.toString("utf8");
       },
     }),
   );
   app.use(cookieParser());
+
+  app.use("/uploads", express.static(path.resolve(process.cwd(), "uploads")));
 
   app.get("/api/health", (_req, res) => {
     res.json({

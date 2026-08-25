@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
-import { label } from "../lib/types";
-import type { PublicUser } from "../lib/types";
 import { Link } from "react-router-dom";
+import { label, type PublicUser } from "../lib/types";
 
 export function initials(name: string) {
   return name
@@ -25,15 +24,7 @@ export function Avatar({
 }) {
   return (
     <div className={large ? "avatar lg" : "avatar"} aria-hidden="true">
-      {url ? (
-        <img
-          src={url}
-          alt=""
-          style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }}
-        />
-      ) : (
-        initials(name)
-      )}
+      {url ? <img src={url} alt="" /> : initials(name)}
       {online ? <span className="dot" /> : null}
     </div>
   );
@@ -49,15 +40,7 @@ export function Notice({
   return <div className={tone === "info" ? "banner" : `banner ${tone}`}>{children}</div>;
 }
 
-export function Empty({
-  title,
-  body,
-  action,
-}: {
-  title: string;
-  body: string;
-  action?: ReactNode;
-}) {
+export function Empty({ title, body, action }: { title: string; body: string; action?: ReactNode }) {
   return (
     <div className="empty card">
       <h3>{title}</h3>
@@ -81,13 +64,10 @@ export function PlayerCard({ player, extra }: { player: PublicUser; extra?: Reac
           <div className="meta">
             @{player.username}
             {player.rank ? ` · ${label(player.rank)}` : ""}
+            {player.level ? ` · Lv ${player.level}` : ""}
             {player.serverRegion ? ` · ${label(player.serverRegion)}` : ""}
           </div>
-          {player.reasons?.length ? (
-            <div className="meta" style={{ marginTop: 4 }}>
-              {player.reasons.join(" · ")}
-            </div>
-          ) : null}
+          {player.reasons?.length ? <div className="meta">{player.reasons.join(" · ")}</div> : null}
         </div>
       </div>
       <div className="chips">
@@ -96,7 +76,9 @@ export function PlayerCard({ player, extra }: { player: PublicUser; extra?: Reac
             {label(mode)}
           </span>
         ))}
+        {player.playStyle ? <span className="chip">{label(player.playStyle)}</span> : null}
         {player.verifiedFf ? <span className="chip accent">Verified IGN</span> : null}
+        {player.online ? <span className="chip accent">Online</span> : null}
       </div>
       {extra}
     </article>
@@ -113,5 +95,13 @@ export function Spinner() {
     <div className="center" role="status">
       Loading…
     </div>
+  );
+}
+
+export function BrandMark({ to = "/" }: { to?: string }) {
+  return (
+    <Link className="brand" to={to}>
+      <img className="brand-logo" src="/brand/logo-horizontal.png" alt="KuchuPuchu" />
+    </Link>
   );
 }

@@ -1,6 +1,7 @@
 # Contributing
 
 1. Read the relevant files in `docs/` before changing a module.
+1b. Home UI is locked. See `docs/home-ui.lock.md`.
 2. Do not add mock buttons, fake balances, or client-side payment verification.
 3. Keep secrets out of the repository. Use environment variables.
 4. Add or update tests with the change.

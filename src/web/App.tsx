@@ -1,39 +1,40 @@
+import { useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./lib/auth";
+import { getStoredSessionToken } from "./lib/api";
 import { AppLayout } from "./components/Layout";
 import { Spinner } from "./components/ui";
 import {
   ForgotPasswordPage,
-  LandingPage,
   LoginPage,
   RegisterPage,
   ResetPasswordPage,
   VerifyEmailPage,
 } from "./pages/public";
 import {
-  ConversationPage,
   DiscoverPage,
   HelpPage,
-  HomePage,
   InventoryPage,
-  MessagesPage,
-  NotificationsPage,
   OnboardingPage,
   PaymentReturnPage,
   PlayerPage,
-  ProfilePage,
   ReferralsPage,
-  RequestsPage,
   SandboxPayPage,
   SettingsPage,
   StorePage,
   WalletPage,
 } from "./pages/appPages";
+import { HomePage } from "./pages/home";
+import { ConversationPage, MessagesPage } from "./pages/chat";
+import { RequestsPage } from "./pages/requests";
+import { FriendsPage } from "./pages/friends";
+import { NotificationsPage } from "./pages/notifications";
+import { ProfileEditPage, ProfilePage } from "./pages/profile";
 import { AdminPage } from "./pages/admin";
 
 function Guard({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
-  if (loading) return <Spinner />;
+  if (loading || (!user && getStoredSessionToken())) return <Spinner />;
   if (!user) return <Navigate to="/login" replace />;
   return children;
 }
@@ -45,14 +46,26 @@ function PublicOnly({ children }: { children: React.ReactNode }) {
   return children;
 }
 
+function hideSplash() {
+  const el = document.getElementById("splash");
+  if (!el) return;
+  el.classList.add("gone");
+  window.setTimeout(() => el.remove(), 400);
+}
+
 export function App() {
+  const { loading } = useAuth();
+  useEffect(() => {
+    if (!loading) hideSplash();
+  }, [loading]);
+
   return (
     <Routes>
       <Route
         path="/"
         element={
           <PublicOnly>
-            <LandingPage />
+            <LoginPage />
           </PublicOnly>
         }
       />
@@ -88,9 +101,11 @@ export function App() {
         <Route path="/discover" element={<DiscoverPage />} />
         <Route path="/players/:id" element={<PlayerPage />} />
         <Route path="/requests" element={<RequestsPage />} />
+        <Route path="/friends" element={<FriendsPage />} />
         <Route path="/messages" element={<MessagesPage />} />
         <Route path="/messages/:id" element={<ConversationPage />} />
         <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/profile/edit" element={<ProfileEditPage />} />
         <Route path="/store" element={<StorePage />} />
         <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/wallet" element={<WalletPage />} />

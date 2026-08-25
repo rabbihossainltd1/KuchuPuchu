@@ -26,8 +26,8 @@ The API and web app share port `4000` in development.
 
 Default bootstrap admin, only created when no admin exists:
 
-- email: value of `ADMIN_BOOTSTRAP_EMAIL`
-- password: value of `ADMIN_BOOTSTRAP_PASSWORD`
+- email: `admin@localhost` (or `ADMIN_BOOTSTRAP_EMAIL`)
+- password: value of `ADMIN_BOOTSTRAP_PASSWORD` (local default `AdminPass123`)
 
 Change these before any shared environment.
 

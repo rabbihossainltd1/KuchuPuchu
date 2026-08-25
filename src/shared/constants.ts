@@ -90,6 +90,7 @@ export const PRODUCT_CATEGORIES = [
   "banners",
   "frames",
   "badges",
+  "themes",
   "name_styles",
   "profile_decorations",
   "boosts",
@@ -165,4 +166,5 @@ export const DEFAULT_SETTINGS = {
   reportDailyLimit: 8,
   followDailyLimit: 60,
   discoveryPageSize: 20,
+  postHourlyLimit: 20,
 } as const;

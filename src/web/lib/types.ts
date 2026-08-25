@@ -44,6 +44,9 @@ export type Me = {
     gender: string | null;
     genderPreference: string | null;
     relationshipStatus: string | null;
+    facebookId: string | null;
+    instagram: string | null;
+    whatsapp: string | null;
     verifiedFf: boolean;
     verifiedIdentity: boolean;
     onboardingComplete: boolean;
@@ -80,6 +83,9 @@ export type PublicUser = {
   availability: string[];
   micPreference: string | null;
   relationshipStatus: string | null;
+  facebookId: string | null;
+  instagram: string | null;
+  whatsapp: string | null;
   verifiedFf: boolean;
   verifiedIdentity: boolean;
   reputation: number;
@@ -130,10 +136,33 @@ export const LABELS: Record<string, string> = {
   banners: "Banners",
   frames: "Frames",
   badges: "Badges",
+  themes: "Themes",
   name_styles: "Name styles",
   profile_decorations: "Decorations",
   boosts: "Boosts",
   limited: "Limited",
+  COMMON: "Common",
+  RARE: "Rare",
+  EPIC: "Epic",
+  LEGENDARY: "Legendary",
+  "13_17": "13–17",
+  "18_24": "18–24",
+  "25_30": "25–30",
+  "31_PLUS": "31+",
+  morning: "Morning",
+  afternoon: "Afternoon",
+  evening: "Evening",
+  night: "Night",
+  weekend: "Weekend",
+  ANY: "Anyone",
+  MALE: "Male",
+  FEMALE: "Female",
+  NON_BINARY: "Non-binary",
+  UNDISCLOSED: "Prefer not to say",
+  PREFER_NOT: "Prefer not to say",
+  SINGLE: "Single",
+  TAKEN: "Taken",
+  COMPLICATED: "It's complicated",
 };
 
 export function label(value?: string | null) {

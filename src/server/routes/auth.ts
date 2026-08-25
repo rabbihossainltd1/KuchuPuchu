@@ -15,6 +15,7 @@ import {
   deleteAccount,
   destroyAllSessions,
   destroySession,
+  getMe,
   loginWithEmail,
   registerWithEmail,
   requestPasswordReset,
@@ -36,14 +37,14 @@ authRouter.post(
   rateLimit({ windowMs: 60_000, max: 10 }),
   asyncHandler(async (req, res) => {
     const body = loginSchema.parse(req.body);
-    const { token } = await loginWithEmail({
+    const { token, user } = await loginWithEmail({
       email: body.email,
       password: body.password,
       userAgent: req.get("user-agent") ?? undefined,
       ip: req.ip,
     });
-    setSessionCookie(res, token);
-    res.json({ ok: true });
+    setSessionCookie(res, token, req);
+    res.json({ ok: true, token, user: await getMe(user.id) });
   }),
 );
 
@@ -52,13 +53,13 @@ authRouter.post(
   rateLimit({ windowMs: 60_000, max: 8 }),
   asyncHandler(async (req, res) => {
     const body = registerSchema.parse(req.body);
-    const { token } = await registerWithEmail({
+    const { token, user } = await registerWithEmail({
       ...body,
       userAgent: req.get("user-agent") ?? undefined,
       ip: req.ip,
     });
-    setSessionCookie(res, token);
-    res.status(201).json({ ok: true });
+    setSessionCookie(res, token, req);
+    res.status(201).json({ ok: true, token, user: await getMe(user.id) });
   }),
 );
 
@@ -67,7 +68,7 @@ authRouter.post(
   asyncHandler(async (req, res) => {
     const token = readSessionToken(req);
     if (token) await destroySession(token);
-    clearSessionCookie(res);
+    clearSessionCookie(res, req);
     res.json({ ok: true });
   }),
 );
@@ -77,7 +78,7 @@ authRouter.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     await destroyAllSessions((req as AuthedRequest).user.id);
-    clearSessionCookie(res);
+    clearSessionCookie(res, req);
     res.json({ ok: true });
   }),
 );
@@ -130,7 +131,7 @@ authRouter.delete(
   requireAuth,
   asyncHandler(async (req, res) => {
     await deleteAccount((req as AuthedRequest).user.id);
-    clearSessionCookie(res);
+    clearSessionCookie(res, req);
     res.json({ ok: true });
   }),
 );

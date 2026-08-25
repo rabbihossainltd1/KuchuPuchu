@@ -1,0 +1,69 @@
+export type CatalogItem = {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  priceCoins: number;
+  imageKey: string;
+  rarity: "COMMON" | "RARE" | "EPIC" | "LEGENDARY";
+  giftable?: boolean;
+  uniqueItem?: boolean;
+  maxPerUser?: number;
+  limited?: boolean;
+  stock?: number;
+};
+
+export const STORE_CATALOG: CatalogItem[] = [
+  { id: "prd_banner_dusk", name: "Dusk Field Banner", description: "Quiet dusk over open ground.", category: "banners", priceCoins: 120, imageKey: "banner-dusk", rarity: "RARE" },
+  { id: "prd_banner_mist", name: "River Mist Banner", description: "Soft morning mist over still water.", category: "banners", priceCoins: 90, imageKey: "banner-mist", rarity: "COMMON" },
+  { id: "prd_banner_amber", name: "Amber Hour Banner", description: "Warm late-afternoon light.", category: "banners", priceCoins: 140, imageKey: "banner-amber", rarity: "RARE" },
+  { id: "prd_banner_monsoon", name: "Monsoon Roof Banner", description: "Rain on a tin roof, evening tea.", category: "banners", priceCoins: 160, imageKey: "banner-monsoon", rarity: "EPIC" },
+  { id: "prd_banner_tea", name: "Tea Garden Banner", description: "Rows of green after rain.", category: "banners", priceCoins: 110, imageKey: "banner-tea", rarity: "COMMON" },
+  { id: "prd_banner_night", name: "City Night Banner", description: "Soft street lamps, no neon.", category: "banners", priceCoins: 180, imageKey: "banner-night", rarity: "EPIC" },
+  { id: "prd_banner_sand", name: "River Sand Banner", description: "Pale sand and shallow water.", category: "banners", priceCoins: 100, imageKey: "banner-sand", rarity: "COMMON" },
+  { id: "prd_banner_silk", name: "Silk Drape Banner", description: "Folded cloth in warm ivory.", category: "banners", priceCoins: 220, imageKey: "banner-silk", rarity: "LEGENDARY" },
+
+  { id: "prd_frame_ink", name: "Ink Line Frame", description: "A thin charcoal ring.", category: "frames", priceCoins: 80, imageKey: "frame-ink", rarity: "COMMON" },
+  { id: "prd_frame_gold", name: "Warm Brass Frame", description: "Restrained brass edge.", category: "frames", priceCoins: 180, imageKey: "frame-brass", rarity: "EPIC" },
+  { id: "prd_frame_ivory", name: "Ivory Ring Frame", description: "Soft cream outline.", category: "frames", priceCoins: 90, imageKey: "frame-ivory", rarity: "COMMON" },
+  { id: "prd_frame_olive", name: "Olive Leaf Frame", description: "A quiet botanical ring.", category: "frames", priceCoins: 130, imageKey: "frame-olive", rarity: "RARE" },
+  { id: "prd_frame_stone", name: "Cut Stone Frame", description: "Matte granite edge.", category: "frames", priceCoins: 150, imageKey: "frame-stone", rarity: "RARE" },
+  { id: "prd_frame_royal", name: "Royal Wax Frame", description: "Deep seal-red ring.", category: "frames", priceCoins: 260, imageKey: "frame-royal", rarity: "LEGENDARY" },
+
+  { id: "prd_badge_reliable", name: "Reliable Teammate", description: "You show up on time.", category: "badges", priceCoins: 60, imageKey: "badge-reliable", rarity: "COMMON" },
+  { id: "prd_badge_igl", name: "Calm IGL", description: "Calls without shouting.", category: "badges", priceCoins: 70, imageKey: "badge-igl", rarity: "RARE" },
+  { id: "prd_badge_clutch", name: "Clutch Hand", description: "Last player standing, still calm.", category: "badges", priceCoins: 90, imageKey: "badge-clutch", rarity: "RARE" },
+  { id: "prd_badge_entry", name: "First In", description: "Opens the site, holds the line.", category: "badges", priceCoins: 80, imageKey: "badge-entry", rarity: "COMMON" },
+  { id: "prd_badge_support", name: "Drop King", description: "Shares loot without being asked.", category: "badges", priceCoins: 75, imageKey: "badge-support", rarity: "COMMON" },
+  { id: "prd_badge_sniper", name: "Long Lane", description: "Holds angles, wastes no ammo.", category: "badges", priceCoins: 95, imageKey: "badge-sniper", rarity: "RARE" },
+  { id: "prd_badge_night", name: "Night Squad", description: "Available after 10pm.", category: "badges", priceCoins: 85, imageKey: "badge-night", rarity: "RARE" },
+  { id: "prd_badge_verified", name: "House Mark", description: "A small pressed-house seal.", category: "badges", priceCoins: 200, imageKey: "badge-house", rarity: "EPIC" },
+  { id: "prd_badge_legend", name: "Season Crown", description: "For a finished ranked grind.", category: "badges", priceCoins: 320, imageKey: "badge-crown", rarity: "LEGENDARY" },
+
+  { id: "prd_theme_parchment", name: "Parchment Theme", description: "Warm paper background for your profile.", category: "themes", priceCoins: 240, imageKey: "theme-parchment", rarity: "EPIC" },
+  { id: "prd_theme_inkwell", name: "Inkwell Theme", description: "Charcoal page, cream type.", category: "themes", priceCoins: 260, imageKey: "theme-inkwell", rarity: "EPIC" },
+  { id: "prd_theme_clay", name: "Clay Court Theme", description: "Terracotta wash across the profile.", category: "themes", priceCoins: 180, imageKey: "theme-clay", rarity: "RARE" },
+  { id: "prd_theme_sage", name: "Sage Room Theme", description: "Muted green, quiet furniture tones.", category: "themes", priceCoins: 190, imageKey: "theme-sage", rarity: "RARE" },
+  { id: "prd_theme_midnight", name: "Midnight Study Theme", description: "Deep brown, brass highlights.", category: "themes", priceCoins: 340, imageKey: "theme-midnight", rarity: "LEGENDARY" },
+  { id: "prd_theme_linen", name: "Linen Theme", description: "Off-white cloth texture.", category: "themes", priceCoins: 150, imageKey: "theme-linen", rarity: "COMMON" },
+
+  { id: "prd_name_serif", name: "Editorial Name", description: "Serif treatment for your display name.", category: "name_styles", priceCoins: 100, imageKey: "name-serif", rarity: "RARE" },
+  { id: "prd_name_smallcaps", name: "Small Caps Name", description: "Quiet all-caps with tracking.", category: "name_styles", priceCoins: 90, imageKey: "name-caps", rarity: "COMMON" },
+  { id: "prd_name_script", name: "Ink Script Name", description: "A handwritten display name.", category: "name_styles", priceCoins: 160, imageKey: "name-script", rarity: "EPIC" },
+  { id: "prd_name_mono", name: "Ledger Mono Name", description: "Typewriter numbers and letters.", category: "name_styles", priceCoins: 110, imageKey: "name-mono", rarity: "RARE" },
+  { id: "prd_name_gold", name: "Gilt Name", description: "Warm metal lettering.", category: "name_styles", priceCoins: 280, imageKey: "name-gilt", rarity: "LEGENDARY" },
+
+  { id: "prd_deco_seal", name: "Pressed Seal", description: "Wax seal on your profile card.", category: "profile_decorations", priceCoins: 150, imageKey: "deco-seal", rarity: "EPIC" },
+  { id: "prd_deco_ribbon", name: "Cloth Ribbon", description: "A folded ribbon under your name.", category: "profile_decorations", priceCoins: 120, imageKey: "deco-ribbon", rarity: "RARE" },
+  { id: "prd_deco_corner", name: "Corner Flourish", description: "Hand-drawn corners, no glitter.", category: "profile_decorations", priceCoins: 100, imageKey: "deco-corner", rarity: "COMMON" },
+  { id: "prd_deco_pin", name: "Enamel Pin", description: "A small pin on the avatar.", category: "profile_decorations", priceCoins: 130, imageKey: "deco-pin", rarity: "RARE" },
+  { id: "prd_deco_crest", name: "House Crest", description: "A quiet family-style crest.", category: "profile_decorations", priceCoins: 300, imageKey: "deco-crest", rarity: "LEGENDARY" },
+
+  { id: "prd_boost_12h", name: "12-hour Discovery Boost", description: "Higher in recommendations for 12 hours.", category: "boosts", priceCoins: 200, imageKey: "boost-12", rarity: "RARE", giftable: false, uniqueItem: false, maxPerUser: 5 },
+  { id: "prd_boost_24h", name: "24-hour Discovery Boost", description: "A full day near the top of Find duo.", category: "boosts", priceCoins: 340, imageKey: "boost-24", rarity: "EPIC", giftable: false, uniqueItem: false, maxPerUser: 5 },
+  { id: "prd_boost_weekend", name: "Weekend Spotlight", description: "Friday to Sunday discovery lift.", category: "boosts", priceCoins: 420, imageKey: "boost-weekend", rarity: "EPIC", giftable: false, uniqueItem: false, maxPerUser: 3 },
+
+  { id: "prd_limited_founders", name: "Founders Cloth Mark", description: "Early player mark. Limited stock.", category: "limited", priceCoins: 300, imageKey: "limited-founders", rarity: "LEGENDARY", limited: true, stock: 500 },
+  { id: "prd_limited_rain", name: "First Rain Token", description: "Season-one rain token.", category: "limited", priceCoins: 280, imageKey: "limited-rain", rarity: "EPIC", limited: true, stock: 250 },
+  { id: "prd_limited_lantern", name: "Festival Lantern", description: "A paper lantern for the season.", category: "limited", priceCoins: 360, imageKey: "limited-lantern", rarity: "LEGENDARY", limited: true, stock: 120 },
+];

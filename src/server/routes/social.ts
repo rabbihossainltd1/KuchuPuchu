@@ -3,13 +3,19 @@ import { asyncHandler } from "../http.js";
 import { requireAuth } from "../middleware/auth.js";
 import { rateLimit } from "../middleware/rateLimit.js";
 import {
+  callAnswerSchema,
+  callCreateSchema,
+  callIceSchema,
+  commentCreateSchema,
   conversationCreateSchema,
   discoverQuerySchema,
   duoRequestSchema,
   friendRequestSchema,
   messageCreateSchema,
   paginationSchema,
+  postCreateSchema,
   reportSchema,
+  storyCreateSchema,
 } from "../../domain/validation.js";
 import { discoverPlayers, dismissPlayer, recommendPlayers } from "../services/discovery.js";
 import {
@@ -33,7 +39,26 @@ import {
   listMessages,
   sendMessage,
 } from "../services/messaging.js";
-import { prisma } from "../db.js";
+import {
+  addComment,
+  createPost,
+  deletePost,
+  listFeed,
+  listFriendRequests,
+  listFriends,
+  toggleLike,
+} from "../services/feed.js";
+import { createStory, deleteStory, listStories, viewStory } from "../services/stories.js";
+import {
+  addIce,
+  answerCall,
+  declineCall,
+  hangupCall,
+  incomingCalls,
+  listIce,
+  serializeCall,
+  startCall,
+} from "../services/calls.js";
 import type { AuthedRequest } from "../types.js";
 
 export const socialRouter = Router();
@@ -162,12 +187,171 @@ socialRouter.get(
   "/friend-requests",
   requireAuth,
   asyncHandler(async (req, res) => {
-    const userId = (req as AuthedRequest).user.id;
-    const items = await prisma.friendRequest.findMany({
-      where: { toUserId: userId, status: "PENDING" },
-      orderBy: { createdAt: "desc" },
+    res.json({ items: await listFriendRequests((req as AuthedRequest).user.id) });
+  }),
+);
+
+socialRouter.get(
+  "/friends",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    res.json({ items: await listFriends((req as AuthedRequest).user.id) });
+  }),
+);
+
+socialRouter.get(
+  "/stories",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    res.json(await listStories((req as AuthedRequest).user.id));
+  }),
+);
+
+socialRouter.post(
+  "/stories",
+  requireAuth,
+  rateLimit({ windowMs: 60_000, max: 8, key: (req) => `story:${(req as AuthedRequest).user.id}` }),
+  asyncHandler(async (req, res) => {
+    const body = storyCreateSchema.parse(req.body);
+    res.status(201).json(await createStory((req as AuthedRequest).user.id, body));
+  }),
+);
+
+socialRouter.post(
+  "/stories/:id/view",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    res.json(await viewStory((req as AuthedRequest).user.id, String(req.params.id)));
+  }),
+);
+
+socialRouter.delete(
+  "/stories/:id",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    await deleteStory((req as AuthedRequest).user.id, String(req.params.id));
+    res.json({ ok: true });
+  }),
+);
+
+socialRouter.get(
+  "/feed",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const query = paginationSchema.parse(req.query);
+    res.json(await listFeed((req as AuthedRequest).user.id, query.cursor, query.limit ?? 20));
+  }),
+);
+
+socialRouter.post(
+  "/posts",
+  requireAuth,
+  rateLimit({ windowMs: 60_000, max: 8, key: (req) => (req as AuthedRequest).user.id }),
+  asyncHandler(async (req, res) => {
+    const body = postCreateSchema.parse(req.body);
+    res.status(201).json({
+      post: await createPost((req as AuthedRequest).user.id, body.body, body.visibility),
     });
-    res.json({ items });
+  }),
+);
+
+socialRouter.delete(
+  "/posts/:id",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    await deletePost((req as AuthedRequest).user.id, String(req.params.id));
+    res.json({ ok: true });
+  }),
+);
+
+socialRouter.post(
+  "/posts/:id/like",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    res.json({ post: await toggleLike((req as AuthedRequest).user.id, String(req.params.id)) });
+  }),
+);
+
+socialRouter.post(
+  "/posts/:id/comments",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const body = commentCreateSchema.parse(req.body);
+    res.status(201).json({
+      post: await addComment((req as AuthedRequest).user.id, String(req.params.id), body.body),
+    });
+  }),
+);
+
+socialRouter.post(
+  "/calls",
+  requireAuth,
+  rateLimit({ windowMs: 60_000, max: 8, key: (req) => `call:${(req as AuthedRequest).user.id}` }),
+  asyncHandler(async (req, res) => {
+    const body = callCreateSchema.parse(req.body);
+    res.status(201).json({
+      call: await startCall((req as AuthedRequest).user.id, body.userId, body.kind, body.offerSdp),
+    });
+  }),
+);
+
+socialRouter.get(
+  "/calls/active",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    res.json({ items: await incomingCalls((req as AuthedRequest).user.id) });
+  }),
+);
+
+socialRouter.get(
+  "/calls/:id",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    res.json({ call: await serializeCall((req as AuthedRequest).user.id, String(req.params.id)) });
+  }),
+);
+
+socialRouter.post(
+  "/calls/:id/answer",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const body = callAnswerSchema.parse(req.body);
+    res.json({
+      call: await answerCall((req as AuthedRequest).user.id, String(req.params.id), body.answerSdp),
+    });
+  }),
+);
+
+socialRouter.post(
+  "/calls/:id/decline",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    res.json({ call: await declineCall((req as AuthedRequest).user.id, String(req.params.id)) });
+  }),
+);
+
+socialRouter.post(
+  "/calls/:id/hangup",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    res.json({ call: await hangupCall((req as AuthedRequest).user.id, String(req.params.id)) });
+  }),
+);
+
+socialRouter.post(
+  "/calls/:id/ice",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const body = callIceSchema.parse(req.body);
+    res.json(await addIce((req as AuthedRequest).user.id, String(req.params.id), body.candidate));
+  }),
+);
+
+socialRouter.get(
+  "/calls/:id/ice",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    res.json(await listIce((req as AuthedRequest).user.id, String(req.params.id)));
   }),
 );
 

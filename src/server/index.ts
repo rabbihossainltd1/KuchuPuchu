@@ -3,6 +3,7 @@ import { env } from "./env.js";
 import { prisma, withBusyTimeout } from "./db.js";
 import { bootstrapAdmin } from "./services/admin.js";
 import { expireDueRequests } from "./services/social.js";
+import { expireStories } from "./services/stories.js";
 import { reconcilePayments } from "./services/payments.js";
 
 async function main() {
@@ -28,6 +29,7 @@ async function main() {
 
   const timer = setInterval(() => {
     void expireDueRequests();
+    void expireStories();
     void reconcilePayments();
   }, 60_000);
 

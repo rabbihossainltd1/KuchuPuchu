@@ -1,24 +1,30 @@
-import type { Response } from "express";
+import type { Request, Response } from "express";
 import { cookieSecure, env } from "./env.js";
 import { SESSION_TTL_MS } from "../shared/constants.js";
 
-export function setSessionCookie(res: Response, token: string) {
-  res.cookie("kp_session", token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: cookieSecure(),
-    maxAge: SESSION_TTL_MS,
-    path: "/",
-  });
+function isHttps(req?: Request) {
+  if (cookieSecure()) return true;
+  const proto = req?.get("x-forwarded-proto") ?? req?.protocol;
+  return proto === "https";
 }
 
-export function clearSessionCookie(res: Response) {
-  res.clearCookie("kp_session", {
+function cookieOptions(req?: Request) {
+  const secure = isHttps(req);
+  return {
     httpOnly: true,
-    sameSite: "lax",
-    secure: cookieSecure(),
+    sameSite: (secure ? "none" : "lax") as "none" | "lax",
+    secure,
+    maxAge: SESSION_TTL_MS,
     path: "/",
-  });
+  };
+}
+
+export function setSessionCookie(res: Response, token: string, req?: Request) {
+  res.cookie("kp_session", token, cookieOptions(req));
+}
+
+export function clearSessionCookie(res: Response, req?: Request) {
+  res.clearCookie("kp_session", cookieOptions(req));
 }
 
 export function googleEnabled() {
