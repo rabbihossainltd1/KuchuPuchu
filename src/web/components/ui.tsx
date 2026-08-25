@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { mediaUrl } from "../lib/config";
 import { label, type PublicUser } from "../lib/types";
 
 export function initials(name: string) {
@@ -24,7 +25,7 @@ export function Avatar({
 }) {
   return (
     <div className={large ? "avatar lg" : "avatar"} aria-hidden="true">
-      {url ? <img src={url} alt="" /> : initials(name)}
+      {url ? <img src={mediaUrl(url) ?? url} alt="" /> : initials(name)}
       {online ? <span className="dot" /> : null}
     </div>
   );

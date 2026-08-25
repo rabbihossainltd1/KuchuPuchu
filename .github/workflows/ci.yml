@@ -44,7 +44,10 @@ jobs:
           java-version: "21"
       - uses: android-actions/setup-android@v3
       - run: npm ci
-      - run: npm run build
+      - name: Build production web client
+        env:
+          VITE_API_BASE: ${{ vars.API_BASE_URL }}
+        run: npm run build
       - run: npx cap sync android
       - name: Build debug APK
         working-directory: android

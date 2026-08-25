@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, RequestError, explainError } from "../lib/api";
+import { apiUrl } from "../lib/config";
 import { useAuth } from "../lib/auth";
 import { BrandMark, FieldError, Notice } from "../components/ui";
 
@@ -106,29 +107,16 @@ export function LoginPage() {
   return (
     <AuthFrame>
       <h1 className="page-title">Welcome back</h1>
-      <p className="lede">The demo admin is filled in. Press sign in, or use your own account.</p>
+      <p className="lede">Sign in with your email and password.</p>
       {error ? <Notice tone="danger">{error}</Notice> : null}
       <form className="grid" style={{ marginTop: 18 }} onSubmit={onSubmit} noValidate>
         <label className="field">
           <span>Email</span>
-          <input
-            name="email"
-            type="text"
-            inputMode="email"
-            autoComplete="username"
-            defaultValue="admin@example.com"
-            required
-          />
+          <input name="email" type="text" inputMode="email" autoComplete="username" required />
         </label>
         <label className="field">
           <span>Password</span>
-          <input
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            defaultValue="AdminPass123"
-            required
-          />
+          <input name="password" type="password" autoComplete="current-password" required />
         </label>
         <button className="btn" type="submit" disabled={pending}>
           {pending ? "Signing in…" : "Sign in"}
@@ -137,7 +125,7 @@ export function LoginPage() {
       {google ? (
         <a
           className="btn-secondary"
-          href="/api/auth/google"
+          href={apiUrl("/api/auth/google")}
           style={{ marginTop: 10, width: "100%" }}
         >
           Continue with Google

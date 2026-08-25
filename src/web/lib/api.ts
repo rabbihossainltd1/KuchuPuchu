@@ -1,3 +1,5 @@
+import { apiUrl, getApiBase, isNativeApp } from "./config";
+
 export type ApiError = {
   code: string;
   message: string;
@@ -43,6 +45,16 @@ export class RequestError extends Error {
   }
 }
 
+function offlineMessage() {
+  if (isNativeApp() && !getApiBase()) {
+    return "This app is not connected to a live KuchuPuchu server yet.";
+  }
+  if (isNativeApp()) {
+    return "Could not reach KuchuPuchu. Check your internet connection and try again.";
+  }
+  return "Could not reach the server. Check your connection and try again.";
+}
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
@@ -50,15 +62,15 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (token && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
   let res: Response;
   try {
-    res = await fetch(path, {
+    res = await fetch(apiUrl(path), {
       ...init,
       headers,
-      credentials: "include",
+      credentials: getApiBase() ? "omit" : "include",
     });
   } catch {
     throw new RequestError(0, {
       code: "NETWORK",
-      message: "Could not reach the server. Refresh the preview and try again.",
+      message: offlineMessage(),
     });
   }
   const text = await res.text();
@@ -69,7 +81,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     } catch {
       throw new RequestError(res.status, {
         code: "BAD_RESPONSE",
-        message: "The app server is not responding. Refresh the preview.",
+        message: offlineMessage(),
       });
     }
   }
