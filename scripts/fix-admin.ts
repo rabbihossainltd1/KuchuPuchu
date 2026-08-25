@@ -4,7 +4,9 @@ const prisma = new PrismaClient();
 
 async function main() {
   const admin = await prisma.user.findFirst({
-    where: { OR: [{ email: "admin@localhost" }, { email: "admin@example.com" }, { username: "admin" }] },
+    where: {
+      OR: [{ email: "admin@localhost" }, { email: "admin@example.com" }, { username: "admin" }],
+    },
   });
   if (!admin) {
     console.info("no admin user");

@@ -51,11 +51,15 @@ export function LandingPage() {
         <div className="grid cols-3">
           <article className="card">
             <h3>Compatible first</h3>
-            <p className="meta">Recommendations are scored on the server and explain why someone appeared.</p>
+            <p className="meta">
+              Recommendations are scored on the server and explain why someone appeared.
+            </p>
           </article>
           <article className="card">
             <h3>Private by default</h3>
-            <p className="meta">District, UID, and relationship status only show if you allow them.</p>
+            <p className="meta">
+              District, UID, and relationship status only show if you allow them.
+            </p>
           </article>
           <article className="card">
             <h3>Safety controls</h3>
@@ -131,7 +135,11 @@ export function LoginPage() {
         </button>
       </form>
       {google ? (
-        <a className="btn-secondary" href="/api/auth/google" style={{ marginTop: 10, width: "100%" }}>
+        <a
+          className="btn-secondary"
+          href="/api/auth/google"
+          style={{ marginTop: 10, width: "100%" }}
+        >
           Continue with Google
         </a>
       ) : (
@@ -140,7 +148,8 @@ export function LoginPage() {
         </p>
       )}
       <p className="meta" style={{ marginTop: 16 }}>
-        <Link to="/forgot-password">Forgot password</Link> · <Link to="/register">Create account</Link>
+        <Link to="/forgot-password">Forgot password</Link> ·{" "}
+        <Link to="/register">Create account</Link>
       </p>
     </AuthFrame>
   );
@@ -305,7 +314,9 @@ export function VerifyEmailPage() {
   return (
     <AuthFrame>
       <h1 className="page-title">Email verification</h1>
-      {state === "ok" ? <Notice tone="ok">Email verified. You can return to the app.</Notice> : null}
+      {state === "ok" ? (
+        <Notice tone="ok">Email verified. You can return to the app.</Notice>
+      ) : null}
       {state === "bad" || state === "missing" ? (
         <Notice tone="danger">This verification link is invalid or expired.</Notice>
       ) : null}

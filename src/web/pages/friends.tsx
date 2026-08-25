@@ -19,7 +19,8 @@ export function FriendsPage() {
     const friendIds = new Set(mine.items.map((item) => item.userId));
     const extras = [...recs.items, ...search.items].filter(
       (item, index, list) =>
-        !friendIds.has(item.userId) && list.findIndex((row) => row.userId === item.userId) === index,
+        !friendIds.has(item.userId) &&
+        list.findIndex((row) => row.userId === item.userId) === index,
     );
     setFriends(mine.items);
     setPeople(extras);
@@ -37,7 +38,9 @@ export function FriendsPage() {
   return (
     <div>
       <h1 className="page-title">Friends</h1>
-      <p className="lede">Everyone you can add lives here — friends, recommendations, and search.</p>
+      <p className="lede">
+        Everyone you can add lives here — friends, recommendations, and search.
+      </p>
       <form className="search-row" onSubmit={search}>
         <input
           value={query}
@@ -54,7 +57,10 @@ export function FriendsPage() {
       {!friends ? (
         <Spinner />
       ) : friends.length === 0 ? (
-        <Empty title="No friends yet" body="Send a request from the list below or from someone’s profile." />
+        <Empty
+          title="No friends yet"
+          body="Send a request from the list below or from someone’s profile."
+        />
       ) : (
         <div className="grid">
           {friends.map((player) => (

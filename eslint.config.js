@@ -5,7 +5,15 @@ import globals from "globals";
 
 export default tseslint.config(
   {
-    ignores: ["dist", "node_modules", "coverage", "prisma/migrations", "src/web/public"],
+    ignores: [
+      "dist",
+      "node_modules",
+      "coverage",
+      "prisma/migrations",
+      "src/web/public",
+      "android",
+      "ios",
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

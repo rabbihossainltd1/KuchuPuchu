@@ -220,7 +220,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
             if (!current) return next;
             return { ...current, ...next };
           });
-          if (next.status === "ACTIVE" && next.answerSdp && pcRef.current && !pcRef.current.currentRemoteDescription) {
+          if (
+            next.status === "ACTIVE" &&
+            next.answerSdp &&
+            pcRef.current &&
+            !pcRef.current.currentRemoteDescription
+          ) {
             await pcRef.current.setRemoteDescription({ type: "answer", sdp: next.answerSdp });
           }
           if (next.status === "ACTIVE" || next.status === "RINGING") {
@@ -303,7 +308,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
                     {muted ? <MicOff size={20} /> : <Mic size={20} />}
                     {muted ? "Unmute" : "Mute"}
                   </button>
-                  <button className="call-btn end" type="button" onClick={() => void hangup(active.id)}>
+                  <button
+                    className="call-btn end"
+                    type="button"
+                    onClick={() => void hangup(active.id)}
+                  >
                     <PhoneOff size={20} />
                     End
                   </button>

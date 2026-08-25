@@ -52,7 +52,12 @@ export function PlayerActions({
           <Phone size={18} />
           {compact ? null : <span>Call</span>}
         </button>
-        <button className="icon-plain" type="button" onClick={() => void addFriend()} title="Add friend">
+        <button
+          className="icon-plain"
+          type="button"
+          onClick={() => void addFriend()}
+          title="Add friend"
+        >
           <UserPlus size={18} />
           {compact ? null : <span>Add</span>}
         </button>
@@ -62,7 +67,11 @@ export function PlayerActions({
           </Link>
         )}
       </div>
-      {notice ? <p className="meta" style={{ marginTop: 8 }}>{notice}</p> : null}
+      {notice ? (
+        <p className="meta" style={{ marginTop: 8 }}>
+          {notice}
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -219,7 +219,9 @@ export function HomePage() {
   return (
     <div>
       <h1 className="page-title">Home</h1>
-      <p className="lede">Hello {user?.displayName}. Recommendations are ranked for compatibility.</p>
+      <p className="lede">
+        Hello {user?.displayName}. Recommendations are ranked for compatibility.
+      </p>
       <div className="grid cols-3" style={{ margin: "16px 0" }}>
         <Link className="card" to="/discover">
           <h3>Discover</h3>
@@ -375,7 +377,11 @@ export function DiscoverPage() {
           onChange={(e) => set("q", e.target.value)}
           aria-label="Search name or IGN"
         />
-        <select value={filters.serverRegion} onChange={(e) => set("serverRegion", e.target.value)} aria-label="Server">
+        <select
+          value={filters.serverRegion}
+          onChange={(e) => set("serverRegion", e.target.value)}
+          aria-label="Server"
+        >
           <option value="">Any server</option>
           {SERVER_REGIONS.map((item) => (
             <option key={item} value={item}>
@@ -395,7 +401,11 @@ export function DiscoverPage() {
           onChange={(e) => set("district", e.target.value)}
           aria-label="District"
         />
-        <select value={filters.rankMin} onChange={(e) => set("rankMin", e.target.value)} aria-label="Minimum rank">
+        <select
+          value={filters.rankMin}
+          onChange={(e) => set("rankMin", e.target.value)}
+          aria-label="Minimum rank"
+        >
           <option value="">Rank min</option>
           {RANKS.map((item) => (
             <option key={item} value={item}>
@@ -403,7 +413,11 @@ export function DiscoverPage() {
             </option>
           ))}
         </select>
-        <select value={filters.rankMax} onChange={(e) => set("rankMax", e.target.value)} aria-label="Maximum rank">
+        <select
+          value={filters.rankMax}
+          onChange={(e) => set("rankMax", e.target.value)}
+          aria-label="Maximum rank"
+        >
           <option value="">Rank max</option>
           {RANKS.map((item) => (
             <option key={item} value={item}>
@@ -411,7 +425,11 @@ export function DiscoverPage() {
             </option>
           ))}
         </select>
-        <select value={filters.mode} onChange={(e) => set("mode", e.target.value)} aria-label="Game mode">
+        <select
+          value={filters.mode}
+          onChange={(e) => set("mode", e.target.value)}
+          aria-label="Game mode"
+        >
           <option value="">Any mode</option>
           {GAME_MODES.map((item) => (
             <option key={item} value={item}>
@@ -419,7 +437,11 @@ export function DiscoverPage() {
             </option>
           ))}
         </select>
-        <select value={filters.playStyle} onChange={(e) => set("playStyle", e.target.value)} aria-label="Play style">
+        <select
+          value={filters.playStyle}
+          onChange={(e) => set("playStyle", e.target.value)}
+          aria-label="Play style"
+        >
           <option value="">Any play style</option>
           {PLAY_STYLES.map((item) => (
             <option key={item} value={item}>
@@ -427,7 +449,11 @@ export function DiscoverPage() {
             </option>
           ))}
         </select>
-        <select value={filters.language} onChange={(e) => set("language", e.target.value)} aria-label="Language">
+        <select
+          value={filters.language}
+          onChange={(e) => set("language", e.target.value)}
+          aria-label="Language"
+        >
           <option value="">Any language</option>
           {LANGUAGES.map((item) => (
             <option key={item} value={item}>
@@ -459,7 +485,11 @@ export function DiscoverPage() {
             </option>
           ))}
         </select>
-        <select value={filters.ageRange} onChange={(e) => set("ageRange", e.target.value)} aria-label="Age range">
+        <select
+          value={filters.ageRange}
+          onChange={(e) => set("ageRange", e.target.value)}
+          aria-label="Age range"
+        >
           <option value="">Any age range</option>
           {AGE_RANGES.map((item) => (
             <option key={item} value={item}>
@@ -479,12 +509,20 @@ export function DiscoverPage() {
             </option>
           ))}
         </select>
-        <select value={filters.online} onChange={(e) => set("online", e.target.value)} aria-label="Online status">
+        <select
+          value={filters.online}
+          onChange={(e) => set("online", e.target.value)}
+          aria-label="Online status"
+        >
           <option value="">Any status</option>
           <option value="true">Online now</option>
           <option value="false">Offline</option>
         </select>
-        <select value={filters.verified} onChange={(e) => set("verified", e.target.value)} aria-label="Verified status">
+        <select
+          value={filters.verified}
+          onChange={(e) => set("verified", e.target.value)}
+          aria-label="Verified status"
+        >
           <option value="">Any verification</option>
           <option value="true">Verified IGN</option>
         </select>
@@ -506,7 +544,10 @@ export function DiscoverPage() {
       {!items ? (
         <Spinner />
       ) : items.length === 0 ? (
-        <Empty title="No players match" body="Try fewer filters. New players appear as they finish onboarding." />
+        <Empty
+          title="No players match"
+          body="Try fewer filters. New players appear as they finish onboarding."
+        />
       ) : (
         <div className="grid cols-2">
           {items.map((player) => (
@@ -548,7 +589,9 @@ export function PlayerPage() {
   if (!player && !error) return <Spinner />;
   if (!player) return <Notice tone="danger">{error}</Notice>;
 
-  const location = [player.approximateArea, player.district, player.country].filter(Boolean).join(" · ");
+  const location = [player.approximateArea, player.district, player.country]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <div>
@@ -573,8 +616,12 @@ export function PlayerPage() {
           {player.ffIgn ? <span className="chip">IGN {player.ffIgn}</span> : null}
           {player.ffUid ? <span className="chip">UID {player.ffUid}</span> : null}
           {player.playStyle ? <span className="chip">{label(player.playStyle)}</span> : null}
-          {player.micPreference ? <span className="chip">{label(player.micPreference)}</span> : null}
-          {player.relationshipStatus ? <span className="chip">{label(player.relationshipStatus)}</span> : null}
+          {player.micPreference ? (
+            <span className="chip">{label(player.micPreference)}</span>
+          ) : null}
+          {player.relationshipStatus ? (
+            <span className="chip">{label(player.relationshipStatus)}</span>
+          ) : null}
           {player.facebookId ? <span className="chip">Facebook {player.facebookId}</span> : null}
           {player.whatsapp ? <span className="chip">WhatsApp {player.whatsapp}</span> : null}
           {player.instagram ? <span className="chip">Instagram {player.instagram}</span> : null}
@@ -708,7 +755,9 @@ export function RequestsPage() {
                     <button
                       className="btn"
                       onClick={() =>
-                        void api(`/api/duo-requests/${item.id}/accept`, { method: "POST" }).then(load)
+                        void api(`/api/duo-requests/${item.id}/accept`, { method: "POST" }).then(
+                          load,
+                        )
                       }
                     >
                       Accept
@@ -726,7 +775,9 @@ export function RequestsPage() {
                     <button
                       className="btn-ghost"
                       onClick={() =>
-                        void api(`/api/duo-requests/${item.id}/cancel`, { method: "POST" }).then(load)
+                        void api(`/api/duo-requests/${item.id}/cancel`, { method: "POST" }).then(
+                          load,
+                        )
                       }
                     >
                       Cancel
@@ -750,7 +801,9 @@ export function MessagesPage() {
     unread: number;
   }> | null>(null);
   useEffect(() => {
-    void api<{ items: typeof items }>("/api/conversations").then((data) => setItems(data.items ?? []));
+    void api<{ items: typeof items }>("/api/conversations").then((data) =>
+      setItems(data.items ?? []),
+    );
   }, []);
   return (
     <div>
@@ -758,7 +811,10 @@ export function MessagesPage() {
       {!items ? (
         <Spinner />
       ) : items.length === 0 ? (
-        <Empty title="No conversations" body="Open a player profile and send a message when they allow it." />
+        <Empty
+          title="No conversations"
+          body="Open a player profile and send a message when they allow it."
+        />
       ) : (
         <div className="grid" style={{ marginTop: 16 }}>
           {items.map((item) => (
@@ -878,7 +934,10 @@ export function ProfilePage() {
         </label>
         <label className="field">
           <span>Relationship status</span>
-          <select name="relationshipStatus" defaultValue={user.profile.relationshipStatus ?? "PREFER_NOT"}>
+          <select
+            name="relationshipStatus"
+            defaultValue={user.profile.relationshipStatus ?? "PREFER_NOT"}
+          >
             {RELATIONSHIP_STATUSES.map((item) => (
               <option key={item} value={item}>
                 {label(item)}
@@ -936,9 +995,18 @@ export function StorePage() {
   return (
     <div className="store-page">
       <h1 className="page-title">Store</h1>
-      <p className="lede">Prices are taken from the server at purchase time. The client price is display-only.</p>
+      <p className="lede">
+        Prices are taken from the server at purchase time. The client price is display-only.
+      </p>
       <div className="tabs" style={{ margin: "14px 0" }}>
-        <button className={category === "" ? "tab active" : "tab"} type="button" onClick={() => { setCategory(""); void load(""); }}>
+        <button
+          className={category === "" ? "tab active" : "tab"}
+          type="button"
+          onClick={() => {
+            setCategory("");
+            void load("");
+          }}
+        >
           All
         </button>
         {PRODUCT_CATEGORIES.map((item) => (
@@ -995,7 +1063,9 @@ export function InventoryPage() {
   const giftTo = params.get("gift");
   const [tab, setTab] = useState<"owned" | "equipped" | "giftable" | "history">("owned");
   const [items, setItems] = useState<InventoryItem[] | null>(null);
-  const [orders, setOrders] = useState<Array<{ id: string; createdAt: string; product: { name: string } }>>([]);
+  const [orders, setOrders] = useState<
+    Array<{ id: string; createdAt: string; product: { name: string } }>
+  >([]);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
@@ -1024,7 +1094,12 @@ export function InventoryPage() {
       {error ? <Notice tone="danger">{error}</Notice> : null}
       <div className="tabs" style={{ margin: "14px 0" }}>
         {(["owned", "equipped", "giftable", "history"] as const).map((item) => (
-          <button key={item} className={tab === item ? "tab active" : "tab"} type="button" onClick={() => setTab(item)}>
+          <button
+            key={item}
+            className={tab === item ? "tab active" : "tab"}
+            type="button"
+            onClick={() => setTab(item)}
+          >
             {item === "owned"
               ? "Owned"
               : item === "equipped"
@@ -1037,7 +1112,10 @@ export function InventoryPage() {
       </div>
       {tab === "history" ? (
         orders.length === 0 ? (
-          <Empty title="No purchases yet" body="Visit the store to buy banners, frames and boosts." />
+          <Empty
+            title="No purchases yet"
+            body="Visit the store to buy banners, frames and boosts."
+          />
         ) : (
           <table className="table">
             <thead>
@@ -1121,18 +1199,18 @@ export function InventoryPage() {
 
 export function WalletPage() {
   const { user, refresh } = useAuth();
-  const [packs, setPacks] = useState<Array<{ id: string; name: string; coins: number; priceBdt: number }>>(
-    [],
-  );
+  const [packs, setPacks] = useState<
+    Array<{ id: string; name: string; coins: number; priceBdt: number }>
+  >([]);
   const [tx, setTx] = useState<
     Array<{ id: string; type: string; amount: number; source: string; createdAt: string }>
   >([]);
   const [payments, setPayments] = useState<
     Array<{ id: string; status: string; amountBdt?: number; createdAt: string }>
   >([]);
-  const [referrals, setReferrals] = useState<Array<{ id: string; status: string; rewardAmount: number }>>(
-    [],
-  );
+  const [referrals, setReferrals] = useState<
+    Array<{ id: string; status: string; rewardAmount: number }>
+  >([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -1171,17 +1249,22 @@ export function WalletPage() {
   }
 
   async function buy(packageId: string) {
-    const order = await api<{ order: { id: string; checkoutUrl: string } }>("/api/payments/orders", {
-      method: "POST",
-      body: JSON.stringify({ packageId, idempotencyKey: idempotencyKey("pay") }),
-    });
+    const order = await api<{ order: { id: string; checkoutUrl: string } }>(
+      "/api/payments/orders",
+      {
+        method: "POST",
+        body: JSON.stringify({ packageId, idempotencyKey: idempotencyKey("pay") }),
+      },
+    );
     window.location.href = order.order.checkoutUrl;
   }
 
   return (
     <div>
       <h1 className="page-title">Wallet</h1>
-      <p className="lede">Credits only happen after server verification. The client never changes balances.</p>
+      <p className="lede">
+        Credits only happen after server verification. The client never changes balances.
+      </p>
       <div className="grid cols-3" style={{ margin: "16px 0" }}>
         <article className="card">
           <h3>{user?.wallet.balance ?? 0} coins</h3>
@@ -1272,9 +1355,13 @@ export function PaymentReturnPage() {
     if (!id) return;
     void api<{ order: { status: string } }>(`/api/payments/orders/${id}/sync`, { method: "POST" })
       .then((data) =>
-        setStatus(`Order ${data.order.status.toLowerCase()}. Coins are added only after verification.`),
+        setStatus(
+          `Order ${data.order.status.toLowerCase()}. Coins are added only after verification.`,
+        ),
       )
-      .catch(() => setStatus("Could not confirm this payment yet. It will be reconciled automatically."));
+      .catch(() =>
+        setStatus("Could not confirm this payment yet. It will be reconciled automatically."),
+      );
   }, [id]);
   return (
     <div className="card">
@@ -1305,8 +1392,9 @@ export function SandboxPayPage() {
         <div className="kicker">SPV sandbox</div>
         <h1 className="page-title">Confirm test payment</h1>
         <p className="lede">
-          This is the server-side sandbox checkout used when live SPV credentials are not configured.
-          Completing it still goes through the same settlement path as a live verified payment.
+          This is the server-side sandbox checkout used when live SPV credentials are not
+          configured. Completing it still goes through the same settlement path as a live verified
+          payment.
         </p>
         <p className="meta">Amount ৳{amount ?? "…"}</p>
         {done ? <Notice tone="ok">{done}</Notice> : null}
@@ -1340,7 +1428,9 @@ export function SandboxPayPage() {
 
 export function ReferralsPage() {
   const { user } = useAuth();
-  const [items, setItems] = useState<Array<{ id: string; status: string; rewardAmount: number }>>([]);
+  const [items, setItems] = useState<Array<{ id: string; status: string; rewardAmount: number }>>(
+    [],
+  );
   useEffect(() => {
     void api<{ items: typeof items }>("/api/wallet/referrals").then((d) => setItems(d.items));
   }, []);
@@ -1390,7 +1480,9 @@ export function NotificationsPage() {
         <h1 className="page-title">Notifications</h1>
         <button
           className="btn-secondary"
-          onClick={() => void api("/api/notifications/read", { method: "POST", body: "{}" }).then(load)}
+          onClick={() =>
+            void api("/api/notifications/read", { method: "POST", body: "{}" }).then(load)
+          }
         >
           Mark all read
         </button>

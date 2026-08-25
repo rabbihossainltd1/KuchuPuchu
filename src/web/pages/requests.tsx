@@ -28,12 +28,20 @@ export function RequestsPage() {
         <section>
           <h2 className="section-title">Friend requests</h2>
           {friends.length === 0 ? (
-            <Empty title="No friend requests" body="When someone adds you, they will show up here with their profile." />
+            <Empty
+              title="No friend requests"
+              body="When someone adds you, they will show up here with their profile."
+            />
           ) : (
             friends.map((item) => (
               <article key={item.id} className="card request-card">
                 <div className="player-head">
-                  <Avatar name={item.from.displayName} url={item.from.avatarUrl} online={item.from.online} large />
+                  <Avatar
+                    name={item.from.displayName}
+                    url={item.from.avatarUrl}
+                    online={item.from.online}
+                    large
+                  />
                   <div>
                     <h3>{item.from.displayName}</h3>
                     <p className="meta">
@@ -47,7 +55,9 @@ export function RequestsPage() {
                   <button
                     className="btn"
                     onClick={() =>
-                      void api(`/api/friend-requests/${item.id}/accept`, { method: "POST" }).then(load)
+                      void api(`/api/friend-requests/${item.id}/accept`, { method: "POST" }).then(
+                        load,
+                      )
                     }
                   >
                     Accept
@@ -55,7 +65,9 @@ export function RequestsPage() {
                   <button
                     className="btn-secondary"
                     onClick={() =>
-                      void api(`/api/friend-requests/${item.id}/decline`, { method: "POST" }).then(load)
+                      void api(`/api/friend-requests/${item.id}/decline`, { method: "POST" }).then(
+                        load,
+                      )
                     }
                   >
                     Decline
@@ -70,7 +82,10 @@ export function RequestsPage() {
           {!duo ? (
             <Spinner />
           ) : duo.length === 0 ? (
-            <Empty title="No match requests" body="Invite someone from Discover when you want to queue." />
+            <Empty
+              title="No match requests"
+              body="Invite someone from Discover when you want to queue."
+            />
           ) : (
             duo.map((item) => {
               const requester = item.requester as PublicUser;
@@ -78,7 +93,11 @@ export function RequestsPage() {
               return (
                 <article key={String(item.id)} className="card request-card">
                   <div className="player-head">
-                    <Avatar name={requester.displayName} url={requester.avatarUrl} online={requester.online} />
+                    <Avatar
+                      name={requester.displayName}
+                      url={requester.avatarUrl}
+                      online={requester.online}
+                    />
                     <div>
                       <h3>{requester.displayName}</h3>
                       <p className="meta">
@@ -91,7 +110,9 @@ export function RequestsPage() {
                       <button
                         className="btn"
                         onClick={() =>
-                          void api(`/api/duo-requests/${item.id}/accept`, { method: "POST" }).then(load)
+                          void api(`/api/duo-requests/${item.id}/accept`, { method: "POST" }).then(
+                            load,
+                          )
                         }
                       >
                         Accept
@@ -99,7 +120,9 @@ export function RequestsPage() {
                       <button
                         className="btn-secondary"
                         onClick={() =>
-                          void api(`/api/duo-requests/${item.id}/decline`, { method: "POST" }).then(load)
+                          void api(`/api/duo-requests/${item.id}/decline`, { method: "POST" }).then(
+                            load,
+                          )
                         }
                       >
                         Decline
@@ -107,7 +130,9 @@ export function RequestsPage() {
                       <button
                         className="btn-ghost"
                         onClick={() =>
-                          void api(`/api/duo-requests/${item.id}/cancel`, { method: "POST" }).then(load)
+                          void api(`/api/duo-requests/${item.id}/cancel`, { method: "POST" }).then(
+                            load,
+                          )
                         }
                       >
                         Cancel

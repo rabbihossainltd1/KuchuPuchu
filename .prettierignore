@@ -6,3 +6,6 @@ prisma/migrations
 *.db
 *.md
 docs
+android
+ios
+.github

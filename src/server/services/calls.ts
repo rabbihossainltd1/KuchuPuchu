@@ -50,12 +50,7 @@ export async function startCall(
   const busy = await prisma.call.findFirst({
     where: {
       status: { in: ["RINGING", "ACTIVE"] },
-      OR: [
-        { callerId },
-        { calleeId: callerId },
-        { callerId: calleeId },
-        { calleeId },
-      ],
+      OR: [{ callerId }, { calleeId: callerId }, { callerId: calleeId }, { calleeId }],
     },
   });
   if (busy) throw new AppError("BUSY", "One of you is already on a call.", 409);
@@ -99,7 +94,8 @@ export async function answerCall(userId: string, callId: string, answerSdp: stri
   await expireCalls();
   const call = await loadCall(userId, callId);
   if (call.calleeId !== userId) throw new AppError("FORBIDDEN", "Only the callee can answer.", 403);
-  if (call.status !== "RINGING") throw new AppError("INVALID_STATE", "This call is no longer ringing.", 409);
+  if (call.status !== "RINGING")
+    throw new AppError("INVALID_STATE", "This call is no longer ringing.", 409);
   await prisma.call.update({
     where: { id: callId },
     data: { status: "ACTIVE", answerSdp, answeredAt: new Date() },
@@ -109,8 +105,10 @@ export async function answerCall(userId: string, callId: string, answerSdp: stri
 
 export async function declineCall(userId: string, callId: string) {
   const call = await loadCall(userId, callId);
-  if (call.calleeId !== userId) throw new AppError("FORBIDDEN", "Only the callee can decline.", 403);
-  if (call.status !== "RINGING") throw new AppError("INVALID_STATE", "This call cannot be declined.", 409);
+  if (call.calleeId !== userId)
+    throw new AppError("FORBIDDEN", "Only the callee can decline.", 403);
+  if (call.status !== "RINGING")
+    throw new AppError("INVALID_STATE", "This call cannot be declined.", 409);
   await prisma.call.update({
     where: { id: callId },
     data: { status: "DECLINED", endedAt: new Date(), endedById: userId },

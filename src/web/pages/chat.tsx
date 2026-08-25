@@ -21,7 +21,9 @@ type ChatMessage = { id: string; senderId: string; body: string; createdAt?: str
 export function MessagesPage() {
   const [items, setItems] = useState<Conversation[] | null>(null);
   useEffect(() => {
-    void api<{ items: Conversation[] }>("/api/conversations").then((data) => setItems(data.items ?? []));
+    void api<{ items: Conversation[] }>("/api/conversations").then((data) =>
+      setItems(data.items ?? []),
+    );
   }, []);
   return (
     <div>
@@ -30,16 +32,25 @@ export function MessagesPage() {
       {!items ? (
         <Spinner />
       ) : items.length === 0 ? (
-        <Empty title="No conversations yet" body="Open a profile and tap Message to start a thread." />
+        <Empty
+          title="No conversations yet"
+          body="Open a profile and tap Message to start a thread."
+        />
       ) : (
         <div className="inbox">
           {items.map((item) => (
             <Link key={item.id} className="inbox-row" to={`/messages/${item.id}`}>
-              <Avatar name={item.other.displayName} url={item.other.avatarUrl} online={item.other.online} />
+              <Avatar
+                name={item.other.displayName}
+                url={item.other.avatarUrl}
+                online={item.other.online}
+              />
               <div className="inbox-copy">
                 <div className="inbox-top">
                   <strong>{item.other.displayName}</strong>
-                  <span className="meta">{item.lastMessageAt ? timeAgo(item.lastMessageAt) : ""}</span>
+                  <span className="meta">
+                    {item.lastMessageAt ? timeAgo(item.lastMessageAt) : ""}
+                  </span>
                 </div>
                 <p className="meta">{item.lastMessage?.body || "No messages yet"}</p>
               </div>
@@ -113,11 +124,19 @@ export function ConversationPage() {
                 {other.online ? " · online" : ""}
               </p>
             </div>
-            <button className="icon-btn" type="button" onClick={() => void startCall(other.userId, "AUDIO")}>
+            <button
+              className="icon-btn"
+              type="button"
+              onClick={() => void startCall(other.userId, "AUDIO")}
+            >
               <Phone size={18} />
               Call
             </button>
-            <button className="icon-btn" type="button" onClick={() => void startCall(other.userId, "VIDEO")}>
+            <button
+              className="icon-btn"
+              type="button"
+              onClick={() => void startCall(other.userId, "VIDEO")}
+            >
               <Video size={18} />
               Video
             </button>
@@ -136,7 +155,13 @@ export function ConversationPage() {
         <div ref={endRef} />
       </div>
       <form className="composer-bar chat-compose" onSubmit={onSubmit}>
-        <input name="body" required placeholder="Write a message" aria-label="Message" autoComplete="off" />
+        <input
+          name="body"
+          required
+          placeholder="Write a message"
+          aria-label="Message"
+          autoComplete="off"
+        />
         <button className="btn" type="submit">
           <Send size={16} />
           Send

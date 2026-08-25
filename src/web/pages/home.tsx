@@ -109,7 +109,8 @@ export function HomePage() {
   }, [posts, q]);
 
   const feedItems = useMemo(() => {
-    const items: Array<{ type: "post"; post: FeedPost } | { type: "recs"; people: PublicUser[] }> = [];
+    const items: Array<{ type: "post"; post: FeedPost } | { type: "recs"; people: PublicUser[] }> =
+      [];
     visiblePosts.forEach((post, index) => {
       items.push({ type: "post", post });
       if ((index + 1) % 3 === 0 && recs.length) {
@@ -185,7 +186,9 @@ export function HomePage() {
 
   useEffect(() => {
     if (!viewer || !activeStory) return;
-    void api(`/api/stories/${activeStory.id}/view`, { method: "POST", body: "{}" }).catch(() => undefined);
+    void api(`/api/stories/${activeStory.id}/view`, { method: "POST", body: "{}" }).catch(
+      () => undefined,
+    );
     const timer = window.setTimeout(() => stepViewer(1), 5000);
     return () => window.clearTimeout(timer);
   }, [viewer?.group, viewer?.index, activeStory?.id]);
@@ -244,12 +247,16 @@ export function HomePage() {
                 {group.stories[0]?.imageUrl ? (
                   <img className="story-cover" src={group.stories[0].imageUrl} alt="" />
                 ) : (
-                  <span className="story-text-fill">{group.stories[0]?.body || group.author.displayName}</span>
+                  <span className="story-text-fill">
+                    {group.stories[0]?.body || group.author.displayName}
+                  </span>
                 )}
                 <span className="story-avatar">
                   <Avatar name={group.author.displayName} url={group.author.avatarUrl} />
                 </span>
-                <em>{group.author.userId === user?.id ? "Your story" : group.author.displayName}</em>
+                <em>
+                  {group.author.userId === user?.id ? "Your story" : group.author.displayName}
+                </em>
               </div>
             </button>
           ))}
@@ -314,7 +321,12 @@ export function HomePage() {
           <form className="composer-sheet" onSubmit={publish}>
             <div className="strip-head">
               <h3>Create post</h3>
-              <button className="icon-plain" type="button" onClick={closeComposer} aria-label="Close">
+              <button
+                className="icon-plain"
+                type="button"
+                onClick={closeComposer}
+                aria-label="Close"
+              >
                 <X size={18} />
               </button>
             </div>
@@ -361,11 +373,18 @@ export function HomePage() {
           <form className="composer-sheet" onSubmit={(event) => void shareStory(event)}>
             <div className="strip-head">
               <h3>Create story</h3>
-              <button className="icon-plain" type="button" onClick={() => setStoryOpen(false)} aria-label="Close">
+              <button
+                className="icon-plain"
+                type="button"
+                onClick={() => setStoryOpen(false)}
+                aria-label="Close"
+              >
                 <X size={18} />
               </button>
             </div>
-            <p className="meta">Stories disappear after 24 hours. Photo or a short caption is enough.</p>
+            <p className="meta">
+              Stories disappear after 24 hours. Photo or a short caption is enough.
+            </p>
             <label className="field">
               <span>Photo</span>
               <input name="photo" type="file" accept="image/*" />
@@ -408,12 +427,27 @@ export function HomePage() {
                 Delete
               </button>
             ) : null}
-            <button className="icon-plain" type="button" onClick={() => setViewer(null)} aria-label="Close story">
+            <button
+              className="icon-plain"
+              type="button"
+              onClick={() => setViewer(null)}
+              aria-label="Close story"
+            >
               <X size={20} />
             </button>
           </div>
-          <button className="story-hit left" type="button" aria-label="Previous" onClick={() => stepViewer(-1)} />
-          <button className="story-hit right" type="button" aria-label="Next" onClick={() => stepViewer(1)} />
+          <button
+            className="story-hit left"
+            type="button"
+            aria-label="Previous"
+            onClick={() => stepViewer(-1)}
+          />
+          <button
+            className="story-hit right"
+            type="button"
+            aria-label="Next"
+            onClick={() => stepViewer(1)}
+          />
           <div className="story-stage">
             {activeStory.imageUrl ? <img src={activeStory.imageUrl} alt="" /> : null}
             {activeStory.body ? <p>{activeStory.body}</p> : null}
@@ -484,7 +518,11 @@ function PostCard({
   return (
     <article className="soft-block post-card">
       <div className="player-head">
-        <Avatar name={post.author.displayName} url={post.author.avatarUrl} online={post.author.online} />
+        <Avatar
+          name={post.author.displayName}
+          url={post.author.avatarUrl}
+          online={post.author.online}
+        />
         <div style={{ flex: 1 }}>
           <strong>
             <Link to={`/players/${post.author.userId}`}>{post.author.displayName}</Link>
@@ -495,14 +533,23 @@ function PostCard({
           </div>
         </div>
         {mine ? (
-          <button className="icon-plain" type="button" onClick={() => void remove()} aria-label="Delete post">
+          <button
+            className="icon-plain"
+            type="button"
+            onClick={() => void remove()}
+            aria-label="Delete post"
+          >
             <X size={16} />
           </button>
         ) : null}
       </div>
       <p className="post-body">{post.body}</p>
       <div className="post-actions">
-        <button className={post.liked ? "text-btn liked" : "text-btn"} type="button" onClick={() => void like()}>
+        <button
+          className={post.liked ? "text-btn liked" : "text-btn"}
+          type="button"
+          onClick={() => void like()}
+        >
           <Heart size={18} fill={post.liked ? "currentColor" : "none"} />
           {post.likeCount}
         </button>
@@ -526,7 +573,13 @@ function PostCard({
             ) : null,
           )}
           <form className="comment-form" onSubmit={comment}>
-            <input name="body" required maxLength={280} placeholder="Write a comment" aria-label="Comment" />
+            <input
+              name="body"
+              required
+              maxLength={280}
+              placeholder="Write a comment"
+              aria-label="Comment"
+            />
             <button className="btn" type="submit">
               Reply
             </button>

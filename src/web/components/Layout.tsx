@@ -95,7 +95,12 @@ export function AppLayout() {
     <CallProvider>
       <div className="social-shell">
         <header className="app-header">
-          <button className="icon-plain" type="button" aria-label="Open menu" onClick={() => setMenu(true)}>
+          <button
+            className="icon-plain"
+            type="button"
+            aria-label="Open menu"
+            onClick={() => setMenu(true)}
+          >
             <Menu size={22} />
           </button>
           {onHome ? (
@@ -171,18 +176,28 @@ export function AppLayout() {
           </form>
         ) : null}
         {offline ? (
-          <Notice tone="danger">You are offline. Some actions will fail until you reconnect.</Notice>
+          <Notice tone="danger">
+            You are offline. Some actions will fail until you reconnect.
+          </Notice>
         ) : null}
         <div className="social-main">
           <Outlet />
         </div>
         <nav className="bottom-nav always" aria-label="Primary">
           {bottom.map((item) => (
-            <NavLink key={item.to} to={item.to} className={({ isActive }) => (isActive ? "active" : "")}>
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) => (isActive ? "active" : "")}
+            >
               <span className="nav-ico">
                 <item.icon size={22} aria-hidden="true" />
-                {item.to === "/notifications" && notifyCount ? <i>{notifyCount > 9 ? "9+" : notifyCount}</i> : null}
-                {item.to === "/messages" && messages ? <i>{messages > 9 ? "9+" : messages}</i> : null}
+                {item.to === "/notifications" && notifyCount ? (
+                  <i>{notifyCount > 9 ? "9+" : notifyCount}</i>
+                ) : null}
+                {item.to === "/messages" && messages ? (
+                  <i>{messages > 9 ? "9+" : messages}</i>
+                ) : null}
               </span>
               <span className="sr-only">{item.label}</span>
             </NavLink>
@@ -190,7 +205,12 @@ export function AppLayout() {
         </nav>
         {menu ? (
           <div className="drawer-wrap">
-            <button className="drawer-backdrop" type="button" aria-label="Close menu" onClick={() => setMenu(false)} />
+            <button
+              className="drawer-backdrop"
+              type="button"
+              aria-label="Close menu"
+              onClick={() => setMenu(false)}
+            />
             <aside className="drawer" aria-label="Menu">
               <div className="drawer-head">
                 <div className="drawer-id">
@@ -200,7 +220,12 @@ export function AppLayout() {
                     <div className="meta">@{user?.username}</div>
                   </div>
                 </div>
-                <button className="icon-plain" type="button" aria-label="Close" onClick={() => setMenu(false)}>
+                <button
+                  className="icon-plain"
+                  type="button"
+                  aria-label="Close"
+                  onClick={() => setMenu(false)}
+                >
                   <X size={18} />
                 </button>
               </div>

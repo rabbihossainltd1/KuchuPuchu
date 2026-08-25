@@ -17,18 +17,27 @@ async function friendIds(userId: string) {
 }
 
 function parseImageData(imageData: string) {
-  const match = /^data:image\/(jpeg|jpg|png|webp);base64,([A-Za-z0-9+/=\s]+)$/i.exec(imageData.trim());
-  if (!match?.[1] || !match[2]) throw new AppError("INVALID_IMAGE", "Use a JPEG, PNG, or WebP photo.", 400);
+  const match = /^data:image\/(jpeg|jpg|png|webp);base64,([A-Za-z0-9+/=\s]+)$/i.exec(
+    imageData.trim(),
+  );
+  if (!match?.[1] || !match[2])
+    throw new AppError("INVALID_IMAGE", "Use a JPEG, PNG, or WebP photo.", 400);
   const ext = match[1].toLowerCase() === "jpg" ? "jpeg" : match[1].toLowerCase();
   const buffer = Buffer.from(match[2].replace(/\s/g, ""), "base64");
   if (buffer.length < 80) throw new AppError("INVALID_IMAGE", "That photo could not be read.", 400);
-  if (buffer.length > 1_500_000) throw new AppError("IMAGE_TOO_LARGE", "Keep photos under 1.5 MB.", 400);
+  if (buffer.length > 1_500_000)
+    throw new AppError("IMAGE_TOO_LARGE", "Keep photos under 1.5 MB.", 400);
   return { ext, buffer };
 }
 
-export async function createStory(userId: string, input: { body?: string | null; imageData?: string | null }) {
+export async function createStory(
+  userId: string,
+  input: { body?: string | null; imageData?: string | null },
+) {
   const since = new Date(Date.now() - 60 * 60 * 1000);
-  const count = await prisma.story.count({ where: { authorId: userId, createdAt: { gte: since } } });
+  const count = await prisma.story.count({
+    where: { authorId: userId, createdAt: { gte: since } },
+  });
   if (count >= STORY_HOURLY_LIMIT) {
     throw new AppError("RATE_LIMITED", "You are sharing stories too quickly.", 429);
   }
@@ -64,7 +73,8 @@ export async function deleteStory(userId: string, storyId: string) {
 
 export async function viewStory(userId: string, storyId: string) {
   const story = await prisma.story.findUnique({ where: { id: storyId } });
-  if (!story || story.expiresAt < new Date()) throw new AppError("NOT_FOUND", "Story not found.", 404);
+  if (!story || story.expiresAt < new Date())
+    throw new AppError("NOT_FOUND", "Story not found.", 404);
   if (story.authorId !== userId && (await isBlocked(userId, story.authorId))) {
     throw new AppError("BLOCKED", "You cannot view this story.", 403);
   }

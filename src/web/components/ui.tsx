@@ -40,7 +40,15 @@ export function Notice({
   return <div className={tone === "info" ? "banner" : `banner ${tone}`}>{children}</div>;
 }
 
-export function Empty({ title, body, action }: { title: string; body: string; action?: ReactNode }) {
+export function Empty({
+  title,
+  body,
+  action,
+}: {
+  title: string;
+  body: string;
+  action?: ReactNode;
+}) {
   return (
     <div className="empty card">
       <h3>{title}</h3>

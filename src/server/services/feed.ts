@@ -63,7 +63,8 @@ export async function listFeed(userId: string, cursor?: string, limit = 20) {
 export async function toggleLike(userId: string, postId: string) {
   const post = await prisma.post.findUnique({ where: { id: postId } });
   if (!post) throw new AppError("NOT_FOUND", "Post not found.", 404);
-  if (await isBlocked(userId, post.authorId)) throw new AppError("BLOCKED", "You cannot like this post.", 403);
+  if (await isBlocked(userId, post.authorId))
+    throw new AppError("BLOCKED", "You cannot like this post.", 403);
   const existing = await prisma.postLike.findUnique({
     where: { postId_userId: { postId, userId } },
   });

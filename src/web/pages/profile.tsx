@@ -25,9 +25,7 @@ function socialHref(kind: "facebook" | "instagram" | "whatsapp", value: string) 
   }
   if (value.startsWith("http")) return value;
   const handle = value.replace(/^@/, "");
-  return kind === "facebook"
-    ? `https://facebook.com/${handle}`
-    : `https://instagram.com/${handle}`;
+  return kind === "facebook" ? `https://facebook.com/${handle}` : `https://instagram.com/${handle}`;
 }
 
 export function ProfilePage() {
@@ -104,7 +102,11 @@ export function ProfilePage() {
                 <Facebook size={14} /> Facebook
               </dt>
               <dd>
-                <a href={socialHref("facebook", profile.facebookId)} target="_blank" rel="noreferrer">
+                <a
+                  href={socialHref("facebook", profile.facebookId)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
                   {profile.facebookId}
                 </a>
               </dd>
@@ -128,7 +130,11 @@ export function ProfilePage() {
                 <Instagram size={14} /> Instagram
               </dt>
               <dd>
-                <a href={socialHref("instagram", profile.instagram)} target="_blank" rel="noreferrer">
+                <a
+                  href={socialHref("instagram", profile.instagram)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
                   {profile.instagram}
                 </a>
               </dd>
@@ -174,7 +180,9 @@ export function ProfilePage() {
             </span>
           ))}
           {profile.playStyle ? <span className="chip">{label(profile.playStyle)}</span> : null}
-          {profile.micPreference ? <span className="chip">{label(profile.micPreference)}</span> : null}
+          {profile.micPreference ? (
+            <span className="chip">{label(profile.micPreference)}</span>
+          ) : null}
         </div>
       </section>
 
@@ -285,7 +293,11 @@ export function ProfileEditPage() {
         </label>
         <label className="field">
           <span>Facebook</span>
-          <input name="facebookId" defaultValue={profile.facebookId ?? ""} placeholder="username or URL" />
+          <input
+            name="facebookId"
+            defaultValue={profile.facebookId ?? ""}
+            placeholder="username or URL"
+          />
         </label>
         <label className="field">
           <span>WhatsApp</span>
@@ -410,7 +422,10 @@ export function ProfileEditPage() {
         </label>
         <label className="field">
           <span>Relationship status</span>
-          <select name="relationshipStatus" defaultValue={profile.relationshipStatus ?? "PREFER_NOT"}>
+          <select
+            name="relationshipStatus"
+            defaultValue={profile.relationshipStatus ?? "PREFER_NOT"}
+          >
             {RELATIONSHIP_STATUSES.map((item) => (
               <option key={item} value={item}>
                 {label(item)}

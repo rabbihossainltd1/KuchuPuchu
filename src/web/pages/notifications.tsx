@@ -68,13 +68,18 @@ export function NotificationsPage() {
         <button
           className="btn-ghost"
           type="button"
-          onClick={() => void api("/api/notifications/read", { method: "POST", body: "{}" }).then(load)}
+          onClick={() =>
+            void api("/api/notifications/read", { method: "POST", body: "{}" }).then(load)
+          }
         >
           Mark all read
         </button>
       </div>
       {rows.length === 0 ? (
-        <Empty title="You’re all caught up" body="Friend requests, likes, and comments will land here." />
+        <Empty
+          title="You’re all caught up"
+          body="Friend requests, likes, and comments will land here."
+        />
       ) : (
         <div className="grid">
           {rows.map((row) => {
@@ -90,7 +95,11 @@ export function NotificationsPage() {
               return (
                 <article key={row.id} className="card note-row unread-note">
                   <div className="player-head">
-                    <Avatar name={row.from.displayName} url={row.from.avatarUrl} online={row.from.online} />
+                    <Avatar
+                      name={row.from.displayName}
+                      url={row.from.avatarUrl}
+                      online={row.from.online}
+                    />
                     <div style={{ flex: 1 }}>
                       <strong>{row.from.displayName} sent you a friend request</strong>
                       <p className="meta">
@@ -101,7 +110,9 @@ export function NotificationsPage() {
                           className="btn"
                           type="button"
                           onClick={() =>
-                            void api(`/api/friend-requests/${row.id}/accept`, { method: "POST" }).then(load)
+                            void api(`/api/friend-requests/${row.id}/accept`, {
+                              method: "POST",
+                            }).then(load)
                           }
                         >
                           Accept
@@ -110,7 +121,9 @@ export function NotificationsPage() {
                           className="btn-ghost"
                           type="button"
                           onClick={() =>
-                            void api(`/api/friend-requests/${row.id}/decline`, { method: "POST" }).then(load)
+                            void api(`/api/friend-requests/${row.id}/decline`, {
+                              method: "POST",
+                            }).then(load)
                           }
                         >
                           Decline
