@@ -1,11 +1,11 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ChevronLeft, ImagePlus, Phone, Send, Video, X } from "lucide-react";
-import { api, RequestError } from "../lib/api";
+import { api, peekCache, RequestError } from "../lib/api";
 import { readPhoto } from "../lib/photo";
 import { useAuth } from "../lib/auth";
 import { useCall } from "../lib/calls";
-import { timeAgo } from "../lib/time";
+import { lastSeenLabel, timeAgo } from "../lib/time";
 import { Avatar, Empty, Notice, Spinner } from "../components/ui";
 import type { PublicUser } from "../lib/types";
 
@@ -47,14 +47,23 @@ function dayKey(iso?: string) {
 }
 
 export function MessagesPage() {
-  const [items, setItems] = useState<Conversation[] | null>(null);
+  const [items, setItems] = useState<Conversation[] | null>(
+    () => peekCache<{ items: Conversation[] }>("/api/conversations")?.items ?? null,
+  );
   useEffect(() => {
-    void api<{ items: Conversation[] }>("/api/conversations").then((data) =>
-      setItems(data.items ?? []),
-    );
+    function apply(data: { items: Conversation[] }) {
+      const list = data.items ?? [];
+      setItems(list);
+      for (const row of list.slice(0, 8)) {
+        void api<{ items: ChatMessage[] }>(`/api/conversations/${row.id}/messages`).catch(
+          () => undefined,
+        );
+      }
+    }
+    void api<{ items: Conversation[] }>("/api/conversations").then(apply);
     const timer = window.setInterval(() => {
       void api<{ items: Conversation[] }>("/api/conversations")
-        .then((data) => setItems(data.items ?? []))
+        .then(apply)
         .catch(() => undefined);
     }, 20000);
     return () => window.clearInterval(timer);
@@ -98,8 +107,13 @@ export function ConversationPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { startCall } = useCall();
-  const [other, setOther] = useState<PublicUser | null>(null);
-  const [items, setItems] = useState<ChatMessage[]>([]);
+  const [other, setOther] = useState<PublicUser | null>(() => {
+    const inbox = peekCache<{ items: Conversation[] }>("/api/conversations");
+    return inbox?.items.find((item) => item.id === id)?.other ?? null;
+  });
+  const [items, setItems] = useState<ChatMessage[]>(
+    () => peekCache<{ items: ChatMessage[] }>(`/api/conversations/${id}/messages`)?.items ?? [],
+  );
   const [draft, setDraft] = useState("");
   const [photo, setPhoto] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -175,7 +189,7 @@ export function ConversationPage() {
               <Avatar name={other.displayName} url={other.avatarUrl} online={other.online} />
               <div>
                 <strong>{other.displayName}</strong>
-                <p className="meta">{other.online ? "Active now" : `@${other.username}`}</p>
+                <p className="meta">{lastSeenLabel(other.lastActiveAt, other.online)}</p>
               </div>
             </Link>
             <button

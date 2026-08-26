@@ -49,12 +49,18 @@ export function bustCache(match?: string) {
   }
 }
 
+function ttlFor(path: string) {
+  if (path.includes("/calls")) return 0;
+  if (path.includes("/messages")) return 8_000;
+  return 45_000;
+}
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const method = (init.method || "GET").toUpperCase();
-  const skipCache = path.includes("/messages") || path.includes("/calls");
-  if (method === "GET" && !skipCache) {
+  if (method === "GET") {
     const hit = memoryCache.get(path);
-    if (hit && Date.now() - hit.at < 45_000) return hit.data as T;
+    const ttl = ttlFor(path);
+    if (hit && ttl > 0 && Date.now() - hit.at < ttl) return hit.data as T;
     const running = inflight.get(path);
     if (running) return running as Promise<T>;
   }
@@ -86,7 +92,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
       };
       throw new RequestError(res.status, err);
     }
-    if (method === "GET" && !skipCache) memoryCache.set(path, { at: Date.now(), data });
+    if (method === "GET") memoryCache.set(path, { at: Date.now(), data });
     else {
       if (path.includes("/conversations")) bustCache("/api/conversations");
       if (path.includes("/posts") || path.includes("/feed") || path.includes("/stories")) {
@@ -104,7 +110,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     return data as T;
   })();
 
-  if (method === "GET" && !skipCache) {
+  if (method === "GET") {
     inflight.set(path, request);
     try {
       return await request;

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { api } from "../lib/api";
+import { api, peekCache } from "../lib/api";
 import { Avatar, Empty, Spinner } from "../components/ui";
 import { type PublicUser } from "../lib/types";
 import { timeAgo } from "../lib/time";
@@ -22,8 +22,12 @@ type Row =
   | { kind: "more" };
 
 export function NotificationsPage() {
-  const [requests, setRequests] = useState<RequestItem[] | null>(null);
-  const [items, setItems] = useState<Note[]>([]);
+  const [requests, setRequests] = useState<RequestItem[] | null>(
+    () => peekCache<{ items: RequestItem[] }>("/api/friend-requests")?.items ?? null,
+  );
+  const [items, setItems] = useState<Note[]>(
+    () => peekCache<{ items: Note[] }>("/api/notifications")?.items ?? [],
+  );
 
   async function load() {
     const [friends, notes] = await Promise.all([

@@ -10,3 +10,11 @@ export function timeAgo(iso: string) {
   if (day < 7) return `${day}d`;
   return new Date(iso).toLocaleDateString();
 }
+
+export function lastSeenLabel(iso?: string | null, online?: boolean) {
+  if (online) return "Active now";
+  if (!iso) return "Offline";
+  const label = timeAgo(iso);
+  if (label === "just now") return "Last seen just now";
+  return `Last seen ${label} ago`;
+}
