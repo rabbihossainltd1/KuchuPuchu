@@ -3,10 +3,8 @@ package app.kuchupuchu.android
 import android.app.Application
 import android.content.Context
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -20,7 +18,6 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -65,6 +62,36 @@ fun KpApp() {
     val engine = remember { CallEngine(ctx.applicationContext as Application) }
     var call by remember { mutableStateOf<CallUi?>(null) }
     var route by remember { mutableStateOf(if (Api.token.isNullOrBlank()) "login" else "boot") }
+    val backStack = remember { mutableStateListOf<String>() }
+
+    fun go(next: String) {
+        if (next == route) return
+        if (next == "login") {
+            backStack.clear()
+            route = "login"
+            return
+        }
+        if (next.startsWith("tabs/")) {
+            backStack.clear()
+            route = next
+            return
+        }
+        backStack.add(route)
+        if (backStack.size > 24) backStack.removeAt(0)
+        route = next
+    }
+
+    fun pop(): Boolean {
+        if (backStack.isNotEmpty()) {
+            route = backStack.removeAt(backStack.lastIndex)
+            return true
+        }
+        if (route != "tabs/home" && route != "login" && route != "boot") {
+            route = "tabs/home"
+            return true
+        }
+        return false
+    }
 
     DisposableEffect(engine) {
         engine.onChange = { call = it }

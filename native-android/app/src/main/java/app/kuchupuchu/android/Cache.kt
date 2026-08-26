@@ -5,6 +5,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Base64
+import android.util.LruCache
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 
@@ -51,18 +53,33 @@ object Cache {
     }
 }
 
+object ImageMem {
+    private val lru = object : LruCache<Int, Bitmap>(16) {}
+
+    private fun key(src: String) = src.hashCode() * 31 + src.length
+
+    fun get(src: String): Bitmap? = synchronized(lru) { lru.get(key(src)) }
+
+    fun decode(src: String): Bitmap? {
+        get(src)?.let { return it }
+        val bmp = decodeDataUrl(src) ?: return null
+        synchronized(lru) { lru.put(key(src), bmp) }
+        return bmp
+    }
+}
+
 fun compressPhoto(ctx: Context, uri: Uri): String {
     val raw = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("Could not read that photo.")
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(raw, 0, raw.size, bounds)
     var sample = 1
     val longest = maxOf(bounds.outWidth, bounds.outHeight, 1)
-    while (longest / sample > 1280) sample *= 2
+    while (longest / sample > 960) sample *= 2
     val opts = BitmapFactory.Options().apply { inSampleSize = sample }
     val src = BitmapFactory.decodeByteArray(raw, 0, raw.size, opts) ?: error("Could not read that photo.")
     var width = src.width
     var height = src.height
-    var quality = 82
+    var quality = 72
     var scale = 1f
     var data = ""
     repeat(8) {
@@ -73,8 +90,8 @@ fun compressPhoto(ctx: Context, uri: Uri): String {
         scaled.compress(Bitmap.CompressFormat.JPEG, quality, out)
         val bytes = out.toByteArray()
         data = "data:image/jpeg;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
-        if (data.length <= 380_000) return data
-        if (quality > 55) quality -= 8 else scale *= 0.85f
+        if (data.length <= 220_000) return data
+        if (quality > 48) quality -= 8 else scale *= 0.82f
     }
     if (!data.startsWith("data:image")) error("Could not read that photo.")
     return data
@@ -91,24 +108,94 @@ fun decodeDataUrl(src: String): Bitmap? {
     }
 }
 
+fun JSONObject.clean(key: String): String {
+    if (!has(key) || isNull(key)) return ""
+    val value = optString(key)
+    return if (value == "null" || value == "inline") "" else value
+}
+
+fun imageList(m: JSONObject): List<String> {
+    val arr = m.optJSONArray("imageUrls")
+    if (arr != null && arr.length() > 0) {
+        return (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotBlank() && it != "inline" && it != "null" }
+    }
+    val one = m.clean("imageUrl")
+    return if (one.isNotBlank()) listOf(one) else emptyList()
+}
+
+fun copyImages(from: JSONObject, to: JSONObject): JSONObject {
+    val imgs = imageList(from)
+    if (imgs.isNotEmpty() && imageList(to).isEmpty()) {
+        val arr = JSONArray()
+        imgs.forEach { arr.put(it) }
+        to.put("imageUrls", arr)
+        to.put("imageUrl", imgs[0])
+    }
+    return to
+}
+
 fun replaceList(target: androidx.compose.runtime.snapshots.SnapshotStateList<JSONObject>, next: List<JSONObject>) {
     val old = target.map { it.optString("id") }
     val neu = next.map { it.optString("id") }
-    if (old == neu && target.size == next.size) return
-    target.clear()
-    target.addAll(next)
+    if (old == neu) {
+        for (i in next.indices) {
+            val a = target[i]
+            val b = next[i]
+            if (
+                a.clean("reaction") != b.clean("reaction") ||
+                    a.optBoolean("pending") != b.optBoolean("pending") ||
+                    a.optBoolean("failed") != b.optBoolean("failed") ||
+                    a.clean("body") != b.clean("body")
+            ) {
+                target[i] = copyImages(a, b)
+            }
+        }
+        return
+    }
+    val keep = LinkedHashMap<String, JSONObject>()
+    next.forEach { keep[it.optString("id")] = it }
+    var i = 0
+    while (i < target.size) {
+        if (target[i].optString("id") !in keep) target.removeAt(i) else i++
+    }
+    next.forEachIndexed { index, item ->
+        val id = item.optString("id")
+        val cur = target.indexOfFirst { it.optString("id") == id }
+        if (cur < 0) {
+            target.add(index.coerceAtMost(target.size), item)
+        } else if (cur != index) {
+            val row = copyImages(target[cur], item)
+            target.removeAt(cur)
+            target.add(index.coerceAtMost(target.size), row)
+        }
+    }
 }
 
 fun mergeChat(target: androidx.compose.runtime.snapshots.SnapshotStateList<JSONObject>, incoming: List<JSONObject>) {
-    val pending =
-        target.filter { it.optBoolean("pending") || it.optBoolean("failed") || it.optString("id").startsWith("tmp-") }
-    val still =
-        pending.filter { p ->
-            incoming.none { r ->
-                r.optString("senderId") == p.optString("senderId") &&
-                    r.optString("body") == p.optString("body") &&
-                    r.optString("sticker") == p.optString("sticker")
+    val now = System.currentTimeMillis()
+    val localById = target.associateBy { it.optString("id") }
+    val merged = ArrayList<JSONObject>(incoming.size + 4)
+    val seen = HashSet<String>()
+    for (row in incoming) {
+        val id = row.optString("id")
+        val local = localById[id]
+        merged.add(if (local != null) copyImages(local, JSONObject(row.toString())) else row)
+        if (id.isNotBlank()) seen.add(id)
+    }
+    for (local in target) {
+        val id = local.optString("id")
+        if (id in seen) continue
+        val pending = local.optBoolean("pending") || local.optBoolean("failed") || id.startsWith("tmp-")
+        val created = parseIso(local.clean("createdAt")) ?: now
+        val fresh = now - created < 30_000
+        val matched =
+            incoming.any { r ->
+                r.clean("senderId") == local.clean("senderId") &&
+                    r.clean("body") == local.clean("body") &&
+                    r.clean("sticker") == local.clean("sticker") &&
+                    !local.optBoolean("failed")
             }
-        }
-    replaceList(target, incoming + still)
+        if ((pending || fresh) && !matched) merged.add(local)
+    }
+    replaceList(target, merged)
 }

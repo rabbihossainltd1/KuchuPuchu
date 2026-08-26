@@ -219,7 +219,7 @@ fun AlertsScreen(session: Session, onRoute: (String) -> Unit) {
 }
 
 @Composable
-fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, engine: CallEngine) {
+fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onBack: () -> Unit, engine: CallEngine) {
     val ctx = LocalContext.current
     val messages = session.chatOf(convoId)
     var other by remember(convoId) {
@@ -238,6 +238,7 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, eng
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val meId = session.me?.optString("id")
+    var sending by remember { mutableStateOf(0) }
 
     val pick =
         rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -256,27 +257,44 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, eng
             otherReadAt = cached.optString("otherReadAt")
             mergeChat(messages, cached.arr("items").objects())
         }
+        val first =
+            withContext(Dispatchers.IO) {
+                runCatching { Api.get("/api/conversations/$convoId/messages") }.getOrNull()
+            }
+        if (first != null) {
+            otherReadAt = first.optString("otherReadAt")
+            mergeChat(messages, first.arr("items").objects())
+        }
+        if (other.userId().isBlank()) {
+            val found = session.inbox.find { it.optString("id") == convoId }
+            if (found != null) {
+                other = found.optJSONObject("other") ?: other
+                muted = found.optBoolean("muted")
+            }
+        }
         while (isActive) {
+            delay(5000)
+            if (sending > 0) continue
             val data =
                 withContext(Dispatchers.IO) {
-                    runCatching { Api.get("/api/conversations/$convoId/messages") }.getOrNull()
+                    runCatching { Api.get("/api/conversations/$convoId/messages?lite=1") }.getOrNull()
                 }
             if (data != null) {
                 otherReadAt = data.optString("otherReadAt")
                 mergeChat(messages, data.arr("items").objects())
             }
-            if (other.userId().isBlank()) {
-                val found = session.inbox.find { it.optString("id") == convoId }
-                if (found != null) {
-                    other = found.optJSONObject("other") ?: other
-                    muted = found.optBoolean("muted")
-                }
-            }
-            delay(2200)
         }
     }
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) list.scrollToItem(messages.lastIndex)
+    }
+
+    BackHandler(viewer != null || menu || stickers) {
+        when {
+            viewer != null -> viewer = null
+            menu -> menu = false
+            else -> stickers = false
+        }
     }
 
     val lastMine = messages.lastOrNull { it.optString("senderId") == meId && it.optString("call").isBlank() }
@@ -300,22 +318,25 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, eng
         text = ""
         photos.clear()
         stickers = false
+        sending += 1
         scope.launch {
             val saved =
                 withContext(Dispatchers.IO) {
                     runCatching { Api.post("/api/conversations/$convoId/messages", payload) }.getOrNull()?.optJSONObject("message")
                 }
             val idx = messages.indexOfFirst { it.optString("id") == tempId }
-            if (idx < 0) return@launch
-            if (saved != null) messages[idx] = saved
-            else messages[idx] = JSONObject(temp.toString()).put("pending", false).put("failed", true)
+            if (idx >= 0) {
+                if (saved != null) messages[idx] = copyImages(temp, saved.put("pending", false))
+                else messages[idx] = JSONObject(temp.toString()).put("pending", false).put("failed", true)
+            }
+            sending = (sending - 1).coerceAtLeast(0)
         }
     }
 
     Box(Modifier.fillMaxSize().background(Bg)) {
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().background(Surface).padding(4.dp, 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconBtn(Icons.Outlined.ChevronLeft) { onRoute("tabs/inbox") }
+            IconBtn(Icons.Outlined.ChevronLeft) { onBack() }
             Row(Modifier.weight(1f).clickable { onRoute("player/${other.userId()}") }, verticalAlignment = Alignment.CenterVertically) {
                 Avatar(other, 36.dp, online = other.optBoolean("online"))
                 Spacer(Modifier.width(10.dp))
@@ -352,9 +373,8 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, eng
                         }
                     Text(label, color = Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.fillMaxWidth().padding(8.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 } else {
-                    val sticker = m.optString("sticker")
-                    val images = m.optJSONArray("imageUrls")?.let { a -> (0 until a.length()).map { a.optString(it) } }
-                        ?: listOfNotNull(m.optString("imageUrl").takeIf { it.isNotBlank() })
+                    val sticker = m.clean("sticker")
+                    val images = imageList(m)
                     val stickerOnly = sticker.isNotBlank()
                     val photoOnly = images.isNotEmpty() && (m.optString("body").isBlank() || m.optString("body") == "Photo")
                     Column(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
@@ -533,18 +553,30 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, eng
                         label,
                         modifier = Modifier.fillMaxWidth().clickable {
                             menu = false
-                            scope.launch(Dispatchers.IO) {
-                                when (label) {
-                                    "Delete" -> Api.delete("/api/conversations/$convoId")
-                                    "Clear chat history" -> Api.post("/api/conversations/$convoId/clear")
-                                    "Block" -> {
-                                        Api.post("/api/users/${other.userId()}/block")
-                                        Api.delete("/api/conversations/$convoId")
+                            when (label) {
+                                "Delete", "Block" -> onBack()
+                                "Clear chat history" -> messages.clear()
+                                else -> {
+                                    muted = !muted
+                                    val idx = session.inbox.indexOfFirst { it.optString("id") == convoId }
+                                    if (idx >= 0) {
+                                        session.inbox[idx] = JSONObject(session.inbox[idx].toString()).put("muted", muted)
                                     }
-                                    else -> Api.post("/api/conversations/$convoId/mute", JSONObject().put("muted", !muted))
                                 }
                             }
-                            if (label == "Delete" || label == "Block") onRoute("tabs/inbox")
+                            scope.launch(Dispatchers.IO) {
+                                runCatching {
+                                    when (label) {
+                                        "Delete" -> Api.delete("/api/conversations/$convoId")
+                                        "Clear chat history" -> Api.post("/api/conversations/$convoId/clear")
+                                        "Block" -> {
+                                            Api.post("/api/users/${other.userId()}/block")
+                                            Api.delete("/api/conversations/$convoId")
+                                        }
+                                        else -> Api.post("/api/conversations/$convoId/mute", JSONObject().put("muted", muted))
+                                    }
+                                }
+                            }
                         }.padding(14.dp, 12.dp),
                     )
                 }

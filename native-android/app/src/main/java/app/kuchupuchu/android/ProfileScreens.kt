@@ -206,7 +206,7 @@ fun EditProfileScreen(session: Session, done: () -> Unit) {
 }
 
 @Composable
-fun PlayerScreen(userId: String, session: Session, onRoute: (String) -> Unit, engine: CallEngine) {
+fun PlayerScreen(userId: String, session: Session, onRoute: (String) -> Unit, onBack: () -> Unit, engine: CallEngine) {
     var user by remember { mutableStateOf(JSONObject()) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(userId) {
@@ -216,7 +216,7 @@ fun PlayerScreen(userId: String, session: Session, onRoute: (String) -> Unit, en
     }
     Column(Modifier.fillMaxSize().background(Bg)) {
         Row(Modifier.padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            CloseIcon { onRoute("tabs/home") }
+            CloseIcon { onBack() }
             Spacer(Modifier.weight(1f))
             IconBtn(Icons.Outlined.Call) { engine.startCall(userId, "AUDIO", user.name()) }
             IconBtn(Icons.Outlined.Videocam) { engine.startCall(userId, "VIDEO", user.name()) }

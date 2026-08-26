@@ -1254,16 +1254,18 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
         cid,
       );
       const otherId = members.find((m) => m !== uid);
+      const lite = search.get("lite") === "1";
       return json({
         otherReadAt: otherId ? (readMap[otherId] ?? null) : null,
         items: items.map((row) => {
           const media = parseMessageMedia(row.image_url ?? null);
+          const urls = lite ? media.imageUrls.map(() => "inline") : media.imageUrls;
           return {
             id: row.id,
             senderId: row.sender_id,
             body: row.body,
-            imageUrl: media.imageUrls[0] ?? null,
-            imageUrls: media.imageUrls,
+            imageUrl: lite ? (media.imageUrls[0] ? "inline" : null) : (media.imageUrls[0] ?? null),
+            imageUrls: urls,
             sticker: media.sticker,
             call: media.call,
             reaction: row.reaction ?? null,

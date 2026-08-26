@@ -1,5 +1,7 @@
 package app.kuchupuchu.android
 
+import android.app.Activity
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -43,8 +45,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 @Composable
-fun AppShell(session: Session, route: String, onRoute: (String) -> Unit, engine: CallEngine) {
+fun AppShell(
+    session: Session,
+    route: String,
+    onRoute: (String) -> Unit,
+    onBack: () -> Boolean,
+    engine: CallEngine,
+) {
     val ctx = LocalContext.current
+    val activity = ctx as? Activity
     var drawer by remember { mutableStateOf(false) }
     var searchOpen by remember { mutableStateOf(false) }
     val tab = route.substringAfter("tabs/").substringBefore("/")
@@ -52,6 +61,14 @@ fun AppShell(session: Session, route: String, onRoute: (String) -> Unit, engine:
     val onHome = route.startsWith("tabs/home")
     val onProfile = route.startsWith("tabs/me")
     val showChrome = !inThread
+
+    BackHandler {
+        when {
+            drawer -> drawer = false
+            searchOpen -> searchOpen = false
+            else -> if (!onBack()) activity?.moveTaskToBack(true)
+        }
+    }
 
     Box(Modifier.fillMaxSize().background(Bg)) {
         Column(Modifier.fillMaxSize()) {
@@ -108,16 +125,18 @@ fun AppShell(session: Session, route: String, onRoute: (String) -> Unit, engine:
                     ProfileScreen(session, onRoute, mine = true)
                 }
                 when {
-                    route.startsWith("chat/") -> ChatScreen(route.removePrefix("chat/"), session, onRoute, engine)
+                    route.startsWith("chat/") ->
+                        ChatScreen(route.removePrefix("chat/"), session, onRoute, { onBack(); Unit }, engine)
                     route == "friends" -> FriendsScreen(session, onRoute)
                     route == "requests" -> RequestsScreen(session, onRoute)
                     route == "settings" -> SettingsScreen(session, onRoute)
                     route == "duo" -> DuoScreen(session, onRoute, engine)
                     route == "store" -> StoreScreen(session, onRoute)
                     route == "wallet" -> WalletScreen(session, onRoute)
-                    route.startsWith("player/") -> PlayerScreen(route.removePrefix("player/"), session, onRoute, engine)
-                    route == "compose" -> ComposePostScreen(session) { session.feedEpoch++; onRoute("tabs/home") }
-                    route == "edit-profile" -> EditProfileScreen(session) { onRoute("tabs/me") }
+                    route.startsWith("player/") ->
+                        PlayerScreen(route.removePrefix("player/"), session, onRoute, { onBack(); Unit }, engine)
+                    route == "compose" -> ComposePostScreen(session) { session.feedEpoch++; onBack(); Unit }
+                    route == "edit-profile" -> EditProfileScreen(session) { onBack(); Unit }
                 }
             }
             if (showChrome && route.startsWith("tabs/")) {
