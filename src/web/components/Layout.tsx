@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { api } from "../lib/api";
+import { onNativeBack } from "../lib/native";
 import { Notice } from "./ui";
 import { CallProvider } from "../lib/calls";
 
@@ -66,6 +67,26 @@ export function AppLayout() {
   useEffect(() => {
     setMenu(false);
   }, [location.pathname]);
+
+  useEffect(() => {
+    return onNativeBack(() => {
+      if (menu) {
+        setMenu(false);
+        return true;
+      }
+      if (searchOpen) {
+        setSearchOpen(false);
+        return true;
+      }
+      if (onHome && params.get("compose")) {
+        const next = new URLSearchParams(params);
+        next.delete("compose");
+        setParams(next);
+        return true;
+      }
+      return false;
+    });
+  }, [menu, searchOpen, onHome, params, setParams]);
 
   function search(event: FormEvent) {
     event.preventDefault();

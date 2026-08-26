@@ -1,11 +1,8 @@
-import { apiUrl, getApiBase, isNativeApp } from "./config";
+import { cloudRequest } from "./cloud";
+import { RequestError, type ApiError } from "./errors";
 
-export type ApiError = {
-  code: string;
-  message: string;
-  requestId?: string;
-  details?: { path: string; message: string }[];
-};
+export type { ApiError };
+export { RequestError };
 
 const TOKEN_KEY = "kp_session_token";
 let memoryToken: string | null = null;
@@ -35,64 +32,8 @@ export function setStoredSessionToken(token: string | null) {
   }
 }
 
-export class RequestError extends Error {
-  status: number;
-  body: ApiError;
-  constructor(status: number, body: ApiError) {
-    super(body.message);
-    this.status = status;
-    this.body = body;
-  }
-}
-
-function offlineMessage() {
-  if (isNativeApp() && !getApiBase()) {
-    return "This app is not connected to a live KuchuPuchu server yet.";
-  }
-  if (isNativeApp()) {
-    return "Could not reach KuchuPuchu. Check your internet connection and try again.";
-  }
-  return "Could not reach the server. Check your connection and try again.";
-}
-
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const headers = new Headers(init.headers);
-  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  const token = getStoredSessionToken();
-  if (token && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
-  let res: Response;
-  try {
-    res = await fetch(apiUrl(path), {
-      ...init,
-      headers,
-      credentials: getApiBase() ? "omit" : "include",
-    });
-  } catch {
-    throw new RequestError(0, {
-      code: "NETWORK",
-      message: offlineMessage(),
-    });
-  }
-  const text = await res.text();
-  let data: T | { error: ApiError } = {} as T;
-  if (text) {
-    try {
-      data = JSON.parse(text) as T | { error: ApiError };
-    } catch {
-      throw new RequestError(res.status, {
-        code: "BAD_RESPONSE",
-        message: offlineMessage(),
-      });
-    }
-  }
-  if (!res.ok) {
-    const err = (data as { error?: ApiError }).error ?? {
-      code: "HTTP_ERROR",
-      message: "Request failed.",
-    };
-    throw new RequestError(res.status, err);
-  }
-  return data as T;
+  return cloudRequest<T>(path, init);
 }
 
 export function idempotencyKey(prefix: string) {

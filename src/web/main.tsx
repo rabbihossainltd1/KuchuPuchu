@@ -3,7 +3,10 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { App } from "./App";
 import { AuthProvider } from "./lib/auth";
+import { bootNative } from "./lib/native";
 import "./styles.css";
+
+void bootNative();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

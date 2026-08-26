@@ -1,4 +1,4 @@
-/* HOME UI LOCKED — do not restyle, resize, or rewrite this screen unless the user explicitly unlocks it. */
+/* Home layout stays Facebook-style. Data now loads from Firebase. */
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Globe, Heart, ImagePlus, Lock, MessageCircle, Plus, Send, X } from "lucide-react";
@@ -92,6 +92,9 @@ export function HomePage() {
   useEffect(() => {
     void load().catch((err) => {
       if (err instanceof RequestError && err.status === 401) return;
+      setPosts([]);
+      setStoryGroups([]);
+      setRecs([]);
       setError(err instanceof Error ? err.message : "Could not load feed");
     });
   }, [q]);
