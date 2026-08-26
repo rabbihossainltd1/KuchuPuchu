@@ -53,16 +53,16 @@ fun Avatar(user: JSONObject?, size: Dp = 40.dp, onClick: (() -> Unit)? = null) {
 }
 
 @Composable
-fun PlusIcon(onClick: () -> Unit) = IconBtn(Icons.Outlined.Add, onClick)
+fun PlusIcon(onClick: () -> Unit) = IconBtn(Icons.Outlined.Add, onClick = onClick)
 
 @Composable
-fun PencilIcon(onClick: () -> Unit) = IconBtn(Icons.Outlined.Edit, onClick)
+fun PencilIcon(onClick: () -> Unit) = IconBtn(Icons.Outlined.Edit, onClick = onClick)
 
 @Composable
-fun MenuIcon(onClick: () -> Unit) = IconBtn(Icons.Outlined.Menu, onClick)
+fun MenuIcon(onClick: () -> Unit) = IconBtn(Icons.Outlined.Menu, onClick = onClick)
 
 @Composable
-fun CloseIcon(onClick: () -> Unit) = IconBtn(Icons.Outlined.Close, onClick)
+fun CloseIcon(onClick: () -> Unit) = IconBtn(Icons.Outlined.Close, onClick = onClick)
 
 @Composable
 fun OnlineDot(online: Boolean, size: Dp = 10.dp) {
