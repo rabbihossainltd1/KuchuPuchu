@@ -151,7 +151,8 @@ fun KpApp() {
                 AppShell(
                     session = session,
                     route = route,
-                    onRoute = { route = it },
+                    onRoute = { go(it) },
+                    onBack = { pop() },
                     engine = engine,
                 )
         }
