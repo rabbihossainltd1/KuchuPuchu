@@ -1090,19 +1090,17 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
       reqId,
     );
     if (!row) fail(404, "Request not found.");
+    await run(
+      db,
+      "DELETE FROM notifications WHERE kind = 'requests' AND title = 'Friend request' AND (user_id = ? OR user_id = ?)",
+      uid,
+      row.from_id,
+    );
     if (decline) {
       await run(db, "DELETE FROM friendships WHERE id = ?", reqId);
       return json({ ok: true });
     }
     await run(db, "UPDATE friendships SET status = 'accepted' WHERE id = ?", reqId);
-    await notify(
-      db,
-      row.from_id,
-      "Request accepted",
-      "Your friend request was accepted.",
-      "/friends",
-      "requests",
-    );
     return json({ ok: true });
   }
 
@@ -1666,6 +1664,7 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
         const link = row.link ?? "";
         if (kind === "calls" || kind === "messaging") return false;
         if (title.includes("incoming call") || title.includes("incoming video")) return false;
+        if (title === "friend request" || title === "request accepted") return false;
         if (link.startsWith("/messages/")) return false;
         return true;
       })

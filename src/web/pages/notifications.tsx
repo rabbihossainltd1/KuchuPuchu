@@ -42,6 +42,7 @@ export function NotificationsPage() {
         const link = item.link || "";
         if (item.kind === "calls" || item.kind === "messaging") return false;
         if (link.startsWith("/messages/")) return false;
+        if (title === "friend request") return false;
         return !title.includes("incoming call") && !title.includes("incoming video");
       }),
     );
@@ -121,22 +122,28 @@ export function NotificationsPage() {
                         <button
                           className="btn"
                           type="button"
-                          onClick={() =>
+                          onClick={() => {
+                            setRequests((current) =>
+                              (current ?? []).filter((item) => item.id !== row.id),
+                            );
                             void api(`/api/friend-requests/${row.id}/accept`, {
                               method: "POST",
-                            }).then(load)
-                          }
+                            }).then(load);
+                          }}
                         >
                           Accept
                         </button>
                         <button
                           className="btn-ghost"
                           type="button"
-                          onClick={() =>
+                          onClick={() => {
+                            setRequests((current) =>
+                              (current ?? []).filter((item) => item.id !== row.id),
+                            );
                             void api(`/api/friend-requests/${row.id}/decline`, {
                               method: "POST",
-                            }).then(load)
-                          }
+                            }).then(load);
+                          }}
                         >
                           Decline
                         </button>

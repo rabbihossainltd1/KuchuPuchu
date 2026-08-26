@@ -9,6 +9,7 @@ import {
   Send,
   Smile,
   Video,
+  VolumeX,
   X,
 } from "lucide-react";
 import { api, peekCache, RequestError } from "../lib/api";
@@ -148,15 +149,18 @@ export function ConversationPage() {
     () => peekCache<{ items: Conversation[] }>("/api/conversations")?.items ?? [],
   );
   const [error, setError] = useState("");
-  const [sending, setSending] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [muted, setMuted] = useState(false);
+  const [muted, setMuted] = useState(() => {
+    const inbox = peekCache<{ items: Conversation[] }>("/api/conversations");
+    return Boolean(inbox?.items.find((item) => item.id === id)?.muted);
+  });
   const [otherReadAt, setOtherReadAt] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const holdTimer = useRef<number>(0);
   const held = useRef(false);
+  const pendingRef = useRef<ChatMessage[]>([]);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -188,10 +192,22 @@ export function ConversationPage() {
           reaction: item.reaction ?? older?.reaction ?? null,
         };
       });
-      const temps = current.filter(
-        (item) => item.id.startsWith("tmp-") && !mapped.some((row) => row.body === item.body),
-      );
-      return [...mapped, ...temps];
+      const claimed = new Set<string>();
+      const still: ChatMessage[] = [];
+      for (const pending of pendingRef.current) {
+        const hit = mapped.find((row) => {
+          if (claimed.has(row.id) || row.senderId !== pending.senderId) return false;
+          if ((row.body || "") !== (pending.body || "")) return false;
+          if ((row.sticker ?? null) !== (pending.sticker ?? null)) return false;
+          const a = Date.parse(row.createdAt || "");
+          const b = Date.parse(pending.createdAt || "");
+          return !Number.isFinite(a) || !Number.isFinite(b) || a + 500 >= b;
+        });
+        if (hit) claimed.add(hit.id);
+        else still.push(pending);
+      }
+      pendingRef.current = still;
+      return [...mapped, ...still];
     });
     const inbox = peekCache<{ items: Conversation[] }>("/api/conversations");
     const found = inbox?.items.find((item) => item.id === id);
@@ -223,32 +239,35 @@ export function ConversationPage() {
       pending: true,
     };
     setItems((current) => [...current, temp]);
+    pendingRef.current = [...pendingRef.current, temp];
     setDraft("");
     setPhotos([]);
     setStickersOpen(false);
     setError("");
     window.setTimeout(() => inputRef.current?.focus(), 0);
-    setSending(true);
-    try {
-      const data = await api<{ message: ChatMessage }>(`/api/conversations/${id}/messages`, {
-        method: "POST",
-        body: JSON.stringify(payload),
+    void api<{ message: ChatMessage }>(`/api/conversations/${id}/messages`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    })
+      .then((data) => {
+        const media = mediaOf(data.message);
+        pendingRef.current = pendingRef.current.filter((item) => item.id !== tempId);
+        setItems((current) =>
+          current.map((item) =>
+            item.id === tempId
+              ? { ...data.message, imageUrls: media.imageUrls, sticker: media.sticker }
+              : item,
+          ),
+        );
+      })
+      .catch((err) => {
+        pendingRef.current = pendingRef.current.filter((item) => item.id !== tempId);
+        setItems((current) => current.filter((item) => item.id !== tempId));
+        setError(err instanceof RequestError ? err.body.message : "Could not send.");
+      })
+      .finally(() => {
+        window.setTimeout(() => inputRef.current?.focus(), 20);
       });
-      const media = mediaOf(data.message);
-      setItems((current) =>
-        current.map((item) =>
-          item.id === tempId
-            ? { ...data.message, imageUrls: media.imageUrls, sticker: media.sticker }
-            : item,
-        ),
-      );
-    } catch (err) {
-      setItems((current) => current.filter((item) => item.id !== tempId));
-      setError(err instanceof RequestError ? err.body.message : "Could not send.");
-    } finally {
-      setSending(false);
-      window.setTimeout(() => inputRef.current?.focus(), 20);
-    }
   }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -256,7 +275,7 @@ export function ConversationPage() {
     inputRef.current?.focus();
     const body = draft.trim();
     if (!body && !photos.length) return;
-    await sendPayload({
+    void sendPayload({
       body: body || undefined,
       imageData: photos,
     });
@@ -420,7 +439,10 @@ export function ConversationPage() {
             <Link className="chat-person" to={`/players/${other.userId}`}>
               <Avatar name={other.displayName} url={other.avatarUrl} online={other.online} />
               <div>
-                <strong>{other.displayName}</strong>
+                <strong className="chat-name">
+                  {other.displayName}
+                  {muted ? <VolumeX className="mute-mark" size={14} aria-label="Muted" /> : null}
+                </strong>
                 <p className="meta">{lastSeenLabel(other.lastActiveAt, other.online)}</p>
               </div>
             </Link>
@@ -454,20 +476,28 @@ export function ConversationPage() {
         )}
       </header>
       {menuOpen ? (
-        <div className="chat-menu" role="menu">
-          <button type="button" onClick={() => void toggleMute()}>
-            {muted ? "Unmute" : "Mute"}
-          </button>
-          <button type="button" onClick={() => void clearChat()}>
-            Clear chat history
-          </button>
-          <button type="button" onClick={() => void deleteChat()}>
-            Delete
-          </button>
-          <button type="button" onClick={() => void blockUser()}>
-            Block
-          </button>
-        </div>
+        <>
+          <button
+            className="chat-menu-scrim"
+            type="button"
+            aria-label="Close menu"
+            onClick={() => setMenuOpen(false)}
+          />
+          <div className="chat-menu" role="menu">
+            <button type="button" onClick={() => void toggleMute()}>
+              {muted ? "Unmute" : "Mute"}
+            </button>
+            <button type="button" onClick={() => void clearChat()}>
+              Clear chat history
+            </button>
+            <button type="button" onClick={() => void deleteChat()}>
+              Delete
+            </button>
+            <button type="button" onClick={() => void blockUser()}>
+              Block
+            </button>
+          </div>
+        </>
       ) : null}
       <div className="thread chat-thread">
         {error ? <Notice tone="danger">{error}</Notice> : null}
@@ -660,7 +690,7 @@ export function ConversationPage() {
             className="chat-send"
             type="submit"
             aria-label="Send"
-            disabled={sending || (!draft.trim() && !photos.length)}
+            disabled={!draft.trim() && !photos.length}
             onMouseDown={(event) => event.preventDefault()}
           >
             <Send size={18} />

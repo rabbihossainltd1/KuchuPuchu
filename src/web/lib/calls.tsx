@@ -171,6 +171,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const hookedKey = useRef("");
   const activeRef = useRef<CallRecord | null>(null);
   const speakerRef = useRef(false);
+  const wantVideoRef = useRef(false);
   activeRef.current = active;
   speakerRef.current = speaker;
 
@@ -262,9 +263,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
         };
       }
       remoteStreamRef.current = stream;
-      playMedia(remoteVideo.current, stream, true);
+      if (wantVideoRef.current) playMedia(remoteVideo.current, stream, true);
       hookRemoteSound(stream);
-      if (stream.getVideoTracks().some((track) => track.readyState === "live" && track.enabled)) {
+      if (
+        wantVideoRef.current &&
+        stream.getVideoTracks().some((track) => track.readyState === "live" && track.enabled)
+      ) {
         setRemoteReady(true);
       }
     },
@@ -600,8 +604,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
           }
           if (next.status === "ACTIVE" && remoteStreamRef.current) {
             hookRemoteSound(remoteStreamRef.current);
-            playMedia(remoteVideo.current, remoteStreamRef.current, true);
-            playMedia(localVideo.current, localRef.current, true);
+            if (wantVideoRef.current) {
+              playMedia(remoteVideo.current, remoteStreamRef.current, true);
+              playMedia(localVideo.current, localRef.current, true);
+            }
           }
         })
         .catch(() => undefined);
@@ -657,8 +663,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
   }, [speaker, active, routeAudio]);
 
   useEffect(() => {
-    playMedia(localVideo.current, localRef.current, true);
-    playMedia(remoteVideo.current, remoteStreamRef.current, true);
+    if (wantVideoRef.current) {
+      playMedia(localVideo.current, localRef.current, true);
+      playMedia(remoteVideo.current, remoteStreamRef.current, true);
+    }
     if (remoteStreamRef.current) hookRemoteSound(remoteStreamRef.current);
   }, [active?.kind, active?.id, hookRemoteSound]);
 
@@ -810,9 +818,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const value = useMemo(() => ({ startCall }), [startCall]);
   const ringing = active?.status === "RINGING";
   const live = active?.status === "ACTIVE";
-  const showVideo = Boolean(
-    active && (active.kind === "VIDEO" || !cameraOff || remoteReady || sharing),
-  );
+  const showVideo = Boolean(active && (active.kind === "VIDEO" || sharing));
+  wantVideoRef.current = showVideo;
   const otherOnline = Boolean(active?.other.online);
   const statusLabel = ringing
     ? active?.incoming
@@ -872,22 +879,24 @@ export function CallProvider({ children }: { children: ReactNode }) {
               <div className={`call-stage ${showVideo ? "video" : "audio"}`}>
                 <video
                   ref={remoteVideo}
-                  className={showVideo && remoteReady ? "remote-video" : "remote-video idle"}
+                  className={showVideo && remoteReady ? "remote-video" : "media-offstage"}
                   autoPlay
                   playsInline
                   muted
-                  onPlaying={() => setRemoteReady(true)}
+                  controls={false}
+                  onPlaying={() => {
+                    if (wantVideoRef.current) setRemoteReady(true);
+                  }}
                 />
                 <video
                   ref={localVideo}
-                  className={
-                    showVideo && hasLocal && !cameraOff ? "local-video" : "local-video idle"
-                  }
+                  className={showVideo && hasLocal && !cameraOff ? "local-video" : "media-offstage"}
                   autoPlay
                   playsInline
                   muted
+                  controls={false}
                 />
-                {!remoteReady || !showVideo ? (
+                {!showVideo || !remoteReady ? (
                   <div className="call-audio">
                     <Avatar name={active.other.displayName} url={active.other.avatarUrl} large />
                     <h2>{active.other.displayName}</h2>

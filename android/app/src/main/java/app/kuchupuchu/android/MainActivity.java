@@ -157,72 +157,95 @@ public class MainActivity extends BridgeActivity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode != SHARE_REQ || resultCode != Activity.RESULT_OK || data == null) return;
-        Intent service = new Intent(this, ScreenShareService.class);
-        if (Build.VERSION.SDK_INT >= 26) startForegroundService(service);
-        else startService(service);
-        MediaProjectionManager manager =
-            (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
-        if (manager == null) return;
-        projection = manager.getMediaProjection(resultCode, data);
-        if (projection == null) return;
-        DisplayMetrics metrics = getResources().getDisplayMetrics();
-        int width = Math.min(720, metrics.widthPixels);
-        int height = Math.min(1280, metrics.heightPixels);
-        imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2);
-        virtualDisplay =
-            projection.createVirtualDisplay(
-                "kp-share",
-                width,
-                height,
-                metrics.densityDpi,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                imageReader.getSurface(),
-                null,
+        try {
+            Intent service = new Intent(this, ScreenShareService.class);
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(service);
+            else startService(service);
+        } catch (Exception ignored) {
+            return;
+        }
+        final int code = resultCode;
+        final Intent grant = data;
+        mainHandler.postDelayed(() -> startCapture(code, grant), 280);
+    }
+
+    private void startCapture(int resultCode, Intent data) {
+        try {
+            MediaProjectionManager manager =
+                (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+            if (manager == null) return;
+            projection = manager.getMediaProjection(resultCode, data);
+            if (projection == null) return;
+            projection.registerCallback(
+                new MediaProjection.Callback() {
+                    @Override
+                    public void onStop() {
+                        endScreenShare();
+                    }
+                },
                 mainHandler
             );
-        imageReader.setOnImageAvailableListener(
-            reader -> {
-                Image image = reader.acquireLatestImage();
-                if (image == null) return;
-                long now = System.currentTimeMillis();
-                if (now - lastFrameAt < 160) {
-                    image.close();
-                    return;
-                }
-                lastFrameAt = now;
-                try {
-                    Image.Plane plane = image.getPlanes()[0];
-                    ByteBuffer buffer = plane.getBuffer();
-                    int pixelStride = plane.getPixelStride();
-                    int rowStride = plane.getRowStride();
-                    int rowPadding = rowStride - pixelStride * width;
-                    Bitmap bitmap =
-                        Bitmap.createBitmap(
-                            width + rowPadding / pixelStride, height, Bitmap.Config.ARGB_8888);
-                    bitmap.copyPixelsFromBuffer(buffer);
-                    Bitmap cropped = Bitmap.createBitmap(bitmap, 0, 0, width, height);
-                    ByteArrayOutputStream out = new ByteArrayOutputStream();
-                    cropped.compress(Bitmap.CompressFormat.JPEG, 55, out);
-                    String payload = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP);
-                    if (getBridge() != null && getBridge().getWebView() != null) {
-                        getBridge()
-                            .getWebView()
-                            .evaluateJavascript(
-                                "window.KpOnScreenFrame&&window.KpOnScreenFrame('data:image/jpeg;base64,"
-                                    + payload
-                                    + "')",
-                                null);
+            DisplayMetrics metrics = getResources().getDisplayMetrics();
+            int width = Math.max(2, Math.min(720, metrics.widthPixels));
+            int height = Math.max(2, Math.min(1280, metrics.heightPixels));
+            imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2);
+            virtualDisplay =
+                projection.createVirtualDisplay(
+                    "kp-share",
+                    width,
+                    height,
+                    metrics.densityDpi,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    imageReader.getSurface(),
+                    null,
+                    mainHandler
+                );
+            imageReader.setOnImageAvailableListener(
+                reader -> {
+                    Image image = null;
+                    try {
+                        image = reader.acquireLatestImage();
+                        if (image == null) return;
+                        long now = System.currentTimeMillis();
+                        if (now - lastFrameAt < 160) return;
+                        lastFrameAt = now;
+                        Image.Plane plane = image.getPlanes()[0];
+                        ByteBuffer buffer = plane.getBuffer();
+                        int pixelStride = plane.getPixelStride();
+                        int rowStride = plane.getRowStride();
+                        int rowPadding = rowStride - pixelStride * width;
+                        int bmpWidth = width + (pixelStride == 0 ? 0 : rowPadding / pixelStride);
+                        if (bmpWidth <= 0) return;
+                        Bitmap bitmap = Bitmap.createBitmap(bmpWidth, height, Bitmap.Config.ARGB_8888);
+                        buffer.rewind();
+                        bitmap.copyPixelsFromBuffer(buffer);
+                        Bitmap cropped =
+                            bmpWidth == width ? bitmap : Bitmap.createBitmap(bitmap, 0, 0, width, height);
+                        ByteArrayOutputStream out = new ByteArrayOutputStream();
+                        cropped.compress(Bitmap.CompressFormat.JPEG, 45, out);
+                        String payload = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP);
+                        if (getBridge() != null && getBridge().getWebView() != null) {
+                            getBridge()
+                                .getWebView()
+                                .evaluateJavascript(
+                                    "window.KpOnScreenFrame&&window.KpOnScreenFrame('data:image/jpeg;base64,"
+                                        + payload
+                                        + "')",
+                                    null);
+                        }
+                        if (cropped != bitmap) cropped.recycle();
+                        bitmap.recycle();
+                    } catch (Exception ignored) {
+                        /* drop frame */
+                    } finally {
+                        if (image != null) image.close();
                     }
-                    if (cropped != bitmap) cropped.recycle();
-                    bitmap.recycle();
-                } catch (Exception ignored) {
-                    /* drop frame */
-                } finally {
-                    image.close();
-                }
-            },
-            mainHandler
-        );
+                },
+                mainHandler
+            );
+        } catch (Exception ignored) {
+            endScreenShare();
+        }
     }
 
     @Override

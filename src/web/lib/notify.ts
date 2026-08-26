@@ -70,22 +70,22 @@ async function ensureChannel() {
   if (!Capacitor.isNativePlatform()) return;
   const { LocalNotifications } = await import("@capacitor/local-notifications");
   await LocalNotifications.createChannel({
-    id: "kp",
-    name: "KuchuPuchu",
-    description: "Messages, calls, and requests",
+    id: "kp-msg-v2",
+    name: "KuchuPuchu messages",
+    description: "Chat and social alerts",
     importance: 5,
     visibility: 1,
     vibration: true,
     sound: "kp_notify",
   }).catch(() => undefined);
   await LocalNotifications.createChannel({
-    id: "kp-calls",
+    id: "kp-calls-v2",
     name: "KuchuPuchu calls",
     description: "Incoming calls",
     importance: 5,
     visibility: 1,
     vibration: true,
-    sound: "kp_notify",
+    sound: "kp_ring",
   }).catch(() => undefined);
   await LocalNotifications.registerActionTypes({
     types: [
@@ -169,8 +169,8 @@ export async function pingOs(kind: NotifKind, title: string, body: string, extra
             id,
             title,
             body,
-            channelId: isCall ? "kp-calls" : "kp",
-            sound: "kp_notify",
+            channelId: isCall ? "kp-calls-v2" : "kp-msg-v2",
+            sound: isCall ? "kp_ring" : "kp_notify",
             actionTypeId: isCall ? "KP_CALL" : kind === "messaging" ? "KP_MSG" : undefined,
             extra: { kind, ...extra },
             autoCancel: true,
