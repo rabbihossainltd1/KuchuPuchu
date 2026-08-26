@@ -32,34 +32,87 @@ export function setStoredSessionToken(token: string | null) {
   }
 }
 
-export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const headers = new Headers(init.headers);
-  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  const token = getStoredSessionToken();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-  let res: Response;
-  try {
-    res = await fetch(apiUrl(path), { ...init, headers });
-  } catch {
-    throw new RequestError(0, { code: "NETWORK", message: "Could not reach the server." });
+const memoryCache = new Map<string, { at: number; data: unknown }>();
+const inflight = new Map<string, Promise<unknown>>();
+
+export function peekCache<T>(path: string): T | undefined {
+  return memoryCache.get(path)?.data as T | undefined;
+}
+
+export function bustCache(match?: string) {
+  if (!match) {
+    memoryCache.clear();
+    return;
   }
-  const text = await res.text();
-  let data: unknown = {};
-  if (text) {
+  for (const key of [...memoryCache.keys()]) {
+    if (key.includes(match)) memoryCache.delete(key);
+  }
+}
+
+export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const method = (init.method || "GET").toUpperCase();
+  const skipCache = path.includes("/messages") || path.includes("/calls");
+  if (method === "GET" && !skipCache) {
+    const hit = memoryCache.get(path);
+    if (hit && Date.now() - hit.at < 45_000) return hit.data as T;
+    const running = inflight.get(path);
+    if (running) return running as Promise<T>;
+  }
+
+  const request = (async () => {
+    const headers = new Headers(init.headers);
+    if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+    const token = getStoredSessionToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    let res: Response;
     try {
-      data = JSON.parse(text);
+      res = await fetch(apiUrl(path), { ...init, headers });
     } catch {
-      data = { error: { code: "CLOUD", message: "Unexpected response." } };
+      throw new RequestError(0, { code: "NETWORK", message: "Could not reach the server." });
+    }
+    const text = await res.text();
+    let data: unknown = {};
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { error: { code: "CLOUD", message: "Unexpected response." } };
+      }
+    }
+    if (!res.ok) {
+      const err = (data as { error?: ApiError }).error ?? {
+        code: "CLOUD",
+        message: res.statusText || "Request failed.",
+      };
+      throw new RequestError(res.status, err);
+    }
+    if (method === "GET" && !skipCache) memoryCache.set(path, { at: Date.now(), data });
+    else {
+      if (path.includes("/conversations")) bustCache("/api/conversations");
+      if (path.includes("/posts") || path.includes("/feed") || path.includes("/stories")) {
+        bustCache("/api/feed");
+        bustCache("/api/stories");
+      }
+      if (path.includes("/notifications") || path.includes("/friend")) {
+        bustCache("/api/notifications");
+        bustCache("/api/friend");
+      }
+      if (path.includes("/api/me") || path.includes("/wallet") || path.includes("/store")) {
+        bustCache("/api/me");
+      }
+    }
+    return data as T;
+  })();
+
+  if (method === "GET" && !skipCache) {
+    inflight.set(path, request);
+    try {
+      return await request;
+    } finally {
+      inflight.delete(path);
     }
   }
-  if (!res.ok) {
-    const err = (data as { error?: ApiError }).error ?? {
-      code: "CLOUD",
-      message: res.statusText || "Request failed.",
-    };
-    throw new RequestError(res.status, err);
-  }
-  return data as T;
+  return request;
 }
 
 export function idempotencyKey(prefix: string) {

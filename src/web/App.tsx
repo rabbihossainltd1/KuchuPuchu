@@ -23,12 +23,10 @@ import { DiscoverPage } from "./pages/discover";
 import { StorePage } from "./pages/store";
 import { WalletPage } from "./pages/wallet";
 import { SettingsPage } from "./pages/settings";
-import { HomePage } from "./pages/home";
-import { ConversationPage, MessagesPage } from "./pages/chat";
+import { ConversationPage } from "./pages/chat";
 import { RequestsPage } from "./pages/requests";
 import { FriendsPage } from "./pages/friends";
-import { NotificationsPage } from "./pages/notifications";
-import { ProfileEditPage, ProfilePage } from "./pages/profile";
+import { ProfileEditPage } from "./pages/profile";
 import { AdminPage } from "./pages/admin";
 
 function Guard({ children }: { children: React.ReactNode }) {
@@ -96,21 +94,21 @@ export function App() {
         }
       >
         <Route path="/onboarding" element={<OnboardingPage />} />
-        <Route path="/home" element={<HomePage />} />
+        <Route path="/home" element={null} />
         <Route path="/discover" element={<DiscoverPage />} />
         <Route path="/players/:id" element={<PlayerPage />} />
         <Route path="/requests" element={<RequestsPage />} />
         <Route path="/friends" element={<FriendsPage />} />
-        <Route path="/messages" element={<MessagesPage />} />
+        <Route path="/messages" element={null} />
         <Route path="/messages/:id" element={<ConversationPage />} />
-        <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/profile" element={null} />
         <Route path="/profile/edit" element={<ProfileEditPage />} />
         <Route path="/store" element={<StorePage />} />
         <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/wallet" element={<WalletPage />} />
         <Route path="/wallet/payment/:id" element={<PaymentReturnPage />} />
         <Route path="/referrals" element={<ReferralsPage />} />
-        <Route path="/notifications" element={<NotificationsPage />} />
+        <Route path="/notifications" element={null} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/help" element={<HelpPage />} />
         <Route path="/admin" element={<AdminPage />} />

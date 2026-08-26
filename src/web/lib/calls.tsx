@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   Camera,
   CameraOff,
@@ -330,81 +331,102 @@ export function CallProvider({ children }: { children: ReactNode }) {
           </button>
         </div>
       ) : null}
-      {active ? (
-        <div className="call-overlay" role="dialog" aria-label="Call">
-          <div className={`call-stage ${active.kind === "VIDEO" ? "video" : "audio"}`}>
-            {active.kind === "VIDEO" ? (
-              <>
-                <video ref={remoteVideo} className="remote-video" autoPlay playsInline />
-                <video ref={localVideo} className="local-video" autoPlay playsInline muted />
-              </>
-            ) : (
-              <div className="call-audio">
-                <Avatar name={active.other.displayName} url={active.other.avatarUrl} large />
-                <h2>{active.other.displayName}</h2>
-                <p className="call-status">{statusLabel}</p>
+      {active
+        ? createPortal(
+            <div
+              className="call-overlay"
+              role="dialog"
+              aria-label="Call"
+              style={{
+                position: "fixed",
+                inset: 0,
+                width: "100vw",
+                height: "100dvh",
+                zIndex: 400,
+                background: "#1c1917",
+                padding: 0,
+                margin: 0,
+              }}
+            >
+              <div className={`call-stage ${active.kind === "VIDEO" ? "video" : "audio"}`}>
+                {active.kind === "VIDEO" ? (
+                  <>
+                    <video ref={remoteVideo} className="remote-video" autoPlay playsInline />
+                    <video ref={localVideo} className="local-video" autoPlay playsInline muted />
+                  </>
+                ) : (
+                  <div className="call-audio">
+                    <Avatar name={active.other.displayName} url={active.other.avatarUrl} large />
+                    <h2>{active.other.displayName}</h2>
+                    <p className="call-status">{statusLabel}</p>
+                  </div>
+                )}
+                <audio ref={remoteAudio} autoPlay />
+                {error ? <p className="call-error">{error}</p> : null}
+                <div className="call-actions">
+                  {ringing && active.incoming ? (
+                    <>
+                      <button
+                        className="call-btn accept"
+                        type="button"
+                        onClick={() => void answer()}
+                      >
+                        {active.kind === "VIDEO" ? <Video size={26} /> : <Phone size={26} />}
+                      </button>
+                      <button className="call-btn end" type="button" onClick={() => void decline()}>
+                        <PhoneOff size={26} />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        className={speaker ? "call-btn on" : "call-btn"}
+                        type="button"
+                        aria-label="Speaker"
+                        onClick={() => setSpeaker((v) => !v)}
+                      >
+                        {speaker ? <Volume2 size={22} /> : <VolumeX size={22} />}
+                      </button>
+                      <button
+                        className={muted ? "call-btn on" : "call-btn"}
+                        type="button"
+                        aria-label="Mute"
+                        onClick={() => setMuted((v) => !v)}
+                      >
+                        {muted ? <MicOff size={22} /> : <Mic size={22} />}
+                      </button>
+                      <button
+                        className={cameraOff ? "call-btn on" : "call-btn"}
+                        type="button"
+                        aria-label="Camera"
+                        onClick={() => setCameraOff((v) => !v)}
+                      >
+                        {cameraOff ? <CameraOff size={22} /> : <Camera size={22} />}
+                      </button>
+                      <button
+                        className={sharing ? "call-btn on" : "call-btn"}
+                        type="button"
+                        aria-label="Share screen"
+                        onClick={() => void shareScreen()}
+                      >
+                        <MonitorUp size={22} />
+                      </button>
+                      <button
+                        className="call-btn end"
+                        type="button"
+                        aria-label="End call"
+                        onClick={() => void hangup(active.id)}
+                      >
+                        <PhoneOff size={26} />
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
-            )}
-            <audio ref={remoteAudio} autoPlay />
-            {error ? <p className="call-error">{error}</p> : null}
-            <div className="call-actions">
-              {ringing && active.incoming ? (
-                <>
-                  <button className="call-btn accept" type="button" onClick={() => void answer()}>
-                    {active.kind === "VIDEO" ? <Video size={26} /> : <Phone size={26} />}
-                  </button>
-                  <button className="call-btn end" type="button" onClick={() => void decline()}>
-                    <PhoneOff size={26} />
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    className={speaker ? "call-btn on" : "call-btn"}
-                    type="button"
-                    aria-label="Speaker"
-                    onClick={() => setSpeaker((v) => !v)}
-                  >
-                    {speaker ? <Volume2 size={22} /> : <VolumeX size={22} />}
-                  </button>
-                  <button
-                    className={muted ? "call-btn on" : "call-btn"}
-                    type="button"
-                    aria-label="Mute"
-                    onClick={() => setMuted((v) => !v)}
-                  >
-                    {muted ? <MicOff size={22} /> : <Mic size={22} />}
-                  </button>
-                  <button
-                    className={cameraOff ? "call-btn on" : "call-btn"}
-                    type="button"
-                    aria-label="Camera"
-                    onClick={() => setCameraOff((v) => !v)}
-                  >
-                    {cameraOff ? <CameraOff size={22} /> : <Camera size={22} />}
-                  </button>
-                  <button
-                    className={sharing ? "call-btn on" : "call-btn"}
-                    type="button"
-                    aria-label="Share screen"
-                    onClick={() => void shareScreen()}
-                  >
-                    <MonitorUp size={22} />
-                  </button>
-                  <button
-                    className="call-btn end"
-                    type="button"
-                    aria-label="End call"
-                    onClick={() => void hangup(active.id)}
-                  >
-                    <PhoneOff size={26} />
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      ) : null}
+            </div>,
+            document.body,
+          )
+        : null}
     </Ctx.Provider>
   );
 }

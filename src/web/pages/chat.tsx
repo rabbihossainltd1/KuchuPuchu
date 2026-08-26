@@ -1,7 +1,8 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ChevronLeft, Phone, Send, Video } from "lucide-react";
+import { ChevronLeft, ImagePlus, Phone, Send, Video, X } from "lucide-react";
 import { api, RequestError } from "../lib/api";
+import { readPhoto } from "../lib/photo";
 import { useAuth } from "../lib/auth";
 import { useCall } from "../lib/calls";
 import { timeAgo } from "../lib/time";
@@ -16,7 +17,13 @@ type Conversation = {
   lastMessageAt?: string;
 };
 
-type ChatMessage = { id: string; senderId: string; body: string; createdAt?: string };
+type ChatMessage = {
+  id: string;
+  senderId: string;
+  body: string;
+  imageUrl?: string | null;
+  createdAt?: string;
+};
 
 function stamp(iso?: string) {
   if (!iso) return "";
@@ -45,6 +52,12 @@ export function MessagesPage() {
     void api<{ items: Conversation[] }>("/api/conversations").then((data) =>
       setItems(data.items ?? []),
     );
+    const timer = window.setInterval(() => {
+      void api<{ items: Conversation[] }>("/api/conversations")
+        .then((data) => setItems(data.items ?? []))
+        .catch(() => undefined);
+    }, 20000);
+    return () => window.clearInterval(timer);
   }, []);
   return (
     <div>
@@ -88,10 +101,12 @@ export function ConversationPage() {
   const [other, setOther] = useState<PublicUser | null>(null);
   const [items, setItems] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
+  const [photo, setPhoto] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const fileRef = useRef<HTMLInputElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
 
-  async function load() {
+  const load = useCallback(async () => {
     if (!id) return;
     const [thread, inbox] = await Promise.all([
       api<{ items: ChatMessage[] }>(`/api/conversations/${id}/messages`),
@@ -99,13 +114,13 @@ export function ConversationPage() {
     ]);
     setItems(thread.items);
     setOther(inbox.items.find((item) => item.id === id)?.other ?? null);
-  }
+  }, [id]);
 
   useEffect(() => {
     void load();
     const timer = window.setInterval(() => void load().catch(() => undefined), 2500);
     return () => window.clearInterval(timer);
-  }, [id]);
+  }, [load]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
@@ -114,14 +129,15 @@ export function ConversationPage() {
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const body = draft.trim();
-    if (!body) return;
+    if (!body && !photo) return;
     try {
       const data = await api<{ message: ChatMessage }>(`/api/conversations/${id}/messages`, {
         method: "POST",
-        body: JSON.stringify({ body }),
+        body: JSON.stringify({ body, imageData: photo }),
       });
       setItems((current) => [...current, data.message]);
       setDraft("");
+      setPhoto(null);
       setError("");
     } catch (err) {
       setError(err instanceof RequestError ? err.body.message : "Could not send.");
@@ -199,6 +215,9 @@ export function ConversationPage() {
                 <Avatar name={other.displayName} url={other.avatarUrl} />
               ) : null}
               <div className={row.item.senderId === user?.id ? "bubble mine" : "bubble"}>
+                {row.item.imageUrl ? (
+                  <img className="bubble-photo" src={row.item.imageUrl} alt="" />
+                ) : null}
                 {row.item.body}
               </div>
             </div>
@@ -208,15 +227,54 @@ export function ConversationPage() {
       </div>
       <form className="chat-compose" onSubmit={onSubmit}>
         <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (!file) return;
+            void readPhoto(file)
+              .then((data) => setPhoto(data))
+              .catch(() => setError("Could not read that photo."));
+          }}
+        />
+        <button
+          className="icon-plain"
+          type="button"
+          aria-label="Attach photo"
+          onClick={() => fileRef.current?.click()}
+        >
+          <ImagePlus size={22} />
+        </button>
+        {photo ? (
+          <span className="chat-preview-wrap">
+            <img className="chat-preview" src={photo} alt="" />
+            <button
+              className="icon-plain"
+              type="button"
+              aria-label="Remove photo"
+              onClick={() => setPhoto(null)}
+            >
+              <X size={16} />
+            </button>
+          </span>
+        ) : null}
+        <input
           name="body"
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
-          required
           placeholder="Message"
           aria-label="Message"
           autoComplete="off"
         />
-        <button className="chat-send" type="submit" aria-label="Send" disabled={!draft.trim()}>
+        <button
+          className="chat-send"
+          type="submit"
+          aria-label="Send"
+          disabled={!draft.trim() && !photo}
+        >
           <Send size={18} />
         </button>
       </form>

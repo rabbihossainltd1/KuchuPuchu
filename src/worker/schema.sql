@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS messages (
   conversation_id TEXT NOT NULL,
   sender_id TEXT NOT NULL,
   body TEXT NOT NULL,
+  image_url TEXT,
   created_at TEXT NOT NULL
 );
 

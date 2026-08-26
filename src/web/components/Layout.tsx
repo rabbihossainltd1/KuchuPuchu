@@ -26,6 +26,10 @@ import { api } from "../lib/api";
 import { onNativeBack } from "../lib/native";
 import { Notice } from "./ui";
 import { CallProvider } from "../lib/calls";
+import { HomePage } from "../pages/home";
+import { MessagesPage } from "../pages/chat";
+import { NotificationsPage } from "../pages/notifications";
+import { ProfilePage } from "../pages/profile";
 
 const bottom = [
   { to: "/home", label: "Home", icon: Home },
@@ -213,7 +217,23 @@ export function AppLayout() {
           </>
         )}
         <div className="social-main">
-          <Outlet />
+          <div className="tab-pane" hidden={location.pathname !== "/home"}>
+            <HomePage />
+          </div>
+          <div className="tab-pane" hidden={location.pathname !== "/messages"}>
+            <MessagesPage />
+          </div>
+          <div className="tab-pane" hidden={location.pathname !== "/notifications"}>
+            <NotificationsPage />
+          </div>
+          <div className="tab-pane" hidden={location.pathname !== "/profile"}>
+            <ProfilePage />
+          </div>
+          {["/home", "/messages", "/notifications", "/profile"].includes(
+            location.pathname,
+          ) ? null : (
+            <Outlet />
+          )}
         </div>
         {onThread ? null : (
           <nav className="bottom-nav always" aria-label="Primary">

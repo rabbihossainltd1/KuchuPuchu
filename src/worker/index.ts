@@ -421,7 +421,20 @@ export default {
   },
 };
 
+let schemaReady = false;
+
+async function ensureSchema(db: D1Database) {
+  if (schemaReady) return;
+  try {
+    await run(db, "ALTER TABLE messages ADD COLUMN image_url TEXT");
+  } catch {
+    /* column already exists */
+  }
+  schemaReady = true;
+}
+
 async function handle(request: Request, db: D1Database): Promise<Response> {
+  await ensureSchema(db);
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/$/, "") || "/";
   const method = request.method.toUpperCase();
@@ -1047,7 +1060,13 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
         JSON.stringify(unread),
         cid,
       );
-      const items = await all<{ id: string; sender_id: string; body: string; created_at: string }>(
+      const items = await all<{
+        id: string;
+        sender_id: string;
+        body: string;
+        image_url?: string | null;
+        created_at: string;
+      }>(
         db,
         "SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC LIMIT 200",
         cid,
@@ -1057,21 +1076,29 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
           id: row.id,
           senderId: row.sender_id,
           body: row.body,
+          imageUrl: row.image_url ?? null,
           createdAt: row.created_at,
         })),
       });
     }
     const text = String(body.body || "").trim();
-    if (!text) fail(400, "Write a message.");
+    let imageUrl: string | null = null;
+    if (typeof body.imageData === "string" && body.imageData.startsWith("data:")) {
+      if (body.imageData.length > 700000) fail(400, "Photo is too large. Pick a smaller image.");
+      imageUrl = body.imageData;
+    }
+    if (!text && !imageUrl) fail(400, "Write a message.");
     const mid = id();
     const created = nowIso();
+    const preview = text.slice(0, 2000) || "Photo";
     await run(
       db,
-      "INSERT INTO messages (id, conversation_id, sender_id, body, created_at) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO messages (id, conversation_id, sender_id, body, image_url, created_at) VALUES (?, ?, ?, ?, ?, ?)",
       mid,
       cid,
       uid,
       text.slice(0, 2000),
+      imageUrl,
       created,
     );
     const unread = parseJson<Record<string, number>>(conv.unread_json, {});
@@ -1081,14 +1108,22 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
     await run(
       db,
       "UPDATE conversations SET last_message = ?, last_message_at = ?, unread_json = ? WHERE id = ?",
-      text.slice(0, 2000),
+      preview,
       created,
       JSON.stringify(unread),
       cid,
     );
-    if (other) await notify(db, other, me.display_name, text.slice(0, 80), `/messages/${cid}`);
+    if (other) await notify(db, other, me.display_name, preview.slice(0, 80), `/messages/${cid}`);
     return json(
-      { message: { id: mid, senderId: uid, body: text.slice(0, 2000), createdAt: created } },
+      {
+        message: {
+          id: mid,
+          senderId: uid,
+          body: text.slice(0, 2000),
+          imageUrl,
+          createdAt: created,
+        },
+      },
       201,
     );
   }
