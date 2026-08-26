@@ -772,7 +772,7 @@ textarea:focus {
   min-height: 64px;
   padding: 4px;
   border-radius: 16px;
-  background: var(--bg);
+  background: transparent;
 }
 .sticker-btn img,
 .bubble-sticker-img {
@@ -781,6 +781,7 @@ textarea:focus {
   object-fit: contain;
   display: block;
   margin: 0 auto;
+  background: transparent;
 }
 .bubble-sticker-img {
   width: 96px;
@@ -796,10 +797,12 @@ textarea:focus {
   padding: 8px 12px 0;
   overflow-x: auto;
 }
-.bubble.sticker-only {
+.bubble.sticker-only,
+.bubble.mine.sticker-only {
   background: transparent;
   border: 0;
   padding: 0;
+  box-shadow: none;
 }
 .bubble-sticker {
   font-size: 56px;

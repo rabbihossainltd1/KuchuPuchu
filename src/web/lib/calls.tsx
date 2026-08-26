@@ -25,6 +25,7 @@ import { api, RequestError } from "./api";
 import type { PublicUser } from "./types";
 import { lastSeenLabel } from "./time";
 import { pingOs } from "./notify";
+import { playTone, stopTone, unlockAudio } from "./sounds";
 import { Avatar } from "../components/ui";
 
 type CallKind = "AUDIO" | "VIDEO";
@@ -46,11 +47,25 @@ type CallCtx = {
 };
 
 const Ctx = createContext<CallCtx | null>(null);
-const ICE = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+const ICE = {
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+    {
+      urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443"],
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+  ],
+};
 
 declare global {
   interface Window {
-    KpCallAudio?: { setSpeaker: (on: boolean) => void };
+    KpCallAudio?: {
+      setSpeaker: (on: boolean) => void;
+      startRing?: () => void;
+      endAudio?: () => void;
+    };
   }
 }
 
@@ -60,13 +75,21 @@ export function useCall() {
   return ctx;
 }
 
-function playMedia(el: HTMLMediaElement | null, stream: MediaStream | null) {
+function playMedia(el: HTMLMediaElement | null, stream: MediaStream | null, mute = false) {
   if (!el) return;
   el.setAttribute("playsinline", "true");
   el.setAttribute("webkit-playsinline", "true");
   el.controls = false;
-  el.srcObject = stream;
+  el.muted = mute;
+  el.volume = 1;
+  if (el.srcObject !== stream) el.srcObject = stream;
   if (stream) void el.play().catch(() => undefined);
+}
+
+function clock(sec: number) {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
 }
 
 export function CallProvider({ children }: { children: ReactNode }) {
@@ -78,36 +101,50 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [sharing, setSharing] = useState(false);
   const [remoteReady, setRemoteReady] = useState(false);
   const [hasLocal, setHasLocal] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const seenIce = useRef(new Set<string>());
   const ignored = useRef(new Set<string>());
+  const liveSince = useRef<number | null>(null);
   const localVideo = useRef<HTMLVideoElement | null>(null);
   const remoteVideo = useRef<HTMLVideoElement | null>(null);
   const remoteAudio = useRef<HTMLAudioElement | null>(null);
 
   const stopMedia = useCallback(() => {
+    stopTone();
+    try {
+      window.KpCallAudio?.endAudio?.();
+    } catch {
+      /* web */
+    }
     localRef.current?.getTracks().forEach((track) => track.stop());
     localRef.current = null;
     remoteStreamRef.current = null;
     pcRef.current?.close();
     pcRef.current = null;
     seenIce.current.clear();
+    liveSince.current = null;
     setMuted(false);
     setCameraOff(false);
     setSharing(false);
     setRemoteReady(false);
     setHasLocal(false);
-    playMedia(localVideo.current, null);
+    setElapsed(0);
+    playMedia(localVideo.current, null, true);
     playMedia(remoteVideo.current, null);
     playMedia(remoteAudio.current, null);
   }, []);
 
-  const attachRemote = useCallback((stream: MediaStream) => {
+  const attachRemote = useCallback((incoming: MediaStream) => {
+    const stream = remoteStreamRef.current ?? new MediaStream();
+    for (const track of incoming.getTracks()) {
+      if (!stream.getTracks().some((item) => item.id === track.id)) stream.addTrack(track);
+    }
     remoteStreamRef.current = stream;
-    playMedia(remoteVideo.current, stream);
-    playMedia(remoteAudio.current, stream);
+    playMedia(remoteVideo.current, stream, true);
+    playMedia(remoteAudio.current, stream, false);
   }, []);
 
   const makePc = useCallback(
@@ -131,8 +168,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
   );
 
   const media = useCallback(async (kind: CallKind) => {
+    unlockAudio();
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
       video:
         kind === "VIDEO"
           ? { facingMode: "user", width: { ideal: 720 }, height: { ideal: 1280 } }
@@ -140,7 +182,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
     });
     localRef.current = stream;
     setHasLocal(true);
-    playMedia(localVideo.current, stream);
+    playMedia(localVideo.current, stream, true);
+    try {
+      window.KpCallAudio?.setSpeaker(true);
+    } catch {
+      /* web */
+    }
     return stream;
   }, []);
 
@@ -174,6 +221,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const startCall = useCallback(
     async (userId: string, kind: CallKind) => {
       setError("");
+      unlockAudio();
       try {
         const stream = await media(kind);
         const pc = new RTCPeerConnection(ICE);
@@ -207,6 +255,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         };
         pcRef.current = pc;
         setActive(created.call);
+        playTone("/sounds/calling.wav");
       } catch (err) {
         stopMedia();
         setError(
@@ -224,6 +273,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const answer = useCallback(async () => {
     if (!active?.offerSdp) return;
     setError("");
+    stopTone();
+    unlockAudio();
     try {
       const stream = await media(active.kind);
       const pc = makePc(active.id);
@@ -280,6 +331,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
                   next.kind === "VIDEO" ? "Incoming video call" : "Incoming call",
                   next.other.displayName,
                 );
+                playTone("/sounds/ringtone.wav");
+                try {
+                  window.KpCallAudio?.startRing?.();
+                } catch {
+                  /* web */
+                }
               }
               return next;
             }
@@ -299,6 +356,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
             !pcRef.current.currentRemoteDescription
           ) {
             await pcRef.current.setRemoteDescription({ type: "answer", sdp: next.answerSdp });
+            stopTone();
           }
           if (next.status === "ACTIVE" || next.status === "RINGING") {
             await pullIce(next.id);
@@ -322,10 +380,38 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!active?.id) return;
-    playMedia(localVideo.current, localRef.current);
-    playMedia(remoteVideo.current, remoteStreamRef.current);
-    playMedia(remoteAudio.current, remoteStreamRef.current);
-  }, [active?.id, hasLocal]);
+    playMedia(localVideo.current, localRef.current, true);
+    playMedia(remoteVideo.current, remoteStreamRef.current, true);
+    playMedia(remoteAudio.current, remoteStreamRef.current, false);
+  }, [active?.id, hasLocal, remoteReady]);
+
+  useEffect(() => {
+    if (!active) {
+      stopTone();
+      return;
+    }
+    if (active.status === "RINGING") {
+      if (active.incoming) playTone("/sounds/ringtone.wav");
+      else playTone("/sounds/calling.wav");
+      return;
+    }
+    stopTone();
+  }, [active?.id, active?.status, active?.incoming]);
+
+  useEffect(() => {
+    if (active?.status !== "ACTIVE") {
+      liveSince.current = null;
+      setElapsed(0);
+      return;
+    }
+    stopTone();
+    if (!liveSince.current) liveSince.current = Date.now();
+    const tick = () =>
+      setElapsed(Math.floor((Date.now() - (liveSince.current ?? Date.now())) / 1000));
+    tick();
+    const timer = window.setInterval(tick, 400);
+    return () => window.clearInterval(timer);
+  }, [active?.id, active?.status]);
 
   useEffect(() => {
     if (!active || active.status !== "ACTIVE") return;
@@ -353,7 +439,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       if (next && localRef.current) {
         localRef.current.getVideoTracks().forEach((track) => track.stop());
         localRef.current.addTrack(next);
-        playMedia(localVideo.current, localRef.current);
+        playMedia(localVideo.current, localRef.current, true);
       }
       setSharing(false);
       return;
@@ -370,7 +456,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       if (sender) await sender.replaceTrack(track);
       else pcRef.current?.addTrack(track, display);
       track.onended = () => setSharing(false);
-      playMedia(localVideo.current, display);
+      playMedia(localVideo.current, display, true);
       setSharing(true);
     } catch {
       setError("Screen share is not available on this phone.");
@@ -388,7 +474,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         ? "Ringing…"
         : "Calling…"
     : live
-      ? "Connected"
+      ? clock(elapsed)
       : (active?.status ?? "").toLowerCase();
   const seenLine = lastSeenLabel(active?.other.lastActiveAt, otherOnline);
 
@@ -428,6 +514,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
                       className={remoteReady ? "remote-video" : "remote-video idle"}
                       autoPlay
                       playsInline
+                      muted
                       onPlaying={() => setRemoteReady(true)}
                     />
                     <video
@@ -444,7 +531,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
                     <Avatar name={active.other.displayName} url={active.other.avatarUrl} large />
                     <h2>{active.other.displayName}</h2>
                     <p className="call-status">{statusLabel}</p>
-                    <p className="call-seen">{seenLine}</p>
+                    {live ? (
+                      <p className="call-seen">Connected</p>
+                    ) : (
+                      <p className="call-seen">{seenLine}</p>
+                    )}
                   </div>
                 ) : (
                   <div className="call-live-name">
@@ -452,7 +543,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
                     <span>{statusLabel}</span>
                   </div>
                 )}
-                <audio ref={remoteAudio} autoPlay />
+                <audio ref={remoteAudio} autoPlay playsInline />
                 {error ? <p className="call-error">{error}</p> : null}
                 <div className="call-actions">
                   {ringing && active.incoming ? (

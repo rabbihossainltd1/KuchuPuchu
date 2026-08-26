@@ -21,6 +21,22 @@ public class MainActivity extends BridgeActivity {
             am.setMode(AudioManager.MODE_IN_COMMUNICATION);
             am.setSpeakerphoneOn(on);
         }
+
+        @JavascriptInterface
+        public void startRing() {
+            AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+            if (am == null) return;
+            am.setMode(AudioManager.MODE_RINGTONE);
+            am.setSpeakerphoneOn(true);
+        }
+
+        @JavascriptInterface
+        public void endAudio() {
+            AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+            if (am == null) return;
+            am.setSpeakerphoneOn(false);
+            am.setMode(AudioManager.MODE_NORMAL);
+        }
     }
 
     @Override

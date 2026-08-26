@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Bell,
@@ -26,6 +26,7 @@ import { api } from "../lib/api";
 import { onNativeBack } from "../lib/native";
 import { Notice } from "./ui";
 import { CallProvider } from "../lib/calls";
+import { inferKind, pingOs } from "../lib/notify";
 import { HomePage } from "../pages/home";
 import { MessagesPage } from "../pages/chat";
 import { NotificationsPage } from "../pages/notifications";
@@ -54,20 +55,64 @@ export function AppLayout() {
   const onProfile = location.pathname === "/profile";
   const onThread = /^\/messages\/[^/]+/.test(location.pathname);
   const notifyCount = unread + requests;
+  const pathRef = useRef(location.pathname);
+  pathRef.current = location.pathname;
 
   useEffect(() => {
-    void Promise.all([
-      api<{ unread: number }>("/api/notifications"),
-      api<{ items: unknown[] }>("/api/friend-requests"),
-      api<{ items: Array<{ unread: number }> }>("/api/conversations"),
-    ])
-      .then(([n, f, c]) => {
+    const seenNotes = new Set<string>();
+    const seenReq = new Set<string>();
+    let primed = false;
+    async function tick() {
+      try {
+        const [n, f, c] = await Promise.all([
+          api<{
+            unread: number;
+            items: Array<{
+              id: string;
+              title: string;
+              body: string;
+              link?: string;
+              kind?: string;
+              readAt: string | null;
+            }>;
+          }>("/api/notifications"),
+          api<{ items: Array<{ id: string; from: { displayName: string } }> }>(
+            "/api/friend-requests",
+          ),
+          api<{ items: Array<{ unread: number }> }>("/api/conversations"),
+        ]);
         setUnread(n.unread);
         setRequests(f.items.length);
         setMessages(c.items.reduce((sum, item) => sum + (item.unread || 0), 0));
-      })
-      .catch(() => undefined);
-  }, [location.pathname]);
+        if (!primed) {
+          for (const item of n.items ?? []) seenNotes.add(item.id);
+          for (const item of f.items ?? []) seenReq.add(item.id);
+          primed = true;
+          return;
+        }
+        for (const item of n.items ?? []) {
+          if (seenNotes.has(item.id) || item.readAt) continue;
+          seenNotes.add(item.id);
+          if (item.link && pathRef.current.startsWith(item.link)) continue;
+          void pingOs(inferKind(item), item.title, item.body);
+        }
+        for (const item of f.items ?? []) {
+          if (seenReq.has(item.id)) continue;
+          seenReq.add(item.id);
+          void pingOs(
+            "requests",
+            "Friend request",
+            `${item.from.displayName} sent you a friend request`,
+          );
+        }
+      } catch {
+        /* offline */
+      }
+    }
+    void tick();
+    const timer = window.setInterval(() => void tick(), 4000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     setMenu(false);

@@ -382,12 +382,13 @@ async function notify(
   if (prefs[kind] === false) return;
   await run(
     db,
-    "INSERT INTO notifications (id, user_id, title, body, link, read_at, created_at) VALUES (?, ?, ?, ?, ?, NULL, ?)",
+    "INSERT INTO notifications (id, user_id, title, body, link, kind, read_at, created_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)",
     id(),
     userId,
     title,
     body,
     link ?? "/notifications",
+    kind,
     nowIso(),
   );
 }
@@ -468,6 +469,11 @@ async function ensureSchema(db: D1Database) {
   }
   try {
     await run(db, "ALTER TABLE users ADD COLUMN notif_json TEXT");
+  } catch {
+    /* column already exists */
+  }
+  try {
+    await run(db, "ALTER TABLE notifications ADD COLUMN kind TEXT");
   } catch {
     /* column already exists */
   }
@@ -1441,6 +1447,7 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
       title: string;
       body: string;
       link: string | null;
+      kind?: string | null;
       read_at: string | null;
       created_at: string;
     }>(db, "SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 50", uid);
@@ -1449,6 +1456,7 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
       title: row.title,
       body: row.body,
       link: row.link ?? undefined,
+      kind: row.kind ?? undefined,
       readAt: row.read_at,
       createdAt: row.created_at,
     }));

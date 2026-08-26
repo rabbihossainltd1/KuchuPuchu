@@ -115,6 +115,7 @@ CREATE TABLE IF NOT EXISTS notifications (
   title TEXT NOT NULL,
   body TEXT NOT NULL,
   link TEXT,
+  kind TEXT,
   read_at TEXT,
   created_at TEXT NOT NULL
 );

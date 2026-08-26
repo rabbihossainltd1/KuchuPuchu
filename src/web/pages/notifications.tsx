@@ -40,6 +40,8 @@ export function NotificationsPage() {
 
   useEffect(() => {
     void load();
+    const timer = window.setInterval(() => void load().catch(() => undefined), 4000);
+    return () => window.clearInterval(timer);
   }, []);
 
   const rows = useMemo(() => {
