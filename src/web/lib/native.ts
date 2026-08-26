@@ -1,7 +1,23 @@
 import { Capacitor } from "@capacitor/core";
 
+type BackFn = () => boolean;
+const backStack: BackFn[] = [];
+
 export function isNativeShell() {
   return Capacitor.isNativePlatform();
+}
+
+export function pushBackHandler(handler: BackFn) {
+  backStack.push(handler);
+  return () => {
+    const index = backStack.lastIndexOf(handler);
+    if (index >= 0) backStack.splice(index, 1);
+  };
+}
+
+export function onNativeBack(handler: BackFn) {
+  if (!Capacitor.isNativePlatform()) return () => undefined;
+  return pushBackHandler(handler);
 }
 
 export async function bootNative() {
@@ -34,27 +50,23 @@ export async function bootNative() {
   }
 
   try {
-    const { askNotifyPermission } = await import("./notify");
+    const { askNotifyPermission, listenNotifyActions } = await import("./notify");
     await askNotifyPermission();
+    await listenNotifyActions();
   } catch {
     /* optional */
   }
-}
 
-export function onNativeBack(handler: () => boolean) {
-  if (!Capacitor.isNativePlatform()) return () => undefined;
-  let remove: (() => void) | undefined;
-  void import("@capacitor/app").then(({ App }) => {
-    const sub = App.addListener("backButton", ({ canGoBack }) => {
-      if (handler()) return;
+  try {
+    const { App } = await import("@capacitor/app");
+    await App.addListener("backButton", ({ canGoBack }) => {
+      for (let i = backStack.length - 1; i >= 0; i -= 1) {
+        if (backStack[i]?.()) return;
+      }
       if (canGoBack) window.history.back();
       else void App.exitApp();
     });
-    void sub.then((handle) => {
-      remove = () => {
-        void handle.remove();
-      };
-    });
-  });
-  return () => remove?.();
+  } catch {
+    /* optional */
+  }
 }

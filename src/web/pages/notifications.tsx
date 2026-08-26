@@ -10,6 +10,7 @@ type Note = {
   title: string;
   body: string;
   link?: string;
+  kind?: string;
   readAt: string | null;
   createdAt: string;
 };
@@ -35,7 +36,12 @@ export function NotificationsPage() {
       api<{ items: Note[] }>("/api/notifications"),
     ]);
     setRequests(friends.items);
-    setItems(notes.items);
+    setItems(
+      notes.items.filter((item) => {
+        const title = (item.title || "").toLowerCase();
+        return !title.includes("incoming call") && !title.includes("incoming video call");
+      }),
+    );
   }
 
   useEffect(() => {

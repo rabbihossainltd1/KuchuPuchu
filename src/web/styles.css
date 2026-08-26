@@ -1079,6 +1079,26 @@ video::-webkit-media-controls-overlay-play-button {
   color: #fafaf9;
   padding: 10px 8px;
 }
+.bubble {
+  position: relative;
+}
+.react-pop {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 6px);
+  transform: translateX(-50%);
+  display: flex;
+  gap: 4px;
+  background: #1c1917;
+  border-radius: 999px;
+  padding: 4px 6px;
+  z-index: 5;
+}
+.react-pop button {
+  font-size: 20px;
+  min-width: 36px;
+  min-height: 36px;
+}
 .chat-preview-wrap {
   display: flex;
   align-items: center;

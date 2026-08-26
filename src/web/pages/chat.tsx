@@ -5,6 +5,7 @@ import { api, peekCache, RequestError } from "../lib/api";
 import { readPhoto, savePhoto } from "../lib/photo";
 import { useAuth } from "../lib/auth";
 import { useCall } from "../lib/calls";
+import { onNativeBack } from "../lib/native";
 import { lastSeenLabel, timeAgo } from "../lib/time";
 import { STICKERS, stickerSrc } from "../lib/stickers";
 import { Avatar, Empty, Notice, Spinner } from "../components/ui";
@@ -128,6 +129,7 @@ export function ConversationPage() {
   const [photos, setPhotos] = useState<string[]>([]);
   const [stickersOpen, setStickersOpen] = useState(false);
   const [viewer, setViewer] = useState<{ src: string; message: ChatMessage } | null>(null);
+  const [reactFor, setReactFor] = useState<ChatMessage | null>(null);
   const [forwardOpen, setForwardOpen] = useState(false);
   const [inbox, setInbox] = useState<Conversation[]>(
     () => peekCache<{ items: Conversation[] }>("/api/conversations")?.items ?? [],
@@ -135,7 +137,10 @@ export function ConversationPage() {
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
+  const holdTimer = useRef<number>(0);
+  const held = useRef(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -197,21 +202,39 @@ export function ConversationPage() {
       setPhotos([]);
       setStickersOpen(false);
       setError("");
+      window.setTimeout(() => inputRef.current?.focus(), 0);
     } catch (err) {
       setError(err instanceof RequestError ? err.body.message : "Could not send.");
     } finally {
       setSending(false);
+      window.setTimeout(() => inputRef.current?.focus(), 30);
     }
   }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    inputRef.current?.focus();
     const body = draft.trim();
     if (!body && !photos.length) return;
     await sendPayload({
       body: body || undefined,
       imageData: photos,
     });
+  }
+
+  function openReact(item: ChatMessage) {
+    held.current = true;
+    setReactFor(item);
+  }
+
+  function pressStart(item: ChatMessage) {
+    held.current = false;
+    window.clearTimeout(holdTimer.current);
+    holdTimer.current = window.setTimeout(() => openReact(item), 420);
+  }
+
+  function pressEnd() {
+    window.clearTimeout(holdTimer.current);
   }
 
   async function reactTo(messageId: string, emoji: string) {
@@ -249,6 +272,24 @@ export function ConversationPage() {
       .then((data) => setInbox(data.items ?? []))
       .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    return onNativeBack(() => {
+      if (forwardOpen) {
+        setForwardOpen(false);
+        return true;
+      }
+      if (viewer) {
+        setViewer(null);
+        return true;
+      }
+      if (reactFor) {
+        setReactFor(null);
+        return true;
+      }
+      return false;
+    });
+  }, [forwardOpen, viewer, reactFor]);
 
   const rows = useMemo(() => {
     const out: Array<{ type: "day"; label: string } | { type: "msg"; item: ChatMessage }> = [];
@@ -351,7 +392,31 @@ export function ConversationPage() {
                 className={`${row.item.senderId === user?.id ? "bubble mine" : "bubble"}${
                   stickerOnly ? " sticker-only" : photoOnly ? " photo-only" : ""
                 }`}
+                onPointerDown={() => pressStart(row.item)}
+                onPointerUp={pressEnd}
+                onPointerCancel={pressEnd}
+                onPointerLeave={pressEnd}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  openReact(row.item);
+                }}
               >
+                {reactFor?.id === row.item.id ? (
+                  <div className="react-pop">
+                    {["❤️", "😂", "😮", "😢", "👍"].map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={() => {
+                          void reactTo(row.item.id, emoji);
+                          setReactFor(null);
+                        }}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
                 {media.sticker ? (
                   stickerSrc(media.sticker) ? (
                     <img className="bubble-sticker-img" src={stickerSrc(media.sticker)!} alt="" />
@@ -366,7 +431,13 @@ export function ConversationPage() {
                         key={src.slice(0, 48)}
                         className="bubble-photo-btn"
                         type="button"
-                        onClick={() => setViewer({ src, message: row.item })}
+                        onClick={() => {
+                          if (held.current) {
+                            held.current = false;
+                            return;
+                          }
+                          setViewer({ src, message: row.item });
+                        }}
                       >
                         <img className="bubble-photo" src={src} alt="" />
                       </button>
@@ -429,7 +500,7 @@ export function ConversationPage() {
               event.target.value = "";
               if (!files.length) return;
               const room = Math.max(0, 4 - photos.length);
-              void Promise.all(files.slice(0, room).map((file) => readPhoto(file, 360, 70000)))
+              void Promise.all(files.slice(0, room).map((file) => readPhoto(file)))
                 .then((next) => setPhotos((current) => [...current, ...next].slice(0, 4)))
                 .catch(() => setError("Could not read that photo."));
             }}
@@ -451,18 +522,21 @@ export function ConversationPage() {
             <Smile size={22} />
           </button>
           <input
+            ref={inputRef}
             name="body"
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             placeholder="Message"
             aria-label="Message"
             autoComplete="off"
+            enterKeyHint="send"
           />
           <button
             className="chat-send"
             type="submit"
             aria-label="Send"
             disabled={sending || (!draft.trim() && !photos.length)}
+            onMouseDown={(event) => event.preventDefault()}
           >
             <Send size={18} />
           </button>
@@ -489,15 +563,6 @@ export function ConversationPage() {
             >
               <Send size={16} /> Forward
             </button>
-            {["❤️", "😂", "😮", "😢", "👍"].map((emoji) => (
-              <button
-                key={emoji}
-                type="button"
-                onClick={() => void reactTo(viewer.message.id, emoji)}
-              >
-                {emoji}
-              </button>
-            ))}
           </div>
           {forwardOpen ? (
             <div className="forward-sheet">

@@ -24,7 +24,7 @@ import {
 import { api, RequestError } from "./api";
 import type { PublicUser } from "./types";
 import { lastSeenLabel } from "./time";
-import { listenNotifyActions, pingOs } from "./notify";
+import { cancelCallOs, listenNotifyActions, pingOs } from "./notify";
 import { playTone, stopTone, unlockAudio } from "./sounds";
 import { Avatar } from "../components/ui";
 
@@ -71,11 +71,14 @@ declare global {
       setSpeaker: (on: boolean) => void;
       startRing?: () => void;
       endAudio?: () => void;
+      startScreen?: () => void;
+      stopScreen?: () => void;
     };
     KpCallBridge?: {
       answerFromNotify?: (callId: string) => void;
       declineFromNotify?: (callId: string) => void;
     };
+    KpOnScreenFrame?: (dataUrl: string) => void;
     webkitAudioContext?: typeof AudioContext;
   }
 }
@@ -131,7 +134,8 @@ function playMedia(el: HTMLMediaElement | null, stream: MediaStream | null, mute
   if (stream) {
     const go = () => void el.play().catch(() => undefined);
     go();
-    window.setTimeout(go, 250);
+    window.setTimeout(go, 200);
+    window.setTimeout(go, 800);
   }
 }
 
@@ -141,11 +145,25 @@ function clock(sec: number) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+function blankVideo() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 16;
+  canvas.height = 16;
+  const ctx = canvas.getContext("2d");
+  if (ctx) {
+    ctx.fillStyle = "#111";
+    ctx.fillRect(0, 0, 16, 16);
+  }
+  const track = canvas.captureStream(1).getVideoTracks()[0];
+  if (track) track.enabled = false;
+  return track;
+}
+
 export function CallProvider({ children }: { children: ReactNode }) {
   const [active, setActive] = useState<CallRecord | null>(null);
   const [error, setError] = useState("");
   const [muted, setMuted] = useState(false);
-  const [speaker, setSpeaker] = useState(true);
+  const [speaker, setSpeaker] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [remoteReady, setRemoteReady] = useState(false);
@@ -156,11 +174,19 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const seenIce = useRef(new Set<string>());
   const ignored = useRef(new Set<string>());
+  const pinged = useRef(new Set<string>());
+  const leftRef = useRef(false);
   const liveSince = useRef<number | null>(null);
   const audioCtx = useRef<AudioContext | null>(null);
   const localVideo = useRef<HTMLVideoElement | null>(null);
   const remoteVideo = useRef<HTMLVideoElement | null>(null);
   const remoteAudio = useRef<HTMLAudioElement | null>(null);
+  const answering = useRef(false);
+  const hookedKey = useRef("");
+  const activeRef = useRef<CallRecord | null>(null);
+  const speakerRef = useRef(false);
+  activeRef.current = active;
+  speakerRef.current = speaker;
 
   const routeAudio = useCallback((on: boolean) => {
     try {
@@ -170,7 +196,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const hookedKey = useRef("");
   const hookRemoteSound = useCallback((stream: MediaStream) => {
     unlockAudio();
     playMedia(remoteAudio.current, stream, false);
@@ -178,8 +203,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       .getAudioTracks()
       .map((track) => track.id)
       .join("|");
-    if (!key) return;
-    if (hookedKey.current === key) {
+    if (!key || hookedKey.current === key) {
       void audioCtx.current?.resume().catch(() => undefined);
       return;
     }
@@ -210,10 +234,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const stopMedia = useCallback(() => {
     stopTone();
     try {
+      window.KpCallAudio?.stopScreen?.();
       window.KpCallAudio?.endAudio?.();
     } catch {
       /* web */
     }
+    window.KpOnScreenFrame = undefined;
     try {
       void audioCtx.current?.close();
     } catch {
@@ -228,6 +254,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     pcRef.current = null;
     seenIce.current.clear();
     liveSince.current = null;
+    answering.current = false;
     setMuted(false);
     setCameraOff(false);
     setSharing(false);
@@ -244,10 +271,16 @@ export function CallProvider({ children }: { children: ReactNode }) {
       const stream = remoteStreamRef.current ?? new MediaStream();
       for (const track of incoming.getTracks()) {
         if (!stream.getTracks().some((item) => item.id === track.id)) stream.addTrack(track);
+        track.onunmute = () => {
+          if (track.kind === "video") setRemoteReady(true);
+        };
       }
       remoteStreamRef.current = stream;
       playMedia(remoteVideo.current, stream, true);
       hookRemoteSound(stream);
+      if (stream.getVideoTracks().some((track) => track.readyState === "live" && track.enabled)) {
+        setRemoteReady(true);
+      }
     },
     [hookRemoteSound],
   );
@@ -265,6 +298,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
         const stream = event.streams[0] ?? new MediaStream([event.track]);
         attachRemote(stream);
       };
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === "failed") {
+          void pc.restartIce();
+        }
+      };
       pcRef.current = pc;
     },
     [attachRemote],
@@ -273,15 +311,26 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const media = useCallback(
     async (kind: CallKind) => {
       unlockAudio();
-      routeAudio(true);
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video:
-          kind === "VIDEO"
-            ? { facingMode: "user", width: { ideal: 640 }, height: { ideal: 860 } }
-            : false,
-      });
-      if (kind === "AUDIO") setCameraOff(true);
+      routeAudio(speakerRef.current);
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 860 } },
+        });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        const blank = blankVideo();
+        if (blank) stream.addTrack(blank);
+      }
+      if (kind === "AUDIO") {
+        stream.getVideoTracks().forEach((track) => {
+          track.enabled = false;
+        });
+        setCameraOff(true);
+      } else {
+        setCameraOff(false);
+      }
       localRef.current = stream;
       setHasLocal(true);
       playMedia(localVideo.current, stream, true);
@@ -307,24 +356,34 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   const hangup = useCallback(
     async (callId?: string) => {
-      const id = callId ?? active?.id;
+      leftRef.current = true;
+      const current = activeRef.current;
+      const id = callId ?? current?.id;
       if (id) ignored.current.add(id);
+      if (current?.id) ignored.current.add(current.id);
       const seconds = liveSince.current ? Math.floor((Date.now() - liveSince.current) / 1000) : 0;
+      const ended = [id, current?.id].filter(Boolean) as string[];
       stopMedia();
       setActive(null);
       setError("");
-      if (id && !id.startsWith("pending")) {
-        await api(`/api/calls/${id}/hangup`, {
-          method: "POST",
-          body: JSON.stringify({ seconds }),
-        }).catch(() => undefined);
+      for (const item of ended) {
+        void cancelCallOs(item);
+        if (!item.startsWith("pending")) {
+          await api(`/api/calls/${item}/hangup`, {
+            method: "POST",
+            body: JSON.stringify({ seconds }),
+          }).catch(() => undefined);
+        }
       }
+      await api("/api/calls/clear", { method: "POST", body: "{}" }).catch(() => undefined);
     },
-    [active?.id, stopMedia],
+    [stopMedia],
   );
 
   const startCall = useCallback(
     async (userId: string, kind: CallKind, person?: PublicUser) => {
+      if (activeRef.current) return;
+      leftRef.current = false;
       setError("");
       unlockAudio();
       const placeholder: CallRecord = {
@@ -339,13 +398,21 @@ export function CallProvider({ children }: { children: ReactNode }) {
         other: stubUser(userId, person),
       };
       setActive(placeholder);
-      setSpeaker(true);
-      routeAudio(true);
+      setSpeaker(false);
+      routeAudio(false);
       playTone("/sounds/calling.wav");
       try {
         const stream = await media(kind);
+        if (leftRef.current) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
         const pc = new RTCPeerConnection(ICE);
         stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+        if (!stream.getVideoTracks().length) {
+          const blank = blankVideo();
+          if (blank) pc.addTrack(blank, stream);
+        }
         const pending: RTCIceCandidate[] = [];
         pc.onicecandidate = (event) => {
           if (event.candidate) pending.push(event.candidate);
@@ -359,6 +426,16 @@ export function CallProvider({ children }: { children: ReactNode }) {
           method: "POST",
           body: JSON.stringify({ userId, kind, offerSdp: offer.sdp }),
         });
+        if (leftRef.current) {
+          ignored.current.add(created.call.id);
+          await api(`/api/calls/${created.call.id}/hangup`, {
+            method: "POST",
+            body: JSON.stringify({ seconds: 0 }),
+          }).catch(() => undefined);
+          stopMedia();
+          setActive(null);
+          return;
+        }
         wirePc(pc, created.call.id);
         for (const candidate of pending) {
           void api(`/api/calls/${created.call.id}/ice`, {
@@ -382,41 +459,71 @@ export function CallProvider({ children }: { children: ReactNode }) {
     [media, routeAudio, stopMedia, wirePc],
   );
 
-  const answer = useCallback(async () => {
-    if (!active?.offerSdp) return;
-    setError("");
-    stopTone();
-    unlockAudio();
-    routeAudio(true);
-    try {
-      const stream = await media(active.kind);
-      const pc = new RTCPeerConnection(ICE);
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-      wirePc(pc, active.id);
-      await pc.setRemoteDescription({ type: "offer", sdp: active.offerSdp });
-      const answerDesc = await pc.createAnswer();
-      await pc.setLocalDescription(answerDesc);
-      const updated = await api<{ call: CallRecord }>(`/api/calls/${active.id}/answer`, {
-        method: "POST",
-        body: JSON.stringify({ answerSdp: answerDesc.sdp }),
-      });
-      setActive(updated.call);
-    } catch (err) {
-      setError(
-        err instanceof RequestError
-          ? err.body.message
-          : "Could not answer. Allow microphone access and try again.",
-      );
-    }
-  }, [active, media, routeAudio, wirePc]);
+  const answerRecord = useCallback(
+    async (record: CallRecord) => {
+      if (!record.offerSdp || answering.current || pcRef.current) return;
+      answering.current = true;
+      leftRef.current = false;
+      setError("");
+      stopTone();
+      unlockAudio();
+      routeAudio(speakerRef.current);
+      setActive(record);
+      try {
+        const stream = await media(record.kind);
+        if (leftRef.current) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        const pc = new RTCPeerConnection(ICE);
+        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+        if (!stream.getVideoTracks().length) {
+          const blank = blankVideo();
+          if (blank) pc.addTrack(blank, stream);
+        }
+        wirePc(pc, record.id);
+        await pc.setRemoteDescription({ type: "offer", sdp: record.offerSdp });
+        const answerDesc = await pc.createAnswer();
+        await pc.setLocalDescription(answerDesc);
+        const updated = await api<{ call: CallRecord }>(`/api/calls/${record.id}/answer`, {
+          method: "POST",
+          body: JSON.stringify({ answerSdp: answerDesc.sdp }),
+        });
+        void cancelCallOs(record.id);
+        setActive(updated.call);
+      } catch (err) {
+        answering.current = false;
+        setError(
+          err instanceof RequestError
+            ? err.body.message
+            : "Could not answer. Allow microphone access and try again.",
+        );
+      }
+    },
+    [media, routeAudio, wirePc],
+  );
 
-  const decline = useCallback(async () => {
-    if (!active) return;
-    ignored.current.add(active.id);
-    await api(`/api/calls/${active.id}/decline`, { method: "POST" }).catch(() => undefined);
-    stopMedia();
-    setActive(null);
-  }, [active, stopMedia]);
+  const answer = useCallback(async () => {
+    const record = activeRef.current;
+    if (record) await answerRecord(record);
+  }, [answerRecord]);
+
+  const decline = useCallback(
+    async (callId?: string) => {
+      const current = activeRef.current;
+      const id = callId || current?.id;
+      if (id) {
+        ignored.current.add(id);
+        void cancelCallOs(id);
+        await api(`/api/calls/${id}/decline`, { method: "POST" }).catch(() => undefined);
+      }
+      if (!callId || !current || current.id === callId) {
+        stopMedia();
+        setActive(null);
+      }
+    },
+    [stopMedia],
+  );
 
   useEffect(() => {
     void navigator.mediaDevices
@@ -429,14 +536,42 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const timer = window.setInterval(() => {
       void api<{ items: CallRecord[] }>("/api/calls/active")
         .then(async (data) => {
-          const next = data.items[0] ?? null;
-          if (!next || ignored.current.has(next.id)) {
+          const live = data.items.filter((item) => !ignored.current.has(item.id));
+          const current = activeRef.current;
+          let next = live[0] ?? null;
+          if (current?.id && !current.id.startsWith("pending")) {
+            next = live.find((item) => item.id === current.id) ?? next;
+          }
+          if (leftRef.current) {
+            for (const item of live) {
+              if (!item.incoming) {
+                ignored.current.add(item.id);
+                await api(`/api/calls/${item.id}/hangup`, {
+                  method: "POST",
+                  body: JSON.stringify({ seconds: 0 }),
+                }).catch(() => undefined);
+                void cancelCallOs(item.id);
+              }
+            }
+            const incoming = live.find((item) => item.incoming);
+            if (!incoming) {
+              if (current) {
+                stopMedia();
+                setActive(null);
+              }
+              if (!live.some((item) => !item.incoming)) leftRef.current = false;
+              return;
+            }
+            leftRef.current = false;
+            next = incoming;
+          }
+          if (!next) {
             if (
-              !next &&
-              active &&
-              !active.id.startsWith("pending") &&
-              ["RINGING", "ACTIVE"].includes(active.status)
+              current &&
+              !current.id.startsWith("pending") &&
+              ["RINGING", "ACTIVE"].includes(current.status)
             ) {
+              void cancelCallOs(current.id);
               stopMedia();
               setActive(null);
             }
@@ -444,40 +579,41 @@ export function CallProvider({ children }: { children: ReactNode }) {
           }
           if (["ENDED", "DECLINED", "MISSED", "CANCELLED"].includes(next.status)) {
             ignored.current.add(next.id);
+            void cancelCallOs(next.id);
             stopMedia();
             setActive(null);
             return;
           }
-          setActive((current) => {
-            if (ignored.current.has(next.id)) return current;
-            if (!current) {
-              if (next.incoming && next.status === "RINGING") {
-                void pingOs(
-                  "calls",
-                  next.kind === "VIDEO" ? "Incoming video call" : "Incoming call",
-                  next.other.displayName,
-                  { callId: next.id },
-                );
-                playTone("/sounds/ringtone.wav");
-                try {
-                  window.KpCallAudio?.startRing?.();
-                } catch {
-                  /* web */
-                }
-              }
-              return next;
+          if (next.incoming && next.status === "RINGING" && !pinged.current.has(next.id)) {
+            pinged.current.add(next.id);
+            void pingOs(
+              "calls",
+              next.kind === "VIDEO" ? "Incoming video call" : "Incoming call",
+              next.other.displayName,
+              { callId: next.id },
+            );
+            playTone("/sounds/ringtone.wav");
+            try {
+              window.KpCallAudio?.startRing?.();
+            } catch {
+              /* web */
             }
-            if (current.id.startsWith("pending") && current.calleeId === next.calleeId) {
-              return { ...next, other: current.other };
+          }
+          setActive((prev) => {
+            if (ignored.current.has(next.id)) return prev;
+            if (prev?.id.startsWith("pending") && prev.calleeId === next.calleeId) {
+              return { ...next, other: prev.other };
             }
             if (
-              current.id === next.id &&
-              current.status === next.status &&
-              current.answerSdp === next.answerSdp
+              prev &&
+              prev.id === next.id &&
+              prev.status === next.status &&
+              prev.answerSdp === next.answerSdp &&
+              prev.kind === next.kind
             ) {
-              return current;
+              return prev;
             }
-            return { ...current, ...next };
+            return prev ? { ...prev, ...next } : next;
           });
           if (
             next.status === "ACTIVE" &&
@@ -487,18 +623,21 @@ export function CallProvider({ children }: { children: ReactNode }) {
           ) {
             await pcRef.current.setRemoteDescription({ type: "answer", sdp: next.answerSdp });
             stopTone();
+            void cancelCallOs(next.id);
           }
           if (next.status === "ACTIVE" || next.status === "RINGING") {
             await pullIce(next.id);
           }
           if (next.status === "ACTIVE" && remoteStreamRef.current) {
             hookRemoteSound(remoteStreamRef.current);
+            playMedia(remoteVideo.current, remoteStreamRef.current, true);
+            playMedia(localVideo.current, localRef.current, true);
           }
         })
         .catch(() => undefined);
     }, 600);
     return () => window.clearInterval(timer);
-  }, [active, hookRemoteSound, pullIce, stopMedia]);
+  }, [hookRemoteSound, pullIce, stopMedia]);
 
   useEffect(() => {
     const stream = localRef.current;
@@ -506,10 +645,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
     stream.getAudioTracks().forEach((track) => {
       track.enabled = !muted;
     });
-    stream.getVideoTracks().forEach((track) => {
-      track.enabled = !cameraOff;
-    });
-  }, [muted, cameraOff]);
+    if (!sharing) {
+      stream.getVideoTracks().forEach((track) => {
+        track.enabled = !cameraOff;
+      });
+    }
+  }, [muted, cameraOff, sharing]);
 
   useEffect(() => {
     if (!active) {
@@ -545,10 +686,50 @@ export function CallProvider({ children }: { children: ReactNode }) {
     routeAudio(speaker);
   }, [speaker, active, routeAudio]);
 
+  useEffect(() => {
+    playMedia(localVideo.current, localRef.current, true);
+    playMedia(remoteVideo.current, remoteStreamRef.current, true);
+    if (remoteStreamRef.current) hookRemoteSound(remoteStreamRef.current);
+  }, [active?.kind, active?.id, hookRemoteSound]);
+
+  async function applyVideoTrack(track: MediaStreamTrack, stream: MediaStream) {
+    const sender = pcRef.current?.getSenders().find((item) => item.track?.kind === "video");
+    if (sender) await sender.replaceTrack(track);
+    else pcRef.current?.addTrack(track, stream);
+    if (localRef.current) {
+      localRef.current.getVideoTracks().forEach((item) => {
+        if (item !== track) {
+          localRef.current?.removeTrack(item);
+          item.stop();
+        }
+      });
+      if (!localRef.current.getVideoTracks().includes(track)) localRef.current.addTrack(track);
+    } else localRef.current = stream;
+    setHasLocal(true);
+    setCameraOff(false);
+    setActive((current) => (current ? { ...current, kind: "VIDEO" } : current));
+    window.setTimeout(() => playMedia(localVideo.current, localRef.current, true), 50);
+  }
+
   async function toggleCamera() {
     if (active?.status !== "ACTIVE") return;
     if (!cameraOff && active.kind === "VIDEO") {
+      localRef.current?.getVideoTracks().forEach((track) => {
+        track.enabled = false;
+      });
       setCameraOff(true);
+      return;
+    }
+    const existing = localRef.current
+      ?.getVideoTracks()
+      .find((track) => track.readyState === "live");
+    if (existing && existing.label && !existing.label.includes("canvas")) {
+      existing.enabled = true;
+      const sender = pcRef.current?.getSenders().find((item) => item.track?.kind === "video");
+      if (sender && sender.track !== existing) await sender.replaceTrack(existing);
+      setCameraOff(false);
+      setActive((current) => (current ? { ...current, kind: "VIDEO" } : current));
+      playMedia(localVideo.current, localRef.current, true);
       return;
     }
     const cam = await navigator.mediaDevices
@@ -558,80 +739,110 @@ export function CallProvider({ children }: { children: ReactNode }) {
       })
       .catch(() => null);
     const track = cam?.getVideoTracks()[0];
-    if (!track) return;
-    const sender =
-      pcRef.current?.getSenders().find((item) => item.track?.kind === "video") ??
-      pcRef.current?.getSenders().find((item) => !item.track);
-    if (sender) await sender.replaceTrack(track);
-    else pcRef.current?.addTrack(track, cam ?? new MediaStream([track]));
-    if (localRef.current) localRef.current.addTrack(track);
-    else localRef.current = new MediaStream([track]);
-    setHasLocal(true);
-    setCameraOff(false);
-    setActive((current) => (current ? { ...current, kind: "VIDEO" } : current));
-    playMedia(localVideo.current, localRef.current, true);
+    if (!track) {
+      setError("Could not open the camera.");
+      return;
+    }
+    await applyVideoTrack(track, cam ?? new MediaStream([track]));
   }
 
   useEffect(() => {
     window.KpCallBridge = {
-      answerFromNotify: () => void answer(),
+      answerFromNotify: (callId) => {
+        void (async () => {
+          const data = await api<{ items: CallRecord[] }>("/api/calls/active").catch(() => ({
+            items: [] as CallRecord[],
+          }));
+          const record =
+            data.items.find((item) => item.id === callId) ??
+            data.items.find((item) => item.incoming && item.status === "RINGING") ??
+            activeRef.current;
+          if (record) await answerRecord(record);
+        })();
+      },
       declineFromNotify: (callId) => {
-        if (callId && active && callId !== active.id) {
-          void api(`/api/calls/${callId}/decline`, { method: "POST" }).catch(() => undefined);
-          return;
-        }
-        void decline();
+        void decline(callId);
       },
     };
-    let off: (() => void) | undefined;
-    void listenNotifyActions().then((fn) => {
-      off = fn;
-    });
+    void listenNotifyActions();
     return () => {
       window.KpCallBridge = undefined;
-      off?.();
     };
-  }, [active, answer, decline]);
+  }, [answerRecord, decline]);
+
+  async function shareFromFrames() {
+    const canvas = document.createElement("canvas");
+    canvas.width = 720;
+    canvas.height = 1280;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    const img = new Image();
+    window.KpOnScreenFrame = (url) => {
+      img.onload = () => {
+        if (
+          img.width &&
+          img.height &&
+          (canvas.width !== img.width || canvas.height !== img.height)
+        ) {
+          canvas.width = img.width;
+          canvas.height = img.height;
+        }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      };
+      img.src = url;
+    };
+    try {
+      window.KpCallAudio?.startScreen?.();
+    } catch {
+      return null;
+    }
+    const stream = canvas.captureStream(8);
+    return stream.getVideoTracks()[0] ? stream : null;
+  }
 
   async function shareScreen() {
     if (active?.status !== "ACTIVE") return;
     if (sharing) {
+      try {
+        window.KpCallAudio?.stopScreen?.();
+      } catch {
+        /* */
+      }
+      window.KpOnScreenFrame = undefined;
       const cam = await navigator.mediaDevices
         .getUserMedia({ video: { facingMode: "user" }, audio: false })
         .catch(() => null);
       const next = cam?.getVideoTracks()[0];
-      const sender = pcRef.current?.getSenders().find((item) => item.track?.kind === "video");
-      if (next && sender) await sender.replaceTrack(next);
-      if (next && localRef.current) {
-        localRef.current.getVideoTracks().forEach((track) => track.stop());
-        localRef.current.addTrack(next);
-        playMedia(localVideo.current, localRef.current, true);
-      }
+      if (next) await applyVideoTrack(next, cam ?? new MediaStream([next]));
       setSharing(false);
       return;
     }
-    if (typeof navigator.mediaDevices?.getDisplayMedia !== "function") {
+    let display: MediaStream | null = null;
+    if (typeof navigator.mediaDevices?.getDisplayMedia === "function") {
+      display = await navigator.mediaDevices
+        .getDisplayMedia({ video: true, audio: false })
+        .catch(() => null);
+    }
+    if (!display) display = await shareFromFrames();
+    const track = display?.getVideoTracks()[0];
+    if (!track) {
       setError("Screen share is not available on this phone.");
       return;
     }
-    try {
-      const display = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
-      const track = display.getVideoTracks()[0];
-      if (!track) return;
-      const sender = pcRef.current?.getSenders().find((item) => item.track?.kind === "video");
-      if (sender) await sender.replaceTrack(track);
-      else pcRef.current?.addTrack(track, display);
-      track.onended = () => setSharing(false);
-      playMedia(localVideo.current, display, true);
-      setSharing(true);
-    } catch {
-      setError("Screen share is not available on this phone.");
-    }
+    track.onended = () => {
+      setSharing(false);
+      void toggleCamera();
+    };
+    await applyVideoTrack(track, display ?? new MediaStream([track]));
+    setSharing(true);
   }
 
   const value = useMemo(() => ({ startCall }), [startCall]);
   const ringing = active?.status === "RINGING";
   const live = active?.status === "ACTIVE";
+  const showVideo = Boolean(
+    active && (active.kind === "VIDEO" || !cameraOff || remoteReady || sharing),
+  );
   const otherOnline = Boolean(active?.other.online);
   const statusLabel = ringing
     ? active?.incoming
@@ -673,27 +884,25 @@ export function CallProvider({ children }: { children: ReactNode }) {
                 margin: 0,
               }}
             >
-              <div className={`call-stage ${active.kind === "VIDEO" ? "video" : "audio"}`}>
-                {active.kind === "VIDEO" ? (
-                  <>
-                    <video
-                      ref={remoteVideo}
-                      className={remoteReady ? "remote-video" : "remote-video idle"}
-                      autoPlay
-                      playsInline
-                      muted
-                      onPlaying={() => setRemoteReady(true)}
-                    />
-                    <video
-                      ref={localVideo}
-                      className={hasLocal ? "local-video" : "local-video idle"}
-                      autoPlay
-                      playsInline
-                      muted
-                    />
-                  </>
-                ) : null}
-                {!remoteReady ? (
+              <div className={`call-stage ${showVideo ? "video" : "audio"}`}>
+                <video
+                  ref={remoteVideo}
+                  className={showVideo && remoteReady ? "remote-video" : "remote-video idle"}
+                  autoPlay
+                  playsInline
+                  muted
+                  onPlaying={() => setRemoteReady(true)}
+                />
+                <video
+                  ref={localVideo}
+                  className={
+                    showVideo && hasLocal && !cameraOff ? "local-video" : "local-video idle"
+                  }
+                  autoPlay
+                  playsInline
+                  muted
+                />
+                {!remoteReady || !showVideo ? (
                   <div className="call-audio">
                     <Avatar name={active.other.displayName} url={active.other.avatarUrl} large />
                     <h2>{active.other.displayName}</h2>

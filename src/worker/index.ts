@@ -1216,6 +1216,7 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
         sender_id: string;
         body: string;
         image_url?: string | null;
+        reaction?: string | null;
         created_at: string;
       }>(
         db,
@@ -1233,6 +1234,7 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
             imageUrls: media.imageUrls,
             sticker: media.sticker,
             call: media.call,
+            reaction: row.reaction ?? null,
             createdAt: row.created_at,
           };
         }),
@@ -1338,6 +1340,19 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
     return json({ ok: true, reaction: emoji });
   }
 
+  if (path === "/api/calls/clear" && method === "POST") {
+    const rows = await all<{ id: string; callee_id: string; kind: string }>(
+      db,
+      "SELECT id, callee_id, kind FROM calls WHERE caller_id = ? AND status = 'RINGING'",
+      uid,
+    );
+    for (const row of rows) {
+      await run(db, "UPDATE calls SET status = 'ENDED' WHERE id = ?", row.id);
+      await logCallEvent(db, uid, row.callee_id, row.kind, "MISSED", 0);
+    }
+    return json({ ok: true });
+  }
+
   if (path === "/api/calls" && method === "POST") {
     const other = String(body.userId || "");
     const kind = body.kind === "VIDEO" ? "VIDEO" : "AUDIO";
@@ -1381,17 +1396,7 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
       lastActiveAt: nowIso(),
       online: false,
     };
-    if (other) {
-      const cid = await ensureConv(db, uid, other);
-      await notify(
-        db,
-        other,
-        kind === "VIDEO" ? "Incoming video call" : "Incoming call",
-        me.display_name,
-        `/messages/${cid}`,
-        "calls",
-      );
-    }
+    if (other) await ensureConv(db, uid, other);
     return json({
       call: {
         id: callId,

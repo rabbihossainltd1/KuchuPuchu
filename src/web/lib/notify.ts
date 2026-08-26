@@ -60,6 +60,12 @@ export function inferKind(note: {
   return "messaging";
 }
 
+export function notifIdFor(key: string) {
+  let hash = 0;
+  for (let i = 0; i < key.length; i += 1) hash = (hash * 31 + key.charCodeAt(i)) | 0;
+  return (Math.abs(hash) % 90000) + 1000;
+}
+
 async function ensureChannel() {
   if (!Capacitor.isNativePlatform()) return;
   const { LocalNotifications } = await import("@capacitor/local-notifications");
@@ -120,6 +126,20 @@ export type PingExtra = {
   convId?: string;
 };
 
+export async function cancelOs(id: number) {
+  if (!Capacitor.isNativePlatform()) return;
+  try {
+    const { LocalNotifications } = await import("@capacitor/local-notifications");
+    await LocalNotifications.cancel({ notifications: [{ id }] });
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function cancelCallOs(callId: string) {
+  await cancelOs(notifIdFor(`call-${callId}`));
+}
+
 export async function pingOs(kind: NotifKind, title: string, body: string, extra: PingExtra = {}) {
   if (!getNotifPrefs()[kind]) return;
   if (kind !== "calls") {
@@ -138,16 +158,22 @@ export async function pingOs(kind: NotifKind, title: string, body: string, extra
       if (perm.display !== "granted") return;
       await ensureChannel();
       const isCall = kind === "calls";
+      const id = extra.callId
+        ? notifIdFor(`call-${extra.callId}`)
+        : extra.convId
+          ? notifIdFor(`msg-${extra.convId}-${Date.now()}`)
+          : Date.now() % 100000;
       await LocalNotifications.schedule({
         notifications: [
           {
-            id: Date.now() % 100000,
+            id,
             title,
             body,
             channelId: isCall ? "kp-calls" : "kp",
             sound: "kp_notify",
             actionTypeId: isCall ? "KP_CALL" : kind === "messaging" ? "KP_MSG" : undefined,
             extra: { kind, ...extra },
+            autoCancel: true,
           },
         ],
       });
@@ -168,43 +194,58 @@ export async function pingOs(kind: NotifKind, title: string, body: string, extra
   }
 }
 
+function extraOf(event: {
+  notification?: { extra?: PingExtra & { kind?: string }; inputValue?: string };
+  inputValue?: string;
+}) {
+  return (event.notification?.extra ?? {}) as PingExtra & { kind?: string };
+}
+
+function replyText(event: {
+  inputValue?: string;
+  notification?: { inputValue?: string; extra?: { inputValue?: string } };
+}) {
+  return String(
+    event.inputValue ||
+      event.notification?.inputValue ||
+      event.notification?.extra?.inputValue ||
+      "",
+  ).trim();
+}
+
+let listening = false;
+
 export async function listenNotifyActions() {
   if (!Capacitor.isNativePlatform()) return () => undefined;
+  if (listening) return () => undefined;
+  listening = true;
   try {
     const { LocalNotifications } = await import("@capacitor/local-notifications");
-    const handle = await LocalNotifications.addListener(
-      "localNotificationActionPerformed",
-      (event) => {
-        const extra = (event.notification.extra ?? {}) as PingExtra & { kind?: string };
-        const action = event.actionId;
-        if (action === "accept") {
-          window.KpCallBridge?.answerFromNotify?.(String(extra.callId ?? ""));
-          return;
+    await LocalNotifications.addListener("localNotificationActionPerformed", (event) => {
+      const extra = extraOf(event);
+      const action = String(event.actionId || "").toLowerCase();
+      if (action === "accept") {
+        window.KpCallBridge?.answerFromNotify?.(String(extra.callId ?? ""));
+        return;
+      }
+      if (action === "decline") {
+        window.KpCallBridge?.declineFromNotify?.(String(extra.callId ?? ""));
+        return;
+      }
+      if (action === "reply") {
+        const convId = extra.convId || extra.link?.replace("/messages/", "");
+        const text = replyText(event);
+        if (convId && text) {
+          void api(`/api/conversations/${convId}/messages`, {
+            method: "POST",
+            body: JSON.stringify({ body: text }),
+          }).catch(() => undefined);
         }
-        if (action === "decline") {
-          window.KpCallBridge?.declineFromNotify?.(String(extra.callId ?? ""));
-          return;
-        }
-        if (action === "reply") {
-          const convId = extra.convId || extra.link?.replace("/messages/", "");
-          const text = String(
-            (event as { inputValue?: string }).inputValue ||
-              (event as { notification?: { inputValue?: string } }).notification?.inputValue ||
-              "",
-          ).trim();
-          if (convId && text) {
-            void api(`/api/conversations/${convId}/messages`, {
-              method: "POST",
-              body: JSON.stringify({ body: text }),
-            }).catch(() => undefined);
-          }
-        }
-      },
-    );
-    return () => {
-      void handle.remove();
-    };
+      }
+    });
+    return () => undefined;
   } catch {
+    listening = false;
     return () => undefined;
   }
 }
