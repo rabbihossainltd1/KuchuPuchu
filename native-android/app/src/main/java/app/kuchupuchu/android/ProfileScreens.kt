@@ -296,15 +296,15 @@ fun FriendsScreen(session: Session, onRoute: (String) -> Unit) {
 
 @Composable
 fun RequestsScreen(session: Session, onRoute: (String) -> Unit) {
-    val items = remember { mutableStateListOf<JSONObject>() }
+    val items = session.requests
     val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            runCatching {
-                items.clear()
-                items.addAll(Api.get("/api/friend-requests").arr("items").objects())
+        if (items.isNotEmpty()) return@LaunchedEffect
+        val next =
+            withContext(Dispatchers.IO) {
+                runCatching { Api.get("/api/friend-requests").arr("items").objects() }.getOrNull()
             }
-        }
+        if (next != null) replaceList(items, next)
     }
     Column(Modifier.fillMaxSize().background(Bg).padding(12.dp)) {
         LazyColumn {

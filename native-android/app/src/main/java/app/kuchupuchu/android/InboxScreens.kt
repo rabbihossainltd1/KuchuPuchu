@@ -1,11 +1,9 @@
 package app.kuchupuchu.android
 
-import android.graphics.BitmapFactory
 import android.net.Uri
-import android.util.Base64
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -52,7 +50,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -70,23 +67,23 @@ import org.json.JSONObject
 
 @Composable
 fun InboxScreen(session: Session, onRoute: (String) -> Unit) {
-    val items = remember { mutableStateListOf<JSONObject>() }
+    val items = session.inbox
     LaunchedEffect(Unit) {
         while (isActive) {
-            withContext(Dispatchers.IO) {
-                runCatching {
-                    val data = Api.get("/api/conversations")
-                    items.clear()
-                    items.addAll(data.arr("items").objects())
-                    session.unread = items.sumOf { it.optInt("unread") }
+            val next =
+                withContext(Dispatchers.IO) {
+                    runCatching { Api.get("/api/conversations").arr("items").objects() }.getOrNull()
                 }
+            if (next != null) {
+                replaceList(items, next)
+                session.unread = next.sumOf { it.optInt("unread") }
             }
-            delay(4000)
+            delay(8000)
         }
     }
     Column(Modifier.fillMaxSize().background(Bg)) {
         LazyColumn(Modifier.padding(top = 8.dp)) {
-            itemsIndexed(items) { _, c ->
+            itemsIndexed(items, key = { _, c -> c.optString("id") }) { _, c ->
                 val other = c.optJSONObject("other") ?: JSONObject()
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
@@ -122,14 +119,13 @@ fun InboxScreen(session: Session, onRoute: (String) -> Unit) {
 
 @Composable
 fun AlertsScreen(session: Session, onRoute: (String) -> Unit) {
-    val notes = remember { mutableStateListOf<JSONObject>() }
-    val reqs = remember { mutableStateListOf<JSONObject>() }
+    val notes = session.notes
+    val reqs = session.requests
     val scope = rememberCoroutineScope()
     suspend fun load() {
-        withContext(Dispatchers.IO) {
-            runCatching {
-                notes.clear()
-                notes.addAll(
+        val nextNotes =
+            withContext(Dispatchers.IO) {
+                runCatching {
                     Api.get("/api/notifications").arr("items").objects().filter { n ->
                         val title = n.optString("title").lowercase()
                         val link = n.optString("link")
@@ -138,15 +134,24 @@ fun AlertsScreen(session: Session, onRoute: (String) -> Unit) {
                             title != "friend request" &&
                             !title.contains("incoming call") &&
                             !title.contains("incoming video")
-                    },
-                )
-                reqs.clear()
-                reqs.addAll(Api.get("/api/friend-requests").arr("items").objects())
-                session.noteCount = notes.count { it.optString("readAt").isBlank() } + reqs.size
+                    }
+                }.getOrNull()
             }
+        val nextReqs =
+            withContext(Dispatchers.IO) {
+                runCatching { Api.get("/api/friend-requests").arr("items").objects() }.getOrNull()
+            }
+        if (nextNotes != null) replaceList(notes, nextNotes)
+        if (nextReqs != null) replaceList(reqs, nextReqs)
+        session.noteCount = notes.count { it.optString("readAt").isBlank() } + reqs.size
+    }
+    LaunchedEffect(Unit) {
+        if (notes.isEmpty() && reqs.isEmpty()) load()
+        while (isActive) {
+            delay(12_000)
+            load()
         }
     }
-    LaunchedEffect(Unit) { load() }
     Column(Modifier.fillMaxSize().background(Bg).padding(12.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("Notifications", fontWeight = FontWeight.SemiBold, fontSize = 22.sp)
@@ -216,11 +221,15 @@ fun AlertsScreen(session: Session, onRoute: (String) -> Unit) {
 @Composable
 fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, engine: CallEngine) {
     val ctx = LocalContext.current
-    val messages = remember { mutableStateListOf<JSONObject>() }
-    var other by remember { mutableStateOf(JSONObject()) }
+    val messages = session.chatOf(convoId)
+    var other by remember(convoId) {
+        mutableStateOf(session.inbox.find { it.optString("id") == convoId }?.optJSONObject("other") ?: JSONObject())
+    }
     var text by remember { mutableStateOf("") }
     var menu by remember { mutableStateOf(false) }
-    var muted by remember { mutableStateOf(false) }
+    var muted by remember(convoId) {
+        mutableStateOf(session.inbox.find { it.optString("id") == convoId }?.optBoolean("muted") == true)
+    }
     var stickers by remember { mutableStateOf(false) }
     var reactFor by remember { mutableStateOf<String?>(null) }
     var otherReadAt by remember { mutableStateOf("") }
@@ -233,33 +242,37 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, eng
     val pick =
         rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
             if (uri == null) return@rememberLauncherForActivityResult
-            scope.launch(Dispatchers.IO) {
-                runCatching {
-                    val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@launch
-                    val data = "data:image/jpeg;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
-                    photos.add(data)
-                }
+            scope.launch {
+                val data =
+                    withContext(Dispatchers.IO) {
+                        runCatching { compressPhoto(ctx, uri) }.getOrNull()
+                    } ?: return@launch
+                photos.add(data)
             }
         }
 
     LaunchedEffect(convoId) {
+        Cache.peek("/api/conversations/$convoId/messages")?.let { cached ->
+            otherReadAt = cached.optString("otherReadAt")
+            mergeChat(messages, cached.arr("items").objects())
+        }
         while (isActive) {
-            withContext(Dispatchers.IO) {
-                runCatching {
-                    val inbox = Api.get("/api/conversations")
-                    val found = inbox.arr("items").objects().find { it.optString("id") == convoId }
-                    if (found != null) {
-                        other = found.optJSONObject("other") ?: other
-                        muted = found.optBoolean("muted")
-                    }
-                    val data = Api.get("/api/conversations/$convoId/messages")
-                    otherReadAt = data.optString("otherReadAt")
-                    val rows = data.arr("items").objects()
-                    messages.clear()
-                    messages.addAll(rows)
+            val data =
+                withContext(Dispatchers.IO) {
+                    runCatching { Api.get("/api/conversations/$convoId/messages") }.getOrNull()
+                }
+            if (data != null) {
+                otherReadAt = data.optString("otherReadAt")
+                mergeChat(messages, data.arr("items").objects())
+            }
+            if (other.userId().isBlank()) {
+                val found = session.inbox.find { it.optString("id") == convoId }
+                if (found != null) {
+                    other = found.optJSONObject("other") ?: other
+                    muted = found.optBoolean("muted")
                 }
             }
-            delay(900)
+            delay(2200)
         }
     }
     LaunchedEffect(messages.size) {
@@ -269,20 +282,33 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, eng
     val lastMine = messages.lastOrNull { it.optString("senderId") == meId && it.optString("call").isBlank() }
 
     fun send(payload: JSONObject) {
+        val tempId = "tmp-${System.currentTimeMillis()}"
         val temp =
             JSONObject()
-                .put("id", "tmp-${System.currentTimeMillis()}")
+                .put("id", tempId)
                 .put("senderId", meId)
                 .put("body", payload.optString("body"))
                 .put("sticker", payload.optString("sticker"))
                 .put("pending", true)
-        if (payload.has("imageData")) temp.put("imageUrls", payload.optJSONArray("imageData"))
+                .put("createdAt", java.time.Instant.now().toString())
+        if (payload.has("imageData")) {
+            val imgs = payload.optJSONArray("imageData")
+            temp.put("imageUrls", imgs)
+            temp.put("imageUrl", imgs?.optString(0).orEmpty())
+        }
         messages.add(temp)
         text = ""
         photos.clear()
         stickers = false
-        scope.launch(Dispatchers.IO) {
-            runCatching { Api.post("/api/conversations/$convoId/messages", payload) }
+        scope.launch {
+            val saved =
+                withContext(Dispatchers.IO) {
+                    runCatching { Api.post("/api/conversations/$convoId/messages", payload) }.getOrNull()?.optJSONObject("message")
+                }
+            val idx = messages.indexOfFirst { it.optString("id") == tempId }
+            if (idx < 0) return@launch
+            if (saved != null) messages[idx] = saved
+            else messages[idx] = JSONObject(temp.toString()).put("pending", false).put("failed", true)
         }
     }
 
@@ -309,7 +335,7 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, eng
             IconBtn(Icons.Outlined.MoreVert) { menu = !menu }
         }
         LazyColumn(Modifier.weight(1f).padding(10.dp, 12.dp), state = list) {
-            itemsIndexed(messages) { _, m ->
+            itemsIndexed(messages, key = { _, m -> m.optString("id") }) { _, m ->
                 val mine = m.optString("senderId") == meId
                 val call = m.optString("call")
                 if (call.isNotBlank()) {
@@ -373,12 +399,13 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, eng
                                         AsyncImage("file:///android_asset/stickers/$sticker.png", null, modifier = Modifier.size(96.dp))
                                     }
                                     images.forEach { src ->
-                                        AsyncImage(
-                                            src,
-                                            null,
-                                            modifier = Modifier.width(220.dp).clip(RoundedCornerShape(12.dp)).clickable { viewer = src },
-                                            contentScale = ContentScale.Crop,
-                                        )
+                                        if (src.isNotBlank()) {
+                                            MediaImage(
+                                                src,
+                                                modifier = Modifier.width(220.dp).clip(RoundedCornerShape(12.dp)).clickable { viewer = src },
+                                                contentScale = ContentScale.Crop,
+                                            )
+                                        }
                                     }
                                     val body = m.optString("body")
                                     if (body.isNotBlank() && !stickerOnly && !photoOnly) {
@@ -394,6 +421,8 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, eng
                                 (parseIso(otherReadAt) ?: 0) >= (parseIso(m.optString("createdAt")) ?: 0)
                             if (m.optBoolean("pending")) {
                                 Text("Sending", fontSize = 11.sp, color = Muted, modifier = Modifier.padding(end = 4.dp))
+                            } else if (m.optBoolean("failed")) {
+                                Text("Couldn't send", fontSize = 11.sp, color = Rose, modifier = Modifier.padding(end = 4.dp))
                             } else if (seen) {
                                 Avatar(other, 16.dp)
                             } else {
@@ -429,7 +458,7 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, eng
             if (photos.isNotEmpty()) {
                 Row(Modifier.padding(8.dp, 8.dp, 8.dp, 0.dp)) {
                     photos.forEach { src ->
-                        AsyncImage(src, null, modifier = Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
+                        MediaImage(src, modifier = Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
                         Spacer(Modifier.width(8.dp))
                     }
                 }
@@ -443,6 +472,22 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, eng
                     modifier = Modifier.weight(1f),
                     placeholder = { Text("Message") },
                     singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        imeAction = androidx.compose.ui.text.input.ImeAction.Send,
+                    ),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                        onSend = {
+                            if (text.isBlank() && photos.isEmpty()) return@KeyboardActions
+                            val payload = JSONObject()
+                            if (text.isNotBlank()) payload.put("body", text)
+                            if (photos.isNotEmpty()) {
+                                val arr = JSONArray()
+                                photos.forEach { arr.put(it) }
+                                payload.put("imageData", arr)
+                            }
+                            send(payload)
+                        },
+                    ),
                     colors = TextFieldDefaults.colors(
                         unfocusedContainerColor = FeedBg,
                         focusedContainerColor = FeedBg,
@@ -472,7 +517,7 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, eng
         }
         viewer?.let { src ->
             Box(Modifier.fillMaxSize().background(Color(0xFF0C0A09))) {
-                AsyncImage(src, null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                MediaImage(src, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
                 CloseIcon { viewer = null }
             }
         }

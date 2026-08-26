@@ -95,11 +95,19 @@ fun AppShell(session: Session, route: String, onRoute: (String) -> Unit, engine:
                 }
             }
             Box(Modifier.weight(1f)) {
+                KeepAlive(route.startsWith("tabs/home")) {
+                    HomeScreen(session, onRoute, searchOpen) { searchOpen = false }
+                }
+                KeepAlive(route.startsWith("tabs/inbox")) {
+                    InboxScreen(session, onRoute)
+                }
+                KeepAlive(route.startsWith("tabs/alerts")) {
+                    AlertsScreen(session, onRoute)
+                }
+                KeepAlive(route.startsWith("tabs/me")) {
+                    ProfileScreen(session, onRoute, mine = true)
+                }
                 when {
-                    route.startsWith("tabs/home") -> HomeScreen(session, onRoute, searchOpen) { searchOpen = false }
-                    route.startsWith("tabs/inbox") -> InboxScreen(session, onRoute)
-                    route.startsWith("tabs/alerts") -> AlertsScreen(session, onRoute)
-                    route.startsWith("tabs/me") -> ProfileScreen(session, onRoute, mine = true)
                     route.startsWith("chat/") -> ChatScreen(route.removePrefix("chat/"), session, onRoute, engine)
                     route == "friends" -> FriendsScreen(session, onRoute)
                     route == "requests" -> RequestsScreen(session, onRoute)
@@ -108,9 +116,8 @@ fun AppShell(session: Session, route: String, onRoute: (String) -> Unit, engine:
                     route == "store" -> StoreScreen(session, onRoute)
                     route == "wallet" -> WalletScreen(session, onRoute)
                     route.startsWith("player/") -> PlayerScreen(route.removePrefix("player/"), session, onRoute, engine)
-                    route == "compose" -> ComposePostScreen(session) { onRoute("tabs/home") }
+                    route == "compose" -> ComposePostScreen(session) { session.feedEpoch++; onRoute("tabs/home") }
                     route == "edit-profile" -> EditProfileScreen(session) { onRoute("tabs/me") }
-                    else -> HomeScreen(session, onRoute, searchOpen) { searchOpen = false }
                 }
             }
             if (showChrome && route.startsWith("tabs/")) {
@@ -160,6 +167,11 @@ fun AppShell(session: Session, route: String, onRoute: (String) -> Unit, engine:
             }
         }
     }
+}
+
+@Composable
+private fun KeepAlive(visible: Boolean, content: @Composable () -> Unit) {
+    Box(if (visible) Modifier.fillMaxSize() else Modifier.size(0.dp)) { content() }
 }
 
 private fun pageTitle(route: String) =

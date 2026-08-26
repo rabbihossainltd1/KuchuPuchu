@@ -31,6 +31,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.Image
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import org.json.JSONObject
@@ -138,6 +141,18 @@ fun PersonMini(u: JSONObject, onOpen: () -> Unit, trailing: @Composable (() -> U
             Text("@${u.uid()}", color = Muted, fontSize = 13.sp)
         }
         if (trailing != null) trailing()
+    }
+}
+
+@Composable
+fun MediaImage(src: String, modifier: Modifier = Modifier, contentScale: ContentScale = ContentScale.Crop) {
+    if (src.startsWith("data:")) {
+        val bmp = remember(src) { decodeDataUrl(src) }
+        if (bmp != null) {
+            Image(bmp.asImageBitmap(), null, modifier = modifier, contentScale = contentScale)
+        }
+    } else {
+        AsyncImage(src, null, modifier = modifier, contentScale = contentScale)
     }
 }
 

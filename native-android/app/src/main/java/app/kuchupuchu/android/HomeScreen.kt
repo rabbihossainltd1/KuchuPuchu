@@ -57,9 +57,9 @@ import org.json.JSONObject
 
 @Composable
 fun HomeScreen(session: Session, onRoute: (String) -> Unit, searchOpen: Boolean, closeSearch: () -> Unit) {
-    val posts = remember { mutableStateListOf<JSONObject>() }
-    val recs = remember { mutableStateListOf<JSONObject>() }
-    val stories = remember { mutableStateListOf<JSONObject>() }
+    val posts = session.feed
+    val recs = session.recs
+    val stories = session.stories
     val found = remember { mutableStateListOf<JSONObject>() }
     var q by remember { mutableStateOf("") }
     var storyOpen by remember { mutableStateOf(false) }
@@ -69,21 +69,28 @@ fun HomeScreen(session: Session, onRoute: (String) -> Unit, searchOpen: Boolean,
     suspend fun load(query: String = q) {
         withContext(Dispatchers.IO) {
             runCatching {
-                posts.clear()
-                posts.addAll(Api.get("/api/feed").arr("items").objects())
-                recs.clear()
-                recs.addAll(Api.get("/api/discover/recommendations").arr("items").objects())
-                stories.clear()
-                stories.addAll(Api.get("/api/stories").arr("items").objects())
-                if (query.length >= 2) {
-                    found.clear()
-                    found.addAll(Api.get("/api/discover?q=${Api.q(query)}").arr("items").objects())
+                val nextPosts = Api.get("/api/feed").arr("items").objects()
+                val nextRecs = Api.get("/api/discover/recommendations").arr("items").objects()
+                val nextStories = Api.get("/api/stories").arr("items").objects()
+                val nextFound =
+                    if (query.length >= 2) Api.get("/api/discover?q=${Api.q(query)}").arr("items").objects()
+                    else emptyList()
+                withContext(Dispatchers.Main) {
+                    replaceList(posts, nextPosts)
+                    replaceList(recs, nextRecs)
+                    replaceList(stories, nextStories)
+                    if (query.length >= 2) replaceList(found, nextFound)
                 }
             }
         }
     }
 
-    LaunchedEffect(Unit) { load("") }
+    LaunchedEffect(Unit) {
+        if (posts.isEmpty()) load("")
+    }
+    LaunchedEffect(session.feedEpoch) {
+        if (session.feedEpoch > 0) load("")
+    }
 
     Column(Modifier.fillMaxSize().background(FeedBg)) {
         if (searchOpen) {
@@ -143,7 +150,7 @@ fun HomeScreen(session: Session, onRoute: (String) -> Unit, searchOpen: Boolean,
                     }
                     Spacer(Modifier.height(8.dp))
                 }
-                itemsIndexed(posts) { i, post ->
+                itemsIndexed(posts, key = { _, post -> post.optString("id") }) { i, post ->
                     PostCard(post, session, onUser = { onRoute("player/${(post.optJSONObject("author") ?: JSONObject()).userId()}") })
                     Spacer(Modifier.height(8.dp))
                     if ((i + 1) % 3 == 0 && recs.isNotEmpty()) {
@@ -199,7 +206,7 @@ private fun StoryCard(author: JSONObject, first: JSONObject, seen: Boolean, onCl
     Box(Modifier.padding(start = 8.dp).size(112.dp, 196.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xFFE7E3DB)).clickable(onClick = onClick)) {
         val img = first.optString("imageUrl")
         if (img.isNotBlank()) {
-            AsyncImage(img, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            MediaImage(img, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         } else {
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFFFDE68A), Color(0xFFD97706)))), contentAlignment = Alignment.Center) {
                 Text(first.optString("body").ifBlank { author.name() }, color = Ink, fontWeight = FontWeight.Bold, fontSize = 15.sp, modifier = Modifier.padding(10.dp))

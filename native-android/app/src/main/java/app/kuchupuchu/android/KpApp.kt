@@ -12,9 +12,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -28,6 +30,32 @@ class Session {
     var loading by mutableStateOf(true)
     var unread by mutableStateOf(0)
     var noteCount by mutableStateOf(0)
+    var feedEpoch by mutableStateOf(0)
+    val feed = mutableStateListOf<JSONObject>()
+    val stories = mutableStateListOf<JSONObject>()
+    val recs = mutableStateListOf<JSONObject>()
+    val inbox = mutableStateListOf<JSONObject>()
+    val notes = mutableStateListOf<JSONObject>()
+    val requests = mutableStateListOf<JSONObject>()
+    val friends = mutableStateListOf<JSONObject>()
+    private val chats = HashMap<String, SnapshotStateList<JSONObject>>()
+
+    fun chatOf(id: String): SnapshotStateList<JSONObject> =
+        synchronized(chats) { chats.getOrPut(id) { mutableStateListOf() } }
+
+    fun clearLists() {
+        feed.clear()
+        stories.clear()
+        recs.clear()
+        inbox.clear()
+        notes.clear()
+        requests.clear()
+        friends.clear()
+        synchronized(chats) { chats.clear() }
+        unread = 0
+        noteCount = 0
+        feedEpoch = 0
+    }
 }
 
 @Composable
@@ -54,11 +82,23 @@ fun KpApp() {
         val ok =
             withContext(Dispatchers.IO) {
                 runCatching {
-                    val data = Api.get("/api/me")
-                    session.me = data.optJSONObject("user")
+                    val me = Api.get("/api/me").optJSONObject("user")
                     val convos = Api.get("/api/conversations").arr("items").objects()
-                    session.unread = convos.sumOf { it.optInt("unread") }
-                    session.noteCount = Api.get("/api/notifications").optInt("unread")
+                    val notes = Api.get("/api/notifications")
+                    val feed = runCatching { Api.get("/api/feed").arr("items").objects() }.getOrDefault(emptyList())
+                    val stories = runCatching { Api.get("/api/stories").arr("items").objects() }.getOrDefault(emptyList())
+                    val recs =
+                        runCatching { Api.get("/api/discover/recommendations").arr("items").objects() }
+                            .getOrDefault(emptyList())
+                    withContext(Dispatchers.Main) {
+                        session.me = me
+                        replaceList(session.inbox, convos)
+                        session.unread = convos.sumOf { it.optInt("unread") }
+                        session.noteCount = notes.optInt("unread")
+                        replaceList(session.feed, feed)
+                        replaceList(session.stories, stories)
+                        replaceList(session.recs, recs)
+                    }
                     true
                 }.getOrDefault(false)
             }

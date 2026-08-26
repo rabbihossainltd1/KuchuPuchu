@@ -81,7 +81,7 @@ class CallEngine(private val app: Application) {
             scope.launch {
                 while (isActive) {
                     tick()
-                    delay(700)
+                    delay(1600)
                 }
             }
     }

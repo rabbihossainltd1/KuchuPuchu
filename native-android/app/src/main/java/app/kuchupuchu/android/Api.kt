@@ -23,9 +23,29 @@ object Api {
         ctx.getSharedPreferences("kp", 0).edit().putString(TOKEN_KEY, value).apply()
     }
 
-    fun get(path: String): JSONObject = request(path, "GET", null)
+    fun get(path: String, force: Boolean = false): JSONObject {
+        if (!force) Cache.get(path)?.let { return it }
+        val data = request(path, "GET", null)
+        Cache.put(path, data)
+        return data
+    }
 
-    fun post(path: String, body: JSONObject? = JSONObject()): JSONObject = request(path, "POST", body)
+    fun post(path: String, body: JSONObject? = JSONObject()): JSONObject {
+        val data = request(path, "POST", body)
+        if (path.contains("/conversations")) Cache.bust("/api/conversations")
+        if (path.contains("/posts") || path.contains("/feed") || path.contains("/stories")) {
+            Cache.bust("/api/feed")
+            Cache.bust("/api/stories")
+        }
+        if (path.contains("/notifications") || path.contains("/friend")) {
+            Cache.bust("/api/notifications")
+            Cache.bust("/api/friend")
+        }
+        if (path.contains("/api/me") || path.contains("/wallet") || path.contains("/store")) {
+            Cache.bust("/api/me")
+        }
+        return data
+    }
 
     fun patch(path: String, body: JSONObject): JSONObject = request(path, "PATCH", body)
 
