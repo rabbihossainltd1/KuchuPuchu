@@ -51,10 +51,9 @@ function hideSplash() {
 }
 
 export function App() {
-  const { loading } = useAuth();
   useEffect(() => {
-    if (!loading) hideSplash();
-  }, [loading]);
+    hideSplash();
+  }, []);
 
   return (
     <Routes>

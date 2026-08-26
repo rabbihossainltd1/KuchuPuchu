@@ -26,37 +26,15 @@
         position: fixed;
         inset: 0;
         z-index: 9999;
-        display: grid;
-        place-items: center;
         background: #f7f6f4;
-        transition: opacity 0.35s ease;
-      }
-      #splash .splash-inner {
-        display: grid;
-        justify-items: center;
-        gap: 18px;
-      }
-      #splash .splash-app {
-        width: 88px;
-        height: 88px;
-        background: transparent;
-      }
-      #splash .splash-word {
-        width: min(240px, 68vw);
-        height: auto;
       }
       #splash.gone {
-        opacity: 0;
-        pointer-events: none;
+        display: none;
       }
     </style>
   </head>
   <body>
-    <div id="splash" aria-hidden="true">
-      <div class="splash-inner">
-        <img class="splash-app" src="/brand/icon-app-gold.png" alt="KuchuPuchu" />
-      </div>
-    </div>
+    <div id="splash" aria-hidden="true"></div>
     <div id="root"></div>
     <script type="module" src="/main.tsx"></script>
   </body>

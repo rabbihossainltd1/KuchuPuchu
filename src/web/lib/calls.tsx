@@ -47,16 +47,22 @@ type CallCtx = {
 };
 
 const Ctx = createContext<CallCtx | null>(null);
-const ICE = {
+const ICE: RTCConfiguration = {
   iceServers: [
-    { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun1.l.google.com:19302" },
+    { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
+    { urls: "stun:stun.cloudflare.com:3478" },
     {
-      urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443"],
+      urls: [
+        "turn:openrelay.metered.ca:80",
+        "turn:openrelay.metered.ca:80?transport=tcp",
+        "turn:openrelay.metered.ca:443",
+        "turns:openrelay.metered.ca:443",
+      ],
       username: "openrelayproject",
       credential: "openrelayproject",
     },
   ],
+  iceCandidatePoolSize: 4,
 };
 
 declare global {
@@ -66,6 +72,11 @@ declare global {
       startRing?: () => void;
       endAudio?: () => void;
     };
+    KpCallBridge?: {
+      answerFromNotify?: (callId: string) => void;
+      declineFromNotify?: (callId: string) => void;
+    };
+    webkitAudioContext?: typeof AudioContext;
   }
 }
 
@@ -73,6 +84,40 @@ export function useCall() {
   const ctx = useContext(Ctx);
   if (!ctx) throw new Error("CallProvider missing");
   return ctx;
+}
+
+function stubUser(userId: string, person?: PublicUser): PublicUser {
+  return (
+    person ?? {
+      userId,
+      displayName: "Player",
+      username: "player",
+      avatarUrl: null,
+      bio: null,
+      country: null,
+      district: null,
+      approximateArea: null,
+      ffUid: null,
+      ffIgn: null,
+      serverRegion: null,
+      level: null,
+      rank: null,
+      preferredModes: [],
+      playStyle: null,
+      languages: [],
+      availability: [],
+      micPreference: null,
+      relationshipStatus: null,
+      facebookId: null,
+      instagram: null,
+      whatsapp: null,
+      verifiedFf: false,
+      verifiedIdentity: false,
+      reputation: 0,
+      lastActiveAt: new Date().toISOString(),
+      online: false,
+    }
+  );
 }
 
 function playMedia(el: HTMLMediaElement | null, stream: MediaStream | null, mute = false) {
@@ -83,7 +128,11 @@ function playMedia(el: HTMLMediaElement | null, stream: MediaStream | null, mute
   el.muted = mute;
   el.volume = 1;
   if (el.srcObject !== stream) el.srcObject = stream;
-  if (stream) void el.play().catch(() => undefined);
+  if (stream) {
+    const go = () => void el.play().catch(() => undefined);
+    go();
+    window.setTimeout(go, 250);
+  }
 }
 
 function clock(sec: number) {
@@ -108,9 +157,52 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const seenIce = useRef(new Set<string>());
   const ignored = useRef(new Set<string>());
   const liveSince = useRef<number | null>(null);
+  const audioCtx = useRef<AudioContext | null>(null);
   const localVideo = useRef<HTMLVideoElement | null>(null);
   const remoteVideo = useRef<HTMLVideoElement | null>(null);
   const remoteAudio = useRef<HTMLAudioElement | null>(null);
+
+  const routeAudio = useCallback((on: boolean) => {
+    try {
+      window.KpCallAudio?.setSpeaker(on);
+    } catch {
+      /* web */
+    }
+  }, []);
+
+  const hookedKey = useRef("");
+  const hookRemoteSound = useCallback((stream: MediaStream) => {
+    unlockAudio();
+    playMedia(remoteAudio.current, stream, false);
+    const key = stream.getAudioTracks().map((track) => track.id).join("|");
+    if (!key) return;
+    if (hookedKey.current === key) {
+      void audioCtx.current?.resume().catch(() => undefined);
+      return;
+    }
+    hookedKey.current = key;
+    if (window.KpCallAudio) return;
+    try {
+      void audioCtx.current?.close();
+    } catch {
+      /* */
+    }
+    audioCtx.current = null;
+    try {
+      const Ctor = window.AudioContext || window.webkitAudioContext;
+      if (!Ctor) return;
+      const ctx = new Ctor();
+      void ctx.resume();
+      const src = ctx.createMediaStreamSource(stream);
+      const gain = ctx.createGain();
+      gain.gain.value = 1;
+      src.connect(gain);
+      gain.connect(ctx.destination);
+      audioCtx.current = ctx;
+    } catch {
+      /* element fallback */
+    }
+  }, []);
 
   const stopMedia = useCallback(() => {
     stopTone();
@@ -119,6 +211,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
     } catch {
       /* web */
     }
+    try {
+      void audioCtx.current?.close();
+    } catch {
+      /* */
+    }
+    audioCtx.current = null;
+    hookedKey.current = "";
     localRef.current?.getTracks().forEach((track) => track.stop());
     localRef.current = null;
     remoteStreamRef.current = null;
@@ -133,28 +232,30 @@ export function CallProvider({ children }: { children: ReactNode }) {
     setHasLocal(false);
     setElapsed(0);
     playMedia(localVideo.current, null, true);
-    playMedia(remoteVideo.current, null);
+    playMedia(remoteVideo.current, null, true);
     playMedia(remoteAudio.current, null);
   }, []);
 
-  const attachRemote = useCallback((incoming: MediaStream) => {
-    const stream = remoteStreamRef.current ?? new MediaStream();
-    for (const track of incoming.getTracks()) {
-      if (!stream.getTracks().some((item) => item.id === track.id)) stream.addTrack(track);
-    }
-    remoteStreamRef.current = stream;
-    playMedia(remoteVideo.current, stream, true);
-    playMedia(remoteAudio.current, stream, false);
-  }, []);
+  const attachRemote = useCallback(
+    (incoming: MediaStream) => {
+      const stream = remoteStreamRef.current ?? new MediaStream();
+      for (const track of incoming.getTracks()) {
+        if (!stream.getTracks().some((item) => item.id === track.id)) stream.addTrack(track);
+      }
+      remoteStreamRef.current = stream;
+      playMedia(remoteVideo.current, stream, true);
+      hookRemoteSound(stream);
+    },
+    [hookRemoteSound],
+  );
 
-  const makePc = useCallback(
-    (callId: string) => {
-      const pc = new RTCPeerConnection(ICE);
+  const wirePc = useCallback(
+    (pc: RTCPeerConnection, callId: string) => {
       pc.onicecandidate = (event) => {
         if (!event.candidate) return;
         void api(`/api/calls/${callId}/ice`, {
           method: "POST",
-          body: JSON.stringify({ candidate: event.candidate }),
+          body: JSON.stringify({ candidate: event.candidate.toJSON() }),
         }).catch(() => undefined);
       };
       pc.ontrack = (event) => {
@@ -162,36 +263,29 @@ export function CallProvider({ children }: { children: ReactNode }) {
         attachRemote(stream);
       };
       pcRef.current = pc;
-      return pc;
     },
     [attachRemote],
   );
 
-  const media = useCallback(async (kind: CallKind) => {
-    unlockAudio();
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video:
-        kind === "VIDEO"
-          ? {
-              facingMode: "user",
-              width: { ideal: 480 },
-              height: { ideal: 640 },
-              frameRate: { ideal: 24 },
-            }
-          : false,
-    });
-    if (kind === "AUDIO") setCameraOff(true);
-    localRef.current = stream;
-    setHasLocal(true);
-    playMedia(localVideo.current, stream, true);
-    try {
-      window.KpCallAudio?.setSpeaker(true);
-    } catch {
-      /* web */
-    }
-    return stream;
-  }, []);
+  const media = useCallback(
+    async (kind: CallKind) => {
+      unlockAudio();
+      routeAudio(true);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video:
+          kind === "VIDEO"
+            ? { facingMode: "user", width: { ideal: 640 }, height: { ideal: 860 } }
+            : false,
+      });
+      if (kind === "AUDIO") setCameraOff(true);
+      localRef.current = stream;
+      setHasLocal(true);
+      playMedia(localVideo.current, stream, true);
+      return stream;
+    },
+    [routeAudio],
+  );
 
   const pullIce = useCallback(async (callId: string) => {
     const data = await api<{ items: Array<{ id: string; candidate: RTCIceCandidateInit }> }>(
@@ -203,7 +297,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       try {
         await pcRef.current?.addIceCandidate(item.candidate);
       } catch {
-        /* candidate may arrive early */
+        /* early */
       }
     }
   }, []);
@@ -212,11 +306,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
     async (callId?: string) => {
       const id = callId ?? active?.id;
       if (id) ignored.current.add(id);
+      const seconds = liveSince.current ? Math.floor((Date.now() - liveSince.current) / 1000) : 0;
       stopMedia();
       setActive(null);
       setError("");
       if (id && !id.startsWith("pending")) {
-        const seconds = liveSince.current ? Math.floor((Date.now() - liveSince.current) / 1000) : 0;
         await api(`/api/calls/${id}/hangup`, {
           method: "POST",
           body: JSON.stringify({ seconds }),
@@ -227,9 +321,24 @@ export function CallProvider({ children }: { children: ReactNode }) {
   );
 
   const startCall = useCallback(
-    async (userId: string, kind: CallKind) => {
+    async (userId: string, kind: CallKind, person?: PublicUser) => {
       setError("");
       unlockAudio();
+      const placeholder: CallRecord = {
+        id: `pending-${Date.now()}`,
+        kind,
+        status: "RINGING",
+        callerId: "me",
+        calleeId: userId,
+        offerSdp: null,
+        answerSdp: null,
+        incoming: false,
+        other: stubUser(userId, person),
+      };
+      setActive(placeholder);
+      setSpeaker(true);
+      routeAudio(true);
+      playTone("/sounds/calling.wav");
       try {
         const stream = await media(kind);
         const pc = new RTCPeerConnection(ICE);
@@ -238,34 +347,23 @@ export function CallProvider({ children }: { children: ReactNode }) {
         pc.onicecandidate = (event) => {
           if (event.candidate) pending.push(event.candidate);
         };
-        const offer = await pc.createOffer();
+        const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
         await pc.setLocalDescription(offer);
         const created = await api<{ call: CallRecord }>("/api/calls", {
           method: "POST",
           body: JSON.stringify({ userId, kind, offerSdp: offer.sdp }),
         });
-        pc.onicecandidate = (event) => {
-          if (!event.candidate) return;
-          void api(`/api/calls/${created.call.id}/ice`, {
-            method: "POST",
-            body: JSON.stringify({ candidate: event.candidate }),
-          }).catch(() => undefined);
-        };
+        wirePc(pc, created.call.id);
         for (const candidate of pending) {
           void api(`/api/calls/${created.call.id}/ice`, {
             method: "POST",
-            body: JSON.stringify({ candidate }),
+            body: JSON.stringify({ candidate: candidate.toJSON() }),
           }).catch(() => undefined);
         }
-        pc.ontrack = (event) => {
-          const remote = event.streams[0] ?? new MediaStream([event.track]);
-          attachRemote(remote);
-        };
-        pcRef.current = pc;
-        setActive(created.call);
-        playTone("/sounds/calling.wav");
+        setActive({ ...created.call, other: person ?? created.call.other });
       } catch (err) {
         stopMedia();
+        setActive(null);
         setError(
           err instanceof RequestError
             ? err.body.message
@@ -275,7 +373,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         );
       }
     },
-    [attachRemote, media, stopMedia],
+    [media, routeAudio, stopMedia, wirePc],
   );
 
   const answer = useCallback(async () => {
@@ -283,11 +381,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
     setError("");
     stopTone();
     unlockAudio();
+    routeAudio(true);
     try {
       const stream = await media(active.kind);
-      const pc = makePc(active.id);
+      const pc = new RTCPeerConnection(ICE);
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-      if (active.kind === "AUDIO") pc.addTransceiver("video", { direction: "sendrecv" });
+      wirePc(pc, active.id);
       await pc.setRemoteDescription({ type: "offer", sdp: active.offerSdp });
       const answerDesc = await pc.createAnswer();
       await pc.setLocalDescription(answerDesc);
@@ -303,7 +402,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
           : "Could not answer. Allow microphone access and try again.",
       );
     }
-  }, [active, makePc, media]);
+  }, [active, media, routeAudio, wirePc]);
 
   const decline = useCallback(async () => {
     if (!active) return;
@@ -312,6 +411,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
     stopMedia();
     setActive(null);
   }, [active, stopMedia]);
+
+  useEffect(() => {
+    void navigator.mediaDevices
+      ?.getUserMedia({ audio: true })
+      .then((stream) => stream.getTracks().forEach((track) => track.stop()))
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -344,10 +450,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
                   "calls",
                   next.kind === "VIDEO" ? "Incoming video call" : "Incoming call",
                   next.other.displayName,
-                  {
-                    callId: next.id,
-                    link: `/messages/c_${[next.callerId, next.calleeId].sort().join("_")}`,
-                  },
+                  { callId: next.id },
                 );
                 playTone("/sounds/ringtone.wav");
                 try {
@@ -357,6 +460,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
                 }
               }
               return next;
+            }
+            if (current.id.startsWith("pending") && current.calleeId === next.calleeId) {
+              return { ...next, other: current.other };
             }
             if (
               current.id === next.id &&
@@ -379,11 +485,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
           if (next.status === "ACTIVE" || next.status === "RINGING") {
             await pullIce(next.id);
           }
+          if (next.status === "ACTIVE" && remoteStreamRef.current) {
+            hookRemoteSound(remoteStreamRef.current);
+          }
         })
         .catch(() => undefined);
-    }, 800);
+    }, 600);
     return () => window.clearInterval(timer);
-  }, [active, pullIce, stopMedia]);
+  }, [active, hookRemoteSound, pullIce, stopMedia]);
 
   useEffect(() => {
     const stream = localRef.current;
@@ -397,13 +506,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
   }, [muted, cameraOff]);
 
   useEffect(() => {
-    if (!active?.id) return;
-    playMedia(localVideo.current, localRef.current, true);
-    playMedia(remoteVideo.current, remoteStreamRef.current, true);
-    playMedia(remoteAudio.current, remoteStreamRef.current, false);
-  }, [active?.id, hasLocal, remoteReady]);
-
-  useEffect(() => {
     if (!active) {
       stopTone();
       return;
@@ -414,7 +516,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       return;
     }
     stopTone();
-  }, [active?.id, active?.status, active?.incoming]);
+  }, [active]);
 
   useEffect(() => {
     if (active?.status !== "ACTIVE") {
@@ -423,27 +525,19 @@ export function CallProvider({ children }: { children: ReactNode }) {
       return;
     }
     stopTone();
+    routeAudio(speaker);
     if (!liveSince.current) liveSince.current = Date.now();
     const tick = () =>
       setElapsed(Math.floor((Date.now() - (liveSince.current ?? Date.now())) / 1000));
     tick();
     const timer = window.setInterval(tick, 400);
     return () => window.clearInterval(timer);
-  }, [active?.id, active?.status]);
+  }, [active?.id, active?.status, routeAudio, speaker]);
 
   useEffect(() => {
     if (!active) return;
-    try {
-      window.KpCallAudio?.setSpeaker(speaker);
-    } catch {
-      /* web */
-    }
-    const el = remoteAudio.current as
-      (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }) | null;
-    if (el && typeof el.setSinkId === "function") {
-      void el.setSinkId(speaker ? "default" : "").catch(() => undefined);
-    }
-  }, [speaker, active]);
+    routeAudio(speaker);
+  }, [speaker, active, routeAudio]);
 
   async function toggleCamera() {
     if (active?.status !== "ACTIVE") return;
@@ -453,7 +547,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }
     const cam = await navigator.mediaDevices
       .getUserMedia({
-        video: { facingMode: "user", width: { ideal: 480 }, height: { ideal: 640 } },
+        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 860 } },
         audio: false,
       })
       .catch(() => null);
@@ -474,9 +568,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     window.KpCallBridge = {
-      answerFromNotify: () => {
-        void answer();
-      },
+      answerFromNotify: () => void answer(),
       declineFromNotify: (callId) => {
         if (callId && active && callId !== active.id) {
           void api(`/api/calls/${callId}/decline`, { method: "POST" }).catch(() => undefined);
@@ -549,6 +641,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={value}>
       {children}
+      <audio ref={remoteAudio} autoPlay playsInline style={{ display: "none" }} />
       {error && !active ? (
         <div className="call-toast" role="status">
           {error}
@@ -611,7 +704,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
                     <span>{statusLabel}</span>
                   </div>
                 )}
-                <audio ref={remoteAudio} autoPlay playsInline />
                 {error ? <p className="call-error">{error}</p> : null}
                 <div className="call-actions">
                   {ringing && active.incoming ? (
@@ -630,10 +722,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
                   ) : (
                     <>
                       <button
-                        className={live && speaker ? "call-btn on" : "call-btn"}
+                        className={speaker ? "call-btn on" : "call-btn"}
                         type="button"
                         aria-label="Speaker"
-                        disabled={!live}
                         onClick={() => setSpeaker((v) => !v)}
                       >
                         {speaker ? <Volume2 size={22} /> : <VolumeX size={22} />}

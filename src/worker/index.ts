@@ -541,6 +541,11 @@ async function ensureSchema(db: D1Database) {
   } catch {
     /* column already exists */
   }
+  try {
+    await run(db, "ALTER TABLE messages ADD COLUMN reaction TEXT");
+  } catch {
+    /* column already exists */
+  }
   schemaReady = true;
 }
 
@@ -1242,7 +1247,7 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
     const images = rawImages
       .filter((item): item is string => typeof item === "string" && item.startsWith("data:"))
       .slice(0, 4);
-    if (images.some((item) => item.length > 120000)) {
+    if (images.some((item) => item.length > 450000)) {
       fail(400, "Photo is too large. Pick a smaller image.");
     }
     const sticker =
@@ -1305,6 +1310,30 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
       },
       201,
     );
+  }
+
+  const reactMsg = path.match(/^\/api\/conversations\/([^/]+)\/messages\/([^/]+)\/react$/);
+  if (reactMsg && method === "POST") {
+    const cid = reactMsg[1]!;
+    const mid = reactMsg[2]!;
+    const conv = await one<{ members_json: string }>(
+      db,
+      "SELECT members_json FROM conversations WHERE id = ?",
+      cid,
+    );
+    if (!conv) fail(404, "Conversation not found.");
+    const members = parseJson<string[]>(conv.members_json, []);
+    if (!members.includes(uid)) fail(403, "Not in this conversation.");
+    const emoji = String(body.emoji || "").trim().slice(0, 8);
+    if (!emoji) fail(400, "Pick a reaction.");
+    await run(
+      db,
+      "UPDATE messages SET reaction = ? WHERE id = ? AND conversation_id = ?",
+      emoji,
+      mid,
+      cid,
+    );
+    return json({ ok: true, reaction: emoji });
   }
 
   if (path === "/api/calls" && method === "POST") {

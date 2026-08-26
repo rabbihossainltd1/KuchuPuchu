@@ -1,8 +1,17 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ChevronLeft, ImagePlus, Phone, Send, Smile, Video, X } from "lucide-react";
+import {
+  ChevronLeft,
+  Download,
+  ImagePlus,
+  Phone,
+  Send,
+  Smile,
+  Video,
+  X,
+} from "lucide-react";
 import { api, peekCache, RequestError } from "../lib/api";
-import { readPhoto } from "../lib/photo";
+import { readPhoto, savePhoto } from "../lib/photo";
 import { useAuth } from "../lib/auth";
 import { useCall } from "../lib/calls";
 import { lastSeenLabel, timeAgo } from "../lib/time";
@@ -26,6 +35,7 @@ type ChatMessage = {
   imageUrls?: string[] | null;
   sticker?: string | null;
   call?: string | null;
+  reaction?: string | null;
   createdAt?: string;
 };
 
@@ -126,6 +136,11 @@ export function ConversationPage() {
   const [draft, setDraft] = useState("");
   const [photos, setPhotos] = useState<string[]>([]);
   const [stickersOpen, setStickersOpen] = useState(false);
+  const [viewer, setViewer] = useState<{ src: string; message: ChatMessage } | null>(null);
+  const [forwardOpen, setForwardOpen] = useState(false);
+  const [inbox, setInbox] = useState<Conversation[]>(
+    () => peekCache<{ items: Conversation[] }>("/api/conversations")?.items ?? [],
+  );
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -142,10 +157,21 @@ export function ConversationPage() {
         if (older && !media.imageUrls.length && !media.sticker && !media.call) {
           const keep = mediaOf(older);
           if (keep.imageUrls.length || keep.sticker || keep.call) {
-            return { ...item, ...keep, imageUrl: keep.imageUrls[0] ?? null };
+            return {
+              ...item,
+              ...keep,
+              imageUrl: keep.imageUrls[0] ?? null,
+              reaction: item.reaction ?? older.reaction,
+            };
           }
         }
-        return { ...item, imageUrls: media.imageUrls, sticker: media.sticker, call: media.call };
+        return {
+          ...item,
+          imageUrls: media.imageUrls,
+          sticker: media.sticker,
+          call: media.call,
+          reaction: item.reaction ?? older?.reaction ?? null,
+        };
       });
     });
     const inbox = peekCache<{ items: Conversation[] }>("/api/conversations");
@@ -192,10 +218,46 @@ export function ConversationPage() {
     const body = draft.trim();
     if (!body && !photos.length) return;
     await sendPayload({
-      body: body || (photos.length ? "Photo" : ""),
+      body: body || undefined,
       imageData: photos,
     });
   }
+
+  async function reactTo(messageId: string, emoji: string) {
+    if (!id) return;
+    try {
+      await api(`/api/conversations/${id}/messages/${messageId}/react`, {
+        method: "POST",
+        body: JSON.stringify({ emoji }),
+      });
+      setItems((current) =>
+        current.map((item) => (item.id === messageId ? { ...item, reaction: emoji } : item)),
+      );
+    } catch {
+      setError("Could not react.");
+    }
+  }
+
+  async function forwardTo(conversationId: string) {
+    if (!viewer) return;
+    try {
+      await api(`/api/conversations/${conversationId}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ imageData: [viewer.src] }),
+      });
+      setForwardOpen(false);
+      setViewer(null);
+      if (conversationId === id) await load();
+    } catch {
+      setError("Could not forward.");
+    }
+  }
+
+  useEffect(() => {
+    void api<{ items: Conversation[] }>("/api/conversations")
+      .then((data) => setInbox(data.items ?? []))
+      .catch(() => undefined);
+  }, []);
 
   const rows = useMemo(() => {
     const out: Array<{ type: "day"; label: string } | { type: "msg"; item: ChatMessage }> = [];
@@ -283,7 +345,9 @@ export function ConversationPage() {
             );
           }
           const stickerOnly = Boolean(media.sticker);
-          const photoOnly = Boolean(media.imageUrls.length && !row.item.body);
+          const photoOnly = Boolean(
+            media.imageUrls.length && (!row.item.body || row.item.body === "Photo"),
+          );
           return (
             <div
               key={row.item.id}
@@ -307,7 +371,14 @@ export function ConversationPage() {
                 {media.imageUrls.length ? (
                   <div className={media.imageUrls.length > 1 ? "bubble-album" : "bubble-album one"}>
                     {media.imageUrls.map((src) => (
-                      <img key={src.slice(0, 48)} className="bubble-photo" src={src} alt="" />
+                      <button
+                        key={src.slice(0, 48)}
+                        className="bubble-photo-btn"
+                        type="button"
+                        onClick={() => setViewer({ src, message: row.item })}
+                      >
+                        <img className="bubble-photo" src={src} alt="" />
+                      </button>
                     ))}
                   </div>
                 ) : null}
@@ -316,6 +387,7 @@ export function ConversationPage() {
                 !(media.imageUrls.length && row.item.body === "Photo") ? (
                   <span>{row.item.body}</span>
                 ) : null}
+                {row.item.reaction ? <em className="bubble-react">{row.item.reaction}</em> : null}
               </div>
             </div>
           );
@@ -405,6 +477,48 @@ export function ConversationPage() {
           </button>
         </form>
       </div>
+      {viewer ? (
+        <div className="photo-lightbox" role="dialog" aria-label="Photo">
+          <button className="icon-plain photo-close" type="button" onClick={() => setViewer(null)}>
+            <X size={24} />
+          </button>
+          <img src={viewer.src} alt="" />
+          <div className="photo-actions">
+            <button type="button" onClick={() => void savePhoto(viewer.src)}>
+              <Download size={16} /> Save
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setForwardOpen(true);
+                void api<{ items: Conversation[] }>("/api/conversations")
+                  .then((data) => setInbox(data.items ?? []))
+                  .catch(() => undefined);
+              }}
+            >
+              <Send size={16} /> Forward
+            </button>
+            {["❤️", "😂", "😮", "😢", "👍"].map((emoji) => (
+              <button key={emoji} type="button" onClick={() => void reactTo(viewer.message.id, emoji)}>
+                {emoji}
+              </button>
+            ))}
+          </div>
+          {forwardOpen ? (
+            <div className="forward-sheet">
+              <strong>Forward to</strong>
+              {inbox.map((row) => (
+                <button key={row.id} type="button" onClick={() => void forwardTo(row.id)}>
+                  {row.other.displayName}
+                </button>
+              ))}
+              <button type="button" onClick={() => setForwardOpen(false)}>
+                Cancel
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

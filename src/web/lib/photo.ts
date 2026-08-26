@@ -16,7 +16,7 @@ function loadImage(src: string) {
   });
 }
 
-export async function readPhoto(file: File, max = 540, limit = 700000) {
+export async function readPhoto(file: File, max = 1280, limit = 380000) {
   let width = 0;
   let height = 0;
   let source: CanvasImageSource | null = null;
@@ -38,7 +38,7 @@ export async function readPhoto(file: File, max = 540, limit = 700000) {
   }
   const canvas = document.createElement("canvas");
   let scale = Math.min(1, max / Math.max(width, height, 1));
-  let quality = 0.7;
+  let quality = 0.88;
   let data = "";
   for (let i = 0; i < 8; i += 1) {
     canvas.width = Math.max(1, Math.round(width * scale));
@@ -48,9 +48,33 @@ export async function readPhoto(file: File, max = 540, limit = 700000) {
     ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
     data = canvas.toDataURL("image/jpeg", quality);
     if (data.length <= limit) return data;
-    if (quality > 0.28) quality -= 0.12;
-    else scale *= 0.72;
+    if (quality > 0.55) quality -= 0.08;
+    else scale *= 0.85;
   }
   if (!data.startsWith("data:image")) throw new Error("Could not read that photo.");
   return data;
+}
+
+export async function savePhoto(src: string) {
+  const name = `kuchupuchu-${Date.now()}.jpg`;
+  try {
+    const res = await fetch(src);
+    const blob = await res.blob();
+    const file = new File([blob], name, { type: blob.type || "image/jpeg" });
+    if (navigator.share && navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ files: [file], title: "Photo" });
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+  } catch {
+    const link = document.createElement("a");
+    link.href = src;
+    link.download = name;
+    link.click();
+  }
 }

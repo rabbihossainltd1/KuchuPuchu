@@ -6,11 +6,14 @@ import android.media.AudioManager;
 import android.os.Bundle;
 import android.view.View;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
+import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.BridgeWebChromeClient;
 
 public class MainActivity extends BridgeActivity {
     public class CallAudio {
@@ -18,8 +21,8 @@ public class MainActivity extends BridgeActivity {
         public void setSpeaker(boolean on) {
             AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
             if (am == null) return;
-            am.requestAudioFocus(null, AudioManager.STREAM_VOICE_CALL, AudioManager.AUDIOFOCUS_GAIN);
-            am.setMode(AudioManager.MODE_IN_COMMUNICATION);
+            am.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
+            am.setMode(on ? AudioManager.MODE_NORMAL : AudioManager.MODE_IN_COMMUNICATION);
             am.setSpeakerphoneOn(on);
         }
 
@@ -27,7 +30,7 @@ public class MainActivity extends BridgeActivity {
         public void startRing() {
             AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
             if (am == null) return;
-            am.setMode(AudioManager.MODE_RINGTONE);
+            am.setMode(AudioManager.MODE_NORMAL);
             am.setSpeakerphoneOn(true);
         }
 
@@ -43,6 +46,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        setVolumeControlStream(AudioManager.STREAM_MUSIC);
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
                 != PackageManager.PERMISSION_GRANTED
             || ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
@@ -75,6 +79,7 @@ public class MainActivity extends BridgeActivity {
         settings.setLoadWithOverviewMode(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setDomStorageEnabled(true);
+        settings.setJavaScriptEnabled(true);
         webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
         webView.setVerticalScrollBarEnabled(false);
         webView.setHorizontalScrollBarEnabled(false);
@@ -82,5 +87,13 @@ public class MainActivity extends BridgeActivity {
         webView.setLongClickable(false);
         webView.setOnLongClickListener(v -> true);
         webView.addJavascriptInterface(new CallAudio(), "KpCallAudio");
+        webView.setWebChromeClient(
+            new BridgeWebChromeClient(getBridge()) {
+                @Override
+                public void onPermissionRequest(PermissionRequest request) {
+                    request.grant(request.getResources());
+                }
+            }
+        );
     }
 }
