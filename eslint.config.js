@@ -12,6 +12,7 @@ export default tseslint.config(
       "prisma/migrations",
       "src/web/public",
       "android",
+      "native-android",
       "ios",
     ],
   },

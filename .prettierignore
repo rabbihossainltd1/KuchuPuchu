@@ -7,5 +7,6 @@ prisma/migrations
 *.md
 docs
 android
+native-android
 ios
 .github

@@ -1,0 +1,103 @@
+package app.kuchupuchu.android
+
+import android.app.Application
+import android.content.Context
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+
+class Session {
+    var me by mutableStateOf<JSONObject?>(null)
+    var loading by mutableStateOf(true)
+    var unread by mutableStateOf(0)
+    var noteCount by mutableStateOf(0)
+}
+
+@Composable
+fun KpApp() {
+    val ctx = LocalContext.current
+    val session = remember { Session() }
+    val engine = remember { CallEngine(ctx.applicationContext as Application) }
+    var call by remember { mutableStateOf<CallUi?>(null) }
+    var route by remember { mutableStateOf(if (Api.token.isNullOrBlank()) "login" else "boot") }
+
+    DisposableEffect(engine) {
+        engine.onChange = { call = it }
+        engine.start(ctx)
+        onDispose { engine.onChange = null }
+    }
+
+    LaunchedEffect(Api.token) {
+        if (Api.token.isNullOrBlank()) {
+            session.loading = false
+            route = "login"
+            return@LaunchedEffect
+        }
+        session.loading = true
+        val ok =
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val data = Api.get("/api/me")
+                    session.me = data.optJSONObject("user")
+                    val convos = Api.get("/api/conversations").arr("items").objects()
+                    session.unread = convos.sumOf { it.optInt("unread") }
+                    session.noteCount = Api.get("/api/notifications").optInt("unread")
+                    true
+                }.getOrDefault(false)
+            }
+        session.loading = false
+        route = if (ok) "tabs/home" else "login"
+        if (!ok) Api.saveToken(ctx, null)
+    }
+
+    Box(Modifier.fillMaxSize().background(Bg)) {
+        when {
+            session.loading && route == "boot" ->
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Accent)
+                }
+            route == "login" ->
+                LoginScreen(
+                    onAuthed = { user ->
+                        session.me = user
+                        route = "tabs/home"
+                    },
+                )
+            else ->
+                AppShell(
+                    session = session,
+                    route = route,
+                    onRoute = { route = it },
+                    engine = engine,
+                )
+        }
+        call?.let {
+            Box(Modifier.fillMaxSize().background(Bg.copy(alpha = 0.02f))) {
+                CallOverlay(it, engine)
+            }
+        }
+    }
+}
+
+fun logout(ctx: Context, session: Session, go: (String) -> Unit) {
+    Api.saveToken(ctx, null)
+    session.me = null
+    go("login")
+}
