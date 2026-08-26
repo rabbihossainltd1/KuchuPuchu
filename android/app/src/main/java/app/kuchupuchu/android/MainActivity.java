@@ -115,7 +115,6 @@ public class MainActivity extends BridgeActivity {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setDomStorageEnabled(true);
         settings.setJavaScriptEnabled(true);
-        if (Build.VERSION.SDK_INT >= 26) webView.setAudioMuted(false);
         webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
         webView.setVerticalScrollBarEnabled(false);
         webView.setHorizontalScrollBarEnabled(false);
