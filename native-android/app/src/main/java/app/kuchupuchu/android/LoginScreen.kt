@@ -2,6 +2,7 @@ package app.kuchupuchu.android
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -12,8 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -25,6 +24,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -49,36 +50,40 @@ fun LoginScreen(onAuthed: (JSONObject) -> Unit) {
     var busy by remember { mutableStateOf(false) }
 
     Column(
-        Modifier.fillMaxSize().background(Bg).padding(28.dp),
+        Modifier.fillMaxSize().background(Bg).padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Image(painterResource(R.drawable.logo_wordmark), "KuchuPuchu", Modifier.fillMaxWidth(0.7f).height(56.dp))
-        Spacer(Modifier.height(28.dp))
-        Text(if (mode == "login") "Welcome back" else "Create account", fontSize = 22.sp, fontWeight = FontWeight.SemiBold, color = Ink)
-        Spacer(Modifier.height(18.dp))
-        if (mode == "signup") {
-            Field("Display name", displayName) { displayName = it }
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Surface).border(1.dp, Line, RoundedCornerShape(14.dp)).padding(22.dp),
+        ) {
+            Image(painterResource(R.drawable.icon_gold), null, Modifier.size(56.dp), contentScale = ContentScale.Fit)
             Spacer(Modifier.height(10.dp))
-        }
-        Field("Email", email, KeyboardType.Email) { email = it }
-        Spacer(Modifier.height(10.dp))
-        OutlinedTextField(
-            value = password,
-            onValueChange = { password = it },
-            label = { Text("Password") },
-            visualTransformation = PasswordVisualTransformation(),
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        if (error.isNotBlank()) {
-            Spacer(Modifier.height(8.dp))
-            Text(error, color = Rose, fontSize = 13.sp)
-        }
-        Spacer(Modifier.height(16.dp))
-        Button(
-            onClick = {
-                if (busy) return@Button
+            Image(painterResource(R.drawable.logo_wordmark), "KuchuPuchu", Modifier.height(32.dp), contentScale = ContentScale.Fit)
+            Spacer(Modifier.height(18.dp))
+            Text(if (mode == "login") "Welcome back" else "Create account", fontSize = 26.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+            Spacer(Modifier.height(16.dp))
+            if (mode == "signup") {
+                OutlinedTextField(displayName, { displayName = it }, label = { Text("Display name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(10.dp))
+            }
+            OutlinedTextField(email, { email = it }, label = { Text("Email") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email), modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(
+                password,
+                { password = it },
+                label = { Text("Password") },
+                visualTransformation = PasswordVisualTransformation(),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (error.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text(error, color = Rose, fontSize = 13.sp)
+            }
+            Spacer(Modifier.height(16.dp))
+            AccentBtn(if (busy) "…" else if (mode == "login") "Sign in" else "Create account") {
+                if (busy) return@AccentBtn
                 busy = true
                 error = ""
                 scope.launch {
@@ -89,8 +94,7 @@ fun LoginScreen(onAuthed: (JSONObject) -> Unit) {
                                 if (mode == "signup") put("displayName", displayName.trim())
                             }
                         val data = withContext(Dispatchers.IO) { Api.post(path, body) }
-                        val tok = data.optString("token")
-                        Api.saveToken(ctx, tok)
+                        Api.saveToken(ctx, data.optString("token"))
                         val user = data.optJSONObject("user") ?: withContext(Dispatchers.IO) { Api.get("/api/me").optJSONObject("user") }
                         onAuthed(user ?: JSONObject())
                     } catch (e: Exception) {
@@ -99,27 +103,10 @@ fun LoginScreen(onAuthed: (JSONObject) -> Unit) {
                         busy = false
                     }
                 }
-            },
-            modifier = Modifier.fillMaxWidth().height(48.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Ink),
-            shape = RoundedCornerShape(12.dp),
-        ) {
-            Text(if (busy) "…" else if (mode == "login") "Log in" else "Sign up")
-        }
-        TextButton(onClick = { mode = if (mode == "login") "signup" else "login" }) {
-            Text(if (mode == "login") "Need an account? Sign up" else "Have an account? Log in", color = Accent)
+            }
+            TextButton(onClick = { mode = if (mode == "login") "signup" else "login" }) {
+                Text(if (mode == "login") "Create account" else "Have an account? Sign in", color = Accent)
+            }
         }
     }
-}
-
-@Composable
-private fun Field(label: String, value: String, type: KeyboardType = KeyboardType.Text, on: (String) -> Unit) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = on,
-        label = { Text(label) },
-        singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = type),
-        modifier = Modifier.fillMaxWidth(),
-    )
 }

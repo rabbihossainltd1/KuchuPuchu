@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
@@ -29,25 +30,25 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import org.json.JSONObject
 import org.webrtc.RendererCommon
 import org.webrtc.SurfaceViewRenderer
 
-private val CallInk = Color(0xFF1C1917)
-private val CallAccept = Color(0xFF22C55E)
-private val CallEnd = Color(0xFFE11D48)
-private val CallBtn = Color(0xFF44403C)
+private val EndRed = Color(0xFFE11D48)
+private val AcceptGreen = Color(0xFF3F6212)
+private val BtnStone = Color(0xFF44403C)
 
 @Composable
 fun CallOverlay(call: CallUi, engine: CallEngine) {
@@ -73,14 +74,13 @@ fun CallOverlay(call: CallUi, engine: CallEngine) {
         onDispose { }
     }
 
-    Box(Modifier.fillMaxSize().background(CallInk)) {
+    Box(Modifier.fillMaxSize().background(Color(0xFF1C1917))) {
         if (video) {
             AndroidView(
                 factory = { c ->
                     SurfaceViewRenderer(c).apply {
                         setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
-                        layoutParams =
-                            ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                        layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                         engine.attachRemote(this)
                     }
                 },
@@ -97,22 +97,29 @@ fun CallOverlay(call: CallUi, engine: CallEngine) {
                     },
                     modifier =
                         if (incoming) Modifier.fillMaxSize()
-                        else Modifier.align(Alignment.TopEnd).padding(16.dp).size(110.dp, 150.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp)),
+                        else Modifier.align(Alignment.TopEnd).padding(top = 16.dp, end = 14.dp).size(92.dp, 124.dp).clip(RoundedCornerShape(14.dp)),
                 )
             }
-            Column(Modifier.align(Alignment.TopStart).padding(24.dp, 48.dp)) {
-                Text(call.otherName, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
-                Text(label, color = Color.White.copy(0.75f), fontSize = 14.sp)
+            Column(
+                Modifier.align(if (incoming) Alignment.Center else Alignment.TopCenter)
+                    .padding(top = if (incoming) 0.dp else 28.dp)
+                    .fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(call.otherName, color = Color.White, fontSize = if (incoming) 28.sp else 18.sp, fontWeight = FontWeight.SemiBold)
+                Text(label, color = Color(0xFFE7E5E4), fontSize = 13.sp)
             }
         } else {
             Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                Avatar(org.json.JSONObject().put("displayName", call.otherName), 112.dp)
-                Spacer(Modifier.height(16.dp))
+                Avatar(JSONObject().put("displayName", call.otherName), 148.dp)
+                Spacer(Modifier.height(12.dp))
                 Text(call.otherName, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
-                Text(label, color = Color.White.copy(0.7f), fontSize = 15.sp)
+                Box(Modifier.clip(RoundedCornerShape(99.dp)).background(Color(0xFF292524)).padding(horizontal = 12.dp, vertical = 6.dp)) {
+                    Text(label, color = Color(0xFFD6D3D1), fontSize = 13.sp)
+                }
                 if (!live) {
-                    Text(if (call.otherOnline) "Active now" else "Last seen recently", color = Color.White.copy(0.45f), fontSize = 13.sp)
+                    Text(if (call.otherOnline) "Active now" else "Last seen recently", color = Color(0xFFA8A29E), fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
                 }
             }
         }
@@ -122,42 +129,46 @@ fun CallOverlay(call: CallUi, engine: CallEngine) {
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(36.dp, 48.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
-                Round(if (video) Icons.Filled.Videocam else Icons.Filled.Call, CallAccept) { engine.answer() }
-                Round(Icons.Filled.CallEnd, CallEnd) { engine.decline() }
+                Round(if (video) Icons.Filled.Videocam else Icons.Filled.Call, AcceptGreen, 72.dp) { engine.answer() }
+                Round(Icons.Filled.CallEnd, EndRed, 72.dp) { engine.decline() }
             }
         } else {
             Row(
-                Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(16.dp, 36.dp),
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                    .then(if (video) Modifier.background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xE00C0A09)))) else Modifier)
+                    .padding(12.dp, 18.dp, 12.dp, 26.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Round(if (engine.speaker) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff, if (engine.speaker) Color.White else CallBtn, if (engine.speaker) CallInk else Color.White) {
+                Round(if (engine.speaker) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff, if (engine.speaker) Color(0xFFFAFAF9) else BtnStone, 52.dp, if (engine.speaker) Color(0xFF1C1917) else Color.White) {
                     engine.toggleSpeaker()
                 }
-                Round(if (engine.muted) Icons.Filled.MicOff else Icons.Filled.Mic, if (engine.muted) Color.White else CallBtn, if (engine.muted) CallInk else Color.White) {
+                Round(if (engine.muted) Icons.Filled.MicOff else Icons.Filled.Mic, if (engine.muted) Color(0xFFFAFAF9) else BtnStone, 52.dp, if (engine.muted) Color(0xFF1C1917) else Color.White) {
                     if (live) engine.toggleMute()
                 }
                 Round(
                     if (engine.cameraOff || call.kind == "AUDIO") Icons.Filled.VideocamOff else Icons.Filled.Videocam,
-                    if (engine.cameraOff) Color.White else CallBtn,
-                    if (engine.cameraOff) CallInk else Color.White,
+                    if (engine.cameraOff) Color(0xFFFAFAF9) else BtnStone,
+                    52.dp,
+                    if (engine.cameraOff) Color(0xFF1C1917) else Color.White,
                 ) {
                     if (live) engine.toggleCamera()
                 }
-                Round(Icons.Filled.ScreenShare, if (engine.sharing) Color.White else CallBtn, if (engine.sharing) CallInk else Color.White) {
+                Round(Icons.Filled.ScreenShare, if (engine.sharing) Color(0xFFFAFAF9) else BtnStone, 52.dp, if (engine.sharing) Color(0xFF1C1917) else Color.White) {
                     if (live) engine.toggleShare()
                 }
-                Round(Icons.Filled.CallEnd, CallEnd) { engine.hangup() }
+                Round(Icons.Filled.CallEnd, EndRed, 58.dp) { engine.hangup() }
             }
         }
     }
 }
 
 @Composable
-private fun Round(icon: ImageVector, bg: Color, tint: Color = Color.White, onClick: () -> Unit) {
+private fun Round(icon: ImageVector, bg: Color, size: Dp, tint: Color = Color.White, onClick: () -> Unit) {
     Box(
-        Modifier.size(58.dp).clip(CircleShape).background(bg).clickable(onClick = onClick),
+        Modifier.size(size).clip(CircleShape).background(bg).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, null, tint = tint, modifier = Modifier.size(26.dp))
+        Icon(icon, null, tint = tint, modifier = Modifier.size(if (size >= 70.dp) 28.dp else 22.dp))
     }
 }

@@ -10,8 +10,8 @@ android {
         applicationId = "app.kuchupuchu.android"
         minSdk = 24
         targetSdk = 35
-        versionCode = 13
-        versionName = "2.0.0"
+        versionCode = 14
+        versionName = "2.0.1"
     }
     signingConfigs {
         getByName("debug") {
@@ -54,4 +54,5 @@ dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("io.getstream:stream-webrtc-android:1.1.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("io.coil-kt:coil-compose:2.7.0")
 }

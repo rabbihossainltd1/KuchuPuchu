@@ -13,12 +13,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.NotificationsNone
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -29,8 +32,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -41,15 +46,60 @@ import androidx.compose.ui.unit.sp
 fun AppShell(session: Session, route: String, onRoute: (String) -> Unit, engine: CallEngine) {
     val ctx = LocalContext.current
     var drawer by remember { mutableStateOf(false) }
+    var searchOpen by remember { mutableStateOf(false) }
     val tab = route.substringAfter("tabs/").substringBefore("/")
-    Box(Modifier.fillMaxSize()) {
+    val inThread = route.startsWith("chat/")
+    val onHome = route.startsWith("tabs/home")
+    val onProfile = route.startsWith("tabs/me")
+    val showChrome = !inThread
+
+    Box(Modifier.fillMaxSize().background(Bg)) {
         Column(Modifier.fillMaxSize()) {
+            if (showChrome) {
+                Row(
+                    Modifier.fillMaxWidth().background(Surface).padding(start = 4.dp, end = 2.dp, top = 6.dp, bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    MenuIcon { drawer = true }
+                    if (onHome) {
+                        Image(
+                            painterResource(R.drawable.logo_wordmark),
+                            "KuchuPuchu",
+                            modifier = Modifier.height(26.dp).padding(start = 2.dp),
+                            contentScale = ContentScale.Fit,
+                        )
+                        Spacer(Modifier.weight(1f))
+                        PlusIcon { onRoute("compose") }
+                        IconBtn(Icons.Outlined.Search) { searchOpen = !searchOpen }
+                        Box {
+                            IconBtn(Icons.Outlined.ChatBubbleOutline) { onRoute("tabs/inbox") }
+                            if (session.unread > 0) Badge(session.unread, Modifier.align(Alignment.TopEnd))
+                        }
+                    } else {
+                        Text(
+                            pageTitle(route),
+                            Modifier.weight(1f),
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Ink,
+                        )
+                        if (onProfile) PencilIcon { onRoute("edit-profile") }
+                        else {
+                            Text(
+                                "${session.me?.walletBal() ?: 0}",
+                                color = Ink,
+                                modifier = Modifier.clickable { onRoute("wallet") }.padding(8.dp),
+                            )
+                        }
+                    }
+                }
+            }
             Box(Modifier.weight(1f)) {
                 when {
-                    route.startsWith("tabs/home") -> HomeScreen(session, onRoute) { drawer = true }
+                    route.startsWith("tabs/home") -> HomeScreen(session, onRoute, searchOpen) { searchOpen = false }
                     route.startsWith("tabs/inbox") -> InboxScreen(session, onRoute)
                     route.startsWith("tabs/alerts") -> AlertsScreen(session, onRoute)
-                    route.startsWith("tabs/me") -> ProfileScreen(session, onRoute, mine = true) { drawer = true }
+                    route.startsWith("tabs/me") -> ProfileScreen(session, onRoute, mine = true)
                     route.startsWith("chat/") -> ChatScreen(route.removePrefix("chat/"), session, onRoute, engine)
                     route == "friends" -> FriendsScreen(session, onRoute)
                     route == "requests" -> RequestsScreen(session, onRoute)
@@ -59,59 +109,88 @@ fun AppShell(session: Session, route: String, onRoute: (String) -> Unit, engine:
                     route == "wallet" -> WalletScreen(session, onRoute)
                     route.startsWith("player/") -> PlayerScreen(route.removePrefix("player/"), session, onRoute, engine)
                     route == "compose" -> ComposePostScreen(session) { onRoute("tabs/home") }
-                    else -> HomeScreen(session, onRoute) { drawer = true }
+                    route == "edit-profile" -> EditProfileScreen(session) { onRoute("tabs/me") }
+                    else -> HomeScreen(session, onRoute, searchOpen) { searchOpen = false }
                 }
             }
-            if (route.startsWith("tabs/")) {
+            if (showChrome && route.startsWith("tabs/")) {
                 Row(
-                    Modifier.fillMaxWidth().background(Surface).padding(vertical = 8.dp),
+                    Modifier.fillMaxWidth().background(Surface).padding(top = 8.dp, bottom = 10.dp),
                     horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Tab("Home", Icons.Outlined.Home, tab == "home") { onRoute("tabs/home") }
-                    Tab("Messages", Icons.Outlined.ChatBubbleOutline, tab == "inbox", session.unread) { onRoute("tabs/inbox") }
-                    Tab("Alerts", Icons.Outlined.NotificationsNone, tab == "alerts", session.noteCount) { onRoute("tabs/alerts") }
-                    Tab("Profile", Icons.Outlined.Person, tab == "me") { onRoute("tabs/me") }
+                    NavIco(Icons.Outlined.Home, tab == "home") { onRoute("tabs/home") }
+                    NavIco(Icons.Outlined.ChatBubbleOutline, tab == "inbox", session.unread) { onRoute("tabs/inbox") }
+                    NavIco(Icons.Outlined.NotificationsNone, tab == "alerts", session.noteCount) { onRoute("tabs/alerts") }
+                    NavIco(Icons.Outlined.Person, tab == "me") { onRoute("tabs/me") }
                 }
             }
         }
         if (drawer) {
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(0.35f)).clickable { drawer = false })
+            Box(Modifier.fillMaxSize().background(Color(0x591C1917)).clickable { drawer = false })
             Column(
-                Modifier.fillMaxHeight().width(280.dp).align(Alignment.CenterEnd).background(Surface).padding(18.dp),
+                Modifier.fillMaxHeight().width(300.dp).align(Alignment.CenterStart).background(Surface).padding(16.dp, 18.dp),
             ) {
-                Image(painterResource(R.drawable.logo_wordmark), null, Modifier.height(28.dp))
-                Spacer(Modifier.height(18.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Image(painterResource(R.drawable.icon_gold), null, Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)))
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(session.me?.name().orEmpty(), fontWeight = FontWeight.SemiBold)
+                        Text("@${session.me?.uid().orEmpty()}", color = Muted, fontSize = 13.sp)
+                    }
+                    CloseIcon { drawer = false }
+                }
+                Spacer(Modifier.height(16.dp))
+                DrawerItem("My profile") { drawer = false; onRoute("tabs/me") }
                 DrawerItem("Friends") { drawer = false; onRoute("friends") }
                 DrawerItem("Requests") { drawer = false; onRoute("requests") }
-                DrawerItem("Settings") { drawer = false; onRoute("settings") }
-                DrawerItem("Find Duo") { drawer = false; onRoute("duo") }
+                DrawerItem("Find duo") { drawer = false; onRoute("duo") }
                 DrawerItem("Store") { drawer = false; onRoute("store") }
-                DrawerItem("Add Funds") { drawer = false; onRoute("wallet") }
-                DrawerItem("My Profile") { drawer = false; onRoute("tabs/me") }
+                DrawerItem("Add funds") { drawer = false; onRoute("wallet") }
+                DrawerItem("Settings") { drawer = false; onRoute("settings") }
                 HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Line)
-                DrawerItem("Log out") {
-                    drawer = false
-                    logout(ctx, session, onRoute)
-                }
+                Text(
+                    "Sign out",
+                    color = Muted,
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        drawer = false
+                        logout(ctx, session, onRoute)
+                    }.padding(vertical = 12.dp),
+                )
             }
         }
     }
 }
 
+private fun pageTitle(route: String) =
+    when {
+        route.startsWith("tabs/inbox") -> "Messages"
+        route.startsWith("tabs/alerts") -> "Notifications"
+        route.startsWith("tabs/me") -> "Profile"
+        route == "friends" -> "Friends"
+        route == "requests" -> "Requests"
+        route == "duo" -> "Find duo"
+        route == "settings" -> "Settings"
+        route == "store" -> "Store"
+        route == "wallet" -> "Add funds"
+        else -> "KuchuPuchu"
+    }
+
 @Composable
-private fun Tab(label: String, icon: ImageVector, on: Boolean, badge: Int = 0, click: () -> Unit) {
-    Column(Modifier.clickable(onClick = click).padding(horizontal = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Box {
-            Icon(icon, label, tint = if (on) Accent else Muted)
-            if (badge > 0) {
-                Box(
-                    Modifier.align(Alignment.TopEnd).background(Rose).padding(horizontal = 4.dp),
-                ) {
-                    Text("${if (badge > 9) "9+" else badge}", color = Color.White, fontSize = 9.sp)
-                }
-            }
-        }
-        Text(label, fontSize = 10.sp, color = if (on) Accent else Muted)
+private fun NavIco(icon: ImageVector, on: Boolean, badge: Int = 0, click: () -> Unit) {
+    Box(Modifier.clickable(onClick = click).padding(horizontal = 18.dp, vertical = 4.dp)) {
+        Icon(icon, null, tint = if (on) Accent else Muted, modifier = Modifier.size(22.dp))
+        if (badge > 0) Badge(badge, Modifier.align(Alignment.TopEnd))
+    }
+}
+
+@Composable
+fun Badge(n: Int, modifier: Modifier = Modifier) {
+    Box(
+        modifier.background(Rose, RoundedCornerShape(99.dp)).padding(horizontal = 4.dp).height(16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(if (n > 9) "9+" else "$n", color = Color.White, fontSize = 10.sp)
     }
 }
 
