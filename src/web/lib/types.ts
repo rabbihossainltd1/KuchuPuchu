@@ -53,13 +53,14 @@ export type Me = {
   };
   privacy: Privacy;
   notificationPreferences: {
-    social: boolean;
-    matching: boolean;
     messaging: boolean;
+    calls: boolean;
+    requests: boolean;
+    likes: boolean;
+    comments: boolean;
+    follow: boolean;
     gifting: boolean;
     wallet: boolean;
-    payment: boolean;
-    referral: boolean;
   } | null;
 };
 

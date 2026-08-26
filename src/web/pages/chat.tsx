@@ -6,6 +6,7 @@ import { readPhoto } from "../lib/photo";
 import { useAuth } from "../lib/auth";
 import { useCall } from "../lib/calls";
 import { lastSeenLabel, timeAgo } from "../lib/time";
+import { STICKERS, stickerSrc } from "../lib/stickers";
 import { Avatar, Empty, Notice, Spinner } from "../components/ui";
 import type { PublicUser } from "../lib/types";
 
@@ -26,39 +27,6 @@ type ChatMessage = {
   sticker?: string | null;
   createdAt?: string;
 };
-
-const STICKERS = [
-  "😀",
-  "😂",
-  "🥰",
-  "😍",
-  "😘",
-  "😎",
-  "😭",
-  "😡",
-  "👍",
-  "🙏",
-  "🔥",
-  "💯",
-  "🎉",
-  "❤️",
-  "💔",
-  "👀",
-  "🤔",
-  "😴",
-  "🤗",
-  "💪",
-  "✨",
-  "🌹",
-  "🎂",
-  "🎮",
-  "🏆",
-  "🤝",
-  "😅",
-  "🙄",
-  "😇",
-  "🤩",
-];
 
 function mediaOf(item: ChatMessage) {
   const imageUrls = item.imageUrls?.length ? item.imageUrls : item.imageUrl ? [item.imageUrl] : [];
@@ -168,7 +136,20 @@ export function ConversationPage() {
       api<{ items: ChatMessage[] }>(`/api/conversations/${id}/messages`),
       api<{ items: Conversation[] }>("/api/conversations"),
     ]);
-    setItems(thread.items);
+    setItems((current) => {
+      const prev = new Map(current.map((item) => [item.id, item]));
+      return thread.items.map((item) => {
+        const older = prev.get(item.id);
+        const media = mediaOf(item);
+        if (older && !media.imageUrls.length && !media.sticker) {
+          const keep = mediaOf(older);
+          if (keep.imageUrls.length || keep.sticker) {
+            return { ...item, ...keep, imageUrl: keep.imageUrls[0] ?? null };
+          }
+        }
+        return { ...item, imageUrls: media.imageUrls, sticker: media.sticker };
+      });
+    });
     setOther(inbox.items.find((item) => item.id === id)?.other ?? null);
   }, [id]);
 
@@ -210,7 +191,10 @@ export function ConversationPage() {
     event.preventDefault();
     const body = draft.trim();
     if (!body && !photos.length) return;
-    await sendPayload({ body, imageData: photos });
+    await sendPayload({
+      body: body || (photos.length ? "Photo" : ""),
+      imageData: photos,
+    });
   }
 
   const rows = useMemo(() => {
@@ -268,8 +252,8 @@ export function ConversationPage() {
           <strong className="header-title">Conversation</strong>
         )}
       </header>
-      {error ? <Notice tone="danger">{error}</Notice> : null}
       <div className="thread chat-thread">
+        {error ? <Notice tone="danger">{error}</Notice> : null}
         {rows.map((row, index) =>
           row.type === "day" ? (
             <div key={`day-${row.label}-${index}`} className="chat-day">
@@ -289,7 +273,15 @@ export function ConversationPage() {
                 }`}
               >
                 {mediaOf(row.item).sticker ? (
-                  <span className="bubble-sticker">{mediaOf(row.item).sticker}</span>
+                  stickerSrc(mediaOf(row.item).sticker!) ? (
+                    <img
+                      className="bubble-sticker-img"
+                      src={stickerSrc(mediaOf(row.item).sticker!)!}
+                      alt=""
+                    />
+                  ) : (
+                    <span className="bubble-sticker">{mediaOf(row.item).sticker}</span>
+                  )
                 ) : null}
                 {mediaOf(row.item).imageUrls.length ? (
                   <div
@@ -302,7 +294,11 @@ export function ConversationPage() {
                     ))}
                   </div>
                 ) : null}
-                {row.item.body ? <span>{row.item.body}</span> : null}
+                {row.item.body &&
+                !mediaOf(row.item).sticker &&
+                !(mediaOf(row.item).imageUrls.length && row.item.body === "Photo") ? (
+                  <span>{row.item.body}</span>
+                ) : null}
               </div>
             </div>
           ),
@@ -312,14 +308,14 @@ export function ConversationPage() {
       <div className="chat-dock">
         {stickersOpen ? (
           <div className="sticker-tray" role="listbox" aria-label="Stickers">
-            {STICKERS.map((sticker) => (
+            {STICKERS.map((item) => (
               <button
-                key={sticker}
+                key={item.id}
                 className="sticker-btn"
                 type="button"
-                onClick={() => void sendPayload({ sticker })}
+                onClick={() => void sendPayload({ sticker: item.id, body: item.name })}
               >
-                {sticker}
+                <img src={item.src} alt={item.name} />
               </button>
             ))}
           </div>

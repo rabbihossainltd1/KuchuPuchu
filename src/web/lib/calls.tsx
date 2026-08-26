@@ -24,6 +24,7 @@ import {
 import { api, RequestError } from "./api";
 import type { PublicUser } from "./types";
 import { lastSeenLabel } from "./time";
+import { pingOs } from "./notify";
 import { Avatar } from "../components/ui";
 
 type CallKind = "AUDIO" | "VIDEO";
@@ -81,6 +82,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const localRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const seenIce = useRef(new Set<string>());
+  const ignored = useRef(new Set<string>());
   const localVideo = useRef<HTMLVideoElement | null>(null);
   const remoteVideo = useRef<HTMLVideoElement | null>(null);
   const remoteAudio = useRef<HTMLAudioElement | null>(null);
@@ -160,6 +162,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const hangup = useCallback(
     async (callId?: string) => {
       const id = callId ?? active?.id;
+      if (id) ignored.current.add(id);
       stopMedia();
       setActive(null);
       setError("");
@@ -244,6 +247,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   const decline = useCallback(async () => {
     if (!active) return;
+    ignored.current.add(active.id);
     await api(`/api/calls/${active.id}/decline`, { method: "POST" }).catch(() => undefined);
     stopMedia();
     setActive(null);
@@ -254,15 +258,38 @@ export function CallProvider({ children }: { children: ReactNode }) {
       void api<{ items: CallRecord[] }>("/api/calls/active")
         .then(async (data) => {
           const next = data.items[0] ?? null;
-          if (!next) {
-            if (active && ["RINGING", "ACTIVE"].includes(active.status)) {
+          if (!next || ignored.current.has(next.id)) {
+            if (!next && active && ["RINGING", "ACTIVE"].includes(active.status)) {
               stopMedia();
               setActive(null);
             }
             return;
           }
+          if (["ENDED", "DECLINED", "MISSED", "CANCELLED"].includes(next.status)) {
+            ignored.current.add(next.id);
+            stopMedia();
+            setActive(null);
+            return;
+          }
           setActive((current) => {
-            if (!current) return next;
+            if (ignored.current.has(next.id)) return current;
+            if (!current) {
+              if (next.incoming && next.status === "RINGING") {
+                void pingOs(
+                  "calls",
+                  next.kind === "VIDEO" ? "Incoming video call" : "Incoming call",
+                  next.other.displayName,
+                );
+              }
+              return next;
+            }
+            if (
+              current.id === next.id &&
+              current.status === next.status &&
+              current.answerSdp === next.answerSdp
+            ) {
+              return current;
+            }
             return { ...current, ...next };
           });
           if (
@@ -275,10 +302,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
           }
           if (next.status === "ACTIVE" || next.status === "RINGING") {
             await pullIce(next.id);
-          }
-          if (["ENDED", "DECLINED", "MISSED", "CANCELLED"].includes(next.status)) {
-            stopMedia();
-            setActive(null);
           }
         })
         .catch(() => undefined);
@@ -298,10 +321,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
   }, [muted, cameraOff]);
 
   useEffect(() => {
+    if (!active?.id) return;
     playMedia(localVideo.current, localRef.current);
     playMedia(remoteVideo.current, remoteStreamRef.current);
     playMedia(remoteAudio.current, remoteStreamRef.current);
-  }, [active]);
+  }, [active?.id, hasLocal]);
 
   useEffect(() => {
     if (!active || active.status !== "ACTIVE") return;

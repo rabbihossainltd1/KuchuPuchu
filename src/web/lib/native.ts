@@ -32,6 +32,13 @@ export async function bootNative() {
   } catch {
     /* optional */
   }
+
+  try {
+    const { askNotifyPermission } = await import("./notify");
+    await askNotifyPermission();
+  } catch {
+    /* optional */
+  }
 }
 
 export function onNativeBack(handler: () => boolean) {

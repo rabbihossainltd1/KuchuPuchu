@@ -35,7 +35,9 @@ public class MainActivity extends BridgeActivity {
                 new String[] {
                     Manifest.permission.CAMERA,
                     Manifest.permission.RECORD_AUDIO,
-                    Manifest.permission.MODIFY_AUDIO_SETTINGS
+                    Manifest.permission.MODIFY_AUDIO_SETTINGS,
+                    Manifest.permission.POST_NOTIFICATIONS,
+                    Manifest.permission.VIBRATE
                 },
                 42
             );

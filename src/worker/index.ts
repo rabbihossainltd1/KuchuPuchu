@@ -98,6 +98,19 @@ function defaultPrivacy() {
   };
 }
 
+function defaultNotif() {
+  return {
+    messaging: true,
+    calls: true,
+    requests: true,
+    likes: true,
+    comments: true,
+    follow: true,
+    gifting: true,
+    wallet: true,
+  };
+}
+
 type UserRow = {
   id: string;
   email: string | null;
@@ -118,6 +131,7 @@ type UserRow = {
   privacy_json: string;
   created_at: string;
   last_active_at: string;
+  notif_json?: string | null;
 };
 
 function parseJson<T>(raw: string, fallback: T): T {
@@ -166,13 +180,8 @@ function meFrom(row: UserRow) {
     profile,
     privacy,
     notificationPreferences: {
-      social: true,
-      matching: true,
-      messaging: true,
-      gifting: true,
-      wallet: true,
-      payment: true,
-      referral: true,
+      ...defaultNotif(),
+      ...parseJson(row.notif_json ?? "{}", {}),
     },
   };
 }
@@ -356,7 +365,21 @@ async function listPeople(db: D1Database, viewer: string) {
   return rows.map((row) => publicFrom(row, viewer)).filter((p) => !blocked.has(p.userId));
 }
 
-async function notify(db: D1Database, userId: string, title: string, body: string, link?: string) {
+async function notify(
+  db: D1Database,
+  userId: string,
+  title: string,
+  body: string,
+  link?: string,
+  kind: keyof ReturnType<typeof defaultNotif> = "messaging",
+) {
+  const row = await one<{ notif_json: string | null }>(
+    db,
+    "SELECT notif_json FROM users WHERE id = ?",
+    userId,
+  );
+  const prefs = { ...defaultNotif(), ...parseJson(row?.notif_json ?? "{}", {}) };
+  if (prefs[kind] === false) return;
   await run(
     db,
     "INSERT INTO notifications (id, user_id, title, body, link, read_at, created_at) VALUES (?, ?, ?, ?, ?, NULL, ?)",
@@ -440,6 +463,11 @@ async function ensureSchema(db: D1Database) {
   if (schemaReady) return;
   try {
     await run(db, "ALTER TABLE messages ADD COLUMN image_url TEXT");
+  } catch {
+    /* column already exists */
+  }
+  try {
+    await run(db, "ALTER TABLE users ADD COLUMN notif_json TEXT");
   } catch {
     /* column already exists */
   }
@@ -593,6 +621,16 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
     return json({ ok: true });
   }
 
+  if (path === "/api/me/notifications" && method === "PATCH") {
+    const current = { ...defaultNotif(), ...parseJson(me.notif_json ?? "{}", {}) };
+    const next = { ...current };
+    for (const key of Object.keys(defaultNotif()) as Array<keyof ReturnType<typeof defaultNotif>>) {
+      if (typeof body[key] === "boolean") next[key] = body[key] as boolean;
+    }
+    await run(db, "UPDATE users SET notif_json = ? WHERE id = ?", JSON.stringify(next), uid);
+    return json({ ok: true, notificationPreferences: next });
+  }
+
   if (path === "/api/feed") {
     const friends = await friendIds(db, uid);
     const posts = await all<{
@@ -681,6 +719,7 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
           "New like",
           `${actor.displayName} liked your post`,
           "/home",
+          "likes",
         );
       }
     }
@@ -708,7 +747,14 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
       postId,
     );
     if (post && post.author_id !== uid) {
-      await notify(db, post.author_id, "New comment", `${me.display_name} commented`, "/home");
+      await notify(
+        db,
+        post.author_id,
+        "New comment",
+        `${me.display_name} commented`,
+        "/home",
+        "comments",
+      );
     }
     return json(await loadPost(db, postId, uid), 201);
   }
@@ -854,6 +900,14 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
       follow[1],
       nowIso(),
     );
+    await notify(
+      db,
+      follow[1]!,
+      "New follow",
+      `${me.display_name} followed you`,
+      `/players/${uid}`,
+      "follow",
+    );
     return json({ ok: true });
   }
   const block = path.match(/^\/api\/users\/([^/]+)\/block$/);
@@ -931,6 +985,7 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
       "Friend request",
       `${me.display_name} sent you a friend request`,
       "/requests",
+      "requests",
     );
     return json({ ok: true });
   }
@@ -956,6 +1011,7 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
       "Request accepted",
       "Your friend request was accepted.",
       "/friends",
+      "requests",
     );
     return json({ ok: true });
   }
@@ -992,7 +1048,14 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
       body.mode || "CLASH_SQUAD",
       nowIso(),
     );
-    await notify(db, target, "Duo invite", `${me.display_name} invited you to queue`, "/requests");
+    await notify(
+      db,
+      target,
+      "Duo invite",
+      `${me.display_name} invited you to queue`,
+      "/requests",
+      "requests",
+    );
     return json({ id: added });
   }
   const duoAct = path.match(/^\/api\/duo-requests\/([^/]+)\/(accept|decline|cancel)$/);
@@ -1148,7 +1211,15 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
       JSON.stringify(unread),
       cid,
     );
-    if (other) await notify(db, other, me.display_name, preview.slice(0, 80), `/messages/${cid}`);
+    if (other)
+      await notify(
+        db,
+        other,
+        me.display_name,
+        preview.slice(0, 80),
+        `/messages/${cid}`,
+        "messaging",
+      );
     return json(
       {
         message: {
@@ -1208,6 +1279,16 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
       lastActiveAt: nowIso(),
       online: false,
     };
+    if (other) {
+      await notify(
+        db,
+        other,
+        kind === "VIDEO" ? "Incoming video call" : "Incoming call",
+        me.display_name,
+        "/messages",
+        "calls",
+      );
+    }
     return json({
       call: {
         id: callId,
@@ -1489,7 +1570,14 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
       nowIso(),
     );
     await run(db, "DELETE FROM inventory WHERE id = ?", invId);
-    await notify(db, receiverId, "Gift received", "Someone sent you a store item.", "/inventory");
+    await notify(
+      db,
+      receiverId,
+      "Gift received",
+      "Someone sent you a store item.",
+      "/inventory",
+      "gifting",
+    );
     return json({ ok: true });
   }
 

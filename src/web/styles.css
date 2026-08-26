@@ -761,16 +761,30 @@ textarea:focus {
 }
 .sticker-tray {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 4px;
-  padding: 10px 10px 0;
-  max-height: 168px;
-  overflow: auto;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px 10px 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  border-top: 1px solid var(--line);
 }
 .sticker-btn {
-  min-height: 44px;
-  font-size: 26px;
-  border-radius: 12px;
+  min-height: 64px;
+  padding: 4px;
+  border-radius: 16px;
+  background: var(--bg);
+}
+.sticker-btn img,
+.bubble-sticker-img {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  display: block;
+  margin: 0 auto;
+}
+.bubble-sticker-img {
+  width: 96px;
+  height: 96px;
 }
 .sticker-btn:hover,
 .icon-plain.on {

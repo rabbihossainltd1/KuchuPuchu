@@ -91,13 +91,14 @@ export function skeletonMe(fb: User, extras?: { displayName?: string; username?:
     profile: defaultProfile(),
     privacy: defaultPrivacy(),
     notificationPreferences: {
-      social: true,
-      matching: true,
       messaging: true,
+      calls: true,
+      requests: true,
+      likes: true,
+      comments: true,
+      follow: true,
       gifting: true,
       wallet: true,
-      payment: true,
-      referral: true,
     },
   };
 }
@@ -132,13 +133,14 @@ export function meFromDoc(id: string, data: UserDoc, fb?: User): Me {
     profile,
     privacy,
     notificationPreferences: {
-      social: true,
-      matching: true,
       messaging: true,
+      calls: true,
+      requests: true,
+      likes: true,
+      comments: true,
+      follow: true,
       gifting: true,
       wallet: true,
-      payment: true,
-      referral: true,
     },
   };
 }
