@@ -885,6 +885,7 @@ textarea:focus {
   grid-template-rows: 1fr auto;
 }
 .call-stage.video {
+  display: block;
   min-height: 100dvh !important;
 }
 .remote-video,
@@ -892,9 +893,12 @@ textarea:focus {
   background: #0c0a09;
 }
 .remote-video {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  z-index: 1;
 }
 .remote-video.idle,
 .local-video.idle {
@@ -918,66 +922,98 @@ video::-webkit-media-controls-overlay-play-button {
 }
 .call-live-name {
   position: absolute;
-  left: 16px;
-  top: max(16px, env(safe-area-inset-top));
+  left: 0;
+  right: 0;
+  top: max(20px, env(safe-area-inset-top));
+  z-index: 4;
   color: #fafaf9;
   display: grid;
+  justify-items: center;
   gap: 2px;
-  text-shadow: 0 1px 4px #000;
+  text-align: center;
+  text-shadow: 0 1px 6px #000;
+  pointer-events: none;
 }
 .call-live-name span {
   font-size: 13px;
-  color: #d6d3d1;
+  color: #e7e5e4;
 }
 .local-video {
   position: absolute;
-  width: 112px;
-  height: 152px;
+  width: 92px;
+  height: 124px;
   object-fit: cover;
-  right: 16px;
+  right: 14px;
   top: max(16px, env(safe-area-inset-top));
+  z-index: 5;
   border-radius: 14px;
   background: #292524;
-  border: 2px solid rgba(255, 255, 255, 0.2);
-}
-.call-stage.video .call-audio {
-  position: absolute;
-  inset: 0 0 110px 0;
+  border: 2px solid rgba(255, 255, 255, 0.35);
 }
 .call-audio {
   display: grid;
   justify-items: center;
   align-content: center;
   gap: 12px;
-  padding: 48px 20px 24px;
+  padding: 48px 20px 16px;
   text-align: center;
 }
+.call-audio h2 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 650;
+}
 .call-audio .avatar.lg {
-  width: 112px;
-  height: 112px;
-  font-size: 36px;
+  width: 148px;
+  height: 148px;
+  font-size: 48px;
 }
 .call-status {
   color: #d6d3d1;
   font-size: 14px;
 }
+.call-pill {
+  margin: 0;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #292524;
+  color: #d6d3d1;
+  font-size: 13px;
+}
+.call-error {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 118px;
+  z-index: 6;
+  text-align: center;
+  color: #fecaca;
+  font-size: 13px;
+}
 .call-actions {
   position: relative;
-  left: auto;
-  right: auto;
-  bottom: auto;
+  z-index: 6;
   display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 16px;
-  padding: 20px 16px calc(28px + env(safe-area-inset-bottom));
+  justify-content: space-evenly;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 8px;
+  padding: 18px 12px calc(26px + env(safe-area-inset-bottom));
+}
+.call-stage.video .call-actions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(transparent, rgba(12, 10, 9, 0.88) 42%);
 }
 .call-btn {
   border: 0;
   border-radius: 50%;
-  width: 58px;
-  height: 58px;
-  min-height: 58px;
+  width: 52px;
+  height: 52px;
+  min-width: 52px;
+  min-height: 52px;
   padding: 0;
   display: grid;
   place-items: center;
@@ -985,6 +1021,7 @@ video::-webkit-media-controls-overlay-play-button {
   cursor: pointer;
   background: #44403c;
   color: #fff;
+  flex: 0 0 auto;
 }
 .call-btn.on {
   background: #fafaf9;
@@ -992,13 +1029,15 @@ video::-webkit-media-controls-overlay-play-button {
 }
 .call-btn.accept {
   background: #3f6212;
-  width: 68px;
-  height: 68px;
+  width: 64px;
+  height: 64px;
+  min-width: 64px;
 }
 .call-btn.end {
-  background: #9f1239;
-  width: 68px;
-  height: 68px;
+  background: #e11d48;
+  width: 58px;
+  height: 58px;
+  min-width: 58px;
 }
 .tab-pane[hidden] {
   display: none !important;

@@ -926,21 +926,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
                   muted
                   controls={false}
                 />
-                {!showVideo || !remoteReady ? (
-                  <div className="call-audio">
-                    <Avatar name={active.other.displayName} url={active.other.avatarUrl} large />
-                    <h2>{active.other.displayName}</h2>
-                    <p className="call-status">{statusLabel}</p>
-                    {live ? (
-                      <p className="call-seen">Connected</p>
-                    ) : (
-                      <p className="call-seen">{seenLine}</p>
-                    )}
-                  </div>
-                ) : (
+                {showVideo ? (
                   <div className="call-live-name">
                     <strong>{active.other.displayName}</strong>
                     <span>{statusLabel}</span>
+                  </div>
+                ) : (
+                  <div className="call-audio">
+                    <Avatar name={active.other.displayName} url={active.other.avatarUrl} large />
+                    <h2>{active.other.displayName}</h2>
+                    <p className="call-pill">{statusLabel}</p>
+                    {!live ? <p className="call-seen">{seenLine}</p> : null}
                   </div>
                 )}
                 {error ? <p className="call-error">{error}</p> : null}
