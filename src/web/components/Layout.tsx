@@ -94,7 +94,12 @@ export function AppLayout() {
           if (seenNotes.has(item.id) || item.readAt) continue;
           seenNotes.add(item.id);
           if (item.link && pathRef.current.startsWith(item.link)) continue;
-          void pingOs(inferKind(item), item.title, item.body);
+          const kind = inferKind(item);
+          if (kind === "calls") continue;
+          const convId = item.link?.startsWith("/messages/")
+            ? item.link.slice("/messages/".length)
+            : undefined;
+          void pingOs(kind, item.title, item.body, { link: item.link, convId });
         }
         for (const item of f.items ?? []) {
           if (seenReq.has(item.id)) continue;
@@ -110,7 +115,7 @@ export function AppLayout() {
       }
     }
     void tick();
-    const timer = window.setInterval(() => void tick(), 4000);
+    const timer = window.setInterval(() => void tick(), 2500);
     return () => window.clearInterval(timer);
   }, []);
 

@@ -24,7 +24,7 @@ import {
 import { api, RequestError } from "./api";
 import type { PublicUser } from "./types";
 import { lastSeenLabel } from "./time";
-import { pingOs } from "./notify";
+import { listenNotifyActions, pingOs } from "./notify";
 import { playTone, stopTone, unlockAudio } from "./sounds";
 import { Avatar } from "../components/ui";
 
@@ -43,7 +43,7 @@ export type CallRecord = {
 };
 
 type CallCtx = {
-  startCall: (userId: string, kind: CallKind) => Promise<void>;
+  startCall: (userId: string, kind: CallKind, other?: PublicUser) => Promise<void>;
 };
 
 const Ctx = createContext<CallCtx | null>(null);
@@ -170,16 +170,18 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const media = useCallback(async (kind: CallKind) => {
     unlockAudio();
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
+      audio: true,
       video:
         kind === "VIDEO"
-          ? { facingMode: "user", width: { ideal: 720 }, height: { ideal: 1280 } }
+          ? {
+              facingMode: "user",
+              width: { ideal: 480 },
+              height: { ideal: 640 },
+              frameRate: { ideal: 24 },
+            }
           : false,
     });
+    if (kind === "AUDIO") setCameraOff(true);
     localRef.current = stream;
     setHasLocal(true);
     playMedia(localVideo.current, stream, true);
@@ -213,7 +215,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
       stopMedia();
       setActive(null);
       setError("");
-      if (id) await api(`/api/calls/${id}/hangup`, { method: "POST" }).catch(() => undefined);
+      if (id && !id.startsWith("pending")) {
+        const seconds = liveSince.current ? Math.floor((Date.now() - liveSince.current) / 1000) : 0;
+        await api(`/api/calls/${id}/hangup`, {
+          method: "POST",
+          body: JSON.stringify({ seconds }),
+        }).catch(() => undefined);
+      }
     },
     [active?.id, stopMedia],
   );
@@ -279,6 +287,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       const stream = await media(active.kind);
       const pc = makePc(active.id);
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+      if (active.kind === "AUDIO") pc.addTransceiver("video", { direction: "sendrecv" });
       await pc.setRemoteDescription({ type: "offer", sdp: active.offerSdp });
       const answerDesc = await pc.createAnswer();
       await pc.setLocalDescription(answerDesc);
@@ -310,7 +319,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
         .then(async (data) => {
           const next = data.items[0] ?? null;
           if (!next || ignored.current.has(next.id)) {
-            if (!next && active && ["RINGING", "ACTIVE"].includes(active.status)) {
+            if (
+              !next &&
+              active &&
+              !active.id.startsWith("pending") &&
+              ["RINGING", "ACTIVE"].includes(active.status)
+            ) {
               stopMedia();
               setActive(null);
             }
@@ -330,6 +344,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
                   "calls",
                   next.kind === "VIDEO" ? "Incoming video call" : "Incoming call",
                   next.other.displayName,
+                  {
+                    callId: next.id,
+                    link: `/messages/c_${[next.callerId, next.calleeId].sort().join("_")}`,
+                  },
                 );
                 playTone("/sounds/ringtone.wav");
                 try {
@@ -363,7 +381,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
           }
         })
         .catch(() => undefined);
-    }, 1500);
+    }, 800);
     return () => window.clearInterval(timer);
   }, [active, pullIce, stopMedia]);
 
@@ -414,7 +432,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   }, [active?.id, active?.status]);
 
   useEffect(() => {
-    if (!active || active.status !== "ACTIVE") return;
+    if (!active) return;
     try {
       window.KpCallAudio?.setSpeaker(speaker);
     } catch {
@@ -426,6 +444,56 @@ export function CallProvider({ children }: { children: ReactNode }) {
       void el.setSinkId(speaker ? "default" : "").catch(() => undefined);
     }
   }, [speaker, active]);
+
+  async function toggleCamera() {
+    if (active?.status !== "ACTIVE") return;
+    if (!cameraOff && active.kind === "VIDEO") {
+      setCameraOff(true);
+      return;
+    }
+    const cam = await navigator.mediaDevices
+      .getUserMedia({
+        video: { facingMode: "user", width: { ideal: 480 }, height: { ideal: 640 } },
+        audio: false,
+      })
+      .catch(() => null);
+    const track = cam?.getVideoTracks()[0];
+    if (!track) return;
+    const sender =
+      pcRef.current?.getSenders().find((item) => item.track?.kind === "video") ??
+      pcRef.current?.getSenders().find((item) => !item.track);
+    if (sender) await sender.replaceTrack(track);
+    else pcRef.current?.addTrack(track, cam ?? new MediaStream([track]));
+    if (localRef.current) localRef.current.addTrack(track);
+    else localRef.current = new MediaStream([track]);
+    setHasLocal(true);
+    setCameraOff(false);
+    setActive((current) => (current ? { ...current, kind: "VIDEO" } : current));
+    playMedia(localVideo.current, localRef.current, true);
+  }
+
+  useEffect(() => {
+    window.KpCallBridge = {
+      answerFromNotify: () => {
+        void answer();
+      },
+      declineFromNotify: (callId) => {
+        if (callId && active && callId !== active.id) {
+          void api(`/api/calls/${callId}/decline`, { method: "POST" }).catch(() => undefined);
+          return;
+        }
+        void decline();
+      },
+    };
+    let off: (() => void) | undefined;
+    void listenNotifyActions().then((fn) => {
+      off = fn;
+    });
+    return () => {
+      window.KpCallBridge = undefined;
+      off?.();
+    };
+  }, [active, answer, decline]);
 
   async function shareScreen() {
     if (active?.status !== "ACTIVE") return;
@@ -584,9 +652,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
                         type="button"
                         aria-label="Camera"
                         disabled={!live}
-                        onClick={() => setCameraOff((v) => !v)}
+                        onClick={() => void toggleCamera()}
                       >
-                        {cameraOff ? <CameraOff size={22} /> : <Camera size={22} />}
+                        {cameraOff || active.kind === "AUDIO" ? (
+                          <CameraOff size={22} />
+                        ) : (
+                          <Camera size={22} />
+                        )}
                       </button>
                       <button
                         className={live && sharing ? "call-btn on" : "call-btn"}

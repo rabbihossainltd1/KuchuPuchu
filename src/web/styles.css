@@ -798,11 +798,25 @@ textarea:focus {
   overflow-x: auto;
 }
 .bubble.sticker-only,
-.bubble.mine.sticker-only {
-  background: transparent;
+.bubble.mine.sticker-only,
+.bubble.photo-only,
+.bubble.mine.photo-only {
+  background: transparent !important;
+  border: 0 !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+}
+.bubble-photo {
   border: 0;
-  padding: 0;
+  background: transparent;
   box-shadow: none;
+}
+.chat-call-log {
+  align-self: center;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  padding: 8px 12px;
 }
 .bubble-sticker {
   font-size: 56px;

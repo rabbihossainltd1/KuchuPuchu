@@ -143,16 +143,80 @@ function parseJson<T>(raw: string, fallback: T): T {
 }
 
 function parseMessageMedia(imageUrl?: string | null) {
-  if (!imageUrl) return { imageUrls: [] as string[], sticker: null as string | null };
-  if (imageUrl.startsWith("sticker:")) return { imageUrls: [], sticker: imageUrl.slice(8) };
-  if (imageUrl.startsWith("data:")) return { imageUrls: [imageUrl], sticker: null };
+  if (!imageUrl)
+    return {
+      imageUrls: [] as string[],
+      sticker: null as string | null,
+      call: null as string | null,
+    };
+  if (imageUrl.startsWith("call:")) return { imageUrls: [], sticker: null, call: imageUrl };
+  if (imageUrl.startsWith("sticker:"))
+    return { imageUrls: [], sticker: imageUrl.slice(8), call: null };
+  if (imageUrl.startsWith("data:")) return { imageUrls: [imageUrl], sticker: null, call: null };
   if (imageUrl.startsWith("[")) {
     const list = parseJson<unknown[]>(imageUrl, []).filter(
       (item): item is string => typeof item === "string" && item.startsWith("data:"),
     );
-    return { imageUrls: list, sticker: null };
+    return { imageUrls: list, sticker: null, call: null };
   }
-  return { imageUrls: [], sticker: null };
+  return { imageUrls: [], sticker: null, call: null };
+}
+
+function clockLabel(sec: number) {
+  const n = Math.max(0, Math.floor(sec));
+  return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, "0")}`;
+}
+
+async function ensureConv(db: D1Database, a: string, b: string) {
+  const cid = `c_${pairId(a, b)}`;
+  const existing = await one(db, "SELECT id FROM conversations WHERE id = ?", cid);
+  if (!existing) {
+    await run(
+      db,
+      "INSERT INTO conversations (id, members_json, last_message, last_message_at, unread_json, created_at) VALUES (?, ?, NULL, NULL, ?, ?)",
+      cid,
+      JSON.stringify([a, b]),
+      JSON.stringify({ [a]: 0, [b]: 0 }),
+      nowIso(),
+    );
+  }
+  return cid;
+}
+
+async function logCallEvent(
+  db: D1Database,
+  caller: string,
+  callee: string,
+  kind: string,
+  status: string,
+  seconds = 0,
+) {
+  const cid = await ensureConv(db, caller, callee);
+  const video = kind === "VIDEO";
+  const label =
+    status === "ENDED"
+      ? `${video ? "Video" : "Voice"} call · ${clockLabel(seconds)}`
+      : status === "DECLINED"
+        ? `Declined ${video ? "video" : "voice"} call`
+        : `Missed ${video ? "video" : "voice"} call`;
+  const created = nowIso();
+  await run(
+    db,
+    "INSERT INTO messages (id, conversation_id, sender_id, body, image_url, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+    id(),
+    cid,
+    caller,
+    label,
+    `call:${kind}:${status}:${seconds}`,
+    created,
+  );
+  await run(
+    db,
+    "UPDATE conversations SET last_message = ?, last_message_at = ? WHERE id = ?",
+    label,
+    created,
+    cid,
+  );
 }
 
 function meFrom(row: UserRow) {
@@ -1163,6 +1227,7 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
             imageUrl: media.imageUrls[0] ?? null,
             imageUrls: media.imageUrls,
             sticker: media.sticker,
+            call: media.call,
             createdAt: row.created_at,
           };
         }),
@@ -1286,12 +1351,13 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
       online: false,
     };
     if (other) {
+      const cid = await ensureConv(db, uid, other);
       await notify(
         db,
         other,
         kind === "VIDEO" ? "Incoming video call" : "Incoming call",
         me.display_name,
-        "/messages",
+        `/messages/${cid}`,
         "calls",
       );
     }
@@ -1376,6 +1442,12 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
   if (callAct && method === "POST") {
     const callId = callAct[1]!;
     const verb = callAct[2];
+    const prev = await one<{
+      caller_id: string;
+      callee_id: string;
+      kind: string;
+      status: string;
+    }>(db, "SELECT caller_id, callee_id, kind, status FROM calls WHERE id = ?", callId);
     if (verb === "answer") {
       await run(
         db,
@@ -1385,8 +1457,19 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
       );
     } else if (verb === "decline") {
       await run(db, "UPDATE calls SET status = 'DECLINED' WHERE id = ?", callId);
+      if (prev) await logCallEvent(db, prev.caller_id, prev.callee_id, prev.kind, "DECLINED", 0);
     } else {
       await run(db, "UPDATE calls SET status = 'ENDED' WHERE id = ?", callId);
+      if (prev) {
+        await logCallEvent(
+          db,
+          prev.caller_id,
+          prev.callee_id,
+          prev.kind,
+          prev.status === "ACTIVE" ? "ENDED" : "MISSED",
+          Number(body.seconds || 0),
+        );
+      }
     }
     const row = await one<{
       caller_id: string;

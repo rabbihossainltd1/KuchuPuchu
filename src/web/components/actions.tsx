@@ -46,7 +46,7 @@ export function PlayerActions({
         <button
           className="icon-plain"
           type="button"
-          onClick={() => void startCall(player.userId, "AUDIO")}
+          onClick={() => void startCall(player.userId, "AUDIO", player)}
           title="Voice call"
         >
           <Phone size={18} />

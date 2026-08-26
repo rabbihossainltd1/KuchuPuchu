@@ -51,7 +51,9 @@ export function bustCache(match?: string) {
 
 function ttlFor(path: string) {
   if (path.includes("/calls")) return 0;
-  if (path.includes("/messages")) return 8_000;
+  if (path.includes("/messages")) return 0;
+  if (path.includes("/notifications") || path.includes("/friend-requests")) return 0;
+  if (path.includes("/conversations")) return 2500;
   return 45_000;
 }
 

@@ -25,12 +25,13 @@ type ChatMessage = {
   imageUrl?: string | null;
   imageUrls?: string[] | null;
   sticker?: string | null;
+  call?: string | null;
   createdAt?: string;
 };
 
 function mediaOf(item: ChatMessage) {
   const imageUrls = item.imageUrls?.length ? item.imageUrls : item.imageUrl ? [item.imageUrl] : [];
-  return { imageUrls, sticker: item.sticker ?? null };
+  return { imageUrls, sticker: item.sticker ?? null, call: item.call ?? null };
 }
 
 function stamp(iso?: string) {
@@ -73,7 +74,7 @@ export function MessagesPage() {
       void api<{ items: Conversation[] }>("/api/conversations")
         .then(apply)
         .catch(() => undefined);
-    }, 20000);
+    }, 6000);
     return () => window.clearInterval(timer);
   }, []);
   return (
@@ -132,30 +133,29 @@ export function ConversationPage() {
 
   const load = useCallback(async () => {
     if (!id) return;
-    const [thread, inbox] = await Promise.all([
-      api<{ items: ChatMessage[] }>(`/api/conversations/${id}/messages`),
-      api<{ items: Conversation[] }>("/api/conversations"),
-    ]);
+    const thread = await api<{ items: ChatMessage[] }>(`/api/conversations/${id}/messages`);
     setItems((current) => {
       const prev = new Map(current.map((item) => [item.id, item]));
       return thread.items.map((item) => {
         const older = prev.get(item.id);
         const media = mediaOf(item);
-        if (older && !media.imageUrls.length && !media.sticker) {
+        if (older && !media.imageUrls.length && !media.sticker && !media.call) {
           const keep = mediaOf(older);
-          if (keep.imageUrls.length || keep.sticker) {
+          if (keep.imageUrls.length || keep.sticker || keep.call) {
             return { ...item, ...keep, imageUrl: keep.imageUrls[0] ?? null };
           }
         }
-        return { ...item, imageUrls: media.imageUrls, sticker: media.sticker };
+        return { ...item, imageUrls: media.imageUrls, sticker: media.sticker, call: media.call };
       });
     });
-    setOther(inbox.items.find((item) => item.id === id)?.other ?? null);
+    const inbox = peekCache<{ items: Conversation[] }>("/api/conversations");
+    const found = inbox?.items.find((item) => item.id === id)?.other;
+    if (found) setOther(found);
   }, [id]);
 
   useEffect(() => {
     void load();
-    const timer = window.setInterval(() => void load().catch(() => undefined), 2500);
+    const timer = window.setInterval(() => void load().catch(() => undefined), 900);
     return () => window.clearInterval(timer);
   }, [load]);
 
@@ -235,7 +235,7 @@ export function ConversationPage() {
               className="icon-plain"
               type="button"
               aria-label="Voice call"
-              onClick={() => void startCall(other.userId, "AUDIO")}
+              onClick={() => void startCall(other.userId, "AUDIO", other)}
             >
               <Phone size={22} />
             </button>
@@ -243,7 +243,7 @@ export function ConversationPage() {
               className="icon-plain"
               type="button"
               aria-label="Video call"
-              onClick={() => void startCall(other.userId, "VIDEO")}
+              onClick={() => void startCall(other.userId, "VIDEO", other)}
             >
               <Video size={22} />
             </button>
@@ -254,12 +254,37 @@ export function ConversationPage() {
       </header>
       <div className="thread chat-thread">
         {error ? <Notice tone="danger">{error}</Notice> : null}
-        {rows.map((row, index) =>
-          row.type === "day" ? (
-            <div key={`day-${row.label}-${index}`} className="chat-day">
-              {row.label}
-            </div>
-          ) : (
+        {rows.map((row, index) => {
+          if (row.type === "day") {
+            return (
+              <div key={`day-${row.label}-${index}`} className="chat-day">
+                {row.label}
+              </div>
+            );
+          }
+          const media = mediaOf(row.item);
+          if (media.call) {
+            const parts = media.call.split(":");
+            const kind = parts[1] === "VIDEO" ? "Video" : "Voice";
+            const status = parts[2] ?? "";
+            const sec = Number(parts[3] || 0);
+            const mins = Math.floor(sec / 60);
+            const clock = `${mins}:${String(sec % 60).padStart(2, "0")}`;
+            const label =
+              status === "ENDED"
+                ? `${kind} call · ${clock}`
+                : status === "DECLINED"
+                  ? `Declined ${kind.toLowerCase()} call`
+                  : `Missed ${kind.toLowerCase()} call`;
+            return (
+              <div key={row.item.id} className="chat-call-log">
+                {label}
+              </div>
+            );
+          }
+          const stickerOnly = Boolean(media.sticker);
+          const photoOnly = Boolean(media.imageUrls.length && !row.item.body);
+          return (
             <div
               key={row.item.id}
               className={row.item.senderId === user?.id ? "bubble-row mine" : "bubble-row"}
@@ -269,40 +294,32 @@ export function ConversationPage() {
               ) : null}
               <div
                 className={`${row.item.senderId === user?.id ? "bubble mine" : "bubble"}${
-                  mediaOf(row.item).sticker && !row.item.body ? " sticker-only" : ""
+                  stickerOnly ? " sticker-only" : photoOnly ? " photo-only" : ""
                 }`}
               >
-                {mediaOf(row.item).sticker ? (
-                  stickerSrc(mediaOf(row.item).sticker!) ? (
-                    <img
-                      className="bubble-sticker-img"
-                      src={stickerSrc(mediaOf(row.item).sticker!)!}
-                      alt=""
-                    />
+                {media.sticker ? (
+                  stickerSrc(media.sticker) ? (
+                    <img className="bubble-sticker-img" src={stickerSrc(media.sticker)!} alt="" />
                   ) : (
-                    <span className="bubble-sticker">{mediaOf(row.item).sticker}</span>
+                    <span className="bubble-sticker">{media.sticker}</span>
                   )
                 ) : null}
-                {mediaOf(row.item).imageUrls.length ? (
-                  <div
-                    className={
-                      mediaOf(row.item).imageUrls.length > 1 ? "bubble-album" : "bubble-album one"
-                    }
-                  >
-                    {mediaOf(row.item).imageUrls.map((src) => (
+                {media.imageUrls.length ? (
+                  <div className={media.imageUrls.length > 1 ? "bubble-album" : "bubble-album one"}>
+                    {media.imageUrls.map((src) => (
                       <img key={src.slice(0, 48)} className="bubble-photo" src={src} alt="" />
                     ))}
                   </div>
                 ) : null}
                 {row.item.body &&
-                !mediaOf(row.item).sticker &&
-                !(mediaOf(row.item).imageUrls.length && row.item.body === "Photo") ? (
+                !media.sticker &&
+                !(media.imageUrls.length && row.item.body === "Photo") ? (
                   <span>{row.item.body}</span>
                 ) : null}
               </div>
             </div>
-          ),
-        )}
+          );
+        })}
         <div ref={endRef} />
       </div>
       <div className="chat-dock">
