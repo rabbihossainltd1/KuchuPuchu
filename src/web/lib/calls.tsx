@@ -174,7 +174,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const hookRemoteSound = useCallback((stream: MediaStream) => {
     unlockAudio();
     playMedia(remoteAudio.current, stream, false);
-    const key = stream.getAudioTracks().map((track) => track.id).join("|");
+    const key = stream
+      .getAudioTracks()
+      .map((track) => track.id)
+      .join("|");
     if (!key) return;
     if (hookedKey.current === key) {
       void audioCtx.current?.resume().catch(() => undefined);
@@ -347,7 +350,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
         pc.onicecandidate = (event) => {
           if (event.candidate) pending.push(event.candidate);
         };
-        const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+        const offer = await pc.createOffer({
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: true,
+        });
         await pc.setLocalDescription(offer);
         const created = await api<{ call: CallRecord }>("/api/calls", {
           method: "POST",

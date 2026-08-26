@@ -1,15 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import {
-  ChevronLeft,
-  Download,
-  ImagePlus,
-  Phone,
-  Send,
-  Smile,
-  Video,
-  X,
-} from "lucide-react";
+import { ChevronLeft, Download, ImagePlus, Phone, Send, Smile, Video, X } from "lucide-react";
 import { api, peekCache, RequestError } from "../lib/api";
 import { readPhoto, savePhoto } from "../lib/photo";
 import { useAuth } from "../lib/auth";
@@ -499,7 +490,11 @@ export function ConversationPage() {
               <Send size={16} /> Forward
             </button>
             {["❤️", "😂", "😮", "😢", "👍"].map((emoji) => (
-              <button key={emoji} type="button" onClick={() => void reactTo(viewer.message.id, emoji)}>
+              <button
+                key={emoji}
+                type="button"
+                onClick={() => void reactTo(viewer.message.id, emoji)}
+              >
                 {emoji}
               </button>
             ))}

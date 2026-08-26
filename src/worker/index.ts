@@ -1324,7 +1324,9 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
     if (!conv) fail(404, "Conversation not found.");
     const members = parseJson<string[]>(conv.members_json, []);
     if (!members.includes(uid)) fail(403, "Not in this conversation.");
-    const emoji = String(body.emoji || "").trim().slice(0, 8);
+    const emoji = String(body.emoji || "")
+      .trim()
+      .slice(0, 8);
     if (!emoji) fail(400, "Pick a reaction.");
     await run(
       db,
