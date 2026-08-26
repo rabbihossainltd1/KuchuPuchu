@@ -1,0 +1,10 @@
+name = "kuchupuchu-api"
+main = "src/worker/index.ts"
+compatibility_date = "2025-08-01"
+account_id = "92081fac7caf54a46a756c382081544b"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "kuchupuchu"
+database_id = "453d304f-d550-44d4-83df-c24e50f58a0f"

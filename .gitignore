@@ -20,6 +20,7 @@ prisma/test.db
 .DS_Store
 uploads
 tmp
+.wrangler
 .idea
 .vscode
 *.tsbuildinfo

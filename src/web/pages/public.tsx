@@ -1,8 +1,6 @@
 import { FormEvent, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { sendPasswordResetEmail } from "firebase/auth";
-import { explainError } from "../lib/api";
-import { firebaseAuth, explainFirebaseError } from "../lib/firebase";
+import { api, explainError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { BrandMark, FieldError, Notice } from "../components/ui";
 
@@ -200,10 +198,13 @@ export function ForgotPasswordPage() {
     setError("");
     const form = new FormData(event.currentTarget);
     try {
-      await sendPasswordResetEmail(firebaseAuth, String(form.get("email") ?? "").trim());
+      await api("/api/auth/password-reset", {
+        method: "POST",
+        body: JSON.stringify({ email: String(form.get("email") ?? "").trim() }),
+      });
       setDone(true);
     } catch (err) {
-      setError(explainFirebaseError(err));
+      setError(explainError(err));
     }
   }
   return (

@@ -2,6 +2,8 @@ const fromEnv = String(import.meta.env.VITE_API_BASE ?? "")
   .trim()
   .replace(/\/$/, "");
 
+const LIVE_API = "https://kuchupuchu-api.kuchupuchu.workers.dev";
+
 export function isNativeApp() {
   if (typeof window === "undefined") return false;
   const cap = (window as Window & { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
@@ -10,7 +12,7 @@ export function isNativeApp() {
 
 export function getApiBase() {
   if (fromEnv) return fromEnv;
-  return "";
+  return LIVE_API;
 }
 
 export function apiUrl(path: string) {

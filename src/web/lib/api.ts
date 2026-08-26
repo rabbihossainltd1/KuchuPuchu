@@ -1,4 +1,4 @@
-import { cloudRequest } from "./cloud";
+import { apiUrl } from "./config";
 import { RequestError, type ApiError } from "./errors";
 
 export type { ApiError };
@@ -33,7 +33,33 @@ export function setStoredSessionToken(token: string | null) {
 }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  return cloudRequest<T>(path, init);
+  const headers = new Headers(init.headers);
+  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  const token = getStoredSessionToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  let res: Response;
+  try {
+    res = await fetch(apiUrl(path), { ...init, headers });
+  } catch {
+    throw new RequestError(0, { code: "NETWORK", message: "Could not reach the server." });
+  }
+  const text = await res.text();
+  let data: unknown = {};
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { error: { code: "CLOUD", message: "Unexpected response." } };
+    }
+  }
+  if (!res.ok) {
+    const err = (data as { error?: ApiError }).error ?? {
+      code: "CLOUD",
+      message: res.statusText || "Request failed.",
+    };
+    throw new RequestError(res.status, err);
+  }
+  return data as T;
 }
 
 export function idempotencyKey(prefix: string) {
