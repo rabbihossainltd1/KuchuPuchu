@@ -57,12 +57,16 @@ const ICE: RTCConfiguration = {
         "turn:openrelay.metered.ca:80?transport=tcp",
         "turn:openrelay.metered.ca:443",
         "turns:openrelay.metered.ca:443",
+        "turn:staticauth.openrelay.metered.ca:80",
+        "turn:staticauth.openrelay.metered.ca:80?transport=tcp",
+        "turn:staticauth.openrelay.metered.ca:443",
+        "turns:staticauth.openrelay.metered.ca:443",
       ],
       username: "openrelayproject",
-      credential: "openrelayproject",
+      credential: "openrelayprojectsecret",
     },
   ],
-  iceCandidatePoolSize: 4,
+  iceCandidatePoolSize: 0,
 };
 
 declare global {
@@ -131,11 +135,34 @@ function playMedia(el: HTMLMediaElement | null, stream: MediaStream | null, mute
   el.muted = mute;
   el.volume = 1;
   if (el.srcObject !== stream) el.srcObject = stream;
-  if (stream) {
-    const go = () => void el.play().catch(() => undefined);
-    go();
-    window.setTimeout(go, 200);
-    window.setTimeout(go, 800);
+  if (stream && el.paused) void el.play().catch(() => undefined);
+}
+
+function audioOnly(stream: MediaStream) {
+  return new MediaStream(stream.getAudioTracks());
+}
+
+function videoOnly(stream: MediaStream) {
+  return new MediaStream(stream.getVideoTracks());
+}
+
+async function attachLocal(pc: RTCPeerConnection, stream: MediaStream) {
+  for (const track of stream.getTracks()) {
+    const trans =
+      pc
+        .getTransceivers()
+        .find((item) => !item.sender.track && item.receiver.track?.kind === track.kind) ??
+      pc.getTransceivers().find((item) => item.receiver.track?.kind === track.kind);
+    if (trans) {
+      await trans.sender.replaceTrack(track);
+      try {
+        trans.direction = "sendrecv";
+      } catch {
+        /* */
+      }
+    } else {
+      pc.addTrack(track, stream);
+    }
   }
 }
 
@@ -185,8 +212,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   const hookRemoteSound = useCallback((stream: MediaStream) => {
     unlockAudio();
-    playMedia(remoteAudio.current, stream, false);
-    const key = stream
+    const sound = audioOnly(stream);
+    if (!sound.getAudioTracks().length) return;
+    playMedia(remoteAudio.current, sound, false);
+    const key = sound
       .getAudioTracks()
       .map((track) => track.id)
       .join("|");
@@ -207,7 +236,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       if (!Ctor) return;
       const ctx = new Ctor();
       void ctx.resume();
-      const src = ctx.createMediaStreamSource(stream);
+      const src = ctx.createMediaStreamSource(sound);
       const gain = ctx.createGain();
       gain.gain.value = 1;
       src.connect(gain);
@@ -263,13 +292,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
         };
       }
       remoteStreamRef.current = stream;
-      if (wantVideoRef.current) playMedia(remoteVideo.current, stream, true);
       hookRemoteSound(stream);
-      if (
-        wantVideoRef.current &&
-        stream.getVideoTracks().some((track) => track.readyState === "live" && track.enabled)
-      ) {
-        setRemoteReady(true);
+      if (wantVideoRef.current && stream.getVideoTracks().length) {
+        playMedia(remoteVideo.current, videoOnly(stream), true);
+        if (stream.getVideoTracks().some((track) => track.readyState === "live" && track.enabled)) {
+          setRemoteReady(true);
+        }
       }
     },
     [hookRemoteSound],
@@ -320,16 +348,18 @@ export function CallProvider({ children }: { children: ReactNode }) {
   );
 
   const pullIce = useCallback(async (callId: string) => {
+    const pc = pcRef.current;
+    if (!pc || !pc.remoteDescription) return;
     const data = await api<{ items: Array<{ id: string; candidate: RTCIceCandidateInit }> }>(
       `/api/calls/${callId}/ice`,
     );
     for (const item of data.items) {
       if (seenIce.current.has(item.id) || !item.candidate) continue;
-      seenIce.current.add(item.id);
       try {
-        await pcRef.current?.addIceCandidate(item.candidate);
+        await pc.addIceCandidate(item.candidate);
+        seenIce.current.add(item.id);
       } catch {
-        /* early */
+        /* wait until remote description / pairing is ready */
       }
     }
   }, []);
@@ -389,15 +419,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
         }
         const pc = new RTCPeerConnection(ICE);
         stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-        if (kind === "AUDIO") pc.addTransceiver("video", { direction: "recvonly" });
         const pending: RTCIceCandidate[] = [];
         pc.onicecandidate = (event) => {
           if (event.candidate) pending.push(event.candidate);
         };
-        const offer = await pc.createOffer({
-          offerToReceiveAudio: true,
-          offerToReceiveVideo: kind === "VIDEO",
-        });
+        const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         const created = await api<{ call: CallRecord }>("/api/calls", {
           method: "POST",
@@ -453,10 +479,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
           return;
         }
         const pc = new RTCPeerConnection(ICE);
-        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-        if (record.kind === "AUDIO") pc.addTransceiver("video", { direction: "recvonly" });
         wirePc(pc, record.id);
         await pc.setRemoteDescription({ type: "offer", sdp: record.offerSdp });
+        await attachLocal(pc, stream);
+        await pullIce(record.id);
         const answerDesc = await pc.createAnswer();
         await pc.setLocalDescription(answerDesc);
         const updated = await api<{ call: CallRecord }>(`/api/calls/${record.id}/answer`, {
@@ -474,7 +500,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         );
       }
     },
-    [media, routeAudio, wirePc],
+    [media, pullIce, routeAudio, wirePc],
   );
 
   const answer = useCallback(async () => {
@@ -598,14 +624,16 @@ export function CallProvider({ children }: { children: ReactNode }) {
             await pcRef.current.setRemoteDescription({ type: "answer", sdp: next.answerSdp });
             stopTone();
             void cancelCallOs(next.id);
-          }
-          if (next.status === "ACTIVE" || next.status === "RINGING") {
+            await pullIce(next.id);
+          } else if (next.status === "ACTIVE" && pcRef.current?.remoteDescription) {
             await pullIce(next.id);
           }
           if (next.status === "ACTIVE" && remoteStreamRef.current) {
-            hookRemoteSound(remoteStreamRef.current);
-            if (wantVideoRef.current) {
-              playMedia(remoteVideo.current, remoteStreamRef.current, true);
+            if (remoteAudio.current?.paused) hookRemoteSound(remoteStreamRef.current);
+            if (wantVideoRef.current && remoteVideo.current?.paused) {
+              playMedia(remoteVideo.current, videoOnly(remoteStreamRef.current), true);
+            }
+            if (wantVideoRef.current && localVideo.current?.paused && localRef.current) {
               playMedia(localVideo.current, localRef.current, true);
             }
           }
@@ -664,8 +692,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (wantVideoRef.current) {
-      playMedia(localVideo.current, localRef.current, true);
-      playMedia(remoteVideo.current, remoteStreamRef.current, true);
+      if (localRef.current) playMedia(localVideo.current, localRef.current, true);
+      if (remoteStreamRef.current) {
+        playMedia(remoteVideo.current, videoOnly(remoteStreamRef.current), true);
+      }
     }
     if (remoteStreamRef.current) hookRemoteSound(remoteStreamRef.current);
   }, [active?.kind, active?.id, hookRemoteSound]);
