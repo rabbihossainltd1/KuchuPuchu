@@ -442,8 +442,8 @@ textarea:focus {
 }
 .bubble {
   max-width: 75%;
-  padding: 9px 12px;
-  border-radius: 14px;
+  padding: 9px 13px;
+  border-radius: 18px;
   background: #fff;
   border: 1px solid var(--line);
 }
@@ -452,6 +452,13 @@ textarea:focus {
   background: var(--accent);
   color: var(--accent-ink);
   border-color: transparent;
+  border-bottom-right-radius: 6px;
+}
+.bubble-row .bubble {
+  max-width: 100%;
+}
+.bubble-row:not(.mine) .bubble {
+  border-bottom-left-radius: 6px;
 }
 .table {
   width: 100%;
@@ -680,22 +687,93 @@ textarea:focus {
 }
 .chat-page {
   display: grid;
-  grid-template-rows: auto auto 1fr auto;
-  min-height: calc(100vh - 140px);
+  grid-template-rows: auto 1fr auto;
+  height: 100dvh;
+  min-height: 100dvh;
+  background: var(--bg);
 }
 .chat-head {
   display: flex;
-  gap: 12px;
+  gap: 4px;
   align-items: center;
+  padding: max(6px, env(safe-area-inset-top)) 4px 8px;
+  background: var(--surface);
+}
+.chat-person {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+}
+.chat-person strong {
+  display: block;
+  font-size: 16px;
+  line-height: 1.2;
 }
 .chat-thread {
-  padding: 12px 0 16px;
-  max-height: 52vh;
+  padding: 12px 10px 8px;
   overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.chat-day {
+  align-self: center;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  padding: 10px 0 6px;
+}
+.bubble-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: 86%;
+}
+.bubble-row .avatar {
+  width: 28px;
+  height: 28px;
+  font-size: 11px;
+}
+.bubble-row.mine {
+  margin-left: auto;
+  flex-direction: row-reverse;
 }
 .chat-compose {
-  position: sticky;
-  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px calc(10px + env(safe-area-inset-bottom));
+  background: var(--surface);
+}
+.chat-compose input {
+  flex: 1;
+  border: 0;
+  background: var(--bg);
+  border-radius: 999px;
+  padding: 10px 14px;
+}
+.chat-send {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  display: grid;
+  place-items: center;
+  flex: none;
+  padding: 0;
+}
+.chat-send:disabled {
+  opacity: 0.4;
+}
+.social-shell.in-thread .social-main {
+  width: 100%;
+  padding: 0;
+  max-width: none;
 }
 .request-card {
   margin-bottom: 12px;

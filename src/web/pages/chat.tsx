@@ -1,6 +1,6 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { Phone, Send, Video } from "lucide-react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { ChevronLeft, Phone, Send, Video } from "lucide-react";
 import { api, RequestError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useCall } from "../lib/calls";
@@ -17,6 +17,27 @@ type Conversation = {
 };
 
 type ChatMessage = { id: string; senderId: string; body: string; createdAt?: string };
+
+function stamp(iso?: string) {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date
+    .toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    })
+    .toUpperCase();
+}
+
+function dayKey(iso?: string) {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
+}
 
 export function MessagesPage() {
   const [items, setItems] = useState<Conversation[] | null>(null);
@@ -61,10 +82,12 @@ export function MessagesPage() {
 
 export function ConversationPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const { startCall } = useCall();
   const [other, setOther] = useState<PublicUser | null>(null);
   const [items, setItems] = useState<ChatMessage[]>([]);
+  const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
   const endRef = useRef<HTMLDivElement | null>(null);
 
@@ -90,77 +113,111 @@ export function ConversationPage() {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = event.currentTarget;
-    const body = String(new FormData(form).get("body") || "");
+    const body = draft.trim();
+    if (!body) return;
     try {
       const data = await api<{ message: ChatMessage }>(`/api/conversations/${id}/messages`, {
         method: "POST",
         body: JSON.stringify({ body }),
       });
       setItems((current) => [...current, data.message]);
-      form.reset();
+      setDraft("");
       setError("");
     } catch (err) {
       setError(err instanceof RequestError ? err.body.message : "Could not send.");
     }
   }
 
+  const rows = useMemo(() => {
+    const out: Array<{ type: "day"; label: string } | { type: "msg"; item: ChatMessage }> = [];
+    let last = "";
+    for (const item of items) {
+      const key = dayKey(item.createdAt);
+      if (key && key !== last) {
+        out.push({ type: "day", label: stamp(item.createdAt) });
+        last = key;
+      }
+      out.push({ type: "msg", item });
+    }
+    return out;
+  }, [items]);
+
   return (
     <div className="chat-page">
-      <header className="chat-head card">
+      <header className="chat-head">
+        <button
+          className="icon-plain"
+          type="button"
+          aria-label="Back"
+          onClick={() => navigate("/messages")}
+        >
+          <ChevronLeft size={26} />
+        </button>
         {other ? (
           <>
-            <Avatar name={other.displayName} url={other.avatarUrl} online={other.online} />
-            <div style={{ flex: 1 }}>
-              <h1 className="page-title" style={{ fontSize: 20 }}>
-                {other.displayName}
-              </h1>
-              <p className="meta">
-                @{other.username}
-                {other.online ? " · online" : ""}
-              </p>
-            </div>
+            <Link className="chat-person" to={`/players/${other.userId}`}>
+              <Avatar name={other.displayName} url={other.avatarUrl} online={other.online} />
+              <div>
+                <strong>{other.displayName}</strong>
+                <p className="meta">{other.online ? "Active now" : `@${other.username}`}</p>
+              </div>
+            </Link>
             <button
-              className="icon-btn"
+              className="icon-plain"
               type="button"
+              aria-label="Voice call"
               onClick={() => void startCall(other.userId, "AUDIO")}
             >
-              <Phone size={18} />
-              Call
+              <Phone size={22} />
             </button>
             <button
-              className="icon-btn"
+              className="icon-plain"
               type="button"
+              aria-label="Video call"
               onClick={() => void startCall(other.userId, "VIDEO")}
             >
-              <Video size={18} />
-              Video
+              <Video size={22} />
             </button>
           </>
         ) : (
-          <h1 className="page-title">Conversation</h1>
+          <strong className="header-title">Conversation</strong>
         )}
       </header>
       {error ? <Notice tone="danger">{error}</Notice> : null}
       <div className="thread chat-thread">
-        {items.map((item) => (
-          <div key={item.id} className={item.senderId === user?.id ? "bubble mine" : "bubble"}>
-            {item.body}
-          </div>
-        ))}
+        {rows.map((row, index) =>
+          row.type === "day" ? (
+            <div key={`day-${row.label}-${index}`} className="chat-day">
+              {row.label}
+            </div>
+          ) : (
+            <div
+              key={row.item.id}
+              className={row.item.senderId === user?.id ? "bubble-row mine" : "bubble-row"}
+            >
+              {row.item.senderId !== user?.id && other ? (
+                <Avatar name={other.displayName} url={other.avatarUrl} />
+              ) : null}
+              <div className={row.item.senderId === user?.id ? "bubble mine" : "bubble"}>
+                {row.item.body}
+              </div>
+            </div>
+          ),
+        )}
         <div ref={endRef} />
       </div>
-      <form className="composer-bar chat-compose" onSubmit={onSubmit}>
+      <form className="chat-compose" onSubmit={onSubmit}>
         <input
           name="body"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
           required
-          placeholder="Write a message"
+          placeholder="Message"
           aria-label="Message"
           autoComplete="off"
         />
-        <button className="btn" type="submit">
-          <Send size={16} />
-          Send
+        <button className="chat-send" type="submit" aria-label="Send" disabled={!draft.trim()}>
+          <Send size={18} />
         </button>
       </form>
     </div>

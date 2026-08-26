@@ -17,14 +17,19 @@ export function Avatar({
   url,
   online,
   large,
+  className,
 }: {
   name: string;
   url?: string | null;
   online?: boolean;
   large?: boolean;
+  className?: string;
 }) {
   return (
-    <div className={large ? "avatar lg" : "avatar"} aria-hidden="true">
+    <div
+      className={`${large ? "avatar lg" : "avatar"}${className ? ` ${className}` : ""}`}
+      aria-hidden="true"
+    >
       {url ? <img src={mediaUrl(url) ?? url} alt="" /> : initials(name)}
       {online ? <span className="dot" /> : null}
     </div>

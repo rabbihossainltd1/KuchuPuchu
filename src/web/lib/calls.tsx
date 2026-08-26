@@ -8,7 +8,18 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Phone, PhoneOff, Video, Mic, MicOff } from "lucide-react";
+import {
+  Camera,
+  CameraOff,
+  Mic,
+  MicOff,
+  MonitorUp,
+  Phone,
+  PhoneOff,
+  Video,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
 import { api, RequestError } from "./api";
 import type { PublicUser } from "./types";
 import { Avatar } from "../components/ui";
@@ -44,6 +55,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [active, setActive] = useState<CallRecord | null>(null);
   const [error, setError] = useState("");
   const [muted, setMuted] = useState(false);
+  const [speaker, setSpeaker] = useState(true);
+  const [cameraOff, setCameraOff] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localRef = useRef<MediaStream | null>(null);
   const seenIce = useRef(new Set<string>());
@@ -57,6 +71,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
     pcRef.current?.close();
     pcRef.current = null;
     seenIce.current.clear();
+    setMuted(false);
+    setCameraOff(false);
+    setSharing(false);
     if (localVideo.current) localVideo.current.srcObject = null;
     if (remoteVideo.current) remoteVideo.current.srcObject = null;
     if (remoteAudio.current) remoteAudio.current.srcObject = null;
@@ -243,16 +260,64 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const stream = localRef.current;
-    if (stream) {
-      stream.getAudioTracks().forEach((track) => {
-        track.enabled = !muted;
-      });
+    if (!stream) return;
+    stream.getAudioTracks().forEach((track) => {
+      track.enabled = !muted;
+    });
+    stream.getVideoTracks().forEach((track) => {
+      track.enabled = !cameraOff;
+    });
+  }, [muted, cameraOff]);
+
+  useEffect(() => {
+    const el = remoteAudio.current as
+      (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }) | null;
+    if (el && typeof el.setSinkId === "function") {
+      void el.setSinkId(speaker ? "default" : "").catch(() => undefined);
     }
-  }, [muted]);
+  }, [speaker, active]);
+
+  async function shareScreen() {
+    if (sharing) {
+      const cam = await navigator.mediaDevices
+        .getUserMedia({ video: true, audio: false })
+        .catch(() => null);
+      const next = cam?.getVideoTracks()[0];
+      const sender = pcRef.current?.getSenders().find((item) => item.track?.kind === "video");
+      if (next && sender) await sender.replaceTrack(next);
+      if (next && localRef.current) {
+        localRef.current.getVideoTracks().forEach((track) => track.stop());
+        localRef.current.addTrack(next);
+        if (localVideo.current) localVideo.current.srcObject = localRef.current;
+      }
+      setSharing(false);
+      return;
+    }
+    try {
+      const display = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      const track = display.getVideoTracks()[0];
+      if (!track) return;
+      const sender = pcRef.current?.getSenders().find((item) => item.track?.kind === "video");
+      if (sender) await sender.replaceTrack(track);
+      else pcRef.current?.addTrack(track, display);
+      track.onended = () => setSharing(false);
+      if (localVideo.current) localVideo.current.srcObject = display;
+      setSharing(true);
+    } catch {
+      setError("Screen share needs permission, or this phone does not support it.");
+    }
+  }
 
   const value = useMemo(() => ({ startCall }), [startCall]);
   const ringing = active?.status === "RINGING";
   const live = active?.status === "ACTIVE";
+  const statusLabel = ringing
+    ? active?.incoming
+      ? "Incoming call"
+      : "Ringing…"
+    : live
+      ? "Connected"
+      : (active?.status ?? "").toLowerCase();
 
   return (
     <Ctx.Provider value={value}>
@@ -277,15 +342,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
               <div className="call-audio">
                 <Avatar name={active.other.displayName} url={active.other.avatarUrl} large />
                 <h2>{active.other.displayName}</h2>
-                <p className="meta">
-                  {ringing
-                    ? active.incoming
-                      ? "Incoming voice call"
-                      : "Ringing…"
-                    : live
-                      ? "Connected"
-                      : active.status.toLowerCase()}
-                </p>
+                <p className="call-status">{statusLabel}</p>
               </div>
             )}
             <audio ref={remoteAudio} autoPlay />
@@ -294,27 +351,53 @@ export function CallProvider({ children }: { children: ReactNode }) {
               {ringing && active.incoming ? (
                 <>
                   <button className="call-btn accept" type="button" onClick={() => void answer()}>
-                    {active.kind === "VIDEO" ? <Video size={20} /> : <Phone size={20} />}
-                    Answer
+                    {active.kind === "VIDEO" ? <Video size={26} /> : <Phone size={26} />}
                   </button>
                   <button className="call-btn end" type="button" onClick={() => void decline()}>
-                    <PhoneOff size={20} />
-                    Decline
+                    <PhoneOff size={26} />
                   </button>
                 </>
               ) : (
                 <>
-                  <button className="call-btn" type="button" onClick={() => setMuted((v) => !v)}>
-                    {muted ? <MicOff size={20} /> : <Mic size={20} />}
-                    {muted ? "Unmute" : "Mute"}
+                  <button
+                    className={speaker ? "call-btn on" : "call-btn"}
+                    type="button"
+                    aria-label="Speaker"
+                    onClick={() => setSpeaker((v) => !v)}
+                  >
+                    {speaker ? <Volume2 size={22} /> : <VolumeX size={22} />}
+                  </button>
+                  <button
+                    className={muted ? "call-btn on" : "call-btn"}
+                    type="button"
+                    aria-label="Mute"
+                    onClick={() => setMuted((v) => !v)}
+                  >
+                    {muted ? <MicOff size={22} /> : <Mic size={22} />}
+                  </button>
+                  <button
+                    className={cameraOff ? "call-btn on" : "call-btn"}
+                    type="button"
+                    aria-label="Camera"
+                    onClick={() => setCameraOff((v) => !v)}
+                  >
+                    {cameraOff ? <CameraOff size={22} /> : <Camera size={22} />}
+                  </button>
+                  <button
+                    className={sharing ? "call-btn on" : "call-btn"}
+                    type="button"
+                    aria-label="Share screen"
+                    onClick={() => void shareScreen()}
+                  >
+                    <MonitorUp size={22} />
                   </button>
                   <button
                     className="call-btn end"
                     type="button"
+                    aria-label="End call"
                     onClick={() => void hangup(active.id)}
                   >
-                    <PhoneOff size={20} />
-                    End
+                    <PhoneOff size={26} />
                   </button>
                 </>
               )}

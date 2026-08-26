@@ -48,6 +48,7 @@ export function AppLayout() {
 
   const onHome = location.pathname === "/home";
   const onProfile = location.pathname === "/profile";
+  const onThread = /^\/messages\/[^/]+/.test(location.pathname);
   const notifyCount = unread + requests;
 
   useEffect(() => {
@@ -84,9 +85,13 @@ export function AppLayout() {
         setParams(next);
         return true;
       }
+      if (onThread) {
+        navigate("/messages");
+        return true;
+      }
       return false;
     });
-  }, [menu, searchOpen, onHome, params, setParams]);
+  }, [menu, searchOpen, onHome, onThread, params, setParams, navigate]);
 
   function search(event: FormEvent) {
     event.preventDefault();
@@ -114,118 +119,124 @@ export function AppLayout() {
 
   return (
     <CallProvider>
-      <div className="social-shell">
-        <header className="app-header">
-          <button
-            className="icon-plain"
-            type="button"
-            aria-label="Open menu"
-            onClick={() => setMenu(true)}
-          >
-            <Menu size={22} />
-          </button>
-          {onHome ? (
-            <>
-              <img className="wordmark-img" src="/brand/logo-horizontal.png" alt="KuchuPuchu" />
-              <div className="header-actions">
-                <button
-                  className="icon-plain"
-                  type="button"
-                  aria-label="Create post"
-                  onClick={() => navigate("/home?compose=1")}
-                >
-                  <Plus size={24} />
-                </button>
-                <button
-                  className="icon-plain"
-                  type="button"
-                  aria-label="Search"
-                  onClick={() => setSearchOpen((open) => !open)}
-                >
-                  <Search size={20} />
-                </button>
-                <Link className="icon-plain" to="/messages" aria-label="Messages">
-                  <span className="nav-ico">
-                    <MessageCircle size={20} />
-                    {messages ? <i>{messages > 9 ? "9+" : messages}</i> : null}
-                  </span>
-                </Link>
-              </div>
-            </>
-          ) : (
-            <>
-              <strong className="header-title">
-                {onProfile
-                  ? "Profile"
-                  : location.pathname.startsWith("/messages")
-                    ? "Messages"
-                    : location.pathname.startsWith("/notifications")
-                      ? "Notifications"
-                      : location.pathname.startsWith("/friends")
-                        ? "Friends"
-                        : location.pathname.startsWith("/requests")
-                          ? "Requests"
-                          : location.pathname.startsWith("/discover")
-                            ? "Find duo"
-                            : location.pathname.startsWith("/settings")
-                              ? "Settings"
-                              : location.pathname.startsWith("/store")
-                                ? "Store"
-                                : location.pathname.startsWith("/wallet")
-                                  ? "Add funds"
-                                  : "KuchuPuchu"}
-              </strong>
-              {onProfile ? (
-                <Link className="icon-plain" to="/profile/edit" aria-label="Edit profile">
-                  <Pencil size={20} />
-                </Link>
+      <div className={onThread ? "social-shell in-thread" : "social-shell"}>
+        {onThread ? null : (
+          <>
+            <header className="app-header">
+              <button
+                className="icon-plain"
+                type="button"
+                aria-label="Open menu"
+                onClick={() => setMenu(true)}
+              >
+                <Menu size={22} />
+              </button>
+              {onHome ? (
+                <>
+                  <img className="wordmark-img" src="/brand/logo-horizontal.png" alt="KuchuPuchu" />
+                  <div className="header-actions">
+                    <button
+                      className="icon-plain"
+                      type="button"
+                      aria-label="Create post"
+                      onClick={() => navigate("/home?compose=1")}
+                    >
+                      <Plus size={24} />
+                    </button>
+                    <button
+                      className="icon-plain"
+                      type="button"
+                      aria-label="Search"
+                      onClick={() => setSearchOpen((open) => !open)}
+                    >
+                      <Search size={20} />
+                    </button>
+                    <Link className="icon-plain" to="/messages" aria-label="Messages">
+                      <span className="nav-ico">
+                        <MessageCircle size={20} />
+                        {messages ? <i>{messages > 9 ? "9+" : messages}</i> : null}
+                      </span>
+                    </Link>
+                  </div>
+                </>
               ) : (
-                <Link className="icon-plain" to="/wallet" aria-label="Wallet">
-                  {user?.wallet.balance ?? 0}
-                </Link>
+                <>
+                  <strong className="header-title">
+                    {onProfile
+                      ? "Profile"
+                      : location.pathname.startsWith("/messages")
+                        ? "Messages"
+                        : location.pathname.startsWith("/notifications")
+                          ? "Notifications"
+                          : location.pathname.startsWith("/friends")
+                            ? "Friends"
+                            : location.pathname.startsWith("/requests")
+                              ? "Requests"
+                              : location.pathname.startsWith("/discover")
+                                ? "Find duo"
+                                : location.pathname.startsWith("/settings")
+                                  ? "Settings"
+                                  : location.pathname.startsWith("/store")
+                                    ? "Store"
+                                    : location.pathname.startsWith("/wallet")
+                                      ? "Add funds"
+                                      : "KuchuPuchu"}
+                  </strong>
+                  {onProfile ? (
+                    <Link className="icon-plain" to="/profile/edit" aria-label="Edit profile">
+                      <Pencil size={20} />
+                    </Link>
+                  ) : (
+                    <Link className="icon-plain" to="/wallet" aria-label="Wallet">
+                      {user?.wallet.balance ?? 0}
+                    </Link>
+                  )}
+                </>
               )}
-            </>
-          )}
-        </header>
-        {onHome && searchOpen ? (
-          <form className="home-search" onSubmit={search}>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search posts and players"
-              aria-label="Search posts and players"
-              autoFocus
-            />
-          </form>
-        ) : null}
-        {offline ? (
-          <Notice tone="danger">
-            You are offline. Some actions will fail until you reconnect.
-          </Notice>
-        ) : null}
+            </header>
+            {onHome && searchOpen ? (
+              <form className="home-search" onSubmit={search}>
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search posts and players"
+                  aria-label="Search posts and players"
+                  autoFocus
+                />
+              </form>
+            ) : null}
+            {offline ? (
+              <Notice tone="danger">
+                You are offline. Some actions will fail until you reconnect.
+              </Notice>
+            ) : null}
+          </>
+        )}
         <div className="social-main">
           <Outlet />
         </div>
-        <nav className="bottom-nav always" aria-label="Primary">
-          {bottom.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) => (isActive ? "active" : "")}
-            >
-              <span className="nav-ico">
-                <item.icon size={22} aria-hidden="true" />
-                {item.to === "/notifications" && notifyCount ? (
-                  <i>{notifyCount > 9 ? "9+" : notifyCount}</i>
-                ) : null}
-                {item.to === "/messages" && messages ? (
-                  <i>{messages > 9 ? "9+" : messages}</i>
-                ) : null}
-              </span>
-              <span className="sr-only">{item.label}</span>
-            </NavLink>
-          ))}
-        </nav>
+        {onThread ? null : (
+          <nav className="bottom-nav always" aria-label="Primary">
+            {bottom.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) => (isActive ? "active" : "")}
+              >
+                <span className="nav-ico">
+                  <item.icon size={22} aria-hidden="true" />
+                  {item.to === "/notifications" && notifyCount ? (
+                    <i>{notifyCount > 9 ? "9+" : notifyCount}</i>
+                  ) : null}
+                  {item.to === "/messages" && messages ? (
+                    <i>{messages > 9 ? "9+" : messages}</i>
+                  ) : null}
+                </span>
+                <span className="sr-only">{item.label}</span>
+              </NavLink>
+            ))}
+          </nav>
+        )}
         {menu ? (
           <div className="drawer-wrap">
             <button
