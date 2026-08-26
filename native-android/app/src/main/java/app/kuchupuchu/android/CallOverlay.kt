@@ -68,6 +68,10 @@ fun CallOverlay(call: CallUi, engine: CallEngine) {
             else -> call.status.lowercase()
         }
 
+    BackHandler {
+        if (incoming) engine.decline() else engine.hangup()
+    }
+
     DisposableEffect(engine.speaker) {
         val am = ctx.getSystemService(AudioManager::class.java)
         am.mode = AudioManager.MODE_IN_COMMUNICATION
