@@ -61,11 +61,7 @@ export function OnboardingPage() {
 
   return (
     <div>
-      <h1 className="page-title">Set up matching</h1>
-      <p className="lede">
-        We ask for region, rank, mode, and availability so recommendations stay compatible. Exact
-        address is never collected or shown.
-      </p>
+      <h1 className="page-title">Profile setup</h1>
       {error ? <Notice tone="danger">{error}</Notice> : null}
       <form className="card grid" style={{ marginTop: 18 }} onSubmit={onSubmit}>
         <label className="field">
@@ -1437,11 +1433,8 @@ export function ReferralsPage() {
   return (
     <div>
       <h1 className="page-title">Referrals</h1>
-      <p className="lede">
-        Your code is {user?.referralCode}. Rewards credit after the invited player verifies email.
-      </p>
       <div className="card">
-        <code>{user?.referralLink}</code>
+        <strong>{user?.referralCode}</strong>
       </div>
       <table className="table">
         <thead>
@@ -1613,14 +1606,7 @@ export function HelpPage() {
     <div>
       <h1 className="page-title">Help & Safety</h1>
       <div className="card">
-        <p>
-          Never share account OTPs, payment PINs or your exact home address. Use block and report if
-          someone harasses you. Moderators review reports; high-impact bans are audited.
-        </p>
-        <p className="meta" style={{ marginTop: 10 }}>
-          Relationship status is informational only. KuchuPuchu does not create legal or social
-          claims.
-        </p>
+        <p>Never share OTPs or your home address. Use block and report if someone harasses you.</p>
       </div>
     </div>
   );

@@ -766,9 +766,31 @@ async function handleEconomy(
     return { ok: true };
   }
   if (path === "/api/payments/packages") return { items: COIN_PACKS };
+  if (path === "/api/wallet/topup" && method === "POST") {
+    const pack = COIN_PACKS.find((item) => item.id === body.packageId);
+    if (!pack) fail(404, "Pack not found.");
+    await updateDoc(doc(db, "users", uid), { walletBalance: increment(pack.coins) });
+    await addDoc(collection(db, "users", uid, "ledger"), {
+      type: "CREDIT",
+      amount: pack.coins,
+      source: "topup",
+      createdAt: serverTimestamp(),
+    });
+    return { ok: true, coins: pack.coins };
+  }
   if (path === "/api/payments/orders") {
-    if (method === "POST")
-      fail(400, "Coin purchase needs a payment server. Claim the daily reward for now.");
+    if (method === "POST") {
+      const pack = COIN_PACKS.find((item) => item.id === body.packageId);
+      if (!pack) fail(404, "Pack not found.");
+      await updateDoc(doc(db, "users", uid), { walletBalance: increment(pack.coins) });
+      await addDoc(collection(db, "users", uid, "ledger"), {
+        type: "CREDIT",
+        amount: pack.coins,
+        source: "topup",
+        createdAt: serverTimestamp(),
+      });
+      return { order: { id: pack.id, checkoutUrl: "/wallet" } };
+    }
     return { items: [] };
   }
   if (path === "/api/wallet/transactions") {

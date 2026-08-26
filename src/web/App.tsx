@@ -11,7 +11,6 @@ import {
   VerifyEmailPage,
 } from "./pages/public";
 import {
-  DiscoverPage,
   HelpPage,
   InventoryPage,
   OnboardingPage,
@@ -19,10 +18,11 @@ import {
   PlayerPage,
   ReferralsPage,
   SandboxPayPage,
-  SettingsPage,
-  StorePage,
-  WalletPage,
 } from "./pages/appPages";
+import { DiscoverPage } from "./pages/discover";
+import { StorePage } from "./pages/store";
+import { WalletPage } from "./pages/wallet";
+import { SettingsPage } from "./pages/settings";
 import { HomePage } from "./pages/home";
 import { ConversationPage, MessagesPage } from "./pages/chat";
 import { RequestsPage } from "./pages/requests";

@@ -23,15 +23,11 @@ export function RequestsPage() {
   return (
     <div>
       <h1 className="page-title">Requests</h1>
-      <p className="lede">Friend requests and Duo / Squad invites live here.</p>
-      <div className="grid cols-2" style={{ marginTop: 16 }}>
+      <div className="grid cols-2">
         <section>
           <h2 className="section-title">Friend requests</h2>
           {friends.length === 0 ? (
-            <Empty
-              title="No friend requests"
-              body="When someone adds you, they will show up here with their profile."
-            />
+            <Empty title="No friend requests" />
           ) : (
             friends.map((item) => (
               <article key={item.id} className="card request-card">
@@ -82,10 +78,7 @@ export function RequestsPage() {
           {!duo ? (
             <Spinner />
           ) : duo.length === 0 ? (
-            <Empty
-              title="No match requests"
-              body="Invite someone from Discover when you want to queue."
-            />
+            <Empty title="No match requests" />
           ) : (
             duo.map((item) => {
               const requester = item.requester as PublicUser;

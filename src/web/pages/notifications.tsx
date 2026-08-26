@@ -76,10 +76,7 @@ export function NotificationsPage() {
         </button>
       </div>
       {rows.length === 0 ? (
-        <Empty
-          title="You’re all caught up"
-          body="Friend requests, likes, and comments will land here."
-        />
+        <Empty title="No notifications" />
       ) : (
         <div className="grid">
           {rows.map((row) => {

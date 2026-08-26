@@ -38,9 +38,6 @@ export function FriendsPage() {
   return (
     <div>
       <h1 className="page-title">Friends</h1>
-      <p className="lede">
-        Everyone you can add lives here — friends, recommendations, and search.
-      </p>
       <form className="search-row" onSubmit={search}>
         <input
           value={query}
@@ -57,10 +54,7 @@ export function FriendsPage() {
       {!friends ? (
         <Spinner />
       ) : friends.length === 0 ? (
-        <Empty
-          title="No friends yet"
-          body="Send a request from the list below or from someone’s profile."
-        />
+        <Empty title="No friends yet" />
       ) : (
         <div className="grid">
           {friends.map((player) => (
@@ -83,7 +77,7 @@ export function FriendsPage() {
 
       <h2 className="section-title">People you may know</h2>
       {people.length === 0 ? (
-        <p className="meta">No more suggestions right now.</p>
+        <p className="meta">—</p>
       ) : (
         <div className="grid">
           {people.map((player) => (

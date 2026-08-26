@@ -264,7 +264,6 @@ export function ProfileEditPage() {
   return (
     <div>
       <h1 className="page-title">Edit profile</h1>
-      <p className="lede">Photo, UID, contact links, and matching details all live here.</p>
       {error ? <Notice tone="danger">{error}</Notice> : null}
       <form className="card grid" style={{ marginTop: 16 }} onSubmit={onSubmit}>
         <label className="field">

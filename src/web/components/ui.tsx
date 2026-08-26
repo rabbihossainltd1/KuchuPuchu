@@ -47,15 +47,17 @@ export function Empty({
   action,
 }: {
   title: string;
-  body: string;
+  body?: string;
   action?: ReactNode;
 }) {
   return (
     <div className="empty card">
       <h3>{title}</h3>
-      <p className="lede" style={{ margin: "8px auto 16px" }}>
-        {body}
-      </p>
+      {body ? (
+        <p className="lede" style={{ margin: "8px auto 16px" }}>
+          {body}
+        </p>
+      ) : null}
       {action}
     </div>
   );

@@ -292,8 +292,7 @@ export function HomePage() {
         </div>
       ) : feedItems.length === 0 ? (
         <Empty
-          title="Your feed is quiet"
-          body="Share what’s on your mind, or add a 24-hour story."
+          title="No posts yet"
           action={
             <button className="btn" type="button" onClick={() => setParams({ compose: "1" })}>
               Create post

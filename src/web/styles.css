@@ -876,8 +876,48 @@ textarea:focus {
 .social-main {
   width: min(680px, 100%);
   margin: 0 auto;
-  padding: 0 0 96px;
+  padding: 12px 14px 96px;
   flex: 1;
+}
+.social-main:has(.feed-page) {
+  padding: 0 0 96px;
+}
+.wallet-balance {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  margin: 8px 0 14px;
+}
+.pack-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.pack-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px 12px 12px;
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  text-align: left;
+}
+.pack-card strong {
+  font-size: 24px;
+  letter-spacing: -0.03em;
+}
+.pack-card span,
+.pack-card em {
+  color: var(--muted);
+  font-style: normal;
+  font-size: 13px;
+}
+.pack-card b {
+  margin-top: 8px;
+  color: var(--accent);
+  font-size: 13px;
 }
 .bottom-nav.always {
   display: flex;

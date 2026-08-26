@@ -87,7 +87,7 @@ export function skeletonMe(fb: User, extras?: { displayName?: string; username?:
     createdAt: fb.metadata.creationTime ? new Date(fb.metadata.creationTime).toISOString() : now,
     reputation: 0,
     adminRole: null,
-    wallet: { balance: 0 },
+    wallet: { balance: 80 },
     profile: defaultProfile(),
     privacy: defaultPrivacy(),
     notificationPreferences: {
@@ -211,7 +211,7 @@ export async function ensureUserDoc(
       referralLink: "",
       reputation: 0,
       adminRole: null,
-      walletBalance: 0,
+      walletBalance: 80,
       profile: base.profile,
       privacy: base.privacy,
       searchName: base.displayName.toLowerCase(),

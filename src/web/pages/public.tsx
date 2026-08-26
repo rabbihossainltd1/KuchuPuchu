@@ -101,7 +101,6 @@ export function LoginPage() {
   return (
     <AuthFrame>
       <h1 className="page-title">Welcome back</h1>
-      <p className="lede">Sign in with your email and password.</p>
       {error ? <Notice tone="danger">{error}</Notice> : null}
       <form className="grid" style={{ marginTop: 18 }} onSubmit={onSubmit} noValidate>
         <label className="field">
@@ -156,7 +155,6 @@ export function RegisterPage() {
   return (
     <AuthFrame>
       <h1 className="page-title">Create account</h1>
-      <p className="lede">Use a real email and a password with at least 6 characters.</p>
       {error ? <Notice tone="danger">{error}</Notice> : null}
       <form className="grid" style={{ marginTop: 18 }} onSubmit={onSubmit} noValidate>
         <label className="field">
@@ -231,7 +229,6 @@ export function ResetPasswordPage() {
   return (
     <AuthFrame>
       <h1 className="page-title">Reset password</h1>
-      <p className="lede">Open the reset link from your email, or request a new one.</p>
       <Link className="btn" to="/forgot-password" style={{ marginTop: 16 }}>
         Send reset email
       </Link>
@@ -243,7 +240,6 @@ export function VerifyEmailPage() {
   return (
     <AuthFrame>
       <h1 className="page-title">Email verification</h1>
-      <p className="lede">You can use the app after creating an account.</p>
       <Link className="btn" to="/home" style={{ marginTop: 16 }}>
         Continue
       </Link>

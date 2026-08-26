@@ -28,14 +28,10 @@ export function MessagesPage() {
   return (
     <div>
       <h1 className="page-title">Messages</h1>
-      <p className="lede">Chat, voice, and video with players who allow messages.</p>
       {!items ? (
         <Spinner />
       ) : items.length === 0 ? (
-        <Empty
-          title="No conversations yet"
-          body="Open a profile and tap Message to start a thread."
-        />
+        <Empty title="No conversations yet" />
       ) : (
         <div className="inbox">
           {items.map((item) => (
