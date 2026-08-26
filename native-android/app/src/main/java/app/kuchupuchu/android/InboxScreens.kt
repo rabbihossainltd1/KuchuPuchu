@@ -351,8 +351,8 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
                     Text(lastSeen(other.optString("lastActiveAt"), other.optBoolean("online")), color = Muted, fontSize = 12.sp)
                 }
             }
-            IconBtn(Icons.Outlined.Call) { engine.startCall(other.userId(), "AUDIO", other.name()) }
-            IconBtn(Icons.Outlined.Videocam) { engine.startCall(other.userId(), "VIDEO", other.name()) }
+            IconBtn(Icons.Outlined.Call) { engine.startCall(other.userId(), "AUDIO", other.name(), other.optString("avatarUrl")) }
+            IconBtn(Icons.Outlined.Videocam) { engine.startCall(other.userId(), "VIDEO", other.name(), other.optString("avatarUrl")) }
             IconBtn(Icons.Outlined.MoreVert) { menu = !menu }
         }
         LazyColumn(Modifier.weight(1f).padding(10.dp, 12.dp), state = list) {

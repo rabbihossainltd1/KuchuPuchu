@@ -157,7 +157,7 @@ fun KpApp() {
                 )
         }
         call?.let {
-            Box(Modifier.fillMaxSize().background(Bg.copy(alpha = 0.02f))) {
+            Box(Modifier.fillMaxSize()) {
                 CallOverlay(it, engine)
             }
         }

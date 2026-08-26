@@ -1,7 +1,13 @@
 package app.kuchupuchu.android
 
+import android.app.Activity
 import android.app.Application
 import android.content.Context
+import android.content.Intent
+import android.media.projection.MediaProjection
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -9,7 +15,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
 import org.json.JSONObject
 import org.webrtc.AudioSource
 import org.webrtc.AudioTrack
@@ -23,6 +28,8 @@ import org.webrtc.MediaConstraints
 import org.webrtc.MediaStream
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
+import org.webrtc.RtpReceiver
+import org.webrtc.ScreenCapturerAndroid
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
 import org.webrtc.SurfaceTextureHelper
@@ -42,6 +49,8 @@ data class CallUi(
     val otherName: String,
     val otherId: String,
     val otherOnline: Boolean = false,
+    val otherAvatar: String = "",
+    val startedAt: Long = 0L,
 )
 
 class CallEngine(private val app: Application) {
@@ -56,6 +65,7 @@ class CallEngine(private val app: Application) {
     var muted = false
     var cameraOff = false
     var sharing = false
+    var hasRemote = false
 
     val egl = EglBase.create()
     private var factory: PeerConnectionFactory? = null
@@ -64,8 +74,11 @@ class CallEngine(private val app: Application) {
     private var audioTrack: AudioTrack? = null
     private var videoSource: VideoSource? = null
     private var videoTrack: VideoTrack? = null
+    private var remoteVideo: VideoTrack? = null
     private var capturer: VideoCapturer? = null
     private var helper: SurfaceTextureHelper? = null
+    private var localView: SurfaceViewRenderer? = null
+    private var remoteView: SurfaceViewRenderer? = null
     private val seenIce = mutableSetOf<String>()
     private val ignored = mutableSetOf<String>()
     private val left = AtomicBoolean(false)
@@ -73,15 +86,22 @@ class CallEngine(private val app: Application) {
     private val scope = CoroutineScope(Dispatchers.Main)
     private var iceCallId: String = ""
     private val pendingIce = mutableListOf<JSONObject>()
+    private var ringingId: String? = null
+    private var shareCallback: MediaProjection.Callback? = null
+
+    init {
+        instance = this
+    }
 
     fun start(ctx: Context) {
         ensureFactory(ctx)
+        CallNotify.ensure(ctx)
         poll?.cancel()
         poll =
             scope.launch {
                 while (isActive) {
                     tick()
-                    delay(1600)
+                    delay(if (active != null) 700 else 650)
                 }
             }
     }
@@ -122,40 +142,69 @@ class CallEngine(private val app: Application) {
             return
         }
         val other = next.optJSONObject("other") ?: JSONObject()
+        val incoming = next.optBoolean("incoming")
         val ui =
             CallUi(
                 id = next.optString("id"),
                 kind = next.optString("kind"),
                 status = status,
-                incoming = next.optBoolean("incoming"),
-                otherName = other.optString("displayName", "Player"),
-                otherId = other.optString("userId"),
+                incoming = incoming,
+                otherName = other.optString("displayName").ifBlank { current?.otherName ?: "Player" },
+                otherId = other.optString("userId").ifBlank { current?.otherId.orEmpty() },
                 otherOnline = other.optBoolean("online"),
+                otherAvatar = other.optString("avatarUrl").ifBlank { current?.otherAvatar.orEmpty() },
+                startedAt =
+                    when {
+                        status == "ACTIVE" && (current?.startedAt ?: 0L) > 0L -> current!!.startedAt
+                        status == "ACTIVE" -> System.currentTimeMillis()
+                        else -> 0L
+                    },
             )
         if (current?.id?.startsWith("pending") == true) {
-            active = ui.copy(otherName = current.otherName)
+            active = ui.copy(otherName = current.otherName, otherAvatar = current.otherAvatar)
         } else {
             active = ui
         }
-        if (ui.incoming && ui.status == "RINGING" && ui.kind == "VIDEO" && videoTrack == null) {
-            withContext(Dispatchers.IO) { runCatching { capture(true) } }
+        if (incoming && status == "RINGING") {
+            if (ringingId != ui.id) {
+                ringingId = ui.id
+                CallSounds.startRing(app)
+                CallNotify.incoming(app, ui.otherName, ui.kind == "VIDEO")
+            }
+            if (ui.kind == "VIDEO") {
+                withContext(Dispatchers.IO) { runCatching { capture(true) } }
+                onChange?.invoke(active)
+            }
         }
-        if (status == "ACTIVE" && next.optString("answerSdp").isNotBlank() && pc?.remoteDescription == null) {
-            pc?.setRemoteDescription(EmptySdp(), SessionDescription(SessionDescription.Type.ANSWER, next.optString("answerSdp")))
+        if (status == "ACTIVE") {
+            if (ringingId != null) {
+                CallNotify.cancelIncoming(app)
+                ringingId = null
+            }
+            CallService.start(app, "In a call with ${ui.otherName}")
+            val answer = next.optString("answerSdp")
+            if (answer.isNotBlank() && pc?.remoteDescription == null) {
+                runCatching {
+                    pc?.setRemoteDescriptionAwait(SessionDescription(SessionDescription.Type.ANSWER, answer))
+                }
+            }
         }
         if (status == "ACTIVE" || status == "RINGING") pullIce(ui.id)
     }
 
-    fun startCall(userId: String, kind: String, name: String) {
+    fun startCall(userId: String, kind: String, name: String, avatar: String = "") {
         if (active != null) return
         left.set(false)
-        active = CallUi("pending", kind, "RINGING", false, name, userId)
+        hasRemote = false
+        active = CallUi("pending", kind, "RINGING", false, name, userId, otherAvatar = avatar)
+        CallService.start(app, if (kind == "VIDEO") "Video calling $name" else "Calling $name")
         scope.launch {
             try {
                 val streamOk = withContext(Dispatchers.IO) { capture(kind == "VIDEO") }
                 if (!streamOk || left.get()) return@launch
+                onChange?.invoke(active)
                 val peer = newPc()
-                val offer = peer.createOfferAwait()
+                val offer = peer.createOfferAwait(sdpConstraints())
                 peer.setLocalDescriptionAwait(offer)
                 val created =
                     withContext(Dispatchers.IO) {
@@ -182,6 +231,7 @@ class CallEngine(private val app: Application) {
                         false,
                         name,
                         userId,
+                        otherAvatar = avatar,
                     )
             } catch (_: Exception) {
                 hangupLocal()
@@ -191,6 +241,9 @@ class CallEngine(private val app: Application) {
 
     fun answer() {
         val rec = active ?: return
+        CallNotify.cancelIncoming(app)
+        ringingId = null
+        CallService.start(app, "In a call with ${rec.otherName}")
         scope.launch {
             try {
                 val offer =
@@ -204,12 +257,13 @@ class CallEngine(private val app: Application) {
                 iceCallId = rec.id
                 val peer = newPc()
                 peer.setRemoteDescriptionAwait(SessionDescription(SessionDescription.Type.OFFER, offer))
-                val answer = peer.createAnswerAwait()
+                val answer = peer.createAnswerAwait(sdpConstraints())
                 peer.setLocalDescriptionAwait(answer)
+                flushIce()
                 withContext(Dispatchers.IO) {
                     Api.post("/api/calls/${rec.id}/answer", JSONObject().put("answerSdp", answer.description))
                 }
-                active = rec.copy(status = "ACTIVE")
+                active = rec.copy(status = "ACTIVE", startedAt = System.currentTimeMillis())
             } catch (_: Exception) {
                 /* keep ringing */
             }
@@ -218,6 +272,8 @@ class CallEngine(private val app: Application) {
 
     fun decline() {
         val id = active?.id
+        CallNotify.cancelIncoming(app)
+        ringingId = null
         if (id != null) {
             ignored.add(id)
             scope.launch(Dispatchers.IO) { runCatching { Api.post("/api/calls/$id/decline") } }
@@ -230,10 +286,12 @@ class CallEngine(private val app: Application) {
         left.set(true)
         rec?.id?.let { ignored.add(it) }
         val id = rec?.id
+        val seconds =
+            if ((rec?.startedAt ?: 0L) > 0L) ((System.currentTimeMillis() - rec!!.startedAt) / 1000).toInt() else 0
         hangupLocal()
         if (id != null && !id.startsWith("pending")) {
             scope.launch(Dispatchers.IO) {
-                runCatching { Api.post("/api/calls/$id/hangup", JSONObject().put("seconds", 0)) }
+                runCatching { Api.post("/api/calls/$id/hangup", JSONObject().put("seconds", seconds)) }
                 runCatching { Api.post("/api/calls/clear") }
             }
         }
@@ -251,32 +309,132 @@ class CallEngine(private val app: Application) {
     }
 
     fun toggleCamera() {
+        if (sharing) return
+        if (videoTrack == null) {
+            scope.launch {
+                withContext(Dispatchers.IO) { runCatching { capture(true) } }
+                videoTrack?.let { track ->
+                    val sender = pc?.senders?.find { it.track()?.kind() == "video" }
+                    if (sender != null) sender.setTrack(track, true) else pc?.addTrack(track)
+                    localView?.let { runCatching { track.addSink(it) } }
+                }
+                cameraOff = false
+                active = active?.copy(kind = "VIDEO")
+            }
+            return
+        }
         cameraOff = !cameraOff
         videoTrack?.setEnabled(!cameraOff)
-        if (!cameraOff && active?.kind == "AUDIO") {
-            active = active?.copy(kind = "VIDEO")
-        }
+        if (!cameraOff && active?.kind == "AUDIO") active = active?.copy(kind = "VIDEO")
         onChange?.invoke(active)
     }
 
     fun toggleShare() {
-        sharing = !sharing
-        if (sharing) active = active?.copy(kind = "VIDEO")
+        if (sharing) {
+            stopShare()
+            return
+        }
+        MainActivity.current?.askShare { code, data ->
+            if (code == Activity.RESULT_OK && data != null) startShare(data)
+        }
+    }
+
+    private fun startShare(data: Intent) {
+        CallService.start(app, "Sharing screen", share = true)
+        val cb =
+            object : MediaProjection.Callback() {
+                override fun onStop() {
+                    scope.launch { if (sharing) stopShare() }
+                }
+            }
+        shareCallback = cb
+        try {
+            capturer?.stopCapture()
+        } catch (_: Exception) {
+        }
+        capturer?.dispose()
+        videoTrack?.let { track -> localView?.let { runCatching { track.removeSink(it) } } }
+        val screen = ScreenCapturerAndroid(data, cb)
+        val src = factory?.createVideoSource(true) ?: return
+        val nextHelper = SurfaceTextureHelper.create("kp-share", egl.eglBaseContext)
+        screen.initialize(nextHelper, app, src.capturerObserver)
+        screen.startCapture(720, 1280, 20)
+        val track = factory!!.createVideoTrack("kp-share", src)
+        val sender = pc?.senders?.find { it.track()?.kind() == "video" }
+        if (sender != null) sender.setTrack(track, true) else pc?.addTrack(track)
+        helper?.dispose()
+        helper = nextHelper
+        runCatching { videoSource?.dispose() }
+        videoSource = src
+        videoTrack = track
+        capturer = screen
+        sharing = true
+        cameraOff = false
+        localView?.setMirror(false)
+        localView?.let { runCatching { track.addSink(it) } }
+        active = active?.copy(kind = "VIDEO")
+    }
+
+    private fun stopShare() {
+        sharing = false
+        try {
+            capturer?.stopCapture()
+        } catch (_: Exception) {
+        }
+        capturer?.dispose()
+        capturer = null
+        videoTrack?.let { track -> localView?.let { runCatching { track.removeSink(it) } } }
+        runCatching { videoSource?.dispose() }
+        videoSource = null
+        helper?.dispose()
+        helper = null
+        videoTrack = null
+        capture(true)
+        videoTrack?.let { track ->
+            val sender = pc?.senders?.find { it.track()?.kind() == "video" }
+            if (sender != null) sender.setTrack(track, true) else pc?.addTrack(track)
+            localView?.setMirror(true)
+            localView?.let { runCatching { track.addSink(it) } }
+        }
         onChange?.invoke(active)
     }
 
     fun attachLocal(view: SurfaceViewRenderer) {
-        view.init(egl.eglBaseContext, null)
-        view.setMirror(true)
-        videoTrack?.addSink(view)
+        if (localView !== view) {
+            localView?.let { old -> videoTrack?.let { runCatching { it.removeSink(old) } } }
+            runCatching { view.init(egl.eglBaseContext, null) }
+            view.setMirror(!sharing)
+            view.setEnableHardwareScaler(true)
+            localView = view
+        }
+        videoTrack?.let { runCatching { it.addSink(view) } }
     }
 
     fun attachRemote(view: SurfaceViewRenderer) {
-        view.init(egl.eglBaseContext, null)
-        view.setMirror(false)
+        if (remoteView !== view) {
+            remoteView?.let { old -> remoteVideo?.let { runCatching { it.removeSink(old) } } }
+            runCatching { view.init(egl.eglBaseContext, null) }
+            view.setMirror(false)
+            view.setEnableHardwareScaler(true)
+            remoteView = view
+        }
+        remoteVideo?.let { runCatching { it.addSink(view) } }
+    }
+
+    fun detachLocal(view: SurfaceViewRenderer) {
+        videoTrack?.let { runCatching { it.removeSink(view) } }
+        if (localView === view) localView = null
+    }
+
+    fun detachRemote(view: SurfaceViewRenderer) {
+        remoteVideo?.let { runCatching { it.removeSink(view) } }
+        if (remoteView === view) remoteView = null
     }
 
     private fun hangupLocal() {
+        CallNotify.cancelAll(app)
+        CallService.stop(app)
+        ringingId = null
         try {
             capturer?.stopCapture()
         } catch (_: Exception) {
@@ -289,8 +447,13 @@ class CallEngine(private val app: Application) {
         audioSource = null
         videoSource?.dispose()
         videoSource = null
+        localView?.let { v -> videoTrack?.let { runCatching { it.removeSink(v) } } }
+        remoteView?.let { v -> remoteVideo?.let { runCatching { it.removeSink(v) } } }
         audioTrack = null
         videoTrack = null
+        remoteVideo = null
+        localView = null
+        remoteView = null
         pc?.close()
         pc = null
         seenIce.clear()
@@ -298,31 +461,39 @@ class CallEngine(private val app: Application) {
         muted = false
         cameraOff = false
         sharing = false
+        hasRemote = false
         iceCallId = ""
         pendingIce.clear()
+        left.set(false)
         active = null
     }
 
     private fun iceServers(): List<PeerConnection.IceServer> =
         listOf(
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("stun:stun2.l.google.com:19302").createIceServer(),
             PeerConnection.IceServer.builder("stun:stun.cloudflare.com:3478").createIceServer(),
-            PeerConnection.IceServer.builder("turn:staticauth.openrelay.metered.ca:80")
-                .setUsername("openrelayproject")
-                .setPassword("openrelayprojectsecret")
-                .createIceServer(),
         )
 
-    private fun newPc(): PeerConnection {
-        val rtc = PeerConnection.RTCConfiguration(iceServers()).apply {
-            sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
+    private fun sdpConstraints() =
+        MediaConstraints().apply {
+            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
         }
+
+    private fun newPc(): PeerConnection {
+        val rtc =
+            PeerConnection.RTCConfiguration(iceServers()).apply {
+                sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
+                continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+            }
         val peer =
             factory!!.createPeerConnection(
                 rtc,
                 object : PeerConnection.Observer {
                     override fun onSignalingChange(p0: PeerConnection.SignalingState?) {}
-                    override fun onIceConnectionChange(p0: PeerConnection.IceConnectionState?) {}
+                    override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {}
                     override fun onIceConnectionReceivingChange(p0: Boolean) {}
                     override fun onIceGatheringChange(p0: PeerConnection.IceGatheringState?) {}
                     override fun onIceCandidate(c: IceCandidate?) {
@@ -342,17 +513,35 @@ class CallEngine(private val app: Application) {
                         }
                     }
                     override fun onIceCandidatesRemoved(p0: Array<out IceCandidate>?) {}
-                    override fun onAddStream(p0: MediaStream?) {}
+                    override fun onAddStream(stream: MediaStream?) {
+                        val track = stream?.videoTracks?.firstOrNull() ?: return
+                        bindRemote(track)
+                    }
                     override fun onRemoveStream(p0: MediaStream?) {}
                     override fun onDataChannel(p0: DataChannel?) {}
                     override fun onRenegotiationNeeded() {}
-                    override fun onAddTrack(receiver: org.webrtc.RtpReceiver?, streams: Array<out MediaStream>?) {}
+                    override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {
+                        val track = receiver?.track()
+                        if (track is VideoTrack) bindRemote(track)
+                        if (track is AudioTrack) track.setEnabled(true)
+                    }
                 },
             )!!
-        audioTrack?.let { peer.addTrack(it) }
-        videoTrack?.let { peer.addTrack(it) }
+        audioTrack?.let { peer.addTrack(it, listOf("kp")) }
+        videoTrack?.let { peer.addTrack(it, listOf("kp")) }
         pc = peer
         return peer
+    }
+
+    private fun bindRemote(track: VideoTrack) {
+        scope.launch {
+            remoteView?.let { old -> remoteVideo?.let { runCatching { it.removeSink(old) } } }
+            remoteVideo = track
+            track.setEnabled(true)
+            remoteView?.let { runCatching { track.addSink(it) } }
+            hasRemote = true
+            onChange?.invoke(active)
+        }
     }
 
     private fun flushIce() {
@@ -375,10 +564,10 @@ class CallEngine(private val app: Application) {
             val id = item.optString("id")
             if (id in seenIce) continue
             val c = item.optJSONObject("candidate") ?: continue
+            val cand = c.optString("candidate")
+            if (cand.isBlank()) continue
             try {
-                pc.addIceCandidate(
-                    IceCandidate(c.optString("sdpMid"), c.optInt("sdpMLineIndex"), c.optString("candidate")),
-                )
+                pc.addIceCandidate(IceCandidate(c.optString("sdpMid"), c.optInt("sdpMLineIndex"), cand))
                 seenIce.add(id)
             } catch (_: Exception) {
             }
@@ -387,9 +576,12 @@ class CallEngine(private val app: Application) {
 
     private fun capture(video: Boolean): Boolean {
         val f = factory ?: return false
-        audioSource = f.createAudioSource(MediaConstraints())
-        audioTrack = f.createAudioTrack("kp-a", audioSource)
-        if (video) {
+        if (audioTrack == null) {
+            audioSource = f.createAudioSource(MediaConstraints())
+            audioTrack = f.createAudioTrack("kp-a", audioSource)
+            audioTrack?.setEnabled(!muted)
+        }
+        if (video && videoTrack == null) {
             val enum = Camera2Enumerator(app)
             val name = enum.deviceNames.firstOrNull { enum.isFrontFacing(it) } ?: enum.deviceNames.firstOrNull()
             if (name != null) {
@@ -397,23 +589,25 @@ class CallEngine(private val app: Application) {
                 helper = SurfaceTextureHelper.create("kp-cap", egl.eglBaseContext)
                 videoSource = f.createVideoSource(false)
                 capturer?.initialize(helper, app, videoSource!!.capturerObserver)
-                capturer?.startCapture(640, 860, 24)
+                capturer?.startCapture(720, 1280, 24)
                 videoTrack = f.createVideoTrack("kp-v", videoSource)
+                localView?.let { view ->
+                    view.setMirror(true)
+                    runCatching { videoTrack?.addSink(view) }
+                }
             }
         }
-        cameraOff = !video
+        cameraOff = videoTrack == null
         return true
+    }
+
+    companion object {
+        @Volatile
+        var instance: CallEngine? = null
     }
 }
 
-private class EmptySdp : SdpObserver {
-    override fun onCreateSuccess(p0: SessionDescription?) {}
-    override fun onSetSuccess() {}
-    override fun onCreateFailure(p0: String?) {}
-    override fun onSetFailure(p0: String?) {}
-}
-
-private suspend fun PeerConnection.createOfferAwait(): SessionDescription =
+private suspend fun PeerConnection.createOfferAwait(constraints: MediaConstraints): SessionDescription =
     suspendCoroutine { cont ->
         createOffer(
             object : SdpObserver {
@@ -424,11 +618,11 @@ private suspend fun PeerConnection.createOfferAwait(): SessionDescription =
                 override fun onCreateFailure(p0: String?) {}
                 override fun onSetFailure(p0: String?) {}
             },
-            MediaConstraints(),
+            constraints,
         )
     }
 
-private suspend fun PeerConnection.createAnswerAwait(): SessionDescription =
+private suspend fun PeerConnection.createAnswerAwait(constraints: MediaConstraints): SessionDescription =
     suspendCoroutine { cont ->
         createAnswer(
             object : SdpObserver {
@@ -439,7 +633,7 @@ private suspend fun PeerConnection.createAnswerAwait(): SessionDescription =
                 override fun onCreateFailure(p0: String?) {}
                 override fun onSetFailure(p0: String?) {}
             },
-            MediaConstraints(),
+            constraints,
         )
     }
 
