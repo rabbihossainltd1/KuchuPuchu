@@ -26,7 +26,7 @@ import androidx.compose.ui.unit.sp
 import org.json.JSONObject
 
 @Composable
-fun IconBtn(icon: ImageVector, onClick: () -> Unit, tint: Color = Ink) {
+fun IconBtn(icon: ImageVector, tint: Color = Ink, onClick: () -> Unit) {
     Box(
         Modifier.size(40.dp).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,

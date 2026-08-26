@@ -355,23 +355,16 @@ class CallEngine(private val app: Application) {
         return peer
     }
 
-    private fun wirePc(peer: PeerConnection, callId: String) {
-        peer.let { /* ice posted in observer replacement */ }
-        val old = pc
-        pc = peer
-        old
-        val rtc = PeerConnection.RTCConfiguration(iceServers()).apply {
-            sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
+    private fun flushIce() {
+        val id = iceCallId
+        if (id.isBlank() || id.startsWith("pending")) return
+        val batch = pendingIce.toList()
+        pendingIce.clear()
+        scope.launch(Dispatchers.IO) {
+            for (body in batch) {
+                runCatching { Api.post("/api/calls/$id/ice", body) }
+            }
         }
-        // observer already set; post ICE via extra observer not replaceable — send after gather
-        scope.launch {
-            delay(400)
-            // candidates gathered into local description
-        }
-        peer
-        // Use onIceCandidate by recreating is hard; poll remote only.
-        pc = peer
-        callId.toString()
     }
 
     private suspend fun pullIce(callId: String) {
