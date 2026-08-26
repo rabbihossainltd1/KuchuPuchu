@@ -46,7 +46,7 @@ public class MainActivity extends BridgeActivity {
             AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
             if (am == null) return;
             am.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
-            am.setMode(on ? AudioManager.MODE_NORMAL : AudioManager.MODE_IN_COMMUNICATION);
+            am.setMode(AudioManager.MODE_NORMAL);
             am.setSpeakerphoneOn(on);
         }
 
@@ -115,6 +115,7 @@ public class MainActivity extends BridgeActivity {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setDomStorageEnabled(true);
         settings.setJavaScriptEnabled(true);
+        if (Build.VERSION.SDK_INT >= 26) webView.setAudioMuted(false);
         webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
         webView.setVerticalScrollBarEnabled(false);
         webView.setHorizontalScrollBarEnabled(false);

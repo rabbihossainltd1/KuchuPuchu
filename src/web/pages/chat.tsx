@@ -1,6 +1,16 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ChevronLeft, Download, ImagePlus, Phone, Send, Smile, Video, X } from "lucide-react";
+import {
+  ChevronLeft,
+  Download,
+  ImagePlus,
+  MoreVertical,
+  Phone,
+  Send,
+  Smile,
+  Video,
+  X,
+} from "lucide-react";
 import { api, peekCache, RequestError } from "../lib/api";
 import { readPhoto, savePhoto } from "../lib/photo";
 import { useAuth } from "../lib/auth";
@@ -17,6 +27,8 @@ type Conversation = {
   lastMessage: { body: string; createdAt?: string } | null;
   unread: number;
   lastMessageAt?: string;
+  muted?: boolean;
+  otherReadAt?: string | null;
 };
 
 type ChatMessage = {
@@ -29,6 +41,7 @@ type ChatMessage = {
   call?: string | null;
   reaction?: string | null;
   createdAt?: string;
+  pending?: boolean;
 };
 
 function mediaOf(item: ChatMessage) {
@@ -136,6 +149,9 @@ export function ConversationPage() {
   );
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [otherReadAt, setOtherReadAt] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
@@ -144,10 +160,13 @@ export function ConversationPage() {
 
   const load = useCallback(async () => {
     if (!id) return;
-    const thread = await api<{ items: ChatMessage[] }>(`/api/conversations/${id}/messages`);
+    const thread = await api<{ items: ChatMessage[]; otherReadAt?: string | null }>(
+      `/api/conversations/${id}/messages`,
+    );
+    if (thread.otherReadAt) setOtherReadAt(thread.otherReadAt);
     setItems((current) => {
       const prev = new Map(current.map((item) => [item.id, item]));
-      return thread.items.map((item) => {
+      const mapped = thread.items.map((item) => {
         const older = prev.get(item.id);
         const media = mediaOf(item);
         if (older && !media.imageUrls.length && !media.sticker && !media.call) {
@@ -169,10 +188,16 @@ export function ConversationPage() {
           reaction: item.reaction ?? older?.reaction ?? null,
         };
       });
+      const temps = current.filter(
+        (item) => item.id.startsWith("tmp-") && !mapped.some((row) => row.body === item.body),
+      );
+      return [...mapped, ...temps];
     });
     const inbox = peekCache<{ items: Conversation[] }>("/api/conversations");
-    const found = inbox?.items.find((item) => item.id === id)?.other;
-    if (found) setOther(found);
+    const found = inbox?.items.find((item) => item.id === id);
+    if (found?.other) setOther(found.other);
+    if (found?.muted != null) setMuted(found.muted);
+    if (found?.otherReadAt) setOtherReadAt(found.otherReadAt);
   }, [id]);
 
   useEffect(() => {
@@ -186,7 +211,23 @@ export function ConversationPage() {
   }, [items.length]);
 
   async function sendPayload(payload: { body?: string; imageData?: string[]; sticker?: string }) {
-    if (!id || sending) return;
+    if (!id || !user) return;
+    const tempId = `tmp-${Date.now()}`;
+    const temp: ChatMessage = {
+      id: tempId,
+      senderId: user.id,
+      body: payload.body || "",
+      imageUrls: payload.imageData ?? [],
+      sticker: payload.sticker ?? null,
+      createdAt: new Date().toISOString(),
+      pending: true,
+    };
+    setItems((current) => [...current, temp]);
+    setDraft("");
+    setPhotos([]);
+    setStickersOpen(false);
+    setError("");
+    window.setTimeout(() => inputRef.current?.focus(), 0);
     setSending(true);
     try {
       const data = await api<{ message: ChatMessage }>(`/api/conversations/${id}/messages`, {
@@ -194,20 +235,19 @@ export function ConversationPage() {
         body: JSON.stringify(payload),
       });
       const media = mediaOf(data.message);
-      setItems((current) => [
-        ...current,
-        { ...data.message, imageUrls: media.imageUrls, sticker: media.sticker },
-      ]);
-      setDraft("");
-      setPhotos([]);
-      setStickersOpen(false);
-      setError("");
-      window.setTimeout(() => inputRef.current?.focus(), 0);
+      setItems((current) =>
+        current.map((item) =>
+          item.id === tempId
+            ? { ...data.message, imageUrls: media.imageUrls, sticker: media.sticker }
+            : item,
+        ),
+      );
     } catch (err) {
+      setItems((current) => current.filter((item) => item.id !== tempId));
       setError(err instanceof RequestError ? err.body.message : "Could not send.");
     } finally {
       setSending(false);
-      window.setTimeout(() => inputRef.current?.focus(), 30);
+      window.setTimeout(() => inputRef.current?.focus(), 20);
     }
   }
 
@@ -275,6 +315,10 @@ export function ConversationPage() {
 
   useEffect(() => {
     return onNativeBack(() => {
+      if (menuOpen) {
+        setMenuOpen(false);
+        return true;
+      }
       if (forwardOpen) {
         setForwardOpen(false);
         return true;
@@ -289,7 +333,62 @@ export function ConversationPage() {
       }
       return false;
     });
-  }, [forwardOpen, viewer, reactFor]);
+  }, [forwardOpen, viewer, reactFor, menuOpen]);
+
+  async function toggleMute() {
+    if (!id) return;
+    const next = !muted;
+    setMuted(next);
+    setMenuOpen(false);
+    await api(`/api/conversations/${id}/mute`, {
+      method: "POST",
+      body: JSON.stringify({ muted: next }),
+    }).catch(() => setMuted(!next));
+  }
+
+  async function clearChat() {
+    if (!id) return;
+    setMenuOpen(false);
+    await api(`/api/conversations/${id}/clear`, { method: "POST", body: "{}" });
+    setItems([]);
+  }
+
+  async function deleteChat() {
+    if (!id) return;
+    setMenuOpen(false);
+    await api(`/api/conversations/${id}`, { method: "DELETE" });
+    navigate("/messages");
+  }
+
+  async function blockUser() {
+    if (!other) return;
+    setMenuOpen(false);
+    await api(`/api/users/${other.userId}/block`, { method: "POST", body: "{}" });
+    if (id) await api(`/api/conversations/${id}`, { method: "DELETE" }).catch(() => undefined);
+    navigate("/messages");
+  }
+
+  const lastMineId = [...items]
+    .reverse()
+    .find((item) => item.senderId === user?.id && !mediaOf(item).call)?.id;
+
+  function receiptFor(item: ChatMessage) {
+    if (item.id !== lastMineId) return null;
+    if (item.pending) return <p className="receipt">Sending</p>;
+    const seen =
+      otherReadAt && item.createdAt && Date.parse(otherReadAt) >= Date.parse(item.createdAt);
+    if (seen && other) {
+      return (
+        <div className="receipt seen">
+          <Avatar name={other.displayName} url={other.avatarUrl} className="seen-dot" />
+        </div>
+      );
+    }
+    const day = item.createdAt
+      ? new Date(item.createdAt).toLocaleDateString(undefined, { weekday: "short" })
+      : "";
+    return <p className="receipt">Delivered {day}</p>;
+  }
 
   const rows = useMemo(() => {
     const out: Array<{ type: "day"; label: string } | { type: "msg"; item: ChatMessage }> = [];
@@ -341,11 +440,35 @@ export function ConversationPage() {
             >
               <Video size={22} />
             </button>
+            <button
+              className="icon-plain"
+              type="button"
+              aria-label="More"
+              onClick={() => setMenuOpen((open) => !open)}
+            >
+              <MoreVertical size={22} />
+            </button>
           </>
         ) : (
           <strong className="header-title">Conversation</strong>
         )}
       </header>
+      {menuOpen ? (
+        <div className="chat-menu" role="menu">
+          <button type="button" onClick={() => void toggleMute()}>
+            {muted ? "Unmute" : "Mute"}
+          </button>
+          <button type="button" onClick={() => void clearChat()}>
+            Clear chat history
+          </button>
+          <button type="button" onClick={() => void deleteChat()}>
+            Delete
+          </button>
+          <button type="button" onClick={() => void blockUser()}>
+            Block
+          </button>
+        </div>
+      ) : null}
       <div className="thread chat-thread">
         {error ? <Notice tone="danger">{error}</Notice> : null}
         {rows.map((row, index) => {
@@ -381,76 +504,78 @@ export function ConversationPage() {
             media.imageUrls.length && (!row.item.body || row.item.body === "Photo"),
           );
           return (
-            <div
-              key={row.item.id}
-              className={row.item.senderId === user?.id ? "bubble-row mine" : "bubble-row"}
-            >
-              {row.item.senderId !== user?.id && other ? (
-                <Avatar name={other.displayName} url={other.avatarUrl} />
-              ) : null}
-              <div
-                className={`${row.item.senderId === user?.id ? "bubble mine" : "bubble"}${
-                  stickerOnly ? " sticker-only" : photoOnly ? " photo-only" : ""
-                }`}
-                onPointerDown={() => pressStart(row.item)}
-                onPointerUp={pressEnd}
-                onPointerCancel={pressEnd}
-                onPointerLeave={pressEnd}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  openReact(row.item);
-                }}
-              >
-                {reactFor?.id === row.item.id ? (
-                  <div className="react-pop">
-                    {["❤️", "😂", "😮", "😢", "👍"].map((emoji) => (
-                      <button
-                        key={emoji}
-                        type="button"
-                        onClick={() => {
-                          void reactTo(row.item.id, emoji);
-                          setReactFor(null);
-                        }}
-                      >
-                        {emoji}
-                      </button>
-                    ))}
-                  </div>
+            <div key={row.item.id} className="bubble-block">
+              <div className={row.item.senderId === user?.id ? "bubble-row mine" : "bubble-row"}>
+                {row.item.senderId !== user?.id && other ? (
+                  <Avatar name={other.displayName} url={other.avatarUrl} />
                 ) : null}
-                {media.sticker ? (
-                  stickerSrc(media.sticker) ? (
-                    <img className="bubble-sticker-img" src={stickerSrc(media.sticker)!} alt="" />
-                  ) : (
-                    <span className="bubble-sticker">{media.sticker}</span>
-                  )
-                ) : null}
-                {media.imageUrls.length ? (
-                  <div className={media.imageUrls.length > 1 ? "bubble-album" : "bubble-album one"}>
-                    {media.imageUrls.map((src) => (
-                      <button
-                        key={src.slice(0, 48)}
-                        className="bubble-photo-btn"
-                        type="button"
-                        onClick={() => {
-                          if (held.current) {
-                            held.current = false;
-                            return;
-                          }
-                          setViewer({ src, message: row.item });
-                        }}
-                      >
-                        <img className="bubble-photo" src={src} alt="" />
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-                {row.item.body &&
-                !media.sticker &&
-                !(media.imageUrls.length && row.item.body === "Photo") ? (
-                  <span>{row.item.body}</span>
-                ) : null}
-                {row.item.reaction ? <em className="bubble-react">{row.item.reaction}</em> : null}
+                <div
+                  className={`${row.item.senderId === user?.id ? "bubble mine" : "bubble"}${
+                    stickerOnly ? " sticker-only" : photoOnly ? " photo-only" : ""
+                  }`}
+                  onPointerDown={() => pressStart(row.item)}
+                  onPointerUp={pressEnd}
+                  onPointerCancel={pressEnd}
+                  onPointerLeave={pressEnd}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    openReact(row.item);
+                  }}
+                >
+                  {reactFor?.id === row.item.id ? (
+                    <div className="react-pop">
+                      {["❤️", "😂", "😮", "😢", "👍"].map((emoji) => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          onClick={() => {
+                            void reactTo(row.item.id, emoji);
+                            setReactFor(null);
+                          }}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  {media.sticker ? (
+                    stickerSrc(media.sticker) ? (
+                      <img className="bubble-sticker-img" src={stickerSrc(media.sticker)!} alt="" />
+                    ) : (
+                      <span className="bubble-sticker">{media.sticker}</span>
+                    )
+                  ) : null}
+                  {media.imageUrls.length ? (
+                    <div
+                      className={media.imageUrls.length > 1 ? "bubble-album" : "bubble-album one"}
+                    >
+                      {media.imageUrls.map((src) => (
+                        <button
+                          key={src.slice(0, 48)}
+                          className="bubble-photo-btn"
+                          type="button"
+                          onClick={() => {
+                            if (held.current) {
+                              held.current = false;
+                              return;
+                            }
+                            setViewer({ src, message: row.item });
+                          }}
+                        >
+                          <img className="bubble-photo" src={src} alt="" />
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  {row.item.body &&
+                  !media.sticker &&
+                  !(media.imageUrls.length && row.item.body === "Photo") ? (
+                    <span>{row.item.body}</span>
+                  ) : null}
+                  {row.item.reaction ? <em className="bubble-react">{row.item.reaction}</em> : null}
+                </div>
               </div>
+              {receiptFor(row.item)}
             </div>
           );
         })}

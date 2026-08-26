@@ -1099,6 +1099,49 @@ video::-webkit-media-controls-overlay-play-button {
   min-width: 36px;
   min-height: 36px;
 }
+.chat-menu {
+  position: absolute;
+  right: 8px;
+  top: calc(env(safe-area-inset-top) + 48px);
+  z-index: 20;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  min-width: 200px;
+  display: grid;
+  box-shadow: 0 10px 30px rgba(28, 25, 23, 0.12);
+}
+.chat-menu button {
+  text-align: left;
+  padding: 12px 14px;
+  min-height: 44px;
+}
+.chat-menu button:hover {
+  background: var(--bg);
+}
+.chat-page {
+  position: relative;
+}
+.bubble-block {
+  display: grid;
+  justify-items: stretch;
+}
+.receipt {
+  width: 100%;
+  text-align: right;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 0 4px 6px;
+}
+.receipt.seen {
+  display: flex;
+  justify-content: flex-end;
+}
+.avatar.seen-dot {
+  width: 16px;
+  height: 16px;
+  font-size: 8px;
+}
 .chat-preview-wrap {
   display: flex;
   align-items: center;

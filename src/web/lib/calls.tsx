@@ -145,20 +145,6 @@ function clock(sec: number) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-function blankVideo() {
-  const canvas = document.createElement("canvas");
-  canvas.width = 16;
-  canvas.height = 16;
-  const ctx = canvas.getContext("2d");
-  if (ctx) {
-    ctx.fillStyle = "#111";
-    ctx.fillRect(0, 0, 16, 16);
-  }
-  const track = canvas.captureStream(1).getVideoTracks()[0];
-  if (track) track.enabled = false;
-  return track;
-}
-
 export function CallProvider({ children }: { children: ReactNode }) {
   const [active, setActive] = useState<CallRecord | null>(null);
   const [error, setError] = useState("");
@@ -312,25 +298,15 @@ export function CallProvider({ children }: { children: ReactNode }) {
     async (kind: CallKind) => {
       unlockAudio();
       routeAudio(speakerRef.current);
-      let stream: MediaStream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 860 } },
-        });
-      } catch {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-        const blank = blankVideo();
-        if (blank) stream.addTrack(blank);
-      }
-      if (kind === "AUDIO") {
-        stream.getVideoTracks().forEach((track) => {
-          track.enabled = false;
-        });
-        setCameraOff(true);
-      } else {
-        setCameraOff(false);
-      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video:
+          kind === "VIDEO"
+            ? { facingMode: "user", width: { ideal: 640 }, height: { ideal: 860 } }
+            : false,
+      });
+      if (kind === "AUDIO") setCameraOff(true);
+      else setCameraOff(false);
       localRef.current = stream;
       setHasLocal(true);
       playMedia(localVideo.current, stream, true);
@@ -409,17 +385,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
         }
         const pc = new RTCPeerConnection(ICE);
         stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-        if (!stream.getVideoTracks().length) {
-          const blank = blankVideo();
-          if (blank) pc.addTrack(blank, stream);
-        }
+        if (kind === "AUDIO") pc.addTransceiver("video", { direction: "recvonly" });
         const pending: RTCIceCandidate[] = [];
         pc.onicecandidate = (event) => {
           if (event.candidate) pending.push(event.candidate);
         };
         const offer = await pc.createOffer({
           offerToReceiveAudio: true,
-          offerToReceiveVideo: true,
+          offerToReceiveVideo: kind === "VIDEO",
         });
         await pc.setLocalDescription(offer);
         const created = await api<{ call: CallRecord }>("/api/calls", {
@@ -477,10 +450,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         }
         const pc = new RTCPeerConnection(ICE);
         stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-        if (!stream.getVideoTracks().length) {
-          const blank = blankVideo();
-          if (blank) pc.addTrack(blank, stream);
-        }
+        if (record.kind === "AUDIO") pc.addTransceiver("video", { direction: "recvonly" });
         wirePc(pc, record.id);
         await pc.setRemoteDescription({ type: "offer", sdp: record.offerSdp });
         const answerDesc = await pc.createAnswer();
@@ -818,12 +788,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
       return;
     }
     let display: MediaStream | null = null;
-    if (typeof navigator.mediaDevices?.getDisplayMedia === "function") {
+    if (window.KpCallAudio?.startScreen) display = await shareFromFrames();
+    if (!display && typeof navigator.mediaDevices?.getDisplayMedia === "function") {
       display = await navigator.mediaDevices
         .getDisplayMedia({ video: true, audio: false })
         .catch(() => null);
     }
-    if (!display) display = await shareFromFrames();
     const track = display?.getVideoTracks()[0];
     if (!track) {
       setError("Screen share is not available on this phone.");
@@ -858,7 +828,22 @@ export function CallProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={value}>
       {children}
-      <audio ref={remoteAudio} autoPlay playsInline style={{ display: "none" }} />
+      <audio
+        ref={remoteAudio}
+        autoPlay
+        playsInline
+        controls={false}
+        style={{
+          position: "fixed",
+          left: 0,
+          bottom: 0,
+          width: 2,
+          height: 2,
+          opacity: 0.01,
+          pointerEvents: "none",
+          zIndex: 1,
+        }}
+      />
       {error && !active ? (
         <div className="call-toast" role="status">
           {error}

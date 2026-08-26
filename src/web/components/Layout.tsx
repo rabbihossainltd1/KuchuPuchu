@@ -61,6 +61,7 @@ export function AppLayout() {
   useEffect(() => {
     const seenNotes = new Set<string>();
     const seenReq = new Set<string>();
+    const seenConv = new Set<string>();
     let primed = false;
     async function tick() {
       try {
@@ -79,7 +80,16 @@ export function AppLayout() {
           api<{ items: Array<{ id: string; from: { displayName: string } }> }>(
             "/api/friend-requests",
           ),
-          api<{ items: Array<{ unread: number }> }>("/api/conversations"),
+          api<{
+            items: Array<{
+              id: string;
+              unread: number;
+              muted?: boolean;
+              lastMessageAt?: string;
+              lastMessage?: { body: string } | null;
+              other: { displayName: string };
+            }>;
+          }>("/api/conversations"),
         ]);
         setUnread(n.unread);
         setRequests(f.items.length);
@@ -87,6 +97,7 @@ export function AppLayout() {
         if (!primed) {
           for (const item of n.items ?? []) seenNotes.add(item.id);
           for (const item of f.items ?? []) seenReq.add(item.id);
+          for (const item of c.items ?? []) seenConv.add(`${item.id}:${item.lastMessageAt ?? ""}`);
           primed = true;
           return;
         }
@@ -95,11 +106,20 @@ export function AppLayout() {
           seenNotes.add(item.id);
           if (item.link && pathRef.current.startsWith(item.link)) continue;
           const kind = inferKind(item);
-          if (kind === "calls") continue;
-          const convId = item.link?.startsWith("/messages/")
-            ? item.link.slice("/messages/".length)
-            : undefined;
-          void pingOs(kind, item.title, item.body, { link: item.link, convId });
+          if (kind === "calls" || kind === "messaging") continue;
+          if (item.link?.startsWith("/messages/")) continue;
+          void pingOs(kind, item.title, item.body, { link: item.link });
+        }
+        for (const item of c.items ?? []) {
+          const key = `${item.id}:${item.lastMessageAt ?? ""}`;
+          if (seenConv.has(key)) continue;
+          seenConv.add(key);
+          if (!item.unread || item.muted) continue;
+          if (pathRef.current === `/messages/${item.id}`) continue;
+          void pingOs("messaging", item.other.displayName, item.lastMessage?.body || "Message", {
+            link: `/messages/${item.id}`,
+            convId: item.id,
+          });
         }
         for (const item of f.items ?? []) {
           if (seenReq.has(item.id)) continue;

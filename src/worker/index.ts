@@ -546,6 +546,21 @@ async function ensureSchema(db: D1Database) {
   } catch {
     /* column already exists */
   }
+  try {
+    await run(db, "ALTER TABLE conversations ADD COLUMN muted_json TEXT");
+  } catch {
+    /* column already exists */
+  }
+  try {
+    await run(db, "ALTER TABLE conversations ADD COLUMN hidden_json TEXT");
+  } catch {
+    /* column already exists */
+  }
+  try {
+    await run(db, "ALTER TABLE conversations ADD COLUMN read_json TEXT");
+  } catch {
+    /* column already exists */
+  }
   schemaReady = true;
 }
 
@@ -1148,15 +1163,22 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
       last_message: string | null;
       last_message_at: string | null;
       unread_json: string;
+      muted_json?: string | null;
+      hidden_json?: string | null;
+      read_json?: string | null;
     }>(db, "SELECT * FROM conversations");
     const items = [];
     for (const row of rows) {
       const members = parseJson<string[]>(row.members_json, []);
       if (!members.includes(uid)) continue;
+      const hiddenMap = parseJson<Record<string, boolean>>(row.hidden_json ?? "{}", {});
+      if (hiddenMap[uid]) continue;
       const otherId = members.find((m) => m !== uid);
       const other = otherId ? await userPublic(db, otherId, uid) : null;
       if (!other) continue;
       const unreadMap = parseJson<Record<string, number>>(row.unread_json, {});
+      const mutedMap = parseJson<Record<string, boolean>>(row.muted_json ?? "{}", {});
+      const readMap = parseJson<Record<string, string>>(row.read_json ?? "{}", {});
       items.push({
         id: row.id,
         other,
@@ -1165,6 +1187,8 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
           : null,
         unread: Number(unreadMap[uid] || 0),
         lastMessageAt: row.last_message_at ?? undefined,
+        muted: Boolean(mutedMap[uid]),
+        otherReadAt: otherId ? (readMap[otherId] ?? null) : null,
       });
     }
     items.sort((a, b) =>
@@ -1205,10 +1229,18 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
     if (method === "GET") {
       const unread = parseJson<Record<string, number>>(conv.unread_json, {});
       unread[uid] = 0;
+      const full = await one<{ read_json?: string | null }>(
+        db,
+        "SELECT read_json FROM conversations WHERE id = ?",
+        cid,
+      );
+      const readMap = parseJson<Record<string, string>>(full?.read_json ?? "{}", {});
+      readMap[uid] = nowIso();
       await run(
         db,
-        "UPDATE conversations SET unread_json = ? WHERE id = ?",
+        "UPDATE conversations SET unread_json = ?, read_json = ? WHERE id = ?",
         JSON.stringify(unread),
+        JSON.stringify(readMap),
         cid,
       );
       const items = await all<{
@@ -1223,7 +1255,9 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
         "SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC LIMIT 200",
         cid,
       );
+      const otherId = members.find((m) => m !== uid);
       return json({
+        otherReadAt: otherId ? (readMap[otherId] ?? null) : null,
         items: items.map((row) => {
           const media = parseMessageMedia(row.image_url ?? null);
           return {
@@ -1289,15 +1323,6 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
       JSON.stringify(unread),
       cid,
     );
-    if (other)
-      await notify(
-        db,
-        other,
-        me.display_name,
-        preview.slice(0, 80),
-        `/messages/${cid}`,
-        "messaging",
-      );
     return json(
       {
         message: {
@@ -1338,6 +1363,70 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
       cid,
     );
     return json({ ok: true, reaction: emoji });
+  }
+
+  const convMute = path.match(/^\/api\/conversations\/([^/]+)\/mute$/);
+  if (convMute && method === "POST") {
+    const cid = convMute[1]!;
+    const conv = await one<{ members_json: string; muted_json?: string | null }>(
+      db,
+      "SELECT members_json, muted_json FROM conversations WHERE id = ?",
+      cid,
+    );
+    if (!conv) fail(404, "Conversation not found.");
+    const members = parseJson<string[]>(conv.members_json, []);
+    if (!members.includes(uid)) fail(403, "Not in this conversation.");
+    const mutedMap = parseJson<Record<string, boolean>>(conv.muted_json ?? "{}", {});
+    mutedMap[uid] = body.muted !== false;
+    await run(
+      db,
+      "UPDATE conversations SET muted_json = ? WHERE id = ?",
+      JSON.stringify(mutedMap),
+      cid,
+    );
+    return json({ ok: true, muted: mutedMap[uid] });
+  }
+
+  const convClear = path.match(/^\/api\/conversations\/([^/]+)\/clear$/);
+  if (convClear && method === "POST") {
+    const cid = convClear[1]!;
+    const conv = await one<{ members_json: string }>(
+      db,
+      "SELECT members_json FROM conversations WHERE id = ?",
+      cid,
+    );
+    if (!conv) fail(404, "Conversation not found.");
+    const members = parseJson<string[]>(conv.members_json, []);
+    if (!members.includes(uid)) fail(403, "Not in this conversation.");
+    await run(db, "DELETE FROM messages WHERE conversation_id = ?", cid);
+    await run(
+      db,
+      "UPDATE conversations SET last_message = NULL, last_message_at = NULL WHERE id = ?",
+      cid,
+    );
+    return json({ ok: true });
+  }
+
+  const convDel = path.match(/^\/api\/conversations\/([^/]+)$/);
+  if (convDel && method === "DELETE") {
+    const cid = convDel[1]!;
+    const conv = await one<{ members_json: string; hidden_json?: string | null }>(
+      db,
+      "SELECT members_json, hidden_json FROM conversations WHERE id = ?",
+      cid,
+    );
+    if (!conv) fail(404, "Conversation not found.");
+    const members = parseJson<string[]>(conv.members_json, []);
+    if (!members.includes(uid)) fail(403, "Not in this conversation.");
+    const hiddenMap = parseJson<Record<string, boolean>>(conv.hidden_json ?? "{}", {});
+    hiddenMap[uid] = true;
+    await run(
+      db,
+      "UPDATE conversations SET hidden_json = ? WHERE id = ?",
+      JSON.stringify(hiddenMap),
+      cid,
+    );
+    return json({ ok: true });
   }
 
   if (path === "/api/calls/clear" && method === "POST") {
@@ -1570,15 +1659,25 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
       read_at: string | null;
       created_at: string;
     }>(db, "SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 50", uid);
-    const items = rows.map((row) => ({
-      id: row.id,
-      title: row.title,
-      body: row.body,
-      link: row.link ?? undefined,
-      kind: row.kind ?? undefined,
-      readAt: row.read_at,
-      createdAt: row.created_at,
-    }));
+    const items = rows
+      .filter((row) => {
+        const kind = row.kind ?? "";
+        const title = (row.title ?? "").toLowerCase();
+        const link = row.link ?? "";
+        if (kind === "calls" || kind === "messaging") return false;
+        if (title.includes("incoming call") || title.includes("incoming video")) return false;
+        if (link.startsWith("/messages/")) return false;
+        return true;
+      })
+      .map((row) => ({
+        id: row.id,
+        title: row.title,
+        body: row.body,
+        link: row.link ?? undefined,
+        kind: row.kind ?? undefined,
+        readAt: row.read_at,
+        createdAt: row.created_at,
+      }));
     return json({ items, unread: items.filter((item) => !item.readAt).length });
   }
   if (path === "/api/notifications/read" && method === "POST") {

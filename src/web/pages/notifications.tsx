@@ -39,7 +39,10 @@ export function NotificationsPage() {
     setItems(
       notes.items.filter((item) => {
         const title = (item.title || "").toLowerCase();
-        return !title.includes("incoming call") && !title.includes("incoming video call");
+        const link = item.link || "";
+        if (item.kind === "calls" || item.kind === "messaging") return false;
+        if (link.startsWith("/messages/")) return false;
+        return !title.includes("incoming call") && !title.includes("incoming video");
       }),
     );
   }
