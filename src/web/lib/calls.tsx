@@ -193,6 +193,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const audioCtx = useRef<AudioContext | null>(null);
   const localVideo = useRef<HTMLVideoElement | null>(null);
   const remoteVideo = useRef<HTMLVideoElement | null>(null);
+  const previewRef = useRef<MediaStream | null>(null);
   const remoteAudio = useRef<HTMLAudioElement | null>(null);
   const answering = useRef(false);
   const hookedKey = useRef("");
@@ -265,6 +266,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
     hookedKey.current = "";
     localRef.current?.getTracks().forEach((track) => track.stop());
     localRef.current = null;
+    previewRef.current?.getTracks().forEach((track) => track.stop());
+    previewRef.current = null;
     remoteStreamRef.current = null;
     pcRef.current?.close();
     pcRef.current = null;
@@ -531,6 +534,31 @@ export function CallProvider({ children }: { children: ReactNode }) {
       .then((stream) => stream.getTracks().forEach((track) => track.stop()))
       .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    if (!active?.incoming || active.status !== "RINGING" || active.kind !== "VIDEO") return;
+    let gone = false;
+    void navigator.mediaDevices
+      .getUserMedia({
+        audio: true,
+        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 860 } },
+      })
+      .then((stream) => {
+        if (gone || leftRef.current) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        previewRef.current = stream;
+        localRef.current = stream;
+        setCameraOff(false);
+        setHasLocal(true);
+        playMedia(localVideo.current, stream, true);
+      })
+      .catch(() => undefined);
+    return () => {
+      gone = true;
+    };
+  }, [active?.id, active?.incoming, active?.status, active?.kind]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -920,16 +948,26 @@ export function CallProvider({ children }: { children: ReactNode }) {
                 />
                 <video
                   ref={localVideo}
-                  className={showVideo && hasLocal && !cameraOff ? "local-video" : "media-offstage"}
+                  className={
+                    showVideo && hasLocal && !cameraOff
+                      ? ringing && active.incoming
+                        ? "local-video full"
+                        : "local-video"
+                      : "media-offstage"
+                  }
                   autoPlay
                   playsInline
                   muted
                   controls={false}
                 />
                 {showVideo ? (
-                  <div className="call-live-name">
+                  <div
+                    className={
+                      ringing && active.incoming ? "call-live-name incoming" : "call-live-name"
+                    }
+                  >
                     <strong>{active.other.displayName}</strong>
-                    <span>{statusLabel}</span>
+                    <span>{ringing && active.incoming ? "Incoming video" : statusLabel}</span>
                   </div>
                 ) : (
                   <div className="call-audio">
@@ -942,18 +980,24 @@ export function CallProvider({ children }: { children: ReactNode }) {
                 {error ? <p className="call-error">{error}</p> : null}
                 <div className="call-actions">
                   {ringing && active.incoming ? (
-                    <>
+                    <div className="call-incoming-actions">
                       <button
                         className="call-btn accept"
                         type="button"
+                        aria-label="Accept"
                         onClick={() => void answer()}
                       >
-                        {active.kind === "VIDEO" ? <Video size={26} /> : <Phone size={26} />}
+                        {active.kind === "VIDEO" ? <Video size={28} /> : <Phone size={28} />}
                       </button>
-                      <button className="call-btn end" type="button" onClick={() => void decline()}>
-                        <PhoneOff size={26} />
+                      <button
+                        className="call-btn end"
+                        type="button"
+                        aria-label="Decline"
+                        onClick={() => void decline()}
+                      >
+                        <PhoneOff size={28} />
                       </button>
-                    </>
+                    </div>
                   ) : (
                     <>
                       <button
