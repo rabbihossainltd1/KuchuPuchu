@@ -742,19 +742,68 @@ textarea:focus {
   margin-left: auto;
   flex-direction: row-reverse;
 }
+.chat-dock {
+  background: var(--surface);
+}
 .chat-compose {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   padding: 8px 10px calc(10px + env(safe-area-inset-bottom));
   background: var(--surface);
 }
-.chat-compose input {
+.chat-compose input:not([type="file"]) {
   flex: 1;
   border: 0;
   background: var(--bg);
   border-radius: 999px;
   padding: 10px 14px;
+}
+.sticker-tray {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+  padding: 10px 10px 0;
+  max-height: 168px;
+  overflow: auto;
+}
+.sticker-btn {
+  min-height: 44px;
+  font-size: 26px;
+  border-radius: 12px;
+}
+.sticker-btn:hover,
+.icon-plain.on {
+  background: var(--bg);
+}
+.chat-previews {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px 0;
+  overflow-x: auto;
+}
+.bubble.sticker-only {
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+.bubble-sticker {
+  font-size: 56px;
+  line-height: 1;
+  display: block;
+}
+.bubble-album {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.bubble-album.one {
+  grid-template-columns: 1fr;
+}
+.bubble-album .bubble-photo {
+  width: 100%;
+  margin: 0;
 }
 .chat-send {
   width: 42px;

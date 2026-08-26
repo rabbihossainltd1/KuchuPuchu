@@ -128,6 +128,19 @@ function parseJson<T>(raw: string, fallback: T): T {
   }
 }
 
+function parseMessageMedia(imageUrl?: string | null) {
+  if (!imageUrl) return { imageUrls: [] as string[], sticker: null as string | null };
+  if (imageUrl.startsWith("sticker:")) return { imageUrls: [], sticker: imageUrl.slice(8) };
+  if (imageUrl.startsWith("data:")) return { imageUrls: [imageUrl], sticker: null };
+  if (imageUrl.startsWith("[")) {
+    const list = parseJson<unknown[]>(imageUrl, []).filter(
+      (item): item is string => typeof item === "string" && item.startsWith("data:"),
+    );
+    return { imageUrls: list, sticker: null };
+  }
+  return { imageUrls: [], sticker: null };
+}
+
 function meFrom(row: UserRow) {
   const profile = { ...defaultProfile(), ...parseJson(row.profile_json, {}) };
   const privacy = { ...defaultPrivacy(), ...parseJson(row.privacy_json, {}) };
@@ -1072,25 +1085,47 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
         cid,
       );
       return json({
-        items: items.map((row) => ({
-          id: row.id,
-          senderId: row.sender_id,
-          body: row.body,
-          imageUrl: row.image_url ?? null,
-          createdAt: row.created_at,
-        })),
+        items: items.map((row) => {
+          const media = parseMessageMedia(row.image_url ?? null);
+          return {
+            id: row.id,
+            senderId: row.sender_id,
+            body: row.body,
+            imageUrl: media.imageUrls[0] ?? null,
+            imageUrls: media.imageUrls,
+            sticker: media.sticker,
+            createdAt: row.created_at,
+          };
+        }),
       });
     }
     const text = String(body.body || "").trim();
-    let imageUrl: string | null = null;
-    if (typeof body.imageData === "string" && body.imageData.startsWith("data:")) {
-      if (body.imageData.length > 700000) fail(400, "Photo is too large. Pick a smaller image.");
-      imageUrl = body.imageData;
+    const rawImages = Array.isArray(body.imageData)
+      ? body.imageData
+      : body.imageData
+        ? [body.imageData]
+        : [];
+    const images = rawImages
+      .filter((item): item is string => typeof item === "string" && item.startsWith("data:"))
+      .slice(0, 4);
+    if (images.some((item) => item.length > 120000)) {
+      fail(400, "Photo is too large. Pick a smaller image.");
     }
-    if (!text && !imageUrl) fail(400, "Write a message.");
+    const sticker =
+      typeof body.sticker === "string" && body.sticker.trim()
+        ? body.sticker.trim().slice(0, 16)
+        : null;
+    if (!text && !images.length && !sticker) fail(400, "Write a message.");
     const mid = id();
     const created = nowIso();
-    const preview = text.slice(0, 2000) || "Photo";
+    const preview = text.slice(0, 2000) || sticker || "Photo";
+    const stored = sticker
+      ? `sticker:${sticker}`
+      : images.length === 1
+        ? images[0]!
+        : images.length
+          ? JSON.stringify(images)
+          : null;
     await run(
       db,
       "INSERT INTO messages (id, conversation_id, sender_id, body, image_url, created_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -1098,7 +1133,7 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
       cid,
       uid,
       text.slice(0, 2000),
-      imageUrl,
+      stored,
       created,
     );
     const unread = parseJson<Record<string, number>>(conv.unread_json, {});
@@ -1120,7 +1155,9 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
           id: mid,
           senderId: uid,
           body: text.slice(0, 2000),
-          imageUrl,
+          imageUrl: images[0] ?? null,
+          imageUrls: images,
+          sticker,
           createdAt: created,
         },
       },

@@ -1,6 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ChevronLeft, ImagePlus, Phone, Send, Video, X } from "lucide-react";
+import { ChevronLeft, ImagePlus, Phone, Send, Smile, Video, X } from "lucide-react";
 import { api, peekCache, RequestError } from "../lib/api";
 import { readPhoto } from "../lib/photo";
 import { useAuth } from "../lib/auth";
@@ -22,8 +22,48 @@ type ChatMessage = {
   senderId: string;
   body: string;
   imageUrl?: string | null;
+  imageUrls?: string[] | null;
+  sticker?: string | null;
   createdAt?: string;
 };
+
+const STICKERS = [
+  "😀",
+  "😂",
+  "🥰",
+  "😍",
+  "😘",
+  "😎",
+  "😭",
+  "😡",
+  "👍",
+  "🙏",
+  "🔥",
+  "💯",
+  "🎉",
+  "❤️",
+  "💔",
+  "👀",
+  "🤔",
+  "😴",
+  "🤗",
+  "💪",
+  "✨",
+  "🌹",
+  "🎂",
+  "🎮",
+  "🏆",
+  "🤝",
+  "😅",
+  "🙄",
+  "😇",
+  "🤩",
+];
+
+function mediaOf(item: ChatMessage) {
+  const imageUrls = item.imageUrls?.length ? item.imageUrls : item.imageUrl ? [item.imageUrl] : [];
+  return { imageUrls, sticker: item.sticker ?? null };
+}
 
 function stamp(iso?: string) {
   if (!iso) return "";
@@ -115,8 +155,10 @@ export function ConversationPage() {
     () => peekCache<{ items: ChatMessage[] }>(`/api/conversations/${id}/messages`)?.items ?? [],
   );
   const [draft, setDraft] = useState("");
-  const [photo, setPhoto] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<string[]>([]);
+  const [stickersOpen, setStickersOpen] = useState(false);
   const [error, setError] = useState("");
+  const [sending, setSending] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
 
@@ -140,22 +182,35 @@ export function ConversationPage() {
     endRef.current?.scrollIntoView({ block: "end" });
   }, [items.length]);
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const body = draft.trim();
-    if (!body && !photo) return;
+  async function sendPayload(payload: { body?: string; imageData?: string[]; sticker?: string }) {
+    if (!id || sending) return;
+    setSending(true);
     try {
       const data = await api<{ message: ChatMessage }>(`/api/conversations/${id}/messages`, {
         method: "POST",
-        body: JSON.stringify({ body, imageData: photo }),
+        body: JSON.stringify(payload),
       });
-      setItems((current) => [...current, data.message]);
+      const media = mediaOf(data.message);
+      setItems((current) => [
+        ...current,
+        { ...data.message, imageUrls: media.imageUrls, sticker: media.sticker },
+      ]);
       setDraft("");
-      setPhoto(null);
+      setPhotos([]);
+      setStickersOpen(false);
       setError("");
     } catch (err) {
       setError(err instanceof RequestError ? err.body.message : "Could not send.");
+    } finally {
+      setSending(false);
     }
+  }
+
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const body = draft.trim();
+    if (!body && !photos.length) return;
+    await sendPayload({ body, imageData: photos });
   }
 
   const rows = useMemo(() => {
@@ -228,70 +283,115 @@ export function ConversationPage() {
               {row.item.senderId !== user?.id && other ? (
                 <Avatar name={other.displayName} url={other.avatarUrl} />
               ) : null}
-              <div className={row.item.senderId === user?.id ? "bubble mine" : "bubble"}>
-                {row.item.imageUrl ? (
-                  <img className="bubble-photo" src={row.item.imageUrl} alt="" />
+              <div
+                className={`${row.item.senderId === user?.id ? "bubble mine" : "bubble"}${
+                  mediaOf(row.item).sticker && !row.item.body ? " sticker-only" : ""
+                }`}
+              >
+                {mediaOf(row.item).sticker ? (
+                  <span className="bubble-sticker">{mediaOf(row.item).sticker}</span>
                 ) : null}
-                {row.item.body}
+                {mediaOf(row.item).imageUrls.length ? (
+                  <div
+                    className={
+                      mediaOf(row.item).imageUrls.length > 1 ? "bubble-album" : "bubble-album one"
+                    }
+                  >
+                    {mediaOf(row.item).imageUrls.map((src) => (
+                      <img key={src.slice(0, 48)} className="bubble-photo" src={src} alt="" />
+                    ))}
+                  </div>
+                ) : null}
+                {row.item.body ? <span>{row.item.body}</span> : null}
               </div>
             </div>
           ),
         )}
         <div ref={endRef} />
       </div>
-      <form className="chat-compose" onSubmit={onSubmit}>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/*"
-          hidden
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            event.target.value = "";
-            if (!file) return;
-            void readPhoto(file)
-              .then((data) => setPhoto(data))
-              .catch(() => setError("Could not read that photo."));
-          }}
-        />
-        <button
-          className="icon-plain"
-          type="button"
-          aria-label="Attach photo"
-          onClick={() => fileRef.current?.click()}
-        >
-          <ImagePlus size={22} />
-        </button>
-        {photo ? (
-          <span className="chat-preview-wrap">
-            <img className="chat-preview" src={photo} alt="" />
-            <button
-              className="icon-plain"
-              type="button"
-              aria-label="Remove photo"
-              onClick={() => setPhoto(null)}
-            >
-              <X size={16} />
-            </button>
-          </span>
+      <div className="chat-dock">
+        {stickersOpen ? (
+          <div className="sticker-tray" role="listbox" aria-label="Stickers">
+            {STICKERS.map((sticker) => (
+              <button
+                key={sticker}
+                className="sticker-btn"
+                type="button"
+                onClick={() => void sendPayload({ sticker })}
+              >
+                {sticker}
+              </button>
+            ))}
+          </div>
         ) : null}
-        <input
-          name="body"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder="Message"
-          aria-label="Message"
-          autoComplete="off"
-        />
-        <button
-          className="chat-send"
-          type="submit"
-          aria-label="Send"
-          disabled={!draft.trim() && !photo}
-        >
-          <Send size={18} />
-        </button>
-      </form>
+        {photos.length ? (
+          <div className="chat-previews">
+            {photos.map((src, index) => (
+              <span key={`${index}-${src.length}`} className="chat-preview-wrap">
+                <img className="chat-preview" src={src} alt="" />
+                <button
+                  className="icon-plain"
+                  type="button"
+                  aria-label="Remove photo"
+                  onClick={() => setPhotos((current) => current.filter((_, i) => i !== index))}
+                >
+                  <X size={14} />
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : null}
+        <form className="chat-compose" onSubmit={onSubmit}>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            onChange={(event) => {
+              const files = [...(event.target.files ?? [])];
+              event.target.value = "";
+              if (!files.length) return;
+              const room = Math.max(0, 4 - photos.length);
+              void Promise.all(files.slice(0, room).map((file) => readPhoto(file, 360, 70000)))
+                .then((next) => setPhotos((current) => [...current, ...next].slice(0, 4)))
+                .catch(() => setError("Could not read that photo."));
+            }}
+          />
+          <button
+            className="icon-plain"
+            type="button"
+            aria-label="Attach photos"
+            onClick={() => fileRef.current?.click()}
+          >
+            <ImagePlus size={22} />
+          </button>
+          <button
+            className={stickersOpen ? "icon-plain on" : "icon-plain"}
+            type="button"
+            aria-label="Stickers"
+            onClick={() => setStickersOpen((open) => !open)}
+          >
+            <Smile size={22} />
+          </button>
+          <input
+            name="body"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder="Message"
+            aria-label="Message"
+            autoComplete="off"
+          />
+          <button
+            className="chat-send"
+            type="submit"
+            aria-label="Send"
+            disabled={sending || (!draft.trim() && !photos.length)}
+          >
+            <Send size={18} />
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
