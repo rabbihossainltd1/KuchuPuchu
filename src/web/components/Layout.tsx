@@ -127,28 +127,30 @@ export function AppLayout() {
           {onHome ? (
             <>
               <img className="wordmark-img" src="/brand/logo-horizontal.png" alt="KuchuPuchu" />
-              <button
-                className="icon-plain"
-                type="button"
-                aria-label="Create post"
-                onClick={() => navigate("/home?compose=1")}
-              >
-                <Plus size={24} />
-              </button>
-              <button
-                className="icon-plain"
-                type="button"
-                aria-label="Search"
-                onClick={() => setSearchOpen((open) => !open)}
-              >
-                <Search size={20} />
-              </button>
-              <Link className="icon-plain" to="/messages" aria-label="Messages">
-                <span className="nav-ico">
-                  <MessageCircle size={20} />
-                  {messages ? <i>{messages > 9 ? "9+" : messages}</i> : null}
-                </span>
-              </Link>
+              <div className="header-actions">
+                <button
+                  className="icon-plain"
+                  type="button"
+                  aria-label="Create post"
+                  onClick={() => navigate("/home?compose=1")}
+                >
+                  <Plus size={24} />
+                </button>
+                <button
+                  className="icon-plain"
+                  type="button"
+                  aria-label="Search"
+                  onClick={() => setSearchOpen((open) => !open)}
+                >
+                  <Search size={20} />
+                </button>
+                <Link className="icon-plain" to="/messages" aria-label="Messages">
+                  <span className="nav-ico">
+                    <MessageCircle size={20} />
+                    {messages ? <i>{messages > 9 ? "9+" : messages}</i> : null}
+                  </span>
+                </Link>
+              </div>
             </>
           ) : (
             <>

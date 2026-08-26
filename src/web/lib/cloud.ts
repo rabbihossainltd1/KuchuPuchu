@@ -15,10 +15,9 @@ import {
   where,
   writeBatch,
 } from "firebase/firestore";
-import { getDownloadURL, ref, uploadString } from "firebase/storage";
 import { sendEmailVerification, updateProfile } from "firebase/auth";
 import { STORE_CATALOG } from "../../shared/catalog";
-import { firebaseAuth, db, storage, explainFirebaseError } from "./firebase";
+import { firebaseAuth, db, explainFirebaseError } from "./firebase";
 import { RequestError } from "./errors";
 import { ensureUserDoc, iso, loadUserDoc, meFromDoc, publicFromDoc, slugFrom } from "./users";
 import type { Me, PublicUser } from "./types";
@@ -197,11 +196,17 @@ async function handleDiscover(uid: string, search: URLSearchParams) {
   return { items: people };
 }
 
+async function recentDocs(name: string, take = 60) {
+  try {
+    return await getDocs(query(collection(db, name), orderBy("createdAt", "desc"), limit(take)));
+  } catch {
+    return getDocs(query(collection(db, name), limit(take)));
+  }
+}
+
 async function handleFeed(uid: string) {
   const friends = await friendIds(uid);
-  const snap = await getDocs(
-    query(collection(db, "posts"), orderBy("createdAt", "desc"), limit(60)),
-  );
+  const snap = await recentDocs("posts");
   const items = [];
   for (const row of snap.docs) {
     const data = row.data();
@@ -286,12 +291,6 @@ async function handleStories(uid: string) {
   const items = [...groups.values()];
   items.sort((a, b) => Number(a.seen) - Number(b.seen));
   return { items };
-}
-
-async function uploadDataUrl(path: string, dataUrl: string) {
-  const file = ref(storage, path);
-  await uploadString(file, dataUrl, "data_url");
-  return getDownloadURL(file);
 }
 
 async function createPost(uid: string, body: Record<string, unknown>) {
@@ -935,7 +934,8 @@ export async function cloudRequest<T>(rawPath: string, init: RequestInit = {}): 
     else if (path === "/api/stories" && method === "POST") {
       let imageUrl: string | null = null;
       if (typeof body.imageData === "string" && body.imageData.startsWith("data:")) {
-        imageUrl = await uploadDataUrl(`stories/${uid}/${Date.now()}.jpg`, body.imageData);
+        if (body.imageData.length > 900000) fail(400, "Photo is too large. Pick a smaller image.");
+        imageUrl = body.imageData;
       }
       const caption = body.body ? String(body.body).slice(0, 200) : null;
       if (!imageUrl && !caption) fail(400, "Add a photo or a caption.");

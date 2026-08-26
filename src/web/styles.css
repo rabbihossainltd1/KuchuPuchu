@@ -809,8 +809,8 @@ textarea:focus {
   z-index: 30;
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: max(6px, env(safe-area-inset-top)) 6px 6px;
+  gap: 0;
+  padding: max(6px, env(safe-area-inset-top)) 2px 6px 4px;
   background: var(--surface);
 }
 .wordmark {
@@ -820,14 +820,19 @@ textarea:focus {
   font-weight: 700;
 }
 .wordmark-img {
-  flex: 1;
-  min-width: 0;
   height: 26px;
   width: auto;
-  max-width: 158px;
+  max-width: 146px;
   object-fit: contain;
   object-position: left center;
   display: block;
+  flex: none;
+}
+.header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  flex: none;
 }
 .header-title {
   flex: 1;
