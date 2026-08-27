@@ -495,7 +495,7 @@ class CallEngine(private val app: Application) {
                 val enum = Camera2Enumerator(app)
                 val name =
                     enum.deviceNames.firstOrNull {
-                        if (nextFacingFront) enum.isFrontFacing(it) else enum.isBackFacing(it)
+                        if (nextFacing) enum.isFrontFacing(it) else enum.isBackFacing(it)
                     } ?: enum.deviceNames.firstOrNull { enum.isFrontFacing(it) } ?: return@launch
                 capturer = enum.createCapturer(name, null)
                 helper?.dispose()
@@ -507,7 +507,7 @@ class CallEngine(private val app: Application) {
                 videoTrack = track
                 val sender = pc?.senders?.find { it.track()?.kind() == "video" }
                 if (sender != null) sender.setTrack(track, true) else pc?.addTrack(track)
-                localView?.setMirror(nextFacingFront)
+                localView?.setMirror(nextFacing)
                 localView?.let { runCatching { track.addSink(it) } }
             }
         }

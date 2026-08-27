@@ -70,7 +70,7 @@ class MainActivity : ComponentActivity() {
         if (intent == null) return
         if (intent.getBooleanExtra("kp_accept", false)) {
             CallEngine.instance?.let {
-                it.suppressIncomingFor(15_000)
+                CallEngine.suppressIncomingFor(15_000)
                 it.pendingAccept = true
                 it.answer()
             }

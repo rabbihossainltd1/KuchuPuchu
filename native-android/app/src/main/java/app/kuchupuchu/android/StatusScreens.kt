@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.RemoveRedEye
 import androidx.compose.foundation.Image
 import androidx.compose.material3.AlertDialog

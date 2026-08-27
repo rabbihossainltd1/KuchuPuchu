@@ -439,7 +439,7 @@ private fun Composer(
             Modifier
                 .size(48.dp)
                 .clip(CircleShape)
-                .background(if (input.isBlank()) Gold else goldFill()),
+                .background(if (input.isBlank()) Brush.linearGradient(listOf(Gold, Gold)) else goldFill()),
             contentAlignment = Alignment.Center,
         ) {
             IconButton(onClick = { if (input.isBlank()) onMic() else onSend() }) {
@@ -576,7 +576,7 @@ private fun MessageRow(
                             bottomEnd = if (mine) 5.dp else 16.dp,
                         ),
                     )
-                    .background(if (mine) goldFill() else Card)
+                    .background(if (mine) goldFill() else Brush.linearGradient(listOf(Card, Card)))
                     .clickable { if (mine) showDelete = true }
                     .padding(10.dp),
             ) {

@@ -29,6 +29,8 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.Icon
+import android.content.Context
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -52,6 +54,7 @@ import org.json.JSONObject
  * Attach sheet — locked design #1: classic 3x2 grid.
  * Gallery / Camera / Document / Audio / Location / Contact.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AttachSheet(
     onDismiss: () -> Unit,
