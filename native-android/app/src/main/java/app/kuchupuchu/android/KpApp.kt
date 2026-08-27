@@ -105,17 +105,17 @@ fun KpApp() {
             route = "login"
             return@LaunchedEffect
         }
-        val cachedMe = Store.get("me")?.optJSONObject("user")
+        val cachedMe = Disk.get("me")?.optJSONObject("user")
         if (cachedMe != null) {
             session.me = cachedMe
-            Store.get("inbox")?.arr("items")?.objects()?.let {
+            Disk.get("inbox")?.arr("items")?.objects()?.let {
                 replaceList(session.inbox, it)
                 session.unread = it.sumOf { row -> row.optInt("unread") }
             }
-            Store.get("feed")?.arr("items")?.objects()?.let { replaceList(session.feed, it) }
-            Store.get("stories")?.arr("items")?.objects()?.let { replaceList(session.stories, it) }
-            Store.get("recs")?.arr("items")?.objects()?.let { replaceList(session.recs, it) }
-            Store.get("notes")?.let { data ->
+            Disk.get("feed")?.arr("items")?.objects()?.let { replaceList(session.feed, it) }
+            Disk.get("stories")?.arr("items")?.objects()?.let { replaceList(session.stories, it) }
+            Disk.get("recs")?.arr("items")?.objects()?.let { replaceList(session.recs, it) }
+            Disk.get("notes")?.let { data ->
                 replaceList(session.notes, data.arr("items").objects())
                 session.noteCount = data.optInt("unread")
             }
@@ -135,12 +135,12 @@ fun KpApp() {
                     val feed = runCatching { Api.get("/api/feed") }.getOrNull()
                     val stories = runCatching { Api.get("/api/stories") }.getOrNull()
                     val recs = runCatching { Api.get("/api/discover/recommendations") }.getOrNull()
-                    Store.put("me", meJson)
-                    Store.put("inbox", convosJson)
-                    notes?.let { Store.put("notes", it) }
-                    feed?.let { Store.put("feed", it) }
-                    stories?.let { Store.put("stories", it) }
-                    recs?.let { Store.put("recs", it) }
+                    Disk.put("me", meJson)
+                    Disk.put("inbox", convosJson)
+                    notes?.let { Disk.put("notes", it) }
+                    feed?.let { Disk.put("feed", it) }
+                    stories?.let { Disk.put("stories", it) }
+                    recs?.let { Disk.put("recs", it) }
                     withContext(Dispatchers.Main) {
                         session.me = me
                         replaceList(session.inbox, convos)
@@ -198,7 +198,7 @@ fun KpApp() {
 fun logout(ctx: Context, session: Session, go: (String) -> Unit) {
     Api.saveToken(ctx, null)
     Cache.bust()
-    Store.clear()
+    Disk.clear()
     session.me = null
     session.clearLists()
     go("login")

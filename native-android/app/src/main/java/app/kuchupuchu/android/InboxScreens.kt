@@ -78,7 +78,7 @@ fun InboxScreen(session: Session, onRoute: (String) -> Unit) {
                 replaceList(items, next)
                 session.unread = next.sumOf { it.optInt("unread") }
                 val pack = JSONObject().put("items", JSONArray().also { arr -> next.forEach { arr.put(it) } })
-                Store.put("inbox", pack)
+                Disk.put("inbox", pack)
             }
             delay(8000)
         }
@@ -145,7 +145,7 @@ fun AlertsScreen(session: Session, onRoute: (String) -> Unit) {
             }
         if (nextNotes != null) {
             replaceList(notes, nextNotes)
-            Store.put(
+            Disk.put(
                 "notes",
                 JSONObject()
                     .put("items", JSONArray().also { a -> nextNotes.forEach { a.put(it) } })
@@ -263,7 +263,7 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
         }
 
     LaunchedEffect(convoId) {
-        Store.loadChat(convoId)?.let { disk ->
+        Disk.loadChat(convoId)?.let { disk ->
             otherReadAt = disk.optString("otherReadAt")
             mergeChat(messages, disk.arr("items").objects().map { hydrateMessage(it) })
         }
@@ -278,7 +278,7 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
         if (first != null) {
             otherReadAt = first.optString("otherReadAt")
             mergeChat(messages, first.arr("items").objects())
-            Store.saveChat(convoId, messages.toList(), otherReadAt)
+            Disk.saveChat(convoId, messages.toList(), otherReadAt)
         }
         if (other.userId().isBlank()) {
             val found = session.inbox.find { it.optString("id") == convoId }
@@ -297,7 +297,7 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
             if (data != null) {
                 otherReadAt = data.optString("otherReadAt")
                 mergeChat(messages, data.arr("items").objects())
-                Store.saveChat(convoId, messages.toList(), otherReadAt)
+                Disk.saveChat(convoId, messages.toList(), otherReadAt)
             }
         }
     }
@@ -345,12 +345,12 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
             if (idx >= 0) {
                 if (saved != null) {
                     val next = copyImages(temp, saved.put("pending", false))
-                    imageList(temp).firstOrNull { it.startsWith("data:") }?.let { Store.saveDataUrl(next.optString("id"), it) }
+                    imageList(temp).firstOrNull { it.startsWith("data:") }?.let { Disk.saveDataUrl(next.optString("id"), it) }
                     messages[idx] = hydrateMessage(next)
                 } else messages[idx] = JSONObject(temp.toString()).put("pending", false).put("failed", true)
             }
             sending = (sending - 1).coerceAtLeast(0)
-            Store.saveChat(convoId, messages.toList(), otherReadAt)
+            Disk.saveChat(convoId, messages.toList(), otherReadAt)
         }
     }
 
@@ -578,7 +578,7 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
                                 "Delete", "Block" -> onBack()
                                 "Clear chat history" -> {
                                     messages.clear()
-                                    Store.saveChat(convoId, emptyList(), "")
+                                    Disk.saveChat(convoId, emptyList(), "")
                                 }
                                 else -> {
                                     muted = !muted
@@ -612,7 +612,7 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
 @Composable
 fun ChatPhoto(convoId: String, message: JSONObject, modifier: Modifier, onOpen: (String) -> Unit) {
     val id = message.optString("id")
-    val seed = imageList(message).firstOrNull() ?: Store.localImage(id)
+    val seed = imageList(message).firstOrNull() ?: Disk.localImage(id)
     var src by remember(id) { mutableStateOf(seed) }
     LaunchedEffect(id, message.optBoolean("hasImage")) {
         if (!src.isNullOrBlank() && src != "inline") return@LaunchedEffect
@@ -623,8 +623,8 @@ fun ChatPhoto(convoId: String, message: JSONObject, modifier: Modifier, onOpen: 
             }
         val url = data?.optString("imageUrl").orEmpty()
         if (url.startsWith("data:")) {
-            withContext(Dispatchers.IO) { Store.saveDataUrl(id, url) }
-            src = Store.localImage(id) ?: url
+            withContext(Dispatchers.IO) { Disk.saveDataUrl(id, url) }
+            src = Disk.localImage(id) ?: url
         } else if (url.isNotBlank() && url != "inline") {
             src = url
         }

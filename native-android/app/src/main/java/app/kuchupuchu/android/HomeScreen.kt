@@ -53,6 +53,7 @@ import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 
 @Composable
@@ -80,9 +81,9 @@ fun HomeScreen(session: Session, onRoute: (String) -> Unit, searchOpen: Boolean,
                     replaceList(recs, nextRecs)
                     replaceList(stories, nextStories)
                     if (query.length >= 2) replaceList(found, nextFound)
-                    Store.put("feed", JSONObject().put("items", org.json.JSONArray().also { a -> nextPosts.forEach { a.put(it) } }))
-                    Store.put("recs", JSONObject().put("items", org.json.JSONArray().also { a -> nextRecs.forEach { a.put(it) } }))
-                    Store.put("stories", JSONObject().put("items", org.json.JSONArray().also { a -> nextStories.forEach { a.put(it) } }))
+                    Disk.put("feed", JSONObject().put("items", org.json.JSONArray().also { a -> nextPosts.forEach { a.put(it) } }))
+                    Disk.put("recs", JSONObject().put("items", org.json.JSONArray().also { a -> nextRecs.forEach { a.put(it) } }))
+                    Disk.put("stories", JSONObject().put("items", org.json.JSONArray().also { a -> nextStories.forEach { a.put(it) } }))
                 }
             }
         }

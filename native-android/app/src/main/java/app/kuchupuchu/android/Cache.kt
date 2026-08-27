@@ -53,6 +53,72 @@ object Cache {
     }
 }
 
+object Disk {
+    private lateinit var root: java.io.File
+
+    fun init(ctx: Context) {
+        root = java.io.File(ctx.applicationContext.filesDir, "kp")
+        java.io.File(root, "img").mkdirs()
+        java.io.File(root, "chat").mkdirs()
+    }
+
+    fun ready() = ::root.isInitialized
+
+    fun put(name: String, data: JSONObject) {
+        if (!ready()) return
+        runCatching { java.io.File(root, "$name.json").writeText(data.toString()) }
+    }
+
+    fun get(name: String): JSONObject? {
+        if (!ready()) return null
+        val f = java.io.File(root, "$name.json")
+        if (!f.exists()) return null
+        return runCatching { JSONObject(f.readText()) }.getOrNull()
+    }
+
+    fun imageFile(id: String) = java.io.File(java.io.File(root, "img"), "$id.jpg")
+
+    fun saveDataUrl(id: String, src: String) {
+        if (!ready() || !src.startsWith("data:")) return
+        val comma = src.indexOf(',')
+        if (comma < 0) return
+        runCatching {
+            val bytes = Base64.decode(src.substring(comma + 1), Base64.DEFAULT)
+            imageFile(id).writeBytes(bytes)
+        }
+    }
+
+    fun localImage(id: String): String? {
+        if (!ready()) return null
+        val f = imageFile(id)
+        return if (f.exists() && f.length() > 0) f.absolutePath else null
+    }
+
+    fun saveChat(cid: String, items: List<JSONObject>, otherReadAt: String = "") {
+        val arr = JSONArray()
+        items.forEach { raw ->
+            val row = JSONObject(raw.toString())
+            val id = row.optString("id")
+            imageList(row).firstOrNull { it.startsWith("data:") }?.let { saveDataUrl(id, it) }
+            if (localImage(id) != null || row.optBoolean("hasImage")) row.put("hasImage", true)
+            row.remove("imageUrls")
+            if (row.clean("imageUrl").startsWith("data:")) row.put("imageUrl", "inline")
+            arr.put(row)
+        }
+        put("chat/$cid", JSONObject().put("items", arr).put("otherReadAt", otherReadAt))
+    }
+
+    fun loadChat(cid: String): JSONObject? = get("chat/$cid")
+
+    fun clear() {
+        if (!ready()) return
+        root.deleteRecursively()
+        root.mkdirs()
+        java.io.File(root, "img").mkdirs()
+        java.io.File(root, "chat").mkdirs()
+    }
+}
+
 object ImageMem {
     private val lru = object : LruCache<Int, Bitmap>(16) {}
 
@@ -116,7 +182,7 @@ fun JSONObject.clean(key: String): String {
 
 fun hydrateMessage(m: JSONObject): JSONObject {
     val id = m.optString("id")
-    val local = Store.localImage(id)
+    val local = Disk.localImage(id)
     if (local != null) {
         m.put("imageUrl", local)
         m.put("imageUrls", JSONArray().put(local))
@@ -130,7 +196,7 @@ fun hydrateMessage(m: JSONObject): JSONObject {
 }
 
 fun imageList(m: JSONObject): List<String> {
-    val local = Store.localImage(m.optString("id"))
+    val local = Disk.localImage(m.optString("id"))
     if (local != null) return listOf(local)
     val arr = m.optJSONArray("imageUrls")
     if (arr != null && arr.length() > 0) {

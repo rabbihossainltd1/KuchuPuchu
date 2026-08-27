@@ -61,11 +61,11 @@ class CallEngine(private val app: Application) {
             onChange?.invoke(value)
         }
 
-    var speaker by androidx.compose.runtime.mutableStateOf(false)
-    var muted by androidx.compose.runtime.mutableStateOf(false)
-    var cameraOff by androidx.compose.runtime.mutableStateOf(false)
-    var sharing by androidx.compose.runtime.mutableStateOf(false)
-    var hasRemote by androidx.compose.runtime.mutableStateOf(false)
+    var speaker by mutableStateOf(false)
+    var muted by mutableStateOf(false)
+    var cameraOff by mutableStateOf(false)
+    var sharing by mutableStateOf(false)
+    var hasRemote by mutableStateOf(false)
 
     val egl = EglBase.create()
     private var factory: PeerConnectionFactory? = null
