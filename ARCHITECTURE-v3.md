@@ -26,6 +26,7 @@
   | Calls tab | #2 | Date sections (Today/Yesterday/Monday), direction arrows, gold callback buttons |
   | Incoming voice call | #1 | Classic dark, green/red circles, Message+Remind me |
   | Outgoing voice call | #4 | Early controls — Mute/Speaker/Bluetooth while ringing + red Cancel, dark, pulse ring |
+  | Settings | #10 | Warm amber gradient banner profile + white list card rows + red logout |
   | Attach sheet | #1 | Classic 3x2 grid: Gallery, Camera, Document, Audio, Location, Contact |
   | Search | #1 | Filter chips All/Chats/Media/Documents + gold-highlighted results |
   | Incoming video call | #3 | Three choice — Decline / Voice only / Video accept, dark, pulse ring |
