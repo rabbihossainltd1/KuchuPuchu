@@ -53,6 +53,13 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keeps message and call notifications arriving instantly" />
         </service>
+        <service
+            android:name=".KpPushService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.messaging.RECEIVE" />
+            </intent-filter>
+        </service>
         <receiver
             android:name=".CallActionReceiver"
             android:exported="false">

@@ -62,19 +62,32 @@ fun lastSeen(iso: String, online: Boolean): String {
     return if (label == "just now") "Last seen just now" else "Last seen $label ago"
 }
 
+private val isoCache = java.util.concurrent.ConcurrentHashMap<String, Long?>()
+private val isoSdf =
+    arrayOf(
+        java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US),
+        java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm", java.util.Locale.US),
+        java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US),
+    ).also { it.forEach { s -> s.timeZone = java.util.TimeZone.getTimeZone("UTC") } }
+
+@Synchronized
 fun parseIso(iso: String): Long? {
+    if (iso.isBlank()) return null
+    isoCache[iso]?.let { return it }
     val clean = iso.trim().replace(" ", "T").removeSuffix("Z").substringBefore("+").substringBefore(".")
-    val patterns = arrayOf("yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd")
-    for (p in patterns) {
+    for (sdf in isoSdf) {
         try {
-            val sdf = java.text.SimpleDateFormat(p, java.util.Locale.US)
-            sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
             val d = sdf.parse(clean)
-            if (d != null) return d.time
+            if (d != null) {
+                isoCache[iso] = d.time
+                return d.time
+            }
         } catch (_: Exception) {
         }
     }
-    return iso.toLongOrNull()
+    val fallback = iso.toLongOrNull()
+    if (fallback != null) isoCache[iso] = fallback
+    return fallback
 }
 
 val STICKERS =

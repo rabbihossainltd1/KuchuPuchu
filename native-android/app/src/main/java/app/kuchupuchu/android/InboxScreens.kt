@@ -72,16 +72,21 @@ import org.json.JSONObject
 fun InboxScreen(session: Session, onRoute: (String) -> Unit) {
     val items = session.inbox
     LaunchedEffect(Unit) {
+        var lastRaw: String? = null
         while (isActive) {
             val next =
                 withContext(Dispatchers.IO) {
                     runCatching { Api.get("/api/conversations").arr("items").objects() }.getOrNull()
                 }
             if (next != null) {
-                replaceList(items, next)
-                session.unread = next.sumOf { it.optInt("unread") }
-                val pack = JSONObject().put("items", JSONArray().also { arr -> next.forEach { arr.put(it) } })
-                Disk.put("inbox", pack)
+                val raw = next.joinToString(",") { it.toString() }
+                if (raw != lastRaw) {
+                    lastRaw = raw
+                    replaceList(items, next)
+                    session.unread = next.sumOf { it.optInt("unread") }
+                    val pack = JSONObject().put("items", JSONArray().also { arr -> next.forEach { arr.put(it) } })
+                    withContext(Dispatchers.IO) { Disk.put("inbox", pack) }
+                }
             }
             delay(2000)
         }
@@ -282,10 +287,13 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
             withContext(Dispatchers.IO) {
                 runCatching { Api.get("/api/conversations/$convoId/messages") }.getOrNull()
             }
+        var lastRaw: String? = null
         if (first != null && sending == 0) {
             otherReadAt = first.optString("otherReadAt")
             mergeChat(messages, first.arr("items").objects())
-            Disk.saveChat(convoId, messages.toList(), otherReadAt)
+            lastRaw = first.toString()
+            val snapshot = messages.toList()
+            withContext(Dispatchers.IO) { Disk.saveChat(convoId, snapshot, otherReadAt) }
         }
         if (other.userId().isBlank()) {
             val found = session.inbox.find { it.optString("id") == convoId }
@@ -302,13 +310,19 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
                     runCatching { Api.get("/api/conversations/$convoId/messages") }.getOrNull()
                 }
             if (data != null && sending == 0) {
-                otherReadAt = data.optString("otherReadAt")
-                mergeChat(messages, data.arr("items").objects())
-                Disk.saveChat(convoId, messages.toList(), otherReadAt)
+                val raw = data.toString()
+                if (raw != lastRaw) {
+                    lastRaw = raw
+                    otherReadAt = data.optString("otherReadAt")
+                    mergeChat(messages, data.arr("items").objects())
+                    val snapshot = messages.toList()
+                    withContext(Dispatchers.IO) { Disk.saveChat(convoId, snapshot, otherReadAt) }
+                }
             }
         }
     }
-    LaunchedEffect(messages.size) {
+    val lastMsgId = messages.lastOrNull()?.optString("id")
+    LaunchedEffect(lastMsgId) {
         if (messages.isNotEmpty()) list.scrollToItem(messages.lastIndex)
     }
 
@@ -362,7 +376,8 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
                 } else messages[idx] = JSONObject(temp.toString()).put("pending", false).put("failed", true)
             }
             sending = (sending - 1).coerceAtLeast(0)
-            Disk.saveChat(convoId, messages.toList(), otherReadAt)
+            val snapshot = messages.toList()
+            withContext(Dispatchers.IO) { Disk.saveChat(convoId, snapshot, otherReadAt) }
         }
     }
 
@@ -611,7 +626,7 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
                                 "Delete", "Block" -> onBack()
                                 "Clear chat history" -> {
                                     messages.clear()
-                                    Disk.saveChat(convoId, emptyList(), "")
+                                    scope.launch(Dispatchers.IO) { Disk.saveChat(convoId, emptyList(), "") }
                                 }
                                 else -> {
                                     muted = !muted

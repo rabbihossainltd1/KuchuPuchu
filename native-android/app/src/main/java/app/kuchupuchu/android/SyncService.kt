@@ -38,6 +38,7 @@ class KpSyncService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lastUnread = HashMap<String, Int>()
     private var ringingCallId: String? = null
+    private var wakeLock: android.os.PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -54,6 +55,12 @@ class KpSyncService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        // Messenger mode: once Firebase push is live this legacy service is
+        // not needed anymore (no permanent notification).
+        if (KpPush.enabled) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         val notification = syncNotification()
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(
@@ -64,12 +71,32 @@ class KpSyncService : Service() {
         } else {
             startForeground(SYNC_ID, notification)
         }
+        acquireWakeLock()
         startPolling()
         return START_STICKY
     }
 
+    /**
+     * Without a wake lock Doze can suspend the CPU between screen-off
+     * notifications, delaying incoming messages by minutes — exactly the
+     * "notifications not arriving" symptom.
+     */
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        runCatching {
+            val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            wakeLock =
+                pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "kuchupuchu:sync").apply {
+                    setReferenceCounted(false)
+                    acquire(12 * 60 * 60 * 1000L) // 12h cap, service re-acquires on restart
+                }
+        }
+    }
+
     override fun onDestroy() {
         pollStarted = false
+        runCatching { wakeLock?.let { if (it.isHeld) it.release() } }
+        wakeLock = null
         scope.cancel()
         super.onDestroy()
     }
@@ -102,10 +129,16 @@ class KpSyncService : Service() {
             var tick = 0L
             while (isActive) {
                 if (Api.token.isNullOrBlank()) break
+                if (KpPush.enabled) break
+                // Screen off → relax the cadence so the battery stays happy
+                // while still catching messages within a few seconds.
+                val pm = getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+                val interactive = pm?.isInteractive ?: true
                 runCatching { pollCalls() }
                 if (tick % 2 == 0L) runCatching { pollInbox() }
+                if (tick % 600L == 0L) acquireWakeLock()
                 tick++
-                delay(1500)
+                delay(if (interactive) 1500L else 2000L)
             }
             stopSelf()
         }

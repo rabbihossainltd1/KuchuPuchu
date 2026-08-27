@@ -1,6 +1,12 @@
 import { STORE_CATALOG } from "../shared/catalog";
 
-export type Env = { DB: D1Database };
+export type Env = {
+  DB: D1Database;
+  /** google-services.json contents (public config, served to the app). */
+  FCM_CONFIG?: string;
+  /** Firebase service-account JSON used to send pushes (secret). */
+  FCM_CREDENTIALS?: string;
+};
 
 type Json = Record<string, unknown>;
 
@@ -556,10 +562,10 @@ async function loadPost(db: D1Database, postId: string, uid: string) {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     if (request.method === "OPTIONS") return json({ ok: true });
     try {
-      return await handle(request, env.DB);
+      return await handle(request, env.DB, env, ctx);
     } catch (err) {
       if (err instanceof ApiError) {
         return json({ error: { code: err.code, message: err.message } }, err.status);
@@ -624,6 +630,11 @@ async function ensureSchema(db: D1Database) {
       db,
       "CREATE TABLE IF NOT EXISTS conversation_members (conv_id TEXT NOT NULL, user_id TEXT NOT NULL, PRIMARY KEY (conv_id, user_id))",
     );
+    await run(
+      db,
+      "CREATE TABLE IF NOT EXISTS devices (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, updated_at TEXT NOT NULL)",
+    );
+    await run(db, "CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id)");
     const backfill = await one<{ value: string }>(
       db,
       "SELECT value FROM meta WHERE key = 'conv_members_backfill'",
@@ -670,7 +681,7 @@ async function ensureSchema(db: D1Database) {
   schemaReady = true;
 }
 
-async function handle(request: Request, db: D1Database): Promise<Response> {
+async function handle(request: Request, db: D1Database, env: Env, ctx: ExecutionContext): Promise<Response> {
   await ensureSchema(db);
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/$/, "") || "/";
@@ -689,6 +700,13 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
 
   if (path === "/api/health") return json({ ok: true, service: "KuchuPuchu", time: nowIso() });
   if (path === "/api/auth/providers") return json({ google: false, email: true });
+
+  /* Public Firebase config so the app can enable push mode without a
+     google-services.json baked into the build. */
+  if (path === "/api/config/firebase" && method === "GET") {
+    const firebase = fcmPublicConfig(env);
+    return json({ firebase });
+  }
 
   if (path === "/api/auth/register" && method === "POST") {
     const email = String(body.email || "")
@@ -756,6 +774,24 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
   const me = await requireUser(db, request);
   const uid = me.id;
   const search = url.searchParams;
+
+  /* ---------- Push device registration (Messenger mode) ---------- */
+  if (path === "/api/devices" && method === "POST") {
+    const token = String(body.token || "").trim().slice(0, 512);
+    if (!token) fail(400, "Missing push token.");
+    await run(
+      db,
+      "INSERT OR REPLACE INTO devices (token, user_id, updated_at) VALUES (?, ?, ?)",
+      token,
+      uid,
+      nowIso(),
+    );
+    return json({ ok: true });
+  }
+  if (path === "/api/devices" && method === "DELETE") {
+    await run(db, "DELETE FROM devices WHERE user_id = ?", uid);
+    return json({ ok: true });
+  }
 
   if ((path === "/api/me" || path === "/api/me/profile") && method === "GET") {
     return json({ user: meFrom(me) });
@@ -1473,6 +1509,22 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
       JSON.stringify(unread),
       cid,
     );
+    // Messenger mode: wake the other member's app with a push notification.
+    if (otherMember) {
+      const sender = await one<{ display_name: string }>(
+        db,
+        "SELECT display_name FROM users WHERE id = ?",
+        uid,
+      );
+      ctx.waitUntil(
+        pushToUser(env, db, otherMember, {
+          type: "message",
+          convoId: cid,
+          from: sender?.display_name ?? "KuchuPuchu",
+          body: preview.slice(0, 120),
+        }),
+      );
+    }
     return json(
       {
         message: {
@@ -1661,6 +1713,23 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
       online: false,
     };
     if (other) await ensureConv(db, uid, other);
+    // High-priority push so the callee's phone rings even when the app is closed.
+    if (other) {
+      const caller = await one<{ display_name: string }>(
+        db,
+        "SELECT display_name FROM users WHERE id = ?",
+        uid,
+      );
+      ctx.waitUntil(
+        pushToUser(env, db, other, {
+          type: "call",
+          callId,
+          kind,
+          from: caller?.display_name ?? "KuchuPuchu",
+          fromId: uid,
+        }),
+      );
+    }
     return json({
       call: {
         id: callId,
@@ -2091,4 +2160,165 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
   if (path.startsWith("/api/admin")) fail(403, "Admin tools need the server.");
 
   fail(404, "Not found.");
+}
+
+/* ===================== Firebase Cloud Messaging ===================== */
+
+type FcmServiceAccount = {
+  project_id: string;
+  client_email: string;
+  private_key: string;
+  token_uri?: string;
+};
+
+type GoogleServicesJson = {
+  project_info?: { project_id?: string; project_number?: string };
+  client?: Array<{
+    client_info?: { mobilesdk_app_id?: string; android_client_info?: { package_name?: string } };
+    api_key?: Array<{ current_key?: string }>;
+  }>;
+};
+
+/** Parses the (public) google-services.json secret into app-side Firebase options. */
+function fcmPublicConfig(env: Env): Record<string, string> | null {
+  if (!env.FCM_CONFIG) return null;
+  try {
+    const cfg = JSON.parse(env.FCM_CONFIG) as GoogleServicesJson;
+    const clients = cfg.client ?? [];
+    const mine =
+      clients.find(
+        (c) => c.client_info?.android_client_info?.package_name === "app.kuchupuchu.android",
+      ) ?? clients[0];
+    const out = {
+      applicationId: mine?.client_info?.mobilesdk_app_id ?? "",
+      apiKey: mine?.api_key?.[0]?.current_key ?? "",
+      projectId: cfg.project_info?.project_id ?? "",
+      senderId: cfg.project_info?.project_number ?? "",
+    };
+    if (!out.applicationId || !out.projectId) return null;
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+let fcmTokenCache: { token: string; exp: number } | null = null;
+
+function base64UrlEncode(bytes: Uint8Array | string): string {
+  let bin = "";
+  if (typeof bytes === "string") {
+    bin = bytes;
+  } else {
+    for (const b of bytes) bin += String.fromCharCode(b);
+  }
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function pemToPkcs8(pem: string): Uint8Array {
+  const body = pem
+    .replace(/-----BEGIN PRIVATE KEY-----/g, "")
+    .replace(/-----END PRIVATE KEY-----/g, "")
+    .replace(/\s+/g, "");
+  const bin = atob(body);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/** Mints an OAuth2 access token for FCM v1 using the service-account key. */
+async function fcmAccessToken(env: Env): Promise<{ token: string; projectId: string } | null> {
+  if (!env.FCM_CREDENTIALS) return null;
+  if (fcmTokenCache && fcmTokenCache.exp > Date.now() + 60_000) {
+    return { token: fcmTokenCache.token, projectId: fcmTokenCache.projectId };
+  }
+  const creds = JSON.parse(env.FCM_CREDENTIALS) as FcmServiceAccount;
+  const tokenUri = creds.token_uri ?? "https://oauth2.googleapis.com/token";
+  const now = Math.floor(Date.now() / 1000);
+  const header = base64UrlEncode(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+  const claims = base64UrlEncode(
+    JSON.stringify({
+      iss: creds.client_email,
+      scope: "https://www.googleapis.com/auth/firebase.messaging",
+      aud: tokenUri,
+      iat: now,
+      exp: now + 3600,
+    }),
+  );
+  const key = await crypto.subtle.importKey(
+    "pkcs8",
+    pemToPkcs8(creds.private_key) as unknown as ArrayBuffer,
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign(
+    "RSASSA-PKCS1-v1_5",
+    key,
+    new TextEncoder().encode(`${header}.${claims}`),
+  );
+  const jwt = `${header}.${claims}.${base64UrlEncode(new Uint8Array(signature))}`;
+  const res = await fetch(tokenUri, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
+  });
+  if (!res.ok) return null;
+  const data = (await res.json()) as { access_token?: string; expires_in?: number };
+  if (!data.access_token) return null;
+  fcmTokenCache = {
+    token: data.access_token,
+    projectId: creds.project_id,
+    exp: Date.now() + (data.expires_in ?? 3600) * 1000,
+  };
+  return { token: data.access_token, projectId: creds.project_id };
+}
+
+/**
+ * Best-effort high-priority data push to every registered device of a user.
+ * Used for new chat messages and incoming calls (Messenger mode).
+ */
+async function pushToUser(
+  env: Env,
+  db: D1Database,
+  userId: string,
+  data: Record<string, string>,
+): Promise<void> {
+  try {
+    const auth = await fcmAccessToken(env);
+    if (!auth) return;
+    const rows = await all<{ token: string }>(
+      db,
+      "SELECT token FROM devices WHERE user_id = ?",
+      userId,
+    );
+    for (const row of rows) {
+      const res = await fetch(
+        `https://fcm.googleapis.com/v1/projects/${auth.projectId}/messages:send`,
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${auth.token}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            message: {
+              token: row.token,
+              android: { priority: "HIGH", ttl: "86400s", data },
+            },
+          }),
+        },
+      );
+      if (res.status >= 400) {
+        const err = (await res.json().catch(() => null)) as {
+          error?: { details?: Array<{ reason?: string }> };
+        } | null;
+        const reason = err?.error?.details?.[0]?.reason;
+        if (reason === "UNREGISTERED" || reason === "INVALID_ARGUMENT") {
+          await run(db, "DELETE FROM devices WHERE token = ?", row.token);
+        }
+      }
+    }
+  } catch {
+    /* push is best-effort; never fail the API request over it */
+  }
 }

@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
@@ -132,6 +133,15 @@ fun KpApp() {
             route = "login"
             return@LaunchedEffect
         }
+        // Messenger mode: if the worker has Firebase push configured, drop the
+        // always-on service (and its permanent notification) entirely.
+        val pushOn = withContext(Dispatchers.IO) { KpPush.tryInit(ctx) }
+        if (pushOn) {
+            KpPush.registerToken(ctx)
+            KpSyncService.stop(ctx)
+        } else {
+            KpSyncService.start(ctx)
+        }
         val cachedMe = Disk.get("me")?.optJSONObject("user")
         if (cachedMe != null) {
             session.me = cachedMe
@@ -156,14 +166,21 @@ fun KpApp() {
                 runCatching {
                     val meJson = Api.get("/api/me")
                     val me = meJson.optJSONObject("user")
-                    val convosJson = Api.get("/api/conversations")
-                    val convos = convosJson.arr("items").objects()
-                    val notes = runCatching { Api.get("/api/notifications") }.getOrNull()
-                    val feed = runCatching { Api.get("/api/feed") }.getOrNull()
-                    val stories = runCatching { Api.get("/api/stories") }.getOrNull()
-                    val recs = runCatching { Api.get("/api/discover/recommendations") }.getOrNull()
+                    // Everything else can be fetched in parallel — boot feels
+                    // noticeably faster on slow networks.
+                    val convosD = async { runCatching { Api.get("/api/conversations") }.getOrNull() }
+                    val notesD = async { runCatching { Api.get("/api/notifications") }.getOrNull() }
+                    val feedD = async { runCatching { Api.get("/api/feed") }.getOrNull() }
+                    val storiesD = async { runCatching { Api.get("/api/stories") }.getOrNull() }
+                    val recsD = async { runCatching { Api.get("/api/discover/recommendations") }.getOrNull() }
+                    val convosJson = convosD.await()
+                    val notes = notesD.await()
+                    val feed = feedD.await()
+                    val stories = storiesD.await()
+                    val recs = recsD.await()
+                    val convos = convosJson?.arr("items")?.objects() ?: emptyList()
                     Disk.put("me", meJson)
-                    Disk.put("inbox", convosJson)
+                    convosJson?.let { Disk.put("inbox", it) }
                     notes?.let { Disk.put("notes", it) }
                     feed?.let { Disk.put("feed", it) }
                     stories?.let { Disk.put("stories", it) }
@@ -180,7 +197,7 @@ fun KpApp() {
                         stories?.arr("items")?.objects()?.let { replaceList(session.stories, it) }
                         recs?.arr("items")?.objects()?.let { replaceList(session.recs, it) }
                     }
-                    true
+                    me != null
                 }.getOrDefault(false)
             }
         session.loading = false
@@ -240,6 +257,7 @@ fun KpApp() {
 }
 
 fun logout(ctx: Context, session: Session, go: (String) -> Unit) {
+    KpPush.unregister(ctx)
     Api.saveToken(ctx, null)
     Cache.bust()
     Disk.clear()

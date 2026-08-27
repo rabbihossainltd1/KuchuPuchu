@@ -21,11 +21,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Call
-import androidx.compose.material.icons.outlined.ChevronLeft
-import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -92,7 +87,7 @@ fun ProfileScreen(session: Session, onRoute: (String) -> Unit, mine: Boolean = t
 }
 
 @Composable
-fun ProfileHero(user: JSONObject, friends: Int, reputation: Int = 0, coins: Int = 0, showPrivateStats: Boolean = true) {
+fun ProfileHero(user: JSONObject, friends: Int, reputation: Int = 0, coins: Int = 0, showPrivateStats: Boolean = true, trailing: (@Composable () -> Unit)? = null) {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Surface).border(1.dp, Line, RoundedCornerShape(14.dp))) {
         Box(Modifier.fillMaxWidth().height(120.dp).background(Brush.linearGradient(listOf(Color(0xFFFDE68A), Color(0xFFFDBA74), Color(0xFFF59E0B)))))
         Row(Modifier.offset(y = (-28).dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.Bottom) {
@@ -107,14 +102,27 @@ fun ProfileHero(user: JSONObject, friends: Int, reputation: Int = 0, coins: Int 
         }
         Column(Modifier.padding(16.dp).offset(y = (-18).dp)) {
             if (user.clean("bio").isNotBlank()) Text(user.clean("bio"))
-            Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(Modifier.padding(top = 10.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text("$friends friends", color = Muted, fontSize = 13.sp)
                 if (showPrivateStats) {
                     Text("$reputation reputation", color = Muted, fontSize = 13.sp)
                     Text("$coins coins", color = Muted, fontSize = 13.sp)
                 }
+                Spacer(Modifier.weight(1f))
+                trailing?.invoke()
             }
         }
+    }
+}
+
+@Composable
+private fun MiniBtn(label: String, onClick: () -> Unit) {
+    Box(
+        Modifier.clip(RoundedCornerShape(9.dp)).background(Accent)
+            .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 7.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = AccentInk, fontWeight = FontWeight.Medium, fontSize = 13.sp)
     }
 }
 
@@ -212,8 +220,19 @@ fun EditProfileScreen(session: Session, done: () -> Unit) {
     }
 }
 
+/**
+ * Bridges PlayerScreen with the app-bar corner buttons (call/video/⋮) that
+ * AppShell renders while a player profile is open.
+ */
+class PlayerBar {
+    var showCalls by mutableStateOf(false)
+    var onAudio: (() -> Unit)? = null
+    var onVideo: (() -> Unit)? = null
+    var onMenu: (() -> Unit)? = null
+}
+
 @Composable
-fun PlayerScreen(userId: String, session: Session, onRoute: (String) -> Unit, onBack: () -> Unit, engine: CallEngine) {
+fun PlayerScreen(userId: String, session: Session, onRoute: (String) -> Unit, onBack: () -> Unit, engine: CallEngine, playerBar: PlayerBar) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var user by remember(userId) { mutableStateOf(JSONObject()) }
@@ -234,6 +253,13 @@ fun PlayerScreen(userId: String, session: Session, onRoute: (String) -> Unit, on
     val canMessage = user.optBoolean("canMessage")
     val requestState = user.optString("requestState").ifBlank { "none" }
     val requestId = user.optString("requestId")
+
+    androidx.compose.runtime.SideEffect {
+        playerBar.showCalls = canMessage
+        playerBar.onAudio = { engine.startCall(userId, "AUDIO", user.name(), user.optString("avatarUrl")) }
+        playerBar.onVideo = { engine.startCall(userId, "VIDEO", user.name(), user.optString("avatarUrl")) }
+        playerBar.onMenu = { menu = !menu }
+    }
 
     fun openChat() {
         scope.launch {
@@ -270,79 +296,46 @@ fun PlayerScreen(userId: String, session: Session, onRoute: (String) -> Unit, on
         }
     }
 
-    Box(Modifier.fillMaxSize().background(Bg)) {
-        Column(Modifier.fillMaxSize()) {
-            Row(Modifier.padding(4.dp, 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconBtn(Icons.Outlined.ChevronLeft) { onBack() }
-                Text(
-                    user.name(),
-                    Modifier.weight(1f),
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Ink,
-                )
-                if (canMessage) {
-                    IconBtn(Icons.Outlined.Call) {
-                        engine.startCall(userId, "AUDIO", user.name(), user.optString("avatarUrl"))
-                    }
-                    IconBtn(Icons.Outlined.Videocam) {
-                        engine.startCall(userId, "VIDEO", user.name(), user.optString("avatarUrl"))
-                    }
-                }
-                IconBtn(Icons.Outlined.MoreVert) { menu = true }
-            }
-            LazyColumn(Modifier.padding(12.dp)) {
-                item {
-                    ProfileHero(user, user.optInt("friendsCount"), showPrivateStats = false)
-                    Spacer(Modifier.height(8.dp))
-                    AboutCard(user)
-                    Spacer(Modifier.height(12.dp))
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        when {
-                            friend -> {
-                                Box(
-                                    Modifier.clip(RoundedCornerShape(10.dp)).background(AccentSoft)
-                                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                                ) {
-                                    Text("Friends ✓", color = AccentDeep, fontWeight = FontWeight.Medium)
-                                }
-                                AccentBtn("Message") { openChat() }
-                            }
-                            requestState == "outgoing" -> {
-                                Box(
-                                    Modifier.clip(RoundedCornerShape(10.dp)).background(Surface)
-                                        .border(1.dp, Line, RoundedCornerShape(10.dp))
-                                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                                ) {
-                                    Text("Request sent", color = Muted, fontWeight = FontWeight.Medium)
-                                }
-                            }
-                            requestState == "incoming" -> {
-                                AccentBtn("Accept") {
-                                    user = JSONObject(user.toString()).put("friend", true).put("requestState", "none")
-                                    scope.launch(Dispatchers.IO) {
-                                        runCatching { Api.post("/api/friend-requests/$requestId/accept") }
-                                    }
-                                }
-                                GhostBtn("Decline") {
-                                    user = JSONObject(user.toString()).put("requestState", "none")
-                                    scope.launch(Dispatchers.IO) {
-                                        runCatching { Api.post("/api/friend-requests/$requestId/decline") }
-                                    }
-                                }
-                            }
-                            else -> {
-                                AccentBtn("Add friend") { sendRequest() }
-                                if (canMessage) AccentBtn("Message") { openChat() }
-                            }
+    // Action cluster shown inside the hero, right beside the friends count.
+    val heroAction: @Composable () -> Unit = {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            when {
+                friend -> MiniBtn("Message") { openChat() }
+                requestState == "outgoing" ->
+                    Text("Requested ✓", color = Muted, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                requestState == "incoming" -> {
+                    MiniBtn("Accept") {
+                        user = JSONObject(user.toString()).put("friend", true).put("requestState", "none")
+                        scope.launch(Dispatchers.IO) {
+                            runCatching { Api.post("/api/friend-requests/$requestId/accept") }
                         }
                     }
-                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Decline",
+                        color = Muted,
+                        fontSize = 13.sp,
+                        modifier = Modifier.clickable {
+                            user = JSONObject(user.toString()).put("requestState", "none")
+                            scope.launch(Dispatchers.IO) {
+                                runCatching { Api.post("/api/friend-requests/$requestId/decline") }
+                            }
+                        }.padding(6.dp),
+                    )
                 }
+                else -> {
+                    MiniBtn("Add friend") { sendRequest() }
+                    if (canMessage) MiniBtn("Message") { openChat() }
+                }
+            }
+        }
+    }
+
+    Box(Modifier.fillMaxSize().background(Bg)) {
+        LazyColumn(Modifier.fillMaxSize().padding(12.dp)) {
+            item {
+                ProfileHero(user, user.optInt("friendsCount"), showPrivateStats = false, trailing = heroAction)
+                Spacer(Modifier.height(8.dp))
+                AboutCard(user)
             }
         }
 

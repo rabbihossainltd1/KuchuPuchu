@@ -133,8 +133,10 @@ class CallEngine(private val app: Application) {
         )
         audioModule =
             JavaAudioDeviceModule.builder(ctx)
-                .setUseHardwareAcousticEchoCanceler(true)
-                .setUseHardwareNoiseSuppressor(true)
+                // Several budget devices ship a broken hardware AEC/NS that
+                // makes call audio silent — WebRTC's software chain is safer.
+                .setUseHardwareAcousticEchoCanceler(false)
+                .setUseHardwareNoiseSuppressor(false)
                 .createAudioDeviceModule()
         factory =
             PeerConnectionFactory.builder()
@@ -147,7 +149,20 @@ class CallEngine(private val app: Application) {
     fun applyAudio() {
         val am = app.getSystemService(android.media.AudioManager::class.java)
         am.mode = android.media.AudioManager.MODE_IN_COMMUNICATION
-        am.isSpeakerphoneOn = speaker
+        if (Build.VERSION.SDK_INT >= 31) {
+            runCatching {
+                val devices = am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)
+                val wanted =
+                    if (speaker) {
+                        devices.firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                    } else {
+                        devices.firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_EARPIECE }
+                    }
+                if (wanted != null) am.setCommunicationDevice(wanted)
+            }
+        } else {
+            runCatching { am.isSpeakerphoneOn = speaker }
+        }
     }
 
     private suspend fun tick() {
@@ -549,7 +564,11 @@ class CallEngine(private val app: Application) {
         speaker = false
         runCatching {
             val am = app.getSystemService(android.media.AudioManager::class.java)
-            am.isSpeakerphoneOn = false
+            if (Build.VERSION.SDK_INT >= 31) {
+                runCatching { am.clearCommunicationDevice() }
+            } else {
+                runCatching { am.isSpeakerphoneOn = false }
+            }
             am.mode = android.media.AudioManager.MODE_NORMAL
         }
         muted = false

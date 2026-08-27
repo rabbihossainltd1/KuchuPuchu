@@ -10,8 +10,8 @@ android {
         applicationId = "app.kuchupuchu.android"
         minSdk = 24
         targetSdk = 35
-        versionCode = 23
-        versionName = "2.1.0"
+        versionCode = 25
+        versionName = "2.1.2"
     }
     signingConfigs {
         getByName("debug") {
@@ -53,6 +53,10 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("io.getstream:stream-webrtc-android:1.1.3")
+    // Push notifications (Messenger mode). Firebase is initialized at runtime
+    // from the worker's /api/config/firebase — no google-services.json needed
+    // in the build, so the app works fine before FCM is set up.
+    implementation("com.google.firebase:firebase-messaging:24.1.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
 }

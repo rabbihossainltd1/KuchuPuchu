@@ -38,7 +38,8 @@ class MainActivity : ComponentActivity() {
                 ContextCompat.checkSelfPermission(this, it) != android.content.pm.PackageManager.PERMISSION_GRANTED
             }
         if (missing.isNotEmpty()) ask.launch(missing.toTypedArray())
-        if (!Api.token.isNullOrBlank()) KpSyncService.start(this)
+        // Note: the background service decision happens in KpApp once we know
+        // whether Firebase push is configured (push mode needs no service).
         handleCallIntent(intent)
         setContent { KpTheme { KpApp() } }
     }
@@ -63,6 +64,10 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         KpState.foreground = true
+        // OEM battery managers sometimes kill the sync service while the app
+        // is backgrounded — restart it so notifications resume immediately.
+        // (Only in legacy mode; push mode needs no service at all.)
+        if (KpPush.decided && !KpPush.enabled && !Api.token.isNullOrBlank()) KpSyncService.start(this)
         if (CallEngine.instance?.active == null) restoreChrome()
     }
 

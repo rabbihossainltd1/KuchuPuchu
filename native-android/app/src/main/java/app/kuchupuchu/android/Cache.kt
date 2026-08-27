@@ -55,6 +55,8 @@ object Cache {
 
 object Disk {
     private lateinit var root: java.io.File
+    // Memoized image-existence lookups so chat rendering never touches the disk.
+    private val imageHits = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
 
     fun init(ctx: Context) {
         root = java.io.File(ctx.applicationContext.filesDir, "kp")
@@ -85,13 +87,20 @@ object Disk {
         runCatching {
             val bytes = Base64.decode(src.substring(comma + 1), Base64.DEFAULT)
             imageFile(id).writeBytes(bytes)
+            imageHits[id] = true
         }
     }
 
     fun localImage(id: String): String? {
-        if (!ready()) return null
+        if (id.isBlank() || !ready()) return null
+        if (imageHits[id] == true) return imageFile(id).absolutePath
         val f = imageFile(id)
-        return if (f.exists() && f.length() > 0) f.absolutePath else null
+        return if (f.exists() && f.length() > 0) {
+            imageHits[id] = true
+            f.absolutePath
+        } else {
+            null
+        }
     }
 
     fun saveChat(cid: String, items: List<JSONObject>, otherReadAt: String = "") {
@@ -112,6 +121,7 @@ object Disk {
 
     fun clear() {
         if (!ready()) return
+        imageHits.clear()
         root.deleteRecursively()
         root.mkdirs()
         java.io.File(root, "img").mkdirs()

@@ -19,11 +19,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.NotificationsNone
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -57,8 +60,10 @@ fun AppShell(
     val activity = ctx as? Activity
     var drawer by remember { mutableStateOf(false) }
     var searchOpen by remember { mutableStateOf(false) }
+    val playerBar = remember { PlayerBar() }
     val tab = route.substringAfter("tabs/").substringBefore("/")
     val inThread = route.startsWith("chat/")
+    val onPlayer = route.startsWith("player/")
     val onHome = route.startsWith("tabs/home")
     val onProfile = route.startsWith("tabs/me")
     val showChrome = !inThread
@@ -101,8 +106,17 @@ fun AppShell(
                             fontWeight = FontWeight.SemiBold,
                             color = Ink,
                         )
-                        if (onProfile) PencilIcon { onRoute("edit-profile") }
-                        else {
+                        if (onPlayer) {
+                            // Other player's profile: the ⋮ menu lives in the
+                            // far corner (where coins usually sit).
+                            if (playerBar.showCalls) {
+                                IconBtn(Icons.Outlined.Call) { playerBar.onAudio?.invoke() }
+                                IconBtn(Icons.Outlined.Videocam) { playerBar.onVideo?.invoke() }
+                            }
+                            IconBtn(Icons.Outlined.MoreVert) { playerBar.onMenu?.invoke() }
+                        } else if (onProfile) {
+                            PencilIcon { onRoute("edit-profile") }
+                        } else {
                             Text(
                                 "${session.me?.walletBal() ?: 0}",
                                 color = Ink,
@@ -135,7 +149,7 @@ fun AppShell(
                     route == "store" -> StoreScreen(session, onRoute)
                     route == "wallet" -> WalletScreen(session, onRoute)
                     route.startsWith("player/") ->
-                        PlayerScreen(route.removePrefix("player/"), session, onRoute, { onBack(); Unit }, engine)
+                        PlayerScreen(route.removePrefix("player/"), session, onRoute, { onBack(); Unit }, engine, playerBar)
                     route == "compose" -> ComposePostScreen(session) { session.feedEpoch++; onBack(); Unit }
                     route == "edit-profile" -> EditProfileScreen(session) { onBack(); Unit }
                 }
@@ -219,23 +233,23 @@ private fun pageTitle(route: String) =
 @Composable
 private fun androidx.compose.foundation.layout.RowScope.NavTab(icon: ImageVector, label: String, on: Boolean, badge: Int = 0, click: () -> Unit) {
     Column(
-        Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(onClick = click).padding(top = 5.dp, bottom = 2.dp),
+        Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(onClick = click).padding(top = 6.dp, bottom = 3.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(contentAlignment = Alignment.Center) {
             Box(
-                Modifier.width(58.dp).height(32.dp).clip(RoundedCornerShape(16.dp))
+                Modifier.width(64.dp).height(38.dp).clip(RoundedCornerShape(19.dp))
                     .background(if (on) AccentSoft else Color.Transparent),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(icon, null, tint = if (on) AccentDeep else Muted, modifier = Modifier.size(24.dp))
+                Icon(icon, null, tint = if (on) AccentDeep else Muted, modifier = Modifier.size(28.dp))
             }
             if (badge > 0) Badge(badge, Modifier.align(Alignment.TopEnd))
         }
         Spacer(Modifier.height(3.dp))
         Text(
             label,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
             fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
             color = if (on) AccentDeep else Muted,
         )
