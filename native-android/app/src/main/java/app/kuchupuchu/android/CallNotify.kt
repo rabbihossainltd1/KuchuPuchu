@@ -201,16 +201,25 @@ class CallService : Service() {
         } else {
             startForeground(ONGOING_ID, CallNotify.ongoing(this, title))
         }
+        fgReady.set(true)
         return START_STICKY
     }
 
+    override fun onDestroy() {
+        fgReady.set(false)
+        super.onDestroy()
+    }
+
     companion object {
+        val fgReady = java.util.concurrent.atomic.AtomicBoolean(false)
+
         fun start(ctx: Context, title: String, share: Boolean = false) {
             val i = Intent(ctx, CallService::class.java).putExtra("title", title).putExtra("share", share)
             if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
         }
 
         fun stop(ctx: Context) {
+            fgReady.set(false)
             ctx.stopService(Intent(ctx, CallService::class.java))
         }
     }

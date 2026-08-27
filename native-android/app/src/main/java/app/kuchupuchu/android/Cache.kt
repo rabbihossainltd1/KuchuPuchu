@@ -18,7 +18,7 @@ object Cache {
             path.contains("/calls") -> 0
             path.contains("/messages") -> 0
             path.contains("/notifications") || path.contains("/friend-requests") -> 2_000
-            path.contains("/conversations") -> 2_500
+            path.contains("/conversations") -> 800
             else -> 45_000
         }
 
@@ -182,6 +182,10 @@ fun JSONObject.clean(key: String): String {
 
 fun hydrateMessage(m: JSONObject): JSONObject {
     val id = m.optString("id")
+    val call = m.clean("call")
+    if (call.startsWith("call:")) m.put("call", call) else m.remove("call")
+    val sticker = m.clean("sticker")
+    if (sticker.isNotBlank()) m.put("sticker", sticker) else m.remove("sticker")
     val local = Disk.localImage(id)
     if (local != null) {
         m.put("imageUrl", local)

@@ -80,7 +80,7 @@ fun InboxScreen(session: Session, onRoute: (String) -> Unit) {
                 val pack = JSONObject().put("items", JSONArray().also { arr -> next.forEach { arr.put(it) } })
                 Disk.put("inbox", pack)
             }
-            delay(8000)
+            delay(2000)
         }
     }
     Column(Modifier.fillMaxSize().background(Bg)) {
@@ -288,7 +288,7 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
             }
         }
         while (isActive) {
-            delay(5000)
+            delay(900)
             if (sending > 0) continue
             val data =
                 withContext(Dispatchers.IO) {
@@ -313,7 +313,7 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
         }
     }
 
-    val lastMine = messages.lastOrNull { it.optString("senderId") == meId && it.optString("call").isBlank() }
+    val lastMine = messages.lastOrNull { it.optString("senderId") == meId && !it.clean("call").startsWith("call:") }
 
     fun send(payload: JSONObject) {
         val tempId = "tmp-${System.currentTimeMillis()}"
@@ -379,8 +379,8 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
         LazyColumn(Modifier.weight(1f).padding(10.dp, 12.dp), state = list) {
             itemsIndexed(messages, key = { _, m -> m.optString("id") }) { _, m ->
                 val mine = m.optString("senderId") == meId
-                val call = m.optString("call")
-                if (call.isNotBlank()) {
+                val call = m.clean("call")
+                if (call.startsWith("call:")) {
                     val parts = call.split(":")
                     val kind = if (parts.getOrNull(1) == "VIDEO") "Video" else "Voice"
                     val status = parts.getOrNull(2).orEmpty()

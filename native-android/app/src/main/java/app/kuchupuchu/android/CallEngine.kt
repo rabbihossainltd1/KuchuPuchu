@@ -32,8 +32,8 @@ import org.webrtc.MediaStream
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
 import org.webrtc.RtpReceiver
-import org.webrtc.ScreenCapturerAndroid
 import org.webrtc.SdpObserver
+import org.webrtc.audio.JavaAudioDeviceModule
 import org.webrtc.SessionDescription
 import org.webrtc.SurfaceTextureHelper
 import org.webrtc.SurfaceViewRenderer
@@ -60,6 +60,7 @@ class CallEngine(private val app: Application) {
     var onChange: ((CallUi?) -> Unit)? = null
     var active: CallUi? = null
         private set(value) {
+            if (field == value) return
             field = value
             onChange?.invoke(value)
         }
@@ -72,6 +73,7 @@ class CallEngine(private val app: Application) {
 
     val egl = EglBase.create()
     private var factory: PeerConnectionFactory? = null
+    private var audioModule: JavaAudioDeviceModule? = null
     private var pc: PeerConnection? = null
     private var audioSource: AudioSource? = null
     private var audioTrack: AudioTrack? = null
@@ -114,11 +116,23 @@ class CallEngine(private val app: Application) {
         PeerConnectionFactory.initialize(
             PeerConnectionFactory.InitializationOptions.builder(ctx).createInitializationOptions(),
         )
+        audioModule =
+            JavaAudioDeviceModule.builder(ctx)
+                .setUseHardwareAcousticEchoCanceler(true)
+                .setUseHardwareNoiseSuppressor(true)
+                .createAudioDeviceModule()
         factory =
             PeerConnectionFactory.builder()
+                .setAudioDeviceModule(audioModule)
                 .setVideoEncoderFactory(DefaultVideoEncoderFactory(egl.eglBaseContext, true, true))
                 .setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext))
                 .createPeerConnectionFactory()
+    }
+
+    fun applyAudio() {
+        val am = app.getSystemService(android.media.AudioManager::class.java)
+        am.mode = android.media.AudioManager.MODE_IN_COMMUNICATION
+        am.isSpeakerphoneOn = speaker
     }
 
     private suspend fun tick() {
@@ -174,9 +188,8 @@ class CallEngine(private val app: Application) {
                 CallSounds.startRing(app)
                 CallNotify.incoming(app, ui.otherName, ui.kind == "VIDEO")
             }
-            if (ui.kind == "VIDEO") {
+            if (ui.kind == "VIDEO" && videoTrack == null) {
                 withContext(Dispatchers.IO) { runCatching { capture(true) } }
-                onChange?.invoke(active)
             }
         }
         if (status == "ACTIVE") {
@@ -199,6 +212,8 @@ class CallEngine(private val app: Application) {
         if (active != null) return
         left.set(false)
         hasRemote = false
+        speaker = false
+        applyAudio()
         active = CallUi("pending", kind, "RINGING", false, name, userId, otherAvatar = avatar)
         CallService.start(app, if (kind == "VIDEO") "Video calling $name" else "Calling $name")
         scope.launch {
@@ -246,6 +261,7 @@ class CallEngine(private val app: Application) {
         val rec = active ?: return
         CallNotify.cancelIncoming(app)
         ringingId = null
+        applyAudio()
         CallService.start(app, "In a call with ${rec.otherName}")
         scope.launch {
             try {
@@ -308,9 +324,7 @@ class CallEngine(private val app: Application) {
 
     fun toggleSpeaker() {
         speaker = !speaker
-        val am = app.getSystemService(android.media.AudioManager::class.java)
-        am.mode = android.media.AudioManager.MODE_IN_COMMUNICATION
-        am.isSpeakerphoneOn = speaker
+        applyAudio()
     }
 
     fun toggleCamera() {
@@ -340,26 +354,26 @@ class CallEngine(private val app: Application) {
             return
         }
         MainActivity.current?.askShare { code, data ->
-            if (code == Activity.RESULT_OK && data != null) startShare(data)
+            if (code == Activity.RESULT_OK && data != null) {
+                scope.launch { runCatching { startShare(data) } }
+            }
         }
     }
 
-    private fun startShare(data: Intent) {
+    private suspend fun startShare(data: Intent) {
         CallService.start(app, "Sharing screen", share = true)
-        val cb =
-            object : MediaProjection.Callback() {
-                override fun onStop() {
-                    scope.launch { if (sharing) stopShare() }
-                }
-            }
-        shareCallback = cb
+        var waits = 0
+        while (!CallService.fgReady.get() && waits++ < 40) delay(40)
         try {
             capturer?.stopCapture()
         } catch (_: Exception) {
         }
         capturer?.dispose()
         videoTrack?.let { track -> localView?.let { runCatching { track.removeSink(it) } } }
-        val screen = ScreenCapturerAndroid(data, cb)
+        val screen =
+            KpScreenCapturer(app, data) {
+                scope.launch { if (sharing) stopShare() }
+            }
         val src = factory?.createVideoSource(true) ?: return
         val nextHelper = SurfaceTextureHelper.create("kp-share", egl.eglBaseContext)
         screen.initialize(nextHelper, app, src.capturerObserver)
@@ -466,6 +480,7 @@ class CallEngine(private val app: Application) {
         runCatching {
             val am = app.getSystemService(android.media.AudioManager::class.java)
             am.isSpeakerphoneOn = false
+            am.mode = android.media.AudioManager.MODE_NORMAL
         }
         muted = false
         cameraOff = false
@@ -585,6 +600,7 @@ class CallEngine(private val app: Application) {
 
     private fun capture(video: Boolean): Boolean {
         val f = factory ?: return false
+        applyAudio()
         if (audioTrack == null) {
             audioSource = f.createAudioSource(MediaConstraints())
             audioTrack = f.createAudioTrack("kp-a", audioSource)

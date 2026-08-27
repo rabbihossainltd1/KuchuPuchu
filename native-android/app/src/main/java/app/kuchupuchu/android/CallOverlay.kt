@@ -2,7 +2,6 @@ package app.kuchupuchu.android
 
 import android.app.Activity
 import android.graphics.Color as AndroidColor
-import android.media.AudioManager
 import android.view.ViewGroup
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
@@ -99,13 +98,6 @@ fun CallOverlay(call: CallUi, engine: CallEngine) {
         }
     }
 
-    DisposableEffect(engine.speaker) {
-        val am = ctx.getSystemService(AudioManager::class.java)
-        am.mode = AudioManager.MODE_IN_COMMUNICATION
-        am.isSpeakerphoneOn = engine.speaker
-        onDispose { }
-    }
-
     val label =
         when {
             incoming && video -> "Incoming video"
@@ -198,36 +190,7 @@ private fun LiveAudio(call: CallUi, engine: CallEngine, person: JSONObject, live
                 )
             }
             Spacer(Modifier.weight(1f))
-            Row(
-                Modifier.fillMaxWidth().padding(bottom = 36.dp, start = 10.dp, end = 10.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                LabeledRound(
-                    if (engine.speaker) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
-                    if (engine.speaker) Color(0xFFFAFAF9) else BtnStone,
-                    "Speaker",
-                    56.dp,
-                    if (engine.speaker) Color(0xFF1C1917) else Color.White,
-                ) { engine.toggleSpeaker() }
-                LabeledRound(
-                    if (engine.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
-                    if (engine.muted) Color(0xFFFAFAF9) else BtnStone,
-                    "Mute",
-                    56.dp,
-                    if (engine.muted) Color(0xFF1C1917) else Color.White,
-                ) { if (live) engine.toggleMute() }
-                LabeledRound(
-                    if (engine.cameraOff || call.kind == "AUDIO") Icons.Filled.VideocamOff else Icons.Filled.Videocam,
-                    BtnStone,
-                    "Video",
-                    56.dp,
-                ) { if (live) engine.toggleCamera() }
-                LabeledRound(Icons.Filled.ScreenShare, if (engine.sharing) Color(0xFFFAFAF9) else BtnStone, "Share", 56.dp, if (engine.sharing) Color(0xFF1C1917) else Color.White) {
-                    if (live) engine.toggleShare()
-                }
-                LabeledRound(Icons.Filled.CallEnd, EndRed, "Hang Up", 58.dp) { engine.hangup() }
-            }
+            AudioControls(call, engine, live)
         }
     }
 }
@@ -300,6 +263,79 @@ private fun LiveVideo(call: CallUi, engine: CallEngine, live: Boolean, label: St
 }
 
 @Composable
+private fun AudioControls(call: CallUi, engine: CallEngine, live: Boolean) {
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = 36.dp, start = 10.dp, end = 10.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        LabeledRound(
+            if (engine.speaker) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
+            if (engine.speaker) Color(0xFFFAFAF9) else BtnStone,
+            "Speaker",
+            56.dp,
+            if (engine.speaker) Color(0xFF1C1917) else Color.White,
+        ) { engine.toggleSpeaker() }
+        LabeledRound(
+            if (engine.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
+            if (engine.muted) Color(0xFFFAFAF9) else BtnStone,
+            "Mute",
+            56.dp,
+            if (engine.muted) Color(0xFF1C1917) else Color.White,
+        ) { if (live) engine.toggleMute() }
+        LabeledRound(
+            if (engine.cameraOff || call.kind == "AUDIO") Icons.Filled.VideocamOff else Icons.Filled.Videocam,
+            BtnStone,
+            "Video",
+            56.dp,
+        ) { if (live) engine.toggleCamera() }
+        LabeledRound(
+            Icons.Filled.ScreenShare,
+            if (engine.sharing) Color(0xFFFAFAF9) else BtnStone,
+            "Share",
+            56.dp,
+            if (engine.sharing) Color(0xFF1C1917) else Color.White,
+        ) { if (live) engine.toggleShare() }
+        LabeledRound(Icons.Filled.CallEnd, EndRed, "Hang Up", 58.dp) { engine.hangup() }
+    }
+}
+
+@Composable
+private fun VideoControls(engine: CallEngine, live: Boolean, modifier: Modifier) {
+    Row(
+        modifier.fillMaxWidth().navigationBarsPadding().padding(12.dp, 16.dp, 12.dp, 28.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Round(
+            if (engine.speaker) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
+            if (engine.speaker) Color(0xFFFAFAF9) else BtnStone,
+            54.dp,
+            if (engine.speaker) Color(0xFF1C1917) else Color.White,
+        ) { engine.toggleSpeaker() }
+        Round(
+            if (engine.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
+            if (engine.muted) Color(0xFFFAFAF9) else BtnStone,
+            54.dp,
+            if (engine.muted) Color(0xFF1C1917) else Color.White,
+        ) { if (live) engine.toggleMute() }
+        Round(
+            if (engine.cameraOff) Icons.Filled.VideocamOff else Icons.Filled.Videocam,
+            if (engine.cameraOff) Color(0xFFFAFAF9) else BtnStone,
+            54.dp,
+            if (engine.cameraOff) Color(0xFF1C1917) else Color.White,
+        ) { if (live) engine.toggleCamera() }
+        Round(
+            Icons.Filled.ScreenShare,
+            if (engine.sharing) Color(0xFFFAFAF9) else BtnStone,
+            54.dp,
+            if (engine.sharing) Color(0xFF1C1917) else Color.White,
+        ) { if (live) engine.toggleShare() }
+        Round(Icons.Filled.CallEnd, EndRed, 58.dp) { engine.hangup() }
+    }
+}
+
+@Composable
 private fun VideoSurface(local: Boolean, engine: CallEngine, modifier: Modifier, overlay: Boolean = false) {
     AndroidView(
         factory = { c ->
@@ -311,7 +347,7 @@ private fun VideoSurface(local: Boolean, engine: CallEngine, modifier: Modifier,
             }
         },
         modifier = modifier,
-        update = { if (local) engine.attachLocal(it) else engine.attachRemote(it) },
+        update = {},
         onRelease = { if (local) engine.detachLocal(it) else engine.detachRemote(it) },
     )
 }

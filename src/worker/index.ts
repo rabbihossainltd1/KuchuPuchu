@@ -1273,8 +1273,8 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
             hasImage,
             imageUrl: hasImage ? "inline" : null,
             imageUrls: hasImage ? ["inline"] : [],
-            sticker: media.sticker,
-            call: media.call,
+            sticker: media.sticker || undefined,
+            call: media.call || undefined,
             reaction: row.reaction ?? null,
             createdAt: row.created_at,
           };
