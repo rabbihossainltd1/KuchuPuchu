@@ -3,10 +3,19 @@ package app.kuchupuchu.android
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
+/**
+ * v3 API client — talks to the KuchuPuchu v3 worker
+ * (https://kuchupuchu-api.kuchupuchu.workers.dev).
+ *
+ * Same tiny HttpURLConnection + org.json approach as v2 (no extra
+ * dependencies), with a short-lived per-path response cache so tab
+ * switches feel instant without hammering D1.
+ */
 object Api {
     const val BASE = "https://kuchupuchu-api.kuchupuchu.workers.dev"
     private const val TOKEN_KEY = "kp_session_token"
@@ -32,31 +41,82 @@ object Api {
 
     fun post(path: String, body: JSONObject? = JSONObject()): JSONObject {
         val data = request(path, "POST", body)
-        if (path.contains("/conversations")) Cache.bust("/api/conversations")
-        if (path.contains("/posts") || path.contains("/feed") || path.contains("/stories")) {
-            Cache.bust("/api/feed")
-            Cache.bust("/api/stories")
-        }
-        if (path.contains("/notifications") || path.contains("/friend")) {
-            Cache.bust("/api/notifications")
-            Cache.bust("/api/friend")
-        }
-        if (path.contains("/api/me") || path.contains("/wallet") || path.contains("/store")) {
-            Cache.bust("/api/me")
-        }
+        bustFor(path)
         return data
     }
 
-    fun patch(path: String, body: JSONObject): JSONObject = request(path, "PATCH", body)
+    fun patch(path: String, body: JSONObject): JSONObject {
+        val data = request(path, "PATCH", body)
+        bustFor(path)
+        return data
+    }
 
-    fun delete(path: String): JSONObject = request(path, "DELETE", JSONObject())
+    fun delete(path: String): JSONObject {
+        val data = request(path, "DELETE", JSONObject())
+        bustFor(path)
+        return data
+    }
+
+    /** Uploads a raw file to R2 via the worker. Returns { fileKey } . */
+    fun upload(name: String, mime: String, bytes: ByteArray): JSONObject {
+        val path = "/api/files?name=${q(name)}&type=${q(mime)}"
+        val conn = (URL(BASE + path).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 60_000
+            readTimeout = 120_000
+            setRequestProperty("Authorization", "Bearer ${token ?: ""}")
+            setRequestProperty("Content-Type", "application/octet-stream")
+            doOutput = true
+            outputStream.use { it.write(bytes) }
+        }
+        val code = conn.responseCode
+        val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
+            ?.bufferedReader()?.readText().orEmpty()
+        val json = if (text.isBlank()) JSONObject() else JSONObject(text)
+        if (code !in 200..299) {
+            throw ApiException(code, json.optJSONObject("error")?.optString("message") ?: "Upload failed.")
+        }
+        return json
+    }
+
+    /** Downloads a stored file's bytes (images shown inline, files saved to disk). */
+    fun download(fileKey: String): ByteArray {
+        val conn = (URL("$BASE/api/files/${encodePath(fileKey)}").openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 30_000
+            readTimeout = 60_000
+            token?.let { setRequestProperty("Authorization", "Bearer $it") }
+        }
+        val code = conn.responseCode
+        if (code !in 200..299) throw ApiException(code, "Download failed.")
+        return conn.inputStream.use { ins ->
+            val buf = ByteArrayOutputStream(maxOf(8192, conn.contentLength))
+            val chunk = ByteArray(64 * 1024)
+            while (true) {
+                val n = ins.read(chunk)
+                if (n < 0) break
+                buf.write(chunk, 0, n)
+            }
+            buf.toByteArray()
+        }
+    }
+
+    private fun bustFor(path: String) {
+        if (path.contains("/conversations")) Cache.bust("/api/conversations")
+        if (path.contains("/messages")) {
+            Cache.bustAll("/messages")
+            Cache.bust("/api/conversations")
+        }
+        if (path.contains("/statuses")) Cache.bustAll("/api/statuses")
+        if (path.contains("/api/me")) Cache.bust("/api/me")
+    }
 
     fun request(path: String, method: String, body: JSONObject?): JSONObject {
         val url = if (path.startsWith("http")) path else "$BASE$path"
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = method
-            connectTimeout = 20000
-            readTimeout = 25000
+            connectTimeout = 20_000
+            readTimeout = 25_000
             setRequestProperty("Accept", "application/json")
             setRequestProperty("Content-Type", "application/json")
             token?.let { setRequestProperty("Authorization", "Bearer $it") }
@@ -77,6 +137,8 @@ object Api {
     }
 
     fun q(value: String) = URLEncoder.encode(value, "UTF-8")
+
+    private fun encodePath(value: String) = value.split("/").joinToString("/") { q(it) }
 }
 
 class ApiException(val status: Int, override val message: String) : Exception(message)

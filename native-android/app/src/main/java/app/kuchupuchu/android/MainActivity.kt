@@ -1,12 +1,9 @@
 package app.kuchupuchu.android
 
 import android.Manifest
-import android.content.Intent
 import android.graphics.Color
-import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
-import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -15,22 +12,17 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
 
 class MainActivity : ComponentActivity() {
-    private var shareCb: ((Int, Intent?) -> Unit)? = null
 
     private val ask =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
 
-    private val shareAsk =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            shareCb?.invoke(result.resultCode, result.data)
-            shareCb = null
-        }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         current = this
-        Disk.init(this)
         Api.loadToken(this)
+        Store.init(this)
+        KpNotify.ensureChannels(this)
+
         val need = mutableListOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
         if (Build.VERSION.SDK_INT >= 33) need += Manifest.permission.POST_NOTIFICATIONS
         val missing =
@@ -38,48 +30,46 @@ class MainActivity : ComponentActivity() {
                 ContextCompat.checkSelfPermission(this, it) != android.content.pm.PackageManager.PERMISSION_GRANTED
             }
         if (missing.isNotEmpty()) ask.launch(missing.toTypedArray())
-        // Note: the background service decision happens in KpApp once we know
-        // whether Firebase push is configured (push mode needs no service).
-        handleCallIntent(intent)
+
+        // Push mode is live on the v3 worker: init Firebase + register the
+        // device token. No always-on service, no permanent notification.
+        if (!Api.token.isNullOrBlank()) {
+            Thread {
+                runCatching {
+                    if (KpPush.tryInit(this)) KpPush.registerToken(this)
+                }
+            }.start()
+        }
+
+        handleIntent(intent)
         setContent { KpTheme { KpApp() } }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handleCallIntent(intent)
+        handleIntent(intent)
     }
 
-    private fun handleCallIntent(intent: Intent?) {
+    private fun handleIntent(intent: android.content.Intent?) {
         if (intent == null) return
-        if (intent.getBooleanExtra("kp_accept", false)) {
-            pendingAccept = true
-            CallEngine.suppressIncomingFor(15_000)
-            CallEngine.instance?.pendingAccept = true
-            CallEngine.instance?.answer()
-        }
         intent.getStringExtra("kp_chat")?.let { pendingChat = it }
     }
 
     override fun onResume() {
         super.onResume()
-        KpState.foreground = true
-        // OEM battery managers sometimes kill the sync service while the app
-        // is backgrounded — restart it so notifications resume immediately.
-        // (Only in legacy mode; push mode needs no service at all.)
-        if (KpPush.decided && !KpPush.enabled && !Api.token.isNullOrBlank()) KpSyncService.start(this)
-        if (CallEngine.instance?.active == null) restoreChrome()
+        Store.foreground = true
+        restoreChrome()
     }
 
     override fun onPause() {
-        KpState.foreground = false
+        Store.foreground = false
         super.onPause()
     }
 
     fun restoreChrome() {
-        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.statusBarColor = Color.parseColor("#F7F6F4")
-        window.navigationBarColor = Color.WHITE
+        window.navigationBarColor = Color.parseColor("#FFFFFF")
         WindowCompat.setDecorFitsSystemWindows(window, true)
         WindowInsetsControllerCompat(window, window.decorView).apply {
             isAppearanceLightStatusBars = true
@@ -92,17 +82,11 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    fun askShare(cb: (Int, Intent?) -> Unit) {
-        shareCb = cb
-        val mgr = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        shareAsk.launch(mgr.createScreenCaptureIntent())
-    }
-
     companion object {
         @Volatile
         var current: MainActivity? = null
-        @Volatile
-        var pendingAccept = false
+
+        /** Conversation to open from a notification tap. */
         @Volatile
         var pendingChat: String? = null
     }

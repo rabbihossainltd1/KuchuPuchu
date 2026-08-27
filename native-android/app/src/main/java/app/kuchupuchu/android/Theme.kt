@@ -3,103 +3,73 @@ package app.kuchupuchu.android
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 
-val Ink = Color(0xFF1C1917)
-val Muted = Color(0xFF6B6560)
-val Line = Color(0xFFE8E4DE)
-val Bg = Color(0xFFF7F6F4)
-val FeedBg = Color(0xFFF0EEEA)
-val Surface = Color(0xFFFFFFFF)
-val Accent = Color(0xFFB45309)
-val AccentInk = Color(0xFFFFFBEB)
-val AccentSoft = Color(0xFFFEF3C7)
-val AccentDeep = Color(0xFF92400E)
-val Green = Color(0xFF3F6212)
-val Rose = Color(0xFF9F1239)
-val DangerSoft = Color(0xFFFFE4E6)
-val Stone = Color(0xFF44403C)
-val CallInk = Color(0xFF1C1917)
+/* ---- KuchuPuchu v3 design tokens (locked: Chat List #7 "Gradient Rings") ---- */
+
+val Cream = Color(0xFFF7F6F4)      // app background
+val Card = Color(0xFFFFFFFF)       // white cards, 16dp radius
+val Ink = Color(0xFF1C1917)        // primary text
+val Muted = Color(0xFF7A6F63)      // secondary text
+val Line = Color(0xFFE8E4DE)       // hairlines / card borders
+val Gold = Color(0xFFF59E0B)       // primary amber
+val GoldLight = Color(0xFFFDE68A)  // gradient ring start
+val GoldDeep = Color(0xFFB45309)   // pressed / emphasized amber text
+val GoldSoft = Color(0xFFFEF3C7)   // soft amber fills
+val AmberInk = Color(0xFFFFFBEB)   // on-gold text
+val Green = Color(0xFF16A34A)      // accept / online
+val Red = Color(0xFFDC2626)        // end / decline
+val Dark = Color(0xFF171412)       // call screens dark bg
+val DarkCard = Color(0xFF242019)   // call screens sheet
+
+/** The signature amber ring gradient around avatars / status circles. */
+fun goldRing(): Brush = Brush.linearGradient(listOf(GoldLight, Gold))
+
+fun goldFill(): Brush = Brush.linearGradient(listOf(Gold, GoldDeep))
 
 @Composable
 fun KpTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = lightColorScheme(
-            primary = Accent,
-            onPrimary = AccentInk,
-            background = Bg,
-            surface = Surface,
+            primary = Gold,
+            onPrimary = AmberInk,
+            secondary = GoldDeep,
+            background = Cream,
+            surface = Card,
             onBackground = Ink,
             onSurface = Ink,
+            outline = Line,
         ),
         content = content,
     )
 }
 
-fun timeAgo(iso: String): String {
+/* ---- small formatting helpers ---- */
+
+fun initials(name: String): String {
+    val parts = name.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+    if (parts.isEmpty()) return "?"
+    if (parts.size == 1) return parts[0].take(1).uppercase()
+    return (parts[0].take(1) + parts[1].take(1)).uppercase()
+}
+
+/** Chat-list style timestamp: 14:05 / Yesterday / Mon / 12 Aug */
+fun listStamp(iso: String): String {
     if (iso.isBlank()) return ""
-    val t =
-        try {
-            java.time.Instant.parse(iso.replace(" ", "T").let { if (it.endsWith("Z") || it.contains("+")) it else it + "Z" }).toEpochMilli()
-        } catch (_: Exception) {
-            iso.toLongOrNull() ?: return iso.take(16)
-        }
-    val sec = ((System.currentTimeMillis() - t).coerceAtLeast(0)) / 1000
-    if (sec < 45) return "just now"
-    val min = sec / 60
-    if (min < 60) return "${min}m"
-    val hr = min / 60
-    if (hr < 24) return "${hr}h"
-    val day = hr / 24
-    if (day < 7) return "${day}d"
-    return iso.take(10)
-}
-
-fun lastSeen(iso: String, online: Boolean): String {
-    if (online) return "Active now"
-    if (iso.isBlank()) return "Offline"
-    val label = timeAgo(iso)
-    return if (label == "just now") "Last seen just now" else "Last seen $label ago"
-}
-
-private val isoCache = java.util.concurrent.ConcurrentHashMap<String, Long?>()
-private val isoSdf =
-    arrayOf(
-        java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US),
-        java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm", java.util.Locale.US),
-        java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US),
-    ).also { it.forEach { s -> s.timeZone = java.util.TimeZone.getTimeZone("UTC") } }
-
-@Synchronized
-fun parseIso(iso: String): Long? {
-    if (iso.isBlank()) return null
-    isoCache[iso]?.let { return it }
-    val clean = iso.trim().replace(" ", "T").removeSuffix("Z").substringBefore("+").substringBefore(".")
-    for (sdf in isoSdf) {
-        try {
-            val d = sdf.parse(clean)
-            if (d != null) {
-                isoCache[iso] = d.time
-                return d.time
-            }
-        } catch (_: Exception) {
-        }
+    val t = try {
+        java.time.Instant.parse(iso)
+    } catch (e: Exception) {
+        return ""
     }
-    val fallback = iso.toLongOrNull()
-    if (fallback != null) isoCache[iso] = fallback
-    return fallback
+    val now = java.time.ZonedDateTime.now()
+    val z = t.atZone(java.time.ZoneId.systemDefault())
+    return when {
+        z.toLocalDate() == now.toLocalDate() ->
+            String.format("%02d:%02d", z.hour, z.minute)
+        z.toLocalDate() == now.toLocalDate().minusDays(1) -> "Yesterday"
+        now.toLocalDate().toEpochDay() - z.toLocalDate().toEpochDay() < 7 ->
+            z.dayOfWeek.toString().take(3).let { d -> d[0].toString() + d.substring(1).lowercase() }
+        else -> "${z.dayOfMonth} ${z.month.toString().take(3).let { m -> m[0] + m.substring(1).lowercase() }}"
+    }
 }
-
-val STICKERS =
-    listOf(
-        "fire" to "Fire",
-        "heart" to "Heart",
-        "like" to "Like",
-        "gg" to "GG",
-        "cry" to "Cry",
-        "rage" to "Rage",
-        "star" to "Star",
-        "party" to "Party",
-        "love" to "Love",
-        "clutch" to "Clutch",
-    )

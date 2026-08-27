@@ -2,7 +2,6 @@ package app.kuchupuchu.android
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -11,8 +10,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -39,7 +40,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 @Composable
-fun LoginScreen(onAuthed: (JSONObject) -> Unit) {
+fun LoginScreen(onAuthed: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var mode by remember { mutableStateOf("login") }
@@ -50,24 +51,58 @@ fun LoginScreen(onAuthed: (JSONObject) -> Unit) {
     var busy by remember { mutableStateOf(false) }
 
     Column(
-        Modifier.fillMaxSize().background(Bg).padding(24.dp),
+        Modifier
+            .fillMaxSize()
+            .background(Cream)
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Column(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Surface).border(1.dp, Line, RoundedCornerShape(14.dp)).padding(22.dp),
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(Card)
+                .padding(22.dp),
         ) {
-            Image(painterResource(R.drawable.icon_gold), null, Modifier.size(56.dp), contentScale = ContentScale.Fit)
-            Spacer(Modifier.height(10.dp))
-            Image(painterResource(R.drawable.logo_wordmark), "KuchuPuchu", Modifier.height(32.dp), contentScale = ContentScale.Fit)
+            Image(
+                painterResource(R.drawable.icon_gold),
+                contentDescription = "KuchuPuchu",
+                modifier = Modifier.size(58.dp),
+                contentScale = ContentScale.Fit,
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "KuchuPuchu",
+                fontSize = 27.sp,
+                fontWeight = FontWeight.Bold,
+                color = Ink,
+            )
+            Text(
+                if (mode == "login") "Welcome back 👋" else "Create your account",
+                fontSize = 14.sp,
+                color = Muted,
+            )
             Spacer(Modifier.height(18.dp))
-            Text(if (mode == "login") "Welcome back" else "Create account", fontSize = 26.sp, fontWeight = FontWeight.SemiBold, color = Ink)
-            Spacer(Modifier.height(16.dp))
             if (mode == "signup") {
-                OutlinedTextField(displayName, { displayName = it }, label = { Text("Display name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(
+                    displayName,
+                    { displayName = it },
+                    label = { Text("Display name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 Spacer(Modifier.height(10.dp))
             }
-            OutlinedTextField(email, { email = it }, label = { Text("Email") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email), modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(
+                email,
+                { email = it },
+                label = { Text("Email") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                modifier = Modifier.fillMaxWidth(),
+            )
             Spacer(Modifier.height(10.dp))
             OutlinedTextField(
                 password,
@@ -79,25 +114,39 @@ fun LoginScreen(onAuthed: (JSONObject) -> Unit) {
             )
             if (error.isNotBlank()) {
                 Spacer(Modifier.height(8.dp))
-                Text(error, color = Rose, fontSize = 13.sp)
+                Text(error, color = Red, fontSize = 13.sp)
             }
             Spacer(Modifier.height(16.dp))
-            AccentBtn(if (busy) "…" else if (mode == "login") "Sign in" else "Create account") {
-                if (busy) return@AccentBtn
+            GoldBtn(
+                if (busy) "…" else if (mode == "login") "Sign in" else "Create account",
+                Modifier.fillMaxWidth(),
+                enabled = !busy,
+            ) {
+                if (busy) return@GoldBtn
                 busy = true
                 error = ""
                 scope.launch {
                     try {
-                        val path = if (mode == "login") "/api/auth/session" else "/api/auth/register"
+                        val path = if (mode == "login") "/api/auth/login" else "/api/auth/register"
                         val body =
-                            JSONObject().put("email", email.trim()).put("password", password).apply {
-                                if (mode == "signup") put("displayName", displayName.trim())
-                            }
+                            JSONObject()
+                                .put("email", email.trim())
+                                .put("password", password)
+                                .apply {
+                                    if (mode == "signup") put("displayName", displayName.trim())
+                                }
                         val data = withContext(Dispatchers.IO) { Api.post(path, body) }
                         Api.saveToken(ctx, data.optString("token"))
-                        val user = data.optJSONObject("user") ?: withContext(Dispatchers.IO) { Api.get("/api/me").optJSONObject("user") }
-                        if (user != null) Disk.put("me", JSONObject().put("user", user))
-                        onAuthed(user ?: JSONObject())
+                        val user = data.optJSONObject("user")
+                            ?: withContext(Dispatchers.IO) { Api.get("/api/me").optJSONObject("user") }
+                        Store.saveMe(user ?: JSONObject())
+                        // Register for push now that we're signed in.
+                        withContext(Dispatchers.IO) {
+                            runCatching {
+                                if (KpPush.tryInit(ctx)) KpPush.registerToken(ctx)
+                            }
+                        }
+                        onAuthed()
                     } catch (e: Exception) {
                         error = e.message ?: "Could not sign in."
                     } finally {
@@ -106,7 +155,10 @@ fun LoginScreen(onAuthed: (JSONObject) -> Unit) {
                 }
             }
             TextButton(onClick = { mode = if (mode == "login") "signup" else "login" }) {
-                Text(if (mode == "login") "Create account" else "Have an account? Sign in", color = Accent)
+                Text(
+                    if (mode == "login") "Create account" else "Have an account? Sign in",
+                    color = GoldDeep,
+                )
             }
         }
     }

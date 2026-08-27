@@ -9,39 +9,24 @@ import com.google.firebase.messaging.RemoteMessage
 import org.json.JSONObject
 
 /**
- * Firebase Cloud Messaging push support.
+ * Firebase Cloud Messaging push (Messenger mode).
  *
- * When push is configured the app behaves like Messenger: no always-on
- * foreground service, no permanent notification. The worker sends a data
- * message for every new chat message / incoming call and Android wakes the
- * app just-in-time to show the notification.
- *
- * Until the worker has FCM secrets set (`/api/config/firebase` returns
- * nothing) everything here silently no-ops and the legacy sync service stays
- * in charge, so nothing breaks in between.
+ * The worker has FCM secrets configured and sends high-priority data
+ * messages for every new message and incoming call, so the app needs no
+ * always-on service and no permanent notification.
  */
 object KpPush {
-    /** True once we've asked the server whether push is configured. */
     @Volatile
     var decided: Boolean = false
 
-    /** True when Firebase was initialized and push is usable. */
     @Volatile
     var enabled: Boolean = false
 
-    /** App ID of the registered Firebase Android client. */
-    @Volatile
-    private var appId: String = ""
-
-    /**
-     * Fetches the public Firebase config from the worker and initializes
-     * Firebase if present. Must run on a background thread. Returns whether
-     * push is enabled.
-     */
+    /** Fetches the public Firebase config from the worker and inits Firebase. */
     fun tryInit(ctx: Context): Boolean {
         if (enabled) return true
         val cfg =
-            runCatching { Api.get("/api/config/firebase").optJSONObject("firebase") }.getOrNull()
+            runCatching { Api.get("/api/config/firebase", force = true).optJSONObject("firebase") }.getOrNull()
         if (cfg == null || cfg.optString("applicationId").isBlank()) {
             decided = true
             enabled = false
@@ -62,7 +47,6 @@ object KpPush {
                 }
                 true
             }.getOrDefault(false)
-        appId = cfg.optString("applicationId")
         enabled = ok
         decided = true
         return ok
@@ -73,32 +57,26 @@ object KpPush {
         if (!enabled) return
         runCatching {
             FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
-                if (token.isNotBlank()) sendToken(token)
+                if (token.isNotBlank()) {
+                    Thread { runCatching { Api.post("/api/devices", JSONObject().put("token", token)) } }.start()
+                }
             }
         }
     }
 
-    /** Removes this device from push delivery (logout) — best effort. */
-    fun unregister(ctx: Context) {
+    /** Removes this device from push delivery (logout). */
+    fun unregister() {
         if (!enabled) return
-        // deleteToken() unregisters with Google, so pushes stop reaching this
-        // device; the worker prunes its row on the next UNREGISTERED send.
         runCatching { FirebaseMessaging.getInstance().deleteToken() }
         enabled = false
         decided = false
     }
-
-    private fun sendToken(token: String) {
-        Thread {
-            runCatching { Api.post("/api/devices", JSONObject().put("token", token)) }
-        }.start()
-    }
 }
 
 /**
- * Receives FCM data messages: new chat messages and incoming calls.
- * Data-only messages (with HIGH priority) are delivered here even when the
- * app is closed, which is exactly what replaces the old sync service.
+ * Receives FCM data messages:
+ *  - type=message : { convoId, kind, from, body }
+ *  - type=call     : { callId, kind (AUDIO|VIDEO), from, fromId }
  */
 class KpPushService : FirebaseMessagingService() {
 
@@ -111,26 +89,17 @@ class KpPushService : FirebaseMessagingService() {
     }
 
     private fun handleCall(data: Map<String, String>) {
-        // A live engine polls /api/calls/active itself and shows its own
-        // ringing UI — don't double-ring.
-        if (CallEngine.instance != null) return
-        if (CallEngine.isIncomingSuppressed()) return
         val callId = data["callId"]
         if (callId.isNullOrBlank()) return
-        if (callId in CallEngine.ignoredCalls) return
-        CallNotify.incoming(this, data["from"] ?: "KuchuPuchu", data["kind"] == "VIDEO", callId)
+        // Call UI (ringing screen + engine) arrives with the call round.
+        // Until then show a high-priority heads-up notification.
+        KpNotify.callHeadsUp(this, data["from"] ?: "KuchuPuchu", data["kind"] == "VIDEO", callId)
     }
 
     private fun handleMessage(data: Map<String, String>) {
         val convoId = data["convoId"] ?: return
-        // Chat screen for this conversation is open and visible → the UI
-        // already shows it, no notification needed.
-        if (KpState.foreground && KpState.route == "chat/$convoId") return
-        val other =
-            JSONObject()
-                .put("displayName", data["from"] ?: "KuchuPuchu")
-                .put("avatarUrl", data["avatar"] ?: "")
-        MsgNotify.show(this, other, data["body"] ?: "New message", convoId)
+        if (Store.foreground && Store.route == "chat/$convoId") return
+        KpNotify.message(this, data["from"] ?: "KuchuPuchu", data["body"] ?: "New message", convoId)
     }
 
     override fun onNewToken(token: String) {
