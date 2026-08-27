@@ -43,6 +43,9 @@
   - Attach sheet, search, settings — design round cholche
 - **Logo:** last round e notun logo (current baad)
 
+## Logo (LOCKED)
+- **#3 Smiling Bubble**: amber gradient squircle + white chat bubble with cute smiling face (dot eyes + smile), rounded friendly wordmark "KuchuPuchu" brown e. Sob jaygay: app icon, splash, notification icon, GitHub, worker branding.
+
 ## Worker v3 (Cloudflare)
 ### Schema (fresh, D1 — `kuchupuchu` DB replace)
 ```
