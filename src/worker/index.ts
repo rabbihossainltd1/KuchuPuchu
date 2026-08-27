@@ -407,6 +407,19 @@ function clockLabel(seconds: number) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+/** Serves an inline dataUrl (data:image/...;base64,xxx) as real bytes. */
+function dataUrlResponse(dataUrl: string): Response {
+  const match = dataUrl.match(/^data:([^;]+);base64,(.*)$/s);
+  if (!match) fail(400, "Bad media.");
+  const bytes = Uint8Array.from(atob(match[2]!), (c) => c.charCodeAt(0));
+  return new Response(bytes, {
+    headers: {
+      "content-type": match[1]!,
+      "cache-control": "private, max-age=604800",
+    },
+  });
+}
+
 /* ---------------- main handler ---------------- */
 
 export default {
@@ -775,7 +788,13 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           before,
         )
       : await all<MsgRow>(db, "SELECT * FROM messages WHERE conv_id = ? ORDER BY created_at DESC LIMIT 50", convId);
-    const items = rows.reverse().map((row) => msgFrom(row));
+    const senderIds = [...new Set(rows.map((r) => r.sender_id).filter(Boolean))];
+    const names = new Map<string, string>();
+    for (const sid of senderIds) {
+      const u = await one<{ display_name: string }>(db, "SELECT display_name FROM users WHERE id = ?", sid);
+      if (u) names.set(sid, u.display_name);
+    }
+    const items = rows.reverse().map((row) => ({ ...msgFrom(row), senderName: names.get(row.sender_id) }));
     return json({ items });
   }
 
@@ -802,6 +821,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             name: String(body.fileName || "file").slice(0, 120),
             type: String(body.fileType || "application/octet-stream").slice(0, 100),
             size: Number(body.fileSize || 0),
+            ...((body.meta as Record<string, unknown> | undefined)
+              ? {
+                  voice: (body.meta as Record<string, unknown>).voice === true,
+                  seconds: Math.max(0, Math.min(600, Number((body.meta as Record<string, unknown>).seconds || 0))),
+                }
+              : {}),
           })
         : null;
     await run(
@@ -1015,9 +1040,15 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       row.user_id,
     ));
     if (row.user_id !== uid && !isContact) fail(403, "Not allowed.");
-    return new Response(row.media, {
-      headers: { "content-type": "image/jpeg", "cache-control": "private, max-age=86400" },
-    });
+    return dataUrlResponse(row.media);
+  }
+
+  const msgMediaMatch = path.match(/^\/api\/messages\/([^/]+)\/media$/);
+  if (msgMediaMatch && method === "GET") {
+    const row = await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", msgMediaMatch[1]!);
+    if (!row || !row.media) fail(404, "Media not found.");
+    await requireMember(db, row.conv_id, uid);
+    return dataUrlResponse(row.media);
   }
 
   const statusMatch = path.match(/^\/api\/statuses\/([^/]+)$/);
@@ -1260,10 +1291,12 @@ function msgFrom(row: MsgRow) {
     kind: row.kind,
     body: row.body,
     hasImage: row.kind === "IMAGE" && !!row.media,
+    mediaUrl: row.kind === "IMAGE" && row.media ? `/api/messages/${row.id}/media` : undefined,
     fileKey: row.kind === "FILE" ? row.media : undefined,
     fileName: meta.name,
     fileType: meta.type,
     fileSize: meta.size,
+    meta: row.kind === "FILE" ? meta : undefined,
     createdAt: row.created_at,
   };
 }
@@ -1333,7 +1366,7 @@ async function conversationDetail(db: D1Database, convId: string, uid: string) {
   for (const row of memberRows) {
     const user = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row.user_id);
     if (!user) continue;
-    members.push({ user: userFrom(user, onlineNow(user)), role: row.role });
+    members.push({ user: userFrom(user, onlineNow(user)), role: row.role, lastReadAt: row.last_read_at });
     if (row.user_id !== uid && conv.kind === "SOLO") other = userFrom(user, onlineNow(user));
     if (row.user_id === uid) {
       meMuted = row.muted === 1;

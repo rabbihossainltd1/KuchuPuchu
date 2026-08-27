@@ -79,9 +79,13 @@ object Api {
         return json
     }
 
-    /** Downloads a stored file's bytes (images shown inline, files saved to disk). */
-    fun download(fileKey: String): ByteArray {
-        val conn = (URL("$BASE/api/files/${encodePath(fileKey)}").openConnection() as HttpURLConnection).apply {
+    /** Downloads bytes for an R2 file key or an API path ("/api/messages/x/media"). */
+    fun download(pathOrKey: String): ByteArray {
+        val url =
+            if (pathOrKey.startsWith("http")) pathOrKey
+            else if (pathOrKey.startsWith("/")) BASE + pathOrKey
+            else "$BASE/api/files/${encodePath(pathOrKey)}"
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 30_000
             readTimeout = 60_000
