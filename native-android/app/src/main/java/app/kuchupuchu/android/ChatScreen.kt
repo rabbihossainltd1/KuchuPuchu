@@ -100,7 +100,7 @@ fun ChatScreen(nav: NavController, convId: String) {
     var otherReadAt by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     val player = remember { VoicePlayer() }
-    val msgsVersion = ScreenStore.msgsVersion
+    var lastTopId by remember { mutableStateOf("") }
 
     fun paintFromStore() {
         msgs.clear()
@@ -122,28 +122,45 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
-    fun refreshMessages(scroll: Boolean = false, markRead: Boolean = false) {
+    fun refreshMessages(forceScroll: Boolean = false, markRead: Boolean = false) {
         scope.launch {
             try {
                 val data = withContext(Dispatchers.IO) { Api.get("/api/conversations/$convId/messages") }
                 val fresh = data.arr("items").objects()
+                val prevTop = lastTopId
+                val newTop = fresh.lastOrNull()?.optString("id") ?: ""
                 ScreenStore.setMsgs(convId, fresh)
                 paintFromStore()
-                // drop optimistic copies the server has confirmed
+                // drop optimistic copies the server confirmed (Instant-safe compare)
                 if (pending.isNotEmpty()) {
                     val confirmed = fresh.filter { it.optString("senderId") == Store.myId() }
                     pending.removeAll { p ->
+                        val pAt = runCatching { java.time.Instant.parse(p.optString("createdAt")) }.getOrNull()
                         confirmed.any { c ->
                             c.optString("kind") == p.optString("kind") &&
                                 c.optString("body") == p.optString("body") &&
-                                c.optString("createdAt") >= p.optString("createdAt")
+                                runCatching { java.time.Instant.parse(c.optString("createdAt")) }.getOrNull()
+                                    ?.let { cAt -> pAt == null || !cAt.isBefore(pAt) } == true
                         }
                     }
+                    // safety: drop echoes stuck older than 60s
+                    val cutoff = System.currentTimeMillis() - 60_000
+                    pending.removeAll {
+                        runCatching { java.time.Instant.parse(it.optString("createdAt")).toEpochMilli() }.getOrDefault(cutoff) < cutoff
+                    }
                 }
-                if (scroll || msgs.isNotEmpty()) {
-                    listState.animateScrollToItem(maxOf(0, msgs.size + pending.size - 1))
+                val total = msgs.size + pending.size
+                // Only scroll when it matters: initial load, explicit send,
+                // or a NEW message landed while we're already near the bottom.
+                val nearBottom = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index?.let {
+                    it >= total - 2
+                } ?: true
+                val newMessage = newTop.isNotBlank() && newTop != prevTop
+                if (total > 0 && (forceScroll || (newMessage && nearBottom))) {
+                    listState.animateScrollToItem(total - 1)
                 }
-                if (markRead) {
+                lastTopId = newTop
+                if (markRead || (newMessage && prevTop.isNotBlank())) {
                     runCatching { withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/read") } }
                 }
             } catch (_: Exception) {
@@ -156,11 +173,11 @@ fun ChatScreen(nav: NavController, convId: String) {
         Store.route = "chat/$convId"
         paintFromStore()
         refreshMeta()
-        refreshMessages(scroll = msgs.isEmpty(), markRead = true)
+        refreshMessages(forceScroll = true, markRead = true)
     }
 
-    /* background refresh while this chat is open */
-    LaunchedEffect(convId, msgsVersion) {
+    /* single stable background refresh loop while this chat is open */
+    LaunchedEffect(convId) {
         while (true) {
             if (Store.foreground && Store.route == "chat/$convId") {
                 refreshMessages()
@@ -183,7 +200,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .put("createdAt", java.time.Instant.now().toString()),
         )
         scope.launch {
-            listState.animateScrollToItem(maxOf(0, msgs.size + pending.size - 1))
+            val total = msgs.size + pending.size
+            if (total > 0) listState.animateScrollToItem(total - 1)
             KpSounds.send(ctx)
             try {
                 withContext(Dispatchers.IO) {
@@ -192,7 +210,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         JSONObject().put("kind", kind).put("body", body),
                     )
                 }
-                refreshMessages()
+                refreshMessages(forceScroll = true)
             } catch (e: Exception) {
                 pending.removeAll { it.optString("body") == body }
                 error = e.message ?: "Could not send."
@@ -211,7 +229,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     )
                 }
                 KpSounds.send(ctx)
-                refreshMessages(scroll = true)
+                refreshMessages(forceScroll = true)
             } catch (e: Exception) {
                 error = e.message ?: "Could not send photo."
             } finally {
@@ -237,7 +255,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     )
                 }
                 KpSounds.send(ctx)
-                refreshMessages(scroll = true)
+                refreshMessages(forceScroll = true)
             } catch (e: Exception) {
                 error = e.message ?: "Could not send file."
             } finally {
@@ -266,7 +284,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     )
                 }
                 KpSounds.send(ctx)
-                refreshMessages(scroll = true)
+                refreshMessages(forceScroll = true)
             } catch (e: Exception) {
                 error = e.message ?: "Could not send voice note."
             } finally {
@@ -349,10 +367,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                 contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 10.dp),
             ) {
                 items(msgs, key = { it.optString("id") }) { m ->
-                    MessageRow(m, isGroup, Store.myId(), otherReadAt, player) { id ->
-                        scope.launch {
-                            runCatching { withContext(Dispatchers.IO) { Api.delete("/api/messages/$id") } }
-                            refreshMessages()
+                    Box(Modifier.animateItem()) {
+                        MessageRow(m, isGroup, Store.myId(), otherReadAt, player) { id ->
+                            scope.launch {
+                                runCatching { withContext(Dispatchers.IO) { Api.delete("/api/messages/$id") } }
+                                refreshMessages()
+                            }
                         }
                     }
                 }
@@ -772,7 +792,7 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer) {
     val fileName = m.optString("fileName").ifBlank { "File" }
     val fileType = m.optString("fileType")
     val isVoice = fileType.startsWith("audio") || fileName.endsWith(".m4a") || fileName.endsWith(".mp3")
-    var playing by remember { mutableStateOf(player.playingId == id) }
+    val playing = player.playingId == id
 
     if (isVoice) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -785,12 +805,10 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer) {
                     .clip(CircleShape)
                     .background(if (mine) Color(0x33FFFFFF) else GoldSoft)
                     .clickable(interactionSource = interaction, indication = null) {
-                        playing = if (player.playingId == id) {
+                        if (player.playingId == id) {
                             player.stop()
-                            false
                         } else {
                             player.toggle(ctx, id, fileKey)
-                            player.playingId == id
                         }
                     },
                 contentAlignment = Alignment.Center,

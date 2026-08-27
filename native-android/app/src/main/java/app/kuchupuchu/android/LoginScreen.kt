@@ -41,6 +41,7 @@ import org.json.JSONObject
 
 @Composable
 fun LoginScreen(onAuthed: () -> Unit) {
+    // onAuthed flips Store.authed via KpApp
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var mode by remember { mutableStateOf("login") }
@@ -140,6 +141,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
                         val user = data.optJSONObject("user")
                             ?: withContext(Dispatchers.IO) { Api.get("/api/me").optJSONObject("user") }
                         Store.saveMe(user ?: JSONObject())
+                        Store.authed.value = true
                         // Register for push now that we're signed in.
                         withContext(Dispatchers.IO) {
                             runCatching {

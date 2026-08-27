@@ -39,7 +39,7 @@ object ScreenStore {
     }
 
     @Synchronized
-    fun msgsOf(convId: String): List<JSONObject> = msgs[convId] ?: emptyList()
+    fun msgsOf(convId: String): List<JSONObject> = msgs[convId]?.toList() ?: emptyList()
 
     @Synchronized
     fun setMsgs(convId: String, list: List<JSONObject>) {

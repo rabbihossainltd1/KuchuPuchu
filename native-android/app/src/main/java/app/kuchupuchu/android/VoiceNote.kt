@@ -4,6 +4,9 @@ import android.content.Context
 import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.os.Build
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import java.io.File
 
 /**
@@ -70,7 +73,7 @@ object VoiceNote {
  */
 class VoicePlayer {
     private var player: MediaPlayer? = null
-    var playingId: String? = null
+    var playingId: String? by mutableStateOf(null)
         private set
 
     /** Starts playing a voice message; downloads with auth on IO. */

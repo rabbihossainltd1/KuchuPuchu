@@ -10,8 +10,8 @@ android {
         applicationId = "app.kuchupuchu.android"
         minSdk = 24
         targetSdk = 35
-        versionCode = 26
-        versionName = "3.0.0"
+        versionCode = 27
+        versionName = "3.1.0"
     }
     signingConfigs {
         getByName("debug") {
@@ -23,7 +23,15 @@ android {
     }
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // Optimized, installable release APK — signed with the repo's
+            // debug key so it installs directly (personal distribution).
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {

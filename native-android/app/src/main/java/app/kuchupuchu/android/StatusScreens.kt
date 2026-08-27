@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -308,7 +309,7 @@ fun StatusComposer(onDone: () -> Unit) {
     val colors = gradients[style]!!
 
     Box(Modifier.fillMaxSize().background(Cream)) {
-        Column(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().imePadding()) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -457,7 +458,11 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
             progress = (System.currentTimeMillis() - start) / 5000f
             delay(50)
         }
-        if (idx + 1 < statuses.size) idx++
+        if (idx + 1 < statuses.size) {
+            idx++
+        } else {
+            nav.popBackStack() // last status finished — close like WhatsApp
+        }
     }
 
     fun deleteStatus() {

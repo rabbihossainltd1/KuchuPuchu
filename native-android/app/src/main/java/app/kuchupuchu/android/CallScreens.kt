@@ -77,6 +77,9 @@ fun CallGate() {
 
     LaunchedEffect(call.status, call.kind) {
         MainActivity.current?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // dark chrome while the (mostly dark) call screens are up
+        MainActivity.current?.window?.statusBarColor = android.graphics.Color.parseColor("#171412")
+        MainActivity.current?.window?.navigationBarColor = android.graphics.Color.parseColor("#171412")
     }
 
     when {
@@ -512,7 +515,7 @@ fun InCallVideoScreen(call: CallUi) {
             StripAction(Icons.Filled.Flip, "Flip", active = false) { engine.flipCamera() }
             StripAction(Icons.Filled.ScreenShare, "Share", active = engine.sharing) { engine.toggleShare() }
             StripAction(Icons.Filled.PhoneInTalk, "Voice only", active = false) {
-                engine.toggleCamera()
+                if (!engine.cameraOff) engine.toggleCamera() // never turn the camera back ON here
             }
             StripAction(Icons.Filled.CallEnd, "End", active = false, danger = true) { haptics.heavy(); engine.hangup() }
         }
@@ -572,6 +575,7 @@ private fun FrostedCircle(icon: @Composable () -> Unit) {
 
 @Composable
 private fun FrostedPill(icon: ImageVector, label: String, active: Boolean, onClick: () -> Unit) {
+    val haptics = rememberHaptics()
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             Modifier
@@ -579,7 +583,7 @@ private fun FrostedPill(icon: ImageVector, label: String, active: Boolean, onCli
                 .clip(CircleShape)
                 .background(if (active) Color(0x66FFFFFF) else Color(0x26FFFFFF))
                 .border(1.dp, Color(0x40FFFFFF), CircleShape)
-                .clickable { onClick() },
+                .clickable { haptics.tap(); onClick() },
             contentAlignment = Alignment.Center,
         ) {
             Icon(icon, contentDescription = label, tint = Color.White, modifier = Modifier.size(24.dp))
@@ -615,9 +619,10 @@ private fun GridAction(
     danger: Boolean = false,
     onClick: () -> Unit,
 ) {
+    val haptics = rememberHaptics()
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.clickable { onClick() },
+        modifier = Modifier.clickable { haptics.tap(); onClick() },
     ) {
         Box(
             Modifier
@@ -652,9 +657,10 @@ private fun StripAction(
     danger: Boolean = false,
     onClick: () -> Unit,
 ) {
+    val haptics = rememberHaptics()
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.clickable { onClick() }.padding(horizontal = 2.dp),
+        modifier = Modifier.clickable { haptics.tap(); onClick() }.padding(horizontal = 2.dp),
     ) {
         Box(
             Modifier

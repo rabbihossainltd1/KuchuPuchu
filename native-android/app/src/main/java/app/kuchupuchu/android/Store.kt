@@ -1,6 +1,7 @@
 package app.kuchupuchu.android
 
 import android.content.Context
+import androidx.compose.runtime.mutableStateOf
 import org.json.JSONObject
 
 /**
@@ -9,6 +10,9 @@ import org.json.JSONObject
  * the screen the user is already looking at).
  */
 object Store {
+    /** Compose state: true while signed in — KpApp observes, logout flips it. */
+    var authed = mutableStateOf(false)
+
     @Volatile
     var me: JSONObject? = null
 
@@ -38,6 +42,8 @@ object Store {
     fun signOut(ctx: Context) {
         me = null
         route = ""
+        authed.value = false
+        ScreenStore.clearMsgs()
         Cache.bustAll("")
         ctx.getSharedPreferences("kp", 0).edit().clear().apply()
         Api.saveToken(ctx, null)

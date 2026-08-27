@@ -313,7 +313,6 @@ fun SettingsScreen(nav: NavController) {
                         KpPush.unregister()
                         KpNotify.cancelAll(ctx)
                         Store.signOut(ctx)
-                        nav.navigate("main") { popUpTo(0) }
                     }
                 }) { Text("Log out", color = Red, fontWeight = FontWeight.SemiBold) }
             },

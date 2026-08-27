@@ -30,6 +30,7 @@ class MainActivity : ComponentActivity() {
         current = this
         Api.loadToken(this)
         Store.init(this)
+        Store.authed.value = !Api.token.isNullOrBlank() && Store.me != null
         KpNotify.ensureChannels(this)
 
         val need = mutableListOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)

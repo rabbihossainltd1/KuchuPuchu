@@ -25,7 +25,7 @@ import androidx.navigation.compose.rememberNavController
 @Composable
 fun KpApp() {
     val nav = rememberNavController()
-    var authed by remember { mutableStateOf(!Api.token.isNullOrBlank() && Store.me != null) }
+    val authed by Store.authed
 
     // Notification tap → open the conversation once authed.
     LaunchedEffect(authed) {
@@ -38,7 +38,7 @@ fun KpApp() {
 
     Surface(Modifier.fillMaxSize(), color = Cream) {
         if (!authed) {
-            LoginScreen { authed = true }
+            LoginScreen { Store.authed.value = true }
         } else {
             NavHost(
                 navController = nav,

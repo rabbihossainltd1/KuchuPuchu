@@ -96,11 +96,7 @@ fun ChatListScreen(nav: NavController) {
     }
 
     LaunchedEffect(Unit) {
-        if (ScreenStore.convsLoaded) {
-            refresh() // silent background refresh, store paints instantly
-        } else {
-            refresh()
-        }
+        refresh() // store paints instantly; this is the silent background refresh
         while (true) {
             delay(10_000)
             if (Store.foreground) refresh()
@@ -153,23 +149,25 @@ fun ChatListScreen(nav: NavController) {
             }
         }
 
-        /* ---------- gold FAB ---------- */
-        FloatingActionButton(
-            onClick = { haptics.tap(); nav.navigate("newchat") },
-            shape = CircleShape,
-            containerColor = Gold,
-            contentColor = AmberInk,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(20.dp)
-                .size(60.dp)
-                .shadow(8.dp, CircleShape),
-        ) {
-            Icon(
-                Icons.Filled.DriveFileRenameOutline,
-                contentDescription = "New chat",
-                modifier = Modifier.size(28.dp),
-            )
+        /* ---------- gold FAB (chats tab only — no overlap with status FABs) ---------- */
+        if (tab == 0) {
+            FloatingActionButton(
+                onClick = { haptics.tap(); nav.navigate("newchat") },
+                shape = CircleShape,
+                containerColor = Gold,
+                contentColor = AmberInk,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(20.dp)
+                    .size(60.dp)
+                    .shadow(8.dp, CircleShape),
+            ) {
+                Icon(
+                    Icons.Filled.DriveFileRenameOutline,
+                    contentDescription = "New chat",
+                    modifier = Modifier.size(28.dp),
+                )
+            }
         }
     }
 }
@@ -334,7 +332,7 @@ private fun SwipeConvRow(conv: JSONObject, nav: NavController, onChange: () -> U
                     }
                 },
         ) {
-            ConvCard(conv, nav)
+            ConvCard(conv, nav, revealed) { if (revealed) dragged = 0f }
         }
     }
 }
@@ -363,7 +361,7 @@ private fun RowScope.ActionSlot(
 }
 
 @Composable
-private fun ConvCard(conv: JSONObject, nav: NavController) {
+private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = false, onCollapse: () -> Unit = {}) {
     val id = conv.optString("id")
     val isGroup = conv.optBoolean("isGroup")
     val other = conv.optJSONObject("other")
@@ -380,7 +378,9 @@ private fun ConvCard(conv: JSONObject, nav: NavController) {
     Row(
         Modifier
             .fillMaxSize()
-            .clickable { nav.navigate("chat/$id") }
+            .clickable {
+                if (revealed) onCollapse() else nav.navigate("chat/$id")
+            }
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
