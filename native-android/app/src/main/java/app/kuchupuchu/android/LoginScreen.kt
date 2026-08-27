@@ -96,6 +96,7 @@ fun LoginScreen(onAuthed: (JSONObject) -> Unit) {
                         val data = withContext(Dispatchers.IO) { Api.post(path, body) }
                         Api.saveToken(ctx, data.optString("token"))
                         val user = data.optJSONObject("user") ?: withContext(Dispatchers.IO) { Api.get("/api/me").optJSONObject("user") }
+                        if (user != null) Store.put("me", JSONObject().put("user", user))
                         onAuthed(user ?: JSONObject())
                     } catch (e: Exception) {
                         error = e.message ?: "Could not sign in."

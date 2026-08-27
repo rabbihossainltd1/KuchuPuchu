@@ -61,11 +61,11 @@ class CallEngine(private val app: Application) {
             onChange?.invoke(value)
         }
 
-    var speaker = false
-    var muted = false
-    var cameraOff = false
-    var sharing = false
-    var hasRemote = false
+    var speaker by androidx.compose.runtime.mutableStateOf(false)
+    var muted by androidx.compose.runtime.mutableStateOf(false)
+    var cameraOff by androidx.compose.runtime.mutableStateOf(false)
+    var sharing by androidx.compose.runtime.mutableStateOf(false)
+    var hasRemote by androidx.compose.runtime.mutableStateOf(false)
 
     val egl = EglBase.create()
     private var factory: PeerConnectionFactory? = null
@@ -305,7 +305,9 @@ class CallEngine(private val app: Application) {
 
     fun toggleSpeaker() {
         speaker = !speaker
-        onChange?.invoke(active)
+        val am = app.getSystemService(android.media.AudioManager::class.java)
+        am.mode = android.media.AudioManager.MODE_IN_COMMUNICATION
+        am.isSpeakerphoneOn = speaker
     }
 
     fun toggleCamera() {
@@ -458,6 +460,10 @@ class CallEngine(private val app: Application) {
         pc = null
         seenIce.clear()
         speaker = false
+        runCatching {
+            val am = app.getSystemService(android.media.AudioManager::class.java)
+            am.isSpeakerphoneOn = false
+        }
         muted = false
         cameraOff = false
         sharing = false

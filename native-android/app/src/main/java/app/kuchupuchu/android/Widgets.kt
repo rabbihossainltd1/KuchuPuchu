@@ -161,7 +161,13 @@ fun MediaImage(src: String, modifier: Modifier = Modifier, contentScale: Content
             Image(bmp!!.asImageBitmap(), null, modifier = modifier, contentScale = contentScale)
         }
     } else if (src.isNotBlank() && src != "inline") {
-        AsyncImage(src, null, modifier = modifier, contentScale = contentScale)
+        val model =
+            when {
+                src.startsWith("file:") || src.startsWith("http") -> src
+                src.startsWith("/") -> "file://$src"
+                else -> src
+            }
+        AsyncImage(model, null, modifier = modifier, contentScale = contentScale)
     }
 }
 

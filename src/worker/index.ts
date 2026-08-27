@@ -1245,27 +1245,34 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
         id: string;
         sender_id: string;
         body: string;
-        image_url?: string | null;
+        img?: string | null;
         reaction?: string | null;
         created_at: string;
       }>(
         db,
-        "SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC LIMIT 200",
+        `SELECT id, sender_id, body, reaction, created_at,
+          CASE
+            WHEN image_url IS NULL OR image_url = '' THEN NULL
+            WHEN image_url LIKE 'call:%' THEN image_url
+            WHEN image_url LIKE 'sticker:%' THEN image_url
+            ELSE 'img'
+          END AS img
+         FROM messages WHERE conversation_id = ? ORDER BY created_at ASC LIMIT 200`,
         cid,
       );
       const otherId = members.find((m) => m !== uid);
-      const lite = search.get("lite") === "1";
       return json({
         otherReadAt: otherId ? (readMap[otherId] ?? null) : null,
         items: items.map((row) => {
-          const media = parseMessageMedia(row.image_url ?? null);
-          const urls = lite ? media.imageUrls.map(() => "inline") : media.imageUrls;
+          const media = parseMessageMedia(row.img && row.img !== "img" ? row.img : null);
+          const hasImage = row.img === "img";
           return {
             id: row.id,
             senderId: row.sender_id,
             body: row.body,
-            imageUrl: lite ? (media.imageUrls[0] ? "inline" : null) : (media.imageUrls[0] ?? null),
-            imageUrls: urls,
+            hasImage,
+            imageUrl: hasImage ? "inline" : null,
+            imageUrls: hasImage ? ["inline"] : [],
             sticker: media.sticker,
             call: media.call,
             reaction: row.reaction ?? null,
@@ -1329,14 +1336,38 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
           id: mid,
           senderId: uid,
           body: text.slice(0, 2000),
-          imageUrl: images[0] ?? null,
-          imageUrls: images,
+          hasImage: images.length > 0,
+          imageUrl: images.length ? "inline" : null,
+          imageUrls: images.length ? ["inline"] : [],
           sticker,
           createdAt: created,
         },
       },
       201,
     );
+  }
+
+  const msgImage = path.match(/^\/api\/conversations\/([^/]+)\/messages\/([^/]+)\/image$/);
+  if (msgImage && method === "GET") {
+    const cid = msgImage[1]!;
+    const mid = msgImage[2]!;
+    const conv = await one<{ members_json: string }>(
+      db,
+      "SELECT members_json FROM conversations WHERE id = ?",
+      cid,
+    );
+    if (!conv) fail(404, "Conversation not found.");
+    const members = parseJson<string[]>(conv.members_json, []);
+    if (!members.includes(uid)) fail(403, "Not in this conversation.");
+    const row = await one<{ image_url?: string | null }>(
+      db,
+      "SELECT image_url FROM messages WHERE id = ? AND conversation_id = ?",
+      mid,
+      cid,
+    );
+    const media = parseMessageMedia(row?.image_url ?? null);
+    if (!media.imageUrls.length) fail(404, "Photo not found.");
+    return json({ imageUrl: media.imageUrls[0], imageUrls: media.imageUrls });
   }
 
   const reactMsg = path.match(/^\/api\/conversations\/([^/]+)\/messages\/([^/]+)\/react$/);

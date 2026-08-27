@@ -105,33 +105,64 @@ fun KpApp() {
             route = "login"
             return@LaunchedEffect
         }
-        session.loading = true
+        val cachedMe = Store.get("me")?.optJSONObject("user")
+        if (cachedMe != null) {
+            session.me = cachedMe
+            Store.get("inbox")?.arr("items")?.objects()?.let {
+                replaceList(session.inbox, it)
+                session.unread = it.sumOf { row -> row.optInt("unread") }
+            }
+            Store.get("feed")?.arr("items")?.objects()?.let { replaceList(session.feed, it) }
+            Store.get("stories")?.arr("items")?.objects()?.let { replaceList(session.stories, it) }
+            Store.get("recs")?.arr("items")?.objects()?.let { replaceList(session.recs, it) }
+            Store.get("notes")?.let { data ->
+                replaceList(session.notes, data.arr("items").objects())
+                session.noteCount = data.optInt("unread")
+            }
+            session.loading = false
+            route = "tabs/home"
+        } else {
+            session.loading = true
+        }
         val ok =
             withContext(Dispatchers.IO) {
                 runCatching {
-                    val me = Api.get("/api/me").optJSONObject("user")
-                    val convos = Api.get("/api/conversations").arr("items").objects()
-                    val notes = Api.get("/api/notifications")
-                    val feed = runCatching { Api.get("/api/feed").arr("items").objects() }.getOrDefault(emptyList())
-                    val stories = runCatching { Api.get("/api/stories").arr("items").objects() }.getOrDefault(emptyList())
-                    val recs =
-                        runCatching { Api.get("/api/discover/recommendations").arr("items").objects() }
-                            .getOrDefault(emptyList())
+                    val meJson = Api.get("/api/me")
+                    val me = meJson.optJSONObject("user")
+                    val convosJson = Api.get("/api/conversations")
+                    val convos = convosJson.arr("items").objects()
+                    val notes = runCatching { Api.get("/api/notifications") }.getOrNull()
+                    val feed = runCatching { Api.get("/api/feed") }.getOrNull()
+                    val stories = runCatching { Api.get("/api/stories") }.getOrNull()
+                    val recs = runCatching { Api.get("/api/discover/recommendations") }.getOrNull()
+                    Store.put("me", meJson)
+                    Store.put("inbox", convosJson)
+                    notes?.let { Store.put("notes", it) }
+                    feed?.let { Store.put("feed", it) }
+                    stories?.let { Store.put("stories", it) }
+                    recs?.let { Store.put("recs", it) }
                     withContext(Dispatchers.Main) {
                         session.me = me
                         replaceList(session.inbox, convos)
                         session.unread = convos.sumOf { it.optInt("unread") }
-                        session.noteCount = notes.optInt("unread")
-                        replaceList(session.feed, feed)
-                        replaceList(session.stories, stories)
-                        replaceList(session.recs, recs)
+                        if (notes != null) {
+                            replaceList(session.notes, notes.arr("items").objects())
+                            session.noteCount = notes.optInt("unread")
+                        }
+                        feed?.arr("items")?.objects()?.let { replaceList(session.feed, it) }
+                        stories?.arr("items")?.objects()?.let { replaceList(session.stories, it) }
+                        recs?.arr("items")?.objects()?.let { replaceList(session.recs, it) }
                     }
                     true
                 }.getOrDefault(false)
             }
         session.loading = false
-        route = if (ok) "tabs/home" else "login"
-        if (!ok) Api.saveToken(ctx, null)
+        if (session.me != null) {
+            route = "tabs/home"
+        } else {
+            route = "login"
+            if (!ok) Api.saveToken(ctx, null)
+        }
     }
 
     Box(Modifier.fillMaxSize().background(Bg)) {
@@ -166,6 +197,9 @@ fun KpApp() {
 
 fun logout(ctx: Context, session: Session, go: (String) -> Unit) {
     Api.saveToken(ctx, null)
+    Cache.bust()
+    Store.clear()
     session.me = null
+    session.clearLists()
     go("login")
 }

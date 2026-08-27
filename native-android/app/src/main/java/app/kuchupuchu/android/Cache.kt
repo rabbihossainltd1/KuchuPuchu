@@ -90,7 +90,7 @@ fun compressPhoto(ctx: Context, uri: Uri): String {
         scaled.compress(Bitmap.CompressFormat.JPEG, quality, out)
         val bytes = out.toByteArray()
         data = "data:image/jpeg;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
-        if (data.length <= 220_000) return data
+        if (data.length <= 120_000) return data
         if (quality > 48) quality -= 8 else scale *= 0.82f
     }
     if (!data.startsWith("data:image")) error("Could not read that photo.")
@@ -114,13 +114,30 @@ fun JSONObject.clean(key: String): String {
     return if (value == "null" || value == "inline") "" else value
 }
 
+fun hydrateMessage(m: JSONObject): JSONObject {
+    val id = m.optString("id")
+    val local = Store.localImage(id)
+    if (local != null) {
+        m.put("imageUrl", local)
+        m.put("imageUrls", JSONArray().put(local))
+        m.put("hasImage", true)
+        return m
+    }
+    if (m.optBoolean("hasImage") || m.clean("imageUrl") == "inline") {
+        m.put("hasImage", true)
+    }
+    return m
+}
+
 fun imageList(m: JSONObject): List<String> {
+    val local = Store.localImage(m.optString("id"))
+    if (local != null) return listOf(local)
     val arr = m.optJSONArray("imageUrls")
     if (arr != null && arr.length() > 0) {
         return (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotBlank() && it != "inline" && it != "null" }
     }
     val one = m.clean("imageUrl")
-    return if (one.isNotBlank()) listOf(one) else emptyList()
+    return if (one.isNotBlank() && one != "inline") listOf(one) else emptyList()
 }
 
 fun copyImages(from: JSONObject, to: JSONObject): JSONObject {
@@ -130,6 +147,9 @@ fun copyImages(from: JSONObject, to: JSONObject): JSONObject {
         imgs.forEach { arr.put(it) }
         to.put("imageUrls", arr)
         to.put("imageUrl", imgs[0])
+        to.put("hasImage", true)
+    } else if (from.optBoolean("hasImage") || to.optBoolean("hasImage")) {
+        to.put("hasImage", true)
     }
     return to
 }
@@ -179,7 +199,8 @@ fun mergeChat(target: androidx.compose.runtime.snapshots.SnapshotStateList<JSONO
     for (row in incoming) {
         val id = row.optString("id")
         val local = localById[id]
-        merged.add(if (local != null) copyImages(local, JSONObject(row.toString())) else row)
+        val next = hydrateMessage(if (local != null) copyImages(local, JSONObject(row.toString())) else row)
+        merged.add(next)
         if (id.isNotBlank()) seen.add(id)
     }
     for (local in target) {

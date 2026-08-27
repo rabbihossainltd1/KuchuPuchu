@@ -77,6 +77,8 @@ fun InboxScreen(session: Session, onRoute: (String) -> Unit) {
             if (next != null) {
                 replaceList(items, next)
                 session.unread = next.sumOf { it.optInt("unread") }
+                val pack = JSONObject().put("items", JSONArray().also { arr -> next.forEach { arr.put(it) } })
+                Store.put("inbox", pack)
             }
             delay(8000)
         }
@@ -141,7 +143,15 @@ fun AlertsScreen(session: Session, onRoute: (String) -> Unit) {
             withContext(Dispatchers.IO) {
                 runCatching { Api.get("/api/friend-requests").arr("items").objects() }.getOrNull()
             }
-        if (nextNotes != null) replaceList(notes, nextNotes)
+        if (nextNotes != null) {
+            replaceList(notes, nextNotes)
+            Store.put(
+                "notes",
+                JSONObject()
+                    .put("items", JSONArray().also { a -> nextNotes.forEach { a.put(it) } })
+                    .put("unread", nextNotes.count { it.optString("readAt").isBlank() }),
+            )
+        }
         if (nextReqs != null) replaceList(reqs, nextReqs)
         session.noteCount = notes.count { it.optString("readAt").isBlank() } + reqs.size
     }
@@ -253,9 +263,13 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
         }
 
     LaunchedEffect(convoId) {
+        Store.loadChat(convoId)?.let { disk ->
+            otherReadAt = disk.optString("otherReadAt")
+            mergeChat(messages, disk.arr("items").objects().map { hydrateMessage(it) })
+        }
         Cache.peek("/api/conversations/$convoId/messages")?.let { cached ->
             otherReadAt = cached.optString("otherReadAt")
-            mergeChat(messages, cached.arr("items").objects())
+            mergeChat(messages, cached.arr("items").objects().map { hydrateMessage(it) })
         }
         val first =
             withContext(Dispatchers.IO) {
@@ -264,6 +278,7 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
         if (first != null) {
             otherReadAt = first.optString("otherReadAt")
             mergeChat(messages, first.arr("items").objects())
+            Store.saveChat(convoId, messages.toList(), otherReadAt)
         }
         if (other.userId().isBlank()) {
             val found = session.inbox.find { it.optString("id") == convoId }
@@ -277,11 +292,12 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
             if (sending > 0) continue
             val data =
                 withContext(Dispatchers.IO) {
-                    runCatching { Api.get("/api/conversations/$convoId/messages?lite=1") }.getOrNull()
+                    runCatching { Api.get("/api/conversations/$convoId/messages") }.getOrNull()
                 }
             if (data != null) {
                 otherReadAt = data.optString("otherReadAt")
                 mergeChat(messages, data.arr("items").objects())
+                Store.saveChat(convoId, messages.toList(), otherReadAt)
             }
         }
     }
@@ -313,6 +329,7 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
             val imgs = payload.optJSONArray("imageData")
             temp.put("imageUrls", imgs)
             temp.put("imageUrl", imgs?.optString(0).orEmpty())
+            temp.put("hasImage", true)
         }
         messages.add(temp)
         text = ""
@@ -326,10 +343,14 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
                 }
             val idx = messages.indexOfFirst { it.optString("id") == tempId }
             if (idx >= 0) {
-                if (saved != null) messages[idx] = copyImages(temp, saved.put("pending", false))
-                else messages[idx] = JSONObject(temp.toString()).put("pending", false).put("failed", true)
+                if (saved != null) {
+                    val next = copyImages(temp, saved.put("pending", false))
+                    imageList(temp).firstOrNull { it.startsWith("data:") }?.let { Store.saveDataUrl(next.optString("id"), it) }
+                    messages[idx] = hydrateMessage(next)
+                } else messages[idx] = JSONObject(temp.toString()).put("pending", false).put("failed", true)
             }
             sending = (sending - 1).coerceAtLeast(0)
+            Store.saveChat(convoId, messages.toList(), otherReadAt)
         }
     }
 
@@ -375,8 +396,9 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
                 } else {
                     val sticker = m.clean("sticker")
                     val images = imageList(m)
+                    val hasPhoto = images.isNotEmpty() || m.optBoolean("hasImage")
                     val stickerOnly = sticker.isNotBlank()
-                    val photoOnly = images.isNotEmpty() && (m.optString("body").isBlank() || m.optString("body") == "Photo")
+                    val photoOnly = hasPhoto && (m.optString("body").isBlank() || m.optString("body") == "Photo")
                     Column(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
                         Row(verticalAlignment = Alignment.Bottom) {
                             if (!mine) {
@@ -418,14 +440,13 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
                                     if (sticker.isNotBlank()) {
                                         AsyncImage("file:///android_asset/stickers/$sticker.png", null, modifier = Modifier.size(96.dp))
                                     }
-                                    images.forEach { src ->
-                                        if (src.isNotBlank()) {
-                                            MediaImage(
-                                                src,
-                                                modifier = Modifier.width(220.dp).clip(RoundedCornerShape(12.dp)).clickable { viewer = src },
-                                                contentScale = ContentScale.Crop,
-                                            )
-                                        }
+                                    if (hasPhoto) {
+                                        ChatPhoto(
+                                            convoId = convoId,
+                                            message = m,
+                                            modifier = Modifier.width(220.dp).clip(RoundedCornerShape(12.dp)),
+                                            onOpen = { viewer = it },
+                                        )
                                     }
                                     val body = m.optString("body")
                                     if (body.isNotBlank() && !stickerOnly && !photoOnly) {
@@ -555,7 +576,10 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
                             menu = false
                             when (label) {
                                 "Delete", "Block" -> onBack()
-                                "Clear chat history" -> messages.clear()
+                                "Clear chat history" -> {
+                                    messages.clear()
+                                    Store.saveChat(convoId, emptyList(), "")
+                                }
                                 else -> {
                                     muted = !muted
                                     val idx = session.inbox.indexOfFirst { it.optString("id") == convoId }
@@ -582,5 +606,35 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
                 }
             }
         }
+    }
+}
+
+@Composable
+fun ChatPhoto(convoId: String, message: JSONObject, modifier: Modifier, onOpen: (String) -> Unit) {
+    val id = message.optString("id")
+    val seed = imageList(message).firstOrNull() ?: Store.localImage(id)
+    var src by remember(id) { mutableStateOf(seed) }
+    LaunchedEffect(id, message.optBoolean("hasImage")) {
+        if (!src.isNullOrBlank() && src != "inline") return@LaunchedEffect
+        if (!message.optBoolean("hasImage") && seed.isNullOrBlank()) return@LaunchedEffect
+        val data =
+            withContext(Dispatchers.IO) {
+                runCatching { Api.get("/api/conversations/$convoId/messages/$id/image") }.getOrNull()
+            }
+        val url = data?.optString("imageUrl").orEmpty()
+        if (url.startsWith("data:")) {
+            withContext(Dispatchers.IO) { Store.saveDataUrl(id, url) }
+            src = Store.localImage(id) ?: url
+        } else if (url.isNotBlank() && url != "inline") {
+            src = url
+        }
+    }
+    val shown = src
+    if (!shown.isNullOrBlank() && shown != "inline") {
+        MediaImage(
+            shown,
+            modifier = modifier.clickable { onOpen(shown) },
+            contentScale = ContentScale.Crop,
+        )
     }
 }
