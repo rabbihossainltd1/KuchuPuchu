@@ -6,5 +6,9 @@ workers_dev = true
 
 [[d1_databases]]
 binding = "DB"
-database_name = "kuchupuchu"
-database_id = "453d304f-d550-44d4-83df-c24e50f58a0f"
+database_name = "kuchupuchu-v3"
+database_id = "dbb7ce3a-332d-4330-b90a-c5d4c11a47e2"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "kp-media"
