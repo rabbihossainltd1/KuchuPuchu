@@ -301,7 +301,7 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
                 withContext(Dispatchers.IO) {
                     runCatching { Api.get("/api/conversations/$convoId/messages") }.getOrNull()
                 }
-            if (data != null) {
+            if (data != null && sending == 0) {
                 otherReadAt = data.optString("otherReadAt")
                 mergeChat(messages, data.arr("items").objects())
                 Disk.saveChat(convoId, messages.toList(), otherReadAt)
@@ -327,6 +327,7 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
         val temp =
             JSONObject()
                 .put("id", tempId)
+                .put("clientKey", tempId)
                 .put("senderId", meId)
                 .put("body", payload.optString("body"))
                 .put("sticker", payload.optString("sticker"))
@@ -352,7 +353,7 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
             val idx = messages.indexOfFirst { it.optString("id") == tempId }
             if (idx >= 0) {
                 if (saved != null) {
-                    val next = copyImages(temp, saved.put("pending", false))
+                    val next = copyImages(temp, saved.put("pending", false).put("clientKey", tempId))
                     imageList(temp).firstOrNull { it.startsWith("data:") }?.let { Disk.saveDataUrl(next.optString("id"), it) }
                     messages[idx] = hydrateMessage(next)
                 } else messages[idx] = JSONObject(temp.toString()).put("pending", false).put("failed", true)
@@ -385,7 +386,7 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
             IconBtn(Icons.Outlined.MoreVert) { menu = !menu }
         }
         LazyColumn(Modifier.weight(1f).padding(10.dp, 12.dp), state = list) {
-            itemsIndexed(messages, key = { _, m -> m.optString("id") }) { _, m ->
+            itemsIndexed(messages, key = { _, m -> m.optString("clientKey").ifBlank { m.optString("id") } }) { _, m ->
                 val mine = m.optString("senderId") == meId
                 val call = m.clean("call")
                 if (call.startsWith("call:")) {
@@ -468,18 +469,22 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
                         if (mine && lastMine?.optString("id") == m.optString("id")) {
                             val seen = otherReadAt.isNotBlank() && parseIso(otherReadAt) != null && parseIso(m.optString("createdAt")) != null &&
                                 (parseIso(otherReadAt) ?: 0) >= (parseIso(m.optString("createdAt")) ?: 0)
-                            if (m.optBoolean("pending")) {
-                                Text("Sending", fontSize = 11.sp, color = Muted, modifier = Modifier.padding(end = 4.dp))
-                            } else if (m.optBoolean("failed")) {
-                                Text("Couldn't send", fontSize = 11.sp, color = Rose, modifier = Modifier.padding(end = 4.dp))
-                            } else if (seen) {
-                                Avatar(other, 16.dp)
-                            } else {
-                                val day =
-                                    parseIso(m.optString("createdAt"))?.let {
-                                        java.text.SimpleDateFormat("EEE", java.util.Locale.getDefault()).format(java.util.Date(it))
-                                    }.orEmpty()
-                                Text("Delivered $day", fontSize = 11.sp, color = Muted, modifier = Modifier.padding(end = 4.dp, bottom = 6.dp))
+                            when {
+                                m.optBoolean("pending") ->
+                                    Text("Sending", fontSize = 11.sp, color = Muted, modifier = Modifier.padding(end = 4.dp))
+                                m.optBoolean("failed") ->
+                                    Text("Couldn't send", fontSize = 11.sp, color = Rose, modifier = Modifier.padding(end = 4.dp))
+                                seen -> {
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 4.dp, bottom = 4.dp)) {
+                                        Avatar(other, 16.dp)
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Seen", fontSize = 11.sp, color = Muted)
+                                    }
+                                }
+                                other.optBoolean("online") ->
+                                    Text("Delivered", fontSize = 11.sp, color = Muted, modifier = Modifier.padding(end = 4.dp, bottom = 6.dp))
+                                else ->
+                                    Text("Sent", fontSize = 11.sp, color = Muted, modifier = Modifier.padding(end = 4.dp, bottom = 6.dp))
                             }
                         }
                     }

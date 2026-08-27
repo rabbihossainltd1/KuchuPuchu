@@ -265,32 +265,53 @@ fun replaceList(target: androidx.compose.runtime.snapshots.SnapshotStateList<JSO
     }
 }
 
+fun sameBubble(a: JSONObject, b: JSONObject): Boolean =
+    a.clean("senderId") == b.clean("senderId") &&
+        a.clean("body") == b.clean("body") &&
+        a.clean("sticker") == b.clean("sticker") &&
+        a.clean("call") == b.clean("call")
+
 fun mergeChat(target: androidx.compose.runtime.snapshots.SnapshotStateList<JSONObject>, incoming: List<JSONObject>) {
     val now = System.currentTimeMillis()
     val localById = target.associateBy { it.optString("id") }
+    val pending =
+        target.filter {
+            it.optBoolean("pending") || it.optBoolean("failed") || it.optString("id").startsWith("tmp-")
+        }
+    val usedPending = HashSet<String>()
     val merged = ArrayList<JSONObject>(incoming.size + 4)
     val seen = HashSet<String>()
     for (row in incoming) {
         val id = row.optString("id")
         val local = localById[id]
-        val next = hydrateMessage(if (local != null) copyImages(local, JSONObject(row.toString())) else row)
+        var next = hydrateMessage(if (local != null) copyImages(local, JSONObject(row.toString())) else JSONObject(row.toString()))
+        if (local != null) {
+            next.put("clientKey", local.clean("clientKey").ifBlank { local.optString("id") })
+        } else {
+            val bind =
+                pending.find { p ->
+                    val pid = p.optString("id")
+                    if (pid in usedPending || p.optBoolean("failed")) false
+                    else {
+                        val dt = kotlin.math.abs((parseIso(p.clean("createdAt")) ?: now) - (parseIso(next.clean("createdAt")) ?: now))
+                        dt < 20_000 && sameBubble(p, next)
+                    }
+                }
+            if (bind != null) {
+                usedPending.add(bind.optString("id"))
+                next = hydrateMessage(copyImages(bind, next))
+                next.put("clientKey", bind.clean("clientKey").ifBlank { bind.optString("id") })
+                next.put("pending", false)
+            }
+        }
+        if (next.clean("clientKey").isBlank()) next.put("clientKey", id)
         merged.add(next)
         if (id.isNotBlank()) seen.add(id)
     }
     for (local in target) {
         val id = local.optString("id")
-        if (id in seen) continue
-        val pending = local.optBoolean("pending") || local.optBoolean("failed") || id.startsWith("tmp-")
-        val created = parseIso(local.clean("createdAt")) ?: now
-        val fresh = now - created < 30_000
-        val matched =
-            incoming.any { r ->
-                r.clean("senderId") == local.clean("senderId") &&
-                    r.clean("body") == local.clean("body") &&
-                    r.clean("sticker") == local.clean("sticker") &&
-                    !local.optBoolean("failed")
-            }
-        if ((pending || fresh) && !matched) merged.add(local)
+        if (id in seen || id in usedPending) continue
+        if (local.optBoolean("pending") || local.optBoolean("failed") || id.startsWith("tmp-")) merged.add(local)
     }
     replaceList(target, merged)
 }
