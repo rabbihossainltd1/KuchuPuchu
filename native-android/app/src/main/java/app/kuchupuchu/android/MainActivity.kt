@@ -34,7 +34,24 @@ class MainActivity : ComponentActivity() {
                 ContextCompat.checkSelfPermission(this, it) != android.content.pm.PackageManager.PERMISSION_GRANTED
             }
         if (missing.isNotEmpty()) ask.launch(missing.toTypedArray())
+        handleCallIntent(intent)
         setContent { KpTheme { KpApp() } }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleCallIntent(intent)
+    }
+
+    private fun handleCallIntent(intent: Intent?) {
+        if (intent == null) return
+        if (intent.getBooleanExtra("kp_accept", false)) {
+            pendingAccept = true
+            CallEngine.instance?.pendingAccept = true
+            CallEngine.instance?.answer()
+        }
+        intent.getStringExtra("kp_chat")?.let { pendingChat = it }
     }
 
     override fun onDestroy() {
@@ -51,5 +68,9 @@ class MainActivity : ComponentActivity() {
     companion object {
         @Volatile
         var current: MainActivity? = null
+        @Volatile
+        var pendingAccept = false
+        @Volatile
+        var pendingChat: String? = null
     }
 }

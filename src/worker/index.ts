@@ -1275,7 +1275,7 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
             imageUrls: hasImage ? ["inline"] : [],
             sticker: media.sticker || undefined,
             call: media.call || undefined,
-            reaction: row.reaction ?? null,
+            reaction: row.reaction || undefined,
             createdAt: row.created_at,
           };
         }),

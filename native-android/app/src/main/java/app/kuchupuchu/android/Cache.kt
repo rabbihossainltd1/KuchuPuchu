@@ -177,7 +177,7 @@ fun decodeDataUrl(src: String): Bitmap? {
 fun JSONObject.clean(key: String): String {
     if (!has(key) || isNull(key)) return ""
     val value = optString(key)
-    return if (value == "null" || value == "inline") "" else value
+    return if (value == "null" || value == "inline" || value == "undefined") "" else value
 }
 
 fun hydrateMessage(m: JSONObject): JSONObject {
@@ -186,6 +186,10 @@ fun hydrateMessage(m: JSONObject): JSONObject {
     if (call.startsWith("call:")) m.put("call", call) else m.remove("call")
     val sticker = m.clean("sticker")
     if (sticker.isNotBlank()) m.put("sticker", sticker) else m.remove("sticker")
+    val body = m.clean("body")
+    if (body.isNotBlank()) m.put("body", body) else m.put("body", "")
+    val reaction = m.clean("reaction")
+    if (reaction.isNotBlank()) m.put("reaction", reaction) else m.remove("reaction")
     val local = Disk.localImage(id)
     if (local != null) {
         m.put("imageUrl", local)

@@ -35,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -190,7 +191,12 @@ fun AppShell(
 
 @Composable
 private fun KeepAlive(visible: Boolean, content: @Composable () -> Unit) {
-    Box(if (visible) Modifier.fillMaxSize() else Modifier.size(0.dp)) { content() }
+    Box(
+        Modifier
+            .then(if (visible) Modifier.fillMaxSize() else Modifier.size(0.dp))
+            .clipToBounds(),
+        propagateMinConstraints = visible,
+    ) { content() }
 }
 
 private fun pageTitle(route: String) =

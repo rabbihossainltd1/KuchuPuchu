@@ -93,6 +93,11 @@ class CallEngine(private val app: Application) {
     private val pendingIce = mutableListOf<JSONObject>()
     private var ringingId: String? = null
     private var shareCallback: MediaProjection.Callback? = null
+    private val answering = AtomicBoolean(false)
+    private val lastUnread = HashMap<String, Int>()
+    private var inboxTick = 0
+    var openChat: String? = null
+    var pendingAccept = false
 
     init {
         instance = this
@@ -136,6 +141,7 @@ class CallEngine(private val app: Application) {
     }
 
     private suspend fun tick() {
+        watchInbox()
         val data =
             withContext(Dispatchers.IO) {
                 runCatching { Api.get("/api/calls/active") }.getOrNull()
@@ -190,6 +196,10 @@ class CallEngine(private val app: Application) {
             }
             if (ui.kind == "VIDEO" && videoTrack == null) {
                 withContext(Dispatchers.IO) { runCatching { capture(true) } }
+            }
+            if (pendingAccept) {
+                pendingAccept = false
+                answer()
             }
         }
         if (status == "ACTIVE") {
@@ -258,21 +268,34 @@ class CallEngine(private val app: Application) {
     }
 
     fun answer() {
-        val rec = active ?: return
+        val rec = active
+        if (rec == null || rec.id.startsWith("pending")) {
+            pendingAccept = true
+            return
+        }
+        if (pc != null && rec.status == "ACTIVE") return
+        if (!answering.compareAndSet(false, true)) return
         CallNotify.cancelIncoming(app)
         ringingId = null
         applyAudio()
         CallService.start(app, "In a call with ${rec.otherName}")
+        active = rec.copy(status = "ACTIVE", startedAt = System.currentTimeMillis())
         scope.launch {
             try {
-                val offer =
-                    withContext(Dispatchers.IO) {
-                        Api.get("/api/calls/active").arr("items").objects()
-                            .find { it.optString("id") == rec.id }
-                            ?.optString("offerSdp")
-                    } ?: return@launch
+                var offer = ""
+                repeat(8) {
+                    offer =
+                        withContext(Dispatchers.IO) {
+                            Api.get("/api/calls/active").arr("items").objects()
+                                .find { it.optString("id") == rec.id }
+                                ?.optString("offerSdp")
+                                .orEmpty()
+                        }
+                    if (offer.isNotBlank()) return@repeat
+                    delay(250)
+                }
+                if (offer.isBlank() || left.get()) return@launch
                 capture(rec.kind == "VIDEO")
-                if (left.get()) return@launch
                 iceCallId = rec.id
                 val peer = newPc()
                 peer.setRemoteDescriptionAwait(SessionDescription(SessionDescription.Type.OFFER, offer))
@@ -282,9 +305,29 @@ class CallEngine(private val app: Application) {
                 withContext(Dispatchers.IO) {
                     Api.post("/api/calls/${rec.id}/answer", JSONObject().put("answerSdp", answer.description))
                 }
-                active = rec.copy(status = "ACTIVE", startedAt = System.currentTimeMillis())
             } catch (_: Exception) {
-                /* keep ringing */
+                answering.set(false)
+            }
+        }
+    }
+
+    private suspend fun watchInbox() {
+        inboxTick++
+        if (inboxTick % 2 != 0) return
+        val data =
+            withContext(Dispatchers.IO) {
+                runCatching { Api.get("/api/conversations") }.getOrNull()
+            } ?: return
+        for (row in data.arr("items").objects()) {
+            val id = row.optString("id")
+            if (id.isBlank()) continue
+            val unread = row.optInt("unread")
+            val prev = lastUnread[id]
+            lastUnread[id] = unread
+            if (prev != null && unread > prev && id != openChat && !row.optBoolean("muted")) {
+                val other = row.optJSONObject("other") ?: JSONObject()
+                val preview = row.optJSONObject("lastMessage")?.clean("body").orEmpty().ifBlank { "New message" }
+                MsgNotify.show(app, other.name(), preview, id)
             }
         }
     }
@@ -489,6 +532,8 @@ class CallEngine(private val app: Application) {
         iceCallId = ""
         pendingIce.clear()
         left.set(false)
+        answering.set(false)
+        pendingAccept = false
         active = null
     }
 

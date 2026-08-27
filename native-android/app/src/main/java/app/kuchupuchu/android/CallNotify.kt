@@ -26,6 +26,7 @@ private const val INCOMING_ID = 7101
 private const val ONGOING_ID = 7102
 private const val CH_IN = "kp-calls-v3"
 private const val CH_FG = "kp-call-fg"
+private const val CH_MSG = "kp-msg-v3"
 
 object CallSounds {
     private var ring: MediaPlayer? = null
@@ -100,6 +101,18 @@ object CallNotify {
             val fg = NotificationChannel(CH_FG, "In a call", NotificationManager.IMPORTANCE_LOW)
             fg.setSound(null, null)
             nm.createNotificationChannel(fg)
+        }
+        if (nm.getNotificationChannel(CH_MSG) == null) {
+            val msg = NotificationChannel(CH_MSG, "Messages", NotificationManager.IMPORTANCE_HIGH)
+            msg.setSound(
+                Uri.parse("android.resource://${ctx.packageName}/${R.raw.kp_notify}"),
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build(),
+            )
+            msg.enableVibration(true)
+            nm.createNotificationChannel(msg)
         }
     }
 
@@ -176,10 +189,45 @@ object CallNotify {
     }
 }
 
+object MsgNotify {
+    fun show(ctx: Context, name: String, body: String, convoId: String) {
+        CallNotify.ensure(ctx)
+        val open =
+            PendingIntent.getActivity(
+                ctx,
+                convoId.hashCode(),
+                Intent(ctx, MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .putExtra("kp_chat", convoId),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        val n =
+            NotificationCompat.Builder(ctx, CH_MSG)
+                .setSmallIcon(R.drawable.ic_stat_call)
+                .setContentTitle(name)
+                .setContentText(body)
+                .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .setContentIntent(open)
+                .setSound(Uri.parse("android.resource://${ctx.packageName}/${R.raw.kp_notify}"))
+                .build()
+        ctx.getSystemService(NotificationManager::class.java).notify(7200 + (convoId.hashCode() and 0xfff), n)
+    }
+}
+
 class CallActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
-            CALL_ACCEPT -> CallEngine.instance?.answer()
+            CALL_ACCEPT -> {
+                CallEngine.instance?.pendingAccept = true
+                CallEngine.instance?.answer()
+                context.startActivity(
+                    Intent(context, MainActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                        .putExtra("kp_accept", true),
+                )
+            }
             CALL_DECLINE -> CallEngine.instance?.decline()
         }
         CallNotify.cancelIncoming(context)

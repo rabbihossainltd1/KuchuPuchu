@@ -19,6 +19,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
@@ -99,6 +101,22 @@ fun KpApp() {
         onDispose { engine.onChange = null }
     }
 
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            val chat = MainActivity.pendingChat
+            if (!chat.isNullOrBlank()) {
+                MainActivity.pendingChat = null
+                go("chat/$chat")
+            }
+            if (MainActivity.pendingAccept) {
+                MainActivity.pendingAccept = false
+                engine.pendingAccept = true
+                engine.answer()
+            }
+            delay(250)
+        }
+    }
+
     LaunchedEffect(Api.token) {
         if (Api.token.isNullOrBlank()) {
             session.loading = false
@@ -120,7 +138,7 @@ fun KpApp() {
                 session.noteCount = data.optInt("unread")
             }
             session.loading = false
-            route = "tabs/home"
+            if (route == "boot" || route == "login") route = "tabs/home"
         } else {
             session.loading = true
         }
@@ -158,7 +176,7 @@ fun KpApp() {
             }
         session.loading = false
         if (session.me != null) {
-            route = "tabs/home"
+            if (route == "boot" || route == "login") route = "tabs/home"
         } else {
             route = "login"
             if (!ok) Api.saveToken(ctx, null)

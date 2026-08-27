@@ -39,6 +39,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -106,7 +107,7 @@ fun InboxScreen(session: Session, onRoute: (String) -> Unit) {
                             }
                             Text(timeAgo(c.optString("lastMessageAt")), color = Muted, fontSize = 12.sp)
                         }
-                        Text(c.optJSONObject("lastMessage")?.optString("body").orEmpty().ifBlank { "No messages yet" }, color = Muted, fontSize = 13.sp, maxLines = 1)
+                        Text((c.optJSONObject("lastMessage")?.clean("body").orEmpty()).ifBlank { "No messages yet" }, color = Muted, fontSize = 13.sp, maxLines = 1)
                     }
                     if (c.optInt("unread") > 0) {
                         Box(Modifier.size(22.dp).clip(CircleShape).background(Accent), contentAlignment = Alignment.Center) {
@@ -249,6 +250,10 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
     val scope = rememberCoroutineScope()
     val meId = session.me?.optString("id")
     var sending by remember { mutableStateOf(0) }
+    DisposableEffect(convoId) {
+        engine.openChat = convoId
+        onDispose { if (engine.openChat == convoId) engine.openChat = null }
+    }
 
     val pick =
         rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -302,7 +307,9 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
         }
     }
     LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) list.scrollToItem(messages.lastIndex)
+        if (messages.isEmpty()) return@LaunchedEffect
+        val lastVisible = list.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+        if (lastVisible >= messages.size - 3) list.scrollToItem(messages.lastIndex)
     }
 
     BackHandler(viewer != null || menu || stickers) {
@@ -398,7 +405,8 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
                     val images = imageList(m)
                     val hasPhoto = images.isNotEmpty() || m.optBoolean("hasImage")
                     val stickerOnly = sticker.isNotBlank()
-                    val photoOnly = hasPhoto && (m.optString("body").isBlank() || m.optString("body") == "Photo")
+                    val bodyText = m.clean("body")
+                    val photoOnly = hasPhoto && (bodyText.isBlank() || bodyText == "Photo")
                     Column(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
                         Row(verticalAlignment = Alignment.Bottom) {
                             if (!mine) {
@@ -448,11 +456,10 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
                                             onOpen = { viewer = it },
                                         )
                                     }
-                                    val body = m.optString("body")
-                                    if (body.isNotBlank() && !stickerOnly && !photoOnly) {
-                                        Text(body, color = if (mine) AccentInk else Ink)
+                                    if (bodyText.isNotBlank() && !stickerOnly && !photoOnly) {
+                                        Text(bodyText, color = if (mine) AccentInk else Ink)
                                     }
-                                    val reaction = m.optString("reaction")
+                                    val reaction = m.clean("reaction")
                                     if (reaction.isNotBlank()) Text(reaction, fontSize = 16.sp)
                                 }
                             }
@@ -556,13 +563,13 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
                 }
             }
         }
+    }
         viewer?.let { src ->
             Box(Modifier.fillMaxSize().background(Color(0xFF0C0A09))) {
                 MediaImage(src, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
                 CloseIcon { viewer = null }
             }
         }
-    }
         if (menu) {
             Box(Modifier.fillMaxSize().clickable { menu = false })
             Column(
