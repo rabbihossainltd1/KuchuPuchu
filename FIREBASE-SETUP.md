@@ -1,4 +1,10 @@
-# 🔔 FCM Push Setup — 10 Minute (Ekbar Korlei Hoy)
+# 🔔 FCM Push Setup — ✅ DONE (2026-08-27)
+
+> **STATUS: COMPLETE!** FCM_CONFIG + FCM_CREDENTIALS secrets set on `kuchupuchu-api` worker.
+> Live check: `GET /api/config/firebase` returns full config. OAuth mint test: Google accepted ✓.
+> Ei document ta future reference er jonno rakha — apnar abar korte hobe na.
+
+## Original guide (already completed)
 
 Ei setup korle **permanent "KuchuPuchu connected" notification completely off** hoye jabe, ar message/call notification **Facebook Messenger er moto** app closed thakleo instant ashbe.
 
