@@ -26,6 +26,7 @@
   | Calls tab | #2 | Date sections (Today/Yesterday/Monday), direction arrows, gold callback buttons |
   | Incoming voice call | #1 | Classic dark, green/red circles, Message+Remind me |
   | Outgoing voice call | #4 | Early controls — Mute/Speaker/Bluetooth while ringing + red Cancel, dark, pulse ring |
+  | Incoming video call | #3 | Three choice — Decline / Voice only / Video accept, dark, pulse ring |
   | Outgoing video call | #5 | Bottom sheet — callee top, white sheet: Cancel / Flip / Camera off |
   | Video call connected | #6 | Authentic minimal — clean icon strip, PiP self-view, controls: Mute, Camera off, Flip, Screen share, Voice only, End |
   | Voice call connected | #2 | Light airy — cream top, white sheet 3x2 grid. Controls: Mute, Speaker, Bluetooth, Hold, Add call, End call (AI-mock er duplicate-button artifact IGNORE — real UI ei list onujayi clean) |
