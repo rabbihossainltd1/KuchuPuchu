@@ -24,6 +24,8 @@
   |---|---|---|
   | Chat list | #7 | Gradient rings, swipe actions (mute/delete), voice/photo previews, tabs top |
   | Calls tab | #2 | Date sections (Today/Yesterday/Monday), direction arrows, gold callback buttons |
+  | Incoming voice call | #1 | Classic dark, green/red circles, Message+Remind me |
+  | Voice call connected | #2 | Light airy — cream top, white sheet 3x2 grid. Controls: Mute, Speaker, Bluetooth, Hold, Add call, End call (AI-mock er duplicate-button artifact IGNORE — real UI ei list onujayi clean) |
   | Chat box | #7 | Coin wallpaper (subtle), gradient outgoing bubble, voice message bubbles, ticks |
   | Status | #7 | Big airy — 72px rings, boro "My status" card, spacious rows |
  |
