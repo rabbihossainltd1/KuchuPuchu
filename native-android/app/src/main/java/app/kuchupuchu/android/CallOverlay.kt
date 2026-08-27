@@ -93,7 +93,7 @@ fun CallOverlay(call: CallUi, engine: CallEngine) {
             }
         }
         onDispose {
-            activity?.restoreChrome()
+            (activity as? MainActivity)?.restoreChrome()
         }
     }
 
