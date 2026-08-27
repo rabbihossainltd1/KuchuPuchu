@@ -282,7 +282,7 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
             withContext(Dispatchers.IO) {
                 runCatching { Api.get("/api/conversations/$convoId/messages") }.getOrNull()
             }
-        if (first != null) {
+        if (first != null && sending == 0) {
             otherReadAt = first.optString("otherReadAt")
             mergeChat(messages, first.arr("items").objects())
             Disk.saveChat(convoId, messages.toList(), otherReadAt)
@@ -332,6 +332,7 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
                 .put("body", payload.optString("body"))
                 .put("sticker", payload.optString("sticker"))
                 .put("pending", true)
+                .put("retryPayload", payload)
                 .put("createdAt", java.time.Instant.now().toString())
         if (payload.has("imageData")) {
             val imgs = payload.optJSONArray("imageData")
@@ -339,11 +340,13 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
             temp.put("imageUrl", imgs?.optString(0).orEmpty())
             temp.put("hasImage", true)
         }
+        // Show the bubble instantly with a "Sending" status; the network call
+        // only swaps it for the saved message afterwards.
+        sending += 1
         messages.add(temp)
         text = ""
         photos.clear()
         stickers = false
-        sending += 1
         scope.launch { runCatching { list.scrollToItem(messages.lastIndex) } }
         scope.launch {
             val saved =
@@ -466,14 +469,26 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
                                 }
                             }
                         }
-                        if (mine && lastMine?.optString("id") == m.optString("id")) {
+                        if (mine && (m.optBoolean("pending") || m.optBoolean("failed") || lastMine?.optString("id") == m.optString("id"))) {
                             val seen = otherReadAt.isNotBlank() && parseIso(otherReadAt) != null && parseIso(m.optString("createdAt")) != null &&
                                 (parseIso(otherReadAt) ?: 0) >= (parseIso(m.optString("createdAt")) ?: 0)
                             when {
                                 m.optBoolean("pending") ->
-                                    Text("Sending", fontSize = 11.sp, color = Muted, modifier = Modifier.padding(end = 4.dp))
+                                    Text("Sending…", fontSize = 11.sp, color = Muted, modifier = Modifier.padding(end = 4.dp))
                                 m.optBoolean("failed") ->
-                                    Text("Couldn't send", fontSize = 11.sp, color = Rose, modifier = Modifier.padding(end = 4.dp))
+                                    Text(
+                                        "Couldn't send · Tap to retry",
+                                        fontSize = 11.sp,
+                                        color = Rose,
+                                        modifier =
+                                            Modifier.padding(end = 4.dp).clickable {
+                                                val payload = m.optJSONObject("retryPayload")
+                                                if (payload != null) {
+                                                    messages.remove(m)
+                                                    send(payload)
+                                                }
+                                            },
+                                    )
                                 seen -> {
                                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 4.dp, bottom = 4.dp)) {
                                         Avatar(other, 16.dp)

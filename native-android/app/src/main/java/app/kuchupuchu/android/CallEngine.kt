@@ -54,6 +54,7 @@ data class CallUi(
     val otherOnline: Boolean = false,
     val otherAvatar: String = "",
     val startedAt: Long = 0L,
+    val connecting: Boolean = false,
 )
 
 class CallEngine(private val app: Application) {
@@ -71,6 +72,10 @@ class CallEngine(private val app: Application) {
     var sharing by mutableStateOf(false)
     var hasRemote by mutableStateOf(false)
 
+    /** Short-lived message shown by the app shell, e.g. "Only friends can call". */
+    var toast by mutableStateOf("")
+        private set
+
     val egl = EglBase.create()
     private var factory: PeerConnectionFactory? = null
     private var audioModule: JavaAudioDeviceModule? = null
@@ -85,7 +90,6 @@ class CallEngine(private val app: Application) {
     private var localView: SurfaceViewRenderer? = null
     private var remoteView: SurfaceViewRenderer? = null
     private val seenIce = mutableSetOf<String>()
-    private val ignored = mutableSetOf<String>()
     private val left = AtomicBoolean(false)
     private var poll: Job? = null
     private val scope = CoroutineScope(Dispatchers.Main)
@@ -94,10 +98,16 @@ class CallEngine(private val app: Application) {
     private var ringingId: String? = null
     private var shareCallback: MediaProjection.Callback? = null
     private val answering = AtomicBoolean(false)
-    private val lastUnread = HashMap<String, Int>()
-    private var inboxTick = 0
     var openChat: String? = null
     var pendingAccept = false
+
+    fun notify(message: String) {
+        toast = message
+        scope.launch {
+            delay(3500)
+            if (toast == message) toast = ""
+        }
+    }
 
     init {
         instance = this
@@ -141,12 +151,11 @@ class CallEngine(private val app: Application) {
     }
 
     private suspend fun tick() {
-        watchInbox()
         val data =
             withContext(Dispatchers.IO) {
                 runCatching { Api.get("/api/calls/active") }.getOrNull()
             } ?: return
-        val items = data.arr("items").objects().filter { !ignored.contains(it.optString("id")) }
+        val items = data.arr("items").objects().filter { !ignoredCalls.contains(it.optString("id")) }
         val current = active
         var next = items.firstOrNull()
         if (current != null && !current.id.startsWith("pending")) {
@@ -158,14 +167,26 @@ class CallEngine(private val app: Application) {
             }
             return
         }
-        val status = next.optString("status")
+        var status = next.optString("status")
+        // The callee already answered locally: never downgrade back to RINGING
+        // while the server catches up, otherwise the ringing screen returns.
+        if (
+            current != null &&
+            current.id == next.optString("id") &&
+            current.status == "ACTIVE" &&
+            (status == "RINGING" || status == "ACTIVE")
+        ) {
+            status = "ACTIVE"
+        }
         if (status in listOf("ENDED", "DECLINED", "MISSED", "CANCELLED")) {
-            ignored.add(next.optString("id"))
+            ignoredCalls.add(next.optString("id"))
             hangupLocal()
             return
         }
         val other = next.optJSONObject("other") ?: JSONObject()
         val incoming = next.optBoolean("incoming")
+        val suppressed = isIncomingSuppressed()
+        val autoAnswer = incoming && status == "RINGING" && (pendingAccept || suppressed)
         val ui =
             CallUi(
                 id = next.optString("id"),
@@ -182,20 +203,27 @@ class CallEngine(private val app: Application) {
                         status == "ACTIVE" -> System.currentTimeMillis()
                         else -> 0L
                     },
+                connecting = autoAnswer || (current?.connecting == true && status != "ACTIVE"),
             )
         if (current?.id?.startsWith("pending") == true) {
             active = ui.copy(otherName = current.otherName, otherAvatar = current.otherAvatar)
         } else {
             active = ui
         }
-        if (incoming && status == "RINGING") {
+        if (incoming && status == "RINGING" && !suppressed) {
             if (ringingId != ui.id) {
                 ringingId = ui.id
                 CallSounds.startRing(app)
-                CallNotify.incoming(app, ui.otherName, ui.kind == "VIDEO")
+                CallNotify.incoming(app, ui.otherName, ui.kind == "VIDEO", ui.id)
             }
             if (ui.kind == "VIDEO" && videoTrack == null) {
                 withContext(Dispatchers.IO) { runCatching { capture(true) } }
+            }
+        }
+        if (autoAnswer) {
+            // Jump straight past the ringing screen into the connecting state.
+            if (active?.status != "ACTIVE") {
+                active = ui.copy(status = "ACTIVE", startedAt = System.currentTimeMillis(), connecting = true)
             }
             if (pendingAccept) {
                 pendingAccept = false
@@ -203,6 +231,7 @@ class CallEngine(private val app: Application) {
             }
         }
         if (status == "ACTIVE") {
+            clearIncomingSuppression()
             if (ringingId != null) {
                 CallNotify.cancelIncoming(app)
                 ringingId = null
@@ -261,7 +290,9 @@ class CallEngine(private val app: Application) {
                         userId,
                         otherAvatar = avatar,
                     )
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                val message = (e as? ApiException)?.message ?: "Couldn't start the call. Try again."
+                notify(message)
                 hangupLocal()
             }
         }
@@ -277,13 +308,14 @@ class CallEngine(private val app: Application) {
         if (!answering.compareAndSet(false, true)) return
         CallNotify.cancelIncoming(app)
         ringingId = null
+        clearIncomingSuppression()
         applyAudio()
         CallService.start(app, "In a call with ${rec.otherName}")
-        active = rec.copy(status = "ACTIVE", startedAt = System.currentTimeMillis())
+        active = rec.copy(status = "ACTIVE", startedAt = System.currentTimeMillis(), connecting = true)
         scope.launch {
             try {
                 var offer = ""
-                repeat(8) {
+                repeat(10) {
                     offer =
                         withContext(Dispatchers.IO) {
                             Api.get("/api/calls/active").arr("items").objects()
@@ -292,9 +324,13 @@ class CallEngine(private val app: Application) {
                                 .orEmpty()
                         }
                     if (offer.isNotBlank()) return@repeat
-                    delay(250)
+                    delay(150)
                 }
-                if (offer.isBlank() || left.get()) return@launch
+                if (offer.isBlank() || left.get()) {
+                    answering.set(false)
+                    hangupLocal()
+                    return@launch
+                }
                 capture(rec.kind == "VIDEO")
                 iceCallId = rec.id
                 val peer = newPc()
@@ -307,37 +343,22 @@ class CallEngine(private val app: Application) {
                 }
             } catch (_: Exception) {
                 answering.set(false)
+                hangupLocal()
             }
         }
     }
 
     private suspend fun watchInbox() {
-        inboxTick++
-        if (inboxTick % 2 != 0) return
-        val data =
-            withContext(Dispatchers.IO) {
-                runCatching { Api.get("/api/conversations") }.getOrNull()
-            } ?: return
-        for (row in data.arr("items").objects()) {
-            val id = row.optString("id")
-            if (id.isBlank()) continue
-            val unread = row.optInt("unread")
-            val prev = lastUnread[id]
-            lastUnread[id] = unread
-            if (prev != null && unread > prev && id != openChat && !row.optBoolean("muted")) {
-                val other = row.optJSONObject("other") ?: JSONObject()
-                val preview = row.optJSONObject("lastMessage")?.clean("body").orEmpty().ifBlank { "New message" }
-                MsgNotify.show(app, other.name(), preview, id)
-            }
-        }
+        // Message notifications moved to KpSyncService (works with the app closed).
     }
 
     fun decline() {
         val id = active?.id
         CallNotify.cancelIncoming(app)
         ringingId = null
+        clearIncomingSuppression()
         if (id != null) {
-            ignored.add(id)
+            ignoredCalls.add(id)
             scope.launch(Dispatchers.IO) { runCatching { Api.post("/api/calls/$id/decline") } }
         }
         hangupLocal()
@@ -346,7 +367,7 @@ class CallEngine(private val app: Application) {
     fun hangup() {
         val rec = active
         left.set(true)
-        rec?.id?.let { ignored.add(it) }
+        rec?.id?.let { ignoredCalls.add(it) }
         val id = rec?.id
         val seconds =
             if ((rec?.startedAt ?: 0L) > 0L) ((System.currentTimeMillis() - rec!!.startedAt) / 1000).toInt() else 0
@@ -540,6 +561,7 @@ class CallEngine(private val app: Application) {
         left.set(false)
         answering.set(false)
         pendingAccept = false
+        clearIncomingSuppression()
         Handler(Looper.getMainLooper()).post { MainActivity.current?.restoreChrome() }
         active = null
     }
@@ -681,6 +703,27 @@ class CallEngine(private val app: Application) {
     companion object {
         @Volatile
         var instance: CallEngine? = null
+
+        /** Call ids that must never ring again (declined / ended / hung up). */
+        val ignoredCalls: MutableSet<String> =
+            java.util.Collections.synchronizedSet(HashSet<String>())
+
+        /**
+         * When the user accepts a call from the notification we must not show
+         * the ringing screen again while the answer is being set up.
+         */
+        @Volatile
+        private var suppressIncomingUntil: Long = 0L
+
+        fun suppressIncomingFor(millis: Long) {
+            suppressIncomingUntil = System.currentTimeMillis() + millis
+        }
+
+        fun isIncomingSuppressed(): Boolean = System.currentTimeMillis() < suppressIncomingUntil
+
+        fun clearIncomingSuppression() {
+            suppressIncomingUntil = 0L
+        }
     }
 }
 

@@ -38,6 +38,7 @@ class MainActivity : ComponentActivity() {
                 ContextCompat.checkSelfPermission(this, it) != android.content.pm.PackageManager.PERMISSION_GRANTED
             }
         if (missing.isNotEmpty()) ask.launch(missing.toTypedArray())
+        if (!Api.token.isNullOrBlank()) KpSyncService.start(this)
         handleCallIntent(intent)
         setContent { KpTheme { KpApp() } }
     }
@@ -52,6 +53,7 @@ class MainActivity : ComponentActivity() {
         if (intent == null) return
         if (intent.getBooleanExtra("kp_accept", false)) {
             pendingAccept = true
+            CallEngine.suppressIncomingFor(15_000)
             CallEngine.instance?.pendingAccept = true
             CallEngine.instance?.answer()
         }
@@ -60,7 +62,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        KpState.foreground = true
         if (CallEngine.instance?.active == null) restoreChrome()
+    }
+
+    override fun onPause() {
+        KpState.foreground = false
+        super.onPause()
     }
 
     fun restoreChrome() {

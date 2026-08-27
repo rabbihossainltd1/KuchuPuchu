@@ -19,9 +19,12 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import androidx.core.app.NotificationCompat
+import androidx.core.app.RemoteInput
+import org.json.JSONObject
 
 const val CALL_ACCEPT = "app.kuchupuchu.android.CALL_ACCEPT"
 const val CALL_DECLINE = "app.kuchupuchu.android.CALL_DECLINE"
+const val REPLY_ACTION = "app.kuchupuchu.android.REPLY"
 private const val INCOMING_ID = 7101
 private const val ONGOING_ID = 7102
 private const val CH_IN = "kp-calls-v3"
@@ -114,9 +117,16 @@ object CallNotify {
             msg.enableVibration(true)
             nm.createNotificationChannel(msg)
         }
+        if (nm.getNotificationChannel(KpSyncService.CH_SYNC) == null) {
+            val sync =
+                NotificationChannel(KpSyncService.CH_SYNC, "Stay connected", NotificationManager.IMPORTANCE_MIN)
+            sync.setSound(null, null)
+            sync.enableVibration(false)
+            nm.createNotificationChannel(sync)
+        }
     }
 
-    fun incoming(ctx: Context, name: String, video: Boolean) {
+    fun incoming(ctx: Context, name: String, video: Boolean, callId: String? = null) {
         ensure(ctx)
         val open =
             PendingIntent.getActivity(
@@ -125,18 +135,24 @@ object CallNotify {
                 Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
+        // Android 12+ blocks starting activities from broadcast receivers
+        // (notification trampolines), so Accept goes straight to the activity.
         val accept =
-            PendingIntent.getBroadcast(
+            PendingIntent.getActivity(
                 ctx,
                 2,
-                Intent(ctx, CallActionReceiver::class.java).setAction(CALL_ACCEPT),
+                Intent(ctx, MainActivity::class.java)
+                    .setAction(CALL_ACCEPT)
+                    .putExtra("kp_accept", true)
+                    .putExtra("kp_call_id", callId)
+                    .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
         val decline =
             PendingIntent.getBroadcast(
                 ctx,
                 3,
-                Intent(ctx, CallActionReceiver::class.java).setAction(CALL_DECLINE),
+                Intent(ctx, CallActionReceiver::class.java).setAction(CALL_DECLINE).putExtra("kp_call_id", callId),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
         val n =
@@ -190,8 +206,42 @@ object CallNotify {
 }
 
 object MsgNotify {
-    fun show(ctx: Context, name: String, body: String, convoId: String) {
+    private class Line(val name: String, val body: String)
+
+    private val history = java.util.Collections.synchronizedMap(HashMap<String, MutableList<Line>>())
+    private val shownIds = java.util.Collections.synchronizedSet(HashSet<Int>())
+
+    private fun notifId(convoId: String): Int = 7200 + (convoId.hashCode() and 0xfff)
+
+    /**
+     * Shows (or updates) the single notification for a conversation. New
+     * messages append to the same notification instead of stacking new ones.
+     */
+    fun show(ctx: Context, other: JSONObject, body: String, convoId: String) {
         CallNotify.ensure(ctx)
+        val name = other.name()
+        val lines =
+            synchronized(history) {
+                val list = history.getOrPut(convoId) { ArrayList() }
+                list.add(Line(name, body))
+                while (list.size > 8) list.removeAt(0)
+                list.toList()
+            }
+        val persona =
+            androidx.core.app.Person.Builder()
+                .setName(name)
+                .setKey("kp-$convoId")
+                .build()
+        val style = NotificationCompat.MessagingStyle(persona)
+        for (line in lines) {
+            style.addMessage(
+                NotificationCompat.MessagingStyle.Message(
+                    line.body,
+                    System.currentTimeMillis(),
+                    androidx.core.app.Person.Builder().setName(line.name).build(),
+                ),
+            )
+        }
         val open =
             PendingIntent.getActivity(
                 ctx,
@@ -199,6 +249,19 @@ object MsgNotify {
                 Intent(ctx, MainActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
                     .putExtra("kp_chat", convoId),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        val replyInput =
+            RemoteInput.Builder("kp_reply")
+                .setLabel("Reply")
+                .build()
+        val reply =
+            PendingIntent.getBroadcast(
+                ctx,
+                convoId.hashCode() + 1,
+                Intent(ctx, ReplyReceiver::class.java)
+                    .setAction(REPLY_ACTION)
+                    .putExtra("convoId", convoId),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
         val n =
@@ -210,25 +273,54 @@ object MsgNotify {
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setAutoCancel(true)
                 .setContentIntent(open)
+                .setStyle(style)
+                .setNumber(lines.size)
+                .addAction(
+                    NotificationCompat.Action.Builder(
+                        0,
+                        "Reply",
+                        reply,
+                    ).addRemoteInput(replyInput).build(),
+                )
                 .setSound(Uri.parse("android.resource://${ctx.packageName}/${R.raw.kp_notify}"))
                 .build()
-        ctx.getSystemService(NotificationManager::class.java).notify(7200 + (convoId.hashCode() and 0xfff), n)
+        val id = notifId(convoId)
+        shownIds.add(id)
+        ctx.getSystemService(NotificationManager::class.java).notify(id, n)
+    }
+
+    /** Hides the conversation notification, e.g. after a direct reply. */
+    fun cancel(ctx: Context, convoId: String) {
+        history.remove(convoId)
+        ctx.getSystemService(NotificationManager::class.java).cancel(notifId(convoId))
+    }
+
+    fun clearAll(ctx: Context) {
+        synchronized(history) { history.clear() }
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        synchronized(shownIds) {
+            for (id in shownIds) nm.cancel(id)
+            shownIds.clear()
+        }
     }
 }
 
 class CallActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        when (intent.action) {
-            CALL_ACCEPT -> {
-                CallEngine.instance?.pendingAccept = true
-                CallEngine.instance?.answer()
-                context.startActivity(
-                    Intent(context, MainActivity::class.java)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                        .putExtra("kp_accept", true),
-                )
+        val callId = intent.getStringExtra("kp_call_id")
+        if (intent.action == CALL_DECLINE) {
+            val engine = CallEngine.instance
+            if (engine != null && (callId == null || engine.active?.id == callId)) {
+                engine.decline()
+            } else if (callId != null) {
+                CallEngine.ignoredCalls.add(callId)
+                Thread {
+                    runCatching {
+                        Api.loadToken(context)
+                        Api.post("/api/calls/$callId/decline")
+                    }
+                }.start()
             }
-            CALL_DECLINE -> CallEngine.instance?.decline()
         }
         CallNotify.cancelIncoming(context)
     }

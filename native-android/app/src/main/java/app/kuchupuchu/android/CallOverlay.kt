@@ -101,6 +101,7 @@ fun CallOverlay(call: CallUi, engine: CallEngine) {
         when {
             incoming && video -> "Incoming video"
             incoming -> "Incoming call"
+            call.connecting -> "Connecting…"
             ringing && call.otherOnline -> "Ringing…"
             ringing -> "Calling…"
             live -> clock(call.startedAt)

@@ -91,7 +91,7 @@ function defaultPrivacy() {
     showApproximateArea: false,
     showRelationship: false,
     showFfUid: false,
-    allowMessages: "EVERYONE",
+    allowMessages: "FRIENDS",
     allowRequests: "EVERYONE",
     allowGifts: "FRIENDS",
     discoverable: true,
@@ -180,6 +180,8 @@ async function ensureConv(db: D1Database, a: string, b: string) {
       nowIso(),
     );
   }
+  await run(db, "INSERT OR IGNORE INTO conversation_members (conv_id, user_id) VALUES (?, ?)", cid, a);
+  await run(db, "INSERT OR IGNORE INTO conversation_members (conv_id, user_id) VALUES (?, ?)", cid, b);
   return cid;
 }
 
@@ -407,16 +409,64 @@ async function blockedSet(db: D1Database, uid: string) {
 async function friendIds(db: D1Database, uid: string) {
   const rows = await all<{ users_json: string }>(
     db,
-    "SELECT users_json FROM friendships WHERE status = 'accepted'",
+    "SELECT users_json FROM friendships WHERE status = 'accepted' AND (from_id = ? OR to_id = ?)",
+    uid,
+    uid,
   );
   const ids = new Set<string>();
   for (const row of rows) {
     const users = parseJson<string[]>(row.users_json, []);
-    if (users.includes(uid)) {
-      for (const other of users) if (other !== uid) ids.add(other);
-    }
+    for (const other of users) if (other !== uid) ids.add(other);
   }
   return ids;
+}
+
+async function areFriends(db: D1Database, a: string, b: string) {
+  const row = await one<{ status: string }>(
+    db,
+    "SELECT status FROM friendships WHERE id = ? AND status = 'accepted'",
+    pairId(a, b),
+  );
+  return Boolean(row);
+}
+
+async function requestBetween(db: D1Database, a: string, b: string) {
+  const row = await one<{ from_id: string }>(
+    db,
+    "SELECT from_id FROM friendships WHERE id = ? AND status = 'pending'",
+    pairId(a, b),
+  );
+  if (!row) return { state: "none", id: null as string | null };
+  return { state: row.from_id === a ? "outgoing" : "incoming", id: pairId(a, b) };
+}
+
+function messageRule(privacyJson: string) {
+  const privacy = { ...defaultPrivacy(), ...parseJson(privacyJson, {}) };
+  const rule = String(privacy.allowMessages ?? "FRIENDS").toUpperCase();
+  return rule === "EVERYONE" || rule === "NO_ONE" ? rule : "FRIENDS";
+}
+
+async function messageGate(db: D1Database, fromId: string, targetId: string, verb = "message") {
+  const target = await one<{ privacy_json: string; status: string }>(
+    db,
+    "SELECT privacy_json, status FROM users WHERE id = ?",
+    targetId,
+  );
+  if (!target || target.status === "DELETED") fail(404, "Player not found.");
+  const blockEither = await one(
+    db,
+    "SELECT id FROM blocks WHERE (owner_id = ? AND target_id = ?) OR (owner_id = ? AND target_id = ?)",
+    targetId,
+    fromId,
+    fromId,
+    targetId,
+  );
+  if (blockEither) fail(403, "You can't reach this player.", "BLOCKED");
+  const rule = messageRule(target.privacy_json);
+  if (rule === "EVERYONE") return;
+  if (rule === "NO_ONE") fail(403, `This player is not accepting ${verb}s right now.`, "MESSAGES_CLOSED");
+  const friends = await areFriends(db, fromId, targetId);
+  if (!friends) fail(403, `Only friends can ${verb} this player.`, "FRIENDS_ONLY");
 }
 
 async function listPeople(db: D1Database, viewer: string) {
@@ -560,6 +610,62 @@ async function ensureSchema(db: D1Database) {
     await run(db, "ALTER TABLE conversations ADD COLUMN read_json TEXT");
   } catch {
     /* column already exists */
+  }
+  try {
+    await run(db, "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    await run(db, "CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at)");
+    await run(db, "CREATE INDEX IF NOT EXISTS idx_calls_caller ON calls(caller_id, status)");
+    await run(db, "CREATE INDEX IF NOT EXISTS idx_calls_callee ON calls(callee_id, status)");
+    await run(db, "CREATE INDEX IF NOT EXISTS idx_call_ice_call ON call_ice(call_id)");
+    await run(db, "CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at)");
+    await run(db, "CREATE INDEX IF NOT EXISTS idx_friendships_from ON friendships(from_id, status)");
+    await run(db, "CREATE INDEX IF NOT EXISTS idx_friendships_to ON friendships(to_id, status)");
+    await run(
+      db,
+      "CREATE TABLE IF NOT EXISTS conversation_members (conv_id TEXT NOT NULL, user_id TEXT NOT NULL, PRIMARY KEY (conv_id, user_id))",
+    );
+    const backfill = await one<{ value: string }>(
+      db,
+      "SELECT value FROM meta WHERE key = 'conv_members_backfill'",
+    );
+    if (!backfill) {
+      const convs = await all<{ id: string; members_json: string }>(
+        db,
+        "SELECT id, members_json FROM conversations",
+      );
+      for (const conv of convs) {
+        for (const member of parseJson<string[]>(conv.members_json, [])) {
+          await run(
+            db,
+            "INSERT OR IGNORE INTO conversation_members (conv_id, user_id) VALUES (?, ?)",
+            conv.id,
+            member,
+          );
+        }
+      }
+      await run(
+        db,
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('conv_members_backfill', ?)",
+        nowIso(),
+      );
+    }
+    const privacyShift = await one<{ value: string }>(
+      db,
+      "SELECT value FROM meta WHERE key = 'allow_messages_default_friends'",
+    );
+    if (!privacyShift) {
+      await run(
+        db,
+        "UPDATE users SET privacy_json = json_set(privacy_json, '$.allowMessages', 'FRIENDS') WHERE json_extract(privacy_json, '$.allowMessages') IS NULL OR json_extract(privacy_json, '$.allowMessages') = 'EVERYONE'",
+      );
+      await run(
+        db,
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('allow_messages_default_friends', ?)",
+        nowIso(),
+      );
+    }
+  } catch {
+    /* migrations already applied or not needed */
   }
   schemaReady = true;
 }
@@ -976,9 +1082,35 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
 
   const userGet = path.match(/^\/api\/users\/([^/]+)$/);
   if (userGet && method === "GET") {
-    const user = await userPublic(db, userGet[1]!, uid);
+    const targetId = userGet[1]!;
+    const user = await userPublic(db, targetId, uid);
     if (!user) fail(404, "Player not found.");
-    return json({ user });
+    const friend = await areFriends(db, uid, targetId);
+    const rule = await (async () => {
+      const target = await one<{ privacy_json: string }>(
+        db,
+        "SELECT privacy_json FROM users WHERE id = ?",
+        targetId,
+      );
+      return messageRule(target?.privacy_json ?? "{}");
+    })();
+    const request = friend ? { state: "none", id: null } : await requestBetween(db, uid, targetId);
+    const count = await one<{ n: number }>(
+      db,
+      "SELECT COUNT(*) AS n FROM friendships WHERE status = 'accepted' AND (from_id = ? OR to_id = ?)",
+      targetId,
+      targetId,
+    );
+    return json({
+      user: {
+        ...user,
+        friend,
+        canMessage: rule === "EVERYONE" || (rule === "FRIENDS" && friend),
+        requestState: request.state,
+        requestId: request.id ?? undefined,
+        friendsCount: Number(count?.n ?? 0),
+      },
+    });
   }
   const follow = path.match(/^\/api\/users\/([^/]+)\/follow$/);
   if (follow && method === "POST") {
@@ -1164,7 +1296,13 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
       muted_json?: string | null;
       hidden_json?: string | null;
       read_json?: string | null;
-    }>(db, "SELECT * FROM conversations");
+    }>(
+      db,
+      `SELECT c.* FROM conversations c
+         JOIN conversation_members m ON m.conv_id = c.id
+         WHERE m.user_id = ?`,
+      uid,
+    );
     const items = [];
     for (const row of rows) {
       const members = parseJson<string[]>(row.members_json, []);
@@ -1198,6 +1336,7 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
   if (path === "/api/conversations" && method === "POST") {
     const other = String(body.userId || "");
     if (!other) fail(400, "Pick someone to message.");
+    await messageGate(db, uid, other);
     const cid = `c_${pairId(uid, other)}`;
     const existing = await one(db, "SELECT id FROM conversations WHERE id = ?", cid);
     if (!existing) {
@@ -1210,6 +1349,8 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
         nowIso(),
       );
     }
+    await run(db, "INSERT OR IGNORE INTO conversation_members (conv_id, user_id) VALUES (?, ?)", cid, uid);
+    await run(db, "INSERT OR IGNORE INTO conversation_members (conv_id, user_id) VALUES (?, ?)", cid, other);
     return json({ conversation: { id: cid } });
   }
 
@@ -1282,6 +1423,8 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
       });
     }
     const text = String(body.body || "").trim();
+    const otherMember = members.find((m) => m !== uid);
+    if (otherMember) await messageGate(db, uid, otherMember);
     const rawImages = Array.isArray(body.imageData)
       ? body.imageData
       : body.imageData
@@ -1476,6 +1619,7 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
   if (path === "/api/calls" && method === "POST") {
     const other = String(body.userId || "");
     const kind = body.kind === "VIDEO" ? "VIDEO" : "AUDIO";
+    await messageGate(db, uid, other, "call");
     const callId = id();
     await run(
       db,
@@ -1533,6 +1677,16 @@ async function handle(request: Request, db: D1Database): Promise<Response> {
   }
 
   if (path === "/api/calls/active") {
+    const cutoff = new Date(Date.now() - 60_000).toISOString();
+    const stale = await all<{ id: string; caller_id: string; callee_id: string; kind: string }>(
+      db,
+      "SELECT id, caller_id, callee_id, kind FROM calls WHERE status = 'RINGING' AND created_at < ?",
+      cutoff,
+    );
+    for (const row of stale) {
+      await logCallEvent(db, row.caller_id, row.callee_id, row.kind, "MISSED", 0);
+      await run(db, "UPDATE calls SET status = 'MISSED' WHERE id = ?", row.id);
+    }
     const rows = await all<{
       id: string;
       caller_id: string;

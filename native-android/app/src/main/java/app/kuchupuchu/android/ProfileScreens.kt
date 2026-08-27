@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -22,6 +23,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Call
+import androidx.compose.material.icons.outlined.ChevronLeft
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -38,9 +41,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -87,7 +92,7 @@ fun ProfileScreen(session: Session, onRoute: (String) -> Unit, mine: Boolean = t
 }
 
 @Composable
-fun ProfileHero(user: JSONObject, friends: Int, reputation: Int, coins: Int) {
+fun ProfileHero(user: JSONObject, friends: Int, reputation: Int = 0, coins: Int = 0, showPrivateStats: Boolean = true) {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Surface).border(1.dp, Line, RoundedCornerShape(14.dp))) {
         Box(Modifier.fillMaxWidth().height(120.dp).background(Brush.linearGradient(listOf(Color(0xFFFDE68A), Color(0xFFFDBA74), Color(0xFFF59E0B)))))
         Row(Modifier.offset(y = (-28).dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.Bottom) {
@@ -104,8 +109,10 @@ fun ProfileHero(user: JSONObject, friends: Int, reputation: Int, coins: Int) {
             if (user.clean("bio").isNotBlank()) Text(user.clean("bio"))
             Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text("$friends friends", color = Muted, fontSize = 13.sp)
-                Text("$reputation reputation", color = Muted, fontSize = 13.sp)
-                Text("$coins coins", color = Muted, fontSize = 13.sp)
+                if (showPrivateStats) {
+                    Text("$reputation reputation", color = Muted, fontSize = 13.sp)
+                    Text("$coins coins", color = Muted, fontSize = 13.sp)
+                }
             }
         }
     }
@@ -207,39 +214,290 @@ fun EditProfileScreen(session: Session, done: () -> Unit) {
 
 @Composable
 fun PlayerScreen(userId: String, session: Session, onRoute: (String) -> Unit, onBack: () -> Unit, engine: CallEngine) {
-    var user by remember { mutableStateOf(JSONObject()) }
+    val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    var user by remember(userId) { mutableStateOf(JSONObject()) }
+    var menu by remember(userId) { mutableStateOf(false) }
+    var giftOpen by remember(userId) { mutableStateOf(false) }
+    var reportOpen by remember(userId) { mutableStateOf(false) }
+    var blockOpen by remember(userId) { mutableStateOf(false) }
+    val gifts = remember(userId) { mutableStateListOf<JSONObject>() }
+    var giftsLoading by remember(userId) { mutableStateOf(false) }
+
     LaunchedEffect(userId) {
         withContext(Dispatchers.IO) {
             runCatching { user = Api.get("/api/users/$userId").optJSONObject("user") ?: JSONObject() }
         }
     }
-    Column(Modifier.fillMaxSize().background(Bg)) {
-        Row(Modifier.padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            CloseIcon { onBack() }
-            Spacer(Modifier.weight(1f))
-            IconBtn(Icons.Outlined.Call) { engine.startCall(userId, "AUDIO", user.name()) }
-            IconBtn(Icons.Outlined.Videocam) { engine.startCall(userId, "VIDEO", user.name()) }
+
+    val friend = user.optBoolean("friend")
+    val canMessage = user.optBoolean("canMessage")
+    val requestState = user.optString("requestState").ifBlank { "none" }
+    val requestId = user.optString("requestId")
+
+    fun openChat() {
+        scope.launch {
+            val data =
+                withContext(Dispatchers.IO) {
+                    runCatching { Api.post("/api/conversations", JSONObject().put("userId", userId)) }.getOrNull()
+                }
+            val id = data?.optJSONObject("conversation")?.optString("id")
+            if (!id.isNullOrBlank()) {
+                onRoute("chat/$id")
+            } else {
+                engine.notify("Couldn't open the chat. Try again.")
+            }
         }
-        LazyColumn(Modifier.padding(12.dp)) {
-            item {
-                ProfileHero(user, 0, user.optInt("reputation"), 0)
-                AboutCard(user)
-                Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AccentBtn("Add") {
-                        scope.launch(Dispatchers.IO) {
-                            runCatching { Api.post("/api/friend-requests", JSONObject().put("userId", userId)) }
+    }
+
+    fun sendRequest() {
+        user = JSONObject(user.toString()).put("requestState", "outgoing")
+        scope.launch(Dispatchers.IO) {
+            runCatching { Api.post("/api/friend-requests", JSONObject().put("userId", userId)) }
+        }
+    }
+
+    fun loadGifts() {
+        giftsLoading = true
+        scope.launch {
+            val items =
+                withContext(Dispatchers.IO) {
+                    runCatching { Api.get("/api/inventory").arr("items").objects() }.getOrDefault(emptyList())
+                }.filter { it.optBoolean("giftable") }
+            gifts.clear()
+            gifts.addAll(items)
+            giftsLoading = false
+        }
+    }
+
+    Box(Modifier.fillMaxSize().background(Bg)) {
+        Column(Modifier.fillMaxSize()) {
+            Row(Modifier.padding(4.dp, 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconBtn(Icons.Outlined.ChevronLeft) { onBack() }
+                Text(
+                    user.name(),
+                    Modifier.weight(1f),
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Ink,
+                )
+                if (canMessage) {
+                    IconBtn(Icons.Outlined.Call) {
+                        engine.startCall(userId, "AUDIO", user.name(), user.optString("avatarUrl"))
+                    }
+                    IconBtn(Icons.Outlined.Videocam) {
+                        engine.startCall(userId, "VIDEO", user.name(), user.optString("avatarUrl"))
+                    }
+                }
+                IconBtn(Icons.Outlined.MoreVert) { menu = true }
+            }
+            LazyColumn(Modifier.padding(12.dp)) {
+                item {
+                    ProfileHero(user, user.optInt("friendsCount"), showPrivateStats = false)
+                    Spacer(Modifier.height(8.dp))
+                    AboutCard(user)
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        when {
+                            friend -> {
+                                Box(
+                                    Modifier.clip(RoundedCornerShape(10.dp)).background(AccentSoft)
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                ) {
+                                    Text("Friends ✓", color = AccentDeep, fontWeight = FontWeight.Medium)
+                                }
+                                AccentBtn("Message") { openChat() }
+                            }
+                            requestState == "outgoing" -> {
+                                Box(
+                                    Modifier.clip(RoundedCornerShape(10.dp)).background(Surface)
+                                        .border(1.dp, Line, RoundedCornerShape(10.dp))
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                ) {
+                                    Text("Request sent", color = Muted, fontWeight = FontWeight.Medium)
+                                }
+                            }
+                            requestState == "incoming" -> {
+                                AccentBtn("Accept") {
+                                    user = JSONObject(user.toString()).put("friend", true).put("requestState", "none")
+                                    scope.launch(Dispatchers.IO) {
+                                        runCatching { Api.post("/api/friend-requests/$requestId/accept") }
+                                    }
+                                }
+                                GhostBtn("Decline") {
+                                    user = JSONObject(user.toString()).put("requestState", "none")
+                                    scope.launch(Dispatchers.IO) {
+                                        runCatching { Api.post("/api/friend-requests/$requestId/decline") }
+                                    }
+                                }
+                            }
+                            else -> {
+                                AccentBtn("Add friend") { sendRequest() }
+                                if (canMessage) AccentBtn("Message") { openChat() }
+                            }
                         }
                     }
-                    AccentBtn("Message") {
-                        scope.launch {
-                            val data =
-                                withContext(Dispatchers.IO) {
-                                    runCatching { Api.post("/api/conversations", JSONObject().put("userId", userId)) }.getOrNull()
+                    Spacer(Modifier.height(6.dp))
+                }
+            }
+        }
+
+        if (menu) {
+            Box(Modifier.fillMaxSize().background(Color(0x591C1917)).clickable { menu = false })
+            Column(
+                Modifier.align(Alignment.TopEnd).padding(end = 8.dp, top = 52.dp).width(210.dp)
+                    .clip(RoundedCornerShape(14.dp)).background(Surface).border(1.dp, Line, RoundedCornerShape(14.dp)),
+            ) {
+                val items =
+                    buildList {
+                        add("Share profile")
+                        if (friend) add("Gift an item")
+                        add("Block")
+                        add("Report")
+                    }
+                items.forEach { label ->
+                    Text(
+                        label,
+                        color = if (label == "Block" || label == "Report") Rose else Ink,
+                        modifier =
+                            Modifier.fillMaxWidth().clickable {
+                                menu = false
+                                when (label) {
+                                    "Share profile" -> {
+                                        val share =
+                                            android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                                type = "text/plain"
+                                                putExtra(
+                                                    android.content.Intent.EXTRA_TEXT,
+                                                    "Find ${user.name()} (@${user.uid()}) on KuchuPuchu 🎮",
+                                                )
+                                            }
+                                        runCatching {
+                                            ctx.startActivity(android.content.Intent.createChooser(share, "Share profile"))
+                                        }
+                                    }
+                                    "Gift an item" -> {
+                                        giftOpen = true
+                                        loadGifts()
+                                    }
+                                    "Block" -> blockOpen = true
+                                    "Report" -> reportOpen = true
                                 }
-                            val id = data?.optJSONObject("conversation")?.optString("id")
-                            if (!id.isNullOrBlank()) onRoute("chat/$id")
+                            }.padding(14.dp, 12.dp),
+                    )
+                }
+            }
+        }
+    }
+
+    if (giftOpen) {
+        Dialog(onDismissRequest = { giftOpen = false }) {
+            Column(
+                Modifier.clip(RoundedCornerShape(16.dp)).background(Surface).padding(16.dp),
+            ) {
+                Text("Send a gift", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                Text("To ${user.name()}", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp, bottom = 8.dp))
+                when {
+                    giftsLoading -> Text("Loading…", color = Muted)
+                    gifts.isEmpty() ->
+                        Text(
+                            "No giftable items yet. Buy something from the store first.",
+                            color = Muted,
+                            fontSize = 13.sp,
+                        )
+                    else ->
+                        LazyColumn(Modifier.height(260.dp)) {
+                            itemsIndexed(gifts) { _, inv ->
+                                val product = inv.optJSONObject("product") ?: JSONObject()
+                                Row(
+                                    Modifier.fillMaxWidth().padding(vertical = 6.dp)
+                                        .clip(RoundedCornerShape(12.dp)).background(Bg).padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(product.optString("name"), fontWeight = FontWeight.Medium)
+                                    }
+                                    AccentBtn("Send") {
+                                        giftOpen = false
+                                        engine.notify("Gift sent 🎁")
+                                        scope.launch(Dispatchers.IO) {
+                                            runCatching {
+                                                Api.post(
+                                                    "/api/gifts",
+                                                    JSONObject()
+                                                        .put("inventoryId", inv.optString("id"))
+                                                        .put("receiverId", userId),
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
+                }
+            }
+        }
+    }
+
+    if (reportOpen) {
+        Dialog(onDismissRequest = { reportOpen = false }) {
+            Column(
+                Modifier.clip(RoundedCornerShape(16.dp)).background(Surface).padding(16.dp),
+            ) {
+                Text("Report ${user.name()}", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                listOf(
+                    "Spam or scam",
+                    "Harassment or abuse",
+                    "Fake profile",
+                    "Cheating or boosting",
+                    "Something else",
+                ).forEach { reason ->
+                    Text(
+                        reason,
+                        modifier =
+                            Modifier.fillMaxWidth().clickable {
+                                reportOpen = false
+                                engine.notify("Report sent. Thank you.")
+                                scope.launch(Dispatchers.IO) {
+                                    runCatching {
+                                        Api.post("/api/reports", JSONObject().put("userId", userId).put("reason", reason))
+                                    }
+                                }
+                            }.padding(vertical = 12.dp),
+                    )
+                }
+            }
+        }
+    }
+
+    if (blockOpen) {
+        Dialog(onDismissRequest = { blockOpen = false }) {
+            Column(Modifier.clip(RoundedCornerShape(16.dp)).background(Surface).padding(16.dp)) {
+                Text("Block ${user.name()}?", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                Text(
+                    "They won't be able to message or call you.",
+                    color = Muted,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AccentBtn("Cancel") { blockOpen = false }
+                    Box(
+                        Modifier.clip(RoundedCornerShape(10.dp)).background(Rose)
+                            .clickable {
+                                blockOpen = false
+                                engine.notify("${user.name()} blocked")
+                                scope.launch(Dispatchers.IO) {
+                                    runCatching { Api.post("/api/users/$userId/block") }
+                                }
+                                onBack()
+                            }.padding(horizontal = 14.dp, vertical = 10.dp),
+                    ) {
+                        Text("Block", color = Color.White, fontWeight = FontWeight.Medium)
                     }
                 }
             }
@@ -331,33 +589,71 @@ fun SettingsScreen(session: Session, onRoute: (String) -> Unit) {
     var showUid by remember { mutableStateOf(p.optBoolean("showFfUid")) }
     var showRel by remember { mutableStateOf(p.optBoolean("showRelationship")) }
     var discoverable by remember { mutableStateOf(p.optBoolean("discoverable", true)) }
+    var allowMessages by remember { mutableStateOf(p.optString("allowMessages").ifBlank { "FRIENDS" }) }
+    var saving by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    Column(Modifier.fillMaxSize().background(Bg).padding(16.dp)) {
+
+    fun savePrivacy() {
+        saving = true
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    Api.patch(
+                        "/api/me/privacy",
+                        JSONObject()
+                            .put("showDistrict", showDistrict)
+                            .put("showFfUid", showUid)
+                            .put("showRelationship", showRel)
+                            .put("discoverable", discoverable)
+                            .put("allowMessages", allowMessages),
+                    )
+                    Api.get("/api/me", force = true).optJSONObject("user")?.let { fresh ->
+                        session.me = fresh
+                    }
+                }
+            }
+            saving = false
+        }
+    }
+
+    Column(Modifier.fillMaxSize().background(Bg).verticalScroll(rememberScrollState()).padding(16.dp)) {
         Text("Settings", fontWeight = FontWeight.SemiBold, fontSize = 22.sp)
         Spacer(Modifier.height(12.dp))
-        Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Surface).border(1.dp, Line, RoundedCornerShape(14.dp)).padding(14.dp)) {
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Surface).border(1.dp, Line, RoundedCornerShape(14.dp)).padding(14.dp)) {
+            Text("Who can message you", fontWeight = FontWeight.SemiBold)
+            Text("Calls follow the same rule.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp, bottom = 4.dp))
+            OptionRow("Everyone", allowMessages == "EVERYONE") { allowMessages = "EVERYONE" }
+            OptionRow("Friends only", allowMessages == "FRIENDS") { allowMessages = "FRIENDS" }
+            OptionRow("No one", allowMessages == "NO_ONE") { allowMessages = "NO_ONE" }
+        }
+        Spacer(Modifier.height(12.dp))
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Surface).border(1.dp, Line, RoundedCornerShape(14.dp)).padding(14.dp)) {
             SwitchRow("Show district", showDistrict) { showDistrict = it }
             SwitchRow("Show UID", showUid) { showUid = it }
             SwitchRow("Show relationship", showRel) { showRel = it }
             SwitchRow("Show in Find duo", discoverable) { discoverable = it }
             Spacer(Modifier.height(8.dp))
-            AccentBtn("Save privacy") {
-                scope.launch(Dispatchers.IO) {
-                    runCatching {
-                        Api.patch(
-                            "/api/me/privacy",
-                            JSONObject()
-                                .put("showDistrict", showDistrict)
-                                .put("showFfUid", showUid)
-                                .put("showRelationship", showRel)
-                                .put("discoverable", discoverable),
-                        )
-                    }
-                }
-            }
+            AccentBtn(if (saving) "Saving…" else "Save privacy") { savePrivacy() }
         }
         Spacer(Modifier.height(16.dp))
         Text("Sign out", color = Muted, modifier = Modifier.clickable { logout(ctx, session, onRoute) }.padding(8.dp))
+    }
+}
+
+@Composable
+private fun OptionRow(label: String, on: Boolean, click: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = click).padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(18.dp).clip(CircleShape).border(1.5.dp, if (on) Accent else Line, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (on) Box(Modifier.size(9.dp).clip(CircleShape).background(Accent))
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(label, color = if (on) Ink else Muted, fontWeight = if (on) FontWeight.Medium else FontWeight.Normal)
     }
 }
 

@@ -5,7 +5,9 @@ import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -17,7 +19,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -94,6 +99,10 @@ fun KpApp() {
         }
         return false
     }
+
+    // The sync service reads this to know when the user is looking at a chat
+    // or the inbox, so it does not post redundant notifications.
+    LaunchedEffect(route) { KpState.route = route }
 
     DisposableEffect(engine) {
         engine.onChange = { call = it }
@@ -197,6 +206,7 @@ fun KpApp() {
                 LoginScreen(
                     onAuthed = { user ->
                         session.me = user
+                        KpSyncService.start(ctx)
                         route = "tabs/home"
                     },
                 )
@@ -214,6 +224,18 @@ fun KpApp() {
                 CallOverlay(it, engine)
             }
         }
+        if (engine.toast.isNotBlank()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+                Box(
+                    Modifier.padding(bottom = 24.dp)
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                        .background(androidx.compose.ui.graphics.Color(0xFF1C1917))
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                ) {
+                    Text(engine.toast, color = androidx.compose.ui.graphics.Color(0xFFF5F5F4), fontSize = 13.sp)
+                }
+            }
+        }
     }
 }
 
@@ -221,6 +243,8 @@ fun logout(ctx: Context, session: Session, go: (String) -> Unit) {
     Api.saveToken(ctx, null)
     Cache.bust()
     Disk.clear()
+    KpSyncService.stop(ctx)
+    MsgNotify.clearAll(ctx)
     session.me = null
     session.clearLists()
     go("login")

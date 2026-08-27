@@ -141,15 +141,18 @@ fun AppShell(
                 }
             }
             if (showChrome && route.startsWith("tabs/")) {
-                Row(
-                    Modifier.fillMaxWidth().background(Surface).padding(top = 8.dp, bottom = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    NavIco(Icons.Outlined.Home, tab == "home") { onRoute("tabs/home") }
-                    NavIco(Icons.Outlined.ChatBubbleOutline, tab == "inbox", session.unread) { onRoute("tabs/inbox") }
-                    NavIco(Icons.Outlined.NotificationsNone, tab == "alerts", session.noteCount) { onRoute("tabs/alerts") }
-                    NavIco(Icons.Outlined.Person, tab == "me") { onRoute("tabs/me") }
+                Column(Modifier.fillMaxWidth().background(Surface)) {
+                    HorizontalDivider(color = Line)
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 7.dp, bottom = 9.dp, start = 6.dp, end = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        NavTab(Icons.Outlined.Home, "Home", tab == "home") { onRoute("tabs/home") }
+                        NavTab(Icons.Outlined.ChatBubbleOutline, "Chats", tab == "inbox", session.unread) { onRoute("tabs/inbox") }
+                        NavTab(Icons.Outlined.NotificationsNone, "Alerts", tab == "alerts", session.noteCount) { onRoute("tabs/alerts") }
+                        NavTab(Icons.Outlined.Person, "Profile", tab == "me") { onRoute("tabs/me") }
+                    }
                 }
             }
         }
@@ -214,10 +217,28 @@ private fun pageTitle(route: String) =
     }
 
 @Composable
-private fun NavIco(icon: ImageVector, on: Boolean, badge: Int = 0, click: () -> Unit) {
-    Box(Modifier.clickable(onClick = click).padding(horizontal = 18.dp, vertical = 4.dp)) {
-        Icon(icon, null, tint = if (on) Accent else Muted, modifier = Modifier.size(22.dp))
-        if (badge > 0) Badge(badge, Modifier.align(Alignment.TopEnd))
+private fun androidx.compose.foundation.layout.RowScope.NavTab(icon: ImageVector, label: String, on: Boolean, badge: Int = 0, click: () -> Unit) {
+    Column(
+        Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(onClick = click).padding(top = 5.dp, bottom = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Box(
+                Modifier.width(58.dp).height(32.dp).clip(RoundedCornerShape(16.dp))
+                    .background(if (on) AccentSoft else Color.Transparent),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(icon, null, tint = if (on) AccentDeep else Muted, modifier = Modifier.size(24.dp))
+            }
+            if (badge > 0) Badge(badge, Modifier.align(Alignment.TopEnd))
+        }
+        Spacer(Modifier.height(3.dp))
+        Text(
+            label,
+            fontSize = 11.sp,
+            fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
+            color = if (on) AccentDeep else Muted,
+        )
     }
 }
 

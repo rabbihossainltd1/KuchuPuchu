@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
@@ -13,15 +14,15 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="KuchuPuchu"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:usesCleartextTraffic="true"
         android:largeHeap="true"
         android:hardwareAccelerated="true"
         android:theme="@style/Theme.KuchuPuchu">
@@ -43,12 +44,28 @@
             android:name=".CallService"
             android:exported="false"
             android:foregroundServiceType="microphone|camera|mediaProjection" />
+        <service
+            android:name=".KpSyncService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse"
+            tools:targetApi="34">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps message and call notifications arriving instantly" />
+        </service>
         <receiver
             android:name=".CallActionReceiver"
             android:exported="false">
             <intent-filter>
                 <action android:name="app.kuchupuchu.android.CALL_ACCEPT" />
                 <action android:name="app.kuchupuchu.android.CALL_DECLINE" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name=".ReplyReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="app.kuchupuchu.android.REPLY" />
             </intent-filter>
         </receiver>
     </application>
