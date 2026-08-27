@@ -27,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
@@ -34,6 +35,7 @@ import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -241,7 +243,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             }
             KpAvatar(title, avatarUrl, 40.dp)
             Spacer(Modifier.width(10.dp))
-            Column {
+            Column(Modifier.weight(1f)) {
                 Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Ink)
                 Text(
                     when {
@@ -252,6 +254,21 @@ fun ChatScreen(nav: NavController, convId: String) {
                     fontSize = 11.5.sp,
                     color = if (online) Green else Muted,
                 )
+            }
+            if (!isGroup && c != null) {
+                val otherId = c.optJSONObject("other")?.optString("id") ?: ""
+                if (otherId.isNotBlank()) {
+                    IconButton(onClick = {
+                        CallEngine.instance?.startCall(otherId, "AUDIO", title, avatarUrl ?: "")
+                    }) {
+                        Icon(Icons.Filled.Call, "Voice call", tint = GoldDeep, modifier = Modifier.size(23.dp))
+                    }
+                    IconButton(onClick = {
+                        CallEngine.instance?.startCall(otherId, "VIDEO", title, avatarUrl ?: "")
+                    }) {
+                        Icon(Icons.Filled.Videocam, "Video call", tint = GoldDeep, modifier = Modifier.size(25.dp))
+                    }
+                }
             }
         }
 

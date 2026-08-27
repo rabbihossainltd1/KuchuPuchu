@@ -1,6 +1,7 @@
 package app.kuchupuchu.android
 
 import android.Manifest
+import android.content.Intent
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
@@ -13,8 +14,16 @@ import androidx.core.view.WindowInsetsControllerCompat
 
 class MainActivity : ComponentActivity() {
 
+    private var shareCb: ((Int, Intent?) -> Unit)? = null
+
     private val ask =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
+
+    private val shareAsk =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            shareCb?.invoke(result.resultCode, result.data)
+            shareCb = null
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -41,6 +50,12 @@ class MainActivity : ComponentActivity() {
             }.start()
         }
 
+        // Call engine: polls active calls, rings, drives the call screens.
+        if (CallEngine.instance == null) {
+            val engine = CallEngine(application)
+            engine.start(this)
+        }
+
         handleIntent(intent)
         setContent { KpTheme { KpApp() } }
     }
@@ -51,15 +66,22 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
     }
 
-    private fun handleIntent(intent: android.content.Intent?) {
+    private fun handleIntent(intent: Intent?) {
         if (intent == null) return
+        if (intent.getBooleanExtra("kp_accept", false)) {
+            CallEngine.instance?.let {
+                it.suppressIncomingFor(15_000)
+                it.pendingAccept = true
+                it.answer()
+            }
+        }
         intent.getStringExtra("kp_chat")?.let { pendingChat = it }
     }
 
     override fun onResume() {
         super.onResume()
         Store.foreground = true
-        restoreChrome()
+        if (CallEngine.instance?.active == null) restoreChrome()
     }
 
     override fun onPause() {
@@ -80,6 +102,13 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         if (current === this) current = null
         super.onDestroy()
+    }
+
+    /** Screen-share permission flow (video call screens). */
+    fun askShare(cb: (Int, Intent?) -> Unit) {
+        shareCb = cb
+        val mgr = getSystemService(MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
+        shareAsk.launch(mgr.createScreenCaptureIntent())
     }
 
     companion object {

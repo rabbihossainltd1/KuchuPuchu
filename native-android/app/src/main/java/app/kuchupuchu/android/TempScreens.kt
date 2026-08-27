@@ -17,16 +17,8 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 
 /**
- * TEMPORARY stand-ins for the Calls and Settings tabs.
- * Each is replaced by its locked-design screen in the remaining rounds:
- *   Calls    → Calls tab #2                 (call round)
- *   Settings → Settings #10 Warm Banner     (settings round)
+ * TEMPORARY stand-in for the Settings tab (replaced by the settings round).
  */
-@Composable
-fun CallsScreen(nav: NavController) {
-    TempTab("📞", "Calls", "Voice & video call history — arriving in this build")
-}
-
 @Composable
 fun SettingsScreen(nav: NavController) {
     TempTab("⚙️", "Settings", "Profile & settings — arriving in this build")

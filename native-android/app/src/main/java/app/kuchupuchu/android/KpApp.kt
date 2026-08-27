@@ -52,6 +52,8 @@ fun KpApp() {
                 }
                 composable("statusphoto") { StatusPhotoScreen(nav) }
             }
+            // Call screens float above everything while a call is live.
+            CallGate()
         }
     }
 }

@@ -91,8 +91,10 @@ class KpPushService : FirebaseMessagingService() {
     private fun handleCall(data: Map<String, String>) {
         val callId = data["callId"]
         if (callId.isNullOrBlank()) return
-        // Call UI (ringing screen + engine) arrives with the call round.
-        // Until then show a high-priority heads-up notification.
+        // A live engine polls /api/calls/active itself and shows its own
+        // ringing UI — don't double-ring.
+        if (CallEngine.instance != null) return
+        if (callId in CallEngine.ignoredCalls) return
         KpNotify.callHeadsUp(this, data["from"] ?: "KuchuPuchu", data["kind"] == "VIDEO", callId)
     }
 
