@@ -17,18 +17,11 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 
 /**
- * TEMPORARY stand-ins for the Status / Calls / Settings tabs.
- * These are honest "arriving in this build" states — each is replaced by
- * its locked-design screen in the remaining build rounds:
- *   Status  → Status #7 + Viewer #4  (status round)
- *   Calls   → Calls tab #2           (call round)
- *   Settings→ Settings #10 Warm Banner (settings round)
+ * TEMPORARY stand-ins for the Calls and Settings tabs.
+ * Each is replaced by its locked-design screen in the remaining rounds:
+ *   Calls    → Calls tab #2                 (call round)
+ *   Settings → Settings #10 Warm Banner     (settings round)
  */
-@Composable
-fun StatusScreen(nav: NavController) {
-    TempTab("✨", "Status", "24-hour status — arriving in this build")
-}
-
 @Composable
 fun CallsScreen(nav: NavController) {
     TempTab("📞", "Calls", "Voice & video call history — arriving in this build")
@@ -37,11 +30,6 @@ fun CallsScreen(nav: NavController) {
 @Composable
 fun SettingsScreen(nav: NavController) {
     TempTab("⚙️", "Settings", "Profile & settings — arriving in this build")
-}
-
-@Composable
-fun ChatScreen(nav: NavController, convId: String) {
-    TempTab("💬", "Chat", "Chat screen — arriving in this build")
 }
 
 @Composable

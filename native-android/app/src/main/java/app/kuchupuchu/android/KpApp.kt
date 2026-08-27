@@ -46,6 +46,11 @@ fun KpApp() {
                 composable("status") { StatusScreen(nav) }
                 composable("calls") { CallsScreen(nav) }
                 composable("search") { SearchScreen(nav) }
+                composable("statusview/{whose}") { entry ->
+                    val whose = entry.arguments?.getString("whose") ?: ""
+                    StatusViewerScreen(nav, whose)
+                }
+                composable("statusphoto") { StatusPhotoScreen(nav) }
             }
         }
     }
