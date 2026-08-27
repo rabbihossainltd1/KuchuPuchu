@@ -177,6 +177,10 @@ fun KpApp() {
         session.loading = false
         if (session.me != null) {
             if (route == "boot" || route == "login") route = "tabs/home"
+            MainActivity.pendingChat?.let { id ->
+                MainActivity.pendingChat = null
+                go("chat/$id")
+            }
         } else {
             route = "login"
             if (!ok) Api.saveToken(ctx, null)

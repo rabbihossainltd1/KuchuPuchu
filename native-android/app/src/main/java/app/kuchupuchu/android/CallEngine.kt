@@ -509,8 +509,14 @@ class CallEngine(private val app: Application) {
         audioSource = null
         videoSource?.dispose()
         videoSource = null
-        localView?.let { v -> videoTrack?.let { runCatching { it.removeSink(v) } } }
-        remoteView?.let { v -> remoteVideo?.let { runCatching { it.removeSink(v) } } }
+        localView?.let { v ->
+            videoTrack?.let { runCatching { it.removeSink(v) } }
+            runCatching { v.release() }
+        }
+        remoteView?.let { v ->
+            remoteVideo?.let { runCatching { it.removeSink(v) } }
+            runCatching { v.release() }
+        }
         audioTrack = null
         videoTrack = null
         remoteVideo = null
@@ -534,6 +540,7 @@ class CallEngine(private val app: Application) {
         left.set(false)
         answering.set(false)
         pendingAccept = false
+        Handler(Looper.getMainLooper()).post { MainActivity.current?.restoreChrome() }
         active = null
     }
 

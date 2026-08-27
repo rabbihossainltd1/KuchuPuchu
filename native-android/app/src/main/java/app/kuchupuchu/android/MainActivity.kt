@@ -2,13 +2,17 @@ package app.kuchupuchu.android
 
 import android.Manifest
 import android.content.Intent
+import android.graphics.Color
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
 
 class MainActivity : ComponentActivity() {
     private var shareCb: ((Int, Intent?) -> Unit)? = null
@@ -52,6 +56,22 @@ class MainActivity : ComponentActivity() {
             CallEngine.instance?.answer()
         }
         intent.getStringExtra("kp_chat")?.let { pendingChat = it }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (CallEngine.instance?.active == null) restoreChrome()
+    }
+
+    fun restoreChrome() {
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        window.statusBarColor = Color.parseColor("#F7F6F4")
+        window.navigationBarColor = Color.WHITE
+        WindowCompat.setDecorFitsSystemWindows(window, true)
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            isAppearanceLightStatusBars = true
+            isAppearanceLightNavigationBars = true
+        }
     }
 
     override fun onDestroy() {

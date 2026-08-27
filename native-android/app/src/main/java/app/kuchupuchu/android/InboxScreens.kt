@@ -57,6 +57,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -307,9 +309,7 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
         }
     }
     LaunchedEffect(messages.size) {
-        if (messages.isEmpty()) return@LaunchedEffect
-        val lastVisible = list.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-        if (lastVisible >= messages.size - 3) list.scrollToItem(messages.lastIndex)
+        if (messages.isNotEmpty()) list.scrollToItem(messages.lastIndex)
     }
 
     BackHandler(viewer != null || menu || stickers) {
@@ -343,6 +343,7 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
         photos.clear()
         stickers = false
         sending += 1
+        scope.launch { runCatching { list.scrollToItem(messages.lastIndex) } }
         scope.launch {
             val saved =
                 withContext(Dispatchers.IO) {
@@ -565,9 +566,14 @@ fun ChatScreen(convoId: String, session: Session, onRoute: (String) -> Unit, onB
         }
     }
         viewer?.let { src ->
-            Box(Modifier.fillMaxSize().background(Color(0xFF0C0A09))) {
-                MediaImage(src, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
-                CloseIcon { viewer = null }
+            Dialog(
+                onDismissRequest = { viewer = null },
+                properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+            ) {
+                Box(Modifier.fillMaxSize().background(Color(0xFF0C0A09))) {
+                    MediaImage(src, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                    CloseIcon { viewer = null }
+                }
             }
         }
         if (menu) {

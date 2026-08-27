@@ -85,7 +85,7 @@ fun Avatar(
     val initial =
         name.split(" ").filter { it.isNotBlank() }.take(2).joinToString("") { it.take(1) }.uppercase()
             .ifBlank { name.take(1).uppercase() }
-    val photo = user?.optString("avatarUrl").orEmpty().ifBlank { user?.optString("photoUrl").orEmpty() }
+    val photo = user?.clean("avatarUrl").orEmpty().ifBlank { user?.clean("photoUrl").orEmpty() }
     Box(
         Modifier.size(size)
             .clip(CircleShape)
@@ -171,11 +171,11 @@ fun MediaImage(src: String, modifier: Modifier = Modifier, contentScale: Content
     }
 }
 
-fun JSONObject.name(): String = optString("displayName").ifBlank { "Player" }
+fun JSONObject.name(): String = clean("displayName").ifBlank { clean("username").ifBlank { "Player" } }
 
-fun JSONObject.userId(): String = optString("userId").ifBlank { optString("id") }
+fun JSONObject.userId(): String = clean("userId").ifBlank { clean("id") }
 
-fun JSONObject.uid(): String = optString("username").ifBlank { userId().take(8) }
+fun JSONObject.uid(): String = clean("username").ifBlank { userId().take(8) }
 
 fun JSONObject.profile(): JSONObject = optJSONObject("profile") ?: this
 

@@ -81,20 +81,19 @@ fun CallOverlay(call: CallUi, engine: CallEngine) {
     }
 
     DisposableEffect(Unit) {
-        val window = (ctx as? Activity)?.window
-        val prevStatus = window?.statusBarColor
-        val prevNav = window?.navigationBarColor
-        window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        window?.statusBarColor = AndroidColor.BLACK
-        window?.navigationBarColor = AndroidColor.BLACK
-        window?.let {
+        val activity = ctx as? Activity
+        activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        activity?.window?.statusBarColor = AndroidColor.BLACK
+        activity?.window?.navigationBarColor = AndroidColor.BLACK
+        activity?.window?.let {
             WindowCompat.setDecorFitsSystemWindows(it, false)
-            WindowInsetsControllerCompat(it, it.decorView).isAppearanceLightStatusBars = false
+            WindowInsetsControllerCompat(it, it.decorView).apply {
+                isAppearanceLightStatusBars = false
+                isAppearanceLightNavigationBars = false
+            }
         }
         onDispose {
-            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            if (prevStatus != null) window.statusBarColor = prevStatus
-            if (prevNav != null) window.navigationBarColor = prevNav
+            activity?.restoreChrome()
         }
     }
 
@@ -348,7 +347,11 @@ private fun VideoSurface(local: Boolean, engine: CallEngine, modifier: Modifier,
         },
         modifier = modifier,
         update = {},
-        onRelease = { if (local) engine.detachLocal(it) else engine.detachRemote(it) },
+        onRelease = { view ->
+            if (local) engine.detachLocal(view) else engine.detachRemote(view)
+            runCatching { view.release() }
+            view.visibility = android.view.View.GONE
+        },
     )
 }
 

@@ -101,7 +101,7 @@ fun ProfileHero(user: JSONObject, friends: Int, reputation: Int, coins: Int) {
             }
         }
         Column(Modifier.padding(16.dp).offset(y = (-18).dp)) {
-            if (user.optString("bio").isNotBlank()) Text(user.optString("bio"))
+            if (user.clean("bio").isNotBlank()) Text(user.clean("bio"))
             Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text("$friends friends", color = Muted, fontSize = 13.sp)
                 Text("$reputation reputation", color = Muted, fontSize = 13.sp)
@@ -144,14 +144,14 @@ fun AboutCard(user: JSONObject) {
 fun EditProfileScreen(session: Session, done: () -> Unit) {
     val user = session.me ?: JSONObject()
     val p0 = user.profile()
-    var displayName by remember { mutableStateOf(user.optString("displayName")) }
-    var username by remember { mutableStateOf(user.optString("username")) }
-    var bio by remember { mutableStateOf(user.optString("bio")) }
-    var ffUid by remember { mutableStateOf(p0.optString("ffUid")) }
-    var ffIgn by remember { mutableStateOf(p0.optString("ffIgn")) }
-    var facebook by remember { mutableStateOf(p0.optString("facebookId")) }
-    var whatsapp by remember { mutableStateOf(p0.optString("whatsapp")) }
-    var instagram by remember { mutableStateOf(p0.optString("instagram")) }
+    var displayName by remember { mutableStateOf(user.clean("displayName")) }
+    var username by remember { mutableStateOf(user.clean("username")) }
+    var bio by remember { mutableStateOf(user.clean("bio")) }
+    var ffUid by remember { mutableStateOf(p0.clean("ffUid")) }
+    var ffIgn by remember { mutableStateOf(p0.clean("ffIgn")) }
+    var facebook by remember { mutableStateOf(p0.clean("facebookId")) }
+    var whatsapp by remember { mutableStateOf(p0.clean("whatsapp")) }
+    var instagram by remember { mutableStateOf(p0.clean("instagram")) }
     val scope = rememberCoroutineScope()
     Column(Modifier.fillMaxSize().background(Bg).verticalScroll(rememberScrollState()).padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
