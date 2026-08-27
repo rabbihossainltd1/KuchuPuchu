@@ -25,7 +25,8 @@ jobs:
         working-directory: native-android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug assembleRelease --no-daemon --stacktrace
+          ./gradlew assembleDebug assembleRelease --no-daemon --stacktrace \
+            -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
       - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
