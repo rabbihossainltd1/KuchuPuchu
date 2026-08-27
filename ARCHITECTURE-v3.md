@@ -26,8 +26,12 @@
   | Calls tab | #2 | Date sections (Today/Yesterday/Monday), direction arrows, gold callback buttons |
   | Chat box | #7 | Coin wallpaper (subtle), gradient outgoing bubble, voice message bubbles, ticks |
   | Status | #7 | Big airy — 72px rings, boro "My status" card, spacious rows |
-  | Status viewer | #4 | Quick reactions row above reply bar | |
-- Baki screens: calls tab, incoming/outgoing call, in-call voice/video+share, attach, search, settings — design round cholche
+ |
+- Baki screens (voice/video ALADA alada screen hobe — user directive):
+  - Incoming VOICE call → Incoming VIDEO call
+  - Outgoing/ringing VOICE → Outgoing/ringing VIDEO
+  - In-call VOICE → In-call VIDEO (+screen share UI)
+  - Attach sheet, search, settings — design round cholche
 - **Logo:** last round e notun logo (current baad)
 
 ## Worker v3 (Cloudflare)
