@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -90,18 +91,14 @@ fun StatusPhotoScreen(nav: NavController) {
                 Image(bmp, contentDescription = "Status photo", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             } else {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("🖼", fontSize = 44.sp)
+                    Icon(
+                        androidx.compose.material.icons.Icons.Filled.PhotoLibrary,
+                        contentDescription = "Pick photo",
+                        tint = GoldDeep,
+                        modifier = Modifier.size(44.dp),
+                    )
                     Spacer(Modifier.height(8.dp))
                     Text("Tap below to pick a photo", color = Muted, fontSize = 14.sp)
-                    Spacer(Modifier.height(14.dp))
-                    Box(
-                        Modifier
-                            .size(52.dp)
-                            .clip(CircleShape)
-                            .background(Gold)
-                            .padding(12.dp),
-                        contentAlignment = Alignment.Center,
-                    ) { Text("＋", color = AmberInk, fontSize = 20.sp) }
                 }
             }
         }

@@ -65,12 +65,10 @@ data class CallUi(
  */
 class CallEngine(private val app: Application) {
     var onChange: ((CallUi?) -> Unit)? = null
-    var active: CallUi? = null
-        private set(value) {
-            if (field == value) return
-            field = value
-            onChange?.invoke(value)
-        }
+
+    /** Compose state: call screens recompose when this changes. */
+    var active by mutableStateOf<CallUi?>(null)
+        private set
 
     var speaker by mutableStateOf(false)
     var muted by mutableStateOf(false)
@@ -121,14 +119,19 @@ class CallEngine(private val app: Application) {
     }
 
     fun start(ctx: Context) {
-        ensureFactory(ctx)
         CallNotify.ensure(ctx)
         poll?.cancel()
         poll =
             scope.launch {
                 while (isActive) {
                     tick()
-                    delay(if (active != null) 700 else 900)
+                    delay(
+                        when {
+                            active != null -> 700L
+                            Store.foreground -> 1500L
+                            else -> 4000L
+                        },
+                    )
                 }
             }
     }
@@ -290,6 +293,7 @@ class CallEngine(private val app: Application) {
         hasRemote = false
         speaker = false
         onHold = false
+        ensureFactory(app)
         applyAudio()
         active = CallUi("pending", kind, "RINGING", false, name, userId, otherAvatar = avatar)
         CallService.start(app, if (kind == "VIDEO") "Video calling $name" else "Calling $name")
@@ -353,6 +357,7 @@ class CallEngine(private val app: Application) {
         CallNotify.cancelIncoming(app)
         ringingId = null
         clearIncomingSuppression()
+        ensureFactory(app)
         applyAudio()
         CallService.start(app, "In a call with ${rec.otherName}")
         active = rec.copy(status = "ACTIVE", startedAt = System.currentTimeMillis(), connecting = true)

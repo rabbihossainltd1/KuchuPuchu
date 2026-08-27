@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.RemoveRedEye
 import androidx.compose.foundation.Image
@@ -66,17 +67,16 @@ import org.json.JSONObject
 @Composable
 fun StatusScreen(nav: NavController) {
     val scope = rememberCoroutineScope()
-    val groups = remember { mutableStateListOf<JSONObject>() }
-    var loading by remember { mutableStateOf(true) }
-    var showAdd by remember { mutableStateOf(false) }
+    val groups = ScreenStore.statuses
+    var loading by remember { mutableStateOf(!ScreenStore.statusesLoaded) }
     var composeText by remember { mutableStateOf(false) }
+    val haptics = rememberHaptics()
 
     fun refresh() {
         scope.launch {
             try {
-                val data = withContext(Dispatchers.IO) { Api.get("/api/statuses", true) }
-                groups.clear()
-                groups.addAll(data.arr("items").objects())
+                val data = withContext(Dispatchers.IO) { Api.get("/api/statuses") }
+                ScreenStore.setStatuses(data.arr("items").objects())
             } catch (_: Exception) {
             } finally {
                 loading = false
@@ -91,7 +91,8 @@ fun StatusScreen(nav: NavController) {
     val mine = groups.firstOrNull { it.optBoolean("mine") }
     val others = groups.filter { !it.optBoolean("mine") }
 
-    Column(Modifier.fillMaxSize().background(Cream)) {
+    Box(Modifier.fillMaxSize().background(Cream)) {
+        Column(Modifier.fillMaxSize()) {
         Text(
             "Status",
             fontSize = 22.sp,
@@ -116,8 +117,9 @@ fun StatusScreen(nav: NavController) {
                         .clip(RoundedCornerShape(16.dp))
                         .background(Card)
                         .clickable {
+                            haptics.tap()
                             if (myStatuses.isNotEmpty()) nav.navigate("statusview/mine")
-                            else showAdd = true
+                            else nav.navigate("statusphoto")
                         }
                         .padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -159,7 +161,7 @@ fun StatusScreen(nav: NavController) {
                                 myStatuses.isEmpty() -> "Tap to add a status update"
                                 else -> {
                                     val views = myStatuses.sumOf { it.optInt("viewers", 0) }
-                                    "👍 ${myStatuses.size} update${if (myStatuses.size > 1) "s" else ""} · $views view${if (views == 1) "" else "s"}"
+                                    "${myStatuses.size} update${if (myStatuses.size > 1) "s" else ""} · $views view${if (views == 1) "" else "s"}"
                                 }
                             },
                             fontSize = 13.sp,
@@ -198,37 +200,47 @@ fun StatusScreen(nav: NavController) {
             }
             if (!loading && others.isEmpty()) {
                 item {
-                    Text(
-                        "No friend statuses yet.\nChats korle ekhane status dekha jabe.",
-                        fontSize = 13.5.sp,
-                        color = Muted,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth().padding(top = 20.dp),
-                    )
+                    Box(Modifier.fillMaxWidth().padding(top = 20.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            "No friend statuses yet. Chats korle ekhane status dekha jabe.",
+                            fontSize = 13.5.sp,
+                            color = Muted,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
                 }
+            }
+        }
+        }
+
+        /* WhatsApp-style stacked FABs: pencil = text status, camera = photo */
+        Column(
+            Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 20.dp, bottom = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            androidx.compose.material3.SmallFloatingActionButton(
+                onClick = { haptics.tap(); composeText = true },
+                shape = CircleShape,
+                containerColor = Card,
+                contentColor = GoldDeep,
+                modifier = Modifier.padding(bottom = 14.dp).size(46.dp),
+            ) {
+                Icon(Icons.Filled.Edit, contentDescription = "Text status", modifier = Modifier.size(22.dp))
+            }
+            androidx.compose.material3.FloatingActionButton(
+                onClick = { haptics.tap(); nav.navigate("statusphoto") },
+                shape = CircleShape,
+                containerColor = Gold,
+                contentColor = AmberInk,
+                modifier = Modifier.size(60.dp),
+            ) {
+                Icon(Icons.Filled.PhotoCamera, contentDescription = "Photo status", modifier = Modifier.size(28.dp))
             }
         }
     }
 
-    if (showAdd) {
-        AlertDialog(
-            onDismissRequest = { showAdd = false },
-            title = { Text("Add status") },
-            text = { Text("Photo niye ba likhe status din — 24 ghonta thakbe.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    showAdd = false
-                    composeText = true
-                }) { Text("✏️ Write text", color = GoldDeep) }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    showAdd = false
-                    nav.navigate("statusphoto")
-                }) { Text("📷 Photo", color = GoldDeep) }
-            },
-        )
-    }
     if (composeText) {
         StatusComposer {
             composeText = false
@@ -506,7 +518,12 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text("👀", fontSize = 40.sp)
+                Icon(
+                    Icons.Filled.RemoveRedEye,
+                    contentDescription = "No status",
+                    tint = Color.White.copy(alpha = 0.8f),
+                    modifier = Modifier.size(42.dp),
+                )
                 Spacer(Modifier.height(8.dp))
                 Text("No status", color = Color.White.copy(alpha = 0.8f), fontSize = 15.sp)
             }
@@ -616,11 +633,20 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                         Modifier.fillMaxWidth().padding(16.dp),
                         horizontalArrangement = Arrangement.Center,
                     ) {
-                        Text(
-                            "👁 ${s.optInt("viewers", 0)} view${if (s.optInt("viewers", 0) == 1) "" else "s"}",
-                            color = Color.White,
-                            fontSize = 13.sp,
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Filled.RemoveRedEye,
+                                contentDescription = "Views",
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.width(5.dp))
+                            Text(
+                                "${s.optInt("viewers", 0)} view${if (s.optInt("viewers", 0) == 1) "" else "s"}",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                            )
+                        }
                     }
                 } else {
                     Row(

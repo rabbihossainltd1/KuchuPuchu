@@ -55,14 +55,14 @@ import org.json.JSONObject
 @Composable
 fun CallsScreen(nav: NavController) {
     val scope = rememberCoroutineScope()
-    val calls = remember { mutableStateListOf<JSONObject>() }
-    var loading by remember { mutableStateOf(true) }
+    val calls = ScreenStore.calls
+    var loading by remember { mutableStateOf(!ScreenStore.callsLoaded) }
+    val haptics = rememberHaptics()
 
     LaunchedEffect(Unit) {
         try {
-            val data = withContext(Dispatchers.IO) { Api.get("/api/calls/history", true) }
-            calls.clear()
-            calls.addAll(data.arr("items").objects())
+            val data = withContext(Dispatchers.IO) { Api.get("/api/calls/history") }
+            ScreenStore.setCalls(data.arr("items").objects())
         } catch (_: Exception) {
         } finally {
             loading = false
@@ -80,16 +80,12 @@ fun CallsScreen(nav: NavController) {
             modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 10.dp),
         )
         if (calls.isEmpty() && !loading) {
-            Column(
-                Modifier.fillMaxSize().padding(32.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text("📞", fontSize = 44.sp)
-                Spacer(Modifier.height(10.dp))
-                Text("No calls yet", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = Ink)
-                Spacer(Modifier.height(6.dp))
-                Text("Chat thekei voice ba video call shuru korun", fontSize = 13.5.sp, color = Muted)
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                EmptyState(
+                    icon = Icons.Filled.Call,
+                    title = "No calls yet",
+                    note = "Chat thekei voice ba video call shuru korun",
+                )
             }
         }
         LazyColumn(
@@ -133,6 +129,7 @@ fun CallsScreen(nav: NavController) {
 
 @Composable
 private fun CallRow(call: JSONObject, onOpenChat: () -> Unit) {
+    val haptics = rememberHaptics()
     val incoming = call.optBoolean("incoming")
     val other = call.optJSONObject("other")
     val name = other?.optString("displayName")?.takeIf { it.isNotBlank() } ?: "Unknown"
@@ -205,6 +202,7 @@ private fun CallRow(call: JSONObject, onOpenChat: () -> Unit) {
         if (otherId.isNotBlank()) {
             IconButton(
                 onClick = {
+                    haptics.tap()
                     CallEngine.instance?.startCall(otherId, if (video) "VIDEO" else "AUDIO", name, avatar ?: "")
                 },
                 modifier = Modifier

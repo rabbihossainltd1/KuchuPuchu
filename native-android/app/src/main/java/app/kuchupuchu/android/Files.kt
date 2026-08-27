@@ -34,11 +34,20 @@ object FilesUtil {
 
     /**
      * Decodes a picked image and re-encodes it as a JPEG dataUrl small
-     * enough for inline storage (≤ ~420KB base64).
+     * enough for inline storage (≤ ~420KB base64). Handles HEIC/HEIF via
+     * ImageDecoder on API 28+.
      */
     fun imageToDataUrl(uri: Uri, ctx: Context, maxSide: Int = 1280): String? = runCatching {
         val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
-        var bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+        var bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        if (bmp == null && android.os.Build.VERSION.SDK_INT >= 28) {
+            // HEIC/HEIF and other formats BitmapFactory can't read directly
+            val source = android.graphics.ImageDecoder.createSource(bytes)
+            bmp = android.graphics.ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
+                decoder.setTargetSampleSize(1)
+            }
+        }
+        if (bmp == null) return null
         var scale = 1
         while (bmp.width / scale > maxSide || bmp.height / scale > maxSide) scale *= 2
         if (scale > 1) bmp = Bitmap.createScaledBitmap(bmp, bmp.width / scale, bmp.height / scale, true)

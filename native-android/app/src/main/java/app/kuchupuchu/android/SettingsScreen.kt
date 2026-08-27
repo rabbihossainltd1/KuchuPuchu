@@ -192,7 +192,7 @@ fun SettingsScreen(nav: NavController) {
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        me.value.optString("about").ifBlank { "Hey! I'm using KuchuPuchu 👋" },
+                        me.value.optString("about").ifBlank { "Hey! I'm using KuchuPuchu" },
                         color = Color(0xCCFFFFFF),
                         fontSize = 12.5.sp,
                         maxLines = 2,
@@ -215,7 +215,7 @@ fun SettingsScreen(nav: NavController) {
             SettingRow(Icons.Filled.AlternateEmail, "Username", me.value.optString("username").ifBlank { "not set" }) {
                 editField = "username"; editValue = me.value.optString("username")
             }
-            SettingRow(Icons.Filled.Info, "About", me.value.optString("about").ifBlank { "Hey! I'm using KuchuPuchu 👋" }) {
+            SettingRow(Icons.Filled.Info, "About", me.value.optString("about").ifBlank { "Hey! I'm using KuchuPuchu" }) {
                 editField = "about"; editValue = me.value.optString("about")
             }
             SettingRow(Icons.Filled.Mail, "Email", me.value.optString("email"), clickable = false) {}
@@ -242,7 +242,7 @@ fun SettingsScreen(nav: NavController) {
             ) {
                 Column(Modifier.weight(1f)) {
                     Text("KuchuPuchu v3.0", fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, color = Ink)
-                    Text("Made with 💛 · kuchupuchu-api.kuchupuchu.workers.dev", fontSize = 12.sp, color = Muted)
+                    Text("kuchupuchu-api.kuchupuchu.workers.dev", fontSize = 12.sp, color = Muted)
                 }
             }
         }

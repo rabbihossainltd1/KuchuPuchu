@@ -80,7 +80,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
                 color = Ink,
             )
             Text(
-                if (mode == "login") "Welcome back 👋" else "Create your account",
+                if (mode == "login") "Welcome back" else "Create your account",
                 fontSize = 14.sp,
                 color = Muted,
             )

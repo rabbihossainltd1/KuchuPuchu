@@ -78,28 +78,32 @@ import kotlin.math.roundToInt
 @Composable
 fun ChatListScreen(nav: NavController) {
     val scope = rememberCoroutineScope()
-    val convs = remember { mutableStateListOf<JSONObject>() }
-    var loading by remember { mutableStateOf(true) }
+    val convs = ScreenStore.convs
+    var loading by remember { mutableStateOf(!ScreenStore.convsLoaded) }
     var tab by remember { mutableIntStateOf(0) }
+    val haptics = rememberHaptics()
 
     fun refresh() {
         scope.launch {
             try {
                 val data = withContext(Dispatchers.IO) { Api.get("/api/conversations", true) }
-                val fresh = data.arr("items").objects()
-                convs.clear()
-                convs.addAll(fresh)
+                ScreenStore.setConvs(data.arr("items").objects())
+                loading = false
             } catch (_: Exception) {
-            } finally {
                 loading = false
             }
         }
     }
 
     LaunchedEffect(Unit) {
+        if (ScreenStore.convsLoaded) {
+            refresh() // silent background refresh, store paints instantly
+        } else {
+            refresh()
+        }
         while (true) {
+            delay(10_000)
             if (Store.foreground) refresh()
-            delay(if (convs.isEmpty()) 4_000 else 9_000)
         }
     }
 
@@ -129,9 +133,9 @@ fun ChatListScreen(nav: NavController) {
                     .fillMaxWidth()
                     .padding(horizontal = 14.dp, vertical = 4.dp),
             ) {
-                TopTab(Icons.Filled.Chat, "Chats", tab == 0, unreadTotal) { tab = 0 }
-                TopTab(Icons.Filled.Circle, "Status", tab == 1) { tab = 1 }
-                TopTab(Icons.Filled.Call, "Calls", tab == 2) { tab = 2 }
+                TopTab(Icons.Filled.Chat, "Chats", tab == 0, unreadTotal) { haptics.tap(); tab = 0 }
+                TopTab(Icons.Filled.Circle, "Status", tab == 1) { haptics.tap(); tab = 1 }
+                TopTab(Icons.Filled.Call, "Calls", tab == 2) { haptics.tap(); tab = 2 }
             }
             Box(
                 Modifier
@@ -151,7 +155,7 @@ fun ChatListScreen(nav: NavController) {
 
         /* ---------- gold FAB ---------- */
         FloatingActionButton(
-            onClick = { nav.navigate("newchat") },
+            onClick = { haptics.tap(); nav.navigate("newchat") },
             shape = CircleShape,
             containerColor = Gold,
             contentColor = AmberInk,
@@ -232,21 +236,15 @@ private fun ChatListBody(
     onChange: () -> Unit,
 ) {
     if (convs.isEmpty()) {
-        Column(
-            Modifier
-                .fillMaxSize()
-                .padding(32.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             if (loading) {
                 CircularProgressIndicator(color = Gold)
             } else {
-                Text("👋", fontSize = 44.sp)
-                Spacer(Modifier.height(10.dp))
-                Text("No chats yet", fontSize = 19.sp, fontWeight = FontWeight.SemiBold, color = Ink)
-                Spacer(Modifier.height(6.dp))
-                Text("Tap the gold button to message someone", fontSize = 14.sp, color = Muted)
+                EmptyState(
+                    icon = Icons.Filled.Chat,
+                    title = "No chats yet",
+                    note = "Tap the gold button to message someone",
+                )
             }
         }
         return
@@ -266,6 +264,7 @@ private fun ChatListBody(
 @Composable
 private fun SwipeConvRow(conv: JSONObject, nav: NavController, onChange: () -> Unit) {
     val scope = rememberCoroutineScope()
+    val haptics = rememberHaptics()
     val density = LocalDensity.current
     val actionWidth = with(density) { 136.dp.toPx() }
     var dragged by remember { mutableStateOf(0f) }
@@ -287,6 +286,7 @@ private fun SwipeConvRow(conv: JSONObject, nav: NavController, onChange: () -> U
                 label = if (conv.optBoolean("muted")) "Unmute" else "Mute",
             ) {
                 scope.launch {
+                    haptics.confirm()
                     runCatching {
                         withContext(Dispatchers.IO) {
                             Api.post(
@@ -306,6 +306,7 @@ private fun SwipeConvRow(conv: JSONObject, nav: NavController, onChange: () -> U
                 label = "Delete",
             ) {
                 scope.launch {
+                    haptics.heavy()
                     runCatching {
                         withContext(Dispatchers.IO) {
                             Api.delete("/api/conversations/${conv.optString("id")}")
@@ -422,7 +423,7 @@ private fun ConvCard(conv: JSONObject, nav: NavController) {
             Spacer(Modifier.height(3.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    preview.ifBlank { "Say hi 👋" },
+                    preview.ifBlank { "No messages yet" },
                     fontSize = 13.5.sp,
                     color = Muted,
                     maxLines = 1,

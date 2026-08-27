@@ -8,7 +8,8 @@ import java.io.File
 
 /**
  * Voice notes: record to a temp m4a with MediaRecorder, play back with
- * MediaPlayer. One active player at a time per screen.
+ * MediaPlayer from a downloaded cache file (auth headers can't go on a
+ * stream URL, so bytes come through Api.download first).
  */
 object VoiceNote {
     private var recorder: MediaRecorder? = null
@@ -62,31 +63,43 @@ object VoiceNote {
     }
 }
 
-/** Simple single-player helper for voice bubbles. */
+/**
+ * Single active player for voice bubbles. Plays from a cached copy
+ * downloaded with auth; toggles feel instant (state flips first, audio
+ * starts as soon as the file is ready).
+ */
 class VoicePlayer {
     private var player: MediaPlayer? = null
     var playingId: String? = null
         private set
 
-    fun toggle(id: String, url: String, onEnd: () -> Unit = {}): Boolean {
+    /** Starts playing a voice message; downloads with auth on IO. */
+    fun toggle(ctx: Context, id: String, fileKey: String, onEnded: () -> Unit = {}) {
         if (playingId == id) {
             stop()
-            return false
+            return
         }
         stop()
-        return runCatching {
-            val p = MediaPlayer()
-            p.setDataSource(url)
-            p.setOnCompletionListener {
+        playingId = id
+        Thread {
+            runCatching {
+                val bytes = Api.download(fileKey)
+                val f = File(ctx.cacheDir, "voice_msg_${id.hashCode()}.m4a")
+                f.writeBytes(bytes)
+                val p = MediaPlayer()
+                p.setDataSource(f.absolutePath)
+                p.setOnCompletionListener {
+                    playingId = null
+                    onEnded()
+                }
+                p.prepare()
+                p.start()
+                player = p
+            }.onFailure {
                 playingId = null
-                onEnd()
+                player = null
             }
-            p.prepare()
-            p.start()
-            player = p
-            playingId = id
-            true
-        }.getOrDefault(false)
+        }.start()
     }
 
     fun stop() {

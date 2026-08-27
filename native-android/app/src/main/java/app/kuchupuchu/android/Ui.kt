@@ -3,25 +3,40 @@ package app.kuchupuchu.android
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Base64
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -139,18 +154,62 @@ fun GoldBtn(
 /** Quiet circular icon button used in top bars. */
 @Composable
 fun IconBtn(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     contentDescription: String,
-    tint: androidx.compose.ui.graphics.Color = Ink,
+    tint: Color = Ink,
     size: Dp = 26.dp,
     onClick: () -> Unit,
 ) {
     androidx.compose.material3.IconButton(onClick = onClick) {
-        androidx.compose.material3.Icon(
+        Icon(
             icon,
             contentDescription = contentDescription,
             tint = tint,
             modifier = Modifier.size(size),
         )
     }
+}
+
+/**
+ * Icon-only empty state (gold-soft circle + icon + title + note) —
+ * replaces the old emoji placeholders everywhere.
+ */
+@Composable
+fun EmptyState(
+    icon: ImageVector,
+    title: String,
+    note: String,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier.then(Modifier.padding(32.dp)),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier
+                .size(76.dp)
+                .clip(CircleShape)
+                .background(GoldSoft),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = title, tint = GoldDeep, modifier = Modifier.size(34.dp))
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(title, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+        Spacer(Modifier.height(6.dp))
+        Text(note, fontSize = 14.sp, color = Muted, textAlign = TextAlign.Center)
+    }
+}
+
+/** Scales down slightly while pressed — attach to any clickable's modifier. */
+@Composable
+fun Modifier.pressScale(interactionSource: MutableInteractionSource): Modifier {
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        if (pressed) 0.92f else 1f,
+        animationSpec = spring(stiffness = 800f),
+        label = "press",
+    )
+    return this.scale(scale)
 }

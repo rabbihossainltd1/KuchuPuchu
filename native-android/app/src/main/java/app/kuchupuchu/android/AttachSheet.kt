@@ -61,6 +61,7 @@ fun AttachSheet(
     onSendText: (String) -> Unit,
     onSendImage: (dataUrl: String) -> Unit,
     onSendFile: (name: String, mime: String, bytes: ByteArray) -> Unit,
+    onError: (String) -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -72,6 +73,7 @@ fun AttachSheet(
                 scope.launch {
                     val dataUrl = withContext(Dispatchers.IO) { FilesUtil.imageToDataUrl(uri, ctx) }
                     if (dataUrl != null) onSendImage(dataUrl)
+                    else onError("Could not read that photo — try another one.")
                 }
             }
         }
@@ -83,6 +85,7 @@ fun AttachSheet(
                 scope.launch {
                     val dataUrl = withContext(Dispatchers.IO) { FilesUtil.imageToDataUrl(uri, ctx) }
                     if (dataUrl != null) onSendImage(dataUrl)
+                    else onError("Could not read that photo — try another one.")
                 }
             }
         }
@@ -109,7 +112,7 @@ fun AttachSheet(
                     if (pair != null) {
                         val (mime, bytes) = pair
                         onSendFile(queryName(ctx, uri), if (mime.startsWith("audio")) mime else "audio/mpeg", bytes)
-                    }
+                    } else onError("Could not read that audio file.")
                 }
             }
         }

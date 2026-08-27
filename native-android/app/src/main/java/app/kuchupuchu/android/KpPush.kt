@@ -100,7 +100,12 @@ class KpPushService : FirebaseMessagingService() {
 
     private fun handleMessage(data: Map<String, String>) {
         val convoId = data["convoId"] ?: return
-        if (Store.foreground && Store.route == "chat/$convoId") return
+        if (Store.foreground && Store.route == "chat/$convoId") {
+            // already watching this chat — just the soft receive tone
+            runCatching { KpSounds.receive(this) }
+            return
+        }
+        if (Store.foreground) runCatching { KpSounds.receive(this) }
         KpNotify.message(this, data["from"] ?: "KuchuPuchu", data["body"] ?: "New message", convoId)
     }
 

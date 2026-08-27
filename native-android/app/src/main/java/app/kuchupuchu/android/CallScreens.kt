@@ -335,6 +335,7 @@ fun OutgoingVideoScreen(call: CallUi) {
 @Composable
 fun InCallVoiceScreen(call: CallUi) {
     val engine = CallEngine.instance ?: return
+    val haptics = rememberHaptics()
     val secs = rememberTick(call.startedAt, call.connecting)
 
     Column(Modifier.fillMaxSize().background(Cream)) {
@@ -392,7 +393,7 @@ fun InCallVoiceScreen(call: CallUi) {
                             ) { engine.toggleSpeaker() }
                             2 -> GridAction(
                                 Icons.Filled.Bluetooth,
-                                if (engine.bluetooth) "Bluetooth" else "Bluetooth",
+                                if (engine.bluetooth) "Bluetooth on" else "Bluetooth",
                                 active = engine.bluetooth,
                             ) { engine.toggleBluetooth() }
                             3 -> GridAction(
@@ -410,7 +411,7 @@ fun InCallVoiceScreen(call: CallUi) {
                                 "End call",
                                 active = false,
                                 danger = true,
-                            ) { engine.hangup() }
+                            ) { haptics.heavy(); engine.hangup() }
                         }
                     }
                 }
@@ -427,6 +428,7 @@ fun InCallVoiceScreen(call: CallUi) {
 @Composable
 fun InCallVideoScreen(call: CallUi) {
     val engine = CallEngine.instance ?: return
+    val haptics = rememberHaptics()
     val secs = rememberTick(call.startedAt, call.connecting)
 
     Box(Modifier.fillMaxSize().background(Dark)) {
@@ -512,7 +514,7 @@ fun InCallVideoScreen(call: CallUi) {
             StripAction(Icons.Filled.PhoneInTalk, "Voice only", active = false) {
                 engine.toggleCamera()
             }
-            StripAction(Icons.Filled.CallEnd, "End", active = false, danger = true) { engine.hangup() }
+            StripAction(Icons.Filled.CallEnd, "End", active = false, danger = true) { haptics.heavy(); engine.hangup() }
         }
     }
 }
@@ -533,12 +535,14 @@ private fun DarkCallScaffold(content: @Composable () -> Unit) {
 @Composable
 private fun CallCircle(color: Color, size: androidx.compose.ui.unit.Dp, icon: @Composable () -> Unit) {
     val engine = CallEngine.instance ?: return
+    val haptics = rememberHaptics()
     Box(
         Modifier
             .size(size)
             .clip(CircleShape)
             .background(color)
             .clickable {
+                haptics.confirm()
                 when (color) {
                     Green -> engine.answer()
                     Red -> if (engine.active?.incoming == true) engine.decline() else engine.hangup()
@@ -551,13 +555,17 @@ private fun CallCircle(color: Color, size: androidx.compose.ui.unit.Dp, icon: @C
 @Composable
 private fun FrostedCircle(icon: @Composable () -> Unit) {
     val engine = CallEngine.instance ?: return
+    val haptics = rememberHaptics()
     Box(
         Modifier
             .size(62.dp)
             .clip(CircleShape)
             .background(Color(0x26FFFFFF))
             .border(1.dp, Color(0x40FFFFFF), CircleShape)
-            .clickable { engine.answerVoiceOnly() },
+            .clickable {
+                haptics.confirm()
+                engine.answerVoiceOnly()
+            },
         contentAlignment = Alignment.Center,
     ) { icon() }
 }

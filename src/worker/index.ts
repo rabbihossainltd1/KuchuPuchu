@@ -812,6 +812,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const imageData = typeof body.imageData === "string" && body.imageData.startsWith("data:") ? body.imageData : null;
     const fileKey = typeof body.fileKey === "string" ? body.fileKey : null;
     if (imageData && imageData.length > 450_000) fail(400, "Photo too large — pick a smaller image.");
+    if (kind === "STICKER" && !text) fail(400, "Pick a sticker.");
+    if (kind === "STICKER" && text.length > 16) fail(400, "Bad sticker.");
     if (!text && !imageData && !fileKey) fail(400, "Write a message.");
     const mid = id();
     const created = nowIso();
@@ -835,15 +837,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       mid,
       convId,
       uid,
-      imageData ? "IMAGE" : fileKey ? "FILE" : "TEXT",
+      imageData ? "IMAGE" : fileKey ? "FILE" : kind,
       text,
       imageData ?? fileKey ?? null,
       meta,
       created,
     );
     const preview =
-      text ||
-      (imageData ? "📷 Photo" : kind === "FILE" ? `📎 ${String(body.fileName || "File")}` : "Message");
+      kind === "STICKER"
+        ? "Sticker"
+        : text || (imageData ? "Photo" : kind === "FILE" ? String(body.fileName || "File") : "Message");
     await run(
       db,
       "UPDATE conversations SET last_message = ?, last_message_at = ?, hidden_json = '{}' WHERE id = ?",

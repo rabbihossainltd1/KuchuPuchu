@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Photo
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -59,10 +60,24 @@ import org.json.JSONObject
 @Composable
 fun SearchScreen(nav: NavController) {
     val scope = rememberCoroutineScope()
+    val haptics = rememberHaptics()
     var query by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf("all") }
     var result by remember { mutableStateOf<JSONObject?>(null) }
     var searching by remember { mutableStateOf(false) }
+
+    fun openChatWith(userId: String) {
+        scope.launch {
+            runCatching {
+                val conv = withContext(Dispatchers.IO) {
+                    Api.post("/api/conversations", JSONObject().put("userId", userId))
+                }
+                conv.optJSONObject("conversation")?.optString("id")?.let {
+                    nav.navigate("chat/$it") { popUpTo("main") }
+                }
+            }
+        }
+    }
 
     LaunchedEffect(query) {
         if (query.trim().length < 2) {
@@ -141,17 +156,11 @@ fun SearchScreen(nav: NavController) {
         }
 
         if (query.trim().length < 2) {
-            Column(
-                Modifier.fillMaxSize().padding(32.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text("🔎", fontSize = 44.sp)
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "People, chat ba message khujun",
-                    fontSize = 14.sp,
-                    color = Muted,
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                EmptyState(
+                    icon = Icons.Filled.Search,
+                    title = "Search",
+                    note = "People, chat ba message khujun",
                 )
             }
         } else if (searching && result == null) {
@@ -166,7 +175,7 @@ fun SearchScreen(nav: NavController) {
                 if (filter == "all" && users.isNotEmpty()) {
                     item { SectionLabel("People") }
                     items(users, key = { "u" + it.optString("id") }) { u ->
-                        ResultCard {
+                        ResultCard(onClick = { haptics.tap(); openChatWith(u.optString("id")) }) {
                             KpAvatar(u.optString("displayName"), u.optString("avatarUrl"), 42.dp, ring = false)
                             Spacer(Modifier.width(12.dp))
                             Column {

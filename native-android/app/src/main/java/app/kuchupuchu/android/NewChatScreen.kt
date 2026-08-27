@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.PersonSearch
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -101,18 +102,11 @@ fun NewChatScreen(nav: NavController) {
         )
 
         if (query.trim().length < 2) {
-            Column(
-                Modifier.fillMaxSize().padding(32.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text("🔍", fontSize = 40.sp)
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Search someone by their name\nor username to start chatting",
-                    fontSize = 14.sp,
-                    color = Muted,
-                    lineHeight = 20.sp,
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                EmptyState(
+                    icon = Icons.Filled.PersonSearch,
+                    title = "New chat",
+                    note = "Search someone by their name or username to start chatting",
                 )
             }
         } else {
