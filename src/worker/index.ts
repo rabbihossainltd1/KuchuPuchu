@@ -250,6 +250,9 @@ let nextStatusSweep = 0;
 /** Throttles the expired-session reaper the same way. */
 let nextSessionSweep = 0;
 
+/** Throttles the disappearing-message reaper the same way. */
+let nextExpirySweep = 0;
+
 /**
  * Drops sessions past their expiry.
  *
@@ -332,15 +335,26 @@ async function ensureSchema(db: D1Database) {
   await runCatchingSql(db, `ALTER TABLE calls ADD COLUMN answer_sdp TEXT`);
   await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN disappear_seconds INTEGER`);
   await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN theme TEXT`);
+  await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN disappear_since TEXT`);
   schemaReady = true;
 }
 
 /** Runs a migration statement, ignoring "already exists" style failures. */
+/**
+ * Best-effort DDL for the additive migrations.
+ *
+ * A duplicate-column or duplicate-index error means the column is already
+ * there, which is the expected case on every isolate after the first. Anything
+ * else is a real failure and used to be swallowed silently, so a migration that
+ * broke for another reason looked identical to one that had already run.
+ */
 async function runCatchingSql(db: D1Database, sql: string) {
   try {
     await run(db, sql);
-  } catch {
-    /* duplicate column / index — already migrated */
+  } catch (err) {
+    const msg = String(err instanceof Error ? err.message : err);
+    if (/duplicate column|duplicate index|already exists/i.test(msg)) return;
+    console.error(`migration failed: ${sql} -> ${msg}`);
   }
 }
 
@@ -1159,7 +1173,17 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     }
     if (body.disappearSeconds !== undefined) {
       const sec = Math.max(0, Number(body.disappearSeconds) || 0);
-      await run(db, "UPDATE conversations SET disappear_seconds = ? WHERE id = ?", sec, convId);
+      // Stamp the moment the timer is turned on. The reaper used to delete
+      // every message older than the TTL with no lower bound, so switching on a
+      // 24h timer destroyed the chat's entire existing history for both people
+      // instead of only applying to what was sent afterwards.
+      await run(
+        db,
+        "UPDATE conversations SET disappear_seconds = ?, disappear_since = ? WHERE id = ?",
+        sec,
+        sec > 0 ? nowIso() : null,
+        convId,
+      );
     }
     if (body.theme !== undefined) {
       const theme = String(body.theme || "default").slice(0, 20);
@@ -1311,19 +1335,30 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   if (msgMatch && method === "GET") {
     const convId = msgMatch[1]!;
     await requireMember(db, convId, uid);
-    const settings = await one<{ disappear_seconds: number | null }>(
-      db,
-      "SELECT disappear_seconds FROM conversations WHERE id = ?",
-      convId,
-    );
+    const settings = await one<{
+      disappear_seconds: number | null;
+      disappear_since: string | null;
+    }>(db, "SELECT disappear_seconds, disappear_since FROM conversations WHERE id = ?", convId);
     const ttl = Number(settings?.disappear_seconds || 0);
-    if (ttl > 0) {
-      await run(
-        db,
-        "DELETE FROM messages WHERE conv_id = ? AND created_at < ?",
-        convId,
-        new Date(Date.now() - ttl * 1000).toISOString(),
-      );
+    const disappearSince = settings?.disappear_since || null;
+    // Nothing expires before the timer was switched on, so history predating it
+    // survives. The rows are filtered out of the response below rather than
+    // relying on the DELETE having run, and the DELETE itself is throttled: it
+    // used to write to the messages table on every single read of the chat.
+    const expiry = ttl > 0 ? new Date(Date.now() - ttl * 1000).toISOString() : null;
+    if (expiry) {
+      if (Date.now() > nextExpirySweep) {
+        nextExpirySweep = Date.now() + 60_000;
+        ctx.waitUntil(
+          run(
+            db,
+            `DELETE FROM messages WHERE conv_id = ? AND created_at < ?${disappearSince ? " AND created_at >= ?" : ""}`,
+            convId,
+            expiry,
+            ...(disappearSince ? [disappearSince] : []),
+          ).then(() => undefined),
+        );
+      }
     }
     // Messages the member deleted for themselves stay deleted. Without this a
     // chat that reappeared after a new message came back with its whole
@@ -1331,6 +1366,17 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const mark = watermarkFor(parseJson<HiddenMap>(await hiddenJson(db, convId), {}), uid);
     const sinceClause = mark ? (mark.row >= 0 ? "AND rowid > ?" : "AND created_at > ?") : "";
     const sinceArgs = mark ? [mark.row >= 0 ? mark.row : mark.at] : [];
+    // Live means "not expired yet" OR "sent before the timer was armed". The
+    // second arm is what keeps existing history alive: a message only counts as
+    // expiring if it was written after the timer went on. Rows from before the
+    // disappear_since column existed have no stamp and fall back to the plain
+    // TTL cut.
+    const liveClause = expiry
+      ? disappearSince
+        ? "AND (created_at >= ? OR created_at < ?)"
+        : "AND created_at >= ?"
+      : "";
+    const liveArgs = expiry ? (disappearSince ? [expiry, disappearSince] : [expiry]) : [];
     const before = url.searchParams.get("before");
     // created_at is millisecond-resolution text, so several messages routinely
     // share one value. Without a rowid tiebreaker both the ORDER BY and the
@@ -1339,21 +1385,23 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const rows = before
       ? await all<MsgRow>(
           db,
-          `SELECT * FROM messages WHERE conv_id = ? ${sinceClause}
+          `SELECT * FROM messages WHERE conv_id = ? ${sinceClause} ${liveClause}
              AND (created_at < ? OR (created_at = ? AND rowid < ?))
            ORDER BY created_at DESC, rowid DESC LIMIT 50`,
           convId,
           ...sinceArgs,
+          ...liveArgs,
           before,
           before,
           Number(url.searchParams.get("beforeRowid") || 0) || Number.MAX_SAFE_INTEGER,
         )
       : await all<MsgRow>(
           db,
-          `SELECT * FROM messages WHERE conv_id = ? ${sinceClause}
+          `SELECT * FROM messages WHERE conv_id = ? ${sinceClause} ${liveClause}
            ORDER BY created_at DESC, rowid DESC LIMIT 50`,
           convId,
           ...sinceArgs,
+          ...liveArgs,
         );
     const senderIds = [...new Set(rows.map((r) => r.sender_id).filter(Boolean))];
     const names = new Map<string, string>();
