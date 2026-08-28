@@ -1,6 +1,7 @@
 package app.kuchupuchu.android
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,6 +38,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -197,15 +200,19 @@ private fun CallRow(call: JSONObject, onOpenChat: () -> Unit) {
         /* gold callback buttons */
         val otherId = if (incoming) call.optString("callerId") else call.optString("calleeId")
         if (otherId.isNotBlank()) {
-            IconButton(
-                onClick = {
-                    haptics.tap()
-                    CallEngine.instance?.startCall(otherId, if (video) "VIDEO" else "AUDIO", name, avatar ?: "")
-                },
-                modifier = Modifier
+            Box(
+                Modifier
+                    .padding(horizontal = 3.dp)
                     .size(40.dp)
+                    .shadow(4.dp, CircleShape)
                     .clip(CircleShape)
-                    .background(GoldSoft),
+                    .background(Brush.verticalGradient(listOf(Color(0xFFFFFFFF), Color(0xFFF3E4C6))))
+                    .border(1.dp, Color(0x24000000), CircleShape)
+                    .clickable {
+                        haptics.tap()
+                        CallEngine.instance?.startCall(otherId, if (video) "VIDEO" else "AUDIO", name, avatar ?: "")
+                    },
+                contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     if (video) Icons.Filled.Videocam else Icons.Filled.Call,
