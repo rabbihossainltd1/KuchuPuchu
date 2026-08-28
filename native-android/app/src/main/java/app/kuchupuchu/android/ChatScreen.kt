@@ -781,7 +781,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             // Name vertically centred on the avatar (WhatsApp): the block is
             // nudged down half the subtitle height, so the NAME lands on the
             // avatar's middle line and "online/typing" hangs just below.
-            Column(Modifier.weight(1f).offset(y = 4.dp)) {
+            Column(Modifier.weight(1f).offset(y = 8.dp)) {
                 Text(
                     title,
                     fontSize = 16.sp,
@@ -798,6 +798,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                         else -> otherLastSeen(other?.optText("lastActiveAt"))
                     },
                     fontSize = 11.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     color = when {
                         typingNow -> GoldDeep
                         online -> Green
@@ -809,17 +811,15 @@ fun ChatScreen(nav: NavController, convId: String) {
             }
             if (!isGroup && c != null) {
                 if (otherId.isNotBlank()) {
-                    IconButton(onClick = {
-                        haptics.tap()
+                    HeaderCallBtn(onClick = {
                         CallEngine.instance?.startCall(otherId, "AUDIO", title, avatarUrl ?: "")
                     }) {
-                        Icon(Icons.Filled.Call, "Voice call", tint = GoldDeep, modifier = Modifier.size(23.dp))
+                        Icon(Icons.Filled.Call, "Voice call", tint = GoldDeep, modifier = Modifier.size(19.dp))
                     }
-                    IconButton(onClick = {
-                        haptics.tap()
+                    HeaderCallBtn(onClick = {
                         CallEngine.instance?.startCall(otherId, "VIDEO", title, avatarUrl ?: "")
                     }) {
-                        Icon(Icons.Filled.Videocam, "Video call", tint = GoldDeep, modifier = Modifier.size(25.dp))
+                        Icon(Icons.Filled.Videocam, "Video call", tint = GoldDeep, modifier = Modifier.size(21.dp))
                     }
                 }
             }
@@ -1386,6 +1386,26 @@ private fun PulsingDot() {
 }
 
 
+/**
+ * Small raised 3D circle for the header call icons: top-lit gradient,
+ * drop shadow, hairline bevel.
+ */
+@Composable
+private fun HeaderCallBtn(onClick: () -> Unit, icon: @Composable () -> Unit) {
+    val haptics = rememberHaptics()
+    Box(
+        Modifier
+            .padding(horizontal = 3.dp)
+            .size(38.dp)
+            .shadow(4.dp, CircleShape)
+            .clip(CircleShape)
+            .background(Brush.verticalGradient(listOf(Color(0xFFFFFFFF), Color(0xFFF3E4C6))))
+            .border(1.dp, Color(0x24000000), CircleShape)
+            .clickable { haptics.tap(); onClick() },
+        contentAlignment = Alignment.Center,
+    ) { icon() }
+}
+
 /** Gold check badge shown on every bubble the user has long-press selected. */
 @Composable
 private fun SelectionCheck(modifier: Modifier = Modifier) {
@@ -1429,7 +1449,7 @@ private object ImageRatios {
     }
 }
 
-/** "last seen 2:45 pm" — just the clock time, like the reference. */
+/** Just the time — "3:17 am" today, "yesterday 11:10 pm", then "12 Aug". */
 private fun otherLastSeen(iso: String?): String {
     if (iso.isNullOrBlank()) return " "
     val t = runCatching { java.time.Instant.parse(iso) }.getOrNull() ?: return " "
@@ -1439,9 +1459,9 @@ private fun otherLastSeen(iso: String?): String {
     val ampm = if (z.hour < 12) "am" else "pm"
     val time = "$hh:%02d $ampm".format(z.minute)
     return when {
-        z.toLocalDate() == now.toLocalDate() -> "last seen $time"
-        z.toLocalDate() == now.toLocalDate().minusDays(1) -> "last seen yesterday $time"
-        else -> "last seen ${z.dayOfMonth} ${z.month.toString().take(3).lowercase()}"
+        z.toLocalDate() == now.toLocalDate() -> time
+        z.toLocalDate() == now.toLocalDate().minusDays(1) -> "yesterday $time"
+        else -> "${z.dayOfMonth} ${z.month.toString().take(3).lowercase()}"
     }
 }
 
@@ -1692,7 +1712,6 @@ private fun MessageRow(
                 Modifier
                     .widthIn(min = 72.dp, max = 280.dp)
                     .wrapContentWidth()
-                    .shadow(3.dp, RoundedCornerShape(14.dp))
                     .clip(
                         RoundedCornerShape(
                             topStart = 16.dp,
@@ -1701,7 +1720,7 @@ private fun MessageRow(
                             bottomEnd = if (mine) 5.dp else 16.dp,
                         ),
                     )
-                    .background(if (mine) goldFill() else Brush.verticalGradient(listOf(Color.White, Color(0xFFF2EDE2))))
+                    .background(if (mine) goldFill() else Brush.linearGradient(listOf(Card, Card)))
                     .combinedClickable(
                         onClick = { if (selectedIds.isNotEmpty() && !pendingEcho) onToggleSelect(m) },
                         onLongClick = { if (!pendingEcho) onToggleSelect(m) },
@@ -1782,7 +1801,6 @@ private fun ImageMessageRow(
         Box(
             Modifier
                 .widthIn(max = 225.dp)
-                .shadow(5.dp, RoundedCornerShape(14.dp))
                 .clip(RoundedCornerShape(12.dp))
                 .combinedClickable(
                     onClick = {
@@ -1848,7 +1866,6 @@ private fun ImageBubble(m: JSONObject, mine: Boolean) {
     Box(
         Modifier
             .widthIn(max = 225.dp)
-            .shadow(5.dp, RoundedCornerShape(14.dp))
             .then(
                 if (ratio > 0f) {
                     Modifier
@@ -2186,9 +2203,8 @@ private fun CallLogBubble(m: JSONObject, mine: Boolean, pendingEcho: Boolean) {
         Row(
             Modifier
                 .widthIn(max = 260.dp)
-                .shadow(4.dp, RoundedCornerShape(16.dp))
                 .clip(RoundedCornerShape(16.dp))
-                .background(if (mine) goldFill() else Brush.verticalGradient(listOf(Color.White, Color(0xFFF2EDE2))))
+                .background(if (mine) goldFill() else Brush.linearGradient(listOf(Card, Card)))
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {

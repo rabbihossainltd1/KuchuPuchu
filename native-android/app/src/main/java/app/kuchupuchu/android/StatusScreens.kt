@@ -473,6 +473,9 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
     var menuOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var videoReady by remember { mutableStateOf(false) }
+    // Viewed-by lists are cached per status: reopening the sheet must not
+    // re-fetch ("viewers list bar bar load hocche").
+    val viewersCache = remember { HashMap<String, List<JSONObject>>() }
     // New status => new clip: the readiness flag must reset or the next
     // video's bar would start before its own buffering finished.
     LaunchedEffect(idx) { videoReady = false }
@@ -511,12 +514,13 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
     val user = group?.optJSONObject("user")
     val isMine = group?.optBoolean("mine") == true
 
-    /* auto-advance + mark viewed — pauses while the viewers sheet is open.
-       For videos the clock only starts when the clip is actually PLAYING:
-       the bar used to run while the file was still buffering, so the status
-       auto-closed before the video even reached its end. */
-    LaunchedEffect(statuses.size, idx, showViewers, replyFocused, videoReady) {
-        if (statuses.isEmpty() || idx >= statuses.size || showViewers || replyFocused) return@LaunchedEffect
+    /* auto-advance + mark viewed. One run PER STATUS (keyed on idx), so
+       opening/closing the viewers sheet or the keyboard no longer restarts
+       the clock and re-fires the /view ping — the clock just PAUSES while
+       they are up. For videos the clock only starts when the clip is
+       actually PLAYING (buffering used to eat the bar). */
+    LaunchedEffect(idx, videoReady) {
+        if (statuses.isEmpty() || idx >= statuses.size) return@LaunchedEffect
         val s = statuses[idx]
         if (!isMine) {
             runCatching { withContext(Dispatchers.IO) { Api.post("/api/statuses/${s.optString("id")}/view") } }
@@ -530,10 +534,15 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                 else -> 30_000L
             }
         if (s.optString("kind") == "VIDEO" && !videoReady) return@LaunchedEffect
-        val start = System.currentTimeMillis()
-        while (System.currentTimeMillis() - start < hold) {
-            progress = (System.currentTimeMillis() - start) / hold.toFloat()
+        var elapsed = 0L
+        while (elapsed < hold) {
+            if (showViewers || replyFocused) {
+                delay(100)
+                continue
+            }
             delay(50)
+            elapsed += 50
+            progress = elapsed.toFloat() / hold
         }
         if (idx + 1 < statuses.size) {
             idx++
@@ -589,15 +598,23 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
 
     fun openViewers() {
         if (idx >= statuses.size) return
-        val s = statuses[idx]
+        val id = statuses[idx].optString("id")
         showViewers = true
-        viewers = emptyList()
         viewersError = false
+        val cached = viewersCache[id]
+        if (cached != null) {
+            viewers = cached
+            viewersLoading = false
+            return
+        }
+        viewers = emptyList()
         viewersLoading = true
         scope.launch {
             runCatching {
-                val data = withContext(Dispatchers.IO) { Api.get("/api/statuses/${s.optString("id")}/viewers", true) }
-                viewers = data.arr("viewers").objects()
+                val data = withContext(Dispatchers.IO) { Api.get("/api/statuses/$id/viewers", true) }
+                val list = data.arr("viewers").objects()
+                viewersCache[id] = list
+                viewers = list
             }.onFailure { viewersError = true }
                 .also { viewersLoading = false }
         }
@@ -783,21 +800,22 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                 }
                 /* tap zones: left = previous, right = next — they fill the
                    middle area only, so header + reply stay tappable.
-                   Swipe DOWN anywhere here closes the viewer (WhatsApp);
-                   vertical swipes never close on their own. */
-                var closeDrag by remember { mutableStateOf(0f) }
+                   Vertical swipes: DOWN closes the viewer, UP opens the
+                   viewers list (own status) — like WhatsApp. */
+                var vDrag by remember { mutableStateOf(0f) }
                 Row(
                     Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .pointerInput("close") {
+                        .pointerInput("vswipe", isMine) {
                             detectVerticalDragGestures(
                                 onDragEnd = {
-                                    if (closeDrag > 130f) nav.popBackStack()
-                                    closeDrag = 0f
+                                    if (vDrag > 130f) nav.popBackStack()
+                                    else if (vDrag < -130f && isMine) openViewers()
+                                    vDrag = 0f
                                 },
                             ) { _, amount ->
-                                closeDrag += amount
+                                vDrag += amount
                             }
                         },
                 ) {
@@ -819,24 +837,13 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                 }
                 /* reply bar or my-status views hint */
                 if (isMine) {
-                    // No shadow/pill — just the eye. Tap or swipe up slides the
-                    // viewer list in from the bottom.
-                    var dragUp by remember { mutableStateOf(0f) }
+                    // No shadow/pill — just the eye; tap opens the sheet and
+                    // swiping UP anywhere above it does the same.
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .navigationBarsPadding()
                             .padding(16.dp)
-                            .pointerInput(s.optString("id")) {
-                                detectVerticalDragGestures(
-                                    onDragEnd = {
-                                        if (dragUp < -60f) openViewers()
-                                        dragUp = 0f
-                                    },
-                                ) { _, amount ->
-                                    dragUp += amount
-                                }
-                            }
                             .clickable { openViewers() },
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically,
