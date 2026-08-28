@@ -108,6 +108,8 @@ class KpPushService : FirebaseMessagingService() {
             runCatching { KpSounds.receive(this) }
             return
         }
+        // Badge jumps instantly; the next list refresh confirms the same number.
+        ScreenStore.bumpUnread(convoId)
         runCatching { KpSounds.receive(this) }
         KpNotify.message(this, data["from"] ?: "KuchuPuchu", data["body"] ?: "New message", convoId)
     }

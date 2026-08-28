@@ -28,6 +28,23 @@ object ScreenStore {
 
     private val lastNotifiedAt = HashMap<String, String>()
 
+    /** Instant local read: zero the unread badge without waiting for the next
+     *  list refresh (the next server response carries the same 0 anyway). */
+    fun markRead(convId: String) {
+        val i = convs.indexOfFirst { it.optString("id") == convId }
+        if (i >= 0 && convs[i].optInt("unread", 0) != 0) {
+            convs[i] = JSONObject(convs[i].toString()).put("unread", 0)
+        }
+    }
+
+    /** Instant local badge bump from an FCM push while the chat is not open. */
+    fun bumpUnread(convId: String) {
+        val i = convs.indexOfFirst { it.optString("id") == convId }
+        if (i >= 0) {
+            convs[i] = JSONObject(convs[i].toString()).put("unread", convs[i].optInt("unread", 0) + 1)
+        }
+    }
+
     fun shouldNotifyChat(convId: String, lastAt: String, unread: Int): Boolean {
         if (unread <= 0 || lastAt.isBlank()) return false
         if (Store.route == "chat/$convId") {

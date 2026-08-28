@@ -86,7 +86,7 @@ fun StatusPhotoScreen(nav: NavController) {
                         }
                     } else {
                         videoUri = null
-                        val d = withContext(Dispatchers.IO) { FilesUtil.imageToDataUrl(uri, ctx) }
+                        val d = withContext(Dispatchers.IO) { FilesUtil.imageToDataUrl(uri, ctx, maxSide = 720, maxChars = 140_000) }
                         if (d == null) error = "Could not read that photo."
                         dataUrl = d
                     }

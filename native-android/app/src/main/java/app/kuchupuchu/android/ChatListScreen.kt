@@ -122,6 +122,10 @@ fun ChatListScreen(nav: NavController) {
             if (Store.foreground) refresh()
         }
     }
+    // onResume pokes this — the list syncs the moment the app comes forward.
+    LaunchedEffect(ScreenStore.poke) {
+        if (Store.foreground) refresh()
+    }
 
     Box(Modifier.fillMaxSize().background(Cream)) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {

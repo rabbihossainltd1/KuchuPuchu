@@ -48,7 +48,10 @@ import org.json.JSONObject
 fun ProfileScreen(nav: NavController, userId: String) {
     val scope = rememberCoroutineScope()
     val haptics = rememberHaptics()
-    var user by remember { mutableStateOf<JSONObject?>(null) }
+    // Paint INSTANTLY from the cached conversation data (name/avatar/username/
+    // about all ride along with the chat list) — the network call only
+    // refreshes. First open used to sit on "Loading…" like a web page.
+    var user by remember { mutableStateOf(profileSnapshot(userId)) }
     var error by remember { mutableStateOf("") }
     var blocked by remember { mutableStateOf(false) }
 

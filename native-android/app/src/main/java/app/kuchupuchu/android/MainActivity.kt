@@ -94,6 +94,9 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         Store.foreground = true
+        // Returning to the app triggers an instant re-sync of the open screens
+        // (they observe ScreenStore.poke) — no waiting for the next poll.
+        ScreenStore.pokeInbox()
         if (CallEngine.instance?.active == null) restoreChrome()
     }
 

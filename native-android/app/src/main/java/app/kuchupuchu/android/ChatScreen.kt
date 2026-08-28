@@ -225,6 +225,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                 lastTopId = newTop
                 if (markRead || (newMessage && prevTop.isNotBlank())) {
                     runCatching { withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/read") } }
+                    // Clear the list badge NOW — waiting for the next list poll
+                    // made the unread counter hang around after reading.
+                    ScreenStore.markRead(convId)
                 }
             } catch (_: Exception) {
             }
@@ -451,7 +454,9 @@ fun ChatScreen(nav: NavController, convId: String) {
        location all survive the sheet closing. */
     fun handleImagePicked(uri: Uri) {
         scope.launch {
-            val dataUrl = withContext(Dispatchers.IO) { FilesUtil.imageToDataUrl(uri, ctx) }
+            // 720px / ~100KB: the old 960px/220KB photos took minutes to send AND load
+            // on slow mobile data (the "image loads forever" report).
+            val dataUrl = withContext(Dispatchers.IO) { FilesUtil.imageToDataUrl(uri, ctx, maxSide = 720, maxChars = 100_000) }
             if (dataUrl == null) {
                 error = "Could not read that photo — try another one."
             } else {
@@ -582,7 +587,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-            KpAvatar(title, avatarUrl, 46.dp)
+            KpAvatar(title, avatarUrl, 40.dp)
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(

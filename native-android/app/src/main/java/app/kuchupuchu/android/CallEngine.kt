@@ -17,6 +17,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import org.webrtc.AudioSource
 import org.webrtc.AudioTrack
@@ -125,6 +126,12 @@ class CallEngine(private val app: Application) {
     var polling = false
         private set
 
+    /** Consecutive tick() failures — drives the "Reconnecting…" toast. */
+    private var netFailStreak = 0
+
+    /** When the outgoing call started ringing — drives the 60s no-answer hangup. */
+    private var outgoingRingAt = 0L
+
     fun notify(message: String) {
         toast = message
         scope.launch {
@@ -151,7 +158,7 @@ class CallEngine(private val app: Application) {
                         runCatching { tick() }.onFailure { notify("Call update failed. Retrying.") }
                         delay(
                             when {
-                                active != null -> 700L
+                                active != null -> 500L
                                 Store.foreground -> 1500L
                                 else -> 4000L
                             },
@@ -211,10 +218,20 @@ class CallEngine(private val app: Application) {
     }
 
     private suspend fun tick() {
+        // A hung request must not stall the whole poll loop: on slow networks
+        // the 45s read timeout meant the caller sat on "Ringing…" forever even
+        // after the other side had answered.
         val data =
-            withContext(Dispatchers.IO) {
-                runCatching { Api.get("/api/calls/active", true) }.getOrNull()
-            } ?: return
+            withTimeout(6_000) {
+                withContext(Dispatchers.IO) {
+                    runCatching { Api.get("/api/calls/active", true) }.getOrNull()
+                }
+            } ?: run {
+                netFailStreak += 1
+                if (netFailStreak == 3 && active != null) notify("Reconnecting…")
+                return
+            }
+        netFailStreak = 0
         val items = data.arr("items").objects().filter { !ignoredCalls.contains(it.optString("id")) }
         val current = active
         var next = items.firstOrNull()
@@ -245,6 +262,18 @@ class CallEngine(private val app: Application) {
         }
         val other = next.optJSONObject("other") ?: JSONObject()
         val incoming = next.optBoolean("incoming")
+        // Outgoing call nobody picked up within a minute: end it like the
+        // server's missed-call sweep does, instead of ringing forever.
+        if (!incoming && status == "RINGING") {
+            if (outgoingRingAt == 0L) outgoingRingAt = System.currentTimeMillis()
+            else if (System.currentTimeMillis() - outgoingRingAt > 60_000) {
+                notify("No answer")
+                hangupLocal()
+                return
+            }
+        } else {
+            outgoingRingAt = 0L
+        }
         // optIso(), not optString(): Android's org.json turns a JSON null into
         // the literal string "null", which is *not* blank. With optString() this
         // was always true, so the caller's screen flipped to "connected" the
@@ -390,7 +419,7 @@ class CallEngine(private val app: Application) {
         scope.launch {
             try {
                 var offer = ""
-                repeat(10) {
+                repeat(24) {
                     offer =
                         withContext(Dispatchers.IO) {
                             Api.get("/api/calls/active", true).arr("items").objects()
@@ -399,7 +428,7 @@ class CallEngine(private val app: Application) {
                                 .orEmpty()
                         }
                     if (offer.isNotBlank()) return@repeat
-                    delay(150)
+                    delay(250)
                 }
                 if (offer.isBlank() || left.get()) {
                     answering.set(false)
@@ -669,6 +698,8 @@ class CallEngine(private val app: Application) {
         sharing = false
         onHold = false
         hasRemote = false
+        netFailStreak = 0
+        outgoingRingAt = 0L
         iceCallId = ""
         pendingIce.clear()
         left.set(false)
