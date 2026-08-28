@@ -67,8 +67,8 @@ object Api {
         val path = "/api/files?name=${q(name)}&type=${q(mime)}"
         val conn = (URL(BASE + path).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
-            connectTimeout = 60_000
-            readTimeout = 120_000
+            connectTimeout = 20_000
+            readTimeout = 45_000
             setRequestProperty("Authorization", "Bearer ${token ?: ""}")
             setRequestProperty("Content-Type", "application/octet-stream")
             doOutput = true

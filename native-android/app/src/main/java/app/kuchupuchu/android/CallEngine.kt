@@ -129,7 +129,7 @@ class CallEngine(private val app: Application) {
                         when {
                             active != null -> 700L
                             Store.foreground -> 1500L
-                            else -> 4000L
+                            else -> 1500L
                         },
                     )
                 }
@@ -707,7 +707,10 @@ class CallEngine(private val app: Application) {
                     override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {
                         val track = receiver?.track()
                         if (track is VideoTrack) bindRemote(track)
-                        if (track is AudioTrack) track.setEnabled(true)
+                        if (track is AudioTrack) {
+                            track.setEnabled(true)
+                            Handler(Looper.getMainLooper()).post { applyAudio() }
+                        }
                     }
                 },
             )!!

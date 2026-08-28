@@ -17,6 +17,9 @@ import java.io.File
 object ScreenStore {
     private var disk: File? = null
 
+    /** When set, ChatScreen opens in-chat search for this conversation. */
+    var pendingChatSearch: String? = null
+
     val convs = mutableStateListOf<JSONObject>()
     var convsRaw by mutableStateOf("")
     var convsLoaded by mutableStateOf(false)

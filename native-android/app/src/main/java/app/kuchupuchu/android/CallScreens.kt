@@ -48,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -78,11 +79,11 @@ fun CallGate() {
     }
 
     when {
+        call.status == "ACTIVE" ->
+            if (call.kind == "VIDEO") InCallVideoScreen(call) else InCallVoiceScreen(call)
         call.incoming && call.status == "RINGING" -> IncomingCallScreen(call)
-        call.kind == "VIDEO" && (call.status == "RINGING" || call.connecting) -> OutgoingVideoScreen(call)
-        call.status == "RINGING" || call.connecting -> OutgoingVoiceScreen(call)
-        call.kind == "VIDEO" -> InCallVideoScreen(call)
-        else -> InCallVoiceScreen(call)
+        call.kind == "VIDEO" -> OutgoingVideoScreen(call)
+        else -> OutgoingVoiceScreen(call)
     }
 
     if (engine.toast.isNotBlank()) {
@@ -252,15 +253,6 @@ fun OutgoingVideoScreen(call: CallUi) {
             Spacer(Modifier.weight(1f))
         }
 
-        /* dark scrim so text stays readable over the camera feed */
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(120.dp)
-                .align(Alignment.Center)
-                .background(Color(0x33000000)),
-        )
-
         /* bottom control strip — same style as the in-call video strip */
         Row(
             Modifier
@@ -321,9 +313,9 @@ fun InCallVoiceScreen(call: CallUi) {
                     secs > 0 -> clockText(secs)
                     else -> "00:00"
                 },
-                color = if (engine.onHold) GoldDeep else Muted,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
+                color = if (engine.onHold) GoldDeep else Ink,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.SemiBold,
             )
         }
         Column(
@@ -358,15 +350,13 @@ fun InCallVoiceScreen(call: CallUi) {
             }
             Row(
                 Modifier.fillMaxWidth().padding(vertical = 10.dp),
-                horizontalArrangement = Arrangement.Center,
+                horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
-                Box(Modifier.width(48.dp)) // spacer so the row centers like WhatsApp's second row
                 GridAction(
                     Icons.Filled.PersonAddAlt1,
                     "Add call",
                     active = false,
                 ) { engine.notify("Adding calls is coming in a future update.") }
-                Box(Modifier.width(48.dp))
                 GridAction(
                     Icons.Filled.CallEnd,
                     "End call",
@@ -415,9 +405,10 @@ fun InCallVideoScreen(call: CallUi) {
                 .fillMaxWidth()
                 .statusBarsPadding()
                 .padding(horizontal = 18.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(call.otherName, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 Text(
                     when {

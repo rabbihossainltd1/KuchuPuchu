@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -225,9 +226,10 @@ private fun TopTab(
             Spacer(Modifier.width(6.dp))
             Box(
                 Modifier
-                    .size(20.dp)
+                    .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
                     .clip(CircleShape)
-                    .background(Gold),
+                    .background(Gold)
+                    .padding(horizontal = 5.dp, vertical = 2.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -235,6 +237,7 @@ private fun TopTab(
                     color = AmberInk,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
+                    lineHeight = 11.sp,
                 )
             }
         }

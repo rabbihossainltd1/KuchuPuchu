@@ -138,16 +138,24 @@ fun ChatScreen(nav: NavController, convId: String) {
     var showChatSearch by remember { mutableStateOf(false) }
     var showDisappear by remember { mutableStateOf(false) }
     var showTheme by remember { mutableStateOf(false) }
+    var muteInFlight by remember { mutableStateOf(false) }
     var searchQ by remember { mutableStateOf("") }
     var searchHits by remember { mutableStateOf(listOf<JSONObject>()) }
 
     fun paintFromStore() {
         val next = ScreenStore.msgsOf(convId)
-        if (msgs.size == next.size &&
-            msgs.isNotEmpty() &&
-            msgs.zip(next).all { it.first.optString("id") == it.second.optString("id") }
-        ) {
+        if (msgs.isEmpty()) {
+            msgs.addAll(next)
+            return
+        }
+        val oldIds = msgs.map { it.optString("id") }
+        val newIds = next.map { it.optString("id") }
+        if (oldIds == newIds) {
             next.forEachIndexed { i, o -> msgs[i] = o }
+            return
+        }
+        if (newIds.size > oldIds.size && newIds.take(oldIds.size) == oldIds) {
+            msgs.addAll(next.drop(oldIds.size))
             return
         }
         msgs.clear()
@@ -160,6 +168,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                 val data = withContext(Dispatchers.IO) { Api.get("/api/conversations/$convId") }
                 val c = data.optJSONObject("conversation")
                 if (c != null) {
+                    if (muteInFlight) {
+                        val localMuted = conv.value?.optBoolean("muted") == true
+                        c.put("muted", localMuted)
+                    }
                     conv.value = c
                     ScreenStore.setConvDetail(convId, c)
                     c.arr("members").objects().forEach { m ->
@@ -214,6 +226,10 @@ fun ChatScreen(nav: NavController, convId: String) {
     LaunchedEffect(convId) {
         Store.route = "chat/$convId"
         paintFromStore()
+        if (ScreenStore.pendingChatSearch == convId) {
+            ScreenStore.pendingChatSearch = null
+            showChatSearch = true
+        }
         refreshMeta()
         refreshMessages(forceScroll = true, markRead = true)
         runCatching { Outbox.flush() }
@@ -300,7 +316,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                     KpSounds.send(ctx)
                     refreshMessages(forceScroll = true)
                 } catch (e2: Exception) {
-                    error = e2.message ?: "Could not send photo."
+                    error = (e2.message ?: "Could not send photo.") + "  Tap the banner to retry."
+                    pending.find { it.optString("clientId") == clientId }?.put("failed", true)
                 }
             }
         }
@@ -511,18 +528,23 @@ fun ChatScreen(nav: NavController, convId: String) {
                         leadingIcon = { Icon(Icons.Filled.NotificationsOff, null, tint = Ink) },
                         onClick = {
                             menuOpen = false
-                            val next = c?.optBoolean("muted") != true
-                            conv.value = c?.put("muted", next)
+                            val snap = conv.value ?: c
+                            val next = snap?.optBoolean("muted") != true
+                            val copy = JSONObject((snap ?: JSONObject()).toString()).put("muted", next)
+                            conv.value = copy
                             ScreenStore.setMuted(convId, next)
+                            muteInFlight = true
                             scope.launch {
-                                runCatching {
+                                val ok = runCatching {
                                     withContext(Dispatchers.IO) {
                                         Api.post("/api/conversations/$convId/mute", JSONObject().put("muted", next))
                                     }
-                                }.onFailure {
-                                    conv.value = c?.put("muted", !next)
+                                }.isSuccess
+                                if (!ok) {
+                                    conv.value = JSONObject(copy.toString()).put("muted", !next)
                                     ScreenStore.setMuted(convId, !next)
                                 }
+                                muteInFlight = false
                             }
                         },
                     )
@@ -558,7 +580,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 10.dp),
             ) {
                 items(msgs, key = { it.optString("clientId").ifBlank { it.optString("id") } }) { m ->
-                    Box(Modifier.animateItem()) {
+                    Box {
                         MessageRow(m, isGroup, Store.myId(), otherReadAt, player) { id ->
                             scope.launch {
                                 runCatching { withContext(Dispatchers.IO) { Api.delete("/api/messages/$id") } }
@@ -612,7 +634,22 @@ fun ChatScreen(nav: NavController, convId: String) {
                     .padding(horizontal = 14.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(error, color = Red, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                Text(
+                    error,
+                    color = Red,
+                    fontSize = 13.sp,
+                    modifier = Modifier.weight(1f).clickable {
+                        val failed = pending.filter { it.optBoolean("failed") }
+                        if (failed.isNotEmpty()) {
+                            error = ""
+                            failed.forEach { p ->
+                                p.put("failed", false)
+                                val url = p.optString("mediaUrl")
+                                if (url.isNotBlank()) sendImage(url)
+                            }
+                        }
+                    },
+                )
                 IconButton(onClick = { error = "" }, Modifier.size(26.dp)) {
                     Icon(Icons.Filled.Close, "Dismiss", tint = Red, modifier = Modifier.size(16.dp))
                 }

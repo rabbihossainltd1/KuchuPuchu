@@ -45,6 +45,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -432,6 +433,8 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
     var idx by remember { mutableStateOf(0) }
     var progress by remember { mutableStateOf(0f) }
     var reply by remember { mutableStateOf("") }
+    var replyFocused by remember { mutableStateOf(false) }
+    var replyError by remember { mutableStateOf("") }
     var showViewers by remember { mutableStateOf(false) }
     var viewers by remember { mutableStateOf("") }
     var viewersError by remember { mutableStateOf(false) }
@@ -461,8 +464,8 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
     val isMine = group?.optBoolean("mine") == true
 
     /* auto-advance + mark viewed — pauses while the viewers sheet is open */
-    LaunchedEffect(statuses.size, idx, showViewers) {
-        if (statuses.isEmpty() || idx >= statuses.size || showViewers) return@LaunchedEffect
+    LaunchedEffect(statuses.size, idx, showViewers, replyFocused) {
+        if (statuses.isEmpty() || idx >= statuses.size || showViewers || replyFocused) return@LaunchedEffect
         val s = statuses[idx]
         if (!isMine) {
             runCatching { withContext(Dispatchers.IO) { Api.post("/api/statuses/${s.optString("id")}/view") } }
@@ -703,12 +706,15 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                     ) {
                         BasicTextField(
                             value = reply,
-                            onValueChange = { reply = it },
+                            onValueChange = { reply = it; replyError = "" },
                             textStyle = androidx.compose.ui.text.TextStyle(
                                 color = Color.White,
                                 fontSize = 14.sp,
                             ),
-                            modifier = Modifier.weight(1f).padding(vertical = 12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(vertical = 12.dp)
+                                .onFocusChanged { replyFocused = it.isFocused },
                             decorationBox = { inner ->
                                 if (reply.isEmpty()) {
                                     Text(
@@ -727,6 +733,14 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                                 tint = Gold,
                             )
                         }
+                    }
+                    if (replyError.isNotBlank()) {
+                        Text(
+                            replyError,
+                            color = Color(0xFFFFCDD2),
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp),
+                        )
                     }
                 }
             }

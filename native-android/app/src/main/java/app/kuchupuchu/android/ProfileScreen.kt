@@ -16,6 +16,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.PermMedia
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -49,9 +50,14 @@ fun ProfileScreen(nav: NavController, userId: String) {
 
     LaunchedEffect(userId) {
         runCatching {
-            val data = withContext(Dispatchers.IO) { Api.get("/api/users/$userId", true) }
-            user = data.optJSONObject("user")
-        }.onFailure { error = it.message ?: "Could not load profile." }
+            val cached = withContext(Dispatchers.IO) { Api.get("/api/users/$userId") }
+            user = cached.optJSONObject("user") ?: user
+            error = ""
+            val fresh = withContext(Dispatchers.IO) { Api.get("/api/users/$userId", true) }
+            user = fresh.optJSONObject("user") ?: user
+        }.onFailure {
+            if (user == null) error = it.message ?: "Could not load profile."
+        }
     }
 
     Column(Modifier.fillMaxSize().background(Cream)) {
@@ -149,11 +155,14 @@ fun ProfileScreen(nav: NavController, userId: String) {
 private fun ProfileAction(
     label: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     androidx.compose.material3.TextButton(
         onClick = onClick,
-        modifier = Modifier
+        modifier = modifier
+            .height(52.dp)
+            .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(GoldSoft),
     ) {
