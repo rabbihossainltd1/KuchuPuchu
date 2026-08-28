@@ -76,7 +76,8 @@ object KpPush {
 /**
  * Receives FCM data messages:
  *  - type=message : { convoId, kind, from, body }
- *  - type=call     : { callId, kind (AUDIO|VIDEO), from, fromId }
+ *  - type=call        : { callId, kind (AUDIO|VIDEO), from, fromId }
+ *  - type=call_answer : { callId, kind }  (to the caller, on accept)
  */
 class KpPushService : FirebaseMessagingService() {
 
@@ -84,8 +85,19 @@ class KpPushService : FirebaseMessagingService() {
         val data = message.data
         when (data["type"]) {
             "call" -> handleCall(data)
+            "call_answer" -> handleCallAnswer(data)
             "message" -> handleMessage(data)
         }
+    }
+
+    /**
+     * Sent to the CALLER when the callee accepts: force an immediate poll so
+     * the ringing screen flips to connected within push latency (~1s) instead
+     * of waiting for the next poll tick.
+     */
+    private fun handleCallAnswer(data: Map<String, String>) {
+        val callId = data["callId"] ?: return
+        CallEngine.instance?.kickPoll(callId)
     }
 
     private fun handleCall(data: Map<String, String>) {

@@ -2109,6 +2109,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       callId,
     );
     const fresh = (await one<CallRow>(db, "SELECT * FROM calls WHERE id = ?", callId))!;
+    // Tell the CALLER instantly that the call was picked up — without this the
+    // caller's phone sat on "Ringing…" for the whole poll interval, reading as
+    // a stuck call even though the callee had answered.
+    ctx.waitUntil(
+      pushToUser(env, db, row.caller_id, {
+        type: "call_answer",
+        callId,
+        kind: row.kind,
+      }),
+    );
     return json({ call: callFrom(fresh, uid, await otherUser(db, fresh, uid)) });
   }
 

@@ -132,6 +132,15 @@ class CallEngine(private val app: Application) {
     /** When the outgoing call started ringing — drives the 60s no-answer hangup. */
     private var outgoingRingAt = 0L
 
+    /**
+     * A "call answered" push arrived for OUR outgoing call: poll immediately
+     * instead of waiting for the next tick, so the caller's ringing screen
+     * flips to connected the moment the callee accepts (push latency only).
+     */
+    fun kickPoll(callId: String) {
+        if (active?.id == callId) scope.launch { runCatching { tick() } }
+    }
+
     fun notify(message: String) {
         toast = message
         scope.launch {
@@ -380,6 +389,11 @@ class CallEngine(private val app: Application) {
                 }
                 iceCallId = call.optString("id")
                 flushIce()
+                // If the other side answered while the offer was still being
+                // posted (fast accept), the poll already flipped us ACTIVE —
+                // don't clobber that back to RINGING here.
+                val prev = active
+                if (prev != null && prev.id == iceCallId && prev.status == "ACTIVE") return@launch
                 active =
                     CallUi(
                         iceCallId,
@@ -418,8 +432,13 @@ class CallEngine(private val app: Application) {
         active = rec.copy(status = "ACTIVE", startedAt = System.currentTimeMillis(), connecting = true)
         scope.launch {
             try {
+                // `repeat(24) { ... return@repeat }` here NEVER left the loop —
+                // return@repeat only skips one iteration, so the callee kept
+                // re-fetching for the whole 6s while ITS OWN screen already
+                // showed "connected". The caller kept hearing the ringtone the
+                // whole time because the answer wasn't on the server yet.
                 var offer = ""
-                repeat(24) {
+                for (attempt in 0 until 24) {
                     offer =
                         withContext(Dispatchers.IO) {
                             Api.get("/api/calls/active", true).arr("items").objects()
@@ -427,7 +446,7 @@ class CallEngine(private val app: Application) {
                                 ?.optIso("offerSdp")
                                 .orEmpty()
                         }
-                    if (offer.isNotBlank()) return@repeat
+                    if (offer.isNotBlank() || left.get()) break
                     delay(250)
                 }
                 if (offer.isBlank() || left.get()) {
@@ -446,8 +465,9 @@ class CallEngine(private val app: Application) {
                     Api.post("/api/calls/${rec.id}/answer", JSONObject().put("answerSdp", answer.description))
                 }
                 pullIce(rec.id)
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 answering.set(false)
+                notify("Couldn't connect the call. Try again.")
                 hangupLocal()
             }
         }

@@ -71,7 +71,13 @@ class MainActivity : ComponentActivity() {
 
         handleIntent(intent)
         askBackgroundPermissions()
-        setContent { KpTheme { KpApp() } }
+        setContent {
+            KpTheme {
+                SplashGate {
+                    KpApp()
+                }
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
