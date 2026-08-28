@@ -63,9 +63,13 @@ async function sha256Hex(value: string) {
 
 async function hashPassword(password: string) {
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, [
-    "deriveBits",
-  ]);
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"],
+  );
   const bits = await crypto.subtle.deriveBits(
     { name: "PBKDF2", hash: "SHA-256", salt, iterations: 100000 },
     key,
@@ -78,9 +82,13 @@ async function verifyPassword(password: string, stored: string) {
   const [saltHex, hashHex] = stored.split(":");
   if (!saltHex || !hashHex) return false;
   const salt = new Uint8Array(saltHex.match(/.{2}/g)!.map((h) => parseInt(h, 16)));
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, [
-    "deriveBits",
-  ]);
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"],
+  );
   const bits = await crypto.subtle.deriveBits(
     { name: "PBKDF2", hash: "SHA-256", salt, iterations: 100000 },
     key,
@@ -98,13 +106,24 @@ function timingSafeEqualHex(a: string, b: string) {
 }
 
 async function all<T>(db: D1Database, sql: string, ...binds: unknown[]) {
-  return (await db.prepare(sql).bind(...binds).all()).results as T[];
+  return (
+    await db
+      .prepare(sql)
+      .bind(...binds)
+      .all()
+  ).results as T[];
 }
 async function one<T>(db: D1Database, sql: string, ...binds: unknown[]) {
-  return (await db.prepare(sql).bind(...binds).first()) as T | null;
+  return (await db
+    .prepare(sql)
+    .bind(...binds)
+    .first()) as T | null;
 }
 async function run(db: D1Database, sql: string, ...binds: unknown[]) {
-  const res = await db.prepare(sql).bind(...binds).run();
+  const res = await db
+    .prepare(sql)
+    .bind(...binds)
+    .run();
   return res?.meta?.changes ?? 0;
 }
 
@@ -139,7 +158,11 @@ const SAFE_MEDIA_TYPES = new Set([
  * and have the API origin serve executable markup back to a browser.
  */
 function safeMediaType(raw: string | null | undefined): string {
-  const t = String(raw || "").split(";")[0]!.trim().toLowerCase().slice(0, 100);
+  const t = String(raw || "")
+    .split(";")[0]!
+    .trim()
+    .toLowerCase()
+    .slice(0, 100);
   return SAFE_MEDIA_TYPES.has(t) ? t : "application/octet-stream";
 }
 
@@ -147,7 +170,8 @@ const ALLOWED_MESSAGE_KINDS = new Set(["TEXT", "STICKER", "IMAGE", "FILE"]);
 const ALLOWED_STATUS_KINDS = new Set(["TEXT", "IMAGE", "VIDEO"]);
 const FILE_KEY_RE = /^[A-Za-z0-9][A-Za-z0-9._\/-]{0,200}$/;
 
-const SAFE_DATA_URL = /^data:(image\/(?:jpeg|png|webp|gif)|audio\/(?:mpeg|mp4|aac|ogg|wav)|video\/(?:mp4|webm));base64,/i;
+const SAFE_DATA_URL =
+  /^data:(image\/(?:jpeg|png|webp|gif)|audio\/(?:mpeg|mp4|aac|ogg|wav)|video\/(?:mp4|webm));base64,/i;
 
 /** True only for inline data URLs whose mime type cannot execute in a browser. */
 function isSafeDataUrl(value: string) {
@@ -175,7 +199,10 @@ const rateBuckets = new Map<string, { tokens: number; stamp: number }>();
 function rateLimit(key: string, capacity: number, refillPerMinute: number) {
   const now = Date.now();
   const bucket = rateBuckets.get(key) ?? { tokens: capacity, stamp: now };
-  bucket.tokens = Math.min(capacity, bucket.tokens + ((now - bucket.stamp) / 60_000) * refillPerMinute);
+  bucket.tokens = Math.min(
+    capacity,
+    bucket.tokens + ((now - bucket.stamp) / 60_000) * refillPerMinute,
+  );
   bucket.stamp = now;
   if (bucket.tokens < 1) {
     rateBuckets.set(key, bucket);
@@ -397,11 +424,12 @@ async function membersOf(db: D1Database, convId: string) {
 }
 
 async function requireMember(db: D1Database, convId: string, userId: string) {
-  const conv = await one<{ id: string; kind: string; title: string | null; owner_id: string | null }>(
-    db,
-    "SELECT id, kind, title, owner_id FROM conversations WHERE id = ?",
-    convId,
-  );
+  const conv = await one<{
+    id: string;
+    kind: string;
+    title: string | null;
+    owner_id: string | null;
+  }>(db, "SELECT id, kind, title, owner_id FROM conversations WHERE id = ?", convId);
   if (!conv) fail(404, "Conversation not found.");
   const member = await one<{ user_id: string; role: string }>(
     db,
@@ -415,7 +443,12 @@ async function requireMember(db: D1Database, convId: string, userId: string) {
 
 /* ---------------- FCM push (Messenger mode) ---------------- */
 
-type FcmServiceAccount = { project_id: string; client_email: string; private_key: string; token_uri?: string };
+type FcmServiceAccount = {
+  project_id: string;
+  client_email: string;
+  private_key: string;
+  token_uri?: string;
+};
 type GoogleServicesJson = {
   project_info?: { project_id?: string; project_number?: string };
   client?: Array<{
@@ -430,8 +463,9 @@ function fcmPublicConfig(env: Env): Record<string, string> | null {
     const cfg = JSON.parse(env.FCM_CONFIG) as GoogleServicesJson;
     const clients = cfg.client ?? [];
     const mine =
-      clients.find((c) => c.client_info?.android_client_info?.package_name === "app.kuchupuchu.android") ??
-      clients[0];
+      clients.find(
+        (c) => c.client_info?.android_client_info?.package_name === "app.kuchupuchu.android",
+      ) ?? clients[0];
     const out = {
       applicationId: mine?.client_info?.mobilesdk_app_id ?? "",
       apiKey: mine?.api_key?.[0]?.current_key ?? "",
@@ -516,19 +550,29 @@ async function pushToUser(env: Env, db: D1Database, userId: string, data: Record
   try {
     const auth = await fcmAccessToken(env);
     if (!auth) return;
-    const rows = await all<{ token: string }>(db, "SELECT token FROM devices WHERE user_id = ?", userId);
+    const rows = await all<{ token: string }>(
+      db,
+      "SELECT token FROM devices WHERE user_id = ?",
+      userId,
+    );
     // One round trip per device used to be sequential; a user on three devices
     // waited for three serial FCM calls before the loop finished.
     await Promise.all(
       rows.map(async (row) => {
         try {
-          const res = await fetch(`https://fcm.googleapis.com/v1/projects/${auth.projectId}/messages:send`, {
-            method: "POST",
-            headers: { authorization: `Bearer ${auth.token}`, "content-type": "application/json" },
-            body: JSON.stringify({
-              message: { token: row.token, android: { priority: "HIGH", ttl: "86400s", data } },
-            }),
-          });
+          const res = await fetch(
+            `https://fcm.googleapis.com/v1/projects/${auth.projectId}/messages:send`,
+            {
+              method: "POST",
+              headers: {
+                authorization: `Bearer ${auth.token}`,
+                "content-type": "application/json",
+              },
+              body: JSON.stringify({
+                message: { token: row.token, android: { priority: "HIGH", ttl: "86400s", data } },
+              }),
+            },
+          );
           if (res.status < 400) return;
           const err = (await res.json().catch(() => null)) as {
             error?: { details?: Array<{ reason?: string }> };
@@ -563,11 +607,24 @@ async function systemMessage(db: D1Database, convId: string, body: string) {
     body,
     created,
   );
-  await run(db, "UPDATE conversations SET last_message = ?, last_message_at = ? WHERE id = ?", body, created, convId);
+  await run(
+    db,
+    "UPDATE conversations SET last_message = ?, last_message_at = ? WHERE id = ?",
+    body,
+    created,
+    convId,
+  );
   return mid;
 }
 
-async function logCallEvent(db: D1Database, caller: string, callee: string, kind: string, status: string, seconds = 0) {
+async function logCallEvent(
+  db: D1Database,
+  caller: string,
+  callee: string,
+  kind: string,
+  status: string,
+  seconds = 0,
+) {
   const convId = pairId(caller, callee);
   const exists = await one<{ id: string }>(db, "SELECT id FROM conversations WHERE id = ?", convId);
   if (!exists) return;
@@ -591,7 +648,13 @@ async function logCallEvent(db: D1Database, caller: string, callee: string, kind
     JSON.stringify({ callKind: kind, status, seconds }),
     created,
   );
-  await run(db, "UPDATE conversations SET last_message = ?, last_message_at = ? WHERE id = ?", label, created, convId);
+  await run(
+    db,
+    "UPDATE conversations SET last_message = ?, last_message_at = ? WHERE id = ?",
+    label,
+    created,
+    convId,
+  );
 }
 
 function clockLabel(seconds: number) {
@@ -663,7 +726,10 @@ export default {
       }
       // Never echo the underlying message: it routinely contained SQLite text
       // ("no such table: members") which leaked schema details to any client.
-      console.error("worker error", err instanceof Error ? (err.stack ?? err.message) : String(err));
+      console.error(
+        "worker error",
+        err instanceof Error ? (err.stack ?? err.message) : String(err),
+      );
       return json({ error: { code: "CLOUD", message: "Something went wrong. Try again." } }, 500);
     }
   },
@@ -689,7 +755,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   /* ---------- public ---------- */
 
-  if (path === "/api/health") return json({ ok: true, service: "KuchuPuchu", version: "3.0", time: nowIso() });
+  if (path === "/api/health")
+    return json({ ok: true, service: "KuchuPuchu", version: "3.0", time: nowIso() });
 
   if (path === "/api/config/firebase" && method === "GET") {
     return json({ firebase: fcmPublicConfig(env) });
@@ -697,12 +764,15 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   if (path === "/api/auth/register" && method === "POST") {
     rateLimit(`reg:${clientIp(request)}`, 10, 5);
-    const email = String(body.email || "").trim().toLowerCase();
+    const email = String(body.email || "")
+      .trim()
+      .toLowerCase();
     const password = String(body.password || "");
     const displayName = String(body.displayName || "").trim() || email.split("@")[0] || "User";
     if (!email || !email.includes("@")) fail(400, "Enter a valid email.");
     if (password.length < 6) fail(400, "Password needs at least 6 characters.");
-    if (await one(db, "SELECT id FROM users WHERE email = ?", email)) fail(400, "That email is already in use.");
+    if (await one(db, "SELECT id FROM users WHERE email = ?", email))
+      fail(400, "That email is already in use.");
     // One random suffix used to be the whole strategy; if that suffix was also
     // taken the INSERT hit the UNIQUE index and the signup 500'd.
     const baseUsername = slugFrom(String(body.username || displayName));
@@ -743,7 +813,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   if (path === "/api/auth/login" && method === "POST") {
     rateLimit(`login:${clientIp(request)}`, 15, 10);
-    const email = String(body.email || "").trim().toLowerCase();
+    const email = String(body.email || "")
+      .trim()
+      .toLowerCase();
     const password = String(body.password || "");
     const row = await one<UserRow>(db, "SELECT * FROM users WHERE email = ?", email);
     if (!row || !(await verifyPassword(password, row.password_hash))) {
@@ -792,7 +864,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     }
     if (body.username !== undefined) {
       const username = slugFrom(String(body.username));
-      const taken = await one(db, "SELECT id FROM users WHERE username = ? AND id != ?", username, uid);
+      const taken = await one(
+        db,
+        "SELECT id FROM users WHERE username = ? AND id != ?",
+        username,
+        uid,
+      );
       if (taken) fail(400, "That username is taken.");
       sets.push("username = ?");
       values.push(username);
@@ -815,9 +892,17 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   }
 
   if (path === "/api/devices" && method === "POST") {
-    const token = String(body.token || "").trim().slice(0, 512);
+    const token = String(body.token || "")
+      .trim()
+      .slice(0, 512);
     if (!token) fail(400, "Missing push token.");
-    await run(db, "INSERT OR REPLACE INTO devices (token, user_id, updated_at) VALUES (?, ?, ?)", token, uid, nowIso());
+    await run(
+      db,
+      "INSERT OR REPLACE INTO devices (token, user_id, updated_at) VALUES (?, ?, ?)",
+      token,
+      uid,
+      nowIso(),
+    );
     return json({ ok: true });
   }
   if (path === "/api/devices" && method === "DELETE") {
@@ -837,7 +922,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           likeTerm(q),
           uid,
         )
-      : await all<UserRow>(db, "SELECT * FROM users WHERE id != ? ORDER BY last_active_at DESC LIMIT 20", uid);
+      : await all<UserRow>(
+          db,
+          "SELECT * FROM users WHERE id != ? ORDER BY last_active_at DESC LIMIT 20",
+          uid,
+        );
     const list = [];
     for (const row of rows) {
       if (await blockedBetween(db, uid, row.id)) continue;
@@ -866,7 +955,13 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   if (path === "/api/blocks" && method === "POST") {
     const target = String(body.userId || "");
     if (!target || target === uid) fail(400, "Bad user.");
-    await run(db, "INSERT OR IGNORE INTO blocks (owner_id, target_id, created_at) VALUES (?, ?, ?)", uid, target, nowIso());
+    await run(
+      db,
+      "INSERT OR IGNORE INTO blocks (owner_id, target_id, created_at) VALUES (?, ?, ?)",
+      uid,
+      target,
+      nowIso(),
+    );
     return json({ ok: true });
   }
   const blockMatch = path.match(/^\/api\/blocks\/([^/]+)$/);
@@ -875,7 +970,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     return json({ ok: true });
   }
   if (path === "/api/blocks" && method === "GET") {
-    const rows = await all<{ target_id: string }>(db, "SELECT target_id FROM blocks WHERE owner_id = ?", uid);
+    const rows = await all<{ target_id: string }>(
+      db,
+      "SELECT target_id FROM blocks WHERE owner_id = ?",
+      uid,
+    );
     const list = [];
     for (const row of rows) {
       const user = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row.target_id);
@@ -899,21 +998,44 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         convId,
         created,
       );
-      await run(db, "INSERT INTO members (conv_id, user_id, joined_at) VALUES (?, ?, ?)", convId, uid, created);
-      await run(db, "INSERT INTO members (conv_id, user_id, joined_at) VALUES (?, ?, ?)", convId, other, created);
+      await run(
+        db,
+        "INSERT INTO members (conv_id, user_id, joined_at) VALUES (?, ?, ?)",
+        convId,
+        uid,
+        created,
+      );
+      await run(
+        db,
+        "INSERT INTO members (conv_id, user_id, joined_at) VALUES (?, ?, ?)",
+        convId,
+        other,
+        created,
+      );
     } else {
       const hidden = parseJson<Record<string, number>>(await hiddenJson(db, convId), {});
       delete hidden[uid];
-      await run(db, "UPDATE conversations SET hidden_json = ? WHERE id = ?", JSON.stringify(hidden), convId);
+      await run(
+        db,
+        "UPDATE conversations SET hidden_json = ? WHERE id = ?",
+        JSON.stringify(hidden),
+        convId,
+      );
     }
     const conv = await conversationDetail(db, convId, uid);
     return json({ conversation: conv });
   }
 
   if (path === "/api/conversations/group" && method === "POST") {
-    const title = String(body.title || "").trim().slice(0, 50) || "New group";
+    const title =
+      String(body.title || "")
+        .trim()
+        .slice(0, 50) || "New group";
     const requested = Array.isArray(body.memberIds)
-      ? [...new Set((body.memberIds as unknown[]).map(String).filter((x) => x && x !== uid))].slice(0, 50)
+      ? [...new Set((body.memberIds as unknown[]).map(String).filter((x) => x && x !== uid))].slice(
+          0,
+          50,
+        )
       : [];
     if (!requested.length) fail(400, "Pick at least one member.");
     // Ids used to go straight into `members` unchecked, so a group could be
@@ -936,9 +1058,21 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       uid,
       created,
     );
-    await run(db, "INSERT INTO members (conv_id, user_id, role, joined_at) VALUES (?, ?, 'owner', ?)", convId, uid, created);
+    await run(
+      db,
+      "INSERT INTO members (conv_id, user_id, role, joined_at) VALUES (?, ?, 'owner', ?)",
+      convId,
+      uid,
+      created,
+    );
     for (const memberId of memberIds) {
-      await run(db, "INSERT OR IGNORE INTO members (conv_id, user_id, joined_at) VALUES (?, ?, ?)", convId, memberId, created);
+      await run(
+        db,
+        "INSERT OR IGNORE INTO members (conv_id, user_id, joined_at) VALUES (?, ?, ?)",
+        convId,
+        memberId,
+        created,
+      );
     }
     await systemMessage(db, convId, `${me.display_name} created "${title}"`);
     const conv = await conversationDetail(db, convId, uid);
@@ -963,7 +1097,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     for (const group of chunked(ids)) {
       for (const c of await all<ConvRow>(
         db,
-        `SELECT ${CONV_COLS} FROM conversations WHERE id IN (${inSql(group.length)})`,
+        `SELECT ${CONV_COLS},
+                (SELECT MAX(rowid) FROM messages m WHERE m.conv_id = conversations.id) AS max_row
+           FROM conversations WHERE id IN (${inSql(group.length)})`,
         ...group,
       )) {
         convs.set(c.id, c);
@@ -990,10 +1126,14 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       // conversation was a no-op and the row came straight back.
       // hidden_json is only ever written for SOLO chats - deleting a group
       // makes the member leave it instead.
-      const hiddenAt = Number(parseJson<Record<string, number>>(conv.hidden_json, {})[uid] || 0);
-      if (hiddenAt > 0 && conv.kind === "SOLO") {
-        const lastAt = conv.last_message_at ? Date.parse(conv.last_message_at) : 0;
-        if (!lastAt || lastAt <= hiddenAt) continue;
+      const mark = watermarkFor(parseJson<HiddenMap>(conv.hidden_json, {}), uid);
+      if (mark && conv.kind === "SOLO") {
+        if (mark.row >= 0) {
+          if (Number(conv.max_row || 0) <= mark.row) continue;
+        } else {
+          const lastAt = conv.last_message_at ? Date.parse(conv.last_message_at) : 0;
+          if (!lastAt || lastAt <= Date.parse(mark.at)) continue;
+        }
       }
       list.push(buildConvDetail(conv, membersByConv.get(conv.id) ?? [], users, uid));
     }
@@ -1082,7 +1222,13 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const targetUser = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", target);
     if (!targetUser) fail(404, "User not found.");
     if (await blockedBetween(db, uid, target)) fail(403, "You can't add this player.", "BLOCKED");
-    await run(db, "INSERT OR IGNORE INTO members (conv_id, user_id, joined_at) VALUES (?, ?, ?)", convId, target, nowIso());
+    await run(
+      db,
+      "INSERT OR IGNORE INTO members (conv_id, user_id, joined_at) VALUES (?, ?, ?)",
+      convId,
+      target,
+      nowIso(),
+    );
     await systemMessage(db, convId, `${me.display_name} added ${targetUser.display_name}`);
     return json({ ok: true });
   }
@@ -1093,11 +1239,18 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const targetId = memberRemoveMatch[2]!;
     const { conv } = await requireMember(db, convId, uid);
     if (conv.kind !== "GROUP") fail(400, "Only groups can remove members.");
-    if (conv.owner_id !== uid && targetId !== uid) fail(403, "Only the group owner can remove others.");
+    if (conv.owner_id !== uid && targetId !== uid)
+      fail(403, "Only the group owner can remove others.");
     const targetUser = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", targetId);
     await run(db, "DELETE FROM members WHERE conv_id = ? AND user_id = ?", convId, targetId);
     if (targetUser) {
-      await systemMessage(db, convId, targetId === uid ? `${targetUser.display_name} left` : `${me.display_name} removed ${targetUser.display_name}`);
+      await systemMessage(
+        db,
+        convId,
+        targetId === uid
+          ? `${targetUser.display_name} left`
+          : `${me.display_name} removed ${targetUser.display_name}`,
+      );
     }
     return json({ ok: true });
   }
@@ -1105,14 +1258,26 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   const readMatch = path.match(/^\/api\/conversations\/([^/]+)\/read$/);
   if (readMatch && method === "POST") {
     await requireMember(db, readMatch[1]!, uid);
-    await run(db, "UPDATE members SET last_read_at = ?, unread = 0 WHERE conv_id = ? AND user_id = ?", nowIso(), readMatch[1]!, uid);
+    await run(
+      db,
+      "UPDATE members SET last_read_at = ?, unread = 0 WHERE conv_id = ? AND user_id = ?",
+      nowIso(),
+      readMatch[1]!,
+      uid,
+    );
     return json({ ok: true });
   }
 
   const muteMatch = path.match(/^\/api\/conversations\/([^/]+)\/mute$/);
   if (muteMatch && method === "POST") {
     await requireMember(db, muteMatch[1]!, uid);
-    await run(db, "UPDATE members SET muted = ? WHERE conv_id = ? AND user_id = ?", body.muted ? 1 : 0, muteMatch[1]!, uid);
+    await run(
+      db,
+      "UPDATE members SET muted = ? WHERE conv_id = ? AND user_id = ?",
+      body.muted ? 1 : 0,
+      muteMatch[1]!,
+      uid,
+    );
     return json({ ok: true });
   }
 
@@ -1123,9 +1288,19 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       await run(db, "DELETE FROM members WHERE conv_id = ? AND user_id = ?", convId, uid);
       await systemMessage(db, convId, `${me.display_name} left`);
     } else {
-      const hidden = parseJson<Record<string, number>>(await hiddenJson(db, convId), {});
-      hidden[uid] = Date.now();
-      await run(db, "UPDATE conversations SET hidden_json = ? WHERE id = ?", JSON.stringify(hidden), convId);
+      const hidden = parseJson<HiddenMap>(await hiddenJson(db, convId), {});
+      const newest = await one<{ row: number | null }>(
+        db,
+        "SELECT MAX(rowid) AS row FROM messages WHERE conv_id = ?",
+        convId,
+      );
+      hidden[uid] = { row: Number(newest?.row || 0), at: nowIso() };
+      await run(
+        db,
+        "UPDATE conversations SET hidden_json = ? WHERE id = ?",
+        JSON.stringify(hidden),
+        convId,
+      );
     }
     return json({ ok: true });
   }
@@ -1153,9 +1328,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // Messages the member deleted for themselves stay deleted. Without this a
     // chat that reappeared after a new message came back with its whole
     // history, which is not what "delete chat" means.
-    const deletedAt = Number(parseJson<Record<string, number>>(await hiddenJson(db, convId), {})[uid] || 0);
-    const sinceClause = deletedAt > 0 ? "AND created_at > ?" : "";
-    const sinceArgs = deletedAt > 0 ? [new Date(deletedAt).toISOString()] : [];
+    const mark = watermarkFor(parseJson<HiddenMap>(await hiddenJson(db, convId), {}), uid);
+    const sinceClause = mark ? (mark.row >= 0 ? "AND rowid > ?" : "AND created_at > ?") : "";
+    const sinceArgs = mark ? [mark.row >= 0 ? mark.row : mark.at] : [];
     const before = url.searchParams.get("before");
     // created_at is millisecond-resolution text, so several messages routinely
     // share one value. Without a rowid tiebreaker both the ORDER BY and the
@@ -1183,15 +1358,28 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const senderIds = [...new Set(rows.map((r) => r.sender_id).filter(Boolean))];
     const names = new Map<string, string>();
     for (const sid of senderIds) {
-      const u = await one<{ display_name: string }>(db, "SELECT display_name FROM users WHERE id = ?", sid);
+      const u = await one<{ display_name: string }>(
+        db,
+        "SELECT display_name FROM users WHERE id = ?",
+        sid,
+      );
       if (u) names.set(sid, u.display_name);
     }
-    const items = rows.reverse().map((row) => ({ ...msgFrom(row), senderName: names.get(row.sender_id) }));
+    const items = rows
+      .reverse()
+      .map((row) => ({ ...msgFrom(row), senderName: names.get(row.sender_id) }));
     // Delivery receipts: the fetching member has now received every message
     // in this page that someone else sent (only mark the ones still pending).
-    const inboxIds = rows.filter((r) => r.sender_id && r.sender_id !== uid && !r.delivered_at).map((r) => r.id);
+    const inboxIds = rows
+      .filter((r) => r.sender_id && r.sender_id !== uid && !r.delivered_at)
+      .map((r) => r.id);
     if (inboxIds.length) {
-      await run(db, `UPDATE messages SET delivered_at = ? WHERE id IN (${inboxIds.map(() => "?").join(",")})`, nowIso(), ...inboxIds);
+      await run(
+        db,
+        `UPDATE messages SET delivered_at = ? WHERE id IN (${inboxIds.map(() => "?").join(",")})`,
+        nowIso(),
+        ...inboxIds,
+      );
     }
     // Read receipts for the sender. In a group this is the *oldest* read time
     // and only when every other member has read something — MAX() used to flip
@@ -1217,25 +1405,32 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         fail(403, "You can't reach this player.", "BLOCKED");
       }
     }
-    const text = String(body.body || "").trim().slice(0, MESSAGE_MAX_LENGTH);
+    const text = String(body.body || "")
+      .trim()
+      .slice(0, MESSAGE_MAX_LENGTH);
     // Whitelisted on purpose: SYSTEM and CALL bubbles are written by the server
     // only. Accepting an arbitrary client kind let anyone forge "Alice paid 500
     // coins" notices and fake call-log entries in someone else's chat.
     const requestedKind = String(body.kind || "TEXT").toUpperCase();
     const kind = ALLOWED_MESSAGE_KINDS.has(requestedKind) ? requestedKind : "TEXT";
-    const imageData = typeof body.imageData === "string" && isSafeDataUrl(body.imageData) ? body.imageData : null;
+    const imageData =
+      typeof body.imageData === "string" && isSafeDataUrl(body.imageData) ? body.imageData : null;
     if (typeof body.imageData === "string" && body.imageData.startsWith("data:") && !imageData) {
       fail(400, "Unsupported image format.", "BAD_MEDIA");
     }
-    const fileKey = typeof body.fileKey === "string" && FILE_KEY_RE.test(body.fileKey) ? body.fileKey : null;
-    if (imageData && imageData.length > 450_000) fail(400, "Photo too large — pick a smaller image.");
+    const fileKey =
+      typeof body.fileKey === "string" && FILE_KEY_RE.test(body.fileKey) ? body.fileKey : null;
+    if (imageData && imageData.length > 450_000)
+      fail(400, "Photo too large — pick a smaller image.");
     if (kind === "STICKER" && !text) fail(400, "Pick a sticker.");
     if (kind === "STICKER" && text.length > 16) fail(400, "Bad sticker.");
     if (!text && !imageData && !fileKey) fail(400, "Write a message.");
     const mid = id();
     const created = nowIso();
     const clientId =
-      typeof body.clientId === "string" && body.clientId.trim() ? body.clientId.trim().slice(0, 64) : null;
+      typeof body.clientId === "string" && body.clientId.trim()
+        ? body.clientId.trim().slice(0, 64)
+        : null;
     const incomingMeta = (body.meta as Record<string, unknown> | undefined) ?? {};
     const metaObj: Record<string, unknown> = {
       ...(kind === "FILE" && fileKey
@@ -1275,9 +1470,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       );
     }
     const preview =
-    kind === "STICKER"
-      ? "Sticker"
-      : text || (imageData ? "Photo" : kind === "FILE" ? String(body.fileName || "File") : "Message");
+      kind === "STICKER"
+        ? "Sticker"
+        : text ||
+          (imageData ? "Photo" : kind === "FILE" ? String(body.fileName || "File") : "Message");
     // A new message has to un-hide the conversation for everyone, but it must
     // not erase the other members' delete watermarks: those are what keep the
     // history they deleted away when the chat reappears. The old statement
@@ -1296,7 +1492,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     );
     for (const memberId of members) {
       if (memberId.user_id === uid) continue;
-      await run(db, "UPDATE members SET unread = unread + 1 WHERE conv_id = ? AND user_id = ?", convId, memberId.user_id);
+      await run(
+        db,
+        "UPDATE members SET unread = unread + 1 WHERE conv_id = ? AND user_id = ?",
+        convId,
+        memberId.user_id,
+      );
     }
     const message = msgFrom((await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", mid))!);
     // Push: every other member gets a high-priority data message.
@@ -1320,7 +1521,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const row = await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", msgDeleteMatch[1]!);
     if (!row) fail(404, "Message not found.");
     if (row.sender_id !== uid) fail(403, "You can only delete your own messages.");
-    await run(db, "UPDATE messages SET body = NULL, media = NULL, meta_json = NULL, kind = 'DELETED' WHERE id = ?", row.id);
+    await run(
+      db,
+      "UPDATE messages SET body = NULL, media = NULL, meta_json = NULL, kind = 'DELETED' WHERE id = ?",
+      row.id,
+    );
     return json({ ok: true });
   }
 
@@ -1336,12 +1541,13 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (data.byteLength === 0) fail(400, "File is empty.");
     if (data.byteLength > 26_214_400) fail(400, "File too large (max 25 MB).");
     const type = safeMediaType(url.searchParams.get("type"));
-    const ext = (url.searchParams.get("name") || "file")
-      .split(".")
-      .pop()
-      ?.toLowerCase()
-      .replace(/[^a-z0-9]/g, "")
-      .slice(0, 10) || "bin";
+    const ext =
+      (url.searchParams.get("name") || "file")
+        .split(".")
+        .pop()
+        ?.toLowerCase()
+        .replace(/[^a-z0-9]/g, "")
+        .slice(0, 10) || "bin";
     const key = `f/${id()}.${ext}`;
     await env.MEDIA.put(key, data, { httpMetadata: { contentType: type } });
     await run(
@@ -1370,7 +1576,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       const allowed =
         meta.owner_id === uid ||
         (!!meta.conv_id &&
-          !!(await one(db, "SELECT user_id FROM members WHERE conv_id = ? AND user_id = ?", meta.conv_id, uid)));
+          !!(await one(
+            db,
+            "SELECT user_id FROM members WHERE conv_id = ? AND user_id = ?",
+            meta.conv_id,
+            uid,
+          )));
       if (!allowed) fail(403, "File not found.", "FORBIDDEN");
     } else {
       // Object uploaded before the files table existed: fall back to "is this
@@ -1410,7 +1621,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     }
     const fileKey =
       typeof body.fileKey === "string" && FILE_KEY_RE.test(body.fileKey) ? body.fileKey : null;
-    if (imageData && imageData.length > 450_000) fail(400, "Photo too large — pick a smaller image.");
+    if (imageData && imageData.length > 450_000)
+      fail(400, "Photo too large — pick a smaller image.");
     if ((kind === "IMAGE" || kind === "VIDEO") && !imageData && !fileKey) {
       fail(400, kind === "VIDEO" ? "Pick a video for the status." : "Pick a photo for the status.");
     }
@@ -1438,7 +1650,18 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       await run(db, "UPDATE files SET conv_id = NULL WHERE key = ? AND owner_id = ?", fileKey, uid);
     }
     return json(
-      { status: { id: sid, kind, text, bgStyle, hasMedia: !!(imageData ?? fileKey), seconds, createdAt: created, expiresAt } },
+      {
+        status: {
+          id: sid,
+          kind,
+          text,
+          bgStyle,
+          hasMedia: !!(imageData ?? fileKey),
+          seconds,
+          createdAt: created,
+          expiresAt,
+        },
+      },
       201,
     );
   }
@@ -1449,9 +1672,15 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // one client's poll wrote to the whole statuses table for everybody.
     if (Date.now() > nextStatusSweep) {
       nextStatusSweep = Date.now() + 60_000;
-      ctx.waitUntil(run(db, "DELETE FROM statuses WHERE expires_at < ?", nowIso()).then(() => undefined));
+      ctx.waitUntil(
+        run(db, "DELETE FROM statuses WHERE expires_at < ?", nowIso()).then(() => undefined),
+      );
     }
-    const contactRows = await all<{ conv_id: string }>(db, "SELECT conv_id FROM members WHERE user_id = ?", uid);
+    const contactRows = await all<{ conv_id: string }>(
+      db,
+      "SELECT conv_id FROM members WHERE user_id = ?",
+      uid,
+    );
     const contactIds = new Set<string>();
     for (const row of contactRows) {
       for (const member of await membersOf(db, row.conv_id)) {
@@ -1459,7 +1688,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       }
     }
     const out: Array<Record<string, unknown>> = [];
-    const mine = await all<StatusRow>(db, "SELECT * FROM statuses WHERE user_id = ? ORDER BY created_at ASC", uid);
+    const mine = await all<StatusRow>(
+      db,
+      "SELECT * FROM statuses WHERE user_id = ? ORDER BY created_at ASC",
+      uid,
+    );
     if (mine.length) {
       const views = await all<{ status_id: string; viewer_id: string; viewed_at: string }>(
         db,
@@ -1488,12 +1721,24 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       });
     }
     for (const contactId of contactIds) {
-      const rows = await all<StatusRow>(db, "SELECT * FROM statuses WHERE user_id = ? AND expires_at > ? ORDER BY created_at ASC", contactId, nowIso());
+      const rows = await all<StatusRow>(
+        db,
+        "SELECT * FROM statuses WHERE user_id = ? AND expires_at > ? ORDER BY created_at ASC",
+        contactId,
+        nowIso(),
+      );
       if (!rows.length) continue;
       const userRow = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", contactId);
       if (!userRow) continue;
       const viewed = new Set(
-        (await all<{ status_id: string }>(db, "SELECT status_id FROM status_views WHERE viewer_id = ? AND status_id IN (SELECT id FROM statuses WHERE user_id = ?)", uid, contactId)).map((r) => r.status_id),
+        (
+          await all<{ status_id: string }>(
+            db,
+            "SELECT status_id FROM status_views WHERE viewer_id = ? AND status_id IN (SELECT id FROM statuses WHERE user_id = ?)",
+            uid,
+            contactId,
+          )
+        ).map((r) => r.status_id),
       );
       out.push({
         user: userFrom(userRow, onlineNow(userRow)),
@@ -1516,9 +1761,19 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   const statusViewMatch = path.match(/^\/api\/statuses\/([^/]+)\/view$/);
   if (statusViewMatch && method === "POST") {
     const sid = statusViewMatch[1]!;
-    const row = await one<{ user_id: string }>(db, "SELECT user_id FROM statuses WHERE id = ?", sid);
+    const row = await one<{ user_id: string }>(
+      db,
+      "SELECT user_id FROM statuses WHERE id = ?",
+      sid,
+    );
     if (row && row.user_id !== uid) {
-      await run(db, "INSERT OR IGNORE INTO status_views (status_id, viewer_id, viewed_at) VALUES (?, ?, ?)", sid, uid, nowIso());
+      await run(
+        db,
+        "INSERT OR IGNORE INTO status_views (status_id, viewer_id, viewed_at) VALUES (?, ?, ?)",
+        sid,
+        uid,
+        nowIso(),
+      );
     }
     return json({ ok: true });
   }
@@ -1526,7 +1781,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   const statusViewsMatch = path.match(/^\/api\/statuses\/([^/]+)\/viewers$/);
   if (statusViewsMatch && method === "GET") {
     const sid = statusViewsMatch[1]!;
-    const row = await one<{ user_id: string }>(db, "SELECT user_id FROM statuses WHERE id = ?", sid);
+    const row = await one<{ user_id: string }>(
+      db,
+      "SELECT user_id FROM statuses WHERE id = ?",
+      sid,
+    );
     if (!row) fail(404, "Status not found.");
     if (row.user_id !== uid) fail(403, "Not your status.");
     const views = await all<{ viewer_id: string; viewed_at: string }>(
@@ -1544,7 +1803,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   const statusMediaMatch = path.match(/^\/api\/statuses\/([^/]+)\/media$/);
   if (statusMediaMatch && method === "GET") {
-    const row = await one<StatusRow>(db, "SELECT * FROM statuses WHERE id = ?", statusMediaMatch[1]!);
+    const row = await one<StatusRow>(
+      db,
+      "SELECT * FROM statuses WHERE id = ?",
+      statusMediaMatch[1]!,
+    );
     if (!row || !row.media) fail(404, "Media not found.");
     const isContact = !!(await one(
       db,
@@ -1587,8 +1850,20 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         convId,
         createdConv,
       );
-      await run(db, "INSERT INTO members (conv_id, user_id, joined_at) VALUES (?, ?, ?)", convId, uid, createdConv);
-      await run(db, "INSERT INTO members (conv_id, user_id, joined_at) VALUES (?, ?, ?)", convId, other, createdConv);
+      await run(
+        db,
+        "INSERT INTO members (conv_id, user_id, joined_at) VALUES (?, ?, ?)",
+        convId,
+        uid,
+        createdConv,
+      );
+      await run(
+        db,
+        "INSERT INTO members (conv_id, user_id, joined_at) VALUES (?, ?, ?)",
+        convId,
+        other,
+        createdConv,
+      );
     }
     const callId = id();
     const created = nowIso();
@@ -1686,7 +1961,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const row = await one<CallRow>(db, "SELECT * FROM calls WHERE id = ?", callId);
     if (!row) fail(404, "Call not found.");
     if (row.callee_id !== uid) fail(403, "Not your call to answer.");
-    if (row.status !== "RINGING") return json({ call: callFrom(row, uid, await otherUser(db, row, uid)) });
+    if (row.status !== "RINGING")
+      return json({ call: callFrom(row, uid, await otherUser(db, row, uid)) });
     await run(
       db,
       "UPDATE calls SET status = 'ACTIVE', answer_sdp = ?, started_at = ? WHERE id = ?",
@@ -1704,7 +1980,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const row = await one<CallRow>(db, "SELECT * FROM calls WHERE id = ?", callId);
     if (!row) fail(404, "Call not found.");
     if (row.status === "RINGING" && row.callee_id === uid) {
-      await run(db, "UPDATE calls SET status = 'DECLINED', ended_at = ? WHERE id = ?", nowIso(), callId);
+      await run(
+        db,
+        "UPDATE calls SET status = 'DECLINED', ended_at = ? WHERE id = ?",
+        nowIso(),
+        callId,
+      );
       await logCallEvent(db, row.caller_id, row.callee_id, row.kind, "DECLINED");
     }
     return json({ ok: true });
@@ -1719,7 +2000,14 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // this check; /end did not, so any signed-in user could hang up on anyone.
     if (row.caller_id !== uid && row.callee_id !== uid) fail(403, "Not your call.", "FORBIDDEN");
     if (row.status === "ACTIVE" || row.status === "RINGING") {
-      const seconds = Math.max(0, Math.round(((row.started_at ? Date.parse(row.started_at) : Date.parse(row.created_at)) - Date.now()) / -1000));
+      const seconds = Math.max(
+        0,
+        Math.round(
+          ((row.started_at ? Date.parse(row.started_at) : Date.parse(row.created_at)) -
+            Date.now()) /
+            -1000,
+        ),
+      );
       // Guarded on the current status so two clients ending at once cannot both
       // write an "ENDED" call-log bubble.
       const changed = await run(
@@ -1746,7 +2034,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       // store the whole object so nothing is lost (stringifying an object
       // here used to save "[object Object]" and break every call).
       const raw = (body.candidate ?? {}) as Record<string, unknown>;
-      const candidate = typeof body.candidate === "string" ? body.candidate : String(raw.candidate ?? "");
+      const candidate =
+        typeof body.candidate === "string" ? body.candidate : String(raw.candidate ?? "");
       if (!candidate || candidate === "[object Object]") fail(400, "Missing candidate.");
       const payload =
         typeof body.candidate === "string"
@@ -1769,14 +2058,24 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (method === "GET") {
       const since = url.searchParams.get("since") || "";
       const rows = since
-        ? await all<{ rowid: number; sender_id: string; candidate_json: string; created_at: string }>(
+        ? await all<{
+            rowid: number;
+            sender_id: string;
+            candidate_json: string;
+            created_at: string;
+          }>(
             db,
             "SELECT rowid AS rowid, sender_id, candidate_json, created_at FROM call_ice WHERE call_id = ? AND sender_id != ? AND created_at > ? ORDER BY created_at ASC, rowid ASC",
             callId,
             uid,
             since,
           )
-        : await all<{ rowid: number; sender_id: string; candidate_json: string; created_at: string }>(
+        : await all<{
+            rowid: number;
+            sender_id: string;
+            candidate_json: string;
+            created_at: string;
+          }>(
             db,
             "SELECT rowid AS rowid, sender_id, candidate_json, created_at FROM call_ice WHERE call_id = ? AND sender_id != ? ORDER BY created_at ASC, rowid ASC",
             callId,
@@ -1826,7 +2125,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     return json({
       users,
       chats,
-      messages: msgRows.map((row) => ({ ...msgFrom(row), convoId: row.conv_id, convTitle: row.title })),
+      messages: msgRows.map((row) => ({
+        ...msgFrom(row),
+        convoId: row.conv_id,
+        convTitle: row.title,
+      })),
     });
   }
 
@@ -1918,7 +2221,11 @@ function callFrom(row: CallRow, uid: string, other: UserRow | null) {
 }
 
 async function hiddenJson(db: D1Database, convId: string) {
-  const row = await one<{ hidden_json: string }>(db, "SELECT hidden_json FROM conversations WHERE id = ?", convId);
+  const row = await one<{ hidden_json: string }>(
+    db,
+    "SELECT hidden_json FROM conversations WHERE id = ?",
+    convId,
+  );
   return row?.hidden_json ?? "{}";
 }
 
@@ -1933,7 +2240,31 @@ type ConvRow = {
   disappear_seconds: number | null;
   theme: string | null;
   hidden_json?: string | null;
+  /** Newest messages rowid in the conversation; only the list query selects it. */
+  max_row?: number | null;
 };
+
+/**
+ * Where a member's "delete chat" cut off.
+ *
+ * Older rows stored a bare epoch-ms number, and comparing message timestamps
+ * against it lost messages: `created_at` is only millisecond-resolution, so a
+ * message written in the same millisecond as the delete fell on the wrong side
+ * of `created_at > watermark` and disappeared. `row` is the messages rowid the
+ * chat was deleted at, which is strictly monotonic, so `rowid > row` has no
+ * boundary to get wrong. Legacy numeric watermarks are still honoured by
+ * timestamp, since they cannot be converted.
+ */
+type Watermark = { row: number; at: string };
+type HiddenMap = Record<string, Watermark | number>;
+
+/** The watermark for one member, or null when the chat was never deleted. */
+function watermarkFor(hidden: HiddenMap, uid: string): Watermark | null {
+  const raw = hidden[uid];
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw === "number") return raw > 0 ? { row: -1, at: new Date(raw).toISOString() } : null;
+  return typeof raw.row === "number" ? raw : null;
+}
 
 type ConvMemberRow = {
   conv_id?: string;
@@ -1944,7 +2275,8 @@ type ConvMemberRow = {
   last_read_at: string | null;
 };
 
-const CONV_COLS = "id, kind, title, owner_id, created_at, last_message_at, last_message, disappear_seconds, theme, hidden_json";
+const CONV_COLS =
+  "id, kind, title, owner_id, created_at, last_message_at, last_message, disappear_seconds, theme, hidden_json";
 const MEMBER_COLS = "conv_id, user_id, role, muted, unread, last_read_at";
 
 /** Placeholder list for an IN(...) clause. */
@@ -1961,14 +2293,23 @@ function chunked<T>(items: T[], size = 200): T[][] {
 async function usersById(db: D1Database, userIds: string[]) {
   const map = new Map<string, UserRow>();
   for (const group of chunked([...new Set(userIds.filter(Boolean))])) {
-    for (const u of await all<UserRow>(db, `SELECT * FROM users WHERE id IN (${inSql(group.length)})`, ...group)) {
+    for (const u of await all<UserRow>(
+      db,
+      `SELECT * FROM users WHERE id IN (${inSql(group.length)})`,
+      ...group,
+    )) {
       map.set(u.id, u);
     }
   }
   return map;
 }
 
-function buildConvDetail(conv: ConvRow, memberRows: ConvMemberRow[], users: Map<string, UserRow>, uid: string) {
+function buildConvDetail(
+  conv: ConvRow,
+  memberRows: ConvMemberRow[],
+  users: Map<string, UserRow>,
+  uid: string,
+) {
   const members = [];
   let other = null;
   let meMuted = false;
@@ -1976,7 +2317,11 @@ function buildConvDetail(conv: ConvRow, memberRows: ConvMemberRow[], users: Map<
   for (const row of memberRows) {
     const user = users.get(row.user_id);
     if (!user) continue;
-    members.push({ user: userFrom(user, onlineNow(user)), role: row.role, lastReadAt: row.last_read_at });
+    members.push({
+      user: userFrom(user, onlineNow(user)),
+      role: row.role,
+      lastReadAt: row.last_read_at,
+    });
     if (row.user_id !== uid && conv.kind === "SOLO") other = userFrom(user, onlineNow(user));
     if (row.user_id === uid) {
       meMuted = row.muted === 1;
@@ -2002,10 +2347,26 @@ function buildConvDetail(conv: ConvRow, memberRows: ConvMemberRow[], users: Map<
 }
 
 async function conversationDetail(db: D1Database, convId: string, uid: string) {
-  const conv = await one<ConvRow>(db, `SELECT ${CONV_COLS} FROM conversations WHERE id = ?`, convId);
+  const conv = await one<ConvRow>(
+    db,
+    `SELECT ${CONV_COLS} FROM conversations WHERE id = ?`,
+    convId,
+  );
   if (!conv) fail(404, "Conversation not found.");
-  const memberRows = await all<ConvMemberRow>(db, `SELECT ${MEMBER_COLS} FROM members WHERE conv_id = ?`, convId);
-  return buildConvDetail(conv, memberRows, await usersById(db, memberRows.map((m) => m.user_id)), uid);
+  const memberRows = await all<ConvMemberRow>(
+    db,
+    `SELECT ${MEMBER_COLS} FROM members WHERE conv_id = ?`,
+    convId,
+  );
+  return buildConvDetail(
+    conv,
+    memberRows,
+    await usersById(
+      db,
+      memberRows.map((m) => m.user_id),
+    ),
+    uid,
+  );
 }
 
 async function otherUser(db: D1Database, call: CallRow, uid: string) {
