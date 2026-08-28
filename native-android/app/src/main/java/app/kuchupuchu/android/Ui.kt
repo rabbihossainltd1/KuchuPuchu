@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -132,7 +133,10 @@ fun KpAvatar(
                 )
                 else -> Text(
                     initials(name),
-                    fontSize = (inner.value * 0.38f).sp,
+                    // dp→sp at the current density (NOT fontScale): a raw
+                    // dp-number-in-sp grew with the user's font setting and
+                    // overflowed the fixed circle.
+                    fontSize = with(LocalDensity.current) { (inner * 0.38f).toSp() },
                     fontWeight = FontWeight.SemiBold,
                     color = GoldDeep,
                 )
@@ -329,7 +333,9 @@ fun statusStamp(iso: String): String {
         z.toLocalDate() == now.toLocalDate().minusDays(1) ->
             "Yesterday at ${String.format("%d:%02d %s", (z.hour % 12f).toInt().let { if (it == 0) 12 else it }, z.minute, if (z.hour >= 12) "PM" else "AM")}"
         now.toLocalDate().toEpochDay() - z.toLocalDate().toEpochDay() < 7 ->
-            "${z.dayOfMonth} ${z.month.toString().take(3).let { m -> m[0] + m.substring(1).lowercase() }}"
+            // Within a week, show the weekday like the chat list does — this
+            // branch used to be a copy of the "else" date format.
+            z.dayOfWeek.toString().take(3).let { d -> d[0] + d.substring(1).lowercase() }
         else ->
             "${z.dayOfMonth} ${z.month.toString().take(3).let { m -> m[0] + m.substring(1).lowercase() }}"
     }

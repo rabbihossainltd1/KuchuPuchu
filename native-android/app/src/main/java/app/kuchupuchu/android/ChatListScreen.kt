@@ -17,9 +17,11 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -122,7 +124,7 @@ fun ChatListScreen(nav: NavController) {
     }
 
     Box(Modifier.fillMaxSize().background(Cream)) {
-        Column(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().statusBarsPadding()) {
             /* ---------- top bar ---------- */
             Row(
                 Modifier
@@ -178,6 +180,7 @@ fun ChatListScreen(nav: NavController) {
                 contentColor = AmberInk,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
+                    .navigationBarsPadding()
                     .padding(20.dp)
                     .size(60.dp)
                     .shadow(8.dp, CircleShape),

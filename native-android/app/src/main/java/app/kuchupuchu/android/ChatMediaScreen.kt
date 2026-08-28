@@ -11,8 +11,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -63,7 +65,13 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
         }
     }
 
-    Column(Modifier.fillMaxSize().background(Cream)) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Cream)
+            .statusBarsPadding()
+            .navigationBarsPadding(),
+    ) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -96,8 +104,11 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
                 if (images.isEmpty()) {
                     EmptyState(Icons.Filled.InsertDriveFile, "No photos", "Photos sent in this chat show up here")
                 } else {
+                    // weight(1f) bounds the grid to the space below the tabs —
+                    // unconstrained, the last rows could run past the bottom.
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(3),
+                        modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(8.dp),
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -126,7 +137,7 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
                     }
                 }
             }
-            1 -> LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            1 -> LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (docs.isEmpty()) {
                     item { Text("No documents yet.", color = Muted, modifier = Modifier.padding(16.dp)) }
                 }
@@ -144,7 +155,7 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
                     }
                 }
             }
-            else -> LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            else -> LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (links.isEmpty()) {
                     item { Text("No links yet.", color = Muted, modifier = Modifier.padding(16.dp)) }
                 }

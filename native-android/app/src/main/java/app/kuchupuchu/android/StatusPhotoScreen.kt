@@ -12,8 +12,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -91,7 +94,13 @@ fun StatusPhotoScreen(nav: NavController) {
             }
         }
 
-    Column(Modifier.fillMaxSize().background(Cream)) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Cream)
+            .statusBarsPadding()
+            .navigationBarsPadding(),
+    ) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -101,11 +110,15 @@ fun StatusPhotoScreen(nav: NavController) {
             }
             Text("Photo or video status", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
         }
+        // Flexible preview: takes whatever height is left after the caption
+        // and the buttons, so "Post" always stays on-screen (the fixed 400dp
+        // pushed it off small devices).
         Box(
             Modifier
                 .fillMaxWidth()
                 .padding(16.dp)
-                .height(400.dp)
+                .weight(1f)
+                .heightIn(min = 160.dp)
                 .clip(RoundedCornerShape(24.dp))
                 .background(Card),
             contentAlignment = Alignment.Center,
@@ -154,7 +167,6 @@ fun StatusPhotoScreen(nav: NavController) {
         if (error.isNotBlank()) {
             Text(error, color = Red, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 18.dp, vertical = 6.dp))
         }
-        Spacer(Modifier.weight(1f))
         Row(
             Modifier.fillMaxWidth().padding(16.dp),
             horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,

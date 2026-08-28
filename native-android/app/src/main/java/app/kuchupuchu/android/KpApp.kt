@@ -50,6 +50,7 @@ fun KpApp() {
             ) {
                 composable("main") { ChatListScreen(nav) }
                 composable("newchat") { NewChatScreen(nav) }
+                composable("newgroup") { CreateGroupScreen(nav) }
                 composable("chat/{id}") { entry ->
                     val id = entry.arguments?.getString("id") ?: ""
                     ChatScreen(nav, id)

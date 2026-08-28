@@ -7,12 +7,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -259,6 +263,7 @@ fun StatusScreen(nav: NavController) {
         Column(
             Modifier
                 .align(Alignment.BottomEnd)
+                .navigationBarsPadding()
                 .padding(end = 20.dp, bottom = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -318,7 +323,7 @@ fun StatusComposer(onDone: () -> Unit) {
     val colors = gradients[style]!!
 
     Box(Modifier.fillMaxSize().background(Cream)) {
-        Column(Modifier.fillMaxSize().imePadding()) {
+        Column(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -328,11 +333,15 @@ fun StatusComposer(onDone: () -> Unit) {
                 }
                 Text("Text status", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
             }
+            // Flexible height: takes the space left over after the input and
+            // buttons, so "Post status" never slides off-screen on short
+            // devices (the fixed 380dp used to push it out of view).
             Box(
                 Modifier
                     .fillMaxWidth()
                     .padding(16.dp)
-                    .height(380.dp)
+                    .weight(1f)
+                    .heightIn(min = 180.dp)
                     .clip(RoundedCornerShape(24.dp))
                     .background(Brush.linearGradient(colors))
                     .clickable { },
@@ -392,8 +401,13 @@ fun StatusComposer(onDone: () -> Unit) {
             if (error.isNotBlank()) {
                 Text(error, color = Red, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 18.dp))
             }
-            Spacer(Modifier.weight(1f))
-            Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.End) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
                 GoldBtn(
                     if (busy) "…" else "Post status",
                     enabled = text.isNotBlank() && !busy,
@@ -439,6 +453,16 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
     var viewers by remember { mutableStateOf("") }
     var viewersError by remember { mutableStateOf(false) }
     var fetched by remember { mutableStateOf(false) }
+
+    // Dark screen → status bar icons must be white while viewing, and back to
+    // dark-on-light when this screen goes away.
+    val window = MainActivity.current?.window
+    DisposableEffect(Unit) {
+        val controller = window?.let { androidx.core.view.WindowCompat.getInsetsController(it, it.decorView) }
+        val prev = controller?.isAppearanceLightStatusBars
+        controller?.isAppearanceLightStatusBars = false
+        onDispose { controller?.isAppearanceLightStatusBars = prev ?: true }
+    }
 
     /* instant paint from cache, then silent refresh */
     LaunchedEffect(Unit) {
@@ -596,7 +620,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
             }
 
             /* progress segments + header */
-            Column(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize().statusBarsPadding()) {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -679,6 +703,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                     Row(
                         Modifier
                             .fillMaxWidth()
+                            .navigationBarsPadding()
                             .padding(16.dp)
                             .clip(RoundedCornerShape(24.dp))
                             .background(Color(0x33FFFFFF))
@@ -704,6 +729,8 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                     Row(
                         Modifier
                             .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .imePadding()
                             .padding(12.dp)
                             .clip(RoundedCornerShape(24.dp))
                             .background(Color(0x33FFFFFF))
@@ -800,14 +827,29 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
 private fun StatusVideoPlayer(url: String) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     var path by remember(url) { mutableStateOf<String?>(null) }
+    // VideoView stretches video to its own bounds, so the view MUST match the
+    // clip's aspect ratio — otherwise portrait clips fill the whole screen
+    // and come out distorted.
+    var aspect by remember(url) { mutableStateOf(9f / 16f) }
     LaunchedEffect(url) {
-        path = withContext(Dispatchers.IO) {
+        val p = withContext(Dispatchers.IO) {
             runCatching {
                 val bytes = Api.download(url)
                 val f = java.io.File(ctx.cacheDir, "status_${url.hashCode()}.mp4")
                 f.writeBytes(bytes)
                 f.absolutePath
             }.getOrNull()
+        }
+        path = p
+        if (p != null) {
+            val r = android.media.MediaMetadataRetriever()
+            runCatching {
+                r.setDataSource(p)
+                val w = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toFloatOrNull() ?: 0f
+                val h = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toFloatOrNull() ?: 0f
+                if (w > 0f && h > 0f) aspect = w / h
+            }
+            runCatching { r.release() }
         }
     }
     if (path == null) {
@@ -816,15 +858,17 @@ private fun StatusVideoPlayer(url: String) {
         }
         return
     }
-    androidx.compose.ui.viewinterop.AndroidView(
-        factory = { c ->
-            android.widget.VideoView(c).apply {
-                setVideoPath(path)
-                setOnPreparedListener { it.isLooping = false; start() }
-            }
-        },
-        modifier = Modifier.fillMaxSize(),
-    )
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        androidx.compose.ui.viewinterop.AndroidView(
+            factory = { c ->
+                android.widget.VideoView(c).apply {
+                    setVideoPath(path)
+                    setOnPreparedListener { it.isLooping = false; start() }
+                }
+            },
+            modifier = Modifier.fillMaxSize().aspectRatio(aspect),
+        )
+    }
 }
 
 private fun progressTo(i: Int, current: Int, p: Float): Float =

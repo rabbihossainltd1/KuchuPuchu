@@ -22,10 +22,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -386,7 +388,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // looking like it was still uploading: the POST never happened,
                 // so no message with this clientId ever came back to match it.
                 markPendingFailed(clientId)
-                error = (e.message ?: "Could not send file.") + "  Tap the banner to retry."
+                // No retry hint here on purpose: the picked bytes are gone with
+                // the dismissed picker, so "tap to retry" could never work.
+                error = e.message ?: "Could not send file."
             }
         }
     }
@@ -403,6 +407,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .put("fileName", name)
                 .put("fileType", "audio/mp4")
                 .put("fileSize", file.length().toInt())
+                // Kept for tap-to-retry after a failed upload (the temp file
+                // is only deleted once the send succeeds).
+                .put("voicePath", file.absolutePath)
                 .put("meta", JSONObject().put("voice", true).put("seconds", seconds).put("clientId", clientId))
                 .put("createdAt", java.time.Instant.now().toString()),
         )
@@ -535,7 +542,13 @@ fun ChatScreen(nav: NavController, convId: String) {
     }
 
     val chatTheme = cTheme(conv.value)
-    Column(Modifier.fillMaxSize().background(chatWallpaper(chatTheme))) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(chatWallpaper(chatTheme))
+            .statusBarsPadding()
+            .navigationBarsPadding(),
+    ) {
         /* ---------------- top bar ---------------- */
         val c = conv.value
         val isGroup = c?.optBoolean("isGroup") == true
@@ -568,7 +581,14 @@ fun ChatScreen(nav: NavController, convId: String) {
             KpAvatar(title, avatarUrl, 46.dp)
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+                Text(
+                    title,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 Text(
                     when {
                         isGroup -> "${c?.arr("members")?.length() ?: 0} members"
@@ -604,12 +624,15 @@ fun ChatScreen(nav: NavController, convId: String) {
                     DropdownMenuItem(
                         text = { Text("New group") },
                         leadingIcon = { Icon(Icons.Filled.GroupAdd, null, tint = Ink) },
-                        onClick = { menuOpen = false; nav.navigate("newchat") },
+                        onClick = { menuOpen = false; nav.navigate("newgroup") },
                     )
                     DropdownMenuItem(
                         text = { Text("View contact") },
                         leadingIcon = { Icon(Icons.Filled.Person, null, tint = Ink) },
-                        onClick = { menuOpen = false },
+                        onClick = {
+                            menuOpen = false
+                            if (!isGroup && otherId.isNotBlank()) nav.navigate("profile/$otherId")
+                        },
                     )
                     DropdownMenuItem(
                         text = { Text("Search") },
@@ -619,7 +642,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     DropdownMenuItem(
                         text = { Text("Media, links, and docs") },
                         leadingIcon = { Icon(Icons.Filled.PermMedia, null, tint = Ink) },
-                        onClick = { menuOpen = false },
+                        onClick = { menuOpen = false; nav.navigate("chatmedia/$convId") },
                     )
                     DropdownMenuItem(
                         text = { Text(if (c?.optBoolean("muted") == true) "Unmute notifications" else "Mute notifications") },
@@ -740,10 +763,29 @@ fun ChatScreen(nav: NavController, convId: String) {
                         val failed = pending.filter { it.optBoolean("failed") }
                         if (failed.isNotEmpty()) {
                             error = ""
+                            // Drop the old bubbles first: retrying creates NEW
+                            // pending entries (new clientIds), and the old ones
+                            // would otherwise never match a server message and
+                            // stick around forever.
+                            pending.removeAll(failed.toSet())
                             failed.forEach { p ->
-                                p.put("failed", false)
                                 val url = p.optString("mediaUrl")
-                                if (url.isNotBlank()) sendImage(url)
+                                val voicePath = p.optString("voicePath")
+                                when {
+                                    url.isNotBlank() -> sendImage(url)
+                                    voicePath.isNotBlank() -> {
+                                        val f = File(voicePath)
+                                        if (f.exists()) {
+                                            sendVoice(
+                                                f,
+                                                p.optJSONObject("meta")?.optInt("seconds") ?: 0,
+                                                p.optString("fileName").ifBlank { "voice.m4a" },
+                                            )
+                                        }
+                                    }
+                                    // Files/documents can't be retried: the bytes
+                                    // are gone with the dismissed picker.
+                                }
                             }
                         }
                     },
@@ -774,6 +816,23 @@ fun ChatScreen(nav: NavController, convId: String) {
             )
         }
 
+        /* ---------------- in-chat search (above the composer so it sits at
+           the bottom edge WITH the input bar, never underneath it; the
+           composer's imePadding lifts both above the keyboard) ---------------- */
+        if (showChatSearch) ChatSearchSheet(
+            convId = convId,
+            query = searchQ,
+            onQuery = { searchQ = it },
+            hits = searchHits,
+            onHits = { searchHits = it },
+            onClose = { showChatSearch = false; searchQ = ""; searchHits = emptyList() },
+            onPick = { id ->
+                showChatSearch = false
+                val i = msgs.indexOfFirst { it.optString("id") == id }
+                if (i >= 0) scope.launch { listState.animateScrollToItem(i) }
+            },
+        )
+
         /* ---------------- composer (doubles as the recording bar) ---------------- */
         Composer(
             input = input,
@@ -789,19 +848,6 @@ fun ChatScreen(nav: NavController, convId: String) {
             recMs = recMs,
             onStartRecord = { haptics.tap(); startRecording() },
             onFinishRecord = { cancelled -> finishRecording(cancelled) },
-        )
-        if (showChatSearch) ChatSearchSheet(
-            convId = convId,
-            query = searchQ,
-            onQuery = { searchQ = it },
-            hits = searchHits,
-            onHits = { searchHits = it },
-            onClose = { showChatSearch = false; searchQ = ""; searchHits = emptyList() },
-            onPick = { id ->
-                showChatSearch = false
-                val i = msgs.indexOfFirst { it.optString("id") == id }
-                if (i >= 0) scope.launch { listState.animateScrollToItem(i) }
-            },
         )
         if (showDisappear) DisappearDialog(
             current = conv.value?.optInt("disappearSeconds", 0) ?: 0,
@@ -899,7 +945,15 @@ private fun Composer(
                     }
                     Box(Modifier.weight(1f)) {
                         if (input.isEmpty()) {
-                            Text("Message", color = Muted, fontSize = 15.sp)
+                            // Same vertical padding as the BasicTextField below,
+                            // otherwise the hint floats 8dp above where the
+                            // typed text lands.
+                            Text(
+                                "Message",
+                                color = Muted,
+                                fontSize = 15.sp,
+                                modifier = Modifier.padding(vertical = 8.dp),
+                            )
                         }
                         BasicTextField(
                             value = input,

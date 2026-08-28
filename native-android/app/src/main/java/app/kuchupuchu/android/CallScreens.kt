@@ -73,9 +73,14 @@ fun CallGate() {
 
     LaunchedEffect(call.status, call.kind) {
         MainActivity.current?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        // dark chrome while the (mostly dark) call screens are up
-        MainActivity.current?.window?.statusBarColor = android.graphics.Color.parseColor("#171412")
-        MainActivity.current?.window?.navigationBarColor = android.graphics.Color.parseColor("#171412")
+        // Dark screens → status/navigation icons must be light. (Bar colors
+        // themselves are ignored on targetSdk 35's enforced edge-to-edge.)
+        MainActivity.current?.window?.let { w ->
+            androidx.core.view.WindowCompat.getInsetsController(w, w.decorView).apply {
+                isAppearanceLightStatusBars = false
+                isAppearanceLightNavigationBars = false
+            }
+        }
     }
 
     val connected = call.status == "ACTIVE" || engine.hasRemote
@@ -88,7 +93,13 @@ fun CallGate() {
     }
 
     if (engine.toast.isNotBlank()) {
-        Box(Modifier.fillMaxWidth().padding(top = 60.dp), contentAlignment = Alignment.TopCenter) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(top = 52.dp),
+            contentAlignment = Alignment.TopCenter,
+        ) {
             Box(
                 Modifier
                     .clip(RoundedCornerShape(20.dp))
@@ -110,7 +121,14 @@ fun IncomingCallScreen(call: CallUi) {
     val engine = CallEngine.instance ?: return
     DarkCallScaffold {
         Column(
-            Modifier.fillMaxSize().statusBarsPadding().padding(bottom = 42.dp),
+            // navigationBarsPadding (not a fixed bottom padding) so the
+            // Accept/Decline circles clear the bar on both gesture and
+            // 3-button navigation.
+            Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(bottom = 18.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Spacer(Modifier.weight(0.7f))
@@ -131,7 +149,7 @@ fun IncomingCallScreen(call: CallUi) {
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                CallCircle(Green, 70.dp) {
+                CallCircle(Green, 70.dp, onClick = { engine.answer() }) {
                     Icon(
                         if (call.kind == "VIDEO") Icons.Filled.Videocam else Icons.Filled.Call,
                         "Accept",
@@ -139,7 +157,7 @@ fun IncomingCallScreen(call: CallUi) {
                         modifier = Modifier.size(if (call.kind == "VIDEO") 33.dp else 30.dp),
                     )
                 }
-                CallCircle(Red, 70.dp) {
+                CallCircle(Red, 70.dp, onClick = { if (engine.active?.incoming == true) engine.decline() else engine.hangup() }) {
                     Icon(Icons.Filled.CallEnd, "Decline", tint = Color.White, modifier = Modifier.size(30.dp))
                 }
             }
@@ -180,7 +198,11 @@ fun OutgoingVoiceScreen(call: CallUi) {
     val engine = CallEngine.instance ?: return
     DarkCallScaffold {
         Column(
-            Modifier.fillMaxSize().statusBarsPadding().padding(bottom = 46.dp),
+            Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(bottom = 22.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Spacer(Modifier.weight(0.7f))
@@ -214,7 +236,7 @@ fun OutgoingVoiceScreen(call: CallUi) {
                 ) { engine.toggleSpeaker() }
             }
             Spacer(Modifier.height(34.dp))
-            CallCircle(Red, 66.dp) {
+            CallCircle(Red, 66.dp, onClick = { engine.hangup() }) {
                 Icon(Icons.Filled.CallEnd, "Cancel", tint = Color.White, modifier = Modifier.size(28.dp))
             }
         }
@@ -427,7 +449,8 @@ fun InCallVideoScreen(call: CallUi) {
         Box(
             Modifier
                 .align(Alignment.BottomEnd)
-                .padding(bottom = 170.dp, end = 14.dp)
+                .navigationBarsPadding()
+                .padding(bottom = 150.dp, end = 14.dp)
                 .size(width = 96.dp, height = 132.dp)
                 .clip(RoundedCornerShape(14.dp))
                 .background(Color(0xFF33302B))
@@ -477,8 +500,12 @@ private fun DarkCallScaffold(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun CallCircle(color: Color, size: androidx.compose.ui.unit.Dp, icon: @Composable () -> Unit) {
-    val engine = CallEngine.instance ?: return
+private fun CallCircle(
+    color: Color,
+    size: androidx.compose.ui.unit.Dp,
+    onClick: () -> Unit,
+    icon: @Composable () -> Unit,
+) {
     val haptics = rememberHaptics()
     Box(
         Modifier
@@ -487,10 +514,7 @@ private fun CallCircle(color: Color, size: androidx.compose.ui.unit.Dp, icon: @C
             .background(color)
             .clickable {
                 haptics.confirm()
-                when (color) {
-                    Green -> engine.answer()
-                    Red -> if (engine.active?.incoming == true) engine.decline() else engine.hangup()
-                }
+                onClick()
             },
         contentAlignment = Alignment.Center,
     ) { icon() }
@@ -637,10 +661,12 @@ private fun rememberTick(startedAt: Long, paused: Boolean): Int {
     var secs by remember(startedAt) { mutableIntStateOf(0) }
     LaunchedEffect(startedAt, paused) {
         while (true) {
-            secs = if (startedAt > 0 && !paused) {
-                ((System.currentTimeMillis() - startedAt) / 1000).toInt()
-            } else 0
-            kotlinx.coroutines.delay(1000)
+            // On hold: FREEZE the reading (real phone apps do) — it used to
+            // reset to 00:00, which reads like the call just dropped.
+            if (startedAt > 0 && !paused) {
+                secs = ((System.currentTimeMillis() - startedAt) / 1000).toInt()
+            }
+            kotlinx.coroutines.delay(500)
         }
     }
     return secs

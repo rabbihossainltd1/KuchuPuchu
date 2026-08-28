@@ -2,14 +2,13 @@ package app.kuchupuchu.android
 
 import android.Manifest
 import android.content.Intent
-import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
-import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import coil.Coil
 import coil.ImageLoader
@@ -29,6 +28,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Edge-to-edge on every API level, so the Compose-side insets are the
+        // single source of truth. (targetSdk 35 forces this on Android 15+
+        // anyway — setDecorFitsSystemWindows(true) and statusBarColor are
+        // ignored there, which used to push the whole UI under the bars.)
+        enableEdgeToEdge()
         current = this
         Api.loadToken(this)
         Coil.setImageLoader(
@@ -99,9 +103,8 @@ class MainActivity : ComponentActivity() {
     }
 
     fun restoreChrome() {
-        window.statusBarColor = Color.parseColor("#F7F6F4")
-        window.navigationBarColor = Color.parseColor("#FFFFFF")
-        WindowCompat.setDecorFitsSystemWindows(window, true)
+        // Bars are transparent (edge-to-edge); only the icon appearance needs
+        // flipping back after the dark call screens.
         WindowInsetsControllerCompat(window, window.decorView).apply {
             isAppearanceLightStatusBars = true
             isAppearanceLightNavigationBars = true
