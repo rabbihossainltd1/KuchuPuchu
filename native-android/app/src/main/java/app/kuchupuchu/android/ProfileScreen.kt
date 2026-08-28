@@ -142,9 +142,7 @@ fun ProfileScreen(nav: NavController, userId: String) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp)
-                .clip(RoundedCornerShape(18.dp))
-                .background(Card),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
         ) {
@@ -153,7 +151,7 @@ fun ProfileScreen(nav: NavController, userId: String) {
                     haptics.tap()
                     CallEngine.instance?.startCall(userId, "AUDIO", u.optText("displayName"), u.optText("avatarUrl"))
                 }) {
-                    Icon(Icons.Filled.Call, "Voice call", tint = GoldDeep, modifier = Modifier.size(19.dp))
+                    Icon(Icons.Filled.Call, "Voice call", tint = GoldDeep, modifier = Modifier.size(23.dp))
                 }
             }
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
@@ -161,7 +159,7 @@ fun ProfileScreen(nav: NavController, userId: String) {
                     haptics.tap()
                     CallEngine.instance?.startCall(userId, "VIDEO", u.optText("displayName"), u.optText("avatarUrl"))
                 }) {
-                    Icon(Icons.Filled.Videocam, "Video call", tint = GoldDeep, modifier = Modifier.size(21.dp))
+                    Icon(Icons.Filled.Videocam, "Video call", tint = GoldDeep, modifier = Modifier.size(25.dp))
                 }
             }
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
@@ -180,7 +178,7 @@ fun ProfileScreen(nav: NavController, userId: String) {
                         }
                     }
                 }) {
-                    Icon(Icons.Filled.Search, "Search", tint = GoldDeep, modifier = Modifier.size(19.dp))
+                    Icon(Icons.Filled.Search, "Search", tint = GoldDeep, modifier = Modifier.size(23.dp))
                 }
             }
         }
