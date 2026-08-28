@@ -581,6 +581,34 @@ function clockLabel(seconds: number) {
 
 /** Serves an inline dataUrl (data:image/...;base64,xxx) as real bytes. */
 /** Serves an inline dataUrl (data:image/...;base64,xxx) as real bytes. */
+/**
+ * Serves a `media` column, which holds either an inline data URL (legacy rows
+ * and anything the client still posts that way) or an R2 object key (every
+ * upload made through POST /api/files). The two media routes disagreed about
+ * this: the message route only understood data URLs, so any message whose
+ * media was an R2 key answered 400 "Bad media." - the photo was sitting in the
+ * bucket but could not be fetched.
+ */
+async function storedMediaResponse(
+  env: Env,
+  media: string,
+  fallbackType: string,
+  filename = "media",
+): Promise<Response> {
+  if (media.startsWith("data:")) return dataUrlResponse(media, filename);
+  if (!env.MEDIA) fail(501, "File storage is not configured yet.");
+  const object = await env.MEDIA.get(media);
+  if (!object) fail(404, "Media not found.");
+  const stored = safeMediaType(object.httpMetadata?.contentType);
+  const type = stored === "application/octet-stream" ? fallbackType : stored;
+  const headers = new Headers();
+  headers.set("content-type", type);
+  headers.set("x-content-type-options", "nosniff");
+  headers.set("content-disposition", `attachment; filename="${filename}"`);
+  headers.set("cache-control", "private, max-age=604800");
+  return new Response(object.body, { headers });
+}
+
 function dataUrlResponse(dataUrl: string, filename = "media"): Response {
   if (!isSafeDataUrl(dataUrl)) fail(400, "Bad media.", "BAD_MEDIA");
   const match = dataUrl.match(/^data:([^;]+);base64,(.*)$/s);
@@ -1474,15 +1502,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       row.user_id,
     ));
     if (row.user_id !== uid && !isContact) fail(403, "Not allowed.");
-    if (row.media.startsWith("data:")) return dataUrlResponse(row.media);
-    if (!env.MEDIA) fail(501, "File storage is not configured yet.");
-    const object = await env.MEDIA.get(row.media);
-    if (!object) fail(404, "Media not found.");
-    const headers = new Headers();
-    object.writeHttpMetadata(headers);
-    headers.set("content-type", object.httpMetadata?.contentType ?? (row.kind === "VIDEO" ? "video/mp4" : "image/jpeg"));
-    headers.set("cache-control", "private, max-age=604800");
-    return new Response(object.body, { headers });
+    return storedMediaResponse(env, row.media, row.kind === "VIDEO" ? "video/mp4" : "image/jpeg");
   }
 
   const msgMediaMatch = path.match(/^\/api\/messages\/([^/]+)\/media$/);
@@ -1490,7 +1510,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const row = await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", msgMediaMatch[1]!);
     if (!row || !row.media) fail(404, "Media not found.");
     await requireMember(db, row.conv_id, uid);
-    return dataUrlResponse(row.media);
+    return storedMediaResponse(env, row.media, row.kind === "VIDEO" ? "video/mp4" : "image/jpeg");
   }
 
   const statusMatch = path.match(/^\/api\/statuses\/([^/]+)$/);
