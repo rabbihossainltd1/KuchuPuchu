@@ -63,6 +63,12 @@ fun KpApp() {
                     StatusViewerScreen(nav, whose)
                 }
                 composable("statusphoto") { StatusPhotoScreen(nav) }
+                composable("profile/{id}") { entry ->
+                    ProfileScreen(nav, entry.arguments?.getString("id") ?: "")
+                }
+                composable("chatmedia/{id}") { entry ->
+                    ChatMediaScreen(nav, entry.arguments?.getString("id") ?: "")
+                }
             }
             // Call screens float above everything while a call is live.
             CallGate()

@@ -135,6 +135,11 @@ fun ChatScreen(nav: NavController, convId: String) {
     val player = remember { VoicePlayer() }
     var lastTopId by remember { mutableStateOf("") }
     var menuOpen by remember { mutableStateOf(false) }
+    var showChatSearch by remember { mutableStateOf(false) }
+    var showDisappear by remember { mutableStateOf(false) }
+    var showTheme by remember { mutableStateOf(false) }
+    var searchQ by remember { mutableStateOf("") }
+    var searchHits by remember { mutableStateOf(listOf<JSONObject>()) }
 
     fun paintFromStore() {
         val next = ScreenStore.msgsOf(convId)
@@ -414,7 +419,8 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
-    Column(Modifier.fillMaxSize().background(Cream)) {
+    val chatTheme = cTheme(conv.value)
+    Column(Modifier.fillMaxSize().background(chatWallpaper(chatTheme))) {
         /* ---------------- top bar ---------------- */
         val c = conv.value
         val isGroup = c?.optBoolean("isGroup") == true
@@ -437,6 +443,13 @@ fun ChatScreen(nav: NavController, convId: String) {
             }) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink)
             }
+            val otherId = c?.optJSONObject("other")?.optString("id") ?: ""
+            Row(
+                Modifier.weight(1f).clickable {
+                    if (!isGroup && otherId.isNotBlank()) nav.navigate("profile/$otherId")
+                },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
             KpAvatar(title, avatarUrl, 40.dp)
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
@@ -451,8 +464,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                     color = if (online) Green else Muted,
                 )
             }
+            }
             if (!isGroup && c != null) {
-                val otherId = c.optJSONObject("other")?.optString("id") ?: ""
                 if (otherId.isNotBlank()) {
                     IconButton(onClick = {
                         haptics.tap()
@@ -516,12 +529,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                     DropdownMenuItem(
                         text = { Text("Disappearing messages") },
                         leadingIcon = { Icon(Icons.Filled.Timer, null, tint = Ink) },
-                        onClick = { menuOpen = false },
+                        onClick = { menuOpen = false; showDisappear = true },
                     )
                     DropdownMenuItem(
                         text = { Text("Chat theme") },
                         leadingIcon = { Icon(Icons.Filled.Palette, null, tint = Ink) },
-                        onClick = { menuOpen = false },
+                        onClick = { menuOpen = false; showTheme = true },
                     )
                 }
             }
@@ -641,6 +654,49 @@ fun ChatScreen(nav: NavController, convId: String) {
             recMs = recMs,
             onStartRecord = { haptics.tap(); startRecording() },
             onFinishRecord = { cancelled -> finishRecording(cancelled) },
+        )
+        if (showChatSearch) ChatSearchSheet(
+            convId = convId,
+            query = searchQ,
+            onQuery = { searchQ = it },
+            hits = searchHits,
+            onHits = { searchHits = it },
+            onClose = { showChatSearch = false; searchQ = ""; searchHits = emptyList() },
+            onPick = { id ->
+                showChatSearch = false
+                val i = msgs.indexOfFirst { it.optString("id") == id }
+                if (i >= 0) scope.launch { listState.animateScrollToItem(i) }
+            },
+        )
+        if (showDisappear) DisappearDialog(
+            current = conv.value?.optInt("disappearSeconds", 0) ?: 0,
+            onClose = { showDisappear = false },
+            onPick = { sec ->
+                conv.value = conv.value?.put("disappearSeconds", sec)
+                showDisappear = false
+                scope.launch {
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            Api.patch("/api/conversations/$convId", JSONObject().put("disappearSeconds", sec))
+                        }
+                    }
+                }
+            },
+        )
+        if (showTheme) ThemeDialog(
+            current = chatTheme,
+            onClose = { showTheme = false },
+            onPick = { theme ->
+                conv.value = conv.value?.put("theme", theme)
+                showTheme = false
+                scope.launch {
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            Api.patch("/api/conversations/$convId", JSONObject().put("theme", theme))
+                        }
+                    }
+                }
+            },
         )
     }
 }
@@ -1148,6 +1204,119 @@ private fun isReadByOther(otherReadAt: String?, createdAt: String): Boolean {
     return !read.isBefore(sent)
 }
 
+private fun cTheme(c: JSONObject?) = c?.optString("theme")?.ifBlank { "default" } ?: "default"
+
+private fun chatWallpaper(theme: String) =
+    when (theme) {
+        "mint" -> Color(0xFFECFDF5)
+        "night" -> Color(0xFF292524)
+        "rose" -> Color(0xFFFFF1F2)
+        else -> Cream
+    }
+
+@Composable
+private fun ChatSearchSheet(
+    convId: String,
+    query: String,
+    onQuery: (String) -> Unit,
+    hits: List<JSONObject>,
+    onHits: (List<JSONObject>) -> Unit,
+    onClose: () -> Unit,
+    onPick: (String) -> Unit,
+) {
+    LaunchedEffect(query) {
+        if (query.trim().length < 2) {
+            onHits(emptyList())
+            return@LaunchedEffect
+        }
+        delay(220)
+        runCatching {
+            val data = withContext(Dispatchers.IO) {
+                Api.get("/api/conversations/$convId/messages/search?q=${Api.q(query.trim())}", true)
+            }
+            onHits(data.arr("items").objects())
+        }
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(Card)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            BasicTextField(
+                value = query,
+                onValueChange = onQuery,
+                textStyle = TextStyle(color = Ink, fontSize = 15.sp),
+                modifier = Modifier.weight(1f).padding(8.dp),
+                decorationBox = { inner ->
+                    if (query.isEmpty()) Text("Search this chat", color = Muted, fontSize = 15.sp)
+                    inner()
+                },
+            )
+            TextButton(onClick = onClose) { Text("Close", color = GoldDeep) }
+        }
+        hits.take(12).forEach { m ->
+            Text(
+                m.optString("body").ifBlank { m.optString("fileName").ifBlank { "Media" } },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onPick(m.optString("id")) }
+                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                color = Ink,
+                fontSize = 14.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (query.trim().length >= 2 && hits.isEmpty()) {
+            Text("No matches", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(8.dp))
+        }
+    }
+}
+
+@Composable
+private fun DisappearDialog(current: Int, onClose: () -> Unit, onPick: (Int) -> Unit) {
+    val options = listOf(0 to "Off", 86400 to "24 hours", 604800 to "7 days", 7776000 to "90 days")
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Disappearing messages") },
+        text = {
+            Column {
+                options.forEach { (sec, label) ->
+                    Text(
+                        if (sec == current) "●  $label" else "○  $label",
+                        modifier = Modifier.fillMaxWidth().clickable { onPick(sec) }.padding(vertical = 8.dp),
+                        color = Ink,
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onClose) { Text("Close", color = GoldDeep) } },
+    )
+}
+
+@Composable
+private fun ThemeDialog(current: String, onClose: () -> Unit, onPick: (String) -> Unit) {
+    val options = listOf("default" to "Cream", "mint" to "Mint", "rose" to "Rose", "night" to "Night")
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Chat theme") },
+        text = {
+            Column {
+                options.forEach { (id, label) ->
+                    Text(
+                        if (id == current) "●  $label" else "○  $label",
+                        modifier = Modifier.fillMaxWidth().clickable { onPick(id) }.padding(vertical = 8.dp),
+                        color = Ink,
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onClose) { Text("Close", color = GoldDeep) } },
+    )
+}
+
 @Composable
 private fun TickIcon(m: JSONObject, pendingEcho: Boolean, otherReadAt: String?) {
     if (pendingEcho) {
@@ -1216,6 +1385,10 @@ private fun CallLogBubble(m: JSONObject, mine: Boolean, pendingEcho: Boolean) {
             }
             Spacer(Modifier.width(12.dp))
             Text(msgStamp(m.optString("createdAt")), fontSize = 10.sp, color = if (mine) Color(0xD9FFFFFF) else Muted)
+        }
+    }
+}
+        Text(msgStamp(m.optString("createdAt")), fontSize = 10.sp, color = if (mine) Color(0xD9FFFFFF) else Muted)
         }
     }
 }

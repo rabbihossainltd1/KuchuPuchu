@@ -162,6 +162,8 @@ async function ensureSchema(db: D1Database) {
   // Lightweight migrations: add columns introduced after first deploy.
   await runCatchingSql(db, `ALTER TABLE messages ADD COLUMN delivered_at TEXT`);
   await runCatchingSql(db, `ALTER TABLE calls ADD COLUMN answer_sdp TEXT`);
+  await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN disappear_seconds INTEGER`);
+  await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN theme TEXT`);
   schemaReady = true;
 }
 
@@ -739,6 +741,60 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const conv = await conversationDetail(db, convId, uid);
     return json({ conversation: conv });
   }
+  if (convMatch && method === "PATCH") {
+    const convId = convMatch[1]!;
+    await requireMember(db, convId, uid);
+    if (body.disappearSeconds !== undefined) {
+      const sec = Math.max(0, Number(body.disappearSeconds) || 0);
+      await run(db, "UPDATE conversations SET disappear_seconds = ? WHERE id = ?", sec, convId);
+    }
+    if (body.theme !== undefined) {
+      const theme = String(body.theme || "default").slice(0, 20);
+      await run(db, "UPDATE conversations SET theme = ? WHERE id = ?", theme, convId);
+    }
+    return json({ conversation: await conversationDetail(db, convId, uid) });
+  }
+
+  const convSearch = path.match(/^\/api\/conversations\/([^/]+)\/messages\/search$/);
+  if (convSearch && method === "GET") {
+    const convId = convSearch[1]!;
+    await requireMember(db, convId, uid);
+    const q = (url.searchParams.get("q") || "").trim().toLowerCase();
+    if (q.length < 2) return json({ items: [] });
+    const rows = await all<MsgRow>(
+      db,
+      `SELECT * FROM messages WHERE conv_id = ? AND kind IN ('TEXT','IMAGE','FILE') AND LOWER(IFNULL(body,'')) LIKE ?
+       ORDER BY created_at DESC LIMIT 40`,
+      convId,
+      `%${q}%`,
+    );
+    return json({ items: rows.map((row) => msgFrom(row)) });
+  }
+
+  const convMedia = path.match(/^\/api\/conversations\/([^/]+)\/media$/);
+  if (convMedia && method === "GET") {
+    const convId = convMedia[1]!;
+    await requireMember(db, convId, uid);
+    const rows = await all<MsgRow>(
+      db,
+      "SELECT * FROM messages WHERE conv_id = ? ORDER BY created_at DESC LIMIT 400",
+      convId,
+    );
+    const images: ReturnType<typeof msgFrom>[] = [];
+    const docs: ReturnType<typeof msgFrom>[] = [];
+    const links: ReturnType<typeof msgFrom>[] = [];
+    const urlRe = /https?:\/\/[^\s]+/gi;
+    for (const row of rows) {
+      const m = msgFrom(row);
+      if (row.kind === "IMAGE" || m.hasImage) images.push(m);
+      else if (row.kind === "FILE") docs.push(m);
+      else if (row.body && urlRe.test(row.body)) {
+        urlRe.lastIndex = 0;
+        links.push(m);
+      }
+    }
+    return json({ images, docs, links });
+  }
 
   const memberAddMatch = path.match(/^\/api\/conversations\/([^/]+)\/members$/);
   if (memberAddMatch && method === "POST") {
@@ -803,6 +859,20 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   if (msgMatch && method === "GET") {
     const convId = msgMatch[1]!;
     await requireMember(db, convId, uid);
+    const settings = await one<{ disappear_seconds: number | null }>(
+      db,
+      "SELECT disappear_seconds FROM conversations WHERE id = ?",
+      convId,
+    );
+    const ttl = Number(settings?.disappear_seconds || 0);
+    if (ttl > 0) {
+      await run(
+        db,
+        "DELETE FROM messages WHERE conv_id = ? AND created_at < ?",
+        convId,
+        new Date(Date.now() - ttl * 1000).toISOString(),
+      );
+    }
     const before = url.searchParams.get("before");
     const rows = before
       ? await all<MsgRow>(
@@ -1433,7 +1503,7 @@ async function hiddenJson(db: D1Database, convId: string) {
 async function conversationDetail(db: D1Database, convId: string, uid: string) {
   const conv = (await one<{ id: string; kind: string; title: string | null; owner_id: string | null; created_at: string; last_message_at: string | null; last_message: string | null }>(
     db,
-    "SELECT id, kind, title, owner_id, created_at, last_message_at, last_message FROM conversations WHERE id = ?",
+    "SELECT id, kind, title, owner_id, created_at, last_message_at, last_message, disappear_seconds, theme FROM conversations WHERE id = ?",
     convId,
   ))!;
   const memberRows = await all<{ user_id: string; role: string; muted: number; unread: number; last_read_at: string | null }>(
@@ -1468,6 +1538,8 @@ async function conversationDetail(db: D1Database, convId: string, uid: string) {
     muted: meMuted,
     unread,
     isGroup: conv.kind === "GROUP",
+    disappearSeconds: Number(conv.disappear_seconds || 0),
+    theme: conv.theme || "default",
   };
 }
 
