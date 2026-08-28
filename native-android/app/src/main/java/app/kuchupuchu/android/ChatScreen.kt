@@ -37,6 +37,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -1641,6 +1642,7 @@ private fun fileLooksImage(m: JSONObject): Boolean {
  * Photo message — no chat-bubble background: the photo is the bubble, with a
  * soft bottom scrim so the timestamp + ticks stay readable on any image.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ImageMessageRow(
     m: JSONObject,
@@ -1702,7 +1704,6 @@ private fun ImageMessageRow(
     }
 }
 
-@Composable
 @Composable
 private fun ImageBubble(m: JSONObject, mine: Boolean) {
     // Photos arrive two ways: kind=IMAGE carries mediaUrl (/api/messages/:id/media
