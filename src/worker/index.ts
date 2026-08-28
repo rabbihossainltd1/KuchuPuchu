@@ -908,6 +908,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       // It stays hidden until a message newer than that arrives. The old test
       // only hid chats that had *never* had a message, so deleting any real
       // conversation was a no-op and the row came straight back.
+      // hidden_json is only ever written for SOLO chats - deleting a group
+      // makes the member leave it instead.
       const hiddenAt = Number(hidden[uid] || 0);
       if (hiddenAt > 0 && conv.kind === "SOLO") {
         const lastAt = conv.lastMessageAt ? Date.parse(conv.lastMessageAt) : 0;
@@ -1068,6 +1070,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         new Date(Date.now() - ttl * 1000).toISOString(),
       );
     }
+    // Messages the member deleted for themselves stay deleted. Without this a
+    // chat that reappeared after a new message came back with its whole
+    // history, which is not what "delete chat" means.
+    const deletedAt = Number(parseJson<Record<string, number>>(await hiddenJson(db, convId), {})[uid] || 0);
+    const sinceClause = deletedAt > 0 ? "AND created_at > ?" : "";
+    const sinceArgs = deletedAt > 0 ? [new Date(deletedAt).toISOString()] : [];
     const before = url.searchParams.get("before");
     // created_at is millisecond-resolution text, so several messages routinely
     // share one value. Without a rowid tiebreaker both the ORDER BY and the
@@ -1076,17 +1084,21 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const rows = before
       ? await all<MsgRow>(
           db,
-          `SELECT * FROM messages WHERE conv_id = ? AND (created_at < ? OR (created_at = ? AND rowid < ?))
+          `SELECT * FROM messages WHERE conv_id = ? ${sinceClause}
+             AND (created_at < ? OR (created_at = ? AND rowid < ?))
            ORDER BY created_at DESC, rowid DESC LIMIT 50`,
           convId,
+          ...sinceArgs,
           before,
           before,
           Number(url.searchParams.get("beforeRowid") || 0) || Number.MAX_SAFE_INTEGER,
         )
       : await all<MsgRow>(
           db,
-          "SELECT * FROM messages WHERE conv_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 50",
+          `SELECT * FROM messages WHERE conv_id = ? ${sinceClause}
+           ORDER BY created_at DESC, rowid DESC LIMIT 50`,
           convId,
+          ...sinceArgs,
         );
     const senderIds = [...new Set(rows.map((r) => r.sender_id).filter(Boolean))];
     const names = new Map<string, string>();
@@ -1186,11 +1198,20 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     kind === "STICKER"
       ? "Sticker"
       : text || (imageData ? "Photo" : kind === "FILE" ? String(body.fileName || "File") : "Message");
+    // A new message has to un-hide the conversation for everyone, but it must
+    // not erase the other members' delete watermarks: those are what keep the
+    // history they deleted away when the chat reappears. The old statement
+    // reset hidden_json to '{}' wholesale, so one member sending a message
+    // silently undeleted the chat for everybody. Only the sender's own entry
+    // is cleared - they just wrote into it, so it is obviously visible again.
     await run(
       db,
-      "UPDATE conversations SET last_message = ?, last_message_at = ?, hidden_json = '{}' WHERE id = ?",
+      `UPDATE conversations
+         SET last_message = ?, last_message_at = ?, hidden_json = json_remove(hidden_json, ?)
+       WHERE id = ?`,
       preview.slice(0, 120),
       created,
+      `$."${uid}"`,
       convId,
     );
     for (const memberId of members) {
