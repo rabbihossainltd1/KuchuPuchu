@@ -854,20 +854,22 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (!text && !imageData && !fileKey) fail(400, "Write a message.");
     const mid = id();
     const created = nowIso();
-    let meta =
-      kind === "FILE" && fileKey
-        ? JSON.stringify({
+    const clientId =
+      typeof body.clientId === "string" && body.clientId.trim() ? body.clientId.trim().slice(0, 64) : null;
+    const incomingMeta = (body.meta as Record<string, unknown> | undefined) ?? {};
+    const metaObj: Record<string, unknown> = {
+      ...(kind === "FILE" && fileKey
+        ? {
             name: String(body.fileName || "file").slice(0, 120),
             type: String(body.fileType || "application/octet-stream").slice(0, 100),
             size: Number(body.fileSize || 0),
-            ...((body.meta as Record<string, unknown> | undefined)
-              ? {
-                  voice: (body.meta as Record<string, unknown>).voice === true,
-                  seconds: Math.max(0, Math.min(600, Number((body.meta as Record<string, unknown>).seconds || 0))),
-                }
-              : {}),
-          })
-        : null;
+            voice: incomingMeta.voice === true,
+            seconds: Math.max(0, Math.min(600, Number(incomingMeta.seconds || 0))),
+          }
+        : {}),
+    };
+    if (clientId) metaObj.clientId = clientId;
+    const meta = Object.keys(metaObj).length ? JSON.stringify(metaObj) : null;
     await run(
       db,
       "INSERT INTO messages (id, conv_id, sender_id, kind, body, media, meta_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -880,13 +882,6 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       meta,
       created,
     );
-    const clientId =
-      typeof body.clientId === "string" && body.clientId.trim() ? body.clientId.trim().slice(0, 64) : null;
-    if (clientId) {
-      const extra = parseJson<Record<string, unknown>>(meta, {});
-      extra.clientId = clientId;
-      meta = JSON.stringify(extra);
-    }
     const preview =
     kind === "STICKER"
       ? "Sticker"
@@ -1361,20 +1356,29 @@ type MsgRow = {
 };
 
 function msgFrom(row: MsgRow) {
-  const meta = parseJson<{ name?: string; type?: string; size?: number }>(row.meta_json, {});
+  const meta = parseJson<{
+    name?: string;
+    type?: string;
+    size?: number;
+    clientId?: string;
+    voice?: boolean;
+    seconds?: number;
+  }>(row.meta_json, {});
+  const imageFile = row.kind === "FILE" && String(meta.type || "").startsWith("image/");
   return {
     id: row.id,
     senderId: row.sender_id,
     kind: row.kind,
     body: row.body,
-    hasImage: row.kind === "IMAGE" && !!row.media,
+    hasImage: (row.kind === "IMAGE" && !!row.media) || imageFile,
     mediaUrl: row.kind === "IMAGE" && row.media ? `/api/messages/${row.id}/media` : undefined,
     fileKey: row.kind === "FILE" ? row.media : undefined,
     fileName: meta.name,
     fileType: meta.type,
     fileSize: meta.size,
-    meta: row.kind === "FILE" ? meta : undefined,
-    deliveredAt: row.delivered_at ?? null,
+    meta: Object.keys(meta).length ? meta : undefined,
+    clientId: meta.clientId,
+    deliveredAt: row.delivered_at ? row.delivered_at : undefined,
     createdAt: row.created_at,
   };
 }

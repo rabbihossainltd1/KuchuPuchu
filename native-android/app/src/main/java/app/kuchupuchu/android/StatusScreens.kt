@@ -52,6 +52,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.navigation.NavController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -281,9 +283,14 @@ fun StatusScreen(nav: NavController) {
     }
 
     if (composeText) {
-        StatusComposer {
-            composeText = false
-            refresh()
+        Dialog(
+            onDismissRequest = { composeText = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            StatusComposer {
+                composeText = false
+                refresh()
+            }
         }
     }
 }
@@ -551,7 +558,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                         bmp,
                         contentDescription = "Status photo",
                         modifier = Modifier.fillMaxSize(),
-                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Fit,
                     )
                 }
                 Box(Modifier.fillMaxSize().background(Color(0x66000000)))

@@ -88,7 +88,7 @@ fun StatusPhotoScreen(nav: NavController) {
         ) {
             val bmp = rememberBitmap(dataUrl)
             if (bmp != null) {
-                Image(bmp, contentDescription = "Status photo", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                Image(bmp, contentDescription = "Status photo", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
             } else {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(

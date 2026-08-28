@@ -98,6 +98,13 @@ object ScreenStore {
     }
 
     @Synchronized
+    fun setMuted(convId: String, muted: Boolean) {
+        val i = convs.indexOfFirst { it.optString("id") == convId }
+        if (i >= 0) convs[i] = JSONObject(convs[i].toString()).put("muted", muted)
+        persist()
+    }
+
+    @Synchronized
     fun msgsOf(convId: String): List<JSONObject> = msgs[convId]?.toList() ?: emptyList()
 
     @Synchronized

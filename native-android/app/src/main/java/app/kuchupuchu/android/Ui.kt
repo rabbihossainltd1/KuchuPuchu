@@ -61,7 +61,10 @@ object Bitmaps {
     private fun decode(url: String): Bitmap? = runCatching {
         if (url.startsWith("data:")) {
             val b64 = url.substringAfter(",", "")
-            if (b64.isBlank()) null else BitmapFactory.decodeByteArray(Base64.decode(b64, Base64.DEFAULT), 0, b64.length)
+            if (b64.isBlank()) null else {
+                val decoded = Base64.decode(b64, Base64.DEFAULT)
+                BitmapFactory.decodeByteArray(decoded, 0, decoded.size)
+            }
         } else if (url.startsWith("http") || url.startsWith("/")) {
             val bytes = Api.download(url)
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)

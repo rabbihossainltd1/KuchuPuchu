@@ -189,7 +189,11 @@ fun OutgoingVoiceScreen(call: CallUi) {
             Text(call.otherName, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(6.dp))
             Text(
-                if (call.connecting) "Connecting…" else "Ringing…",
+                when {
+                    call.connecting -> "Connecting…"
+                    call.otherOnline -> "Ringing…"
+                    else -> "Calling…"
+                },
                 color = Color(0xB3FFFFFF),
                 fontSize = 14.sp,
             )
@@ -237,7 +241,11 @@ fun OutgoingVideoScreen(call: CallUi) {
             Text(call.otherName, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(6.dp))
             Text(
-                if (call.connecting) "Connecting…" else "Ringing…",
+                when {
+                    call.connecting -> "Connecting…"
+                    call.otherOnline -> "Ringing…"
+                    else -> "Calling…"
+                },
                 color = Color(0xB3FFFFFF),
                 fontSize = 14.sp,
             )

@@ -31,8 +31,8 @@ object KpNotify {
             NotificationChannel(CALL_CHANNEL, "Calls", NotificationManager.IMPORTANCE_HIGH)
                 .apply {
                     description = "Incoming calls"
-                    setBypassDnd(false)
-                    lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
+                    setBypassDnd(true)
+                    lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
                 },
         )
     }

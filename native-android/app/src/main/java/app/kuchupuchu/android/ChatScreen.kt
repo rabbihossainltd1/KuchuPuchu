@@ -181,16 +181,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                 ScreenStore.setMsgs(convId, fresh)
                 paintFromStore()
                 if (pending.isNotEmpty()) {
-                    val confirmedIds = fresh.map { it.optString("clientId").ifBlank { it.optString("id") } }.toSet()
                     pending.removeAll { p ->
-                        val cid = p.optString("clientId").ifBlank { p.optString("id") }
-                        cid in confirmedIds ||
-                            fresh.any { c ->
-                                c.optString("senderId") == Store.myId() &&
-                                    c.optString("kind") == p.optString("kind") &&
-                                    c.optString("body") == p.optString("body") &&
-                                    (p.optString("kind") != "FILE" || c.optString("fileName") == p.optString("fileName"))
-                            }
+                        val cid = p.optString("clientId").ifBlank { "" }
+                        cid.isNotBlank() && fresh.any { it.optString("clientId") == cid }
                     }
                 }
                 val total = msgs.size + pending.size
@@ -268,9 +261,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .put("id", clientId)
                 .put("clientId", clientId)
                 .put("senderId", Store.myId())
-                .put("kind", "IMAGE")
+                .put("kind", "FILE")
                 .put("body", "")
                 .put("hasImage", true)
+                .put("fileName", "photo.jpg")
+                .put("fileType", "image/jpeg")
+                .put("mediaUrl", dataUrl)
                 .put("createdAt", java.time.Instant.now().toString()),
         )
         scope.launch {
@@ -306,7 +302,18 @@ fun ChatScreen(nav: NavController, convId: String) {
     }
 
     fun sendFile(name: String, mime: String, bytes: ByteArray) {
-        uploading++
+        val clientId = "c_${java.util.UUID.randomUUID()}"
+        pending.add(
+            JSONObject()
+                .put("id", clientId)
+                .put("clientId", clientId)
+                .put("senderId", Store.myId())
+                .put("kind", "FILE")
+                .put("fileName", name)
+                .put("fileType", mime)
+                .put("fileSize", bytes.size)
+                .put("createdAt", java.time.Instant.now().toString()),
+        )
         scope.launch {
             try {
                 val data = withContext(Dispatchers.IO) { Api.upload(name, mime, bytes) }
@@ -318,15 +325,14 @@ fun ChatScreen(nav: NavController, convId: String) {
                             .put("fileKey", data.optString("fileKey"))
                             .put("fileName", name)
                             .put("fileType", mime)
-                            .put("fileSize", bytes.size),
+                            .put("fileSize", bytes.size)
+                            .put("clientId", clientId),
                     )
                 }
                 KpSounds.send(ctx)
                 refreshMessages(forceScroll = true)
             } catch (e: Exception) {
                 error = e.message ?: "Could not send file."
-            } finally {
-                uploading--
             }
         }
     }
@@ -492,16 +498,18 @@ fun ChatScreen(nav: NavController, convId: String) {
                         leadingIcon = { Icon(Icons.Filled.NotificationsOff, null, tint = Ink) },
                         onClick = {
                             menuOpen = false
+                            val next = c?.optBoolean("muted") != true
+                            conv.value = c?.put("muted", next)
+                            ScreenStore.setMuted(convId, next)
                             scope.launch {
                                 runCatching {
                                     withContext(Dispatchers.IO) {
-                                        Api.post(
-                                            "/api/conversations/$convId/mute",
-                                            JSONObject().put("muted", c?.optBoolean("muted") != true),
-                                        )
+                                        Api.post("/api/conversations/$convId/mute", JSONObject().put("muted", next))
                                     }
+                                }.onFailure {
+                                    conv.value = c?.put("muted", !next)
+                                    ScreenStore.setMuted(convId, !next)
                                 }
-                                refreshMeta()
                             }
                         },
                     )

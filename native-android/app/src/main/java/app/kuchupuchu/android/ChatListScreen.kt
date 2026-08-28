@@ -307,18 +307,17 @@ private fun SwipeConvRow(conv: JSONObject, nav: NavController, onChange: () -> U
                 tint = GoldDeep,
                 label = if (conv.optBoolean("muted")) "Unmute" else "Mute",
             ) {
+                haptics.confirm()
+                val id = conv.optString("id")
+                val next = !conv.optBoolean("muted")
+                ScreenStore.setMuted(id, next)
+                dragged = 0f
                 scope.launch {
-                    haptics.confirm()
                     runCatching {
                         withContext(Dispatchers.IO) {
-                            Api.post(
-                                "/api/conversations/${conv.optString("id")}/mute",
-                                JSONObject().put("muted", !conv.optBoolean("muted")),
-                            )
+                            Api.post("/api/conversations/$id/mute", JSONObject().put("muted", next))
                         }
-                    }
-                    dragged = 0f
-                    onChange()
+                    }.onFailure { ScreenStore.setMuted(id, !next) }
                 }
             }
             ActionSlot(
