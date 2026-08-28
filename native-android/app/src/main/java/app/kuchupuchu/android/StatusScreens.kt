@@ -471,19 +471,36 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
         onDispose { controller?.isAppearanceLightStatusBars = prev ?: true }
     }
 
-    /* instant paint from cache, then silent refresh */
+    /* Instant paint from cache. A re-open no longer "loads again": the
+       network only fires when the cache is older than 15s, and the current
+       status stays anchored (idx follows the id, not the list position). */
     LaunchedEffect(Unit) {
         groups.clear()
         groups.addAll(ScreenStore.statuses)
+        fetched = true
+        // Remember which status is on screen now (derived from `groups`, which
+        // is declared above — `statuses` isn't in scope yet).
+        val groupNow =
+            if (whose == "mine") groups.firstOrNull { it.optBoolean("mine") }
+            else groups.firstOrNull { it.optJSONObject("user")?.optString("id") == whose }
+        val currentId = groupNow?.arr("statuses")?.objects()?.getOrNull(idx)?.optString("id")
+        val stale = System.currentTimeMillis() - ScreenStore.statusesFetchedAt > 15_000
+        if (!stale) return@LaunchedEffect
         try {
             val data = withContext(Dispatchers.IO) { Api.get("/api/statuses", true) }
             val fresh = data.arr("items").objects()
             groups.clear()
             groups.addAll(fresh)
             ScreenStore.setStatuses(fresh)
+            // Keep the user on the SAME status after the refresh.
+            if (currentId != null) {
+                val target = groups
+                    .firstOrNull { g -> g.arr("statuses").objects().any { it.optString("id") == currentId } }
+                    ?.arr("statuses")?.objects()
+                    ?.indexOfFirst { it.optString("id") == currentId }
+                if (target != null && target >= 0) idx = target
+            }
         } catch (_: Exception) {
-        } finally {
-            fetched = true
         }
     }
 

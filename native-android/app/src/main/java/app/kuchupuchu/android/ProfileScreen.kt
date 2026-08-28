@@ -3,6 +3,7 @@ package app.kuchupuchu.android
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
@@ -151,7 +152,7 @@ fun ProfileScreen(nav: NavController, userId: String) {
                     haptics.tap()
                     CallEngine.instance?.startCall(userId, "AUDIO", u.optText("displayName"), u.optText("avatarUrl"))
                 }) {
-                    Icon(Icons.Filled.Call, "Voice call", tint = GoldDeep, modifier = Modifier.size(23.dp))
+                    Icon(Icons.Filled.Call, "Voice call", tint = GoldDeep, modifier = Modifier.size(25.dp))
                 }
             }
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
@@ -159,7 +160,7 @@ fun ProfileScreen(nav: NavController, userId: String) {
                     haptics.tap()
                     CallEngine.instance?.startCall(userId, "VIDEO", u.optText("displayName"), u.optText("avatarUrl"))
                 }) {
-                    Icon(Icons.Filled.Videocam, "Video call", tint = GoldDeep, modifier = Modifier.size(25.dp))
+                    Icon(Icons.Filled.Videocam, "Video call", tint = GoldDeep, modifier = Modifier.size(27.dp))
                 }
             }
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
@@ -178,23 +179,58 @@ fun ProfileScreen(nav: NavController, userId: String) {
                         }
                     }
                 }) {
-                    Icon(Icons.Filled.Search, "Search", tint = GoldDeep, modifier = Modifier.size(23.dp))
+                    Icon(Icons.Filled.Search, "Search", tint = GoldDeep, modifier = Modifier.size(25.dp))
                 }
             }
         }
         Spacer(Modifier.height(16.dp))
         Column(Modifier.padding(horizontal = 16.dp)) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Card)
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Filled.PermMedia, null, tint = GoldDeep)
-                Spacer(Modifier.width(12.dp))
-                Text("Shared media lives in each chat’s menu → Media, links, and docs", color = Muted, fontSize = 13.5.sp)
+            // Real shared-media strip: recent photos from this user's chat.
+            // (The card here used to be a dead placeholder.)
+            val convId0 = ScreenStore.convs
+                .firstOrNull { !it.optBoolean("isGroup") && it.optJSONObject("other")?.optString("id") == userId }
+                ?.optString("id")
+            val photos = remember(convId0, ScreenStore.msgsVersion.value) {
+                if (convId0 == null) emptyList()
+                else ScreenStore.msgsOf(convId0).filter { m ->
+                    val k = m.optString("kind")
+                    (k == "IMAGE" && m.optText("mediaUrl").isNotBlank()) ||
+                        (k == "FILE" && (m.optText("fileType").startsWith("image") ||
+                            listOf(".jpg", ".jpeg", ".png", ".webp").any { m.optText("fileName").lowercase().endsWith(it) }))
+                }.takeLast(9).reversed()
+            }
+            if (convId0 != null) {
+                if (photos.isNotEmpty()) {
+                    LazyRow(
+                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(photos.size) { i ->
+                            val m = photos[i]
+                            val url =
+                                m.optText("mediaUrl").takeIf { it.isNotBlank() }
+                                    ?: m.optText("fileKey").takeIf { it.isNotBlank() }?.let { k ->
+                                        if (k.startsWith("data:") || k.startsWith("http") || k.startsWith("/")) k else "/api/files/$k"
+                                    } ?: ""
+                            Box(
+                                Modifier
+                                    .size(86.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { nav.navigate("chatmedia/$convId0") },
+                            ) {
+                                KpNetImage(url, "Shared photo", Modifier.fillMaxSize())
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Shared media — tap to see all",
+                        color = Muted,
+                        fontSize = 12.sp,
+                        modifier = Modifier.clickable { nav.navigate("chatmedia/$convId0") },
+                    )
+                } else {
+                    Text("No shared media yet — photos you send will appear here.", color = Muted, fontSize = 13.sp)
+                }
             }
             Spacer(Modifier.height(10.dp))
             androidx.compose.foundation.layout.Box(
@@ -232,8 +268,8 @@ private fun ProfileHeaderCallBtn(onClick: () -> Unit, icon: @Composable () -> Un
     Box(
         Modifier
             .padding(horizontal = 3.dp)
-            .size(38.dp)
-            .shadow(4.dp, CircleShape)
+            .size(50.dp)
+            .shadow(5.dp, CircleShape)
             .clip(CircleShape)
             .background(Brush.verticalGradient(listOf(Color(0xFFFFFFFF), Color(0xFFF3E4C6))))
             .border(1.dp, Color(0x24000000), CircleShape)

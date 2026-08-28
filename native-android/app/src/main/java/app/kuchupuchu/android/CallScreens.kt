@@ -239,7 +239,10 @@ fun VoiceCallScreen(call: CallUi) {
             )
             Spacer(Modifier.weight(1f))
 
-            /* control grid — disabled buttons dim to 35% while ringing */
+            /* control grid — 3 x 2, every slot the same width, disabled
+               buttons dim to 35% while ringing. Video opens THIS user's
+               camera (both phones land on the video screen; the opponent
+               can turn theirs on too). */
             Row(
                 Modifier.fillMaxWidth().padding(vertical = 10.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
@@ -257,36 +260,37 @@ fun VoiceCallScreen(call: CallUi) {
                     enabled = connected,
                 ) { engine.toggleMute() }
                 CallAction(
+                    if (engine.cameraOff) Icons.Filled.VideocamOff else Icons.Filled.Videocam,
+                    "Video",
+                    active = call.kind == "VIDEO" && !engine.cameraOff,
+                    enabled = connected,
+                ) { engine.toggleCamera() }
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+            ) {
+                CallAction(
                     Icons.Filled.PersonAddAlt1,
                     "Add call",
                     active = false,
                     enabled = connected,
                 ) { engine.notify("Adding calls is coming in a future update.") }
-            }
-            // Screen share lives in the VOICE call too: sharing flips both
-            // phones onto the video screen automatically.
-            Row(
-                Modifier.fillMaxWidth().padding(vertical = 10.dp),
-                horizontalArrangement = Arrangement.Center,
-            ) {
                 CallAction(
                     Icons.Filled.ScreenShare,
                     if (engine.sharing) "Stop share" else "Share screen",
                     active = engine.sharing,
                     enabled = connected,
                 ) { engine.toggleShare() }
+                CallAction(
+                    Icons.Filled.CallEnd,
+                    if (connected) "End call" else "Cancel",
+                    active = false,
+                    danger = true,
+                    enabled = true,
+                ) { haptics.heavy(); engine.hangup() }
             }
-            Spacer(Modifier.height(16.dp))
-            CallCircle(Red, 68.dp, onClick = { haptics.heavy(); engine.hangup() }) {
-                Icon(Icons.Filled.CallEnd, "End call", tint = Color.White, modifier = Modifier.size(29.dp))
-            }
-            Spacer(Modifier.height(30.dp))
-            Text(
-                if (connected) "End call" else "Cancel",
-                color = Color(0x99FFFFFF),
-                fontSize = 13.sp,
-            )
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.weight(0.25f))
         }
     }
 }
@@ -298,6 +302,7 @@ private fun CallAction(
     label: String,
     active: Boolean,
     enabled: Boolean,
+    danger: Boolean = false,
     onClick: () -> Unit,
 ) {
     val haptics = rememberHaptics()
@@ -309,16 +314,22 @@ private fun CallAction(
                 .shadow(6.dp, CircleShape)
                 .clip(CircleShape)
                 .background(
-                    if (active) {
-                        Brush.verticalGradient(
+                    when {
+                        danger -> Brush.verticalGradient(
+                            listOf(
+                                androidx.compose.ui.graphics.lerp(Red, Color.White, 0.25f),
+                                Red,
+                                androidx.compose.ui.graphics.lerp(Red, Color.Black, 0.22f),
+                            ),
+                        )
+                        active -> Brush.verticalGradient(
                             listOf(
                                 androidx.compose.ui.graphics.lerp(Gold, Color.White, 0.3f),
                                 Gold,
                                 androidx.compose.ui.graphics.lerp(Gold, Color.Black, 0.2f),
                             ),
                         )
-                    } else {
-                        Brush.verticalGradient(listOf(Color(0x42FFFFFF), Color(0x1AFFFFFF)))
+                        else -> Brush.verticalGradient(listOf(Color(0x42FFFFFF), Color(0x1AFFFFFF)))
                     },
                 )
                 .border(1.dp, Color.White.copy(alpha = 0.33f), CircleShape)
@@ -328,12 +339,12 @@ private fun CallAction(
             Icon(
                 icon,
                 contentDescription = label,
-                tint = if (active) Color.White else Color(0xF5FFFFFF),
+                tint = Color.White,
                 modifier = Modifier.size(26.dp),
             )
         }
         Spacer(Modifier.height(7.dp))
-        Text(label, color = Color(0xB3FFFFFF), fontSize = 12.sp)
+        Text(label, color = if (danger) Color(0xFFFFB4AB) else Color(0xB3FFFFFF), fontSize = 12.sp)
     }
 }
 

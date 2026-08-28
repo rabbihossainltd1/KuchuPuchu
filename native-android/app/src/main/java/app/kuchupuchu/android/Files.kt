@@ -65,7 +65,7 @@ object FilesUtil {
         var scale = 1
         while (picture.width / scale > maxSide || picture.height / scale > maxSide) scale *= 2
         if (scale > 1) picture = Bitmap.createScaledBitmap(picture, picture.width / scale, picture.height / scale, true)
-        var quality = 78
+        var quality = 85
         var out = ByteArray(0)
         while (true) {
             val buf = ByteArrayOutputStream()

@@ -32,6 +32,32 @@ private const val CH_FG = "kp-call-fg"
 /** Ringtone + vibration while an incoming call rings. */
 object CallSounds {
     private var ring: MediaPlayer? = null
+    private var ringback: MediaPlayer? = null
+
+    /**
+     * RingBACK — the tone the CALLER hears while waiting (a real phone
+     * never leaves the caller in silence). Quieter than the incoming
+     * ring, no vibration.
+     */
+    @Synchronized
+    fun startRingback(ctx: Context) {
+        if (ringback != null || ring != null) return
+        val player =
+            runCatching { MediaPlayer.create(ctx.applicationContext, R.raw.kp_ring) }.getOrNull()
+                ?: return
+        player.isLooping = true
+        runCatching { player.setVolume(0.45f, 0.45f) }
+        runCatching { player.setAudioStreamType(AudioManager.STREAM_VOICE_CALL) }
+        runCatching { player.start() }
+        ringback = player
+    }
+
+    @Synchronized
+    fun stopRingback() {
+        runCatching { ringback?.stop() }
+        ringback?.release()
+        ringback = null
+    }
 
     @Synchronized
     fun startRing(ctx: Context) {
@@ -73,6 +99,9 @@ object CallSounds {
         runCatching { ring?.stop() }
         ring?.release()
         ring = null
+        runCatching { ringback?.stop() }
+        ringback?.release()
+        ringback = null
         ctx?.let {
             val vib =
                 if (Build.VERSION.SDK_INT >= 31) {

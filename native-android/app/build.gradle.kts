@@ -7,6 +7,12 @@ android {
     namespace = "app.kuchupuchu.android"
     compileSdk = 35
     defaultConfig {
+        // Lite-weight APK: WebRTC ships 4 ABIs, phones need 2; only English
+        // resources. Cuts several MB and speeds install/startup.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
+        resourceConfigurations += listOf("en")
         applicationId = "app.kuchupuchu.android"
         minSdk = 24
         targetSdk = 35

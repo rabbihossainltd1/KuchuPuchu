@@ -148,6 +148,11 @@ fun ChatScreen(nav: NavController, convId: String) {
     val pending = remember { mutableStateListOf<JSONObject>() }
     var input by remember { mutableStateOf("") }
     var lastTypingPing by remember { mutableStateOf(0L) }
+    // System back during selection CLEARS the selection (WhatsApp) — it must
+    // not fling the user out of the chat with bubbles still highlighted.
+    androidx.activity.compose.BackHandler(enabled = selected.isNotEmpty()) {
+        selected.clear()
+    }
     var showAttach by remember { mutableStateOf(false) }
     var showStickers by remember { mutableStateOf(false) }
     var recording by remember { mutableStateOf(false) }
@@ -498,7 +503,8 @@ fun ChatScreen(nav: NavController, convId: String) {
         scope.launch {
             // 720px / ~100KB: the old 960px/220KB photos took minutes to send AND load
             // on slow mobile data (the "image loads forever" report).
-            val dataUrl = withContext(Dispatchers.IO) { FilesUtil.imageToDataUrl(uri, ctx, maxSide = 720, maxChars = 100_000) }
+            // High-quality photos: 1440px, ~380KB inline budget (server caps at 450K).
+            val dataUrl = withContext(Dispatchers.IO) { FilesUtil.imageToDataUrl(uri, ctx, maxSide = 1440, maxChars = 380_000) }
             if (dataUrl == null) {
                 error = "Could not read that photo — try another one."
             } else {
@@ -1706,7 +1712,12 @@ private fun MessageRow(
                     .background(if (mine) goldFill() else Brush.linearGradient(listOf(Card, Card)))
                     .combinedClickable(
                         onClick = { if (selectedIds.isNotEmpty() && !pendingEcho) onToggleSelect(m) },
-                        onLongClick = { if (!pendingEcho) onToggleSelect(m) },
+                        onLongClick = {
+                            if (!pendingEcho) {
+                                rememberHaptics().tap()
+                                onToggleSelect(m)
+                            }
+                        },
                     )
                     .padding(start = 10.dp, top = 7.dp, end = 8.dp, bottom = 5.dp),
             ) {
@@ -1789,7 +1800,12 @@ private fun ImageMessageRow(
                         if (pendingEcho) return@combinedClickable
                         if (selectedIds.isNotEmpty()) onToggleSelect(m) else onOpenImage(m)
                     },
-                    onLongClick = { if (!pendingEcho) onToggleSelect(m) },
+                    onLongClick = {
+                        if (!pendingEcho) {
+                            rememberHaptics().tap()
+                            onToggleSelect(m)
+                        }
+                    },
                 ),
         ) {
             ImageBubble(m, mine)

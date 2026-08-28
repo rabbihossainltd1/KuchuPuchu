@@ -264,6 +264,7 @@ object ScreenStore {
     val statuses = mutableStateListOf<JSONObject>()
     var statusesRaw by mutableStateOf("")
     var statusesLoaded by mutableStateOf(false)
+    var statusesFetchedAt by mutableStateOf(0L)
 
     val calls = mutableStateListOf<JSONObject>()
     var callsRaw by mutableStateOf("")
@@ -356,6 +357,7 @@ object ScreenStore {
             statuses.addAll(list)
         }
         statusesLoaded = true
+        statusesFetchedAt = System.currentTimeMillis()
         // Every other setter persisted; this one did not, so the statuses tab
         // was the one screen that always came back empty after a restart even
         // though hydrate() reads a "statuses" key.

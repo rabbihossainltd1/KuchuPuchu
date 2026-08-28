@@ -516,6 +516,7 @@ private fun SwipeConvRow(conv: JSONObject, nav: NavController, onChange: () -> U
         }
 
         /* the card itself, slid by the swipe (either direction) */
+        var buzzedSide by remember { mutableStateOf(0) }
         Box(
             Modifier
                 .offset { IntOffset(-offset.roundToInt(), 0) }
@@ -532,9 +533,17 @@ private fun SwipeConvRow(conv: JSONObject, nav: NavController, onChange: () -> U
                                     dragged < -actionWidth / 2 -> -actionWidth
                                     else -> 0f
                                 }
+                            buzzedSide = 0
                         },
                     ) { _, dragAmount ->
                         dragged = (dragged - dragAmount).coerceIn(-actionWidth, actionWidth)
+                        // Haptic once when an action arm opens (left=delete/mute,
+                        // right=archive) — the finger learns the threshold.
+                        val side = if (dragged > actionWidth / 2) 1 else if (dragged < -actionWidth / 2) -1 else 0
+                        if (side != 0 && side != buzzedSide) {
+                            buzzedSide = side
+                            haptics.tap()
+                        }
                     }
                 },
         ) {
@@ -566,6 +575,31 @@ private fun RowScope.ActionSlot(
     }
 }
 
+/**
+ * Chat-list preview: media never shows its raw file name — "voice_123.m4a"
+ * becomes "Voice message", anything photo/video/doc likewise. Text passes
+ * through untouched.
+ */
+private fun friendlyPreview(raw: String): String {
+    val t = raw.trim()
+    if (t.isBlank()) return "No messages yet"
+    val lower = t.lowercase()
+    val photoExts = listOf(".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic")
+    val videoExts = listOf(".mp4", ".mkv", ".mov", ".webm", ".avi", ".3gp")
+    val audioExts = listOf(".m4a", ".mp3", ".aac", ".ogg", ".wav", ".opus", ".flac")
+    val docExts = listOf(".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".zip", ".rar", ".txt", ".csv")
+    if (t == "Photo" || t == "📷 Photo") return "📷 Photo"
+    return when {
+        lower.startsWith("voice_") || lower.startsWith("voice ") -> "🎤 Voice message"
+        lower == "video" -> "🎬 Video"
+        photoExts.any { lower.endsWith(it) } || lower.startsWith("photo_") -> "📷 Photo"
+        videoExts.any { lower.endsWith(it) } -> "🎬 Video"
+        audioExts.any { lower.endsWith(it) } -> "🎤 Voice message"
+        docExts.any { lower.endsWith(it) } -> "📄 Document"
+        else -> t
+    }
+}
+
 @Composable
 private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = false, onCollapse: () -> Unit = {}) {
     val id = conv.optString("id")
@@ -575,7 +609,7 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
         if (isGroup) conv.optText("title").ifBlank { "Group" }
         else other?.optText("displayName")?.takeIf { it.isNotBlank() } ?: "Chat"
     val avatarUrl = if (isGroup) null else other?.optString("avatarUrl")
-    val preview = conv.optText("lastMessage")
+    val preview = friendlyPreview(conv.optText("lastMessage"))
     val stamp = listStamp(conv.optString("lastMessageAt"))
     val unread = conv.optInt("unread", 0)
     val muted = conv.optBoolean("muted")

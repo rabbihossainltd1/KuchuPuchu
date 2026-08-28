@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.RingtoneManager
 import android.net.Uri
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -23,9 +24,20 @@ object KpNotify {
 
     fun ensureChannels(ctx: Context) {
         val mgr = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        // API 26+: the CHANNEL decides sound/vibration; a per-notification
+        // setSound() is ignored. Channels created without an explicit sound
+        // were SILENT — a top reason "notification jacche na" reports.
+        val attrs = android.media.AudioAttributes.Builder()
+            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
+            .build()
         mgr.createNotificationChannel(
             NotificationChannel(CHAT_CHANNEL, "Messages", NotificationManager.IMPORTANCE_HIGH)
-                .apply { description = "New chat messages" },
+                .apply {
+                    description = "New chat messages"
+                    setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION), attrs)
+                    enableVibration(true)
+                },
         )
         mgr.createNotificationChannel(
             NotificationChannel(CALL_CHANNEL, "Calls", NotificationManager.IMPORTANCE_HIGH)

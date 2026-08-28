@@ -317,6 +317,10 @@ class CallEngine(private val app: Application) {
         } else {
             active = ui
         }
+        // Caller side: ringback tone so the waiting isn't silent.
+        if (!incoming && status == "RINGING") {
+            CallSounds.startRingback(app)
+        }
         if (incoming && status == "RINGING" && !suppressed) {
             if (ringingId != ui.id) {
                 ringingId = ui.id
@@ -338,6 +342,7 @@ class CallEngine(private val app: Application) {
             }
         }
         if (status == "ACTIVE") {
+            CallSounds.stopRingback()
             clearIncomingSuppression()
             if (ringingId != null) {
                 CallNotify.cancelIncoming(app)
@@ -670,6 +675,7 @@ class CallEngine(private val app: Application) {
     }
 
     private fun hangupLocal() {
+        CallSounds.stopRingback()
         CallNotify.cancelAll(app)
         CallService.stop(app)
         ringingId = null
