@@ -674,6 +674,19 @@ class CallEngine(private val app: Application) {
      * STUN for same-network calls + a public TURN relay so calls also
      * connect across mobile networks (CGNAT), where STUN-only P2P fails.
      */
+    /**
+     * ICE servers.
+     *
+     * The two TURN entries were bare `turn:host:port`, which in a WebRTC URL
+     * means UDP - so nothing in the list ever used the TCP or TLS listeners.
+     * Probing the host directly (kp-lab/turncheck.py) showed TCP/80 answering
+     * plain TURN as METERED-TURN-SERVER with realm metered.ca, and TCP/443
+     * terminating TLS with a CN=*.relay.metered.ca certificate. The UDP
+     * listeners could not be verified from that network, so they are kept and
+     * the measured TCP and TLS transports are added alongside them: more
+     * candidates, and relay now has a path that works where UDP is blocked or
+     * throttled, which is common on mobile networks.
+     */
     private fun iceServers(): List<PeerConnection.IceServer> =
         listOf(
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
@@ -684,6 +697,14 @@ class CallEngine(private val app: Application) {
                 .setPassword("openrelayproject")
                 .createIceServer(),
             PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer(),
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80?transport=tcp")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer(),
+            PeerConnection.IceServer.builder("turns:openrelay.metered.ca:443?transport=tcp")
                 .setUsername("openrelayproject")
                 .setPassword("openrelayproject")
                 .createIceServer(),
@@ -835,9 +856,31 @@ class CallEngine(private val app: Application) {
         @Volatile
         var instance: CallEngine? = null
 
-        /** Call ids that must never ring again (declined / ended / hung up). */
+        /** Oldest ids are dropped past this; only recent ones can still poll in. */
+        private const val MAX_IGNORED_CALLS = 200
+
+        /**
+         * Call ids that must never ring again (declined / ended / hung up).
+         *
+         * Bounded now. This set is static for the whole process and nothing ever
+         * removed from it, so a phone that stayed open accumulated every call id
+         * the user had ever seen - an unbounded leak that also had to be scanned
+         * on every incoming push.
+         */
         val ignoredCalls: MutableSet<String> =
-            java.util.Collections.synchronizedSet(HashSet<String>())
+            java.util.Collections.synchronizedSet(
+                object : java.util.LinkedHashSet<String>() {
+                    override fun add(element: String): Boolean {
+                        val added = super.add(element)
+                        val it = iterator()
+                        while (size > MAX_IGNORED_CALLS && it.hasNext()) {
+                            it.next()
+                            it.remove()
+                        }
+                        return added
+                    }
+                }
+            )
 
         /**
          * When the user accepts a call from the notification we must not show

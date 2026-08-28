@@ -79,6 +79,9 @@ fun CallsScreen(nav: NavController) {
             color = Ink,
             modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 10.dp),
         )
+        // Was an `if` with no `else`, so the empty state and the list were both
+        // composed; the fillMaxSize() Box took all the remaining height and left
+        // the LazyColumn none.
         if (calls.isEmpty() && !loading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 EmptyState(
@@ -87,8 +90,7 @@ fun CallsScreen(nav: NavController) {
                     note = "Start a voice or video call from any chat",
                 )
             }
-        }
-        LazyColumn(
+        } else LazyColumn(
             contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {

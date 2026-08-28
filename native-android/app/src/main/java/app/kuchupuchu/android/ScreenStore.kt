@@ -66,28 +66,72 @@ object ScreenStore {
         }
     }
 
+    /**
+     * Writes the cache to disk.
+     *
+     * This used to serialize every message of every chat and write the file
+     * inline, on the caller's thread, and `setConvs` called it on every chat
+     * list poll - 2.5s - whether or not anything had changed. Both problems
+     * are fixed here: the callers only persist on a real change, and the
+     * serialization and the write happen on one background thread with at most
+     * one write in flight.
+     *
+     * The snapshot itself is taken under the caller's lock and only copies
+     * references, so it stays cheap; nothing mutates a cached JSONObject in
+     * place (setMuted replaces the object), so handing the graph to another
+     * thread is safe.
+     */
+    /** Builds the cache snapshot. Callers must hold the ScreenStore lock. */
+    private fun snapshotLocked(): JSONObject {
+        val msgsObj = JSONObject()
+        msgs.forEach { (k, v) ->
+            val arr = JSONArray()
+            v.toList().forEach { arr.put(it) }
+            msgsObj.put(k, arr)
+        }
+        val convArr = JSONArray(); convs.toList().forEach { convArr.put(it) }
+        val callArr = JSONArray(); calls.toList().forEach { callArr.put(it) }
+        val stArr = JSONArray(); statuses.toList().forEach { stArr.put(it) }
+        return JSONObject()
+            .put("convs", convArr)
+            .put("calls", callArr)
+            .put("statuses", stArr)
+            .put("msgs", msgsObj)
+    }
+
     private fun persist() {
-        val folder = disk ?: return
-        runCatching {
-            val msgsObj = JSONObject()
-            msgs.forEach { (k, v) ->
-                val arr = JSONArray()
-                v.forEach { arr.put(it) }
-                msgsObj.put(k, arr)
+        if (disk == null) return
+        dirty.set(true)
+        if (!writeInFlight.compareAndSet(false, true)) return
+        writer.execute { drainWrites() }
+    }
+
+    /** Writes the newest snapshot, then any that arrived while it was writing. */
+    private fun drainWrites() {
+        try {
+            while (true) {
+                val target: File
+                val snapshot: JSONObject
+                synchronized(ScreenStore) {
+                    val d = disk
+                    if (d == null || !dirty.compareAndSet(true, false)) return
+                    target = d
+                    snapshot = snapshotLocked()
+                }
+                val text = runCatching { snapshot.toString() }.getOrNull() ?: continue
+                runCatching { target.writeText(text) }
             }
-            val convArr = JSONArray(); convs.forEach { convArr.put(it) }
-            val callArr = JSONArray(); calls.forEach { callArr.put(it) }
-            val stArr = JSONArray(); statuses.forEach { stArr.put(it) }
-            folder.writeText(
-                JSONObject()
-                    .put("convs", convArr)
-                    .put("calls", callArr)
-                    .put("statuses", stArr)
-                    .put("msgs", msgsObj)
-                    .toString(),
-            )
+        } finally {
+            writeInFlight.set(false)
         }
     }
+
+    private val dirty = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val writeInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val writer =
+        java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+            Thread(r, "kp-persist").apply { isDaemon = true }
+        }
 
     @Synchronized
     fun setConvDetail(convId: String, conv: JSONObject?) {
@@ -130,13 +174,17 @@ object ScreenStore {
     @Synchronized
     fun setConvs(list: List<JSONObject>) {
         val raw = convSignature(list)
-        if (raw != convsRaw || convs.isEmpty()) {
+        val changed = raw != convsRaw || convs.isEmpty()
+        if (changed) {
             convsRaw = raw
             convs.clear()
             convs.addAll(list)
         }
         convsLoaded = true
-        persist()
+        // The chat list polls every 2.5s. Rewriting the whole cache on every
+        // one of those polls, when almost none of them change anything, was
+        // most of the cost; only a real change needs to reach disk.
+        if (changed) persist()
     }
 
     @Synchronized
@@ -180,24 +228,31 @@ object ScreenStore {
         convDetail.clear()
     }
 
+    @Synchronized
     fun setStatuses(list: List<JSONObject>) {
         val raw = list.joinToString(",") { it.optString("id") + ":" + (it.optJSONObject("user")?.optString("id") ?: "") + ":" + it.arr("statuses").length() }
-        if (raw != statusesRaw || statuses.isEmpty()) {
+        val changed = raw != statusesRaw || statuses.isEmpty()
+        if (changed) {
             statusesRaw = raw
             statuses.clear()
             statuses.addAll(list)
         }
         statusesLoaded = true
+        // Every other setter persisted; this one did not, so the statuses tab
+        // was the one screen that always came back empty after a restart even
+        // though hydrate() reads a "statuses" key.
+        if (changed) persist()
     }
 
     fun setCalls(list: List<JSONObject>) {
         val raw = list.joinToString(",") { it.optString("id") + ":" + it.optString("status") }
-        if (raw != callsRaw || calls.isEmpty()) {
+        val changed = raw != callsRaw || calls.isEmpty()
+        if (changed) {
             callsRaw = raw
             calls.clear()
             calls.addAll(list)
         }
         callsLoaded = true
-        persist()
+        if (changed) persist()
     }
 }

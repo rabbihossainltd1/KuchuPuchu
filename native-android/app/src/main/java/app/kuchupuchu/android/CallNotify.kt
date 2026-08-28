@@ -214,23 +214,33 @@ class CallService : Service() {
         val fgReady = AtomicBoolean(false)
         private var started = false
         private var lastShare = false
+        private var lastTitle: String? = null
 
         fun start(ctx: Context, title: String, share: Boolean = false) {
             if (started) {
-                if (share == lastShare) return // same service types — nothing to re-declare
-                // Re-start with different service types (e.g. screen share):
-                // reset fgReady so callers can wait for onStartCommand to
-                // re-declare the mediaProjection type (Android 14+ requires
-                // this before getMediaProjection()).
+                // Only skip when there is genuinely nothing to change. This
+                // used to compare `share` alone, so the second start() of every
+                // call - the one that replaces "Calling Alice" with "In a call
+                // with Alice" once the callee picks up - was dropped and the
+                // notification stayed frozen on the ringing text for the whole
+                // call.
+                if (share == lastShare && title == lastTitle) return
+                // Reset fgReady so callers wait for onStartCommand to
+                // re-declare the service types (Android 14+ requires the
+                // mediaProjection type before getMediaProjection()).
                 lastShare = share
+                lastTitle = title
                 fgReady.set(false)
-                ctx.startService(
-                    Intent(ctx, CallService::class.java).putExtra("title", title).putExtra("share", share),
-                )
+                runCatching {
+                    ctx.startService(
+                        Intent(ctx, CallService::class.java).putExtra("title", title).putExtra("share", share),
+                    )
+                }
                 return
             }
             started = true
             lastShare = share
+            lastTitle = title
             fgReady.set(false)
             val intent = Intent(ctx, CallService::class.java).putExtra("title", title).putExtra("share", share)
             runCatching {
@@ -245,7 +255,21 @@ class CallService : Service() {
         fun stop(ctx: Context) {
             if (!started) return
             started = false
+            lastShare = false
+            lastTitle = null
+            // The next call has to wait for a real startForeground again. This
+            // used to stay true, so a caller could race past the wait and hit
+            // getMediaProjection() with no foreground service behind it.
+            fgReady.set(false)
             runCatching { ctx.stopService(Intent(ctx, CallService::class.java)) }
+        }
+
+        /** Drops the cached state, whatever tore the service down. */
+        internal fun reset() {
+            started = false
+            lastShare = false
+            lastTitle = null
+            fgReady.set(false)
         }
     }
 
@@ -267,14 +291,26 @@ class CallService : Service() {
             } else {
                 0
             }
-        runCatching {
+        // Publish readiness only if the foreground declaration actually took.
+        // Setting this unconditionally told CallEngine the service was in the
+        // foreground even when startForeground() threw, and it then called
+        // getMediaProjection(), which needs the mediaProjection type to have
+        // been declared.
+        val declared = runCatching {
             if (Build.VERSION.SDK_INT >= 30 && types != 0) {
                 startForeground(ONGOING_ID, CallNotify.ongoing(this, title), types)
             } else {
                 startForeground(ONGOING_ID, CallNotify.ongoing(this, title))
             }
-        }
-        fgReady.set(true)
+        }.isSuccess
+        fgReady.set(declared)
         return START_NOT_STICKY
+    }
+
+    override fun onDestroy() {
+        // Without this, a service the system killed left `started` true and no
+        // later call could ever bring the notification back.
+        reset()
+        super.onDestroy()
     }
 }
