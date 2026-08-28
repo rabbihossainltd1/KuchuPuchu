@@ -34,10 +34,11 @@ object FilesUtil {
 
     /**
      * Decodes a picked image and re-encodes it as a JPEG dataUrl small
-     * enough for inline storage (≤ ~420KB base64). Handles HEIC/HEIF via
-     * ImageDecoder on API 28+.
+     * enough for inline storage. Handles HEIC/HEIF via ImageDecoder on
+     * API 28+. `maxChars` defaults to the 420KB inline-photo budget; avatars
+     * pass the worker's 200KB avatar budget.
      */
-    fun imageToDataUrl(uri: Uri, ctx: Context, maxSide: Int = 1280): String? = runCatching {
+    fun imageToDataUrl(uri: Uri, ctx: Context, maxSide: Int = 1280, maxChars: Int = 420_000): String? = runCatching {
         val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
         var bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
         if (bmp == null && android.os.Build.VERSION.SDK_INT >= 28) {
@@ -59,7 +60,7 @@ object FilesUtil {
             bmp.compress(Bitmap.CompressFormat.JPEG, quality, buf)
             out = buf.toByteArray()
             dataUrl = "data:image/jpeg;base64," + Base64.encodeToString(out, Base64.NO_WRAP)
-            if (dataUrl.length <= 420_000 || quality <= 35) break
+            if (dataUrl.length <= maxChars || quality <= 30) break
             quality -= 12
         }
         dataUrl

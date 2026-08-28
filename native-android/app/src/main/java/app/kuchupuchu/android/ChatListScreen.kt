@@ -47,6 +47,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -80,7 +81,9 @@ fun ChatListScreen(nav: NavController) {
     val scope = rememberCoroutineScope()
     val convs = ScreenStore.convs
     var loading by remember { mutableStateOf(!ScreenStore.convsLoaded) }
-    var tab by remember { mutableIntStateOf(0) }
+    // Saveable: coming back from a chat / status viewer returns to the SAME
+    // tab instead of jumping to Chats every time.
+    var tab by rememberSaveable { mutableIntStateOf(0) }
     val haptics = rememberHaptics()
 
     fun refresh() {
@@ -124,13 +127,14 @@ fun ChatListScreen(nav: NavController) {
 
             /* ---------- big top tabs ---------- */
             val unreadTotal = convs.sumOf { it.optInt("unread", 0) }
+            val unseenStatus = ScreenStore.statuses.any { !it.optBoolean("mine") && !it.optBoolean("allViewed") }
             Row(
                 Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 14.dp, vertical = 4.dp),
             ) {
                 TopTab(Icons.Filled.Chat, "Chats", tab == 0, unreadTotal) { haptics.tap(); tab = 0 }
-                TopTab(Icons.Filled.Circle, "Status", tab == 1) { haptics.tap(); tab = 1 }
+                TopTab(Icons.Filled.Circle, "Status", tab == 1, dot = unseenStatus) { haptics.tap(); tab = 1 }
                 TopTab(Icons.Filled.Call, "Calls", tab == 2) { haptics.tap(); tab = 2 }
             }
             Box(
@@ -172,15 +176,17 @@ fun ChatListScreen(nav: NavController) {
     }
 }
 
-/** Big friendly tab pill with optional unread badge. */
+/** Big friendly tab pill with optional unread badge / new-status dot. */
 @Composable
 private fun TopTab(
     icon: ImageVector,
     label: String,
     selected: Boolean,
     badge: Int = 0,
+    dot: Boolean = false,
     onClick: () -> Unit,
 ) {
+    val tint = if (selected) GoldDeep else Muted
     val bg =
         if (selected) Modifier.background(GoldSoft, RoundedCornerShape(14.dp))
         else Modifier
@@ -193,16 +199,21 @@ private fun TopTab(
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            icon,
-            contentDescription = label,
-            tint = if (selected) GoldDeep else Muted,
-            modifier = Modifier.size(26.dp),
-        )
+        if (label == "Status") {
+            // WhatsApp-style status glyph (ring + dot), not a plain circle.
+            StatusGlyphIcon(tint, 26.dp)
+        } else {
+            Icon(
+                icon,
+                contentDescription = label,
+                tint = tint,
+                modifier = Modifier.size(26.dp),
+            )
+        }
         Spacer(Modifier.width(8.dp))
         Text(
             label,
-            color = if (selected) GoldDeep else Muted,
+            color = tint,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
             fontSize = 15.sp,
         )
@@ -222,6 +233,15 @@ private fun TopTab(
                     fontWeight = FontWeight.Bold,
                 )
             }
+        }
+        if (dot) {
+            Spacer(Modifier.width(6.dp))
+            Box(
+                Modifier
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(Green),
+            )
         }
     }
 }

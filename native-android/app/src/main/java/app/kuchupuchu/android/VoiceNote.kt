@@ -1,6 +1,8 @@
 package app.kuchupuchu.android
 
 import android.content.Context
+import android.media.AudioAttributes
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.os.Build
@@ -11,14 +13,15 @@ import java.io.File
 
 /**
  * Voice notes: record to a temp m4a with MediaRecorder, play back with
- * MediaPlayer from a downloaded cache file (auth headers can't go on a
- * stream URL, so bytes come through Api.download first).
+ * MediaPlayer from a cached download (auth headers can't go on a stream
+ * URL, so bytes come through Api.download first). Files are keyed by
+ * their immutable R2 key, so replays start instantly from cache.
  */
 object VoiceNote {
     private var recorder: MediaRecorder? = null
     private var file: File? = null
     private var startedAt = 0L
-    var isRecording = false
+    var isRecording: Boolean = false
         private set
 
     fun start(ctx: Context): Boolean =
@@ -41,6 +44,9 @@ object VoiceNote {
             isRecording = true
             true
         }.getOrDefault(false)
+
+    /** Recording elapsed time in ms (for the min-1-second rule). */
+    fun elapsedMs(): Long = if (isRecording) System.currentTimeMillis() - startedAt else 0L
 
     /** Stops and returns (file, seconds) or null on failure. */
     fun stop(): Pair<File, Int>? {
@@ -69,14 +75,16 @@ object VoiceNote {
 /**
  * Single active player for voice bubbles. Plays from a cached copy
  * downloaded with auth; toggles feel instant (state flips first, audio
- * starts as soon as the file is ready).
+ * starts as soon as the file is ready, replays hit the cache).
  */
 class VoicePlayer {
     private var player: MediaPlayer? = null
     var playingId: String? by mutableStateOf(null)
         private set
+    var loadingId: String? by mutableStateOf(null)
+        private set
 
-    /** Starts playing a voice message; downloads with auth on IO. */
+    /** Starts playing a voice message; downloads with auth on IO (cached). */
     fun toggle(ctx: Context, id: String, fileKey: String, onEnded: () -> Unit = {}) {
         if (playingId == id) {
             stop()
@@ -84,22 +92,52 @@ class VoicePlayer {
         }
         stop()
         playingId = id
+        loadingId = id
         Thread {
             runCatching {
-                val bytes = Api.download(fileKey)
-                val f = File(ctx.cacheDir, "voice_msg_${id.hashCode()}.m4a")
-                f.writeBytes(bytes)
+                val f = File(ctx.cacheDir, "voice_${fileKey.replace(Regex("[^A-Za-z0-9._-]"), "_")}")
+                if (!f.exists() || f.length() == 0L) {
+                    // R2 keys are unique per upload — safe to cache forever.
+                    val bytes = Api.download(fileKey)
+                    f.writeBytes(bytes)
+                }
+                val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                val focus = android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build(),
+                    )
+                    .build()
+                am.requestAudioFocus(focus)
                 val p = MediaPlayer()
+                p.setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build(),
+                )
                 p.setDataSource(f.absolutePath)
                 p.setOnCompletionListener {
                     playingId = null
+                    loadingId = null
+                    runCatching { am.abandonAudioFocusRequest(focus) }
                     onEnded()
                 }
-                p.prepare()
+                p.setOnErrorListener { _, _, _ ->
+                    playingId = null
+                    loadingId = null
+                    runCatching { am.abandonAudioFocusRequest(focus) }
+                    true
+                }
+                p.prepare() // local file — synchronous prepare is fine
+                loadingId = null
                 p.start()
                 player = p
             }.onFailure {
                 playingId = null
+                loadingId = null
                 player = null
             }
         }.start()
@@ -110,5 +148,6 @@ class VoicePlayer {
         runCatching { player?.release() }
         player = null
         playingId = null
+        loadingId = null
     }
 }

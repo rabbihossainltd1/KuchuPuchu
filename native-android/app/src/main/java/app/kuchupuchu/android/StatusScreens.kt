@@ -16,22 +16,20 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PhotoCamera
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.RemoveRedEye
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.foundation.Image
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -62,14 +60,13 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /**
- * Status list — locked design #7 "Big airy":
- * 72px gradient rings, big "My status" card, spacious contact rows.
+ * Status list — WhatsApp-style: "My status" row with an add badge on top,
+ * then Recent updates with segmented rings that gray out once viewed.
  */
 @Composable
 fun StatusScreen(nav: NavController) {
     val scope = rememberCoroutineScope()
     val groups = ScreenStore.statuses
-    var loading by remember { mutableStateOf(!ScreenStore.statusesLoaded) }
     var composeText by remember { mutableStateOf(false) }
     val haptics = rememberHaptics()
 
@@ -79,8 +76,6 @@ fun StatusScreen(nav: NavController) {
                 val data = withContext(Dispatchers.IO) { Api.get("/api/statuses") }
                 ScreenStore.setStatuses(data.arr("items").objects())
             } catch (_: Exception) {
-            } finally {
-                loading = false
             }
         }
     }
@@ -94,124 +89,167 @@ fun StatusScreen(nav: NavController) {
 
     Box(Modifier.fillMaxSize().background(Cream)) {
         Column(Modifier.fillMaxSize()) {
-        Text(
-            "Status",
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Bold,
-            color = Ink,
-            modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 10.dp),
-        )
+            Text(
+                "Status",
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = Ink,
+                modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 10.dp),
+            )
 
-        LazyColumn(
-            Modifier.fillMaxSize(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                start = 16.dp, end = 16.dp, bottom = 24.dp,
-            ),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            /* ---- my status big card ---- */
-            item {
-                val myStatuses = mine?.arr("statuses")?.objects() ?: emptyList()
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Card)
-                        .clickable {
-                            haptics.tap()
-                            if (myStatuses.isNotEmpty()) nav.navigate("statusview/mine")
-                            else nav.navigate("statusphoto")
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    start = 8.dp, end = 8.dp, bottom = 24.dp,
+                ),
+            ) {
+                /* ---- my status row ---- */
+                item(key = "my_status") {
+                    val myStatuses = mine?.arr("statuses")?.objects() ?: emptyList()
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                haptics.tap()
+                                if (myStatuses.isNotEmpty()) nav.navigate("statusview/mine") else nav.navigate("statusphoto")
+                            }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box {
+                            if (myStatuses.isNotEmpty()) {
+                                StatusRingAvatar(
+                                    Store.myName(),
+                                    Store.me?.optString("avatarUrl"),
+                                    60.dp,
+                                    segments = myStatuses.size,
+                                    seen = false,
+                                )
+                            } else {
+                                KpAvatar(Store.myName(), Store.me?.optString("avatarUrl"), 60.dp, ring = false)
+                            }
+                            Box(
+                                Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .size(22.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Box(
+                                    Modifier
+                                        .size(20.dp)
+                                        .clip(CircleShape)
+                                        .background(Gold),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Add,
+                                        contentDescription = "Add status",
+                                        tint = AmberInk,
+                                        modifier = Modifier.size(14.dp),
+                                    )
+                                }
+                            }
                         }
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box {
-                        KpAvatar(
-                            Store.myName(),
-                            Store.me?.optString("avatarUrl"),
-                            72.dp,
-                            ring = myStatuses.isNotEmpty(),
-                        )
-                        Box(
-                            Modifier
-                                .align(Alignment.BottomEnd)
-                                .size(24.dp)
-                                .clip(CircleShape)
-                                .background(Gold),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                Icons.Filled.Add,
-                                contentDescription = "Add status",
-                                tint = AmberInk,
-                                modifier = Modifier.size(16.dp),
+                        Spacer(Modifier.width(14.dp))
+                        Column {
+                            Text(
+                                "My status",
+                                fontSize = 16.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Ink,
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                when {
+                                    myStatuses.isEmpty() -> "Tap to add a status update"
+                                    else -> {
+                                        val views = myStatuses.sumOf { it.optInt("viewers", 0) }
+                                        val last = myStatuses.maxOfOrNull { it.optString("createdAt") } ?: ""
+                                        "My updates · ${statusStamp(last)}" +
+                                            (if (views > 0) " · $views view${if (views == 1) "" else "s"}" else "")
+                                    }
+                                },
+                                fontSize = 13.sp,
+                                color = Muted,
                             )
                         }
                     }
-                    Spacer(Modifier.width(14.dp))
-                    Column {
+                }
+
+                /* ---- recent updates ---- */
+                if (others.isNotEmpty()) {
+                    item(key = "recent_header") {
                         Text(
-                            "My status",
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Ink,
-                        )
-                        Spacer(Modifier.height(3.dp))
-                        Text(
-                            when {
-                                myStatuses.isEmpty() -> "Tap to add a status update"
-                                else -> {
-                                    val views = myStatuses.sumOf { it.optInt("viewers", 0) }
-                                    "${myStatuses.size} update${if (myStatuses.size > 1) "s" else ""} · $views view${if (views == 1) "" else "s"}"
-                                }
-                            },
+                            "Recent updates",
                             fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
                             color = Muted,
+                            modifier = Modifier.padding(start = 20.dp, top = 10.dp, bottom = 4.dp),
                         )
                     }
+                    items(others, key = { it.optJSONObject("user")?.optString("id") ?: it.toString() }) { g ->
+                        val user = g.optJSONObject("user") ?: return@items
+                        val allViewed = g.optBoolean("allViewed")
+                        val statuses = g.arr("statuses").objects()
+                        val lastAt = statuses.maxOfOrNull { it.optString("createdAt") } ?: ""
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    haptics.tap()
+                                    nav.navigate("statusview/${user.optString("id")}")
+                                }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            StatusRingAvatar(
+                                user.optString("displayName"),
+                                user.optString("avatarUrl"),
+                                60.dp,
+                                segments = statuses.size,
+                                seen = allViewed,
+                            )
+                            Spacer(Modifier.width(14.dp))
+                            Column {
+                                Text(
+                                    user.optString("displayName"),
+                                    fontSize = 16.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Ink,
+                                )
+                                Spacer(Modifier.height(2.dp))
+                                Text(
+                                    "${statuses.size} update${if (statuses.size > 1) "s" else ""} · ${statusStamp(lastAt)}",
+                                    fontSize = 13.sp,
+                                    color = Muted,
+                                )
+                            }
+                        }
+                    }
                 }
-            }
 
-            /* ---- recent updates ---- */
-            if (others.isNotEmpty()) {
-                item {
-                    Text(
-                        "Recent updates",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Muted,
-                        modifier = Modifier.padding(top = 8.dp, start = 4.dp, bottom = 2.dp),
-                    )
+                if (!ScreenStore.statusesLoaded) {
+                    item(key = "loading") {
+                        Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(color = Gold, modifier = Modifier.size(28.dp))
+                        }
+                    }
                 }
-                items(others, key = { it.optJSONObject("user")?.optString("id") ?: it.toString() }) { g ->
-                    val user = g.optJSONObject("user") ?: return@items
-                    val allViewed = g.optBoolean("allViewed")
-                    StatusRow(user, allViewed, g.arr("statuses").objects().size) {
-                        nav.navigate("statusview/${user.optString("id")}")
+                if (ScreenStore.statusesLoaded && others.isEmpty()) {
+                    item(key = "empty") {
+                        Box(Modifier.fillMaxWidth().padding(top = 20.dp), contentAlignment = Alignment.Center) {
+                            Text(
+                                "No friend statuses yet. Chats korle ekhane status dekha jabe.",
+                                fontSize = 13.5.sp,
+                                color = Muted,
+                                textAlign = TextAlign.Center,
+                            )
+                        }
                     }
                 }
             }
-
-            if (loading && groups.isEmpty()) {
-                item {
-                    Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                        androidx.compose.material3.CircularProgressIndicator(color = Gold)
-                    }
-                }
-            }
-            if (!loading && others.isEmpty()) {
-                item {
-                    Box(Modifier.fillMaxWidth().padding(top = 20.dp), contentAlignment = Alignment.Center) {
-                        Text(
-                            "No friend statuses yet. Chats korle ekhane status dekha jabe.",
-                            fontSize = 13.5.sp,
-                            color = Muted,
-                            textAlign = TextAlign.Center,
-                        )
-                    }
-                }
-            }
-        }
         }
 
         /* WhatsApp-style stacked FABs: pencil = text status, camera = photo */
@@ -249,43 +287,6 @@ fun StatusScreen(nav: NavController) {
         }
     }
 }
-
-@Composable
-private fun StatusRow(user: JSONObject, allViewed: Boolean, count: Int, onClick: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(Card)
-            .clickable { onClick() }
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        KpAvatar(
-            user.optString("displayName"),
-            user.optString("avatarUrl"),
-            64.dp,
-            ring = !allViewed,
-        )
-        Spacer(Modifier.width(14.dp))
-        Column {
-            Text(
-                user.optString("displayName"),
-                fontSize = 15.5.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Ink,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                "$count update${if (count > 1) "s" else ""} · ${listStamp(userStatusTime(user))}",
-                fontSize = 12.5.sp,
-                color = Muted,
-            )
-        }
-    }
-}
-
-private fun userStatusTime(user: JSONObject): String = ""
 
 /**
  * Text status composer — big text over a gradient card, pick a background.
@@ -412,9 +413,10 @@ fun StatusComposer(onDone: () -> Unit) {
 }
 
 /**
- * Status viewer — locked design #4: full-screen, segmented progress,
- * tap sides to move, auto-advance, reply bar (others) /
- * viewers + delete (mine).
+ * Status viewer — WhatsApp-style: full-screen, segmented progress, tap
+ * sides to move (left = back, right = next), auto-advance, reply bar
+ * (others) / viewers + delete (mine). Paints instantly from the cached
+ * list and refreshes silently in the background.
  */
 @Composable
 fun StatusViewerScreen(nav: NavController, whose: String) {
@@ -425,16 +427,22 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
     var reply by remember { mutableStateOf("") }
     var showViewers by remember { mutableStateOf(false) }
     var viewers by remember { mutableStateOf("") }
-    var loaded by remember { mutableStateOf(false) }
+    var viewersError by remember { mutableStateOf(false) }
+    var fetched by remember { mutableStateOf(false) }
 
+    /* instant paint from cache, then silent refresh */
     LaunchedEffect(Unit) {
+        groups.clear()
+        groups.addAll(ScreenStore.statuses)
         try {
             val data = withContext(Dispatchers.IO) { Api.get("/api/statuses", true) }
+            val fresh = data.arr("items").objects()
             groups.clear()
-            groups.addAll(data.arr("items").objects())
+            groups.addAll(fresh)
+            ScreenStore.setStatuses(fresh)
         } catch (_: Exception) {
         } finally {
-            loaded = true
+            fetched = true
         }
     }
 
@@ -445,9 +453,9 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
     val user = group?.optJSONObject("user")
     val isMine = group?.optBoolean("mine") == true
 
-    /* auto-advance + mark viewed */
-    LaunchedEffect(statuses.size, idx) {
-        if (statuses.isEmpty() || idx >= statuses.size) return@LaunchedEffect
+    /* auto-advance + mark viewed — pauses while the viewers sheet is open */
+    LaunchedEffect(statuses.size, idx, showViewers) {
+        if (statuses.isEmpty() || idx >= statuses.size || showViewers) return@LaunchedEffect
         val s = statuses[idx]
         if (!isMine) {
             runCatching { withContext(Dispatchers.IO) { Api.post("/api/statuses/${s.optString("id")}/view") } }
@@ -500,6 +508,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
         val s = statuses[idx]
         showViewers = true
         viewers = ""
+        viewersError = false
         scope.launch {
             runCatching {
                 val data = withContext(Dispatchers.IO) { Api.get("/api/statuses/${s.optString("id")}/viewers", true) }
@@ -507,30 +516,29 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                     (v.optJSONObject("user")?.optString("displayName") ?: "?") + "|" +
                         listStamp(v.optString("viewedAt"))
                 }
-            }
+            }.onFailure { viewersError = true }
         }
     }
 
     Box(Modifier.fillMaxSize().background(Dark)) {
-        if (!loaded) {
-            androidx.compose.material3.CircularProgressIndicator(
-                color = Gold,
-                modifier = Modifier.align(Alignment.Center),
-            )
-        } else if (statuses.isEmpty()) {
+        if (statuses.isEmpty()) {
             Column(
                 Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Icon(
-                    Icons.Filled.RemoveRedEye,
-                    contentDescription = "No status",
-                    tint = Color.White.copy(alpha = 0.8f),
-                    modifier = Modifier.size(42.dp),
-                )
-                Spacer(Modifier.height(8.dp))
-                Text("No status", color = Color.White.copy(alpha = 0.8f), fontSize = 15.sp)
+                if (!fetched) {
+                    CircularProgressIndicator(color = Gold)
+                } else {
+                    Icon(
+                        Icons.Filled.RemoveRedEye,
+                        contentDescription = "No status",
+                        tint = Color.White.copy(alpha = 0.8f),
+                        modifier = Modifier.size(42.dp),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text("No status", color = Color.White.copy(alpha = 0.8f), fontSize = 15.sp)
+                }
             }
         } else {
             val s = statuses[minOf(idx, statuses.size - 1)]
@@ -613,7 +621,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                             fontSize = 15.sp,
                         )
                         Text(
-                            listStamp(s.optString("createdAt")),
+                            statusStamp(s.optString("createdAt")),
                             color = Color.White.copy(alpha = 0.75f),
                             fontSize = 12.sp,
                         )
@@ -631,27 +639,50 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                         }
                     }
                 }
-                Spacer(Modifier.weight(1f))
-                /* reply bar or my-status hint */
+                /* tap zones: left = previous, right = next — they fill the
+                   middle area only, so header + reply stay tappable */
+                Row(Modifier.weight(1f).fillMaxWidth()) {
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .fillMaxSize()
+                            .clickable { if (idx > 0) { idx--; progress = 0f } },
+                    )
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .fillMaxSize()
+                            .clickable {
+                                progress = 0f
+                                if (idx + 1 < statuses.size) idx++ else nav.popBackStack()
+                            },
+                    )
+                }
+                /* reply bar or my-status views hint */
                 if (isMine) {
                     Row(
-                        Modifier.fillMaxWidth().padding(16.dp),
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(Color(0x33FFFFFF))
+                            .clickable { openViewers() }
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
                         horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Filled.RemoveRedEye,
-                                contentDescription = "Views",
-                                tint = Color.White,
-                                modifier = Modifier.size(16.dp),
-                            )
-                            Spacer(Modifier.width(5.dp))
-                            Text(
-                                "${s.optInt("viewers", 0)} view${if (s.optInt("viewers", 0) == 1) "" else "s"}",
-                                color = Color.White,
-                                fontSize = 13.sp,
-                            )
-                        }
+                        Icon(
+                            Icons.Filled.RemoveRedEye,
+                            contentDescription = "Views",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            "${s.optInt("viewers", 0)} view${if (s.optInt("viewers", 0) == 1) "" else "s"} · tap for the list",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                        )
                     }
                 } else {
                     Row(
@@ -663,7 +694,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                             .padding(horizontal = 16.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        androidx.compose.foundation.text.BasicTextField(
+                        BasicTextField(
                             value = reply,
                             onValueChange = { reply = it },
                             textStyle = androidx.compose.ui.text.TextStyle(
@@ -672,13 +703,19 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                             ),
                             modifier = Modifier.weight(1f).padding(vertical = 12.dp),
                             decorationBox = { inner ->
-                                if (reply.isEmpty()) Text("Reply…", color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp)
+                                if (reply.isEmpty()) {
+                                    Text(
+                                        "Reply to ${user?.optString("displayName") ?: ""}…",
+                                        color = Color.White.copy(alpha = 0.7f),
+                                        fontSize = 14.sp,
+                                    )
+                                }
                                 inner()
                             },
                         )
                         IconButton(onClick = { sendReply() }) {
                             Icon(
-                                androidx.compose.material.icons.Icons.AutoMirrored.Filled.Send,
+                                Icons.AutoMirrored.Filled.Send,
                                 "Send reply",
                                 tint = Gold,
                             )
@@ -687,16 +724,6 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                 }
             }
 
-            /* tap zones */
-            Row(Modifier.fillMaxSize()) {
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .fillMaxSize()
-                        .clickable { if (idx > 0) { idx--; progress = 0f } },
-                )
-                Box(Modifier.weight(1f).fillMaxSize())
-            }
         }
     }
 
@@ -706,11 +733,21 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
             title = { Text("Viewed by") },
             text = {
                 Column {
-                    if (viewers.isBlank()) {
-                        Text("Loading…", color = Muted)
+                    if (viewersError) {
+                        Text("Couldn't load viewers. Try again.", color = Red, fontSize = 14.sp)
+                    } else if (viewers.isBlank()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(color = Gold, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(10.dp))
+                            Text("Loading…", color = Muted)
+                        }
+                    } else if (viewers == "\n" || viewers.lines().all { it.isBlank() }) {
+                        Text("No views yet.", color = Muted, fontSize = 14.sp)
                     } else {
-                        viewers.lines().forEach { line ->
-                            val (name, at) = line.split("|") + listOf("")
+                        viewers.lines().filter { it.isNotBlank() }.forEach { line ->
+                            val parts = line.split("|")
+                            val name = parts.getOrElse(0) { "?" }
+                            val at = parts.getOrElse(1) { "" }
                             Row(
                                 Modifier.fillMaxWidth().padding(vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,

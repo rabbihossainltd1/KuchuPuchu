@@ -213,15 +213,24 @@ class CallService : Service() {
     companion object {
         val fgReady = AtomicBoolean(false)
         private var started = false
+        private var lastShare = false
 
         fun start(ctx: Context, title: String, share: Boolean = false) {
             if (started) {
+                if (share == lastShare) return // same service types — nothing to re-declare
+                // Re-start with different service types (e.g. screen share):
+                // reset fgReady so callers can wait for onStartCommand to
+                // re-declare the mediaProjection type (Android 14+ requires
+                // this before getMediaProjection()).
+                lastShare = share
+                fgReady.set(false)
                 ctx.startService(
                     Intent(ctx, CallService::class.java).putExtra("title", title).putExtra("share", share),
                 )
                 return
             }
             started = true
+            lastShare = share
             fgReady.set(false)
             val intent = Intent(ctx, CallService::class.java).putExtra("title", title).putExtra("share", share)
             runCatching {

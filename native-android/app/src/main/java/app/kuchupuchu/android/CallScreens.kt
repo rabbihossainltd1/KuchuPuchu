@@ -5,6 +5,7 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,17 +25,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
-import androidx.compose.material.icons.filled.Flip
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PersonAddAlt1
-import androidx.compose.material.icons.filled.Phone
-import androidx.compose.material.icons.filled.PhoneInTalk
-import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.ScreenShare
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
@@ -51,12 +47,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -66,9 +60,10 @@ import org.webrtc.RendererCommon
 import org.webrtc.SurfaceViewRenderer
 
 /**
- * The six locked call screens (voice/video fully separate flows):
- *  incoming voice #1 · incoming video #3 · outgoing voice #4 ·
- *  outgoing video #5 · in-call voice #2 · in-call video #6
+ * The call screens — one shared flow for BOTH sides:
+ *   incoming (ringing) → in-call voice #2 / in-call video #6.
+ * Both the caller and the callee see the exact same screen once the call
+ * connects, and the same dark look while ringing.
  */
 @Composable
 fun CallGate() {
@@ -83,8 +78,7 @@ fun CallGate() {
     }
 
     when {
-        call.incoming && call.status == "RINGING" && call.kind == "VIDEO" -> IncomingVideoScreen(call)
-        call.incoming && call.status == "RINGING" -> IncomingVoiceScreen(call)
+        call.incoming && call.status == "RINGING" -> IncomingCallScreen(call)
         call.kind == "VIDEO" && (call.status == "RINGING" || call.connecting) -> OutgoingVideoScreen(call)
         call.status == "RINGING" || call.connecting -> OutgoingVoiceScreen(call)
         call.kind == "VIDEO" -> InCallVideoScreen(call)
@@ -106,11 +100,11 @@ fun CallGate() {
 }
 
 /* ------------------------------------------------------------------ */
-/* INCOMING VOICE — #1 classic dark                                    */
+/* INCOMING (voice + video) — dark, pulse ring, accept / decline       */
 /* ------------------------------------------------------------------ */
 
 @Composable
-fun IncomingVoiceScreen(call: CallUi) {
+fun IncomingCallScreen(call: CallUi) {
     val engine = CallEngine.instance ?: return
     DarkCallScaffold {
         Column(
@@ -124,21 +118,30 @@ fun IncomingVoiceScreen(call: CallUi) {
             Spacer(Modifier.height(26.dp))
             Text(call.otherName, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(6.dp))
-            Text("Incoming voice call…", color = Color(0xB3FFFFFF), fontSize = 14.sp)
+            Text(
+                if (call.kind == "VIDEO") "Incoming video call…" else "Incoming voice call…",
+                color = Color(0xB3FFFFFF),
+                fontSize = 14.sp,
+            )
             Spacer(Modifier.weight(1f))
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 48.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                CallCircle(Green, 66.dp) {
-                    Icon(Icons.Filled.Call, "Accept", tint = Color.White, modifier = Modifier.size(30.dp))
+                CallCircle(Green, 70.dp) {
+                    Icon(
+                        if (call.kind == "VIDEO") Icons.Filled.Videocam else Icons.Filled.Call,
+                        "Accept",
+                        tint = Color.White,
+                        modifier = Modifier.size(if (call.kind == "VIDEO") 33.dp else 30.dp),
+                    )
                 }
-                CallCircle(Red, 66.dp) {
-                    Icon(Icons.Filled.CallEnd, "Decline", tint = Color.White, modifier = Modifier.size(28.dp))
+                CallCircle(Red, 70.dp) {
+                    Icon(Icons.Filled.CallEnd, "Decline", tint = Color.White, modifier = Modifier.size(30.dp))
                 }
             }
-            Spacer(Modifier.height(22.dp))
+            Spacer(Modifier.height(20.dp))
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 40.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
@@ -160,65 +163,14 @@ fun IncomingVoiceScreen(call: CallUi) {
                         engine.decline()
                         Reminders.schedule(engineApp(), call.otherName, call.otherId)
                     },
-                )            }
-        }
-    }
-}
-
-/* ------------------------------------------------------------------ */
-/* INCOMING VIDEO — #3 dark + amber pulse, three choices               */
-/* ------------------------------------------------------------------ */
-
-@Composable
-fun IncomingVideoScreen(call: CallUi) {
-    val engine = CallEngine.instance ?: return
-    DarkCallScaffold {
-        Column(
-            Modifier.fillMaxSize().statusBarsPadding().padding(bottom = 46.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Spacer(Modifier.weight(0.7f))
-            AmberPulseRing {
-                KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 108.dp, ring = false)
-            }
-            Spacer(Modifier.height(26.dp))
-            Text(call.otherName, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(6.dp))
-            Text("Incoming video call…", color = Color(0xB3FFFFFF), fontSize = 14.sp)
-            Spacer(Modifier.weight(1f))
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 30.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                /* red decline */
-                CallCircle(Red, 62.dp) {
-                    Icon(Icons.Filled.CallEnd, "Decline", tint = Color.White, modifier = Modifier.size(26.dp))
-                }
-                /* frosted voice-only (green phone) */
-                FrostedCircle {
-                    Icon(Icons.Filled.Phone, "Answer with voice only", tint = Green, modifier = Modifier.size(27.dp))
-                }
-                /* green video accept */
-                CallCircle(Green, 70.dp) {
-                    Icon(Icons.Filled.Videocam, "Accept video", tint = Color.White, modifier = Modifier.size(33.dp))
-                }
-            }
-            Spacer(Modifier.height(20.dp))
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 30.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-            ) {
-                Text("Decline", color = Color(0x99FFFFFF), fontSize = 12.5.sp)
-                Text("Voice only", color = Color(0x99FFFFFF), fontSize = 12.5.sp)
-                Text("Video", color = Color(0x99FFFFFF), fontSize = 12.5.sp)
+                )
             }
         }
     }
 }
 
 /* ------------------------------------------------------------------ */
-/* OUTGOING VOICE — #4 dark, pulse ring, early controls + cancel       */
+/* OUTGOING VOICE — dark, pulse ring, early controls + cancel          */
 /* ------------------------------------------------------------------ */
 
 @Composable
@@ -254,11 +206,6 @@ fun OutgoingVoiceScreen(call: CallUi) {
                     if (engine.speaker) "Speaker on" else "Speaker",
                     active = engine.speaker,
                 ) { engine.toggleSpeaker() }
-                FrostedPill(
-                    Icons.Filled.Bluetooth,
-                    if (engine.bluetooth) "Bluetooth on" else "Bluetooth",
-                    active = engine.bluetooth,
-                ) { engine.toggleBluetooth() }
             }
             Spacer(Modifier.height(34.dp))
             CallCircle(Red, 66.dp) {
@@ -269,70 +216,74 @@ fun OutgoingVoiceScreen(call: CallUi) {
 }
 
 /* ------------------------------------------------------------------ */
-/* OUTGOING VIDEO — #5 bottom sheet (callee top / white sheet)         */
+/* OUTGOING VIDEO — dark, same look as the in-call video screen        */
 /* ------------------------------------------------------------------ */
 
 @Composable
 fun OutgoingVideoScreen(call: CallUi) {
     val engine = CallEngine.instance ?: return
-    Column(Modifier.fillMaxSize().background(Dark)) {
-        /* cream top with callee */
+    Box(Modifier.fillMaxSize().background(Dark)) {
+        /* local preview fills the screen while ringing */
+        VideoRenderer(engine, remote = false)
+
         Column(
             Modifier
-                .fillMaxWidth()
-                .background(Cream)
+                .fillMaxSize()
                 .statusBarsPadding()
-                .padding(bottom = 34.dp),
+                .padding(top = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Spacer(Modifier.height(30.dp))
-            KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 96.dp, ring = false)
-            Spacer(Modifier.height(18.dp))
-            Text(call.otherName, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.weight(0.55f))
+            Text(call.otherName, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(6.dp))
             Text(
                 if (call.connecting) "Connecting…" else "Ringing…",
-                color = Muted,
-                fontSize = 13.5.sp,
+                color = Color(0xB3FFFFFF),
+                fontSize = 14.sp,
             )
-            Spacer(Modifier.height(22.dp))
-            /* local preview while ringing */
-            Box(
-                Modifier
-                    .size(width = 110.dp, height = 150.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(Color(0xFF1C1917)),
-            ) {
-                VideoRenderer(engine, remote = false, fit = true)
-            }
+            Spacer(Modifier.weight(1f))
         }
-        /* white sheet */
-        Column(
+
+        /* dark scrim so text stays readable over the camera feed */
+        Box(
             Modifier
-                .weight(1f)
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
-                .background(Color.White)
+                .height(120.dp)
+                .align(Alignment.Center)
+                .background(Color(0x33000000)),
+        )
+
+        /* bottom control strip — same style as the in-call video strip */
+        Row(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(vertical = 30.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .padding(horizontal = 12.dp, vertical = 14.dp)
+                .clip(RoundedCornerShape(26.dp))
+                .background(Color(0x99000000))
+                .padding(horizontal = 8.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(22.dp)) {
-                SheetAction(Icons.Filled.Flip, "Flip") { engine.flipCamera() }
-                SheetAction(
-                    if (engine.cameraOff) Icons.Filled.Videocam else Icons.Filled.VideocamOff,
-                    if (engine.cameraOff) "Camera on" else "Camera off",
-                    tint = if (engine.cameraOff) Green else Ink,
-                ) { engine.toggleCamera() }
-                SheetAction(Icons.Filled.CallEnd, "Cancel", tint = Red) { engine.hangup() }
-            }
+            StripAction(
+                if (engine.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
+                if (engine.muted) "Unmute" else "Mute",
+                active = engine.muted,
+            ) { engine.toggleMute() }
+            StripAction(
+                if (engine.cameraOff) Icons.Filled.VideocamOff else Icons.Filled.Videocam,
+                if (engine.cameraOff) "Camera on" else "Camera off",
+                active = engine.cameraOff,
+            ) { engine.toggleCamera() }
+            StripAction(Icons.Filled.CallEnd, "Cancel", active = false, danger = true) { engine.hangup() }
         }
     }
 }
 
 /* ------------------------------------------------------------------ */
-/* IN-CALL VOICE — #2 light airy: cream top + white sheet 3x2 grid     */
-/* controls EXACTLY: Mute / Speaker / Bluetooth / Hold / Add call / End */
+/* IN-CALL VOICE — light airy: cream top + white sheet grid            */
+/* controls: Mute / Speaker / Hold / Add call / End                    */
 /* ------------------------------------------------------------------ */
 
 @Composable
@@ -377,55 +328,51 @@ fun InCallVoiceScreen(call: CallUi) {
                 .padding(horizontal = 26.dp, vertical = 30.dp),
             verticalArrangement = Arrangement.Center,
         ) {
-            for (row in 0 until 2) {
-                Row(
-                    Modifier.fillMaxWidth().padding(vertical = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                ) {
-                    for (col in 0 until 3) {
-                        when (row * 3 + col) {
-                            0 -> GridAction(
-                                if (engine.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
-                                if (engine.muted) "Unmute" else "Mute",
-                                active = engine.muted,
-                            ) { engine.toggleMute() }
-                            1 -> GridAction(
-                                Icons.Filled.VolumeUp,
-                                if (engine.speaker) "Speaker on" else "Speaker",
-                                active = engine.speaker,
-                            ) { engine.toggleSpeaker() }
-                            2 -> GridAction(
-                                Icons.Filled.Bluetooth,
-                                if (engine.bluetooth) "Bluetooth on" else "Bluetooth",
-                                active = engine.bluetooth,
-                            ) { engine.toggleBluetooth() }
-                            3 -> GridAction(
-                                Icons.Filled.Pause,
-                                if (engine.onHold) "Resume" else "Hold",
-                                active = engine.onHold,
-                            ) { engine.toggleHold() }
-                            4 -> GridAction(
-                                Icons.Filled.PersonAddAlt1,
-                                "Add call",
-                                active = false,
-                            ) { engine.notify("Adding calls is coming in a future update.") }
-                            5 -> GridAction(
-                                Icons.Filled.CallEnd,
-                                "End call",
-                                active = false,
-                                danger = true,
-                            ) { haptics.heavy(); engine.hangup() }
-                        }
-                    }
-                }
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+            ) {
+                GridAction(
+                    if (engine.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
+                    if (engine.muted) "Unmute" else "Mute",
+                    active = engine.muted,
+                ) { engine.toggleMute() }
+                GridAction(
+                    Icons.Filled.VolumeUp,
+                    if (engine.speaker) "Speaker on" else "Speaker",
+                    active = engine.speaker,
+                ) { engine.toggleSpeaker() }
+                GridAction(
+                    Icons.Filled.Pause,
+                    if (engine.onHold) "Resume" else "Hold",
+                    active = engine.onHold,
+                ) { engine.toggleHold() }
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                Box(Modifier.width(48.dp)) // spacer so the row centers like WhatsApp's second row
+                GridAction(
+                    Icons.Filled.PersonAddAlt1,
+                    "Add call",
+                    active = false,
+                ) { engine.notify("Adding calls is coming in a future update.") }
+                Box(Modifier.width(48.dp))
+                GridAction(
+                    Icons.Filled.CallEnd,
+                    "End call",
+                    active = false,
+                    danger = true,
+                ) { haptics.heavy(); engine.hangup() }
             }
         }
     }
 }
 
 /* ------------------------------------------------------------------ */
-/* IN-CALL VIDEO — #6 authentic minimal dark                           */
-/* strip: Mute / Camera off / Flip / Screen share / Voice only / End    */
+/* IN-CALL VIDEO — authentic minimal dark                              */
+/* strip: Mute / Camera / Screen share / End                           */
 /* ------------------------------------------------------------------ */
 
 @Composable
@@ -480,7 +427,7 @@ fun InCallVideoScreen(call: CallUi) {
         Box(
             Modifier
                 .align(Alignment.BottomEnd)
-                .padding(bottom = 190.dp, end = 14.dp)
+                .padding(bottom = 170.dp, end = 14.dp)
                 .size(width = 96.dp, height = 132.dp)
                 .clip(RoundedCornerShape(14.dp))
                 .background(Color(0xFF33302B))
@@ -509,14 +456,10 @@ fun InCallVideoScreen(call: CallUi) {
             ) { engine.toggleMute() }
             StripAction(
                 if (engine.cameraOff) Icons.Filled.VideocamOff else Icons.Filled.Videocam,
-                if (engine.cameraOff) "Camera off" else "Camera",
+                if (engine.cameraOff) "Camera on" else "Camera",
                 active = engine.cameraOff,
             ) { engine.toggleCamera() }
-            StripAction(Icons.Filled.Flip, "Flip", active = false) { engine.flipCamera() }
             StripAction(Icons.Filled.ScreenShare, "Share", active = engine.sharing) { engine.toggleShare() }
-            StripAction(Icons.Filled.PhoneInTalk, "Voice only", active = false) {
-                if (!engine.cameraOff) engine.toggleCamera() // never turn the camera back ON here
-            }
             StripAction(Icons.Filled.CallEnd, "End", active = false, danger = true) { haptics.heavy(); engine.hangup() }
         }
     }
@@ -528,10 +471,8 @@ fun InCallVideoScreen(call: CallUi) {
 
 @Composable
 private fun DarkCallScaffold(content: @Composable () -> Unit) {
-    val engine = CallEngine.instance ?: return
     Box(Modifier.fillMaxSize().background(Dark)) {
         content()
-        /* taps: green accept / red decline handled by children */
     }
 }
 
@@ -556,24 +497,6 @@ private fun CallCircle(color: Color, size: androidx.compose.ui.unit.Dp, icon: @C
 }
 
 @Composable
-private fun FrostedCircle(icon: @Composable () -> Unit) {
-    val engine = CallEngine.instance ?: return
-    val haptics = rememberHaptics()
-    Box(
-        Modifier
-            .size(62.dp)
-            .clip(CircleShape)
-            .background(Color(0x26FFFFFF))
-            .border(1.dp, Color(0x40FFFFFF), CircleShape)
-            .clickable {
-                haptics.confirm()
-                engine.answerVoiceOnly()
-            },
-        contentAlignment = Alignment.Center,
-    ) { icon() }
-}
-
-@Composable
 private fun FrostedPill(icon: ImageVector, label: String, active: Boolean, onClick: () -> Unit) {
     val haptics = rememberHaptics()
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -590,24 +513,6 @@ private fun FrostedPill(icon: ImageVector, label: String, active: Boolean, onCli
         }
         Spacer(Modifier.height(5.dp))
         Text(label, color = Color(0x99FFFFFF), fontSize = 11.sp)
-    }
-}
-
-@Composable
-private fun SheetAction(icon: ImageVector, label: String, tint: Color = Ink, onClick: () -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            Modifier
-                .size(58.dp)
-                .clip(CircleShape)
-                .background(Cream)
-                .clickable { onClick() },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(26.dp))
-        }
-        Spacer(Modifier.height(6.dp))
-        Text(label, color = Muted, fontSize = 12.sp)
     }
 }
 
@@ -695,7 +600,7 @@ private fun PulseRing(content: @Composable () -> Unit) {
         initialValue = 1f,
         targetValue = 1.06f,
         animationSpec = infiniteRepeatable(
-            androidx.compose.animation.core.tween(1100),
+            tween(1100),
             repeatMode = RepeatMode.Reverse,
         ),
         label = "scale",
@@ -703,41 +608,9 @@ private fun PulseRing(content: @Composable () -> Unit) {
     Box(Modifier.scale(s)) { content() }
 }
 
-@Composable
-private fun AmberPulseRing(content: @Composable () -> Unit) {
-    val t = rememberInfiniteTransition(label = "amberpulse")
-    val s by t.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.08f,
-        animationSpec = infiniteRepeatable(
-            androidx.compose.animation.core.tween(900),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "scale",
-    )
-    Box(Modifier.scale(s)) {
-        Box(
-            Modifier
-                .size(128.dp)
-                .clip(CircleShape)
-                .background(Color(0x26F59E0B)),
-        )
-        Box(Modifier.scale(s), contentAlignment = Alignment.Center) {
-            Box(
-                Modifier
-                    .size(120.dp)
-                    .clip(CircleShape)
-                    .background(goldRing()),
-            )
-        }
-        Box(contentAlignment = Alignment.Center) { content() }
-    }
-}
-
 /** WebRTC video renderer (remote full-bleed or local PiP). */
 @Composable
 fun VideoRenderer(engine: CallEngine, remote: Boolean, fit: Boolean = false) {
-    val ctx = LocalContext.current
     AndroidView(
         factory = { c ->
             SurfaceViewRenderer(c).apply {

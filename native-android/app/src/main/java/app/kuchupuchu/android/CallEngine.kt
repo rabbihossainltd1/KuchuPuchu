@@ -4,7 +4,6 @@ import android.app.Activity
 import android.app.Application
 import android.content.Context
 import android.content.Intent
-import android.media.projection.MediaProjection
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -42,6 +41,7 @@ import org.webrtc.VideoTrack
 import org.webrtc.audio.JavaAudioDeviceModule
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 
 data class CallUi(
@@ -60,8 +60,10 @@ data class CallUi(
 /**
  * WebRTC call engine for v3 — polls /api/calls/active, drives the peer
  * connection, relays ICE through the worker, and exposes Compose state
- * (active call, muted, speaker, camera, sharing) for the six locked
- * call screens.
+ * (active call, muted, speaker, camera, sharing) for the call screens.
+ *
+ * Both sides of every call now land on the SAME screens: incoming
+ * (ringing) → in-call (voice or video). No per-side variants.
  */
 class CallEngine(private val app: Application) {
     var onChange: ((CallUi?) -> Unit)? = null
@@ -76,7 +78,6 @@ class CallEngine(private val app: Application) {
     var sharing by mutableStateOf(false)
     var hasRemote by mutableStateOf(false)
     var onHold by mutableStateOf(false)
-    var bluetooth by mutableStateOf(false)
 
     /** Short-lived message shown by the call screens, e.g. "User offline". */
     var toast by mutableStateOf("")
@@ -102,7 +103,6 @@ class CallEngine(private val app: Application) {
     private var iceCallId: String = ""
     private val pendingIce = mutableListOf<JSONObject>()
     private var ringingId: String? = null
-    private var shareCallback: MediaProjection.Callback? = null
     private val answering = AtomicBoolean(false)
     var pendingAccept = false
 
@@ -159,20 +159,13 @@ class CallEngine(private val app: Application) {
     fun applyAudio() {
         val am = app.getSystemService(android.media.AudioManager::class.java)
         am.mode = android.media.AudioManager.MODE_IN_COMMUNICATION
-        if (bluetooth) {
-            runCatching {
-                @Suppress("DEPRECATION")
-                am.startBluetoothSco()
-                @Suppress("DEPRECATION")
-                am.isBluetoothScoOn = true
-            }
-            return
-        }
+        // A device sitting at ~0 in-call volume is the classic "I can't hear
+        // anything" report — nudge it to a sane level if it's silenced.
         runCatching {
-            @Suppress("DEPRECATION")
-            am.stopBluetoothSco()
-            @Suppress("DEPRECATION")
-            am.isBluetoothScoOn = false
+            val max = am.getStreamMaxVolume(android.media.AudioManager.STREAM_VOICE_CALL)
+            if (am.getStreamVolume(android.media.AudioManager.STREAM_VOICE_CALL) <= max / 10) {
+                am.setStreamVolume(android.media.AudioManager.STREAM_VOICE_CALL, (max * 0.45f).toInt().coerceAtLeast(1), 0)
+            }
         }
         if (Build.VERSION.SDK_INT >= 31) {
             runCatching {
@@ -278,7 +271,7 @@ class CallEngine(private val app: Application) {
             }
             CallService.start(app, "In a call with ${ui.otherName}")
             val answer = next.optString("answerSdp")
-            if (answer.isNotBlank() && pc?.remoteDescription == null) {
+            if (answer.isNotBlank() && pc?.remoteDescription == null && pc != null) {
                 runCatching {
                     pc?.setRemoteDescriptionAwait(SessionDescription(SessionDescription.Type.ANSWER, answer))
                 }
@@ -340,12 +333,6 @@ class CallEngine(private val app: Application) {
         }
     }
 
-    fun answerVoiceOnly() {
-        val rec = active ?: return
-        active = rec.copy(kind = "AUDIO")
-        answer()
-    }
-
     fun answer() {
         val rec = active
         if (rec == null || rec.id.startsWith("pending")) {
@@ -390,6 +377,7 @@ class CallEngine(private val app: Application) {
                 withContext(Dispatchers.IO) {
                     Api.post("/api/calls/${rec.id}/answer", JSONObject().put("answerSdp", answer.description))
                 }
+                pullIce(rec.id)
             } catch (_: Exception) {
                 answering.set(false)
                 hangupLocal()
@@ -456,13 +444,6 @@ class CallEngine(private val app: Application) {
 
     fun toggleSpeaker() {
         speaker = !speaker
-        if (speaker) bluetooth = false
-        applyAudio()
-    }
-
-    fun toggleBluetooth() {
-        bluetooth = !bluetooth
-        if (bluetooth) speaker = false
         applyAudio()
     }
 
@@ -487,55 +468,33 @@ class CallEngine(private val app: Application) {
         onChange?.invoke(active)
     }
 
-    fun flipCamera() {
-        val nextFacing = if (currentFacingFront) false else true
-        currentFacingFront = nextFacing
-        if (sharing) return
-        scope.launch {
-            runCatching {
-                capturer?.stopCapture()
-                capturer?.dispose()
-                videoTrack?.let { track -> localView?.let { v -> runCatching { track.removeSink(v) } } }
-                val f = factory ?: return@launch
-                val enum = Camera2Enumerator(app)
-                val name =
-                    enum.deviceNames.firstOrNull {
-                        if (nextFacing) enum.isFrontFacing(it) else enum.isBackFacing(it)
-                    } ?: enum.deviceNames.firstOrNull { enum.isFrontFacing(it) } ?: return@launch
-                capturer = enum.createCapturer(name, null)
-                helper?.dispose()
-                helper = SurfaceTextureHelper.create("kp-cap", egl.eglBaseContext)
-                videoSource = videoSource ?: f.createVideoSource(false)
-                capturer?.initialize(helper, app, videoSource!!.capturerObserver)
-                capturer?.startCapture(720, 1280, 24)
-                val track = videoTrack ?: f.createVideoTrack("kp-v", videoSource)
-                videoTrack = track
-                val sender = pc?.senders?.find { it.track()?.kind() == "video" }
-                if (sender != null) sender.setTrack(track, true) else pc?.addTrack(track)
-                localView?.setMirror(nextFacing)
-                localView?.let { runCatching { track.addSink(it) } }
-            }
-        }
-    }
-
-    private var currentFacingFront = true
-
     fun toggleShare() {
+        if (active == null || pc == null) {
+            notify("Start a video call first to share your screen.")
+            return
+        }
         if (sharing) {
             stopShare()
             return
         }
         MainActivity.current?.askShare { code, data ->
             if (code == Activity.RESULT_OK && data != null) {
-                scope.launch { runCatching { startShare(data) } }
+                scope.launch { runCatching { startShare(data) }.onFailure { notify("Screen share failed to start.") } }
             }
         }
     }
 
     private suspend fun startShare(data: Intent) {
+        // Android 14+: the foreground service must re-declare the
+        // mediaProjection type BEFORE getMediaProjection() is called, so
+        // restart the service with share=true and wait for it to be ready.
         CallService.start(app, "Sharing screen", share = true)
         var waits = 0
-        while (!CallService.fgReady.get() && waits++ < 40) delay(40)
+        while (!CallService.fgReady.get() && waits++ < 60) delay(50)
+        if (!CallService.fgReady.get()) {
+            notify("Screen share couldn't start. Try again.")
+            return
+        }
         try {
             capturer?.stopCapture()
         } catch (_: Exception) {
@@ -670,7 +629,6 @@ class CallEngine(private val app: Application) {
         cameraOff = false
         sharing = false
         onHold = false
-        bluetooth = false
         hasRemote = false
         iceCallId = ""
         pendingIce.clear()
@@ -682,12 +640,23 @@ class CallEngine(private val app: Application) {
         active = null
     }
 
+    /**
+     * STUN for same-network calls + a public TURN relay so calls also
+     * connect across mobile networks (CGNAT), where STUN-only P2P fails.
+     */
     private fun iceServers(): List<PeerConnection.IceServer> =
         listOf(
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
             PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
-            PeerConnection.IceServer.builder("stun:stun2.l.google.com:19302").createIceServer(),
             PeerConnection.IceServer.builder("stun:stun.cloudflare.com:3478").createIceServer(),
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer(),
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer(),
         )
 
     private fun sdpConstraints() =
@@ -701,6 +670,7 @@ class CallEngine(private val app: Application) {
             PeerConnection.RTCConfiguration(iceServers()).apply {
                 sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
                 continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+                iceCandidatePoolSize = 2
             }
         val peer =
             factory!!.createPeerConnection(
@@ -770,19 +740,24 @@ class CallEngine(private val app: Application) {
         }
     }
 
+    /** Camera always opens front-facing first (no flip button anymore). */
+    private val currentFacingFront = true
+
     private suspend fun pullIce(callId: String) {
         val pc = pc ?: return
         if (pc.remoteDescription == null) return
         val data = withContext(Dispatchers.IO) { runCatching { Api.get("/api/calls/$callId/ice") }.getOrNull() } ?: return
         for (item in data.arr("items").objects()) {
             val id = item.optString("id")
-            if (id in seenIce) continue
+            if (id.isNotBlank()) {
+                if (id in seenIce) continue
+            }
             val c = item.optJSONObject("candidate") ?: continue
             val cand = c.optString("candidate")
             if (cand.isBlank()) continue
             try {
                 pc.addIceCandidate(IceCandidate(c.optString("sdpMid"), c.optInt("sdpMLineIndex"), cand))
-                seenIce.add(id)
+                if (id.isNotBlank()) seenIce.add(id)
             } catch (_: Exception) {
             }
         }
@@ -853,8 +828,10 @@ private suspend fun PeerConnection.createOfferAwait(constraints: MediaConstraint
                     cont.resume(sdp!!)
                 }
                 override fun onSetSuccess() {}
-                override fun onCreateFailure(p0: String?) {}
-                override fun onSetFailure(p0: String?) {}
+                override fun onCreateFailure(error: String?) {
+                    cont.resumeWithException(RuntimeException("createOffer: ${error ?: "failed"}"))
+                }
+                override fun onSetFailure(error: String?) {}
             },
             constraints,
         )
@@ -868,14 +845,16 @@ private suspend fun PeerConnection.createAnswerAwait(constraints: MediaConstrain
                     cont.resume(sdp!!)
                 }
                 override fun onSetSuccess() {}
-                override fun onCreateFailure(p0: String?) {}
-                override fun onSetFailure(p0: String?) {}
+                override fun onCreateFailure(error: String?) {
+                    cont.resumeWithException(RuntimeException("createAnswer: ${error ?: "failed"}"))
+                }
+                override fun onSetFailure(error: String?) {}
             },
             constraints,
         )
     }
 
-private suspend fun PeerConnection.setLocalDescriptionAwait(sdp: SessionDescription) =
+private suspend fun PeerConnection.setLocalDescriptionAwait(sdp: SessionDescription): Unit =
     suspendCoroutine { cont ->
         setLocalDescription(
             object : SdpObserver {
@@ -884,13 +863,15 @@ private suspend fun PeerConnection.setLocalDescriptionAwait(sdp: SessionDescript
                     cont.resume(Unit)
                 }
                 override fun onCreateFailure(p0: String?) {}
-                override fun onSetFailure(p0: String?) {}
+                override fun onSetFailure(error: String?) {
+                    cont.resumeWithException(RuntimeException("setLocalDescription: ${error ?: "failed"}"))
+                }
             },
             sdp,
         )
     }
 
-private suspend fun PeerConnection.setRemoteDescriptionAwait(sdp: SessionDescription) =
+private suspend fun PeerConnection.setRemoteDescriptionAwait(sdp: SessionDescription): Unit =
     suspendCoroutine { cont ->
         setRemoteDescription(
             object : SdpObserver {
@@ -899,7 +880,9 @@ private suspend fun PeerConnection.setRemoteDescriptionAwait(sdp: SessionDescrip
                     cont.resume(Unit)
                 }
                 override fun onCreateFailure(p0: String?) {}
-                override fun onSetFailure(p0: String?) {}
+                override fun onSetFailure(error: String?) {
+                    cont.resumeWithException(RuntimeException("setRemoteDescription: ${error ?: "failed"}"))
+                }
             },
             sdp,
         )

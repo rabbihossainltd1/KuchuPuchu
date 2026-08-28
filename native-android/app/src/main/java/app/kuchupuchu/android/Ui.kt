@@ -213,3 +213,87 @@ fun Modifier.pressScale(interactionSource: MutableInteractionSource): Modifier {
     )
     return this.scale(scale)
 }
+
+/**
+ * WhatsApp-style status glyph drawn on canvas: a ring with a dot in the
+ * middle. (The old tab icon was Icons.Filled.Circle — literally just a dot.)
+ */
+@Composable
+fun StatusGlyphIcon(tint: Color, size: Dp) {
+    androidx.compose.foundation.Canvas(Modifier.size(size)) {
+        val s = size.toPx()
+        val stroke = s / 9f
+        drawCircle(color = tint, radius = stroke / 2f) // center dot
+        drawCircle(
+            color = tint,
+            radius = (s - stroke) / 2f,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke),
+        )
+    }
+}
+
+/**
+ * Segmented ring around a status avatar — one arc per status update,
+ * WhatsApp-style. Gold when unseen, gray once everything's been viewed.
+ */
+@Composable
+fun StatusRingAvatar(
+    name: String,
+    url: String?,
+    size: Dp,
+    segments: Int,
+    seen: Boolean,
+    ringWidth: Dp = 2.5.dp,
+) {
+    val ringColor = if (seen) Color(0xFFD6D3D1) else Gold
+    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
+        androidx.compose.foundation.Canvas(Modifier.size(size)) {
+            val stroke = ringWidth.toPx()
+            val r = (size.toPx() - stroke) / 2f
+            val n = segments.coerceAtLeast(1)
+            val circumference = 2.0 * Math.PI * r
+            val gapPx = if (n == 1) 0.0 else 5.dp.toPx().toDouble()
+            val segAngle = (circumference - gapPx * n) / n / r // radians
+            val gapAngle = if (n == 1) 0.0 else gapPx / r
+            var start = -Math.PI / 2.0 + gapAngle / 2.0
+            repeat(n) {
+                drawArc(
+                    color = ringColor,
+                    startAngle = Math.toDegrees(start).toFloat(),
+                    sweepAngle = Math.toDegrees(segAngle).toFloat(),
+                    useCenter = false,
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(
+                        width = stroke,
+                        cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                    ),
+                    topLeft = androidx.compose.ui.geometry.Offset(stroke / 2f, stroke / 2f),
+                    size = androidx.compose.ui.geometry.Size(r * 2f, r * 2f),
+                )
+                start += segAngle + gapAngle
+            }
+        }
+        KpAvatar(name, url, size - ringWidth * 2, ring = false)
+    }
+}
+
+/** Status-list timestamp: "Today at 4:39 PM" / "Yesterday at …" / "12 Aug". */
+fun statusStamp(iso: String): String {
+    if (iso.isBlank()) return ""
+    val t = try {
+        java.time.Instant.parse(iso)
+    } catch (e: Exception) {
+        return ""
+    }
+    val now = java.time.ZonedDateTime.now()
+    val z = t.atZone(java.time.ZoneId.systemDefault())
+    return when {
+        z.toLocalDate() == now.toLocalDate() ->
+            "Today at ${String.format("%d:%02d %s", (z.hour % 12f).toInt().let { if (it == 0) 12 else it }, z.minute, if (z.hour >= 12) "PM" else "AM")}"
+        z.toLocalDate() == now.toLocalDate().minusDays(1) ->
+            "Yesterday at ${String.format("%d:%02d %s", (z.hour % 12f).toInt().let { if (it == 0) 12 else it }, z.minute, if (z.hour >= 12) "PM" else "AM")}"
+        now.toLocalDate().toEpochDay() - z.toLocalDate().toEpochDay() < 7 ->
+            "${z.dayOfMonth} ${z.month.toString().take(3).let { m -> m[0] + m.substring(1).lowercase() }}"
+        else ->
+            "${z.dayOfMonth} ${z.month.toString().take(3).let { m -> m[0] + m.substring(1).lowercase() }}"
+    }
+}

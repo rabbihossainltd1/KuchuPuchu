@@ -1,6 +1,13 @@
 package app.kuchupuchu.android
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -15,6 +22,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -22,6 +30,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,6 +43,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.InsertDriveFile
@@ -63,11 +75,15 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
@@ -77,6 +93,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
+import kotlin.math.roundToInt
 
 /**
  * Chat screen — locked design #7 "Chat Box": coin wallpaper, gradient
@@ -88,14 +105,17 @@ fun ChatScreen(nav: NavController, convId: String) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val haptics = rememberHaptics()
-    val conv = remember { mutableStateOf<JSONObject?>(null) }
+    // Paint the header instantly from the last-known detail (or the chat
+    // list row) — no "…" flash while the fetch round-trips.
+    val conv = remember { mutableStateOf<JSONObject?>(ScreenStore.convDetailOf(convId) ?: convRowSnapshot(convId)) }
     val msgs = remember { mutableStateListOf<JSONObject>() }
     val pending = remember { mutableStateListOf<JSONObject>() }
     var input by remember { mutableStateOf("") }
     var showAttach by remember { mutableStateOf(false) }
     var showStickers by remember { mutableStateOf(false) }
     var recording by remember { mutableStateOf(false) }
-    var uploading by remember { mutableStateOf(0) } // >0 = attachments in flight
+    var recMs by remember { mutableStateOf(0) }
+    var uploading by remember { mutableStateOf(0) } // >0 = photo/file uploads in flight
     var error by remember { mutableStateOf("") }
     var otherReadAt by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
@@ -111,11 +131,15 @@ fun ChatScreen(nav: NavController, convId: String) {
         scope.launch {
             runCatching {
                 val data = withContext(Dispatchers.IO) { Api.get("/api/conversations/$convId") }
-                conv.value = data.optJSONObject("conversation")
-                conv.value?.arr("members")?.objects()?.forEach { m ->
-                    val u = m.optJSONObject("user")
-                    if (u != null && u.optString("id") != Store.myId()) {
-                        otherReadAt = m.optString("lastReadAt").takeIf { it.isNotBlank() }
+                val c = data.optJSONObject("conversation")
+                if (c != null) {
+                    conv.value = c
+                    ScreenStore.setConvDetail(convId, c)
+                    c.arr("members").objects().forEach { m ->
+                        val u = m.optJSONObject("user")
+                        if (u != null && u.optString("id") != Store.myId()) {
+                            otherReadAt = m.optString("lastReadAt").takeIf { it.isNotBlank() }
+                        }
                     }
                 }
             }
@@ -127,6 +151,9 @@ fun ChatScreen(nav: NavController, convId: String) {
             try {
                 val data = withContext(Dispatchers.IO) { Api.get("/api/conversations/$convId/messages") }
                 val fresh = data.arr("items").objects()
+                // Live read receipts: the sender's ticks turn blue without
+                // reopening the chat.
+                data.optString("readAt").takeIf { it.isNotBlank() }?.let { otherReadAt = it }
                 val prevTop = lastTopId
                 val newTop = fresh.lastOrNull()?.optString("id") ?: ""
                 ScreenStore.setMsgs(convId, fresh)
@@ -139,6 +166,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         confirmed.any { c ->
                             c.optString("kind") == p.optString("kind") &&
                                 c.optString("body") == p.optString("body") &&
+                                (p.optString("kind") != "FILE" || c.optString("fileName") == p.optString("fileName")) &&
                                 runCatching { java.time.Instant.parse(c.optString("createdAt")) }.getOrNull()
                                     ?.let { cAt -> pAt == null || !cAt.isBefore(pAt) } == true
                         }
@@ -264,12 +292,24 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
-    fun sendVoice(file: File, seconds: Int) {
-        uploading++
+    fun sendVoice(file: File, seconds: Int, name: String) {
+        // Optimistic voice bubble with ticks — no separate "Sending…" row.
+        pending.add(
+            JSONObject()
+                .put("id", "pending_${System.currentTimeMillis()}")
+                .put("senderId", Store.myId())
+                .put("kind", "FILE")
+                .put("body", "")
+                .put("fileName", name)
+                .put("fileType", "audio/mp4")
+                .put("fileSize", file.length().toInt())
+                .put("meta", JSONObject().put("voice", true).put("seconds", seconds))
+                .put("createdAt", java.time.Instant.now().toString()),
+        )
         scope.launch {
+            listState.animateScrollToItem(msgs.size + pending.size - 1)
             try {
                 val bytes = withContext(Dispatchers.IO) { file.readBytes() }
-                val name = "voice_${System.currentTimeMillis()}.m4a"
                 val data = withContext(Dispatchers.IO) { Api.upload(name, "audio/mp4", bytes) }
                 withContext(Dispatchers.IO) {
                     Api.post(
@@ -284,12 +324,50 @@ fun ChatScreen(nav: NavController, convId: String) {
                     )
                 }
                 KpSounds.send(ctx)
+                file.delete()
                 refreshMessages(forceScroll = true)
             } catch (e: Exception) {
+                pending.removeAll { it.optString("fileName") == name }
                 error = e.message ?: "Could not send voice note."
-            } finally {
-                uploading--
             }
+        }
+    }
+
+    /* ---- hold-to-record voice: press = record, release = send (≥1s),
+       slide left while holding = cancel ---- */
+    fun startRecording() {
+        if (VoiceNote.isRecording) return
+        if (VoiceNote.start(ctx)) {
+            recMs = 0
+            recording = true
+        } else {
+            error = "Mic is not available. Check the mic permission."
+        }
+    }
+
+    fun finishRecording(cancelled: Boolean) {
+        if (!recording) return
+        recording = false
+        if (cancelled) {
+            VoiceNote.cancel()
+            return
+        }
+        if (VoiceNote.elapsedMs() < 1000) {
+            VoiceNote.cancel()
+            error = "Hold the mic for at least 1 second to record."
+            return
+        }
+        val result = VoiceNote.stop()
+        if (result != null) {
+            val name = "voice_${System.currentTimeMillis()}.m4a"
+            sendVoice(result.first, result.second, name)
+        }
+    }
+
+    LaunchedEffect(recording) {
+        while (recording) {
+            recMs = VoiceNote.elapsedMs().toInt()
+            delay(100)
         }
     }
 
@@ -324,7 +402,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     when {
                         isGroup -> "${c?.arr("members")?.length() ?: 0} members"
                         online -> "online"
-                        else -> "tap to refresh"
+                        else -> " "
                     },
                     fontSize = 11.5.sp,
                     color = if (online) Green else Muted,
@@ -442,36 +520,22 @@ fun ChatScreen(nav: NavController, convId: String) {
             )
         }
 
-        /* ---------------- composer / recording ---------------- */
-        if (recording) {
-            RecordingBar(
-                onCancel = {
-                    VoiceNote.cancel()
-                    recording = false
-                },
-                onSend = {
-                    val result = VoiceNote.stop()
-                    recording = false
-                    if (result != null) sendVoice(result.first, result.second)
-                },
-            )
-        } else {
-            Composer(
-                input = input,
-                onInput = { input = it },
-                onAttach = { haptics.tap(); showAttach = true },
-                onSticker = { haptics.tap(); showStickers = true },
-                onSend = {
-                    haptics.confirm()
-                    sendText(input)
-                    input = ""
-                },
-                onMic = {
-                    haptics.tap()
-                    if (VoiceNote.start(ctx)) recording = true else error = "Mic is not available."
-                },
-            )
-        }
+        /* ---------------- composer (doubles as the recording bar) ---------------- */
+        Composer(
+            input = input,
+            onInput = { input = it },
+            onAttach = { haptics.tap(); showAttach = true },
+            onSticker = { haptics.tap(); showStickers = true },
+            onSend = {
+                haptics.confirm()
+                sendText(input)
+                input = ""
+            },
+            recording = recording,
+            recMs = recMs,
+            onStartRecord = { haptics.tap(); startRecording() },
+            onFinishRecord = { cancelled -> finishRecording(cancelled) },
+        )
     }
 }
 
@@ -511,87 +575,11 @@ private fun Composer(
     onAttach: () -> Unit,
     onSticker: () -> Unit,
     onSend: () -> Unit,
-    onMic: () -> Unit,
+    recording: Boolean,
+    recMs: Int,
+    onStartRecord: () -> Unit,
+    onFinishRecord: (cancelled: Boolean) -> Unit,
 ) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .background(Cream)
-            .imePadding()
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.Bottom,
-    ) {
-        Column(
-            Modifier
-                .weight(1f)
-                .clip(RoundedCornerShape(22.dp))
-                .background(Card)
-                .padding(horizontal = 4.dp, vertical = 4.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onAttach, Modifier.size(40.dp)) {
-                    Icon(Icons.Filled.AttachFile, "Attach", tint = GoldDeep, modifier = Modifier.size(24.dp))
-                }
-                Box(Modifier.weight(1f)) {
-                    if (input.isEmpty()) {
-                        Text("Message", color = Muted, fontSize = 15.sp)
-                    }
-                    BasicTextField(
-                        value = input,
-                        onValueChange = onInput,
-                        textStyle = TextStyle(color = Ink, fontSize = 15.sp),
-                        maxLines = 4,
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                    )
-                }
-                IconButton(onClick = onSticker, Modifier.size(40.dp)) {
-                    Icon(Icons.Filled.Mood, "Stickers", tint = GoldDeep, modifier = Modifier.size(24.dp))
-                }
-            }
-            if (input.length > 800) {
-                LinearProgressIndicator(
-                    progress = { (input.length / 4000f).coerceIn(0f, 1f) },
-                    color = Gold,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
-                )
-            }
-        }
-        Spacer(Modifier.width(8.dp))
-        val sendInteraction = remember { MutableInteractionSource() }
-        val sendPressed by sendInteraction.collectIsPressedAsState()
-        Box(
-            Modifier
-                .size(48.dp)
-                .pressScale(sendInteraction)
-                .clip(CircleShape)
-                .background(if (input.isBlank()) Brush.linearGradient(listOf(Gold, Gold)) else goldFill())
-                .clickable(
-                    interactionSource = sendInteraction,
-                    indication = null,
-                ) {
-                    if (input.isBlank()) onMic() else onSend()
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                if (input.isBlank()) Icons.Filled.Mic else Icons.AutoMirrored.Filled.Send,
-                contentDescription = if (input.isBlank()) "Voice note" else "Send",
-                tint = AmberInk,
-                modifier = Modifier.size(23.dp).scale(if (sendPressed) 0.9f else 1f),
-            )
-        }
-    }
-}
-
-@Composable
-private fun RecordingBar(onCancel: () -> Unit, onSend: () -> Unit) {
-    var secs by remember { mutableStateOf(0) }
-    LaunchedEffect(Unit) {
-        while (VoiceNote.isRecording) {
-            secs++
-            delay(1000)
-        }
-    }
     Row(
         Modifier
             .fillMaxWidth()
@@ -600,43 +588,189 @@ private fun RecordingBar(onCancel: () -> Unit, onSend: () -> Unit) {
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onCancel) {
-            Icon(Icons.Filled.Close, "Cancel", tint = Red)
-        }
-        Row(
-            Modifier
-                .weight(1f)
-                .clip(RoundedCornerShape(22.dp))
-                .background(Card)
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
+        if (!recording) {
+            Column(
                 Modifier
-                    .size(9.dp)
-                    .clip(CircleShape)
-                    .background(Red),
-            )
-            Spacer(Modifier.width(10.dp))
-            Text(
-                "Recording · %d:%02d".format(secs / 60, secs % 60),
-                color = Ink,
-                fontSize = 14.sp,
-            )
-        }
-        Spacer(Modifier.width(8.dp))
-        Box(
-            Modifier
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(goldFill()),
-            contentAlignment = Alignment.Center,
-        ) {
-            IconButton(onClick = onSend) {
-                Icon(Icons.AutoMirrored.Filled.Send, "Send voice note", tint = AmberInk, modifier = Modifier.size(23.dp))
+                    .weight(1f)
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(Card)
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onAttach, Modifier.size(40.dp)) {
+                        Icon(Icons.Filled.AttachFile, "Attach", tint = GoldDeep, modifier = Modifier.size(24.dp))
+                    }
+                    Box(Modifier.weight(1f)) {
+                        if (input.isEmpty()) {
+                            Text("Message", color = Muted, fontSize = 15.sp)
+                        }
+                        BasicTextField(
+                            value = input,
+                            onValueChange = onInput,
+                            textStyle = TextStyle(color = Ink, fontSize = 15.sp),
+                            maxLines = 4,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        )
+                    }
+                    IconButton(onClick = onSticker, Modifier.size(40.dp)) {
+                        Icon(Icons.Filled.Mood, "Stickers", tint = GoldDeep, modifier = Modifier.size(24.dp))
+                    }
+                }
+                if (input.length > 800) {
+                    LinearProgressIndicator(
+                        progress = { (input.length / 4000f).coerceIn(0f, 1f) },
+                        color = Gold,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+                    )
+                }
+            }
+        } else {
+            /* live recording panel: timer + slide-to-cancel hint */
+            Row(
+                Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(Color(0xFFFEE2E2))
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                PulsingDot()
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "%d:%02d".format(recMs / 1000 / 60, recMs / 1000 % 60),
+                    color = Ink,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+                Spacer(Modifier.width(10.dp))
+                Text("‹ Slide to cancel", color = Red, fontSize = 13.sp, modifier = Modifier.weight(1f))
             }
         }
+        Spacer(Modifier.width(8.dp))
+
+        /* mic/send circle. While input is blank this is a HOLD button:
+           press = record, slide left = cancel, release = send. */
+        if (!input.isBlank()) {
+            val sendInteraction = remember { MutableInteractionSource() }
+            val sendPressed by sendInteraction.collectIsPressedAsState()
+            Box(
+                Modifier
+                    .size(48.dp)
+                    .pressScale(sendInteraction)
+                    .clip(CircleShape)
+                    .background(goldFill())
+                    .clickable(
+                        interactionSource = sendInteraction,
+                        indication = null,
+                    ) { onSend() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Send,
+                    contentDescription = "Send",
+                    tint = AmberInk,
+                    modifier = Modifier.size(23.dp).scale(if (sendPressed) 0.9f else 1f),
+                )
+            }
+        } else {
+            HoldMicButton(
+                recording = recording,
+                onStartRecord = onStartRecord,
+                onFinishRecord = onFinishRecord,
+            )
+        }
     }
+}
+
+/**
+ * The hold-to-record mic: press to start recording, keep holding and slide
+ * left past the threshold to cancel (turns into a red trash), release to
+ * send. The button physically follows the finger while sliding.
+ */
+@Composable
+private fun HoldMicButton(
+    recording: Boolean,
+    onStartRecord: () -> Unit,
+    onFinishRecord: (cancelled: Boolean) -> Unit,
+) {
+    val haptics = rememberHaptics()
+    val density = LocalDensity.current
+    val cancelDist = with(density) { 88.dp.toPx() }
+    var dragX by remember { mutableStateOf(0f) }
+    val cancelArmed = dragX <= -cancelDist
+    val animX by animateFloatAsState(if (recording) dragX else 0f, spring(stiffness = 900f), label = "micdrag")
+
+    Box(
+        Modifier
+            .size(48.dp)
+            .offset { IntOffset((if (recording) animX else 0f).roundToInt(), 0) }
+            .clip(CircleShape)
+            .background(if (cancelArmed) Brush.linearGradient(listOf(Color.White, Color.White)) else goldFill())
+            .border(1.dp, if (cancelArmed) Red else Color.Transparent, CircleShape)
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    dragX = 0f
+                    var armed = false
+                    onStartRecord()
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull() ?: break
+                        val dx = change.positionChange().x
+                        if (dx != 0f) dragX = (dragX + dx).coerceIn(-cancelDist * 1.5f, 0f)
+                        val nowArmed = dragX <= -cancelDist
+                        if (nowArmed && !armed) haptics.heavy()
+                        armed = nowArmed
+                        event.changes.forEach { it.consume() }
+                        if (event.changes.all { !it.pressed }) break
+                    }
+                    val cancelled = dragX <= -cancelDist
+                    dragX = 0f
+                    onFinishRecord(cancelled)
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            if (cancelArmed) Icons.Filled.Delete else Icons.Filled.Mic,
+            contentDescription = if (cancelArmed) "Release to cancel" else "Hold to record",
+            tint = if (cancelArmed) Red else AmberInk,
+            modifier = Modifier.size(23.dp),
+        )
+    }
+}
+
+/** Small breathing red dot for the recording panel. */
+@Composable
+private fun PulsingDot() {
+    val t = rememberInfiniteTransition(label = "recdot")
+    val a by t.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.25f,
+        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
+        label = "alpha",
+    )
+    Box(
+        Modifier
+            .size(9.dp)
+            .clip(CircleShape)
+            .background(Red.copy(alpha = a)),
+    )
+}
+
+/** Snapshot of a chat list row → a pseudo conversation object for instant paint. */
+private fun convRowSnapshot(convId: String): JSONObject? {
+    val row = ScreenStore.convs.firstOrNull { it.optString("id") == convId } ?: return null
+    val other = JSONObject()
+        .put("id", row.optJSONObject("other")?.optString("id") ?: "")
+        .put("displayName", row.optJSONObject("other")?.optString("displayName") ?: "")
+        .put("avatarUrl", row.optJSONObject("other")?.optString("avatarUrl") ?: "")
+        .put("online", row.optJSONObject("other")?.optBoolean("online") ?: false)
+    return JSONObject()
+        .put("id", convId)
+        .put("isGroup", row.optBoolean("isGroup"))
+        .put("title", row.optString("title"))
+        .put("other", other)
 }
 
 /* ------------------------------------------------------------------ */
@@ -715,7 +849,7 @@ private fun MessageRow(
                 when (kind) {
                     "IMAGE" -> ImageBubble(m, mine)
                     "STICKER" -> Text(m.optString("body"), fontSize = 56.sp)
-                    "FILE" -> FileBubble(m, mine, player)
+                    "FILE" -> FileBubble(m, mine, player, pendingEcho)
                     "DELETED" -> Text(
                         "This message was deleted",
                         fontSize = 13.5.sp,
@@ -725,7 +859,12 @@ private fun MessageRow(
                     else -> Text(m.optString("body"), fontSize = 14.5.sp, color = Ink)
                 }
                 Spacer(Modifier.height(3.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                /* time + ticks, right-aligned like WhatsApp */
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
                         msgStamp(m.optString("createdAt")),
                         fontSize = 10.sp,
@@ -734,6 +873,7 @@ private fun MessageRow(
                     if (mine) {
                         Spacer(Modifier.width(4.dp))
                         if (pendingEcho) {
+                            // still uploading / sending
                             Icon(
                                 Icons.Filled.Schedule,
                                 contentDescription = "Sending",
@@ -741,13 +881,28 @@ private fun MessageRow(
                                 modifier = Modifier.size(12.dp),
                             )
                         } else {
-                            val read = otherReadAt != null && otherReadAt >= m.optString("createdAt")
-                            Icon(
-                                if (read) Icons.Filled.DoneAll else Icons.Filled.Done,
-                                contentDescription = if (read) "Read" else "Sent",
-                                tint = Color(0xE6FFFFFF),
-                                modifier = Modifier.size(13.dp),
-                            )
+                            val seen = isReadByOther(otherReadAt, m.optString("createdAt"))
+                            val delivered = m.optString("deliveredAt").isNotBlank()
+                            when {
+                                seen -> Icon(
+                                    Icons.Filled.DoneAll,
+                                    contentDescription = "Seen",
+                                    tint = Color(0xFF53BDEB), // WhatsApp blue
+                                    modifier = Modifier.size(13.dp),
+                                )
+                                delivered -> Icon(
+                                    Icons.Filled.DoneAll,
+                                    contentDescription = "Delivered",
+                                    tint = Color(0xB3FFFFFF),
+                                    modifier = Modifier.size(13.dp),
+                                )
+                                else -> Icon(
+                                    Icons.Filled.Done,
+                                    contentDescription = "Sent",
+                                    tint = Color(0xB3FFFFFF),
+                                    modifier = Modifier.size(13.dp),
+                                )
+                            }
                         }
                     }
                 }
@@ -784,7 +939,7 @@ private fun ImageBubble(m: JSONObject, mine: Boolean) {
 }
 
 @Composable
-private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer) {
+private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendingEcho: Boolean = false) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val id = m.optString("id")
@@ -793,6 +948,7 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer) {
     val fileType = m.optString("fileType")
     val isVoice = fileType.startsWith("audio") || fileName.endsWith(".m4a") || fileName.endsWith(".mp3")
     val playing = player.playingId == id
+    val loading = player.loadingId == id
 
     if (isVoice) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -805,6 +961,7 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer) {
                     .clip(CircleShape)
                     .background(if (mine) Color(0x33FFFFFF) else GoldSoft)
                     .clickable(interactionSource = interaction, indication = null) {
+                        if (pendingEcho || fileKey.isBlank()) return@clickable // still uploading
                         if (player.playingId == id) {
                             player.stop()
                         } else {
@@ -813,19 +970,33 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer) {
                     },
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(
-                    if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    contentDescription = if (playing) "Pause" else "Play",
-                    tint = if (mine) Ink else GoldDeep,
-                    modifier = Modifier.size(22.dp).scale(if (pressed) 0.85f else 1f),
-                )
+                when {
+                    loading -> CircularProgressIndicator(
+                        color = if (mine) AmberInk else GoldDeep,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    playing -> Icon(
+                        Icons.Filled.Pause,
+                        contentDescription = "Pause",
+                        tint = if (mine) Ink else GoldDeep,
+                        modifier = Modifier.size(22.dp).scale(if (pressed) 0.85f else 1f),
+                    )
+                    else -> Icon(
+                        Icons.Filled.PlayArrow,
+                        contentDescription = "Play",
+                        tint = if (mine) Ink else GoldDeep,
+                        modifier = Modifier.size(22.dp).scale(if (pressed) 0.85f else 1f),
+                    )
+                }
             }
             Spacer(Modifier.width(8.dp))
             Column {
                 Text("Voice message", fontSize = 14.sp, color = Ink)
                 val secs = m.optJSONObject("meta")?.optInt("seconds") ?: 0
                 Text(
-                    if (secs > 0) "%d:%02d · %s".format(secs / 60, secs % 60, FilesUtil.displaySize(m.optInt("fileSize")))
+                    if (secs > 0) "%d:%02d".format(secs / 60, secs % 60)
+                    else if (pendingEcho) "Sending…"
                     else FilesUtil.displaySize(m.optInt("fileSize")),
                     fontSize = 11.sp,
                     color = if (mine) Color(0x99FFFFFF) else Muted,
@@ -881,4 +1052,12 @@ private fun msgStamp(iso: String): String {
     } catch (e: Exception) {
         ""
     }
+}
+
+/** Instant-safe "has the other side read this message" check. */
+private fun isReadByOther(otherReadAt: String?, createdAt: String): Boolean {
+    if (otherReadAt.isNullOrBlank()) return false
+    val read = runCatching { java.time.Instant.parse(otherReadAt) }.getOrNull() ?: return false
+    val sent = runCatching { java.time.Instant.parse(createdAt) }.getOrNull() ?: return false
+    return !read.isBefore(sent)
 }

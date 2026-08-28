@@ -159,7 +159,19 @@ async function ensureSchema(db: D1Database) {
   await run(db, `CREATE INDEX IF NOT EXISTS idx_calls_active ON calls(callee_id, status)`);
   await run(db, `CREATE INDEX IF NOT EXISTS idx_calls_caller ON calls(caller_id, created_at)`);
   await run(db, `CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id)`);
+  // Lightweight migrations: add columns introduced after first deploy.
+  await runCatchingSql(db, `ALTER TABLE messages ADD COLUMN delivered_at TEXT`);
+  await runCatchingSql(db, `ALTER TABLE calls ADD COLUMN answer_sdp TEXT`);
   schemaReady = true;
+}
+
+/** Runs a migration statement, ignoring "already exists" style failures. */
+async function runCatchingSql(db: D1Database, sql: string) {
+  try {
+    await run(db, sql);
+  } catch {
+    /* duplicate column / index — already migrated */
+  }
 }
 
 /* ---------------- auth ---------------- */
@@ -795,7 +807,20 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       if (u) names.set(sid, u.display_name);
     }
     const items = rows.reverse().map((row) => ({ ...msgFrom(row), senderName: names.get(row.sender_id) }));
-    return json({ items });
+    // Delivery receipts: the fetching member has now received every message
+    // in this page that someone else sent (only mark the ones still pending).
+    const inboxIds = rows.filter((r) => r.sender_id !== uid && !r.delivered_at).map((r) => r.id);
+    if (inboxIds.length) {
+      await run(db, `UPDATE messages SET delivered_at = ? WHERE id IN (${inboxIds.map(() => "?").join(",")})`, nowIso(), ...inboxIds);
+    }
+    // Live read receipts for the sender: the other members' newest read time.
+    const readRow = await one<{ r: string | null }>(
+      db,
+      "SELECT MAX(last_read_at) AS r FROM members WHERE conv_id = ? AND user_id != ? AND last_read_at IS NOT NULL",
+      convId,
+      uid,
+    );
+    return json({ items, readAt: readRow?.r ?? null });
   }
 
   if (msgMatch && method === "POST") {
@@ -1199,14 +1224,26 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (!row) fail(404, "Call not found.");
     if (row.caller_id !== uid && row.callee_id !== uid) fail(403, "Not your call.");
     if (method === "POST") {
-      const candidate = String(body.candidate || "");
-      if (!candidate) fail(400, "Missing candidate.");
+      // The app sends { candidate: { candidate, sdpMid, sdpMLineIndex } } —
+      // store the whole object so nothing is lost (stringifying an object
+      // here used to save "[object Object]" and break every call).
+      const raw = (body.candidate ?? {}) as Record<string, unknown>;
+      const candidate = typeof body.candidate === "string" ? body.candidate : String(raw.candidate ?? "");
+      if (!candidate || candidate === "[object Object]") fail(400, "Missing candidate.");
+      const payload =
+        typeof body.candidate === "string"
+          ? JSON.stringify({ candidate: body.candidate })
+          : JSON.stringify({
+              candidate,
+              sdpMid: raw.sdpMid ?? null,
+              sdpMLineIndex: raw.sdpMLineIndex ?? 0,
+            });
       await run(
         db,
         "INSERT INTO call_ice (call_id, sender_id, candidate_json, created_at) VALUES (?, ?, ?, ?)",
         callId,
         uid,
-        candidate.slice(0, 4000),
+        payload.slice(0, 4000),
         nowIso(),
       );
       return json({ ok: true }, 201);
@@ -1214,20 +1251,25 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (method === "GET") {
       const since = url.searchParams.get("since") || "";
       const rows = since
-        ? await all<{ sender_id: string; candidate_json: string; created_at: string }>(
+        ? await all<{ rowid: number; sender_id: string; candidate_json: string; created_at: string }>(
             db,
-            "SELECT sender_id, candidate_json, created_at FROM call_ice WHERE call_id = ? AND sender_id != ? AND created_at > ? ORDER BY created_at ASC",
+            "SELECT rowid AS rowid, sender_id, candidate_json, created_at FROM call_ice WHERE call_id = ? AND sender_id != ? AND created_at > ? ORDER BY created_at ASC, rowid ASC",
             callId,
             uid,
             since,
           )
-        : await all<{ sender_id: string; candidate_json: string; created_at: string }>(
+        : await all<{ rowid: number; sender_id: string; candidate_json: string; created_at: string }>(
             db,
-            "SELECT sender_id, candidate_json, created_at FROM call_ice WHERE call_id = ? AND sender_id != ? ORDER BY created_at ASC",
+            "SELECT rowid AS rowid, sender_id, candidate_json, created_at FROM call_ice WHERE call_id = ? AND sender_id != ? ORDER BY created_at ASC, rowid ASC",
             callId,
             uid,
           );
-      return json({ items: rows, now: nowIso() });
+      const items = rows.map((r) => ({
+        id: `${r.created_at}:${r.rowid}`,
+        candidate: parseJson<Record<string, unknown>>(r.candidate_json, {}),
+        createdAt: r.created_at,
+      }));
+      return json({ items, now: nowIso() });
     }
   }
 
@@ -1284,6 +1326,7 @@ type MsgRow = {
   media: string | null;
   meta_json: string | null;
   created_at: string;
+  delivered_at?: string | null;
 };
 
 function msgFrom(row: MsgRow) {
@@ -1300,6 +1343,7 @@ function msgFrom(row: MsgRow) {
     fileType: meta.type,
     fileSize: meta.size,
     meta: row.kind === "FILE" ? meta : undefined,
+    deliveredAt: row.delivered_at ?? null,
     createdAt: row.created_at,
   };
 }

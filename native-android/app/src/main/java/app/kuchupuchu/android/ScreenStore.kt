@@ -19,6 +19,21 @@ object ScreenStore {
     private val msgs = HashMap<String, MutableList<JSONObject>>()
     val msgsVersion = mutableStateOf(0)
 
+    /** Last-known conversation detail per chat — reopening a chat paints the
+     *  name/avatar instantly instead of flashing "…" then loading. */
+    private val convDetail = HashMap<String, JSONObject>()
+    val convDetailVersion = mutableStateOf(0)
+
+    @Synchronized
+    fun setConvDetail(convId: String, conv: JSONObject?) {
+        if (conv == null) return
+        convDetail[convId] = conv
+        convDetailVersion.value++
+    }
+
+    @Synchronized
+    fun convDetailOf(convId: String): JSONObject? = convDetail[convId]
+
     val statuses = mutableStateListOf<JSONObject>()
     var statusesRaw by mutableStateOf("")
     var statusesLoaded by mutableStateOf(false)
@@ -54,6 +69,7 @@ object ScreenStore {
     @Synchronized
     fun clearMsgs() {
         msgs.clear()
+        convDetail.clear()
     }
 
     fun setStatuses(list: List<JSONObject>) {

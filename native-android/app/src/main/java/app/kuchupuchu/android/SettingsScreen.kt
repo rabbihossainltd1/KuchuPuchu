@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Mail
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -65,7 +66,8 @@ import org.json.JSONObject
 fun SettingsScreen(nav: NavController) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    val me = remember { mutableStateOf(JSONObject()) }
+    // Paint instantly from the cached profile — no "…" flash on every open.
+    val me = remember { mutableStateOf(Store.me ?: JSONObject()) }
     var editField by remember { mutableStateOf<String?>(null) }
     var editValue by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
@@ -84,15 +86,24 @@ fun SettingsScreen(nav: NavController) {
             if (uri != null) {
                 scope.launch {
                     busy = true
-                    val dataUrl = withContext(Dispatchers.IO) { FilesUtil.imageToDataUrl(uri, ctx, maxSide = 640) }
-                    if (dataUrl != null) {
-                        runCatching {
+                    error = ""
+                    // The worker stores avatars inline with a 200KB budget —
+                    // compress below it and show real errors instead of
+                    // failing silently.
+                    val dataUrl =
+                        withContext(Dispatchers.IO) { FilesUtil.imageToDataUrl(uri, ctx, maxSide = 512, maxChars = 190_000) }
+                    if (dataUrl == null) {
+                        error = "Could not read that photo. Pick another one."
+                    } else {
+                        try {
                             val updated =
                                 withContext(Dispatchers.IO) {
                                     Api.patch("/api/me", JSONObject().put("avatarUrl", dataUrl))
                                 }
                             me.value = updated.optJSONObject("user") ?: me.value
                             Store.saveMe(me.value)
+                        } catch (e: Exception) {
+                            error = e.message ?: "Could not set the photo."
                         }
                     }
                     busy = false
@@ -167,12 +178,20 @@ fun SettingsScreen(nav: NavController) {
                             },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(
-                            Icons.Filled.Edit,
-                            contentDescription = "Change photo",
-                            tint = GoldDeep,
-                            modifier = Modifier.size(15.dp),
-                        )
+                        if (busy) {
+                            CircularProgressIndicator(
+                                color = GoldDeep,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(15.dp),
+                            )
+                        } else {
+                            Icon(
+                                Icons.Filled.Edit,
+                                contentDescription = "Change photo",
+                                tint = GoldDeep,
+                                modifier = Modifier.size(15.dp),
+                            )
+                        }
                     }
                 }
                 Spacer(Modifier.width(16.dp))
@@ -241,7 +260,7 @@ fun SettingsScreen(nav: NavController) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("KuchuPuchu v3.0", fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+                    Text("KuchuPuchu v3.2.0", fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, color = Ink)
                     Text("kuchupuchu-api.kuchupuchu.workers.dev", fontSize = 12.sp, color = Muted)
                 }
             }
