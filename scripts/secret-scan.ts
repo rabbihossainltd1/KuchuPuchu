@@ -4,7 +4,15 @@ import { existsSync, readFileSync } from "node:fs";
 const PATTERNS: { name: string; regex: RegExp }[] = [
   { name: "GitHub PAT", regex: /ghp_[A-Za-z0-9]{20,}/ },
   { name: "AWS key", regex: /AKIA[0-9A-Z]{16}/ },
-  { name: "Private key", regex: /-----BEGIN (RSA |OPENSSH |EC )?PRIVATE KEY-----/ },
+  // A bare PEM header is not a secret on its own: src/worker/index.ts contains
+  // the literal text inside the regexes that strip headers off a key it is
+  // converting, which made this scan fail on a clean tree. Requiring base64 key
+  // material on the following lines keeps real keys detected.
+  {
+    name: "Private key",
+    regex:
+      /-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY-----\r?\n(?:[A-Za-z0-9+/]{40,}={0,2}\r?\n)+/,
+  },
 ];
 
 const IGNORE = new Set(["scripts/secret-scan.ts", "arena agent command.md", "package-lock.json"]);
