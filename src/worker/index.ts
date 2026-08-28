@@ -928,22 +928,51 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       "SELECT c.id FROM conversations c JOIN members m ON m.conv_id = c.id WHERE m.user_id = ? ORDER BY COALESCE(c.last_message_at, c.created_at) DESC",
       uid,
     );
+    // One statement each for the conversations, their members and those
+    // members' user rows. This used to call conversationDetail() per chat,
+    // which fetched its own conversation, members and every member's user row
+    // inside the loop - 1 + 5N round trips, so five chats cost 29 statements
+    // and a busy user paid for it on every 2.5s poll.
+    const ids = rows.map((r) => r.id);
+    const convs = new Map<string, ConvRow>();
+    const membersByConv = new Map<string, ConvMemberRow[]>();
+    const userIds: string[] = [];
+    for (const group of chunked(ids)) {
+      for (const c of await all<ConvRow>(
+        db,
+        `SELECT ${CONV_COLS} FROM conversations WHERE id IN (${inSql(group.length)})`,
+        ...group,
+      )) {
+        convs.set(c.id, c);
+      }
+      for (const m of await all<ConvMemberRow>(
+        db,
+        `SELECT ${MEMBER_COLS} FROM members WHERE conv_id IN (${inSql(group.length)})`,
+        ...group,
+      )) {
+        const bucket = membersByConv.get(m.conv_id!);
+        if (bucket) bucket.push(m);
+        else membersByConv.set(m.conv_id!, [m]);
+        userIds.push(m.user_id);
+      }
+    }
+    const users = await usersById(db, userIds);
     const list = [];
     for (const row of rows) {
-      const hidden = parseJson<Record<string, number>>(await hiddenJson(db, row.id), {});
-      const conv = await conversationDetail(db, row.id, uid);
+      const conv = convs.get(row.id);
+      if (!conv) continue;
       // hidden_json[uid] is the epoch-ms at which this member deleted the chat.
       // It stays hidden until a message newer than that arrives. The old test
       // only hid chats that had *never* had a message, so deleting any real
       // conversation was a no-op and the row came straight back.
       // hidden_json is only ever written for SOLO chats - deleting a group
       // makes the member leave it instead.
-      const hiddenAt = Number(hidden[uid] || 0);
+      const hiddenAt = Number(parseJson<Record<string, number>>(conv.hidden_json, {})[uid] || 0);
       if (hiddenAt > 0 && conv.kind === "SOLO") {
-        const lastAt = conv.lastMessageAt ? Date.parse(conv.lastMessageAt) : 0;
+        const lastAt = conv.last_message_at ? Date.parse(conv.last_message_at) : 0;
         if (!lastAt || lastAt <= hiddenAt) continue;
       }
-      list.push(conv);
+      list.push(buildConvDetail(conv, membersByConv.get(conv.id) ?? [], users, uid));
     }
     return json({ items: list });
   }
@@ -1870,34 +1899,59 @@ async function hiddenJson(db: D1Database, convId: string) {
   return row?.hidden_json ?? "{}";
 }
 
-async function conversationDetail(db: D1Database, convId: string, uid: string) {
-  const conv = await one<{
-    id: string;
-    kind: string;
-    title: string | null;
-    owner_id: string | null;
-    created_at: string;
-    last_message_at: string | null;
-    last_message: string | null;
-    disappear_seconds: number | null;
-    theme: string | null;
-  }>(
-    db,
-    "SELECT id, kind, title, owner_id, created_at, last_message_at, last_message, disappear_seconds, theme FROM conversations WHERE id = ?",
-    convId,
-  );
-  if (!conv) fail(404, "Conversation not found.");
-  const memberRows = await all<{ user_id: string; role: string; muted: number; unread: number; last_read_at: string | null }>(
-    db,
-    "SELECT user_id, role, muted, unread, last_read_at FROM members WHERE conv_id = ?",
-    convId,
-  );
+type ConvRow = {
+  id: string;
+  kind: string;
+  title: string | null;
+  owner_id: string | null;
+  created_at: string;
+  last_message_at: string | null;
+  last_message: string | null;
+  disappear_seconds: number | null;
+  theme: string | null;
+  hidden_json?: string | null;
+};
+
+type ConvMemberRow = {
+  conv_id?: string;
+  user_id: string;
+  role: string;
+  muted: number;
+  unread: number;
+  last_read_at: string | null;
+};
+
+const CONV_COLS = "id, kind, title, owner_id, created_at, last_message_at, last_message, disappear_seconds, theme, hidden_json";
+const MEMBER_COLS = "conv_id, user_id, role, muted, unread, last_read_at";
+
+/** Placeholder list for an IN(...) clause. */
+const inSql = (n: number) => Array.from({ length: n }, () => "?").join(",");
+
+/** Keeps an IN(...) clause inside SQLite's bound-parameter limit. */
+function chunked<T>(items: T[], size = 200): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/** Every user referenced by a set of member rows, in one pass. */
+async function usersById(db: D1Database, userIds: string[]) {
+  const map = new Map<string, UserRow>();
+  for (const group of chunked([...new Set(userIds.filter(Boolean))])) {
+    for (const u of await all<UserRow>(db, `SELECT * FROM users WHERE id IN (${inSql(group.length)})`, ...group)) {
+      map.set(u.id, u);
+    }
+  }
+  return map;
+}
+
+function buildConvDetail(conv: ConvRow, memberRows: ConvMemberRow[], users: Map<string, UserRow>, uid: string) {
   const members = [];
   let other = null;
   let meMuted = false;
   let unread = 0;
   for (const row of memberRows) {
-    const user = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row.user_id);
+    const user = users.get(row.user_id);
     if (!user) continue;
     members.push({ user: userFrom(user, onlineNow(user)), role: row.role, lastReadAt: row.last_read_at });
     if (row.user_id !== uid && conv.kind === "SOLO") other = userFrom(user, onlineNow(user));
@@ -1922,6 +1976,13 @@ async function conversationDetail(db: D1Database, convId: string, uid: string) {
     disappearSeconds: Number(conv.disappear_seconds || 0),
     theme: conv.theme || "default",
   };
+}
+
+async function conversationDetail(db: D1Database, convId: string, uid: string) {
+  const conv = await one<ConvRow>(db, `SELECT ${CONV_COLS} FROM conversations WHERE id = ?`, convId);
+  if (!conv) fail(404, "Conversation not found.");
+  const memberRows = await all<ConvMemberRow>(db, `SELECT ${MEMBER_COLS} FROM members WHERE conv_id = ?`, convId);
+  return buildConvDetail(conv, memberRows, await usersById(db, memberRows.map((m) => m.user_id)), uid);
 }
 
 async function otherUser(db: D1Database, call: CallRow, uid: string) {
