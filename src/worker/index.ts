@@ -79,7 +79,15 @@ async function verifyPassword(password: string, stored: string) {
     key,
     256,
   );
-  return bytesToHex(new Uint8Array(bits)) === hashHex;
+  return timingSafeEqualHex(bytesToHex(new Uint8Array(bits)), hashHex);
+}
+
+/** Length-independent, branch-free comparison — avoids leaking hash bytes by timing. */
+function timingSafeEqualHex(a: string, b: string) {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
 }
 
 async function all<T>(db: D1Database, sql: string, ...binds: unknown[]) {
@@ -89,7 +97,95 @@ async function one<T>(db: D1Database, sql: string, ...binds: unknown[]) {
   return (await db.prepare(sql).bind(...binds).first()) as T | null;
 }
 async function run(db: D1Database, sql: string, ...binds: unknown[]) {
-  await db.prepare(sql).bind(...binds).run();
+  const res = await db.prepare(sql).bind(...binds).run();
+  return res?.meta?.changes ?? 0;
+}
+
+/** Escapes LIKE metacharacters so a search for "%" is a literal percent. */
+function likeTerm(q: string) {
+  return `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+}
+
+const ESCAPED_LIKE = " ESCAPE '\\'";
+
+/** Content types we are willing to serve back out of R2 / data URLs. */
+const SAFE_MEDIA_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "audio/mpeg",
+  "audio/mp4",
+  "audio/aac",
+  "audio/ogg",
+  "audio/wav",
+  "video/mp4",
+  "video/webm",
+  "application/pdf",
+  "text/plain",
+  "application/octet-stream",
+]);
+
+/**
+ * Anything not on the allowlist is stored and served as a generic binary
+ * download. Without this an uploader could store `text/html` (or `image/svg+xml`)
+ * and have the API origin serve executable markup back to a browser.
+ */
+function safeMediaType(raw: string | null | undefined): string {
+  const t = String(raw || "").split(";")[0]!.trim().toLowerCase().slice(0, 100);
+  return SAFE_MEDIA_TYPES.has(t) ? t : "application/octet-stream";
+}
+
+const ALLOWED_MESSAGE_KINDS = new Set(["TEXT", "STICKER", "IMAGE", "FILE"]);
+const ALLOWED_STATUS_KINDS = new Set(["TEXT", "IMAGE", "VIDEO"]);
+const FILE_KEY_RE = /^[A-Za-z0-9][A-Za-z0-9._\/-]{0,200}$/;
+
+const SAFE_DATA_URL = /^data:(image\/(?:jpeg|png|webp|gif)|audio\/(?:mpeg|mp4|aac|ogg|wav)|video\/(?:mp4|webm));base64,/i;
+
+/** True only for inline data URLs whose mime type cannot execute in a browser. */
+function isSafeDataUrl(value: string) {
+  return SAFE_DATA_URL.test(value);
+}
+
+/** Extra headers on every media response so browsers never sniff into HTML. */
+function mediaHeaders(contentType: string, disposition: string) {
+  return {
+    "content-type": contentType,
+    "x-content-type-options": "nosniff",
+    "content-disposition": disposition,
+    "cache-control": "private, max-age=604800",
+  };
+}
+
+/**
+ * Small per-isolate token bucket, used on the unauthenticated endpoints.
+ * Workers isolates are short-lived and not shared globally, so this is a
+ * speed bump rather than a hard quota — but it stops a single client from
+ * grinding through passwords or mass-registering accounts.
+ */
+const rateBuckets = new Map<string, { tokens: number; stamp: number }>();
+
+function rateLimit(key: string, capacity: number, refillPerMinute: number) {
+  const now = Date.now();
+  const bucket = rateBuckets.get(key) ?? { tokens: capacity, stamp: now };
+  bucket.tokens = Math.min(capacity, bucket.tokens + ((now - bucket.stamp) / 60_000) * refillPerMinute);
+  bucket.stamp = now;
+  if (bucket.tokens < 1) {
+    rateBuckets.set(key, bucket);
+    fail(429, "Too many attempts. Wait a minute and try again.", "RATE_LIMITED");
+  }
+  bucket.tokens -= 1;
+  rateBuckets.set(key, bucket);
+  if (rateBuckets.size > 5_000) rateBuckets.clear();
+}
+
+/** Best-effort client key for rate limiting (CF-Connecting-IP on Cloudflare). */
+function clientIp(request: Request) {
+  return (
+    request.headers.get("cf-connecting-ip") ??
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    "unknown"
+  );
 }
 
 function parseJson<T>(raw: string | null | undefined, fallback: T): T {
@@ -114,52 +210,73 @@ function slugFrom(value: string) {
 
 let schemaReady = false;
 
+/** Throttles the expired-status reaper so reads stay read-only. */
+let nextStatusSweep = 0;
+
+/**
+ * DDL + idempotent migrations, sent as a single batch.
+ *
+ * Every statement used to be its own awaited round-trip, so a cold isolate paid
+ * ~21 sequential D1 hops on the very first request. One batch does the same work
+ * in one hop. Migrations are kept in the batch as `CREATE … IF NOT EXISTS`
+ * plus best-effort `ALTER`s that we swallow when the column already exists.
+ */
 async function ensureSchema(db: D1Database) {
   if (schemaReady) return;
-  await run(
-    db,
+  const statements = [
     `CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
       username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL, avatar_url TEXT,
       about TEXT, created_at TEXT NOT NULL, last_active_at TEXT NOT NULL
     )`,
-  );
-  await run(db, `CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL)`);
-  await run(db, `CREATE TABLE IF NOT EXISTS devices (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, updated_at TEXT NOT NULL)`);
-  await run(db, `CREATE TABLE IF NOT EXISTS blocks (owner_id TEXT NOT NULL, target_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (owner_id, target_id))`);
-  await run(db, `CREATE TABLE IF NOT EXISTS conversations (
-    id TEXT PRIMARY KEY, kind TEXT NOT NULL DEFAULT 'SOLO', title TEXT, owner_id TEXT,
-    created_at TEXT NOT NULL, last_message_at TEXT, last_message TEXT, hidden_json TEXT NOT NULL DEFAULT '{}'
-  )`);
-  await run(db, `CREATE TABLE IF NOT EXISTS members (
-    conv_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'member',
-    joined_at TEXT NOT NULL, last_read_at TEXT, muted INTEGER NOT NULL DEFAULT 0, unread INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (conv_id, user_id)
-  )`);
-  await run(db, `CREATE TABLE IF NOT EXISTS messages (
-    id TEXT PRIMARY KEY, conv_id TEXT NOT NULL, sender_id TEXT NOT NULL,
-    kind TEXT NOT NULL DEFAULT 'TEXT', body TEXT, media TEXT, meta_json TEXT,
-    created_at TEXT NOT NULL
-  )`);
-  await run(db, `CREATE TABLE IF NOT EXISTS statuses (
-    id TEXT PRIMARY KEY, user_id TEXT NOT NULL, kind TEXT NOT NULL,
-    text TEXT, bg_style TEXT, media TEXT, meta_json TEXT,
-    created_at TEXT NOT NULL, expires_at TEXT NOT NULL
-  )`);
-  await run(db, `CREATE TABLE IF NOT EXISTS status_views (status_id TEXT NOT NULL, viewer_id TEXT NOT NULL, viewed_at TEXT NOT NULL, PRIMARY KEY (status_id, viewer_id))`);
-  await run(db, `CREATE TABLE IF NOT EXISTS calls (
-    id TEXT PRIMARY KEY, conv_id TEXT, caller_id TEXT NOT NULL, callee_id TEXT NOT NULL,
-    kind TEXT NOT NULL, status TEXT NOT NULL, offer_sdp TEXT, answer_sdp TEXT,
-    started_at TEXT, ended_at TEXT, created_at TEXT NOT NULL
-  )`);
-  await run(db, `CREATE TABLE IF NOT EXISTS call_ice (call_id TEXT NOT NULL, sender_id TEXT NOT NULL, candidate_json TEXT NOT NULL, created_at TEXT NOT NULL)`);
-  await run(db, `CREATE INDEX IF NOT EXISTS idx_members_user ON members(user_id)`);
-  await run(db, `CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conv_id, created_at)`);
-  await run(db, `CREATE INDEX IF NOT EXISTS idx_status_user ON statuses(user_id, expires_at)`);
-  await run(db, `CREATE INDEX IF NOT EXISTS idx_calls_active ON calls(callee_id, status)`);
-  await run(db, `CREATE INDEX IF NOT EXISTS idx_calls_caller ON calls(caller_id, created_at)`);
-  await run(db, `CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id)`);
-  // Lightweight migrations: add columns introduced after first deploy.
+    `CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS devices (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS blocks (owner_id TEXT NOT NULL, target_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (owner_id, target_id))`,
+    `CREATE TABLE IF NOT EXISTS conversations (
+      id TEXT PRIMARY KEY, kind TEXT NOT NULL DEFAULT 'SOLO', title TEXT, owner_id TEXT,
+      created_at TEXT NOT NULL, last_message_at TEXT, last_message TEXT, hidden_json TEXT NOT NULL DEFAULT '{}'
+    )`,
+    `CREATE TABLE IF NOT EXISTS members (
+      conv_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'member',
+      joined_at TEXT NOT NULL, last_read_at TEXT, muted INTEGER NOT NULL DEFAULT 0, unread INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (conv_id, user_id)
+    )`,
+    `CREATE TABLE IF NOT EXISTS messages (
+      id TEXT PRIMARY KEY, conv_id TEXT NOT NULL, sender_id TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'TEXT', body TEXT, media TEXT, meta_json TEXT,
+      created_at TEXT NOT NULL
+    )`,
+    // Who owns an uploaded object, and which conversation (if any) references it.
+    // This is what makes GET /api/files/:key authorizable instead of "anyone who
+    // guesses the key".
+    `CREATE TABLE IF NOT EXISTS files (
+      key TEXT PRIMARY KEY, owner_id TEXT NOT NULL, conv_id TEXT, created_at TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS statuses (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, kind TEXT NOT NULL,
+      text TEXT, bg_style TEXT, media TEXT, meta_json TEXT,
+      created_at TEXT NOT NULL, expires_at TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS status_views (status_id TEXT NOT NULL, viewer_id TEXT NOT NULL, viewed_at TEXT NOT NULL, PRIMARY KEY (status_id, viewer_id))`,
+    `CREATE TABLE IF NOT EXISTS calls (
+      id TEXT PRIMARY KEY, conv_id TEXT, caller_id TEXT NOT NULL, callee_id TEXT NOT NULL,
+      kind TEXT NOT NULL, status TEXT NOT NULL, offer_sdp TEXT, answer_sdp TEXT,
+      started_at TEXT, ended_at TEXT, created_at TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS call_ice (call_id TEXT NOT NULL, sender_id TEXT NOT NULL, candidate_json TEXT NOT NULL, created_at TEXT NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS idx_members_user ON members(user_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conv_id, created_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_messages_media ON messages(media)`,
+    `CREATE INDEX IF NOT EXISTS idx_status_user ON statuses(user_id, expires_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_calls_active ON calls(callee_id, status)`,
+    `CREATE INDEX IF NOT EXISTS idx_calls_caller ON calls(caller_id, created_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_files_owner ON files(owner_id)`,
+  ];
+  await db.batch(statements.map((sql) => db.prepare(sql)));
+  // Lightweight migrations: columns added after the first deploy. These are
+  // deliberately outside the batch — a duplicate-column error must not roll the
+  // whole batch back — and each one is individually tolerant.
   await runCatchingSql(db, `ALTER TABLE messages ADD COLUMN delivered_at TEXT`);
   await runCatchingSql(db, `ALTER TABLE calls ADD COLUMN answer_sdp TEXT`);
   await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN disappear_seconds INTEGER`);
@@ -190,16 +307,25 @@ type UserRow = {
   last_active_at: string;
 };
 
+/**
+ * Public shape for *other* people. Deliberately has no `email`: it is embedded
+ * in chat lists, member lists, search results and call payloads, so leaking it
+ * there let any signed-in user harvest every address in the database.
+ */
 function userFrom(row: UserRow, online = false) {
   return {
     id: row.id,
-    email: row.email,
     username: row.username,
     displayName: row.display_name,
     avatarUrl: row.avatar_url,
     about: row.about,
     online,
   };
+}
+
+/** Full shape, only ever returned for the signed-in user themself. */
+function userSelf(row: UserRow, online = false) {
+  return { ...userFrom(row, online), email: row.email };
 }
 
 async function requireUser(db: D1Database, request: Request) {
@@ -216,13 +342,23 @@ async function requireUser(db: D1Database, request: Request) {
   if (Date.parse(session.expires_at) < Date.now()) fail(401, "Session expired.", "UNAUTHENTICATED");
   const row = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", session.user_id);
   if (!row) fail(401, "Sign in first.", "UNAUTHENTICATED");
-  await run(db, "UPDATE users SET last_active_at = ? WHERE id = ?", nowIso(), row.id);
-  row.last_active_at = nowIso();
+  // Presence used to be written on every authenticated request — including the
+  // 800ms chat poll — which turned every read into a D1 write. Only refresh it
+  // once the stored value is older than the online window.
+  const now = Date.now();
+  if (now - Date.parse(row.last_active_at) > ONLINE_WINDOW_MS) {
+    const iso = new Date(now).toISOString();
+    await run(db, "UPDATE users SET last_active_at = ? WHERE id = ?", iso, row.id);
+    row.last_active_at = iso;
+  }
   return row;
 }
 
+/** Presence window, shared with src/shared/constants.ts. */
+const ONLINE_WINDOW_MS = 90_000;
+
 const onlineNow = (row: { last_active_at: string }) =>
-  Date.now() - Date.parse(row.last_active_at) < 90_000;
+  Date.now() - Date.parse(row.last_active_at) < ONLINE_WINDOW_MS;
 
 async function blockedBetween(db: D1Database, a: string, b: string) {
   return !!(await one(
@@ -360,24 +496,34 @@ async function pushToUser(env: Env, db: D1Database, userId: string, data: Record
     const auth = await fcmAccessToken(env);
     if (!auth) return;
     const rows = await all<{ token: string }>(db, "SELECT token FROM devices WHERE user_id = ?", userId);
-    for (const row of rows) {
-      const res = await fetch(`https://fcm.googleapis.com/v1/projects/${auth.projectId}/messages:send`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${auth.token}`, "content-type": "application/json" },
-        body: JSON.stringify({
-          message: { token: row.token, android: { priority: "HIGH", ttl: "86400s", data } },
-        }),
-      });
-      if (res.status >= 400) {
-        const err = (await res.json().catch(() => null)) as {
-          error?: { details?: Array<{ reason?: string }> };
-        } | null;
-        const reason = err?.error?.details?.[0]?.reason;
-        if (reason === "UNREGISTERED" || reason === "INVALID_ARGUMENT") {
-          await run(db, "DELETE FROM devices WHERE token = ?", row.token);
+    // One round trip per device used to be sequential; a user on three devices
+    // waited for three serial FCM calls before the loop finished.
+    await Promise.all(
+      rows.map(async (row) => {
+        try {
+          const res = await fetch(`https://fcm.googleapis.com/v1/projects/${auth.projectId}/messages:send`, {
+            method: "POST",
+            headers: { authorization: `Bearer ${auth.token}`, "content-type": "application/json" },
+            body: JSON.stringify({
+              message: { token: row.token, android: { priority: "HIGH", ttl: "86400s", data } },
+            }),
+          });
+          if (res.status < 400) return;
+          const err = (await res.json().catch(() => null)) as {
+            error?: { details?: Array<{ reason?: string }> };
+          } | null;
+          const reason = err?.error?.details?.[0]?.reason;
+          // UNREGISTERED is the only "this token is dead" signal. INVALID_ARGUMENT
+          // was in here too, which meant one malformed payload pruned every
+          // perfectly good device the user had.
+          if (reason === "UNREGISTERED") {
+            await run(db, "DELETE FROM devices WHERE token = ?", row.token);
+          }
+        } catch {
+          /* per-device failures must not sink the others */
         }
-      }
-    }
+      }),
+    );
   } catch {
     /* push is best-effort */
   }
@@ -434,15 +580,24 @@ function clockLabel(seconds: number) {
 }
 
 /** Serves an inline dataUrl (data:image/...;base64,xxx) as real bytes. */
-function dataUrlResponse(dataUrl: string): Response {
+/** Serves an inline dataUrl (data:image/...;base64,xxx) as real bytes. */
+function dataUrlResponse(dataUrl: string, filename = "media"): Response {
+  if (!isSafeDataUrl(dataUrl)) fail(400, "Bad media.", "BAD_MEDIA");
   const match = dataUrl.match(/^data:([^;]+);base64,(.*)$/s);
-  if (!match) fail(400, "Bad media.");
-  const bytes = Uint8Array.from(atob(match[2]!), (c) => c.charCodeAt(0));
+  if (!match) fail(400, "Bad media.", "BAD_MEDIA");
+  let decoded: string | null = null;
+  try {
+    decoded = atob(match[2]!);
+  } catch {
+    /* handled below */
+  }
+  if (decoded === null) fail(400, "Bad media.", "BAD_MEDIA");
+  const bytes = Uint8Array.from(decoded, (c) => c.charCodeAt(0));
+  // The mime type is attacker-controlled text, so it is run through the same
+  // allowlist as uploads and the payload is always a download, never inline
+  // markup on the API origin.
   return new Response(bytes, {
-    headers: {
-      "content-type": match[1]!,
-      "cache-control": "private, max-age=604800",
-    },
+    headers: mediaHeaders(safeMediaType(match[1]), `attachment; filename="${filename}"`),
   });
 }
 
@@ -457,10 +612,10 @@ export default {
       if (err instanceof ApiError) {
         return json({ error: { code: err.code, message: err.message } }, err.status);
       }
-      return json(
-        { error: { code: "CLOUD", message: err instanceof Error ? err.message : "Server error." } },
-        500,
-      );
+      // Never echo the underlying message: it routinely contained SQLite text
+      // ("no such table: members") which leaked schema details to any client.
+      console.error("worker error", err instanceof Error ? (err.stack ?? err.message) : String(err));
+      return json({ error: { code: "CLOUD", message: "Something went wrong. Try again." } }, 500);
     }
   },
 };
@@ -492,15 +647,23 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   }
 
   if (path === "/api/auth/register" && method === "POST") {
+    rateLimit(`reg:${clientIp(request)}`, 10, 5);
     const email = String(body.email || "").trim().toLowerCase();
     const password = String(body.password || "");
     const displayName = String(body.displayName || "").trim() || email.split("@")[0] || "User";
     if (!email || !email.includes("@")) fail(400, "Enter a valid email.");
     if (password.length < 6) fail(400, "Password needs at least 6 characters.");
     if (await one(db, "SELECT id FROM users WHERE email = ?", email)) fail(400, "That email is already in use.");
-    let username = slugFrom(String(body.username || displayName));
+    // One random suffix used to be the whole strategy; if that suffix was also
+    // taken the INSERT hit the UNIQUE index and the signup 500'd.
+    const baseUsername = slugFrom(String(body.username || displayName));
+    let username = baseUsername;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      if (!(await one(db, "SELECT id FROM users WHERE username = ?", username))) break;
+      username = `${baseUsername}_${Math.floor(Math.random() * 1_000_000)}`;
+    }
     if (await one(db, "SELECT id FROM users WHERE username = ?", username)) {
-      username = `${username}_${Math.floor(Math.random() * 9999)}`;
+      username = `${baseUsername}_${id().slice(0, 8)}`;
     }
     const userId = id();
     const created = nowIso();
@@ -525,10 +688,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       created,
     );
     const row = (await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", userId))!;
-    return json({ token, user: userFrom(row, true) }, 201);
+    return json({ token, user: userSelf(row, true) }, 201);
   }
 
   if (path === "/api/auth/login" && method === "POST") {
+    rateLimit(`login:${clientIp(request)}`, 15, 10);
     const email = String(body.email || "").trim().toLowerCase();
     const password = String(body.password || "");
     const row = await one<UserRow>(db, "SELECT * FROM users WHERE email = ?", email);
@@ -545,7 +709,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       nowIso(),
     );
     await run(db, "UPDATE users SET last_active_at = ? WHERE id = ?", nowIso(), row.id);
-    return json({ token, user: userFrom(row, true) });
+    return json({ token, user: userSelf(row, true) });
   }
 
   if (path === "/api/auth/logout" && method === "POST") {
@@ -560,7 +724,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   const me = await requireUser(db, request);
   const uid = me.id;
 
-  if (path === "/api/me" && method === "GET") return json({ user: userFrom(me, true) });
+  if (path === "/api/me" && method === "GET") return json({ user: userSelf(me, true) });
 
   if (path === "/api/me" && method === "PATCH") {
     const sets: string[] = [];
@@ -584,7 +748,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     }
     if (body.avatarUrl !== undefined) {
       const avatar = String(body.avatarUrl || "");
-      if (avatar && !avatar.startsWith("data:")) fail(400, "Bad avatar.");
+      // data:text/html used to be accepted here and then served back verbatim by
+      // the media endpoints — a stored XSS on the API origin.
+      if (avatar && !isSafeDataUrl(avatar)) fail(400, "Bad avatar.", "BAD_MEDIA");
       if (avatar.length > 200_000) fail(400, "Avatar too large — pick a smaller image.");
       sets.push("avatar_url = ?");
       values.push(avatar || null);
@@ -594,7 +760,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       await run(db, `UPDATE users SET ${sets.join(", ")} WHERE id = ?`, ...values);
     }
     const row = (await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", uid))!;
-    return json({ user: userFrom(row, true) });
+    return json({ user: userSelf(row, true) });
   }
 
   if (path === "/api/devices" && method === "POST") {
@@ -615,9 +781,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const rows = q
       ? await all<UserRow>(
           db,
-          "SELECT * FROM users WHERE (LOWER(username) LIKE ? OR LOWER(display_name) LIKE ?) AND id != ? ORDER BY last_active_at DESC LIMIT 20",
-          `%${q}%`,
-          `%${q}%`,
+          `SELECT * FROM users WHERE (LOWER(username) LIKE ?${ESCAPED_LIKE} OR LOWER(display_name) LIKE ?${ESCAPED_LIKE}) AND id != ? ORDER BY last_active_at DESC LIMIT 20`,
+          likeTerm(q),
+          likeTerm(q),
           uid,
         )
       : await all<UserRow>(db, "SELECT * FROM users WHERE id != ? ORDER BY last_active_at DESC LIMIT 20", uid);
@@ -695,10 +861,20 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   if (path === "/api/conversations/group" && method === "POST") {
     const title = String(body.title || "").trim().slice(0, 50) || "New group";
-    const memberIds = Array.isArray(body.memberIds)
-      ? (body.memberIds as unknown[]).map(String).filter((x) => x && x !== uid).slice(0, 50)
+    const requested = Array.isArray(body.memberIds)
+      ? [...new Set((body.memberIds as unknown[]).map(String).filter((x) => x && x !== uid))].slice(0, 50)
       : [];
-    if (!memberIds.length) fail(400, "Pick at least one member.");
+    if (!requested.length) fail(400, "Pick at least one member.");
+    // Ids used to go straight into `members` unchecked, so a group could be
+    // created around accounts that do not exist (leaving rows that render as
+    // blank members) and around people who had blocked the creator.
+    const memberIds: string[] = [];
+    for (const candidate of requested) {
+      if (!(await one(db, "SELECT id FROM users WHERE id = ?", candidate))) continue;
+      if (await blockedBetween(db, uid, candidate)) continue;
+      memberIds.push(candidate);
+    }
+    if (!memberIds.length) fail(400, "None of those players can be added.", "NO_MEMBERS");
     const convId = id();
     const created = nowIso();
     await run(
@@ -728,7 +904,15 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     for (const row of rows) {
       const hidden = parseJson<Record<string, number>>(await hiddenJson(db, row.id), {});
       const conv = await conversationDetail(db, row.id, uid);
-      if (hidden[uid] && !conv.lastMessageAt && conv.kind === "SOLO") continue;
+      // hidden_json[uid] is the epoch-ms at which this member deleted the chat.
+      // It stays hidden until a message newer than that arrives. The old test
+      // only hid chats that had *never* had a message, so deleting any real
+      // conversation was a no-op and the row came straight back.
+      const hiddenAt = Number(hidden[uid] || 0);
+      if (hiddenAt > 0 && conv.kind === "SOLO") {
+        const lastAt = conv.lastMessageAt ? Date.parse(conv.lastMessageAt) : 0;
+        if (!lastAt || lastAt <= hiddenAt) continue;
+      }
       list.push(conv);
     }
     return json({ items: list });
@@ -743,7 +927,14 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   }
   if (convMatch && method === "PATCH") {
     const convId = convMatch[1]!;
-    await requireMember(db, convId, uid);
+    const { conv } = await requireMember(db, convId, uid);
+    // The disappearing timer deletes messages for *everyone* in the chat, so in
+    // a group only the owner may change it (or the theme). Any member being
+    // able to set it meant any member could wipe the whole group's history.
+    const changesSharedSettings = body.disappearSeconds !== undefined || body.theme !== undefined;
+    if (conv.kind === "GROUP" && changesSharedSettings && conv.owner_id !== uid) {
+      fail(403, "Only the group owner can change these settings.", "FORBIDDEN");
+    }
     if (body.disappearSeconds !== undefined) {
       const sec = Math.max(0, Number(body.disappearSeconds) || 0);
       await run(db, "UPDATE conversations SET disappear_seconds = ? WHERE id = ?", sec, convId);
@@ -763,10 +954,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (q.length < 2) return json({ items: [] });
     const rows = await all<MsgRow>(
       db,
-      `SELECT * FROM messages WHERE conv_id = ? AND kind IN ('TEXT','IMAGE','FILE') AND LOWER(IFNULL(body,'')) LIKE ?
-       ORDER BY created_at DESC LIMIT 40`,
+      `SELECT * FROM messages WHERE conv_id = ? AND kind IN ('TEXT','IMAGE','FILE') AND LOWER(IFNULL(body,'')) LIKE ?${ESCAPED_LIKE}
+       ORDER BY created_at DESC, rowid DESC LIMIT 40`,
       convId,
-      `%${q}%`,
+      likeTerm(q),
     );
     return json({ items: rows.map((row) => msgFrom(row)) });
   }
@@ -801,10 +992,14 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const convId = memberAddMatch[1]!;
     const { conv } = await requireMember(db, convId, uid);
     if (conv.kind !== "GROUP") fail(400, "Only groups can add members.");
+    // Matches the rule the remove endpoint already enforced ("Only the group
+    // owner can remove others"); before this any member could add anyone.
+    if (conv.owner_id !== uid) fail(403, "Only the group owner can add members.", "FORBIDDEN");
     const target = String(body.userId || "");
     if (!target) fail(400, "Bad user.");
     const targetUser = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", target);
     if (!targetUser) fail(404, "User not found.");
+    if (await blockedBetween(db, uid, target)) fail(403, "You can't add this player.", "BLOCKED");
     await run(db, "INSERT OR IGNORE INTO members (conv_id, user_id, joined_at) VALUES (?, ?, ?)", convId, target, nowIso());
     await systemMessage(db, convId, `${me.display_name} added ${targetUser.display_name}`);
     return json({ ok: true });
@@ -874,14 +1069,25 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       );
     }
     const before = url.searchParams.get("before");
+    // created_at is millisecond-resolution text, so several messages routinely
+    // share one value. Without a rowid tiebreaker both the ORDER BY and the
+    // `created_at < ?` cursor were ambiguous and paging back silently dropped
+    // every message that shared the boundary timestamp.
     const rows = before
       ? await all<MsgRow>(
           db,
-          "SELECT * FROM messages WHERE conv_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT 50",
+          `SELECT * FROM messages WHERE conv_id = ? AND (created_at < ? OR (created_at = ? AND rowid < ?))
+           ORDER BY created_at DESC, rowid DESC LIMIT 50`,
           convId,
           before,
+          before,
+          Number(url.searchParams.get("beforeRowid") || 0) || Number.MAX_SAFE_INTEGER,
         )
-      : await all<MsgRow>(db, "SELECT * FROM messages WHERE conv_id = ? ORDER BY created_at DESC LIMIT 50", convId);
+      : await all<MsgRow>(
+          db,
+          "SELECT * FROM messages WHERE conv_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 50",
+          convId,
+        );
     const senderIds = [...new Set(rows.map((r) => r.sender_id).filter(Boolean))];
     const names = new Map<string, string>();
     for (const sid of senderIds) {
@@ -895,14 +1101,19 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (inboxIds.length) {
       await run(db, `UPDATE messages SET delivered_at = ? WHERE id IN (${inboxIds.map(() => "?").join(",")})`, nowIso(), ...inboxIds);
     }
-    // Live read receipts for the sender: the other members' newest read time.
-    const readRow = await one<{ r: string | null }>(
+    // Read receipts for the sender. In a group this is the *oldest* read time
+    // and only when every other member has read something — MAX() used to flip
+    // everyone's ticks blue as soon as one person out of five opened the chat.
+    const readRow = await one<{ r: string | null; unreadMembers: number }>(
       db,
-      "SELECT MAX(last_read_at) AS r FROM members WHERE conv_id = ? AND user_id != ? AND last_read_at IS NOT NULL",
+      `SELECT MIN(last_read_at) AS r,
+              SUM(CASE WHEN last_read_at IS NULL THEN 1 ELSE 0 END) AS unreadMembers
+       FROM members WHERE conv_id = ? AND user_id != ?`,
       convId,
       uid,
     );
-    return json({ items, readAt: readRow?.r ?? null });
+    const readAt = readRow && Number(readRow.unreadMembers || 0) === 0 ? readRow.r : null;
+    return json({ items, readAt: readAt ?? null });
   }
 
   if (msgMatch && method === "POST") {
@@ -915,9 +1126,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       }
     }
     const text = String(body.body || "").trim().slice(0, 4000);
-    const kind = String(body.kind || "TEXT").toUpperCase();
-    const imageData = typeof body.imageData === "string" && body.imageData.startsWith("data:") ? body.imageData : null;
-    const fileKey = typeof body.fileKey === "string" ? body.fileKey : null;
+    // Whitelisted on purpose: SYSTEM and CALL bubbles are written by the server
+    // only. Accepting an arbitrary client kind let anyone forge "Alice paid 500
+    // coins" notices and fake call-log entries in someone else's chat.
+    const requestedKind = String(body.kind || "TEXT").toUpperCase();
+    const kind = ALLOWED_MESSAGE_KINDS.has(requestedKind) ? requestedKind : "TEXT";
+    const imageData = typeof body.imageData === "string" && isSafeDataUrl(body.imageData) ? body.imageData : null;
+    if (typeof body.imageData === "string" && body.imageData.startsWith("data:") && !imageData) {
+      fail(400, "Unsupported image format.", "BAD_MEDIA");
+    }
+    const fileKey = typeof body.fileKey === "string" && FILE_KEY_RE.test(body.fileKey) ? body.fileKey : null;
     if (imageData && imageData.length > 450_000) fail(400, "Photo too large — pick a smaller image.");
     if (kind === "STICKER" && !text) fail(400, "Pick a sticker.");
     if (kind === "STICKER" && text.length > 16) fail(400, "Bad sticker.");
@@ -952,6 +1170,18 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       meta,
       created,
     );
+    // Bind the uploaded object to this conversation so GET /api/files/:key can
+    // authorize every other member. Without this the authz check would reject
+    // the recipient, who is not the uploader.
+    if (fileKey) {
+      await run(
+        db,
+        "UPDATE files SET conv_id = ? WHERE key = ? AND owner_id = ? AND conv_id IS NULL",
+        convId,
+        fileKey,
+        uid,
+      );
+    }
     const preview =
     kind === "STICKER"
       ? "Sticker"
@@ -997,13 +1227,29 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   if (path === "/api/files" && method === "POST") {
     if (!env.MEDIA) fail(501, "File storage is not configured yet.");
-    const size = Number(request.headers.get("content-length") || 0);
-    if (size > 26_214_400) fail(400, "File too large (max 25 MB).");
-    const type = (url.searchParams.get("type") || "application/octet-stream").slice(0, 100);
-    const ext = (url.searchParams.get("name") || "file").split(".").pop()?.slice(0, 10) || "bin";
-    const key = `f/${id()}.${ext}`;
+    rateLimit(`upload:${uid}`, 120, 60);
+    // Size is measured from the bytes we actually received. Reading the
+    // client-supplied content-length header let an uploader claim 10 bytes and
+    // stream 3 MB straight into the bucket.
     const data = await request.arrayBuffer();
+    if (data.byteLength === 0) fail(400, "File is empty.");
+    if (data.byteLength > 26_214_400) fail(400, "File too large (max 25 MB).");
+    const type = safeMediaType(url.searchParams.get("type"));
+    const ext = (url.searchParams.get("name") || "file")
+      .split(".")
+      .pop()
+      ?.toLowerCase()
+      .replace(/[^a-z0-9]/g, "")
+      .slice(0, 10) || "bin";
+    const key = `f/${id()}.${ext}`;
     await env.MEDIA.put(key, data, { httpMetadata: { contentType: type } });
+    await run(
+      db,
+      "INSERT OR REPLACE INTO files (key, owner_id, conv_id, created_at) VALUES (?, ?, NULL, ?)",
+      key,
+      uid,
+      nowIso(),
+    );
     return json({ fileKey: key, size: data.byteLength }, 201);
   }
 
@@ -1011,44 +1257,99 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   if (fileGetMatch && method === "GET") {
     if (!env.MEDIA) fail(501, "File storage is not configured yet.");
     const key = decodeURIComponent(fileGetMatch[1]!);
+    // Authorization: the uploader, or a member of a conversation that actually
+    // references this key. Before this any signed-in user who knew (or guessed)
+    // a key could download anyone else's file.
+    const meta = await one<{ owner_id: string; conv_id: string | null }>(
+      db,
+      "SELECT owner_id, conv_id FROM files WHERE key = ?",
+      key,
+    );
+    if (meta) {
+      const allowed =
+        meta.owner_id === uid ||
+        (!!meta.conv_id &&
+          !!(await one(db, "SELECT user_id FROM members WHERE conv_id = ? AND user_id = ?", meta.conv_id, uid)));
+      if (!allowed) fail(403, "File not found.", "FORBIDDEN");
+    } else {
+      // Object uploaded before the files table existed: fall back to "is this
+      // key referenced by a message in one of my conversations?".
+      const ref = await one<{ conv_id: string }>(
+        db,
+        `SELECT m.conv_id FROM messages m
+         JOIN members mem ON mem.conv_id = m.conv_id AND mem.user_id = ?
+         WHERE m.media = ? LIMIT 1`,
+        uid,
+        key,
+      );
+      if (!ref) fail(403, "File not found.", "FORBIDDEN");
+    }
     const object = await env.MEDIA.get(key);
     if (!object) fail(404, "File not found.");
-    const headers = new Headers();
-    object.writeHttpMetadata(headers);
-    headers.set("content-type", object.httpMetadata?.contentType ?? "application/octet-stream");
-    headers.set("cache-control", "private, max-age=31536000, immutable");
-    return new Response(object.body, { headers });
+    const contentType = safeMediaType(object.httpMetadata?.contentType);
+    return new Response(object.body, {
+      headers: mediaHeaders(contentType, `attachment; filename="${key.split("/").pop()}"`),
+    });
   }
 
   /* ---------- statuses (24h stories) ---------- */
 
   if (path === "/api/statuses" && method === "POST") {
-    const kind = String(body.kind || "TEXT").toUpperCase() === "IMAGE" ? "IMAGE" : "TEXT";
+    // VIDEO used to be folded into TEXT here, so a video status was stored as a
+    // text post with an orphaned blob attached and the client's video player was
+    // unreachable dead code.
+    const requested = String(body.kind || "TEXT").toUpperCase();
+    const kind = ALLOWED_STATUS_KINDS.has(requested) ? requested : "TEXT";
     const text = String(body.text || "").slice(0, 500);
     const bgStyle = String(body.bgStyle || "amber").slice(0, 20);
-    const imageData = typeof body.imageData === "string" && body.imageData.startsWith("data:") ? body.imageData : null;
-    if (kind === "IMAGE" && !imageData) fail(400, "Pick a photo for the status.");
-    if (kind === "TEXT" && !text) fail(400, "Write something for the status.");
+    const imageData =
+      typeof body.imageData === "string" && isSafeDataUrl(body.imageData) ? body.imageData : null;
+    if (typeof body.imageData === "string" && body.imageData.startsWith("data:") && !imageData) {
+      fail(400, "Unsupported media format.", "BAD_MEDIA");
+    }
+    const fileKey =
+      typeof body.fileKey === "string" && FILE_KEY_RE.test(body.fileKey) ? body.fileKey : null;
     if (imageData && imageData.length > 450_000) fail(400, "Photo too large — pick a smaller image.");
+    if ((kind === "IMAGE" || kind === "VIDEO") && !imageData && !fileKey) {
+      fail(400, kind === "VIDEO" ? "Pick a video for the status." : "Pick a photo for the status.");
+    }
+    if (kind === "TEXT" && !text) fail(400, "Write something for the status.");
+    const seconds = kind === "VIDEO" ? Math.max(0, Math.min(120, Number(body.seconds || 0))) : 0;
     const sid = id();
     const created = nowIso();
+    const expiresAt = new Date(Date.now() + 864e5).toISOString();
     await run(
       db,
-      "INSERT INTO statuses (id, user_id, kind, text, bg_style, media, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO statuses (id, user_id, kind, text, bg_style, media, meta_json, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
       sid,
       uid,
       kind,
       text || null,
       bgStyle,
-      imageData ?? null,
+      imageData ?? fileKey ?? null,
+      seconds ? JSON.stringify({ seconds, fileKey: !!fileKey }) : null,
       created,
-      new Date(Date.now() + 864e5).toISOString(),
+      expiresAt,
     );
-    return json({ status: { id: sid, kind, text, createdAt: created } }, 201);
+    if (fileKey) {
+      // Statuses are visible to contacts, not to one conversation; mark the
+      // object as owned so its author can always re-read it.
+      await run(db, "UPDATE files SET conv_id = NULL WHERE key = ? AND owner_id = ?", fileKey, uid);
+    }
+    return json(
+      { status: { id: sid, kind, text, bgStyle, hasMedia: !!(imageData ?? fileKey), seconds, createdAt: created, expiresAt } },
+      201,
+    );
   }
 
   if (path === "/api/statuses" && method === "GET") {
-    await run(db, "DELETE FROM statuses WHERE expires_at < ?", nowIso());
+    // Expired rows are filtered below and reaped at most once a minute per
+    // isolate. This used to be an unconditional DELETE on every single read, so
+    // one client's poll wrote to the whole statuses table for everybody.
+    if (Date.now() > nextStatusSweep) {
+      nextStatusSweep = Date.now() + 60_000;
+      ctx.waitUntil(run(db, "DELETE FROM statuses WHERE expires_at < ?", nowIso()).then(() => undefined));
+    }
     const contactRows = await all<{ conv_id: string }>(db, "SELECT conv_id FROM members WHERE user_id = ?", uid);
     const contactIds = new Set<string>();
     for (const row of contactRows) {
@@ -1244,8 +1545,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       cutoff,
     );
     for (const row of stale) {
-      await run(db, "UPDATE calls SET status = 'MISSED', ended_at = ? WHERE id = ?", nowIso(), row.id);
-      await logCallEvent(db, row.caller_id, row.callee_id, row.kind, "MISSED");
+      // Conditional UPDATE + row count: this endpoint is polled by every client,
+      // so two simultaneous polls used to each insert their own "Missed call"
+      // bubble for the same call.
+      const changed = await run(
+        db,
+        "UPDATE calls SET status = 'MISSED', ended_at = ? WHERE id = ? AND status = 'RINGING'",
+        nowIso(),
+        row.id,
+      );
+      if (changed > 0) await logCallEvent(db, row.caller_id, row.callee_id, row.kind, "MISSED");
     }
     const rows = await all<CallRow>(
       db,
@@ -1313,10 +1622,22 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const callId = endMatch[1]!;
     const row = await one<CallRow>(db, "SELECT * FROM calls WHERE id = ?", callId);
     if (!row) fail(404, "Call not found.");
+    // Only the two people on the call may end it. /ice and /decline already had
+    // this check; /end did not, so any signed-in user could hang up on anyone.
+    if (row.caller_id !== uid && row.callee_id !== uid) fail(403, "Not your call.", "FORBIDDEN");
     if (row.status === "ACTIVE" || row.status === "RINGING") {
       const seconds = Math.max(0, Math.round(((row.started_at ? Date.parse(row.started_at) : Date.parse(row.created_at)) - Date.now()) / -1000));
-      await run(db, "UPDATE calls SET status = 'ENDED', ended_at = ? WHERE id = ?", nowIso(), callId);
-      if (row.started_at) await logCallEvent(db, row.caller_id, row.callee_id, row.kind, "ENDED", seconds);
+      // Guarded on the current status so two clients ending at once cannot both
+      // write an "ENDED" call-log bubble.
+      const changed = await run(
+        db,
+        "UPDATE calls SET status = 'ENDED', ended_at = ? WHERE id = ? AND status IN ('ACTIVE','RINGING')",
+        nowIso(),
+        callId,
+      );
+      if (changed > 0 && row.started_at) {
+        await logCallEvent(db, row.caller_id, row.callee_id, row.kind, "ENDED", seconds);
+      }
     }
     return json({ ok: true });
   }
@@ -1384,9 +1705,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (q.length < 2) return json({ users: [], messages: [], chats: [] });
     const userRows = await all<UserRow>(
       db,
-      "SELECT * FROM users WHERE (LOWER(username) LIKE ? OR LOWER(display_name) LIKE ?) AND id != ? LIMIT 10",
-      `%${q}%`,
-      `%${q}%`,
+      `SELECT * FROM users WHERE (LOWER(username) LIKE ?${ESCAPED_LIKE} OR LOWER(display_name) LIKE ?${ESCAPED_LIKE}) AND id != ? LIMIT 10`,
+      likeTerm(q),
+      likeTerm(q),
       uid,
     );
     const users = [];
@@ -1398,10 +1719,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       `SELECT m.*, c.title FROM messages m
        JOIN members mem ON mem.conv_id = m.conv_id AND mem.user_id = ?
        JOIN conversations c ON c.id = m.conv_id
-       WHERE m.kind IN ('TEXT','IMAGE','FILE') AND LOWER(m.body) LIKE ?
-       ORDER BY m.created_at DESC LIMIT 20`,
+       WHERE m.kind IN ('TEXT','IMAGE','FILE') AND LOWER(m.body) LIKE ?${ESCAPED_LIKE}
+       ORDER BY m.created_at DESC, m.rowid DESC LIMIT 20`,
       uid,
-      `%${q}%`,
+      likeTerm(q),
     );
     const convIds = new Set(msgRows.map((row) => row.conv_id));
     const chats = [];
@@ -1509,11 +1830,22 @@ async function hiddenJson(db: D1Database, convId: string) {
 }
 
 async function conversationDetail(db: D1Database, convId: string, uid: string) {
-  const conv = (await one<{ id: string; kind: string; title: string | null; owner_id: string | null; created_at: string; last_message_at: string | null; last_message: string | null }>(
+  const conv = await one<{
+    id: string;
+    kind: string;
+    title: string | null;
+    owner_id: string | null;
+    created_at: string;
+    last_message_at: string | null;
+    last_message: string | null;
+    disappear_seconds: number | null;
+    theme: string | null;
+  }>(
     db,
     "SELECT id, kind, title, owner_id, created_at, last_message_at, last_message, disappear_seconds, theme FROM conversations WHERE id = ?",
     convId,
-  ))!;
+  );
+  if (!conv) fail(404, "Conversation not found.");
   const memberRows = await all<{ user_id: string; role: string; muted: number; unread: number; last_read_at: string | null }>(
     db,
     "SELECT user_id, role, muted, unread, last_read_at FROM members WHERE conv_id = ?",
