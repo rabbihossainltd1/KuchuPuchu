@@ -13,3 +13,13 @@
 
 # Keep our data models' names for readable crash logs.
 -keepnames class app.kuchupuchu.android.** { *; }
+
+# OkHttp / Okio (HTTP/2 client).
+-dontwarn okhttp3.**
+-dontwarn okio.**
+-dontwarn org.codehaus.mojo.animal_sniffer.**
+-dontwarn javax.annotation.**
+
+# Coil image loader.
+-keep class coil.** { *; }
+-dontwarn coil.**

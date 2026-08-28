@@ -123,15 +123,22 @@ class CallEngine(private val app: Application) {
         poll?.cancel()
         poll =
             scope.launch {
+                var idle = 1500L
                 while (isActive) {
+                    val had = active != null
                     tick()
+                    val busy = active != null
                     delay(
                         when {
-                            active != null -> 700L
-                            Store.foreground -> 1500L
-                            else -> 1500L
+                            busy -> 700L
+                            Store.foreground -> {
+                                idle = if (had || busy) 1500L else (idle + 500L).coerceAtMost(8_000L)
+                                idle
+                            }
+                            else -> (idle + 1_000L).coerceAtMost(8_000L).also { idle = it }
                         },
                     )
+                    if (busy) idle = 1500L
                 }
             }
     }

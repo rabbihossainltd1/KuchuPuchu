@@ -11,6 +11,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import coil.Coil
+import coil.ImageLoader
 
 class MainActivity : ComponentActivity() {
 
@@ -29,6 +31,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         current = this
         Api.loadToken(this)
+        Coil.setImageLoader(
+            ImageLoader.Builder(applicationContext)
+                .okHttpClient { Api.http }
+                .crossfade(true)
+                .build(),
+        )
         Store.init(this)
         Store.authed.value = !Api.token.isNullOrBlank() && Store.me != null
         KpNotify.ensureChannels(this)

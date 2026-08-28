@@ -1,27 +1,42 @@
 package app.kuchupuchu.android
 
 import android.content.Context
+import okhttp3.ConnectionPool
+import okhttp3.Interceptor
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.ByteArrayOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
+import java.io.IOException
 import java.net.URLEncoder
+import java.util.concurrent.TimeUnit
 
 /**
- * v3 API client — talks to the KuchuPuchu v3 worker
- * (https://kuchupuchu-api.kuchupuchu.workers.dev).
- *
- * Same tiny HttpURLConnection + org.json approach as v2 (no extra
- * dependencies), with a short-lived per-path response cache so tab
- * switches feel instant without hammering D1.
+ * v3 API client — OkHttp (HTTP/2, connection pool, gzip, GET retries).
  */
 object Api {
     const val BASE = "https://kuchupuchu-api.kuchupuchu.workers.dev"
     private const val TOKEN_KEY = "kp_session_token"
+    private val JSON = "application/json; charset=utf-8".toMediaType()
+    private val OCTET = "application/octet-stream".toMediaType()
 
     @Volatile
     var token: String? = null
+
+    val http: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(45, TimeUnit.SECONDS)
+            .writeTimeout(45, TimeUnit.SECONDS)
+            .connectionPool(ConnectionPool(8, 5, TimeUnit.MINUTES))
+            .retryOnConnectionFailure(true)
+            .addInterceptor(AuthInterceptor())
+            .addInterceptor(GetRetryInterceptor())
+            .build()
+    }
 
     fun loadToken(ctx: Context) {
         token = ctx.getSharedPreferences("kp", 0).getString(TOKEN_KEY, null)
@@ -62,51 +77,25 @@ object Api {
         return data
     }
 
-    /** Uploads a raw file to R2 via the worker. Returns { fileKey } . */
     fun upload(name: String, mime: String, bytes: ByteArray): JSONObject {
         val path = "/api/files?name=${q(name)}&type=${q(mime)}"
-        val conn = (URL(BASE + path).openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            connectTimeout = 20_000
-            readTimeout = 45_000
-            setRequestProperty("Authorization", "Bearer ${token ?: ""}")
-            setRequestProperty("Content-Type", "application/octet-stream")
-            doOutput = true
-            outputStream.use { it.write(bytes) }
-        }
-        val code = conn.responseCode
-        val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
-            ?.bufferedReader()?.readText().orEmpty()
-        val json = if (text.isBlank()) JSONObject() else JSONObject(text)
-        if (code !in 200..299) {
-            throw ApiException(code, json.optJSONObject("error")?.optString("message") ?: "Upload failed.")
-        }
-        return json
+        val req = Request.Builder()
+            .url(BASE + path)
+            .post(bytes.toRequestBody(OCTET))
+            .header("Accept", "application/json")
+            .build()
+        return executeJson(req)
     }
 
-    /** Downloads bytes for an R2 file key or an API path ("/api/messages/x/media"). */
     fun download(pathOrKey: String): ByteArray {
         val url =
             if (pathOrKey.startsWith("http")) pathOrKey
             else if (pathOrKey.startsWith("/")) BASE + pathOrKey
             else "$BASE/api/files/${encodePath(pathOrKey)}"
-        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 30_000
-            readTimeout = 60_000
-            token?.let { setRequestProperty("Authorization", "Bearer $it") }
-        }
-        val code = conn.responseCode
-        if (code !in 200..299) throw ApiException(code, "Download failed.")
-        return conn.inputStream.use { ins ->
-            val buf = ByteArrayOutputStream(maxOf(8192, conn.contentLength))
-            val chunk = ByteArray(64 * 1024)
-            while (true) {
-                val n = ins.read(chunk)
-                if (n < 0) break
-                buf.write(chunk, 0, n)
-            }
-            buf.toByteArray()
+        val req = Request.Builder().url(url).get().build()
+        http.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) throw ApiException(resp.code, "Download failed.")
+            return resp.body?.bytes() ?: ByteArray(0)
         }
     }
 
@@ -122,32 +111,64 @@ object Api {
 
     fun request(path: String, method: String, body: JSONObject?): JSONObject {
         val url = if (path.startsWith("http")) path else "$BASE$path"
-        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = method
-            connectTimeout = 20_000
-            readTimeout = 25_000
-            setRequestProperty("Accept", "application/json")
-            setRequestProperty("Content-Type", "application/json")
-            token?.let { setRequestProperty("Authorization", "Bearer $it") }
-            if (body != null && method != "GET") {
-                doOutput = true
-                outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+        val builder = Request.Builder().url(url).header("Accept", "application/json")
+        val payload = body?.toString()?.toRequestBody(JSON)
+        when (method) {
+            "GET" -> builder.get()
+            "POST" -> builder.post(payload ?: ByteArray(0).toRequestBody(JSON))
+            "PATCH" -> builder.patch(payload ?: ByteArray(0).toRequestBody(JSON))
+            "DELETE" -> builder.delete(payload ?: ByteArray(0).toRequestBody(JSON))
+            else -> builder.method(method, payload)
+        }
+        return executeJson(builder.build())
+    }
+
+    private fun executeJson(req: Request): JSONObject {
+        http.newCall(req).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            val json = if (text.isBlank()) JSONObject() else JSONObject(text)
+            if (!resp.isSuccessful) {
+                val msg = json.optJSONObject("error")?.optString("message") ?: "Request failed."
+                throw ApiException(resp.code, msg)
             }
+            return json
         }
-        val code = conn.responseCode
-        val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-        val text = stream?.bufferedReader()?.readText().orEmpty()
-        val json = if (text.isBlank()) JSONObject() else JSONObject(text)
-        if (code !in 200..299) {
-            val msg = json.optJSONObject("error")?.optString("message") ?: "Request failed."
-            throw ApiException(code, msg)
-        }
-        return json
     }
 
     fun q(value: String) = URLEncoder.encode(value, "UTF-8")
 
     private fun encodePath(value: String) = value.split("/").joinToString("/") { q(it) }
+
+    private class AuthInterceptor : Interceptor {
+        override fun intercept(chain: Interceptor.Chain): Response {
+            val t = token
+            val req =
+                if (t.isNullOrBlank()) chain.request()
+                else chain.request().newBuilder().header("Authorization", "Bearer $t").build()
+            return chain.proceed(req)
+        }
+    }
+
+    /** Idempotent GET only — POST retries can duplicate messages. */
+    private class GetRetryInterceptor : Interceptor {
+        override fun intercept(chain: Interceptor.Chain): Response {
+            val req = chain.request()
+            if (req.method != "GET") return chain.proceed(req)
+            var lastIo: IOException? = null
+            repeat(3) { attempt ->
+                try {
+                    val resp = chain.proceed(req)
+                    if (resp.isSuccessful || resp.code in 400..499) return resp
+                    resp.close()
+                } catch (e: IOException) {
+                    lastIo = e
+                }
+                if (attempt < 2) Thread.sleep(200L * (1 shl attempt))
+            }
+            lastIo?.let { throw it }
+            return chain.proceed(req)
+        }
+    }
 }
 
 class ApiException(val status: Int, override val message: String) : Exception(message)

@@ -107,19 +107,18 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
                                 val key = m.optString("fileKey")
                                 if (key.isNotBlank()) "/api/files/$key" else ""
                             }
-                            val bmp = rememberBitmap(url.takeIf { it.isNotBlank() })
                             Box(
                                 Modifier
                                     .height(110.dp)
                                     .clip(RoundedCornerShape(8.dp))
                                     .background(Line),
                             ) {
-                                if (bmp != null) {
-                                    androidx.compose.foundation.Image(
-                                        bmp,
-                                        contentDescription = "Photo",
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                if (url.isNotBlank()) {
+                                    KpNetImage(
+                                        url,
+                                        "Photo",
+                                        Modifier.fillMaxSize(),
+                                        androidx.compose.ui.layout.ContentScale.Crop,
                                     )
                                 }
                             }

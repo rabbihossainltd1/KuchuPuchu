@@ -102,9 +102,19 @@ fun ChatListScreen(nav: NavController) {
 
     LaunchedEffect(Unit) {
         refresh() // store paints instantly; this is the silent background refresh
+        var gap = 10_000L
         while (true) {
-            delay(10_000)
-            if (Store.foreground) refresh()
+            delay(gap)
+            if (Store.foreground) {
+                val before = ScreenStore.convsRaw
+                refresh()
+                delay(400)
+                gap = if (ScreenStore.convsRaw == before) {
+                    (gap + 5_000L).coerceAtMost(30_000L)
+                } else {
+                    10_000L
+                }
+            }
         }
     }
 

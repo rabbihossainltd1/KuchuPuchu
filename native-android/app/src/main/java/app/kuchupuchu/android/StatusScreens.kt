@@ -555,15 +555,12 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
 
             /* background: photo or gradient text card */
             if (s.optString("kind") == "IMAGE") {
-                val bmp = rememberBitmap("${Api.BASE}/api/statuses/${s.optString("id")}/media")
-                if (bmp != null) {
-                    Image(
-                        bmp,
-                        contentDescription = "Status photo",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = androidx.compose.ui.layout.ContentScale.Fit,
-                    )
-                }
+                KpNetImage(
+                    "${Api.BASE}/api/statuses/${s.optString("id")}/media",
+                    "Status photo",
+                    Modifier.fillMaxSize(),
+                    androidx.compose.ui.layout.ContentScale.Fit,
+                )
                 Box(Modifier.fillMaxSize().background(Color(0x66000000)))
             } else {
                 val gradients = mapOf(

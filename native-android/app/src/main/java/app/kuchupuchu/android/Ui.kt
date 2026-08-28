@@ -35,7 +35,10 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -95,8 +98,9 @@ fun KpAvatar(
     ring: Boolean = true,
     ringWidth: Dp = 2.5.dp,
 ) {
-    val bmp = rememberBitmap(url)
     val inner = size - if (ring) ringWidth * 2 else 0.dp
+    val dataUrl = url?.startsWith("data:") == true
+    val bmp = if (dataUrl) rememberBitmap(url) else null
     Box(Modifier.size(size), contentAlignment = Alignment.Center) {
         if (ring) {
             Box(
@@ -113,15 +117,20 @@ fun KpAvatar(
                 .background(Cream),
             contentAlignment = Alignment.Center,
         ) {
-            if (bmp != null) {
-                Image(
+            when {
+                bmp != null -> Image(
                     bmp,
                     contentDescription = name,
                     modifier = Modifier.size(inner),
                     contentScale = ContentScale.Crop,
                 )
-            } else {
-                Text(
+                !url.isNullOrBlank() && !dataUrl -> KpNetImage(
+                    url,
+                    name,
+                    Modifier.size(inner),
+                    ContentScale.Crop,
+                )
+                else -> Text(
                     initials(name),
                     fontSize = (inner.value * 0.38f).sp,
                     fontWeight = FontWeight.SemiBold,
@@ -130,6 +139,31 @@ fun KpAvatar(
             }
         }
     }
+}
+
+@Composable
+fun KpNetImage(
+    url: String?,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Crop,
+) {
+    if (url.isNullOrBlank()) return
+    if (url.startsWith("data:")) {
+        val bmp = rememberBitmap(url)
+        if (bmp != null) {
+            Image(bmp, contentDescription = contentDescription, modifier = modifier, contentScale = contentScale)
+        }
+        return
+    }
+    val full = if (url.startsWith("http")) url else Api.BASE + url
+    val ctx = LocalContext.current
+    AsyncImage(
+        model = ImageRequest.Builder(ctx).data(full).crossfade(true).build(),
+        contentDescription = contentDescription,
+        modifier = modifier,
+        contentScale = contentScale,
+    )
 }
 
 /** Solid gold pill button — the app's primary action. */

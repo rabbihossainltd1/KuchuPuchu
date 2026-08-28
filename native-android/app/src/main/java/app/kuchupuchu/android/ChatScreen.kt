@@ -237,10 +237,17 @@ fun ChatScreen(nav: NavController, convId: String) {
 
     /* single stable background refresh loop while this chat is open */
     LaunchedEffect(convId) {
+        var gap = 4_000L
         while (true) {
             if (Store.foreground && Store.route == "chat/$convId") {
+                val before = ScreenStore.msgsVersion.value
                 refreshMessages()
-                delay(4_000)
+                delay(gap)
+                gap = if (ScreenStore.msgsVersion.value == before) {
+                    (gap + 2_000L).coerceAtMost(12_000L)
+                } else {
+                    4_000L
+                }
             } else {
                 delay(1_500)
             }
@@ -1086,26 +1093,23 @@ private fun MessageRow(
 @Composable
 private fun ImageBubble(m: JSONObject, mine: Boolean) {
     val url = m.optString("mediaUrl").takeIf { it.isNotBlank() }
-    val bmp = rememberBitmap(url)
-    if (bmp != null) {
-        androidx.compose.foundation.Image(
-            bmp,
-            contentDescription = "Photo",
-            modifier = Modifier
-                .widthIn(max = 260.dp, min = 180.dp)
-                .clip(RoundedCornerShape(12.dp)),
-            contentScale = androidx.compose.ui.layout.ContentScale.FillWidth,
-        )
-    } else {
-        Box(
-            Modifier
-                .widthIn(min = 150.dp)
-                .height(110.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color(0x22000000)),
-            contentAlignment = Alignment.Center,
-        ) {
+    Box(
+        Modifier
+            .widthIn(max = 260.dp, min = 180.dp)
+            .height(160.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0x22000000)),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (url.isNullOrBlank()) {
             CircularProgressIndicator(color = if (mine) AmberInk else Gold, modifier = Modifier.size(22.dp))
+        } else {
+            KpNetImage(
+                url,
+                "Photo",
+                Modifier.fillMaxSize(),
+                androidx.compose.ui.layout.ContentScale.FillWidth,
+            )
         }
     }
 }
