@@ -40,9 +40,9 @@ import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
 import org.webrtc.audio.JavaAudioDeviceModule
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
-import kotlin.coroutines.suspendCoroutine
 
 data class CallUi(
     val id: String,
@@ -100,11 +100,25 @@ class CallEngine(private val app: Application) {
     private val left = AtomicBoolean(false)
     private var poll: Job? = null
     private val scope = CoroutineScope(Dispatchers.Main)
+    @Volatile
     private var iceCallId: String = ""
-    private val pendingIce = mutableListOf<JSONObject>()
+
+    // Written by WebRTC's signalling thread, drained on the main thread — a plain
+    // ArrayList here could lose candidates or throw ConcurrentModificationException.
+    private val pendingIce = java.util.Collections.synchronizedList(mutableListOf<JSONObject>())
     private var ringingId: String? = null
     private val answering = AtomicBoolean(false)
     var pendingAccept = false
+
+    /**
+     * True only while the poll loop is actually running. Push handling uses this
+     * to decide whether the engine will raise its own ringing UI; the previous
+     * "instance != null" test was always true after MainActivity ran, so FCM
+     * heads-up notifications were suppressed even when nothing was polling.
+     */
+    @Volatile
+    var polling = false
+        private set
 
     fun notify(message: String) {
         toast = message
@@ -123,15 +137,22 @@ class CallEngine(private val app: Application) {
         poll?.cancel()
         poll =
             scope.launch {
-                while (isActive) {
-                    tick()
-                    delay(
-                        when {
-                            active != null -> 700L
-                            Store.foreground -> 1500L
-                            else -> 4000L
-                        },
-                    )
+                polling = true
+                try {
+                    while (isActive) {
+                        // A throw out of tick() used to kill this coroutine, which
+                        // meant no more call polling at all for the process.
+                        runCatching { tick() }.onFailure { notify("Call update failed. Retrying.") }
+                        delay(
+                            when {
+                                active != null -> 700L
+                                Store.foreground -> 1500L
+                                else -> 4000L
+                            },
+                        )
+                    }
+                } finally {
+                    polling = false
                 }
             }
     }
@@ -218,7 +239,13 @@ class CallEngine(private val app: Application) {
         }
         val other = next.optJSONObject("other") ?: JSONObject()
         val incoming = next.optBoolean("incoming")
-        if (!incoming && status == "RINGING" && next.optString("answerSdp").isNotBlank()) {
+        // optIso(), not optString(): Android's org.json turns a JSON null into
+        // the literal string "null", which is *not* blank. With optString() this
+        // was always true, so the caller's screen flipped to "connected" the
+        // moment the call was created and then fed the string "null" to
+        // setRemoteDescription() as if it were an SDP answer.
+        val answerSdp = next.optIso("answerSdp").orEmpty()
+        if (!incoming && status == "RINGING" && answerSdp.isNotBlank()) {
             status = "ACTIVE"
         }
         val suppressed = isIncomingSuppressed()
@@ -273,7 +300,7 @@ class CallEngine(private val app: Application) {
                 ringingId = null
             }
             CallService.start(app, "In a call with ${ui.otherName}")
-            val answer = next.optString("answerSdp")
+            val answer = next.optIso("answerSdp").orEmpty()
             if (answer.isNotBlank() && pc?.remoteDescription == null && pc != null) {
                 runCatching {
                     pc?.setRemoteDescriptionAwait(SessionDescription(SessionDescription.Type.ANSWER, answer))
@@ -359,7 +386,7 @@ class CallEngine(private val app: Application) {
                         withContext(Dispatchers.IO) {
                             Api.get("/api/calls/active", true).arr("items").objects()
                                 .find { it.optString("id") == rec.id }
-                                ?.optString("offerSdp")
+                                ?.optIso("offerSdp")
                                 .orEmpty()
                         }
                     if (offer.isNotBlank()) return@repeat
@@ -737,8 +764,13 @@ class CallEngine(private val app: Application) {
     private fun flushIce() {
         val id = iceCallId
         if (id.isBlank() || id.startsWith("pending")) return
-        val batch = pendingIce.toList()
-        pendingIce.clear()
+        // Snapshot and clear atomically; toList()+clear() on a live list dropped
+        // anything WebRTC emitted in between.
+        val batch = synchronized(pendingIce) {
+            val copy = pendingIce.toList()
+            pendingIce.clear()
+            copy
+        }
         scope.launch(Dispatchers.IO) {
             for (body in batch) {
                 runCatching { Api.post("/api/calls/$id/ice", body) }
@@ -827,11 +859,14 @@ class CallEngine(private val app: Application) {
 }
 
 private suspend fun PeerConnection.createOfferAwait(constraints: MediaConstraints): SessionDescription =
-    suspendCoroutine { cont ->
+    suspendCancellableCoroutine { cont ->
         createOffer(
             object : SdpObserver {
                 override fun onCreateSuccess(sdp: SessionDescription?) {
-                    cont.resume(sdp!!)
+                    // sdp is nullable in the WebRTC API; `sdp!!` used to throw on
+                    // the signalling thread and leave the coroutine hung forever.
+                    if (sdp != null) cont.resume(sdp)
+                    else cont.resumeWithException(RuntimeException("createOffer: empty SDP"))
                 }
                 override fun onSetSuccess() {}
                 override fun onCreateFailure(error: String?) {
@@ -844,11 +879,12 @@ private suspend fun PeerConnection.createOfferAwait(constraints: MediaConstraint
     }
 
 private suspend fun PeerConnection.createAnswerAwait(constraints: MediaConstraints): SessionDescription =
-    suspendCoroutine { cont ->
+    suspendCancellableCoroutine { cont ->
         createAnswer(
             object : SdpObserver {
                 override fun onCreateSuccess(sdp: SessionDescription?) {
-                    cont.resume(sdp!!)
+                    if (sdp != null) cont.resume(sdp)
+                    else cont.resumeWithException(RuntimeException("createAnswer: empty SDP"))
                 }
                 override fun onSetSuccess() {}
                 override fun onCreateFailure(error: String?) {
@@ -861,14 +897,18 @@ private suspend fun PeerConnection.createAnswerAwait(constraints: MediaConstrain
     }
 
 private suspend fun PeerConnection.setLocalDescriptionAwait(sdp: SessionDescription): Unit =
-    suspendCoroutine { cont ->
+    suspendCancellableCoroutine { cont ->
         setLocalDescription(
             object : SdpObserver {
                 override fun onCreateSuccess(p0: SessionDescription?) {}
                 override fun onSetSuccess() {
                     cont.resume(Unit)
                 }
-                override fun onCreateFailure(p0: String?) {}
+                // An empty onCreateFailure left the awaiting coroutine suspended
+                // forever, which wedged the whole CallEngine poll loop.
+                override fun onCreateFailure(error: String?) {
+                    cont.resumeWithException(RuntimeException("setLocalDescription create: ${error ?: "failed"}"))
+                }
                 override fun onSetFailure(error: String?) {
                     cont.resumeWithException(RuntimeException("setLocalDescription: ${error ?: "failed"}"))
                 }
@@ -878,14 +918,16 @@ private suspend fun PeerConnection.setLocalDescriptionAwait(sdp: SessionDescript
     }
 
 private suspend fun PeerConnection.setRemoteDescriptionAwait(sdp: SessionDescription): Unit =
-    suspendCoroutine { cont ->
+    suspendCancellableCoroutine { cont ->
         setRemoteDescription(
             object : SdpObserver {
                 override fun onCreateSuccess(p0: SessionDescription?) {}
                 override fun onSetSuccess() {
                     cont.resume(Unit)
                 }
-                override fun onCreateFailure(p0: String?) {}
+                override fun onCreateFailure(error: String?) {
+                    cont.resumeWithException(RuntimeException("setRemoteDescription create: ${error ?: "failed"}"))
+                }
                 override fun onSetFailure(error: String?) {
                     cont.resumeWithException(RuntimeException("setRemoteDescription: ${error ?: "failed"}"))
                 }

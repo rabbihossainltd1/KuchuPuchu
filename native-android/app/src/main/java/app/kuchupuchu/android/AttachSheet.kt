@@ -34,7 +34,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,96 +44,60 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /**
  * Attach sheet — locked design #1: classic 3x2 grid.
  * Gallery / Camera / Document / Audio / Location / Contact.
+ *
+ * This sheet is a *picker only*: it reports the picked [Uri] (or a location
+ * request) straight back to the caller and does no IO of its own. Reading a
+ * picked photo/document takes hundreds of milliseconds, and the sheet is
+ * dismissed the moment the user picks something — so any coroutine launched
+ * on this composable's own scope would be cancelled with the sheet before it
+ * ever finished, silently dropping the attachment. The owning screen does the
+ * decoding/sending on a scope that outlives this sheet.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AttachSheet(
     onDismiss: () -> Unit,
-    onSendText: (String) -> Unit,
-    onSendImage: (dataUrl: String) -> Unit,
-    onSendFile: (name: String, mime: String, bytes: ByteArray) -> Unit,
-    onError: (String) -> Unit = {},
+    onImagePicked: (Uri) -> Unit,
+    onDocumentPicked: (Uri) -> Unit,
+    onContactPicked: (Uri) -> Unit,
+    onLocationRequested: () -> Unit,
 ) {
     val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
 
     val gallery =
         rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
             onDismiss()
-            if (uri != null) {
-                scope.launch {
-                    val dataUrl = withContext(Dispatchers.IO) { FilesUtil.imageToDataUrl(uri, ctx) }
-                    if (dataUrl != null) onSendImage(dataUrl)
-                    else onError("Could not read that photo — try another one.")
-                }
-            }
+            if (uri != null) onImagePicked(uri)
         }
     val camera =
         rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
             onDismiss()
-            if (ok && cameraUri != null) {
-                val uri = cameraUri!!
-                scope.launch {
-                    val dataUrl = withContext(Dispatchers.IO) { FilesUtil.imageToDataUrl(uri, ctx) }
-                    if (dataUrl != null) onSendImage(dataUrl)
-                    else onError("Could not read that photo — try another one.")
-                }
-            }
+            if (ok) cameraUri?.let(onImagePicked)
         }
     val document =
         rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
             onDismiss()
-            if (uri != null) {
-                scope.launch {
-                    val pair = withContext(Dispatchers.IO) { FilesUtil.readDocument(ctx, uri) }
-                    if (pair != null) {
-                        val (mime, bytes) = pair
-                        val name = queryName(ctx, uri)
-                        onSendFile(name, mime, bytes)
-                    }
-                }
-            }
+            if (uri != null) onDocumentPicked(uri)
         }
     val audio =
         rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
             onDismiss()
-            if (uri != null) {
-                scope.launch {
-                    val pair = withContext(Dispatchers.IO) { FilesUtil.readDocument(ctx, uri) }
-                    if (pair != null) {
-                        val (mime, bytes) = pair
-                        onSendFile(queryName(ctx, uri), if (mime.startsWith("audio")) mime else "audio/mpeg", bytes)
-                    } else onError("Could not read that audio file.")
-                }
-            }
+            if (uri != null) onDocumentPicked(uri)
         }
     val contact =
         rememberLauncherForActivityResult(ActivityResultContracts.PickContact()) { uri ->
             onDismiss()
-            if (uri != null) {
-                scope.launch {
-                    val text = withContext(Dispatchers.IO) { readContact(ctx, uri) }
-                    if (text.isNotBlank()) onSendText(text)
-                }
-            }
+            if (uri != null) onContactPicked(uri)
         }
     val locationPermission =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             onDismiss()
-            if (granted) {
-                scope.launch {
-                    val text = withContext(Dispatchers.IO) { readLocation(ctx) }
-                    if (text.isNotBlank()) onSendText(text)
-                }
-            }
+            if (granted) onLocationRequested()
         }
 
     ModalBottomSheet(
@@ -185,10 +148,7 @@ fun AttachSheet(
                                     == PackageManager.PERMISSION_GRANTED
                                 ) {
                                     onDismiss()
-                                    scope.launch {
-                                        val text = withContext(Dispatchers.IO) { readLocation(ctx) }
-                                        if (text.isNotBlank()) onSendText(text)
-                                    }
+                                    onLocationRequested()
                                 } else {
                                     locationPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION)
                                 }
@@ -230,7 +190,7 @@ private fun AttachTile(icon: ImageVector, bg: Color, label: String, onClick: () 
 
 private var cameraUri: Uri? = null
 
-private fun queryName(ctx: android.content.Context, uri: Uri): String {
+internal fun queryName(ctx: android.content.Context, uri: Uri): String {
     var name = uri.lastPathSegment ?: "file"
     runCatching {
         ctx.contentResolver.query(uri, null, null, null, null)?.use { c ->
@@ -244,7 +204,7 @@ private fun queryName(ctx: android.content.Context, uri: Uri): String {
 }
 
 @Suppress("MissingPermission")
-private fun readLocation(ctx: android.content.Context): String {
+internal fun readLocation(ctx: android.content.Context): String {
     val mgr = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
     val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER)
     for (p in providers) {
@@ -255,7 +215,7 @@ private fun readLocation(ctx: android.content.Context): String {
     return ""
 }
 
-private fun readContact(ctx: android.content.Context, uri: Uri): String {
+internal fun readContact(ctx: android.content.Context, uri: Uri): String {
     return runCatching {
         var name = ""
         var number = ""

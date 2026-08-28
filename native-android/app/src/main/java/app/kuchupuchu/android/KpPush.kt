@@ -91,10 +91,13 @@ class KpPushService : FirebaseMessagingService() {
     private fun handleCall(data: Map<String, String>) {
         val callId = data["callId"]
         if (callId.isNullOrBlank()) return
-        // A live engine polls /api/calls/active itself and shows its own
-        // ringing UI — don't double-ring.
-        if (CallEngine.instance != null) return
         if (callId in CallEngine.ignoredCalls) return
+        // Only skip the heads-up when the engine is actually alive and polling.
+        // The old check bailed out whenever an engine had ever been constructed,
+        // which is always true once MainActivity has run — so incoming-call
+        // notifications effectively never appeared.
+        val engine = CallEngine.instance
+        if (engine != null && engine.polling) return
         KpNotify.callHeadsUp(this, data["from"] ?: "KuchuPuchu", data["kind"] == "VIDEO", callId)
     }
 

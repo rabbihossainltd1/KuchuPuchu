@@ -107,9 +107,29 @@ object ScreenStore {
     var callsRaw by mutableStateOf("")
     var callsLoaded by mutableStateOf(false)
 
+    /**
+     * Everything the chat list row renders. The old fingerprint was only
+     * id/lastMessageAt/unread/muted, so a contact renaming themselves, changing
+     * their avatar, or coming online never reached the list.
+     */
+    private fun convSignature(list: List<JSONObject>) = list.joinToString(",") { c ->
+        val other = c.optJSONObject("other")
+        buildString {
+            append(c.optString("id")).append('|')
+            append(c.optString("title")).append('|')
+            append(c.optString("lastMessage")).append('|')
+            append(c.optString("lastMessageAt")).append('|')
+            append(c.optInt("unread")).append('|')
+            append(c.optBoolean("muted")).append('|')
+            append(other?.optString("displayName")).append('|')
+            append(other?.optString("avatarUrl")).append('|')
+            append(other?.optBoolean("online"))
+        }
+    }
+
     @Synchronized
     fun setConvs(list: List<JSONObject>) {
-        val raw = list.joinToString(",") { it.optString("id") + ":" + it.optString("lastMessageAt") + ":" + it.optInt("unread") + ":" + it.optBoolean("muted") }
+        val raw = convSignature(list)
         if (raw != convsRaw || convs.isEmpty()) {
             convsRaw = raw
             convs.clear()
@@ -129,17 +149,26 @@ object ScreenStore {
     @Synchronized
     fun msgsOf(convId: String): List<JSONObject> = msgs[convId]?.toList() ?: emptyList()
 
+    /**
+     * Full per-message signature. The old check only compared the list length
+     * and the last id, so a server-side delete (kind flips to DELETED, body goes
+     * null) or a read-receipt change produced an identical fingerprint and the
+     * screen kept showing the stale bubble until the app was restarted.
+     */
+    private fun msgSignature(list: List<JSONObject>) = list.joinToString("|") { m ->
+        buildString {
+            append(m.optString("id")).append(':')
+            append(m.optString("kind")).append(':')
+            append(m.optString("body")).append(':')
+            append(m.optIso("deliveredAt")).append(':')
+            append(m.optString("mediaUrl")).append(':')
+            append(m.optString("fileKey"))
+        }
+    }
+
     @Synchronized
     fun setMsgs(convId: String, list: List<JSONObject>) {
-        val old = msgs[convId]
-        val changed = old == null || old.size != list.size ||
-            (list.isNotEmpty() && old.isNotEmpty() && list.last().optString("id") != old.last().optString("id"))
-        val idsChanged = changed
-        val tickChanged =
-            !idsChanged && old != null && list.zip(old).any { (n, o) ->
-                n.optIso("deliveredAt") != o.optIso("deliveredAt")
-            }
-        if (!idsChanged && !tickChanged) return
+        if (msgs[convId]?.let { msgSignature(it) } == msgSignature(list)) return
         msgs[convId] = list.toMutableList()
         msgsVersion.value++
         persist()

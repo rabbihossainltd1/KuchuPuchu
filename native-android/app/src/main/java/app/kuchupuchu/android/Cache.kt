@@ -85,6 +85,7 @@ object Outbox {
     private val items = ArrayList<JSONObject>()
     private var file: File? = null
     @Volatile var flushing = false
+    private val flushLock = Any()
 
     fun init(ctx: Context) {
         file = File(ctx.filesDir, "kp-outbox.json")
@@ -118,20 +119,30 @@ object Outbox {
     }
 
     suspend fun flush() {
-        if (flushing) return
-        flushing = true
+        // A bare check-then-set on a @Volatile let two coroutines in at once and
+        // post the same queued message twice.
+        synchronized(flushLock) {
+            if (flushing) return
+            flushing = true
+        }
         try {
             for (item in snapshot()) {
                 val convId = item.optString("convId")
                 val clientId = item.optString("clientId")
-                val body = item.optJSONObject("body") ?: continue
+                val body = item.optJSONObject("body")
+                if (body == null) {
+                    remove(clientId)
+                    continue
+                }
                 try {
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         Api.post("/api/conversations/$convId/messages", body)
                     }
                     remove(clientId)
-                } catch (_: Exception) {
-                    break
+                } catch (e: Exception) {
+                    // A 4xx will never succeed on retry, so drop that item rather
+                    // than blocking the rest of the queue behind it forever.
+                    if (e is ApiException && e.status in 400..499) remove(clientId) else break
                 }
             }
         } finally {

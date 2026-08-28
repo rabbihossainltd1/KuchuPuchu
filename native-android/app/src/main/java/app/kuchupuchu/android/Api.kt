@@ -129,6 +129,12 @@ object Api {
             val json = if (text.isBlank()) JSONObject() else JSONObject(text)
             if (!resp.isSuccessful) {
                 val msg = json.optJSONObject("error")?.optString("message") ?: "Request failed."
+                // An expired/revoked session used to surface as empty screens with
+                // no way out. Flip the auth gate so the login screen comes back.
+                if (resp.code == 401 && !token.isNullOrBlank()) {
+                    token = null
+                    Store.authed.value = false
+                }
                 throw ApiException(resp.code, msg)
             }
             return json

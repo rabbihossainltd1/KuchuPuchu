@@ -104,6 +104,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import android.net.Uri
 import org.json.JSONObject
 import java.io.File
 import kotlin.math.roundToInt
@@ -202,6 +203,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                         val cid = p.optString("clientId").ifBlank { "" }
                         cid.isNotBlank() && fresh.any { it.optString("clientId") == cid }
                     }
+                    // Failed sends keep their bubble long enough for the error to
+                    // be read, then clear instead of spinning forever.
+                    pending.removeAll {
+                        it.optBoolean("failed") &&
+                            System.currentTimeMillis() - it.optLong("failedAt") > 20_000
+                    }
                 }
                 val total = msgs.size + pending.size
                 // Only scroll when it matters: initial load, explicit send,
@@ -249,6 +256,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                 delay(2_000)
             }
         }
+    }
+
+    /** Flags an optimistic bubble as failed so it stops pretending to upload. */
+    fun markPendingFailed(clientId: String) {
+        pending.find { it.optString("clientId") == clientId }
+            ?.put("failed", true)
+            ?.put("failedAt", System.currentTimeMillis())
     }
 
     fun sendText(body: String, kind: String = "TEXT") {
@@ -368,7 +382,11 @@ fun ChatScreen(nav: NavController, convId: String) {
                 KpSounds.send(ctx)
                 refreshMessages(forceScroll = true)
             } catch (e: Exception) {
-                error = e.message ?: "Could not send file."
+                // Before this the optimistic bubble stayed on screen forever
+                // looking like it was still uploading: the POST never happened,
+                // so no message with this clientId ever came back to match it.
+                markPendingFailed(clientId)
+                error = (e.message ?: "Could not send file.") + "  Tap the banner to retry."
             }
         }
     }
@@ -407,7 +425,73 @@ fun ChatScreen(nav: NavController, convId: String) {
                 file.delete()
                 refreshMessages(forceScroll = false)
             } catch (e: Exception) {
-                Outbox.add(convId, clientId, JSONObject().put("kind", "FILE").put("fileName", name).put("clientId", clientId))
+                // The old fallback queued a FILE payload with no fileKey. The
+                // server rejects that with 400 every time, and because flush()
+                // stops at the first failure it wedged every later queued
+                // message behind it permanently.
+                markPendingFailed(clientId)
+                error = (e.message ?: "Could not send that voice note.") + "  Tap the banner to retry."
+            }
+        }
+    }
+
+    /* ---- attachment pickers --------------------------------------------
+       AttachSheet is dismissed the instant the user picks something, so it
+       cannot do the (slow) decode/read itself: its own coroutine scope dies
+       with the sheet and the attachment is silently dropped. These handlers
+       run on the *chat* screen's scope instead, which lives as long as the
+       chat is open, so gallery / camera / document / audio / contact /
+       location all survive the sheet closing. */
+    fun handleImagePicked(uri: Uri) {
+        scope.launch {
+            val dataUrl = withContext(Dispatchers.IO) { FilesUtil.imageToDataUrl(uri, ctx) }
+            if (dataUrl == null) {
+                error = "Could not read that photo — try another one."
+            } else {
+                error = ""
+                sendImage(dataUrl)
+            }
+        }
+    }
+
+    fun handleDocumentPicked(uri: Uri) {
+        scope.launch {
+            val name = withContext(Dispatchers.IO) { queryName(ctx, uri) }
+            val pair = withContext(Dispatchers.IO) { FilesUtil.readDocument(ctx, uri) }
+            if (pair == null) {
+                error = "Could not read that file — try another one."
+                return@launch
+            }
+            val (mime, bytes) = pair
+            if (bytes.isEmpty()) {
+                error = "That file is empty."
+                return@launch
+            }
+            error = ""
+            sendFile(name, mime, bytes)
+        }
+    }
+
+    fun handleContactPicked(uri: Uri) {
+        scope.launch {
+            val text = withContext(Dispatchers.IO) { readContact(ctx, uri) }
+            if (text.isBlank()) {
+                error = "Could not read that contact."
+            } else {
+                error = ""
+                sendText(text)
+            }
+        }
+    }
+
+    fun handleLocationRequested() {
+        scope.launch {
+            val text = withContext(Dispatchers.IO) { readLocation(ctx) }
+            if (text.isBlank()) {
+                error = "No recent location available. Turn on location and try again."
+            } else {
+                error = ""
+                sendText(text)
             }
         }
     }
@@ -674,10 +758,10 @@ fun ChatScreen(nav: NavController, convId: String) {
         if (showAttach) {
             AttachSheet(
                 onDismiss = { showAttach = false },
-                onSendText = { sendText(it) },
-                onSendImage = { sendImage(it) },
-                onSendFile = { n, m, b -> sendFile(n, m, b) },
-                onError = { error = it },
+                onImagePicked = ::handleImagePicked,
+                onDocumentPicked = ::handleDocumentPicked,
+                onContactPicked = ::handleContactPicked,
+                onLocationRequested = ::handleLocationRequested,
             )
         }
         if (showStickers) {
@@ -1025,7 +1109,7 @@ private fun MessageRow(
         AlertDialog(
             onDismissRequest = { showDelete = false },
             title = { Text("Delete message?") },
-            text = { Text("This only deletes it for you.") },
+            text = { Text("This deletes the message for everyone in the chat.") },
             confirmButton = {
                 TextButton(onClick = {
                     showDelete = false
@@ -1380,11 +1464,12 @@ private fun TickIcon(m: JSONObject, pendingEcho: Boolean, otherReadAt: String?) 
     }
 }
 
-private fun isCallLog(m: JSONObject): Boolean {
-    if (m.optString("kind") == "CALL") return true
-    val b = m.optString("body").lowercase()
-    return b.contains("voice call") || b.contains("video call") || b.startsWith("missed ") || b.startsWith("declined ")
-}
+/**
+ * Only server-written CALL rows are call logs. This used to sniff the message
+ * body as well, so an ordinary "missed you" or "declined the offer" was drawn as
+ * a Missed voice call bubble.
+ */
+private fun isCallLog(m: JSONObject): Boolean = m.optString("kind") == "CALL"
 
 @Composable
 private fun CallLogBubble(m: JSONObject, mine: Boolean, pendingEcho: Boolean) {

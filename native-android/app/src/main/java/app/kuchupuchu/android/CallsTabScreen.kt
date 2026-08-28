@@ -84,7 +84,7 @@ fun CallsScreen(nav: NavController) {
                 EmptyState(
                     icon = Icons.Filled.Call,
                     title = "No calls yet",
-                    note = "Chat thekei voice ba video call shuru korun",
+                    note = "Start a voice or video call from any chat",
                 )
             }
         }
@@ -138,8 +138,11 @@ private fun CallRow(call: JSONObject, onOpenChat: () -> Unit) {
     val status = call.optString("status")
     val video = kind == "VIDEO"
 
-    val started = call.optString("startedAt")
-    val ended = call.optString("endedAt")
+    // optIso(): optString() on a JSON null yields the string "null", which is
+    // not blank, so this used to try Instant.parse("null") on every missed call
+    // and only survived because of the getOrDefault below.
+    val started = call.optIso("startedAt").orEmpty()
+    val ended = call.optIso("endedAt").orEmpty()
     val seconds =
         if (started.isNotBlank() && ended.isNotBlank()) {
             runCatching {
