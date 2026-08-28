@@ -81,6 +81,7 @@ import kotlin.math.roundToInt
 @Composable
 fun ChatListScreen(nav: NavController) {
     val scope = rememberCoroutineScope()
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     val convs = ScreenStore.convs
     var loading by remember { mutableStateOf(!ScreenStore.convsLoaded) }
     // Saveable: coming back from a chat / status viewer returns to the SAME
@@ -92,7 +93,19 @@ fun ChatListScreen(nav: NavController) {
         scope.launch {
             try {
                 val data = withContext(Dispatchers.IO) { Api.get("/api/conversations", true) }
-                ScreenStore.setConvs(data.arr("items").objects())
+                val items = data.arr("items").objects()
+                items.forEach { c ->
+                    val id = c.optString("id")
+                    val last = c.optString("lastMessageAt")
+                    val unread = c.optInt("unread", 0)
+                    if (ScreenStore.shouldNotifyChat(id, last, unread)) {
+                        val name =
+                            if (c.optBoolean("isGroup")) c.optString("title").ifBlank { "Group" }
+                            else c.optJSONObject("other")?.optString("displayName") ?: "KuchuPuchu"
+                        KpNotify.message(ctx, name, c.optString("lastMessage"), id)
+                    }
+                }
+                ScreenStore.setConvs(items)
                 loading = false
             } catch (_: Exception) {
                 loading = false
@@ -103,7 +116,7 @@ fun ChatListScreen(nav: NavController) {
     LaunchedEffect(Unit) {
         refresh()
         while (true) {
-            delay(5_000)
+            delay(2_500)
             if (Store.foreground) refresh()
         }
     }

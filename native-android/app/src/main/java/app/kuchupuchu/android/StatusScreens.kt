@@ -278,7 +278,7 @@ fun StatusScreen(nav: NavController) {
                 contentColor = AmberInk,
                 modifier = Modifier.size(60.dp),
             ) {
-                Icon(Icons.Filled.PhotoCamera, contentDescription = "Photo status", modifier = Modifier.size(28.dp))
+                Icon(Icons.Filled.PhotoCamera, contentDescription = "Photo or video status", modifier = Modifier.size(28.dp))
             }
         }
     }

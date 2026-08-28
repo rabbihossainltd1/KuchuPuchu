@@ -26,6 +26,19 @@ object ScreenStore {
         poke++
     }
 
+    private val lastNotifiedAt = HashMap<String, String>()
+
+    fun shouldNotifyChat(convId: String, lastAt: String, unread: Int): Boolean {
+        if (unread <= 0 || lastAt.isBlank()) return false
+        if (Store.route == "chat/$convId") {
+            lastNotifiedAt[convId] = lastAt
+            return false
+        }
+        val prev = lastNotifiedAt[convId]
+        lastNotifiedAt[convId] = lastAt
+        return prev != null && prev != lastAt
+    }
+
     val convs = mutableStateListOf<JSONObject>()
     var convsRaw by mutableStateOf("")
     var convsLoaded by mutableStateOf(false)

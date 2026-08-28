@@ -244,7 +244,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         while (true) {
             if (Store.foreground && Store.route == "chat/$convId") {
                 refreshMessages()
-                delay(1_500)
+                delay(800)
             } else {
                 delay(2_000)
             }
@@ -481,7 +481,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-            KpAvatar(title, avatarUrl, 40.dp)
+            KpAvatar(title, avatarUrl, 46.dp)
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Ink)
@@ -868,7 +868,7 @@ private fun Composer(
             val sendPressed by sendInteraction.collectIsPressedAsState()
             Box(
                 Modifier
-                    .size(48.dp)
+                    .size(54.dp)
                     .pressScale(sendInteraction)
                     .clip(CircleShape)
                     .background(goldFill())

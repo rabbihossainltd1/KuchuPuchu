@@ -101,11 +101,11 @@ class KpPushService : FirebaseMessagingService() {
     private fun handleMessage(data: Map<String, String>) {
         val convoId = data["convoId"] ?: return
         ScreenStore.pokeInbox()
-        if (Store.foreground && Store.route == "chat/$convoId") {
+        if (Store.route == "chat/$convoId" && Store.foreground) {
             runCatching { KpSounds.receive(this) }
             return
         }
-        if (Store.foreground) runCatching { KpSounds.receive(this) }
+        runCatching { KpSounds.receive(this) }
         KpNotify.message(this, data["from"] ?: "KuchuPuchu", data["body"] ?: "New message", convoId)
     }
 

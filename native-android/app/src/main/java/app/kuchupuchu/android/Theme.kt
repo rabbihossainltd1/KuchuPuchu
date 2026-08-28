@@ -3,8 +3,11 @@ package app.kuchupuchu.android
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 
 /* ---- KuchuPuchu v3 design tokens (locked: Chat List #7 "Gradient Rings") ---- */
 
@@ -30,19 +33,24 @@ fun goldFill(): Brush = Brush.linearGradient(listOf(Gold, GoldDeep))
 
 @Composable
 fun KpTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = lightColorScheme(
-            primary = Gold,
-            onPrimary = AmberInk,
-            secondary = GoldDeep,
-            background = Cream,
-            surface = Card,
-            onBackground = Ink,
-            onSurface = Ink,
-            outline = Line,
-        ),
-        content = content,
-    )
+    val d = LocalDensity.current
+    CompositionLocalProvider(
+        LocalDensity provides Density(density = d.density * 1.16f, fontScale = d.fontScale * 1.08f),
+    ) {
+        MaterialTheme(
+            colorScheme = lightColorScheme(
+                primary = Gold,
+                onPrimary = AmberInk,
+                secondary = GoldDeep,
+                background = Cream,
+                surface = Card,
+                onBackground = Ink,
+                onSurface = Ink,
+                outline = Line,
+            ),
+            content = content,
+        )
+    }
 }
 
 /* ---- small formatting helpers ---- */
