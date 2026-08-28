@@ -139,6 +139,7 @@ class CallEngine(private val app: Application) {
 
     fun start(ctx: Context) {
         CallNotify.ensure(ctx)
+        loadIceConfig()
         poll?.cancel()
         poll =
             scope.launch {
@@ -696,6 +697,10 @@ class CallEngine(private val app: Application) {
      * throttled, which is common on mobile networks.
      */
     private fun iceServers(): List<PeerConnection.IceServer> =
+        customTurnServers() + builtInIceServers()
+
+    /** Built-ins: public STUN + the free openrelay TURN as a last resort. */
+    private fun builtInIceServers(): List<PeerConnection.IceServer> =
         listOf(
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
             PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
@@ -717,6 +722,43 @@ class CallEngine(private val app: Application) {
                 .setPassword("openrelayproject")
                 .createIceServer(),
         )
+
+    @Volatile private var turnUrls: List<String> = emptyList()
+    @Volatile private var turnUser: String = ""
+    @Volatile private var turnPass: String = ""
+    @Volatile private var turnLoaded: Boolean = false
+
+    /**
+     * TURN credentials served by the worker (/api/config/ice — set the
+     * TURN_URLS / TURN_USERNAME / TURN_CREDENTIAL worker secrets). Fetched
+     * once at startup and placed FIRST, so a real relay beats the flaky free
+     * fallbacks. Without a config the built-ins carry on as before.
+     */
+    private fun customTurnServers(): List<PeerConnection.IceServer> {
+        if (!turnLoaded) return emptyList()
+        return turnUrls.map { url ->
+            PeerConnection.IceServer.builder(url)
+                .setUsername(turnUser)
+                .setPassword(turnPass)
+                .createIceServer()
+        }
+    }
+
+    fun loadIceConfig() {
+        scope.launch {
+            runCatching {
+                val data = withContext(Dispatchers.IO) { Api.get("/api/config/ice", true) }
+                val ice = data.optJSONObject("ice") ?: return@runCatching
+                val urls = ice.optJSONArray("urls")?.objects()?.map { it }.orEmpty().filter { it.isNotBlank() }
+                if (urls.isNotEmpty()) {
+                    turnUrls = urls
+                    turnUser = ice.optString("username")
+                    turnPass = ice.optString("credential")
+                    turnLoaded = true
+                }
+            }
+        }
+    }
 
     private fun sdpConstraints() =
         MediaConstraints().apply {

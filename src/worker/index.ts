@@ -16,6 +16,11 @@ export type Env = {
   MEDIA?: R2Bucket;
   FCM_CONFIG?: string;
   FCM_CREDENTIALS?: string;
+  /** Optional self-hosted/purchased TURN for reliable calls on strict NATs.
+   *  Comma-separated URLs, e.g. "turn:turn.example.com:3478,turns:turn.example.com:5349". */
+  TURN_URLS?: string;
+  TURN_USERNAME?: string;
+  TURN_CREDENTIAL?: string;
 };
 
 type Json = Record<string, unknown>;
@@ -774,6 +779,19 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   if (path === "/api/config/firebase" && method === "GET") {
     return json({ firebase: fcmPublicConfig(env) });
+  }
+
+  // Optional TURN relay config for the dialer. The app falls back to its
+  // built-in STUN/TURN list when this is null, so an empty config is fine.
+  if (path === "/api/config/ice" && method === "GET") {
+    const urls = String(env.TURN_URLS || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!urls.length) return json({ ice: null });
+    return json({
+      ice: { urls, username: String(env.TURN_USERNAME || ""), credential: String(env.TURN_CREDENTIAL || "") },
+    });
   }
 
   if (path === "/api/auth/register" && method === "POST") {
