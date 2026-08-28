@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,7 +38,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -115,9 +116,22 @@ fun KpAvatar(
             Modifier
                 .size(inner)
                 .clip(CircleShape)
-                .background(Cream),
+                .background(Card),
             contentAlignment = Alignment.Center,
         ) {
+            if (bmp == null) {
+                // Default "no photo" placeholder: light circle + person glyph.
+                // Also visible WHILE a photo decodes/downloads, so the circle
+                // is never just an empty ring.
+                Icon(
+                    Icons.Filled.Person,
+                    contentDescription = name,
+                    tint = Color(0xFFC9C5BE),
+                    modifier = Modifier
+                        .size(inner * 0.75f)
+                        .align(Alignment.BottomCenter),
+                )
+            }
             when {
                 bmp != null -> Image(
                     bmp,
@@ -130,15 +144,6 @@ fun KpAvatar(
                     name,
                     Modifier.size(inner),
                     ContentScale.Crop,
-                )
-                else -> Text(
-                    initials(name),
-                    // dp→sp at the current density (NOT fontScale): a raw
-                    // dp-number-in-sp grew with the user's font setting and
-                    // overflowed the fixed circle.
-                    fontSize = with(LocalDensity.current) { (inner * 0.38f).toSp() },
-                    fontWeight = FontWeight.SemiBold,
-                    color = GoldDeep,
                 )
             }
         }

@@ -77,6 +77,11 @@ class CallEngine(private val app: Application) {
     var cameraOff by mutableStateOf(false)
     var sharing by mutableStateOf(false)
     var hasRemote by mutableStateOf(false)
+
+    /** True once the remote side is actually sending video — how an
+     *  audio→video upgrade is detected, so BOTH phones land on the same
+     *  in-call screen even though the server row still says "AUDIO". */
+    val hasRemoteVideo: Boolean get() = remoteVideo != null
     var onHold by mutableStateOf(false)
 
     /** Short-lived message shown by the call screens, e.g. "User offline". */
@@ -364,6 +369,9 @@ class CallEngine(private val app: Application) {
     }
 
     fun answer() {
+        // A stale true from a previous call would drop this side straight
+        // onto the in-call screen instead of ringing.
+        hasRemote = false
         val rec = active
         if (rec == null || rec.id.startsWith("pending")) {
             pendingAccept = true
@@ -778,6 +786,11 @@ class CallEngine(private val app: Application) {
             track.setEnabled(true)
             remoteView?.let { runCatching { track.addSink(it) } }
             hasRemote = true
+            // Remote video arrived on a call this side still labels AUDIO
+            // (the other phone turned its camera on): promote this side too,
+            // otherwise one phone shows the video screen and the other the
+            // voice screen for the same call.
+            if (active?.kind != "VIDEO") active = active?.copy(kind = "VIDEO")
             onChange?.invoke(active)
         }
     }

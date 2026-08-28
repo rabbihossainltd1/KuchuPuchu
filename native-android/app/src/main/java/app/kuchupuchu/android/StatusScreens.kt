@@ -212,8 +212,8 @@ fun StatusScreen(nav: NavController) {
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             StatusRingAvatar(
-                                user.optString("displayName"),
-                                user.optString("avatarUrl"),
+                                user.optText("displayName"),
+                                user.optText("avatarUrl"),
                                 60.dp,
                                 segments = statuses.size,
                                 seen = allViewed,
@@ -552,7 +552,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
             runCatching {
                 val data = withContext(Dispatchers.IO) { Api.get("/api/statuses/${s.optString("id")}/viewers", true) }
                 viewers = data.arr("viewers").objects().joinToString("\n") { v ->
-                    (v.optJSONObject("user")?.optString("displayName") ?: "?") + "|" +
+                    (v.optJSONObject("user")?.optText("displayName") ?: "?") + "|" +
                         listStamp(v.optString("viewedAt"))
                 }
             }.onFailure { viewersError = true }
@@ -647,15 +647,15 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     KpAvatar(
-                        user?.optString("displayName") ?: Store.myName(),
-                        user?.optString("avatarUrl") ?: Store.me?.optString("avatarUrl"),
+                        user?.optText("displayName") ?: Store.myName(),
+                        user?.optText("avatarUrl") ?: Store.me?.optString("avatarUrl"),
                         42.dp,
                         ring = false,
                     )
                     Spacer(Modifier.width(10.dp))
                     Column {
                         Text(
-                            user?.optString("displayName") ?: "My status",
+                            user?.optText("displayName") ?: "My status",
                             color = Color.White,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 15.sp,
@@ -751,7 +751,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                             decorationBox = { inner ->
                                 if (reply.isEmpty()) {
                                     Text(
-                                        "Reply to ${user?.optString("displayName") ?: ""}…",
+                                        "Reply to ${user?.optText("displayName") ?: ""}…",
                                         color = Color.White.copy(alpha = 0.7f),
                                         fontSize = 14.sp,
                                     )

@@ -86,7 +86,10 @@ fun CallGate() {
     val connected = call.status == "ACTIVE" || engine.hasRemote
     when {
         connected ->
-            if (call.kind == "VIDEO") InCallVideoScreen(call) else InCallVoiceScreen(call)
+            // hasRemoteVideo: the server row can still say AUDIO after the
+            // other phone upgraded to video mid-call — follow the actual
+            // media so both sides always render the SAME in-call screen.
+            if (call.kind == "VIDEO" || engine.hasRemoteVideo) InCallVideoScreen(call) else InCallVoiceScreen(call)
         call.incoming && call.status == "RINGING" -> IncomingCallScreen(call)
         call.kind == "VIDEO" -> OutgoingVideoScreen(call)
         else -> OutgoingVoiceScreen(call)

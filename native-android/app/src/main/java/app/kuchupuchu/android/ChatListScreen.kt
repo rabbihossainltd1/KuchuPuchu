@@ -103,7 +103,7 @@ fun ChatListScreen(nav: NavController) {
                     if (ScreenStore.shouldNotifyChat(id, last, unread)) {
                         val name =
                             if (c.optBoolean("isGroup")) c.optString("title").ifBlank { "Group" }
-                            else c.optJSONObject("other")?.optString("displayName") ?: "KuchuPuchu"
+                            else c.optJSONObject("other")?.optText("displayName")?.ifBlank { "KuchuPuchu" } ?: "KuchuPuchu"
                         KpNotify.message(ctx, name, c.optString("lastMessage"), id)
                     }
                 }
@@ -411,10 +411,10 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
     val isGroup = conv.optBoolean("isGroup")
     val other = conv.optJSONObject("other")
     val name =
-        if (isGroup) conv.optString("title").ifBlank { "Group" }
-        else other?.optString("displayName")?.takeIf { it.isNotBlank() } ?: "Chat"
+        if (isGroup) conv.optText("title").ifBlank { "Group" }
+        else other?.optText("displayName")?.takeIf { it.isNotBlank() } ?: "Chat"
     val avatarUrl = if (isGroup) null else other?.optString("avatarUrl")
-    val preview = conv.optString("lastMessage")
+    val preview = conv.optText("lastMessage")
     val stamp = listStamp(conv.optString("lastMessageAt"))
     val unread = conv.optInt("unread", 0)
     val muted = conv.optBoolean("muted")

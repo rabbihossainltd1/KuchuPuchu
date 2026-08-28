@@ -172,11 +172,11 @@ private fun UserRow(user: JSONObject, onClick: () -> Unit) {
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        KpAvatar(user.optString("displayName"), user.optString("avatarUrl"), 46.dp)
+        KpAvatar(user.optText("displayName"), user.optText("avatarUrl"), 46.dp)
         Spacer(Modifier.width(12.dp))
         Column {
             Text(
-                user.optString("displayName"),
+                user.optText("displayName"),
                 fontSize = 15.5.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = Ink,

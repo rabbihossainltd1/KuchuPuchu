@@ -164,7 +164,7 @@ fun SettingsScreen(nav: NavController) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box {
                     KpAvatar(
-                        me.value.optString("displayName"),
+                        me.value.optText("displayName"),
                         me.value.optString("avatarUrl"),
                         76.dp,
                         ring = false,
@@ -201,13 +201,13 @@ fun SettingsScreen(nav: NavController) {
                 Spacer(Modifier.width(16.dp))
                 Column {
                     Text(
-                        me.value.optString("displayName").ifBlank { "…" },
+                        me.value.optText("displayName").ifBlank { "…" },
                         color = Color.White,
                         fontSize = 21.sp,
                         fontWeight = FontWeight.Bold,
                     )
                     Spacer(Modifier.height(2.dp))
-                    val un = me.value.optString("username")
+                    val un = me.value.optText("username")
                     Text(
                         if (un.isNotBlank()) "@$un" else "Add a username ↓",
                         color = Color(0xE6FFFFFF),
@@ -215,7 +215,7 @@ fun SettingsScreen(nav: NavController) {
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        me.value.optString("about").ifBlank { "Hey! I'm using KuchuPuchu" },
+                        me.value.optText("about").ifBlank { "Hey! I'm using KuchuPuchu" },
                         color = Color(0xCCFFFFFF),
                         fontSize = 12.5.sp,
                         maxLines = 2,
@@ -232,16 +232,16 @@ fun SettingsScreen(nav: NavController) {
                 .clip(RoundedCornerShape(16.dp))
                 .background(Color.White),
         ) {
-            SettingRow(Icons.Filled.Badge, "Name", me.value.optString("displayName").ifBlank { "—" }) {
-                editField = "displayName"; editValue = me.value.optString("displayName")
+            SettingRow(Icons.Filled.Badge, "Name", me.value.optText("displayName").ifBlank { "—" }) {
+                editField = "displayName"; editValue = me.value.optText("displayName")
             }
-            SettingRow(Icons.Filled.AlternateEmail, "Username", me.value.optString("username").ifBlank { "not set" }) {
-                editField = "username"; editValue = me.value.optString("username")
+            SettingRow(Icons.Filled.AlternateEmail, "Username", me.value.optText("username").ifBlank { "not set" }) {
+                editField = "username"; editValue = me.value.optText("username")
             }
-            SettingRow(Icons.Filled.Info, "About", me.value.optString("about").ifBlank { "Hey! I'm using KuchuPuchu" }) {
-                editField = "about"; editValue = me.value.optString("about")
+            SettingRow(Icons.Filled.Info, "About", me.value.optText("about").ifBlank { "Hey! I'm using KuchuPuchu" }) {
+                editField = "about"; editValue = me.value.optText("about")
             }
-            SettingRow(Icons.Filled.Mail, "Email", me.value.optString("email"), clickable = false) {}
+            SettingRow(Icons.Filled.Mail, "Email", me.value.optText("email"), clickable = false) {}
         }
 
         if (error.isNotBlank()) {

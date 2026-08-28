@@ -189,3 +189,6 @@ fun JSONObject.optIso(key: String): String? {
     val s = optString(key)
     return s.takeIf { it.isNotBlank() && it != "null" }
 }
+
+/** optString() for DISPLAY text: JSON null and missing keys both become "". */
+fun JSONObject.optText(key: String): String = optIso(key).orEmpty()

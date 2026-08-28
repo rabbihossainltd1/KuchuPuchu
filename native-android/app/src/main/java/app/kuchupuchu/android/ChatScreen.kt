@@ -552,9 +552,13 @@ fun ChatScreen(nav: NavController, convId: String) {
         /* ---------------- top bar ---------------- */
         val c = conv.value
         val isGroup = c?.optBoolean("isGroup") == true
+        val rawTitle =
+            if (isGroup) c?.optText("title")?.ifBlank { "Group" } ?: "…"
+            else c?.optJSONObject("other")?.optText("displayName")?.ifBlank { "…" } ?: "…"
+        // Long names collapse to the first word so the header always stays a
+        // single line (the full name lives on the contact page).
         val title =
-            if (isGroup) c?.optString("title")?.ifBlank { "Group" } ?: "…"
-            else c?.optJSONObject("other")?.optString("displayName")?.takeIf { it.isNotBlank() } ?: "…"
+            if (rawTitle.length > 14 && rawTitle.contains(' ')) rawTitle.substringBefore(' ') else rawTitle
         val avatarUrl = if (isGroup) null else c?.optJSONObject("other")?.optString("avatarUrl")
         val online = !isGroup && c?.optJSONObject("other")?.optBoolean("online") == true
         Row(
@@ -1114,7 +1118,7 @@ private fun convRowSnapshot(convId: String): JSONObject? {
     val row = ScreenStore.convs.firstOrNull { it.optString("id") == convId } ?: return null
     val other = JSONObject()
         .put("id", row.optJSONObject("other")?.optString("id") ?: "")
-        .put("displayName", row.optJSONObject("other")?.optString("displayName") ?: "")
+        .put("displayName", row.optJSONObject("other")?.optText("displayName") ?: "")
         .put("avatarUrl", row.optJSONObject("other")?.optString("avatarUrl") ?: "")
         .put("online", row.optJSONObject("other")?.optBoolean("online") ?: false)
     return JSONObject()
@@ -1155,6 +1159,13 @@ private fun MessageRow(
     }
     if (kind == "CALL" || isCallLog(m)) {
         CallLogBubble(m, mine, pendingEcho)
+        return
+    }
+    // Photos skip the chat bubble entirely: the image IS the bubble, with the
+    // timestamp and ticks overlaid on the photo (WhatsApp-style). FILE-kind
+    // image uploads (picked as documents) get the same treatment.
+    if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m))) {
+        ImageMessageRow(m, mine, pendingEcho, otherReadAt, onDelete)
         return
     }
 
@@ -1198,13 +1209,12 @@ private fun MessageRow(
                     .clickable { if (mine && !pendingEcho) showDelete = true }
                     .padding(start = 10.dp, top = 7.dp, end = 8.dp, bottom = 5.dp),
             ) {
-                val senderName = m.optString("senderName").takeIf { it.isNotBlank() } ?: ""
+                val senderName = m.optText("senderName")
                 Column(Modifier.padding(end = 52.dp, bottom = 2.dp)) {
                     if (!mine && isGroup && senderName.isNotBlank()) {
                         Text(senderName, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = GoldDeep)
                     }
                     when (kind) {
-                        "IMAGE" -> ImageBubble(m, mine)
                         "STICKER" -> Text(m.optString("body"), fontSize = 56.sp)
                         "FILE" -> FileBubble(m, mine, player, pendingEcho)
                         "DELETED" -> Text(
@@ -1229,6 +1239,85 @@ private fun MessageRow(
                         Spacer(Modifier.width(3.dp))
                         TickIcon(m, pendingEcho, otherReadAt)
                     }
+                }
+            }
+        }
+    }
+}
+
+/** True when a FILE message is really just a photo (image mime / extension). */
+private fun fileLooksImage(m: JSONObject): Boolean {
+    val type = m.optString("fileType")
+    if (type.startsWith("image")) return true
+    val name = m.optString("fileName").lowercase()
+    return name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png") || name.endsWith(".webp")
+}
+
+/**
+ * Photo message — no chat-bubble background: the photo is the bubble, with a
+ * soft bottom scrim so the timestamp + ticks stay readable on any image.
+ */
+@Composable
+private fun ImageMessageRow(
+    m: JSONObject,
+    mine: Boolean,
+    pendingEcho: Boolean,
+    otherReadAt: String?,
+    onDelete: (String) -> Unit,
+) {
+    var showDelete by remember { mutableStateOf(false) }
+    if (showDelete && mine && !pendingEcho) {
+        AlertDialog(
+            onDismissRequest = { showDelete = false },
+            title = { Text("Delete message?") },
+            text = { Text("This deletes the message for everyone in the chat.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDelete = false
+                    onDelete(m.optString("id"))
+                }) { Text("Delete", color = Red) }
+            },
+            dismissButton = { TextButton(onClick = { showDelete = false }) { Text("Cancel", color = Muted) } },
+        )
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp)
+            .animateContentSize(),
+        horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
+    ) {
+        Box(
+            Modifier
+                .widthIn(max = 260.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .clickable { if (mine && !pendingEcho) showDelete = true },
+        ) {
+            ImageBubble(m, mine)
+            // scrim so the stamp never drowns in a bright photo
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Transparent, Color.Transparent, Color(0x66000000)),
+                        ),
+                    ),
+            )
+            Row(
+                Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    msgStamp(m.optString("createdAt")),
+                    fontSize = 10.sp,
+                    color = Color.White,
+                )
+                if (mine) {
+                    Spacer(Modifier.width(3.dp))
+                    TickIcon(m, pendingEcho, otherReadAt)
                 }
             }
         }

@@ -72,16 +72,8 @@ fun CallsScreen(nav: NavController) {
     val sections = groupByDay(calls)
 
     Column(Modifier.fillMaxSize().background(Cream)) {
-        Text(
-            "Calls",
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Bold,
-            color = Ink,
-            modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 10.dp),
-        )
-        // Was an `if` with no `else`, so the empty state and the list were both
-        // composed; the fillMaxSize() Box took all the remaining height and left
-        // the LazyColumn none.
+        // No "Calls" heading here: this screen only ever appears inside the
+        // Calls tab, which is already labelled right above it.
         if (calls.isEmpty() && !loading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 EmptyState(
@@ -91,7 +83,7 @@ fun CallsScreen(nav: NavController) {
                 )
             }
         } else LazyColumn(
-            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 96.dp),
+            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             sections.forEach { (day, items) ->
@@ -134,7 +126,7 @@ private fun CallRow(call: JSONObject, onOpenChat: () -> Unit) {
     val haptics = rememberHaptics()
     val incoming = call.optBoolean("incoming")
     val other = call.optJSONObject("other")
-    val name = other?.optString("displayName")?.takeIf { it.isNotBlank() } ?: "Unknown"
+    val name = other?.optText("displayName")?.takeIf { it.isNotBlank() } ?: "Unknown"
     val avatar = other?.optString("avatarUrl")
     val kind = call.optString("kind")
     val status = call.optString("status")

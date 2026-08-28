@@ -193,7 +193,7 @@ fun SearchScreen(nav: NavController) {
                             KpAvatar(u.optString("displayName"), u.optString("avatarUrl"), 42.dp, ring = false)
                             Spacer(Modifier.width(12.dp))
                             Column {
-                                Highlight(u.optString("displayName"), query)
+                                Highlight(u.optText("displayName"), query)
                                 val un = u.optString("username")
                                 if (un.isNotBlank()) Highlight("@$un", query, fontSize = 12f)
                             }
@@ -213,7 +213,7 @@ fun SearchScreen(nav: NavController) {
                             val other = c.optJSONObject("other")
                             val title =
                                 if (c.optBoolean("isGroup")) c.optString("title")
-                                else other?.optString("displayName") ?: "Chat"
+                                else other?.optText("displayName")?.ifBlank { "Chat" } ?: "Chat"
                             ResultCard(onClick = {
                                 nav.navigate("chat/${c.optString("id")}") { popUpTo("main") }
                             }) {

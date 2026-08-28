@@ -85,25 +85,30 @@ fun ProfileScreen(nav: NavController, userId: String) {
             Text(error.ifBlank { "Loading…" }, color = Muted, modifier = Modifier.padding(24.dp))
             return
         }
+        // Compact header: avatar, name, @username, online, about — no big
+        // empty blocks in between (optText keeps JSON-null fields from
+        // rendering as the literal string "null").
         Column(
-            Modifier.fillMaxWidth().padding(24.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            KpAvatar(u.optString("displayName"), u.optString("avatarUrl"), 96.dp)
-            Spacer(Modifier.height(14.dp))
-            Text(u.optString("displayName"), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Ink)
-            val uname = u.optString("username")
-            if (uname.isNotBlank()) Text("@$uname", fontSize = 14.sp, color = Muted)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                if (u.optBoolean("online")) "online" else " ",
-                fontSize = 13.sp,
-                color = if (u.optBoolean("online")) Green else Muted,
+            KpAvatar(
+                u.optText("displayName").ifBlank { "?" },
+                u.optText("avatarUrl").ifBlank { null },
+                88.dp,
             )
-            val about = u.optString("about")
+            Spacer(Modifier.height(10.dp))
+            Text(u.optText("displayName").ifBlank { "—" }, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
+            val uname = u.optText("username")
+            if (uname.isNotBlank()) Text("@$uname", fontSize = 13.5.sp, color = Muted)
+            if (u.optBoolean("online")) {
+                Spacer(Modifier.height(2.dp))
+                Text("online", fontSize = 12.5.sp, color = Green)
+            }
+            val about = u.optText("about")
             if (about.isNotBlank()) {
-                Spacer(Modifier.height(12.dp))
-                Text(about, fontSize = 14.5.sp, color = Ink)
+                Spacer(Modifier.height(6.dp))
+                Text(about, fontSize = 13.5.sp, color = Ink, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             }
         }
         Row(
@@ -116,12 +121,12 @@ fun ProfileScreen(nav: NavController, userId: String) {
         ) {
             ProfileAction(Icons.Filled.Call, "Voice", Modifier.weight(1f)) {
                 haptics.tap()
-                CallEngine.instance?.startCall(userId, "AUDIO", u.optString("displayName"), u.optString("avatarUrl"))
+                CallEngine.instance?.startCall(userId, "AUDIO", u.optText("displayName"), u.optText("avatarUrl"))
             }
             ProfileActionDivider()
             ProfileAction(Icons.Filled.Videocam, "Video", Modifier.weight(1f)) {
                 haptics.tap()
-                CallEngine.instance?.startCall(userId, "VIDEO", u.optString("displayName"), u.optString("avatarUrl"))
+                CallEngine.instance?.startCall(userId, "VIDEO", u.optText("displayName"), u.optText("avatarUrl"))
             }
             ProfileActionDivider()
             ProfileAction(Icons.Filled.Search, "Search", Modifier.weight(1f)) {
@@ -194,7 +199,7 @@ private fun ProfileAction(
     Column(
         modifier
             .clickable { onClick() }
-            .padding(vertical = 14.dp),
+            .padding(vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Icon(icon, label, tint = GoldDeep, modifier = Modifier.size(20.dp))
