@@ -782,8 +782,25 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                     }
                 }
                 /* tap zones: left = previous, right = next — they fill the
-                   middle area only, so header + reply stay tappable */
-                Row(Modifier.weight(1f).fillMaxWidth()) {
+                   middle area only, so header + reply stay tappable.
+                   Swipe DOWN anywhere here closes the viewer (WhatsApp);
+                   vertical swipes never close on their own. */
+                var closeDrag by remember { mutableStateOf(0f) }
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .pointerInput("close") {
+                            detectVerticalDragGestures(
+                                onDragEnd = {
+                                    if (closeDrag > 130f) nav.popBackStack()
+                                    closeDrag = 0f
+                                },
+                            ) { _, amount ->
+                                closeDrag += amount
+                            }
+                        },
+                ) {
                     Box(
                         Modifier
                             .weight(1f)

@@ -50,6 +50,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -292,14 +293,22 @@ private fun CallAction(
         Box(
             Modifier
                 .size(64.dp)
+                .shadow(6.dp, CircleShape)
                 .clip(CircleShape)
                 .background(
-                    when {
-                        active -> Gold
-                        else -> Color(0x2EFFFFFF)
+                    if (active) {
+                        Brush.verticalGradient(
+                            listOf(
+                                androidx.compose.ui.graphics.lerp(Gold, Color.White, 0.3f),
+                                Gold,
+                                androidx.compose.ui.graphics.lerp(Gold, Color.Black, 0.2f),
+                            ),
+                        )
+                    } else {
+                        Brush.verticalGradient(listOf(Color(0x42FFFFFF), Color(0x1AFFFFFF)))
                     },
                 )
-                .border(1.dp, Color(0x33FFFFFF), CircleShape)
+                .border(1.dp, Color.White.copy(alpha = 0.33f), CircleShape)
                 .clickable(enabled = enabled) { haptics.tap(); onClick() },
             contentAlignment = Alignment.Center,
         ) {
@@ -492,11 +501,22 @@ private fun CallCircle(
     icon: @Composable () -> Unit,
 ) {
     val haptics = rememberHaptics()
+    // 3D: soft drop shadow + top-lit gradient so the circle reads raised.
     Box(
         Modifier
             .size(size)
+            .shadow(7.dp, CircleShape)
             .clip(CircleShape)
-            .background(color)
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        androidx.compose.ui.graphics.lerp(color, Color.White, 0.28f),
+                        color,
+                        androidx.compose.ui.graphics.lerp(color, Color.Black, 0.18f),
+                    ),
+                ),
+            )
+            .border(1.dp, Color.White.copy(alpha = 0.35f), CircleShape)
             .clickable {
                 haptics.confirm()
                 onClick()
@@ -521,14 +541,28 @@ private fun StripAction(
         Box(
             Modifier
                 .size(46.dp)
+                .shadow(5.dp, CircleShape)
                 .clip(CircleShape)
                 .background(
                     when {
-                        danger -> Red
-                        active -> Gold
-                        else -> Color(0x26FFFFFF)
+                        danger -> Brush.verticalGradient(
+                            listOf(
+                                androidx.compose.ui.graphics.lerp(Red, Color.White, 0.28f),
+                                Red,
+                                androidx.compose.ui.graphics.lerp(Red, Color.Black, 0.2f),
+                            ),
+                        )
+                        active -> Brush.verticalGradient(
+                            listOf(
+                                androidx.compose.ui.graphics.lerp(Gold, Color.White, 0.3f),
+                                Gold,
+                                androidx.compose.ui.graphics.lerp(Gold, Color.Black, 0.2f),
+                            ),
+                        )
+                        else -> Brush.verticalGradient(listOf(Color(0x3DFFFFFF), Color(0x14FFFFFF)))
                     },
-                ),
+                )
+                .border(1.dp, Color.White.copy(alpha = 0.3f), CircleShape),
             contentAlignment = Alignment.Center,
         ) {
             Icon(

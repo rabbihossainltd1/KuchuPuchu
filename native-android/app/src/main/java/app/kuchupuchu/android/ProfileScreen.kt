@@ -129,10 +129,6 @@ fun ProfileScreen(nav: NavController, userId: String) {
             Text(u.optText("displayName").ifBlank { "—" }, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
             val uname = u.optText("username")
             if (uname.isNotBlank()) Text("@$uname", fontSize = 13.5.sp, color = Muted)
-            if (u.optBoolean("online")) {
-                Spacer(Modifier.height(2.dp))
-                Text("online", fontSize = 12.5.sp, color = Green)
-            }
             val about = u.optText("about")
             if (about.isNotBlank()) {
                 Spacer(Modifier.height(6.dp))

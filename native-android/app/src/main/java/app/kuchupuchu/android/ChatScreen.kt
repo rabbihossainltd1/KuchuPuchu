@@ -50,6 +50,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
@@ -702,40 +703,54 @@ fun ChatScreen(nav: NavController, convId: String) {
     ) {
         /* ---------------- top bar (or selection bar) ---------------- */
         if (selected.isNotEmpty()) {
+            // WhatsApp reference: back arrow, count, then the action icons.
             Row(
                 Modifier
                     .fillMaxWidth()
                     .background(Cream)
-                    .padding(horizontal = 4.dp, vertical = 6.dp),
+                    .padding(horizontal = 2.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = { selected.clear() }) {
-                    Icon(Icons.Filled.Close, "Clear selection", tint = Ink)
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink)
                 }
                 Text(
-                    "${selected.size} selected",
-                    fontSize = 16.sp,
+                    "${selected.size}",
+                    fontSize = 19.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = Ink,
-                    modifier = Modifier.weight(1f),
                 )
-                if (single) {
-                    IconButton(onClick = { forwarding = true }) {
-                        Icon(Icons.AutoMirrored.Filled.Send, "Forward", tint = GoldDeep, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.weight(1f))
+                // Copy (texts), Forward, Unsend (own, single), Delete for me.
+                if (selectedMessages().any { it.optString("kind") == "TEXT" && it.optText("body").isNotBlank() }) {
+                    IconButton(onClick = {
+                        val text = selectedMessages()
+                            .filter { it.optString("kind") == "TEXT" }
+                            .joinToString("\n") { it.optText("body") }
+                        val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        cm.setPrimaryClip(android.content.ClipData.newPlainText("KuchuPuchu", text))
+                        android.widget.Toast.makeText(ctx, "Copied", android.widget.Toast.LENGTH_SHORT).show()
+                        selected.clear()
+                    }) {
+                        Icon(Icons.Filled.ContentCopy, "Copy", tint = Ink, modifier = Modifier.size(21.dp))
                     }
-                    if (singleMsg != null && canEdit(singleMsg)) {
-                        IconButton(onClick = { editing = singleMsg; selected.clear() }) {
-                            Icon(Icons.Filled.Edit, "Edit", tint = GoldDeep, modifier = Modifier.size(22.dp))
-                        }
+                }
+                IconButton(onClick = { forwarding = true }) {
+                    Icon(Icons.AutoMirrored.Filled.Send, "Forward", tint = GoldDeep, modifier = Modifier.size(21.dp))
+                }
+                if (single && singleMsg != null && canEdit(singleMsg)) {
+                    IconButton(onClick = { editing = singleMsg; selected.clear() }) {
+                        Icon(Icons.Filled.Edit, "Edit", tint = GoldDeep, modifier = Modifier.size(21.dp))
                     }
-                    if (singleMsg != null && singleMsg.optString("senderId") == Store.myId() && !pendingEchoOf(singleMsg)) {
-                        IconButton(onClick = { unsendSelected() }) {
-                            Icon(Icons.Filled.DeleteForever, "Unsend for everyone", tint = Red, modifier = Modifier.size(22.dp))
-                        }
+                }
+                if (single && singleMsg != null && singleMsg.optString("senderId") == Store.myId() && !pendingEchoOf(singleMsg)) {
+                    IconButton(onClick = { unsendSelected() }) {
+                        Icon(Icons.Filled.DeleteForever, "Unsend for everyone", tint = Red, modifier = Modifier.size(21.dp))
                     }
                 }
                 IconButton(onClick = { deleteForMe() }) {
-                    Icon(Icons.Filled.Delete, "Delete for me", tint = Red, modifier = Modifier.size(22.dp))
+                    Icon(Icons.Filled.Delete, "Delete for me", tint = Red, modifier = Modifier.size(21.dp))
                 }
             }
         } else {
@@ -762,7 +777,10 @@ fun ChatScreen(nav: NavController, convId: String) {
             ) {
             KpAvatar(title, avatarUrl, 40.dp)
             Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
+            // Name vertically centred on the avatar (WhatsApp): the block is
+            // nudged down half the subtitle height, so the NAME lands on the
+            // avatar's middle line and "online/typing" hangs just below.
+            Column(Modifier.weight(1f).offset(y = 4.dp)) {
                 Text(
                     title,
                     fontSize = 16.sp,
@@ -890,19 +908,28 @@ fun ChatScreen(nav: NavController, convId: String) {
                 contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 10.dp),
             ) {
                 items(msgs, key = { it.optString("clientId").ifBlank { it.optString("id") } }) { m ->
-                    MessageRow(
-                        m,
-                        isGroup,
-                        Store.myId(),
-                        otherReadAt,
-                        player,
-                        selectedIds = selected.toList(),
-                        onToggleSelect = { msg ->
-                            val id = msg.optString("id")
-                            if (id in selected) selected.remove(id) else selected.add(id)
-                        },
-                        onOpenImage = { msg -> viewerMsg = msg },
-                    )
+                    // WhatsApp-style selection: the whole ROW gets a translucent
+                    // highlight strip, edge to edge — not just the bubble.
+                    val rowSelected = m.optString("id") in selected
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(if (rowSelected) Gold.copy(alpha = 0.16f) else Color.Transparent),
+                    ) {
+                        MessageRow(
+                            m,
+                            isGroup,
+                            Store.myId(),
+                            otherReadAt,
+                            player,
+                            selectedIds = selected.toList(),
+                            onToggleSelect = { msg ->
+                                val id = msg.optString("id")
+                                if (id in selected) selected.remove(id) else selected.add(id)
+                            },
+                            onOpenImage = { msg -> viewerMsg = msg },
+                        )
+                    }
                 }
                 items(
                     pending.filter { p ->
@@ -1401,23 +1428,19 @@ private object ImageRatios {
     }
 }
 
-/** "last seen 5 minutes ago" style subtitle from the user's last activity. */
+/** "last seen 2:45 pm" — just the clock time, like the reference. */
 private fun otherLastSeen(iso: String?): String {
     if (iso.isNullOrBlank()) return " "
-    val t = runCatching { java.time.Instant.parse(iso).toEpochMilli() }.getOrNull() ?: return " "
-    val mins = (System.currentTimeMillis() - t) / 60_000
+    val t = runCatching { java.time.Instant.parse(iso) }.getOrNull() ?: return " "
+    val z = t.atZone(java.time.ZoneId.systemDefault())
+    val now = java.time.ZonedDateTime.now()
+    val h12 = z.hour % 12; val hh = if (h12 == 0) 12 else h12
+    val ampm = if (z.hour < 12) "am" else "pm"
+    val time = "$hh:%02d $ampm".format(z.minute)
     return when {
-        mins < 1 -> "last seen just now"
-        mins < 60 -> "last seen ${mins} minute${if (mins == 1L) "" else "s"} ago"
-        mins < 60 * 24 -> {
-            val h = mins / 60
-            "last seen ${h} hour${if (h == 1L) "" else "s"} ago"
-        }
-        mins < 60L * 24 * 7 -> {
-            val d = mins / (60 * 24)
-            "last seen ${d} day${if (d == 1L) "" else "s"} ago"
-        }
-        else -> "last seen " + listStamp(iso)
+        z.toLocalDate() == now.toLocalDate() -> "last seen $time"
+        z.toLocalDate() == now.toLocalDate().minusDays(1) -> "last seen yesterday $time"
+        else -> "last seen ${z.dayOfMonth} ${z.month.toString().take(3).lowercase()}"
     }
 }
 
@@ -1668,6 +1691,7 @@ private fun MessageRow(
                 Modifier
                     .widthIn(min = 72.dp, max = 280.dp)
                     .wrapContentWidth()
+                    .shadow(3.dp, RoundedCornerShape(14.dp))
                     .clip(
                         RoundedCornerShape(
                             topStart = 16.dp,
@@ -1676,7 +1700,7 @@ private fun MessageRow(
                             bottomEnd = if (mine) 5.dp else 16.dp,
                         ),
                     )
-                    .background(if (mine) goldFill() else Brush.linearGradient(listOf(Card, Card)))
+                    .background(if (mine) goldFill() else Brush.verticalGradient(listOf(Color.White, Color(0xFFF2EDE2))))
                     .combinedClickable(
                         onClick = { if (selectedIds.isNotEmpty() && !pendingEcho) onToggleSelect(m) },
                         onLongClick = { if (!pendingEcho) onToggleSelect(m) },
@@ -1756,8 +1780,8 @@ private fun ImageMessageRow(
     ) {
         Box(
             Modifier
-                .widthIn(max = 260.dp)
-                .then(if (m.optString("id") in selectedIds) Modifier.border(2.dp, Gold, RoundedCornerShape(14.dp)) else Modifier)
+                .widthIn(max = 225.dp)
+                .shadow(5.dp, RoundedCornerShape(14.dp))
                 .clip(RoundedCornerShape(12.dp))
                 .combinedClickable(
                     onClick = {
@@ -1823,6 +1847,7 @@ private fun ImageBubble(m: JSONObject, mine: Boolean) {
     Box(
         Modifier
             .widthIn(max = 225.dp)
+            .shadow(5.dp, RoundedCornerShape(14.dp))
             .then(
                 if (ratio > 0f) {
                     Modifier
@@ -2160,8 +2185,9 @@ private fun CallLogBubble(m: JSONObject, mine: Boolean, pendingEcho: Boolean) {
         Row(
             Modifier
                 .widthIn(max = 260.dp)
+                .shadow(4.dp, RoundedCornerShape(16.dp))
                 .clip(RoundedCornerShape(16.dp))
-                .background(if (mine) goldFill() else Brush.linearGradient(listOf(Card, Card)))
+                .background(if (mine) goldFill() else Brush.verticalGradient(listOf(Color.White, Color(0xFFF2EDE2))))
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
