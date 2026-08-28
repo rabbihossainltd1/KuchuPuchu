@@ -78,8 +78,9 @@ fun CallGate() {
         MainActivity.current?.window?.navigationBarColor = android.graphics.Color.parseColor("#171412")
     }
 
+    val connected = call.status == "ACTIVE" || engine.hasRemote
     when {
-        call.status == "ACTIVE" ->
+        connected ->
             if (call.kind == "VIDEO") InCallVideoScreen(call) else InCallVoiceScreen(call)
         call.incoming && call.status == "RINGING" -> IncomingCallScreen(call)
         call.kind == "VIDEO" -> OutgoingVideoScreen(call)

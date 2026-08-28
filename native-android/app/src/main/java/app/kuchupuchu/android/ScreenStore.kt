@@ -20,6 +20,12 @@ object ScreenStore {
     /** When set, ChatScreen opens in-chat search for this conversation. */
     var pendingChatSearch: String? = null
 
+    /** Bumped on FCM so an open chat refreshes immediately. */
+    var poke by mutableStateOf(0)
+    fun pokeInbox() {
+        poke++
+    }
+
     val convs = mutableStateListOf<JSONObject>()
     var convsRaw by mutableStateOf("")
     var convsLoaded by mutableStateOf(false)

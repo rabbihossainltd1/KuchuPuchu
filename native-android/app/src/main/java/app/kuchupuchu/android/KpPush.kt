@@ -100,8 +100,8 @@ class KpPushService : FirebaseMessagingService() {
 
     private fun handleMessage(data: Map<String, String>) {
         val convoId = data["convoId"] ?: return
+        ScreenStore.pokeInbox()
         if (Store.foreground && Store.route == "chat/$convoId") {
-            // already watching this chat — just the soft receive tone
             runCatching { KpSounds.receive(this) }
             return
         }

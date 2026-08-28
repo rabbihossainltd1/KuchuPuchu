@@ -38,33 +38,45 @@ object FilesUtil {
      * API 28+. `maxChars` defaults to the 420KB inline-photo budget; avatars
      * pass the worker's 200KB avatar budget.
      */
-    fun imageToDataUrl(uri: Uri, ctx: Context, maxSide: Int = 1280, maxChars: Int = 420_000): String? = runCatching {
-        val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
-        var bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-        if (bmp == null && android.os.Build.VERSION.SDK_INT >= 28) {
-            // HEIC/HEIF and other formats BitmapFactory can't read directly
-            val source = android.graphics.ImageDecoder.createSource(bytes)
-            bmp = android.graphics.ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
-                decoder.setTargetSampleSize(1)
+    fun imageToJpeg(uri: Uri, ctx: Context, maxSide: Int = 960, maxBytes: Int = 220_000): ByteArray? = runCatching {
+        var bmp: Bitmap? = null
+        if (android.os.Build.VERSION.SDK_INT >= 28) {
+            val source = android.graphics.ImageDecoder.createSource(ctx.contentResolver, uri)
+            bmp = android.graphics.ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                val w = info.size.width.coerceAtLeast(1)
+                val h = info.size.height.coerceAtLeast(1)
+                val sample = maxOf(1, maxOf(w, h) / maxSide)
+                decoder.setTargetSampleSize(sample)
+                decoder.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
             }
         }
-        if (bmp == null) return null
+        if (bmp == null) {
+            val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+            bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        }
+        var picture = bmp ?: return null
+        if (picture.config != Bitmap.Config.ARGB_8888) {
+            picture = picture.copy(Bitmap.Config.ARGB_8888, false)
+        }
         var scale = 1
-        while (bmp.width / scale > maxSide || bmp.height / scale > maxSide) scale *= 2
-        if (scale > 1) bmp = Bitmap.createScaledBitmap(bmp, bmp.width / scale, bmp.height / scale, true)
-        var quality = 82
-        var out: ByteArray
-        var dataUrl: String
+        while (picture.width / scale > maxSide || picture.height / scale > maxSide) scale *= 2
+        if (scale > 1) picture = Bitmap.createScaledBitmap(picture, picture.width / scale, picture.height / scale, true)
+        var quality = 78
+        var out = ByteArray(0)
         while (true) {
             val buf = ByteArrayOutputStream()
-            bmp.compress(Bitmap.CompressFormat.JPEG, quality, buf)
+            if (!picture.compress(Bitmap.CompressFormat.JPEG, quality, buf)) break
             out = buf.toByteArray()
-            dataUrl = "data:image/jpeg;base64," + Base64.encodeToString(out, Base64.NO_WRAP)
-            if (dataUrl.length <= maxChars || quality <= 30) break
-            quality -= 12
+            if (out.size <= maxBytes || quality <= 28) break
+            quality -= 10
         }
-        dataUrl
+        out.takeIf { it.isNotEmpty() }
     }.getOrNull()
+
+    fun imageToDataUrl(uri: Uri, ctx: Context, maxSide: Int = 960, maxChars: Int = 300_000): String? {
+        val jpeg = imageToJpeg(uri, ctx, maxSide, maxBytes = maxChars * 3 / 4) ?: return null
+        return "data:image/jpeg;base64," + Base64.encodeToString(jpeg, Base64.NO_WRAP)
+    }
 
     /** Reads any picked document's bytes + guessed mime. */
     fun readDocument(ctx: Context, uri: Uri): Pair<String, ByteArray>? = runCatching {

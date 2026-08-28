@@ -52,6 +52,8 @@ fun StatusPhotoScreen(nav: NavController) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var dataUrl by remember { mutableStateOf<String?>(null) }
+    var videoUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var videoSecs by remember { mutableStateOf(0) }
     var caption by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
@@ -60,9 +62,30 @@ fun StatusPhotoScreen(nav: NavController) {
         rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
             if (uri != null) {
                 scope.launch {
-                    val d = withContext(Dispatchers.IO) { FilesUtil.imageToDataUrl(uri, ctx) }
-                    if (d == null) error = "Could not read that photo."
-                    dataUrl = d
+                    val mime = ctx.contentResolver.getType(uri) ?: ""
+                    if (mime.startsWith("video")) {
+                        val secs = withContext(Dispatchers.IO) {
+                            val r = android.media.MediaMetadataRetriever()
+                            runCatching {
+                                r.setDataSource(ctx, uri)
+                                (r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L) / 1000
+                            }.getOrDefault(0L).also { runCatching { r.release() } }.toInt()
+                        }
+                        if (secs > 60) {
+                            error = "Video status can be at most 1 minute."
+                            videoUri = null
+                        } else {
+                            error = ""
+                            dataUrl = null
+                            videoUri = uri
+                            videoSecs = secs
+                        }
+                    } else {
+                        videoUri = null
+                        val d = withContext(Dispatchers.IO) { FilesUtil.imageToDataUrl(uri, ctx) }
+                        if (d == null) error = "Could not read that photo."
+                        dataUrl = d
+                    }
                 }
             }
         }
@@ -75,7 +98,7 @@ fun StatusPhotoScreen(nav: NavController) {
             IconButton(onClick = { nav.popBackStack() }) {
                 Icon(Icons.Filled.Close, "Close", tint = Ink)
             }
-            Text("Photo status", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
+            Text("Photo or video status", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
         }
         Box(
             Modifier
@@ -98,11 +121,14 @@ fun StatusPhotoScreen(nav: NavController) {
                         modifier = Modifier.size(44.dp),
                     )
                     Spacer(Modifier.height(8.dp))
-                    Text("Tap below to pick a photo", color = Muted, fontSize = 14.sp)
+                    Text("Tap below to pick a photo or a video (max 1 min)", color = Muted, fontSize = 14.sp)
                 }
             }
         }
-        if (dataUrl != null) {
+        if (videoUri != null) {
+            Text("Video · ${videoSecs}s", color = Muted, modifier = Modifier.padding(horizontal = 16.dp))
+        }
+        if (dataUrl != null || videoUri != null) {
             OutlinedTextField(
                 caption,
                 { caption = it.take(200) },

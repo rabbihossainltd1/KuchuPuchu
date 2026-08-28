@@ -1152,7 +1152,15 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       row.user_id,
     ));
     if (row.user_id !== uid && !isContact) fail(403, "Not allowed.");
-    return dataUrlResponse(row.media);
+    if (row.media.startsWith("data:")) return dataUrlResponse(row.media);
+    if (!env.MEDIA) fail(501, "File storage is not configured yet.");
+    const object = await env.MEDIA.get(row.media);
+    if (!object) fail(404, "Media not found.");
+    const headers = new Headers();
+    object.writeHttpMetadata(headers);
+    headers.set("content-type", object.httpMetadata?.contentType ?? (row.kind === "VIDEO" ? "video/mp4" : "image/jpeg"));
+    headers.set("cache-control", "private, max-age=604800");
+    return new Response(object.body, { headers });
   }
 
   const msgMediaMatch = path.match(/^\/api\/messages\/([^/]+)\/media$/);

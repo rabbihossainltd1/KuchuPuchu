@@ -236,20 +236,17 @@ fun ChatScreen(nav: NavController, convId: String) {
     }
 
     /* single stable background refresh loop while this chat is open */
+    LaunchedEffect(convId, ScreenStore.poke) {
+        if (Store.route == "chat/$convId") refreshMessages()
+    }
+
     LaunchedEffect(convId) {
-        var gap = 4_000L
         while (true) {
             if (Store.foreground && Store.route == "chat/$convId") {
-                val before = ScreenStore.msgsVersion.value
                 refreshMessages()
-                delay(gap)
-                gap = if (ScreenStore.msgsVersion.value == before) {
-                    (gap + 2_000L).coerceAtMost(12_000L)
-                } else {
-                    4_000L
-                }
-            } else {
                 delay(1_500)
+            } else {
+                delay(2_000)
             }
         }
     }
@@ -289,7 +286,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .put("id", clientId)
                 .put("clientId", clientId)
                 .put("senderId", Store.myId())
-                .put("kind", "FILE")
+                .put("kind", "IMAGE")
                 .put("body", "")
                 .put("hasImage", true)
                 .put("fileName", "photo.jpg")
@@ -299,16 +296,23 @@ fun ChatScreen(nav: NavController, convId: String) {
         )
         scope.launch {
             listState.animateScrollToItem(msgs.size + pending.size - 1)
+            val jpeg = withContext(Dispatchers.IO) {
+                val b64 = dataUrl.substringAfter(",", "")
+                runCatching { android.util.Base64.decode(b64, android.util.Base64.DEFAULT) }.getOrNull()
+            }
+            if (jpeg == null || jpeg.isEmpty()) {
+                error = "Could not read that photo."
+                pending.find { it.optString("clientId") == clientId }?.put("failed", true)
+                return@launch
+            }
             try {
-                val jpeg = withContext(Dispatchers.IO) {
-                    val b64 = dataUrl.substringAfter(",", "")
-                    android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
-                }
                 val up = withContext(Dispatchers.IO) { Api.upload("photo.jpg", "image/jpeg", jpeg) }
+                val key = up.optString("fileKey")
+                if (key.isBlank()) throw ApiException(500, "Upload returned no file key.")
                 val payload =
                     JSONObject()
                         .put("kind", "FILE")
-                        .put("fileKey", up.optString("fileKey"))
+                        .put("fileKey", key)
                         .put("fileName", "photo.jpg")
                         .put("fileType", "image/jpeg")
                         .put("fileSize", jpeg.size)
@@ -318,7 +322,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                 refreshMessages(forceScroll = true)
             } catch (e: Exception) {
                 try {
-                    val payload = JSONObject().put("kind", "IMAGE").put("imageData", dataUrl).put("clientId", clientId)
+                    val small = if (dataUrl.length > 400_000) {
+                        "data:image/jpeg;base64," + android.util.Base64.encodeToString(jpeg, android.util.Base64.NO_WRAP)
+                    } else dataUrl
+                    val payload = JSONObject().put("kind", "IMAGE").put("imageData", small).put("clientId", clientId)
                     withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
                     KpSounds.send(ctx)
                     refreshMessages(forceScroll = true)

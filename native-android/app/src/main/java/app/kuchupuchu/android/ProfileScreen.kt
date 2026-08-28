@@ -1,6 +1,7 @@
 package app.kuchupuchu.android
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -158,16 +159,17 @@ private fun ProfileAction(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    androidx.compose.material3.TextButton(
-        onClick = onClick,
-        modifier = modifier
-            .height(52.dp)
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(GoldSoft),
+    Column(
+        modifier
+            .padding(horizontal = 4.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(GoldSoft)
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(icon, label, tint = GoldDeep)
-        Spacer(Modifier.width(6.dp))
-        Text(label, color = GoldDeep, fontWeight = FontWeight.SemiBold)
+        Icon(icon, label, tint = GoldDeep, modifier = Modifier.size(28.dp))
+        Spacer(Modifier.height(6.dp))
+        Text(label, color = GoldDeep, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
     }
 }

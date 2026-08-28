@@ -123,22 +123,15 @@ class CallEngine(private val app: Application) {
         poll?.cancel()
         poll =
             scope.launch {
-                var idle = 1500L
                 while (isActive) {
-                    val had = active != null
                     tick()
-                    val busy = active != null
                     delay(
                         when {
-                            busy -> 700L
-                            Store.foreground -> {
-                                idle = if (had || busy) 1500L else (idle + 500L).coerceAtMost(8_000L)
-                                idle
-                            }
-                            else -> (idle + 1_000L).coerceAtMost(8_000L).also { idle = it }
+                            active != null -> 700L
+                            Store.foreground -> 1500L
+                            else -> 4000L
                         },
                     )
-                    if (busy) idle = 1500L
                 }
             }
     }
@@ -225,6 +218,9 @@ class CallEngine(private val app: Application) {
         }
         val other = next.optJSONObject("other") ?: JSONObject()
         val incoming = next.optBoolean("incoming")
+        if (!incoming && status == "RINGING" && next.optString("answerSdp").isNotBlank()) {
+            status = "ACTIVE"
+        }
         val suppressed = isIncomingSuppressed()
         val autoAnswer = incoming && status == "RINGING" && (pendingAccept || suppressed)
         val ui =
@@ -882,6 +878,22 @@ private suspend fun PeerConnection.setLocalDescriptionAwait(sdp: SessionDescript
     }
 
 private suspend fun PeerConnection.setRemoteDescriptionAwait(sdp: SessionDescription): Unit =
+    suspendCoroutine { cont ->
+        setRemoteDescription(
+            object : SdpObserver {
+                override fun onCreateSuccess(p0: SessionDescription?) {}
+                override fun onSetSuccess() {
+                    cont.resume(Unit)
+                }
+                override fun onCreateFailure(p0: String?) {}
+                override fun onSetFailure(error: String?) {
+                    cont.resumeWithException(RuntimeException("setRemoteDescription: ${error ?: "failed"}"))
+                }
+            },
+            sdp,
+        )
+    }
+(sdp: SessionDescription): Unit =
     suspendCoroutine { cont ->
         setRemoteDescription(
             object : SdpObserver {

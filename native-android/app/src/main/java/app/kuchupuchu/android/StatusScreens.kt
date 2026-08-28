@@ -471,9 +471,10 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
             runCatching { withContext(Dispatchers.IO) { Api.post("/api/statuses/${s.optString("id")}/view") } }
         }
         progress = 0f
+        val hold = if (s.optString("kind") == "VIDEO") 60_000L else 5_000L
         val start = System.currentTimeMillis()
-        while (System.currentTimeMillis() - start < 5000) {
-            progress = (System.currentTimeMillis() - start) / 5000f
+        while (System.currentTimeMillis() - start < hold) {
+            progress = (System.currentTimeMillis() - start) / hold.toFloat()
             delay(50)
         }
         if (idx + 1 < statuses.size) {
@@ -496,19 +497,23 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
         if (reply.isBlank() || user == null || isMine) return
         val target = user.optString("id")
         val text = reply.trim()
+        val snippet = statuses.getOrNull(idx)?.optString("text")?.take(40).orEmpty()
         scope.launch {
             try {
                 val conv = withContext(Dispatchers.IO) {
                     Api.post("/api/conversations", JSONObject().put("userId", target))
                 }
+                val cid = conv.optJSONObject("conversation")?.optString("id").orEmpty()
+                if (cid.isBlank()) throw Exception("Couldn't open the chat.")
+                val body = if (snippet.isBlank()) "↩️ $text" else "↩️ $snippet\n$text"
                 withContext(Dispatchers.IO) {
-                    Api.post(
-                        "/api/conversations/${conv.optJSONObject("conversation")?.optString("id")}/messages",
-                        JSONObject().put("body", text),
-                    )
+                    Api.post("/api/conversations/$cid/messages", JSONObject().put("body", body))
                 }
                 reply = ""
-            } catch (_: Exception) {
+                replyError = ""
+                replyFocused = false
+            } catch (e: Exception) {
+                replyError = e.message ?: "Reply didn't send. Try again."
             }
         }
     }
@@ -554,13 +559,17 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
             val s = statuses[minOf(idx, statuses.size - 1)]
 
             /* background: photo or gradient text card */
-            if (s.optString("kind") == "IMAGE") {
-                KpNetImage(
-                    "${Api.BASE}/api/statuses/${s.optString("id")}/media",
-                    "Status photo",
-                    Modifier.fillMaxSize(),
-                    androidx.compose.ui.layout.ContentScale.Fit,
-                )
+            if (s.optString("kind") == "IMAGE" || s.optString("kind") == "VIDEO") {
+                if (s.optString("kind") == "VIDEO") {
+                    StatusVideoPlayer("${Api.BASE}/api/statuses/${s.optString("id")}/media")
+                } else {
+                    KpNetImage(
+                        "${Api.BASE}/api/statuses/${s.optString("id")}/media",
+                        "Status photo",
+                        Modifier.fillMaxSize(),
+                        androidx.compose.ui.layout.ContentScale.Fit,
+                    )
+                }
                 Box(Modifier.fillMaxSize().background(Color(0x66000000)))
             } else {
                 val gradients = mapOf(
@@ -785,6 +794,37 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
             },
         )
     }
+}
+
+@Composable
+private fun StatusVideoPlayer(url: String) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var path by remember(url) { mutableStateOf<String?>(null) }
+    LaunchedEffect(url) {
+        path = withContext(Dispatchers.IO) {
+            runCatching {
+                val bytes = Api.download(url)
+                val f = java.io.File(ctx.cacheDir, "status_${url.hashCode()}.mp4")
+                f.writeBytes(bytes)
+                f.absolutePath
+            }.getOrNull()
+        }
+    }
+    if (path == null) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = Gold)
+        }
+        return
+    }
+    androidx.compose.ui.viewinterop.AndroidView(
+        factory = { c ->
+            android.widget.VideoView(c).apply {
+                setVideoPath(path)
+                setOnPreparedListener { it.isLooping = false; start() }
+            }
+        },
+        modifier = Modifier.fillMaxSize(),
+    )
 }
 
 private fun progressTo(i: Int, current: Int, p: Float): Float =
