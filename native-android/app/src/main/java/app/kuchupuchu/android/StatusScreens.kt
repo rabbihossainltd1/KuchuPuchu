@@ -648,7 +648,14 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
             /* background: photo or gradient text card */
             if (s.optString("kind") == "IMAGE" || s.optString("kind") == "VIDEO") {
                 if (s.optString("kind") == "VIDEO") {
-                    StatusVideoPlayer("${Api.BASE}/api/statuses/${s.optString("id")}/media", onReady = { videoReady = true })
+                    // The clip PAUSES exactly when the progress clock pauses
+                    // (views sheet open / reply focused) — video and bar stay
+                    // in lock-step instead of the video running on.
+                    StatusVideoPlayer(
+                        "${Api.BASE}/api/statuses/${s.optString("id")}/media",
+                        paused = showViewers || replyFocused,
+                        onReady = { videoReady = true },
+                    )
                 } else {
                     KpNetImage(
                         "${Api.BASE}/api/statuses/${s.optString("id")}/media",
@@ -1021,7 +1028,7 @@ private fun ViewersSheet(
 }
 
 @Composable
-private fun StatusVideoPlayer(url: String, onReady: () -> Unit = {}) {
+private fun StatusVideoPlayer(url: String, paused: Boolean = false, onReady: () -> Unit = {}) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     var path by remember(url) { mutableStateOf<String?>(null) }
     // VideoView stretches video to its own bounds, so the view MUST match the
@@ -1067,6 +1074,15 @@ private fun StatusVideoPlayer(url: String, onReady: () -> Unit = {}) {
                         onReady()
                         start()
                     }
+                }
+            },
+            // Reconstructed on `paused` change: freeze the clip while the
+            // progress bar is paused (views sheet / keyboard), resume after.
+            update = { view ->
+                if (paused) {
+                    if (view.isPlaying) view.pause()
+                } else if (!view.isPlaying) {
+                    runCatching { view.start() }
                 }
             },
             modifier = Modifier.fillMaxSize().aspectRatio(aspect),

@@ -263,7 +263,20 @@ fun VoiceCallScreen(call: CallUi) {
                     enabled = connected,
                 ) { engine.notify("Adding calls is coming in a future update.") }
             }
-            Spacer(Modifier.height(22.dp))
+            // Screen share lives in the VOICE call too: sharing flips both
+            // phones onto the video screen automatically.
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                CallAction(
+                    Icons.Filled.ScreenShare,
+                    if (engine.sharing) "Stop share" else "Share screen",
+                    active = engine.sharing,
+                    enabled = connected,
+                ) { engine.toggleShare() }
+            }
+            Spacer(Modifier.height(16.dp))
             CallCircle(Red, 68.dp, onClick = { haptics.heavy(); engine.hangup() }) {
                 Icon(Icons.Filled.CallEnd, "End call", tint = Color.White, modifier = Modifier.size(29.dp))
             }
