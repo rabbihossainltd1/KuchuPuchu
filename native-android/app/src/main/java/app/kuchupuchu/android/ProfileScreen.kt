@@ -99,23 +99,24 @@ fun ProfileScreen(nav: NavController, userId: String) {
             }
         }
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 48.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(Card),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = {
+            ProfileAction(Icons.Filled.Call, "Voice", Modifier.weight(1f)) {
                 haptics.tap()
                 CallEngine.instance?.startCall(userId, "AUDIO", u.optString("displayName"), u.optString("avatarUrl"))
-            }, modifier = Modifier.size(56.dp)) {
-                Icon(Icons.Filled.Call, "Voice call", tint = Ink, modifier = Modifier.size(32.dp))
             }
-            IconButton(onClick = {
+            ProfileActionDivider()
+            ProfileAction(Icons.Filled.Videocam, "Video", Modifier.weight(1f)) {
                 haptics.tap()
                 CallEngine.instance?.startCall(userId, "VIDEO", u.optString("displayName"), u.optString("avatarUrl"))
-            }, modifier = Modifier.size(56.dp)) {
-                Icon(Icons.Filled.Videocam, "Video call", tint = Ink, modifier = Modifier.size(32.dp))
             }
-            IconButton(onClick = {
+            ProfileActionDivider()
+            ProfileAction(Icons.Filled.Search, "Search", Modifier.weight(1f)) {
                 haptics.tap()
                 scope.launch {
                     runCatching {
@@ -129,8 +130,6 @@ fun ProfileScreen(nav: NavController, userId: String) {
                         }
                     }
                 }
-            }, modifier = Modifier.size(56.dp)) {
-                Icon(Icons.Filled.Search, "Search", tint = Ink, modifier = Modifier.size(32.dp))
             }
         }
         Spacer(Modifier.height(16.dp))
@@ -175,6 +174,35 @@ fun ProfileScreen(nav: NavController, userId: String) {
             }
         }
     }
+}
+
+@Composable
+private fun ProfileAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier
+            .clickable { onClick() }
+            .padding(vertical = 14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(icon, label, tint = GoldDeep, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.height(5.dp))
+        Text(label, color = Muted, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+private fun ProfileActionDivider() {
+    androidx.compose.foundation.layout.Box(
+        Modifier
+            .width(1.dp)
+            .height(28.dp)
+            .background(Line),
+    )
 }
 
 private fun profileSnapshot(userId: String): JSONObject? {
