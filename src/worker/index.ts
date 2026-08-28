@@ -4,6 +4,13 @@
  * Files: R2 bucket `kp-media` (worker-mediated upload/download).
  */
 
+import {
+  BIO_MAX_LENGTH,
+  MESSAGE_MAX_LENGTH,
+  ONLINE_WINDOW_MS,
+  SESSION_TTL_MS,
+} from "../shared/constants.js";
+
 export type Env = {
   DB: D1Database;
   MEDIA?: R2Bucket;
@@ -213,6 +220,23 @@ let schemaReady = false;
 /** Throttles the expired-status reaper so reads stay read-only. */
 let nextStatusSweep = 0;
 
+/** Throttles the expired-session reaper the same way. */
+let nextSessionSweep = 0;
+
+/**
+ * Drops sessions past their expiry.
+ *
+ * Nothing ever deleted them: `sessions` only grew, one row per login for 90
+ * days, and every expired row still had to be read and rejected on the request
+ * path. Runs off the login/register writes so reads stay read-only, at most
+ * once an hour per isolate.
+ */
+async function sweepSessions(db: D1Database) {
+  if (Date.now() < nextSessionSweep) return;
+  nextSessionSweep = Date.now() + 3_600_000;
+  await run(db, "DELETE FROM sessions WHERE expires_at < ?", nowIso());
+}
+
 /**
  * DDL + idempotent migrations, sent as a single batch.
  *
@@ -353,9 +377,6 @@ async function requireUser(db: D1Database, request: Request) {
   }
   return row;
 }
-
-/** Presence window, shared with src/shared/constants.ts. */
-const ONLINE_WINDOW_MS = 90_000;
 
 const onlineNow = (row: { last_active_at: string }) =>
   Date.now() - Date.parse(row.last_active_at) < ONLINE_WINDOW_MS;
@@ -712,9 +733,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       "INSERT INTO sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
       await sha256Hex(token),
       userId,
-      new Date(Date.now() + 90 * 864e5).toISOString(),
+      new Date(Date.now() + SESSION_TTL_MS).toISOString(),
       created,
     );
+    ctx.waitUntil(sweepSessions(db));
     const row = (await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", userId))!;
     return json({ token, user: userSelf(row, true) }, 201);
   }
@@ -733,9 +755,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       "INSERT INTO sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
       await sha256Hex(token),
       row.id,
-      new Date(Date.now() + 90 * 864e5).toISOString(),
+      new Date(Date.now() + SESSION_TTL_MS).toISOString(),
       nowIso(),
     );
+    ctx.waitUntil(sweepSessions(db));
     await run(db, "UPDATE users SET last_active_at = ? WHERE id = ?", nowIso(), row.id);
     return json({ token, user: userSelf(row, true) });
   }
@@ -765,7 +788,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     }
     if (body.about !== undefined) {
       sets.push("about = ?");
-      values.push(String(body.about).slice(0, 160));
+      values.push(String(body.about).slice(0, BIO_MAX_LENGTH));
     }
     if (body.username !== undefined) {
       const username = slugFrom(String(body.username));
@@ -1194,7 +1217,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         fail(403, "You can't reach this player.", "BLOCKED");
       }
     }
-    const text = String(body.body || "").trim().slice(0, 4000);
+    const text = String(body.body || "").trim().slice(0, MESSAGE_MAX_LENGTH);
     // Whitelisted on purpose: SYSTEM and CALL bubbles are written by the server
     // only. Accepting an arbitrary client kind let anyone forge "Alice paid 500
     // coins" notices and fake call-log entries in someone else's chat.

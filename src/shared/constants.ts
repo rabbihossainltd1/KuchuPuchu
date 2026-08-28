@@ -1,3 +1,14 @@
+/**
+ * Limits and windows enforced by the worker.
+ *
+ * These values used to disagree with src/worker/index.ts, which hardcoded its
+ * own copies - a 2000-char message limit against the worker's 4000, a 280-char
+ * bio against 160, a 30-day session against 90, a 5-minute presence window
+ * against 90 seconds. Nothing imported this file, so the drift went unnoticed
+ * and anything built against it would have been wrong. The worker now imports
+ * these directly, so this file is the single source of truth.
+ */
+
 export const RANKS = [
   "BRONZE",
   "SILVER",
@@ -143,14 +154,14 @@ export const DEFAULT_MATCH_WEIGHTS = {
   mic: 4,
 } as const;
 
-export const ONLINE_WINDOW_MS = 5 * 60 * 1000;
-export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+export const ONLINE_WINDOW_MS = 90 * 1000;
+export const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 export const EMAIL_VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
 export const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
 export const DUO_REQUEST_TTL_MS = 12 * 60 * 60 * 1000;
 export const DISMISSAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-export const MESSAGE_MAX_LENGTH = 2000;
-export const BIO_MAX_LENGTH = 280;
+export const MESSAGE_MAX_LENGTH = 4000;
+export const BIO_MAX_LENGTH = 160;
 export const GIFT_MESSAGE_MAX = 140;
 
 export const DEFAULT_SETTINGS = {
