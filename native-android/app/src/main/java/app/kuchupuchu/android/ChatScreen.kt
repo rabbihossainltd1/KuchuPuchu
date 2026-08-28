@@ -62,8 +62,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.CheckMissed
+import androidx.compose.material.icons.filled.CallMissed
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Download

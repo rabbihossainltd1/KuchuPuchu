@@ -987,7 +987,7 @@ private fun ViewersSheet(
                         fontSize = 14.sp,
                         modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
                     )
-                    else {
+                    else -> {
                         LazyColumn(Modifier.heightIn(max = 420.dp)) {
                             items(viewers, key = { it.optJSONObject("user")?.optString("id") ?: it.toString() }) { v ->
                                 val u = v.optJSONObject("user")
