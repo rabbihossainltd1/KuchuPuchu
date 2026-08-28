@@ -146,7 +146,7 @@ fun ChatListScreen(nav: NavController) {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 TopTab(Icons.Filled.Chat, "Chats", tab == 0, unreadTotal, modifier = Modifier.weight(1f)) { haptics.tap(); tab = 0 }
@@ -209,56 +209,59 @@ private fun TopTab(
         else Modifier
     Row(
         modifier
-            .padding(4.dp)
+            .padding(3.dp)
             .clip(RoundedCornerShape(14.dp))
             .then(bg)
             .clickable { onClick() }
-            .padding(horizontal = 8.dp, vertical = 8.dp),
+            .padding(horizontal = 6.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
         if (label == "Status") {
             // WhatsApp-style status glyph (ring + dot), not a plain circle.
-            StatusGlyphIcon(tint, 26.dp)
+            StatusGlyphIcon(tint, 19.dp)
         } else {
             Icon(
                 icon,
                 contentDescription = label,
                 tint = tint,
-                modifier = Modifier.size(26.dp),
+                modifier = Modifier.size(19.dp),
             )
         }
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(6.dp))
         Text(
             label,
             color = tint,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-            fontSize = 15.sp,
+            fontSize = 14.sp,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Clip,
         )
         if (badge > 0) {
-            Spacer(Modifier.width(6.dp))
+            Spacer(Modifier.width(5.dp))
             Box(
                 Modifier
-                    .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
+                    .defaultMinSize(minWidth = 18.dp, minHeight = 18.dp)
                     .clip(CircleShape)
                     .background(Gold)
-                    .padding(horizontal = 5.dp, vertical = 2.dp),
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     if (badge > 99) "99+" else "$badge",
                     color = AmberInk,
-                    fontSize = 11.sp,
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    lineHeight = 11.sp,
+                    lineHeight = 10.sp,
                 )
             }
         }
         if (dot) {
-            Spacer(Modifier.width(6.dp))
+            Spacer(Modifier.width(5.dp))
             Box(
                 Modifier
-                    .size(10.dp)
+                    .size(8.dp)
                     .clip(CircleShape)
                     .background(Green),
             )
