@@ -257,6 +257,7 @@ let nextSessionSweep = 0;
 
 /** Throttles the disappearing-message reaper the same way. */
 let nextExpirySweep = 0;
+let nextTypingSweep = 0;
 
 /**
  * Drops sessions past their expiry.
@@ -323,6 +324,9 @@ async function ensureSchema(db: D1Database) {
       started_at TEXT, ended_at TEXT, created_at TEXT NOT NULL
     )`,
     `CREATE TABLE IF NOT EXISTS call_ice (call_id TEXT NOT NULL, sender_id TEXT NOT NULL, candidate_json TEXT NOT NULL, created_at TEXT NOT NULL)`,
+    // "X is typing" pings: one row per (conversation, user), overwritten on
+    // every keystroke batch and expired by age on read (no cleanup job).
+    `CREATE TABLE IF NOT EXISTS typing (conv_id TEXT NOT NULL, user_id TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (conv_id, user_id))`,
     `CREATE INDEX IF NOT EXISTS idx_members_user ON members(user_id)`,
     `CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conv_id, created_at)`,
     `CREATE INDEX IF NOT EXISTS idx_messages_media ON messages(media)`,
@@ -390,6 +394,7 @@ function userFrom(row: UserRow, online = false) {
     avatarUrl: row.avatar_url,
     about: row.about,
     online,
+    lastActiveAt: row.last_active_at,
   };
 }
 
@@ -1353,6 +1358,33 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   /* ---------- messages ---------- */
 
+  const typingMatch = path.match(/^\/api\/conversations\/([^/]+)\/typing$/);
+  if (typingMatch && method === "POST") {
+    const convId = typingMatch[1]!;
+    await requireMember(db, convId, uid);
+    const at = nowIso();
+    await run(
+      db,
+      `INSERT INTO typing (conv_id, user_id, at) VALUES (?, ?, ?)
+       ON CONFLICT (conv_id, user_id) DO UPDATE SET at = excluded.at`,
+      convId,
+      uid,
+      at,
+    );
+    // Cheap lazy expiry: pings older than a minute are dead weight.
+    if (Date.now() > nextTypingSweep) {
+      nextTypingSweep = Date.now() + 30_000;
+      ctx.waitUntil(
+        run(
+          db,
+          "DELETE FROM typing WHERE at < ?",
+          new Date(Date.now() - 60_000).toISOString(),
+        ).then(() => undefined),
+      );
+    }
+    return json({ ok: true });
+  }
+
   const msgMatch = path.match(/^\/api\/conversations\/([^/]+)\/messages$/);
   if (msgMatch && method === "GET") {
     const convId = msgMatch[1]!;
@@ -1463,7 +1495,19 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       uid,
     );
     const readAt = readRow && Number(readRow.unreadMembers || 0) === 0 ? readRow.r : null;
-    return json({ items, readAt: readAt ?? null });
+    // Typing indicator: the OTHER members' freshest ping, if any. The client
+    // treats it as typing while it is younger than ~6s.
+    const typingRow = await one<{ at: string }>(
+      db,
+      "SELECT at FROM typing WHERE conv_id = ? AND user_id != ? ORDER BY at DESC LIMIT 1",
+      convId,
+      uid,
+    );
+    return json({
+      items,
+      readAt: readAt ?? null,
+      typingAt: typingRow && Date.now() - Date.parse(typingRow.at) < 6_000 ? typingRow.at : null,
+    });
   }
 
   if (msgMatch && method === "POST") {

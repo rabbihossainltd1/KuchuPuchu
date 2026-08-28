@@ -29,11 +29,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
+import androidx.compose.material.icons.filled.Unarchive
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Search
@@ -59,7 +62,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -169,7 +174,7 @@ fun ChatListScreen(nav: NavController) {
 
             /* ---------- tab bodies ---------- */
             when (tab) {
-                0 -> ChatListBody(convs, loading, nav, ::refresh)
+                0 -> ArchivePullArea(nav) { ChatListBody(convs, loading, nav, ::refresh) }
                 1 -> StatusScreen(nav)
                 2 -> CallsScreen(nav)
             }
@@ -186,14 +191,121 @@ fun ChatListScreen(nav: NavController) {
                     .align(Alignment.BottomEnd)
                     .navigationBarsPadding()
                     .padding(20.dp)
-                    .size(60.dp)
+                    .size(52.dp)
                     .shadow(8.dp, CircleShape),
             ) {
                 Icon(
                     Icons.Filled.DriveFileRenameOutline,
                     contentDescription = "New chat",
-                    modifier = Modifier.size(28.dp),
+                    modifier = Modifier.size(24.dp),
                 )
+            }
+        }
+    }
+}
+
+/**
+ * Pull-down gesture on the chats list: pulling past ~110dp at the top and
+ * releasing opens the archived chats. A gold hint pill shows while pulling.
+ */
+@Composable
+private fun ArchivePullArea(nav: NavController, content: @Composable () -> Unit) {
+    val density = LocalDensity.current
+    val threshold = with(density) { 110.dp.toPx() }
+    var pull by remember { mutableStateOf(0f) }
+    val conn = remember {
+        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: androidx.compose.ui.geometry.Offset,
+                available: androidx.compose.ui.geometry.Offset,
+                source: androidx.compose.ui.input.nestedscroll.NestedScrollSource,
+            ): androidx.compose.ui.geometry.Offset {
+                // Leftover downward scroll = the list is already at its top.
+                if (available.y > 0f) pull = (pull + available.y).coerceAtMost(threshold * 1.5f)
+                return androidx.compose.ui.geometry.Offset.Zero
+            }
+
+            override suspend fun onPostFling(
+                consumed: androidx.compose.ui.unit.Velocity,
+                available: androidx.compose.ui.unit.Velocity,
+            ): androidx.compose.ui.unit.Velocity {
+                if (pull > threshold) nav.navigate("archive")
+                pull = 0f
+                return androidx.compose.ui.unit.Velocity.Zero
+            }
+        }
+    }
+    Box(Modifier.fillMaxSize().nestedScroll(conn)) {
+        content()
+        if (pull > threshold * 0.3f) {
+            Row(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 4.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(GoldSoft)
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Archive, null, tint = GoldDeep, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    if (pull > threshold) "Release for archived chats" else "Pull down for archived chats",
+                    fontSize = 12.sp,
+                    color = GoldDeep,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+    }
+}
+
+/** Archived chats — swipe a chat right in the main list to put it here. */
+@Composable
+fun ArchiveScreen(nav: NavController) {
+    val convs = ScreenStore.convs
+    val archived = convs.filter { ScreenStore.isArchived(it.optString("id")) }
+    val ctx = LocalContext.current
+    Column(Modifier.fillMaxSize().background(Cream).statusBarsPadding()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = { nav.popBackStack() }) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink)
+            }
+            Text("Archived", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
+            Spacer(Modifier.width(8.dp))
+            Text("(${archived.size})", fontSize = 15.sp, color = Muted)
+        }
+        if (archived.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                EmptyState(
+                    icon = Icons.Filled.Archive,
+                    title = "No archived chats",
+                    note = "Swipe a chat right to archive it",
+                )
+            }
+        } else {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(archived, key = { it.optString("id") }) { conv ->
+                    Row(Modifier.fillMaxWidth().height(76.dp)) {
+                        Box(Modifier.weight(1f)) { ConvCard(conv, nav) }
+                        IconButton(
+                            onClick = {
+                                ScreenStore.unarchiveConv(conv.optString("id"))
+                                android.widget.Toast.makeText(ctx, "Chat unarchived", android.widget.Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.align(Alignment.CenterVertically),
+                        ) {
+                            Icon(Icons.Filled.Unarchive, "Unarchive", tint = GoldDeep)
+                        }
+                    }
+                }
             }
         }
     }
@@ -283,7 +395,9 @@ private fun ChatListBody(
     nav: NavController,
     onChange: () -> Unit,
 ) {
-    if (convs.isEmpty()) {
+    // Archived chats live in their own list (pull down on this list to open).
+    val visible = convs.filter { !ScreenStore.isArchived(it.optString("id")) }
+    if (visible.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             if (loading) {
                 CircularProgressIndicator(color = Gold)
@@ -302,70 +416,106 @@ private fun ChatListBody(
         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        items(convs, key = { it.optString("id") }) { conv ->
+        items(visible, key = { it.optString("id") }) { conv ->
             SwipeConvRow(conv, nav, onChange)
         }
     }
 }
 
-/** One conversation card + swipe-to-reveal mute / delete actions. */
+/**
+ * One conversation card + bidirectional swipe:
+ *   swipe LEFT  → mute / delete (unchanged)
+ *   swipe RIGHT → archive (local — pull the list down to reach it)
+ */
 @Composable
 private fun SwipeConvRow(conv: JSONObject, nav: NavController, onChange: () -> Unit) {
     val scope = rememberCoroutineScope()
     val haptics = rememberHaptics()
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     val density = LocalDensity.current
     val actionWidth = with(density) { 136.dp.toPx() }
     var dragged by remember { mutableStateOf(0f) }
     val offset by animateFloatAsState(dragged, tween(160), label = "swipe")
-    val revealed = offset > actionWidth / 2
+    val revealedLeft = offset > actionWidth / 2   // card slid left → actions on the right
+    val revealedRight = offset < -actionWidth / 2 // card slid right → archive on the left
 
     Box(Modifier.fillMaxWidth().height(76.dp)) {
-        /* revealed actions behind the card */
-        Row(
-            Modifier
-                .matchParentSize()
-                .clip(RoundedCornerShape(16.dp))
-                .background(Line),
-        ) {
-            ActionSlot(
-                icon = if (conv.optBoolean("muted")) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
-                bg = GoldSoft,
-                tint = GoldDeep,
-                label = if (conv.optBoolean("muted")) "Unmute" else "Mute",
+        /* revealed actions: delete/mute sit on the RIGHT of the card,
+           archive sits on the LEFT */
+        Row(Modifier.matchParentSize()) {
+            // left slot (revealed by swiping right)
+            Row(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Line),
             ) {
-                haptics.confirm()
-                val id = conv.optString("id")
-                val next = !conv.optBoolean("muted")
-                ScreenStore.setMuted(id, next)
-                dragged = 0f
-                scope.launch {
-                    runCatching {
-                        withContext(Dispatchers.IO) {
-                            Api.post("/api/conversations/$id/mute", JSONObject().put("muted", next))
-                        }
-                    }.onFailure { ScreenStore.setMuted(id, !next) }
+                if (offset < 0f) {
+                    ActionSlot(
+                        icon = Icons.Filled.Archive,
+                        bg = Color(0xFFE7F0E7),
+                        tint = Color(0xFF2E7D32),
+                        label = "Archive",
+                    ) {
+                        haptics.confirm()
+                        ScreenStore.archiveConv(conv.optString("id"))
+                        android.widget.Toast.makeText(ctx, "Chat archived", android.widget.Toast.LENGTH_SHORT).show()
+                        dragged = 0f
+                        onChange()
+                    }
                 }
             }
-            ActionSlot(
-                icon = Icons.Filled.Delete,
-                bg = Color(0xFFFEE2E2),
-                tint = Red,
-                label = "Delete",
+            // right slot (revealed by swiping left)
+            Row(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Line),
             ) {
-                scope.launch {
-                    haptics.heavy()
-                    runCatching {
-                        withContext(Dispatchers.IO) {
-                            Api.delete("/api/conversations/${conv.optString("id")}")
+                if (offset >= 0f) {
+                    ActionSlot(
+                        icon = if (conv.optBoolean("muted")) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
+                        bg = GoldSoft,
+                        tint = GoldDeep,
+                        label = if (conv.optBoolean("muted")) "Unmute" else "Mute",
+                    ) {
+                        haptics.confirm()
+                        val id = conv.optString("id")
+                        val next = !conv.optBoolean("muted")
+                        ScreenStore.setMuted(id, next)
+                        dragged = 0f
+                        scope.launch {
+                            runCatching {
+                                withContext(Dispatchers.IO) {
+                                    Api.post("/api/conversations/$id/mute", JSONObject().put("muted", next))
+                                }
+                            }.onFailure { ScreenStore.setMuted(id, !next) }
                         }
                     }
-                    dragged = 0f
-                    onChange()
+                    ActionSlot(
+                        icon = Icons.Filled.Delete,
+                        bg = Color(0xFFFEE2E2),
+                        tint = Red,
+                        label = "Delete",
+                    ) {
+                        scope.launch {
+                            haptics.heavy()
+                            runCatching {
+                                withContext(Dispatchers.IO) {
+                                    Api.delete("/api/conversations/${conv.optString("id")}")
+                                }
+                            }
+                            dragged = 0f
+                            onChange()
+                        }
+                    }
                 }
             }
         }
 
-        /* the card itself, slid left by the swipe */
+        /* the card itself, slid by the swipe (either direction) */
         Box(
             Modifier
                 .offset { IntOffset(-offset.roundToInt(), 0) }
@@ -375,13 +525,20 @@ private fun SwipeConvRow(conv: JSONObject, nav: NavController, onChange: () -> U
                 .background(Card)
                 .pointerInput(conv.optString("id")) {
                     detectHorizontalDragGestures(
-                        onDragEnd = { dragged = if (dragged > actionWidth / 2) actionWidth else 0f },
+                        onDragEnd = {
+                            dragged =
+                                when {
+                                    dragged > actionWidth / 2 -> actionWidth
+                                    dragged < -actionWidth / 2 -> -actionWidth
+                                    else -> 0f
+                                }
+                        },
                     ) { _, dragAmount ->
-                        dragged = (dragged - dragAmount).coerceIn(0f, actionWidth)
+                        dragged = (dragged - dragAmount).coerceIn(-actionWidth, actionWidth)
                     }
                 },
         ) {
-            ConvCard(conv, nav, revealed) { if (revealed) dragged = 0f }
+            ConvCard(conv, nav, revealedLeft || revealedRight) { dragged = 0f }
         }
     }
 }

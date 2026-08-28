@@ -59,7 +59,6 @@ fun StatusPhotoScreen(nav: NavController) {
     var videoUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var videoSecs by remember { mutableStateOf(0) }
     var caption by remember { mutableStateOf("") }
-    var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
 
     val picker =
@@ -179,49 +178,58 @@ fun StatusPhotoScreen(nav: NavController) {
                 picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
             }
             if (dataUrl != null || videoUri != null) {
-                GoldBtn(if (busy) "…" else "Post", enabled = !busy) {
-                    busy = true
-                    scope.launch {
+                GoldBtn("Post") {
+                    // Snapshot everything, tell the user it's on its way, and
+                    // leave the screen IMMEDIATELY — the upload continues in
+                    // the background. Waiting on this screen felt frozen.
+                    val vUri = videoUri
+                    val img = dataUrl
+                    val secs = videoSecs
+                    val cap = caption.trim()
+                    android.widget.Toast.makeText(ctx, "Sharing status…", android.widget.Toast.LENGTH_SHORT).show()
+                    nav.popBackStack()
+                    ScreenStore.appScope.launch {
                         try {
-                            withContext(Dispatchers.IO) {
-                                val vUri = videoUri
-                                if (vUri != null) {
-                                    // Video goes to R2 as an object, not as a data
-                                    // URL - a minute of video is far past the inline
-                                    // budget the server allows.
-                                    val read = FilesUtil.readDocument(ctx, vUri)
-                                        ?: throw Exception("Could not read that video.")
-                                    val (name, bytes) = read
-                                    // Same ceiling the worker enforces on uploads;
-                                    // failing here says why instead of surfacing a
-                                    // bare "File too large" from the API.
-                                    if (bytes.size > 25 * 1024 * 1024) {
-                                        throw Exception("That video is over 25 MB. Pick a shorter one.")
-                                    }
-                                    val up = Api.upload(name.ifBlank { "status.mp4" }, "video/mp4", bytes)
-                                    Api.post(
-                                        "/api/statuses",
-                                        JSONObject()
-                                            .put("kind", "VIDEO")
-                                            .put("fileKey", up.optString("fileKey"))
-                                            .put("seconds", videoSecs)
-                                            .put("text", caption.trim()),
-                                    )
-                                } else {
-                                    Api.post(
-                                        "/api/statuses",
-                                        JSONObject()
-                                            .put("kind", "IMAGE")
-                                            .put("imageData", dataUrl)
-                                            .put("text", caption.trim()),
-                                    )
+                            if (vUri != null) {
+                                // Video goes to R2 as an object, not as a data
+                                // URL - a minute of video is far past the inline
+                                // budget the server allows.
+                                val read = FilesUtil.readDocument(ctx, vUri)
+                                    ?: throw Exception("Could not read that video.")
+                                val (name, bytes) = read
+                                if (bytes.size > 25 * 1024 * 1024) {
+                                    throw Exception("That video is over 25 MB.")
                                 }
+                                val up = Api.upload(name.ifBlank { "status.mp4" }, "video/mp4", bytes)
+                                Api.post(
+                                    "/api/statuses",
+                                    JSONObject()
+                                        .put("kind", "VIDEO")
+                                        .put("fileKey", up.optString("fileKey"))
+                                        .put("seconds", secs)
+                                        .put("text", cap),
+                                )
+                            } else {
+                                Api.post(
+                                    "/api/statuses",
+                                    JSONObject()
+                                        .put("kind", "IMAGE")
+                                        .put("imageData", img)
+                                        .put("text", cap),
+                                )
                             }
-                            nav.popBackStack()
+                            runCatching {
+                                val data = Api.get("/api/statuses", true)
+                                ScreenStore.setStatuses(data.arr("items").objects())
+                            }
                         } catch (e: Exception) {
-                            error = e.message ?: "Could not post."
-                        } finally {
-                            busy = false
+                            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                android.widget.Toast.makeText(
+                                    ctx,
+                                    e.message ?: "Status didn't post. Try again.",
+                                    android.widget.Toast.LENGTH_LONG,
+                                ).show()
+                            }
                         }
                     }
                 }

@@ -24,6 +24,75 @@ object ScreenStore {
     val hiddenMsgIds = mutableSetOf<String>()
     private var hiddenFile: File? = null
 
+    /**
+     * Conversations archived on THIS device (WhatsApp-style swipe right).
+     * Archive is purely local: the chat just leaves the main list and shows
+     * up under the archive screen. Persisted locally.
+     */
+    val archivedConvIds = mutableSetOf<String>()
+    private var archiveFile: File? = null
+
+    fun archiveConv(id: String) {
+        if (id.isNotBlank()) {
+            archivedConvIds.add(id)
+            saveArchive()
+        }
+    }
+
+    fun unarchiveConv(id: String) {
+        archivedConvIds.remove(id)
+        saveArchive()
+    }
+
+    fun isArchived(id: String): Boolean = id in archivedConvIds
+
+    private fun saveArchive() {
+        runCatching { archiveFile?.writeText(JSONObject().put("ids", JSONArray(archivedConvIds.toList())).toString()) }
+    }
+
+    private fun loadArchive() {
+        runCatching {
+            val raw = archiveFile?.takeIf { it.exists() }?.readText() ?: return@runCatching
+            val arr = JSONObject(raw).optJSONArray("ids") ?: return@runCatching
+            for (i in 0 until arr.length()) archivedConvIds.add(arr.optString(i))
+        }
+    }
+
+    /**
+     * Status owners hidden from the status feed ("Hide" in the 3-dot menu of
+     * the status viewer). Local only. Persisted.
+     */
+    val hiddenStatusUserIds = mutableSetOf<String>()
+    private var statusHiddenFile: File? = null
+
+    fun hideStatusUser(id: String) {
+        if (id.isNotBlank()) {
+            hiddenStatusUserIds.add(id)
+            saveStatusHidden()
+        }
+    }
+
+    private fun saveStatusHidden() {
+        runCatching { statusHiddenFile?.writeText(JSONObject().put("ids", JSONArray(hiddenStatusUserIds.toList())).toString()) }
+    }
+
+    private fun loadStatusHidden() {
+        runCatching {
+            val raw = statusHiddenFile?.takeIf { it.exists() }?.readText() ?: return@runCatching
+            val arr = JSONObject(raw).optJSONArray("ids") ?: return@runCatching
+            for (i in 0 until arr.length()) hiddenStatusUserIds.add(arr.optString(i))
+        }
+    }
+
+    /**
+     * App-lifetime scope for work that must outlive the screen that started
+     * it — e.g. status uploads that keep running after "Sharing status…"
+     * pops the composer.
+     */
+    val appScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO,
+    )
+
     fun hideMessage(id: String) {
         if (id.isNotBlank()) {
             hiddenMsgIds.add(id)
@@ -97,7 +166,11 @@ object ScreenStore {
     fun hydrate(ctx: Context) {
         disk = File(ctx.filesDir, "kp-screens.json")
         hiddenFile = File(ctx.filesDir, "kp-hidden.json")
+        archiveFile = File(ctx.filesDir, "kp-archive.json")
+        statusHiddenFile = File(ctx.filesDir, "kp-statushidden.json")
         loadHidden()
+        loadArchive()
+        loadStatusHidden()
         val raw = disk?.takeIf { it.exists() }?.readText() ?: return
         runCatching {
             val o = JSONObject(raw)

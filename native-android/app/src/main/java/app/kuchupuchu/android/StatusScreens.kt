@@ -22,18 +22,25 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.HideSource
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.RemoveRedEye
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.foundation.Image
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -50,7 +57,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -92,7 +102,7 @@ fun StatusScreen(nav: NavController) {
     }
 
     val mine = groups.firstOrNull { it.optBoolean("mine") }
-    val others = groups.filter { !it.optBoolean("mine") }
+    val others = groups.filter { !it.optBoolean("mine") && it.optJSONObject("user")?.optString("id") !in ScreenStore.hiddenStatusUserIds }
 
     Box(Modifier.fillMaxSize().background(Cream)) {
         Column(Modifier.fillMaxSize()) {
@@ -135,12 +145,18 @@ fun StatusScreen(nav: NavController) {
                             } else {
                                 KpAvatar(Store.myName(), Store.me?.optString("avatarUrl"), 60.dp, ring = false)
                             }
+                            // The little "+" opens the same thing as the row:
+                            // your latest status if one exists, else composer.
                             Box(
                                 Modifier
                                     .align(Alignment.BottomEnd)
                                     .size(22.dp)
                                     .clip(CircleShape)
-                                    .background(Color.White),
+                                    .background(Color.White)
+                                    .clickable {
+                                        haptics.tap()
+                                        if (myStatuses.isNotEmpty()) nav.navigate("statusview/mine") else nav.navigate("statusphoto")
+                                    },
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Box(
@@ -272,18 +288,18 @@ fun StatusScreen(nav: NavController) {
                 shape = CircleShape,
                 containerColor = Card,
                 contentColor = GoldDeep,
-                modifier = Modifier.padding(bottom = 14.dp).size(46.dp),
+                modifier = Modifier.padding(bottom = 14.dp).size(40.dp),
             ) {
-                Icon(Icons.Filled.Edit, contentDescription = "Text status", modifier = Modifier.size(22.dp))
+                Icon(Icons.Filled.Edit, contentDescription = "Text status", modifier = Modifier.size(19.dp))
             }
             androidx.compose.material3.FloatingActionButton(
                 onClick = { haptics.tap(); nav.navigate("statusphoto") },
                 shape = CircleShape,
                 containerColor = Gold,
                 contentColor = AmberInk,
-                modifier = Modifier.size(60.dp),
+                modifier = Modifier.size(52.dp),
             ) {
-                Icon(Icons.Filled.PhotoCamera, contentDescription = "Photo or video status", modifier = Modifier.size(28.dp))
+                Icon(Icons.Filled.PhotoCamera, contentDescription = "Photo or video status", modifier = Modifier.size(24.dp))
             }
         }
     }
@@ -450,9 +466,17 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
     var replyFocused by remember { mutableStateOf(false) }
     var replyError by remember { mutableStateOf("") }
     var showViewers by remember { mutableStateOf(false) }
-    var viewers by remember { mutableStateOf("") }
+    var viewers by remember { mutableStateOf(listOf<JSONObject>()) }
     var viewersError by remember { mutableStateOf(false) }
+    var viewersLoading by remember { mutableStateOf(false) }
     var fetched by remember { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    var videoReady by remember { mutableStateOf(false) }
+    // New status => new clip: the readiness flag must reset or the next
+    // video's bar would start before its own buffering finished.
+    LaunchedEffect(idx) { videoReady = false }
+    val ctx = LocalContext.current
 
     // Dark screen → status bar icons must be white while viewing, and back to
     // dark-on-light when this screen goes away.
@@ -487,16 +511,17 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
     val user = group?.optJSONObject("user")
     val isMine = group?.optBoolean("mine") == true
 
-    /* auto-advance + mark viewed — pauses while the viewers sheet is open */
-    LaunchedEffect(statuses.size, idx, showViewers, replyFocused) {
+    /* auto-advance + mark viewed — pauses while the viewers sheet is open.
+       For videos the clock only starts when the clip is actually PLAYING:
+       the bar used to run while the file was still buffering, so the status
+       auto-closed before the video even reached its end. */
+    LaunchedEffect(statuses.size, idx, showViewers, replyFocused, videoReady) {
         if (statuses.isEmpty() || idx >= statuses.size || showViewers || replyFocused) return@LaunchedEffect
         val s = statuses[idx]
         if (!isMine) {
             runCatching { withContext(Dispatchers.IO) { Api.post("/api/statuses/${s.optString("id")}/view") } }
         }
         progress = 0f
-        // Progress bar duration must MATCH the clip: the server stores the
-        // video length in seconds; the old fixed 60s made a 10s video crawl.
         val videoSecs = s.optInt("seconds", 0)
         val hold =
             when {
@@ -504,6 +529,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                 videoSecs > 0 -> (videoSecs * 1000L).coerceIn(5_000L, 120_000L)
                 else -> 30_000L
             }
+        if (s.optString("kind") == "VIDEO" && !videoReady) return@LaunchedEffect
         val start = System.currentTimeMillis()
         while (System.currentTimeMillis() - start < hold) {
             progress = (System.currentTimeMillis() - start) / hold.toFloat()
@@ -565,16 +591,30 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
         if (idx >= statuses.size) return
         val s = statuses[idx]
         showViewers = true
-        viewers = ""
+        viewers = emptyList()
         viewersError = false
+        viewersLoading = true
         scope.launch {
             runCatching {
                 val data = withContext(Dispatchers.IO) { Api.get("/api/statuses/${s.optString("id")}/viewers", true) }
-                viewers = data.arr("viewers").objects().joinToString("\n") { v ->
-                    (v.optJSONObject("user")?.optText("displayName") ?: "?") + "|" +
-                        listStamp(v.optString("viewedAt"))
-                }
+                viewers = data.arr("viewers").objects()
             }.onFailure { viewersError = true }
+                .also { viewersLoading = false }
+        }
+    }
+
+    /** Open (or create) the 1:1 chat with this user, then go there. */
+    fun openChatWith(userId: String) {
+        if (userId.isBlank()) return
+        scope.launch {
+            runCatching {
+                val conv = withContext(Dispatchers.IO) { Api.post("/api/conversations", JSONObject().put("userId", userId)) }
+                val cid = conv.optJSONObject("conversation")?.optString("id").orEmpty()
+                if (cid.isNotBlank()) {
+                    showViewers = false
+                    nav.navigate("chat/$cid")
+                }
+            }
         }
     }
 
@@ -611,7 +651,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
             /* background: photo or gradient text card */
             if (s.optString("kind") == "IMAGE" || s.optString("kind") == "VIDEO") {
                 if (s.optString("kind") == "VIDEO") {
-                    StatusVideoPlayer("${Api.BASE}/api/statuses/${s.optString("id")}/media")
+                    StatusVideoPlayer("${Api.BASE}/api/statuses/${s.optString("id")}/media", onReady = { videoReady = true })
                 } else {
                     KpNetImage(
                         "${Api.BASE}/api/statuses/${s.optString("id")}/media",
@@ -696,12 +736,48 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                     IconButton(onClick = { nav.popBackStack() }) {
                         Icon(Icons.Filled.Close, "Close", tint = Color.White)
                     }
-                    if (isMine) {
-                        IconButton(onClick = { openViewers() }) {
-                            Icon(Icons.Filled.RemoveRedEye, "Viewers", tint = Color.White)
+                    Box {
+                        IconButton(onClick = { menuOpen = true }) {
+                            Icon(Icons.Filled.MoreVert, "Menu", tint = Color.White)
                         }
-                        IconButton(onClick = { deleteStatus() }) {
-                            Icon(Icons.Filled.Delete, "Delete", tint = Color.White)
+                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            if (isMine) {
+                                DropdownMenuItem(
+                                    text = { Text("Delete status") },
+                                    leadingIcon = { Icon(Icons.Filled.Delete, null, tint = Ink) },
+                                    onClick = {
+                                        menuOpen = false
+                                        confirmDelete = true
+                                    },
+                                )
+                            } else {
+                                DropdownMenuItem(
+                                    text = { Text("Message") },
+                                    leadingIcon = { Icon(Icons.Filled.Chat, null, tint = Ink) },
+                                    onClick = {
+                                        menuOpen = false
+                                        openChatWith(user?.optString("id") ?: "")
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Hide status") },
+                                    leadingIcon = { Icon(Icons.Filled.HideSource, null, tint = Ink) },
+                                    onClick = {
+                                        menuOpen = false
+                                        ScreenStore.hideStatusUser(user?.optString("id") ?: "")
+                                        android.widget.Toast.makeText(ctx, "Status hidden", android.widget.Toast.LENGTH_SHORT).show()
+                                        nav.popBackStack()
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Report") },
+                                    leadingIcon = { Icon(Icons.Filled.Flag, null, tint = Ink) },
+                                    onClick = {
+                                        menuOpen = false
+                                        android.widget.Toast.makeText(ctx, "Reported. Thank you.", android.widget.Toast.LENGTH_SHORT).show()
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -726,15 +802,25 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                 }
                 /* reply bar or my-status views hint */
                 if (isMine) {
+                    // No shadow/pill — just the eye. Tap or swipe up slides the
+                    // viewer list in from the bottom.
+                    var dragUp by remember { mutableStateOf(0f) }
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .navigationBarsPadding()
                             .padding(16.dp)
-                            .clip(RoundedCornerShape(24.dp))
-                            .background(Color(0x33FFFFFF))
-                            .clickable { openViewers() }
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                            .pointerInput(s.optString("id")) {
+                                detectVerticalDragGestures(
+                                    onDragEnd = {
+                                        if (dragUp < -60f) openViewers()
+                                        dragUp = 0f
+                                    },
+                                ) { _, amount ->
+                                    dragUp += amount
+                                }
+                            }
+                            .clickable { openViewers() },
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -742,11 +828,11 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                             Icons.Filled.RemoveRedEye,
                             contentDescription = "Views",
                             tint = Color.White,
-                            modifier = Modifier.size(16.dp),
+                            modifier = Modifier.size(18.dp),
                         )
                         Spacer(Modifier.width(5.dp))
                         Text(
-                            "${s.optInt("viewers", 0)} view${if (s.optInt("viewers", 0) == 1) "" else "s"} · tap for the list",
+                            "${s.optInt("viewers", 0)} view${if (s.optInt("viewers", 0) == 1) "" else "s"}",
                             color = Color.White,
                             fontSize = 13.sp,
                         )
@@ -808,49 +894,130 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
     }
 
     if (showViewers) {
+        ViewersSheet(
+            loading = viewersLoading,
+            error = viewersError,
+            viewers = viewers,
+            onClose = { showViewers = false },
+            onOpenChat = { openChatWith(it) },
+        )
+    }
+
+    if (confirmDelete) {
         AlertDialog(
-            onDismissRequest = { showViewers = false },
-            title = { Text("Viewed by") },
-            text = {
-                Column {
-                    if (viewersError) {
-                        Text("Couldn't load viewers. Try again.", color = Red, fontSize = 14.sp)
-                    } else if (viewers.isBlank()) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(color = Gold, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(10.dp))
-                            Text("Loading…", color = Muted)
-                        }
-                    } else if (viewers == "\n" || viewers.lines().all { it.isBlank() }) {
-                        Text("No views yet.", color = Muted, fontSize = 14.sp)
-                    } else {
-                        viewers.lines().filter { it.isNotBlank() }.forEach { line ->
-                            val parts = line.split("|")
-                            val name = parts.getOrElse(0) { "?" }
-                            val at = parts.getOrElse(1) { "" }
-                            Row(
-                                Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                KpAvatar(name, null, 36.dp, ring = false)
-                                Spacer(Modifier.width(10.dp))
-                                Text(name, fontSize = 14.5.sp, fontWeight = FontWeight.Medium)
-                                Spacer(Modifier.weight(1f))
-                                Text(at, fontSize = 12.sp, color = Muted)
-                            }
-                        }
-                    }
-                }
-            },
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete status?") },
+            text = { Text("This status will be removed for everyone. It cannot be undone.") },
             confirmButton = {
-                TextButton(onClick = { showViewers = false }) { Text("Close", color = GoldDeep) }
+                TextButton(onClick = {
+                    confirmDelete = false
+                    deleteStatus()
+                }) { Text("Delete", color = Red) }
             },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel", color = Muted) } },
         )
     }
 }
 
+/**
+ * "Viewed by" bottom sheet — slides up from the bottom edge (not a centered
+ * popup). Tapping a viewer opens the chat with them.
+ */
 @Composable
-private fun StatusVideoPlayer(url: String) {
+private fun ViewersSheet(
+    loading: Boolean,
+    error: Boolean,
+    viewers: List<JSONObject>,
+    onClose: () -> Unit,
+    onOpenChat: (String) -> Unit,
+) {
+    var shown by remember { mutableStateOf(false) }
+    val progress by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (shown) 0f else 1f,
+        animationSpec = androidx.compose.animation.core.tween(220),
+        label = "sheet",
+    )
+    LaunchedEffect(Unit) { shown = true }
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color(0x52000000))
+                .clickable(onClick = onClose),
+        ) {
+            Column(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .graphicsLayer { translationY = progress * 900f }
+                    .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
+                    .background(Card)
+                    .clickable(onClick = {})  // don't close when touching the sheet
+                    .navigationBarsPadding()
+                    .padding(vertical = 10.dp),
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Viewed by", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Ink)
+                    Spacer(Modifier.weight(1f))
+                    IconButton(onClick = onClose) {
+                        Icon(Icons.Filled.Close, "Close", tint = Muted)
+                    }
+                }
+                when {
+                    error -> Text(
+                        "Couldn't load viewers. Try again.",
+                        color = Red,
+                        fontSize = 14.sp,
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+                    )
+                    loading -> Row(
+                        Modifier.padding(18.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(color = Gold, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Text("Loading…", color = Muted)
+                    }
+                    viewers.isEmpty() -> Text(
+                        "No views yet.",
+                        color = Muted,
+                        fontSize = 14.sp,
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+                    )
+                    else {
+                        LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                            items(viewers, key = { it.optJSONObject("user")?.optString("id") ?: it.toString() }) { v ->
+                                val u = v.optJSONObject("user")
+                                val name = u?.optText("displayName") ?: "?"
+                                val uid = u?.optString("id") ?: ""
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onOpenChat(uid) }
+                                        .padding(horizontal = 18.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    KpAvatar(name, u?.optText("avatarUrl"), 38.dp, ring = false)
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(name, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, color = Ink)
+                                        Text(listStamp(v.optString("viewedAt")), fontSize = 11.5.sp, color = Muted)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusVideoPlayer(url: String, onReady: () -> Unit = {}) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     var path by remember(url) { mutableStateOf<String?>(null) }
     // VideoView stretches video to its own bounds, so the view MUST match the
@@ -889,7 +1056,13 @@ private fun StatusVideoPlayer(url: String) {
             factory = { c ->
                 android.widget.VideoView(c).apply {
                     setVideoPath(path)
-                    setOnPreparedListener { it.isLooping = false; start() }
+                    // Tell the viewer the clip is about to play: the progress
+                    // bar waits for this instead of racing the buffering.
+                    setOnPreparedListener {
+                        it.isLooping = false
+                        onReady()
+                        start()
+                    }
                 }
             },
             modifier = Modifier.fillMaxSize().aspectRatio(aspect),

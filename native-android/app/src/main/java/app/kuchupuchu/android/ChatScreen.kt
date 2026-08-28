@@ -49,6 +49,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
@@ -61,7 +62,8 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.CallMissed
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.CheckMissed
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Download
@@ -143,6 +145,7 @@ fun ChatScreen(nav: NavController, convId: String) {
     val msgs = remember { mutableStateListOf<JSONObject>() }
     val pending = remember { mutableStateListOf<JSONObject>() }
     var input by remember { mutableStateOf("") }
+    var lastTypingPing by remember { mutableStateOf(0L) }
     var showAttach by remember { mutableStateOf(false) }
     var showStickers by remember { mutableStateOf(false) }
     var recording by remember { mutableStateOf(false) }
@@ -150,6 +153,8 @@ fun ChatScreen(nav: NavController, convId: String) {
     var uploading by remember { mutableStateOf(0) } // >0 = photo/file uploads in flight
     var error by remember { mutableStateOf("") }
     var otherReadAt by remember { mutableStateOf<String?>(null) }
+    // "typing…" lives 6s per ping, refreshed on the messages poll.
+    var otherTypingAt by remember { mutableStateOf(0L) }
     val listState = rememberLazyListState()
     val player = remember { VoicePlayer() }
     var lastTopId by remember { mutableStateOf("") }
@@ -217,6 +222,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // Live read receipts: the sender's ticks turn blue without
                 // reopening the chat.
                 data.optString("readAt").takeIf { it.isNotBlank() }?.let { otherReadAt = it }
+                data.optString("typingAt").takeIf { it.isNotBlank() }?.let {
+                    (runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() ?: 0L)
+                        .takeIf { ms -> ms > 0 }?.let { ms -> otherTypingAt = ms }
+                }
                 val prevTop = lastTopId
                 val newTop = fresh.lastOrNull()?.optString("id") ?: ""
                 ScreenStore.setMsgs(convId, fresh)
@@ -683,6 +692,8 @@ fun ChatScreen(nav: NavController, convId: String) {
         if (rawTitle.length > 14 && rawTitle.contains(' ')) rawTitle.substringBefore(' ') else rawTitle
     val avatarUrl = if (isGroup) null else c?.optJSONObject("other")?.optString("avatarUrl")
     val online = !isGroup && c?.optJSONObject("other")?.optBoolean("online") == true
+    val typingNow = !isGroup && System.currentTimeMillis() - otherTypingAt < 6_000
+    val other = c?.optJSONObject("other")
     Column(
         Modifier
             .fillMaxSize()
@@ -760,16 +771,21 @@ fun ChatScreen(nav: NavController, convId: String) {
                     color = Ink,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 2.dp),
                 )
                 Text(
                     when {
                         isGroup -> "${c?.arr("members")?.length() ?: 0} members"
+                        typingNow -> "typing..."
                         online -> "online"
-                        else -> " "
+                        else -> otherLastSeen(other?.optText("lastActiveAt"))
                     },
                     fontSize = 11.5.sp,
-                    color = if (online) Green else Muted,
+                    color = when {
+                        typingNow -> GoldDeep
+                        online -> Green
+                        else -> Muted
+                    },
+                    fontWeight = if (typingNow) FontWeight.SemiBold else FontWeight.Normal,
                 )
             }
             }
@@ -1015,7 +1031,22 @@ fun ChatScreen(nav: NavController, convId: String) {
         /* ---------------- composer (doubles as the recording bar) ---------------- */
         Composer(
             input = input,
-            onInput = { input = it },
+            onInput = { v ->
+                input = v
+                if (v.isNotBlank()) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastTypingPing > 3_000) {
+                        lastTypingPing = now
+                        scope.launch {
+                            runCatching {
+                                withContext(Dispatchers.IO) {
+                                    Api.post("/api/conversations/$convId/typing", JSONObject())
+                                }
+                            }
+                        }
+                    }
+                }
+            },
             onAttach = { haptics.tap(); showAttach = true },
             onSticker = { haptics.tap(); showStickers = true },
             onSend = {
@@ -1328,11 +1359,69 @@ private fun PulsingDot() {
 }
 
 
+/** Gold check badge shown on every bubble the user has long-press selected. */
+@Composable
+private fun SelectionCheck(modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .size(20.dp)
+            .clip(CircleShape)
+            .background(Gold),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.Filled.Check,
+            contentDescription = "Selected",
+            tint = Color.White,
+            modifier = Modifier.size(14.dp),
+        )
+    }
+}
+
 /**
  * Full-screen photo viewer: pinch/double-tap zoom, pan, save to gallery and
  * forward. Plain taps on chat photos used to offer "delete" — far too easy
  * to hit by accident; now photos OPEN instead.
  */
+/**
+ * Decoded photo aspect ratios, cached process-wide. LazyColumn discards
+ * off-screen items and their remember{} state; without this cache a scrolled
+ * photo returned to the placeholder size and "jumped" on the way back.
+ */
+private object ImageRatios {
+    private val map = HashMap<String, Float>()
+
+    fun get(url: String?): Float {
+        if (url == null) return 0f
+        synchronized(map) { return map[url] ?: 0f }
+    }
+
+    fun put(url: String?, ratio: Float): Float {
+        if (url != null && ratio > 0f) synchronized(map) { map[url] = ratio }
+        return ratio
+    }
+}
+
+/** "last seen 5 minutes ago" style subtitle from the user's last activity. */
+private fun otherLastSeen(iso: String?): String {
+    if (iso.isNullOrBlank()) return " "
+    val t = runCatching { java.time.Instant.parse(iso).toEpochMilli() }.getOrNull() ?: return " "
+    val mins = (System.currentTimeMillis() - t) / 60_000
+    return when {
+        mins < 1 -> "last seen just now"
+        mins < 60 -> "last seen ${mins} minute${if (mins == 1L) "" else "s"} ago"
+        mins < 60 * 24 -> {
+            val h = mins / 60
+            "last seen ${h} hour${if (h == 1L) "" else "s"} ago"
+        }
+        mins < 60L * 24 * 7 -> {
+            val d = mins / (60 * 24)
+            "last seen ${d} day${if (d == 1L) "" else "s"} ago"
+        }
+        else -> "last seen " + listStamp(iso)
+    }
+}
+
 @Composable
 private fun ImageViewerDialog(
     m: JSONObject,
@@ -1389,11 +1478,16 @@ private fun ImageViewerDialog(
             IconButton(onClick = onClose, Modifier.align(Alignment.TopStart).padding(6.dp)) {
                 Icon(Icons.Filled.Close, "Close", tint = Color.White)
             }
+            // 20% black pill behind the actions: on a white photo the plain
+            // white glyphs used to vanish completely.
             Row(
                 Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
-                    .padding(18.dp),
+                    .padding(18.dp)
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(Color(0x33000000))
+                    .padding(horizontal = 26.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(28.dp),
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1595,6 +1689,7 @@ private fun MessageRow(
                     if (!mine && isGroup && senderName.isNotBlank()) {
                         Text(senderName, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = GoldDeep)
                     }
+                    if (isSelected) SelectionCheck()
                     when (kind) {
                         "STICKER" -> Text(m.optString("body"), fontSize = 56.sp)
                         "FILE" -> FileBubble(m, mine, player, pendingEcho)
@@ -1674,6 +1769,9 @@ private fun ImageMessageRow(
                 ),
         ) {
             ImageBubble(m, mine)
+            if (m.optString("id") in selectedIds) {
+                SelectionCheck(Modifier.align(Alignment.TopStart).padding(6.dp))
+            }
             // scrim so the stamp never drowns in a bright photo
             Box(
                 Modifier
@@ -1717,23 +1815,24 @@ private fun ImageBubble(m: JSONObject, mine: Boolean) {
                 if (key.startsWith("data:") || key.startsWith("http") || key.startsWith("/")) key
                 else "/api/files/$key"
             }
-    // ORIGINAL aspect ratio (capped): the fixed 160dp box squeezed every
-    // photo into the same shape. Ratio comes from the decoded bitmap (data
-    // URLs) or Coil's intrinsic size (network).
-    var ratio by remember(url) { mutableStateOf(0f) }
+    // ORIGINAL aspect ratio (capped). The ratio lives in a PROCESS-WIDE cache
+    // keyed by URL: a LazyColumn disposes off-screen items, so a remember()
+    // here was thrown away on every scroll-out and the bubble snapped back to
+    // the placeholder size while flinging ("images jump while scrolling").
+    var ratio by remember(url) { mutableStateOf(ImageRatios.get(url)) }
     val dataBmp = if (url?.startsWith("data:") == true) rememberBitmap(url) else null
     Box(
         Modifier
-            .widthIn(max = 260.dp)
+            .widthIn(max = 225.dp)
             .then(
                 if (ratio > 0f) {
                     Modifier
-                        .aspectRatio(ratio)
-                        .heightIn(max = 380.dp)
+                        .aspectRatio(ratio.coerceIn(0.55f, 2.6f))
+                        .heightIn(max = 280.dp)
                 } else {
                     Modifier
-                        .widthIn(min = 180.dp)
-                        .height(200.dp)
+                        .widthIn(min = 150.dp)
+                        .height(170.dp)
                 },
             )
             .clip(RoundedCornerShape(12.dp))
@@ -1743,7 +1842,9 @@ private fun ImageBubble(m: JSONObject, mine: Boolean) {
         if (url.isNullOrBlank()) {
             CircularProgressIndicator(color = if (mine) AmberInk else Gold, modifier = Modifier.size(22.dp))
         } else if (dataBmp != null) {
-            if (ratio <= 0f && dataBmp.height > 0) ratio = dataBmp.width.toFloat() / dataBmp.height.toFloat()
+            if (ratio <= 0f && dataBmp.height > 0) {
+                ratio = ImageRatios.put(url, dataBmp.width.toFloat() / dataBmp.height.toFloat())
+            }
             Image(
                 dataBmp,
                 contentDescription = "Photo",
@@ -1754,7 +1855,7 @@ private fun ImageBubble(m: JSONObject, mine: Boolean) {
             coil.compose.AsyncImage(
                 model = coil.request.ImageRequest.Builder(LocalContext.current)
                     .data(if (url.startsWith("http")) url else Api.BASE + url)
-                    .crossfade(true)
+                    .crossfade(false)
                     .build(),
                 contentDescription = "Photo",
                 modifier = Modifier.fillMaxSize(),
@@ -1762,7 +1863,7 @@ private fun ImageBubble(m: JSONObject, mine: Boolean) {
                 onSuccess = { state ->
                     val d = state.result.drawable
                     if (d.intrinsicWidth > 0 && d.intrinsicHeight > 0 && ratio <= 0f) {
-                        ratio = d.intrinsicWidth.toFloat() / d.intrinsicHeight.toFloat()
+                        ratio = ImageRatios.put(url, d.intrinsicWidth.toFloat() / d.intrinsicHeight.toFloat())
                     }
                 },
             )

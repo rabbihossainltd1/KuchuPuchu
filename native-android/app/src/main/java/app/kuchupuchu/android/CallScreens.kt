@@ -29,7 +29,6 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
-import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PersonAddAlt1
 import androidx.compose.material.icons.filled.ScreenShare
 import androidx.compose.material.icons.filled.VolumeOff
@@ -47,6 +46,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.scale
@@ -89,10 +89,13 @@ fun CallGate() {
             // hasRemoteVideo: the server row can still say AUDIO after the
             // other phone upgraded to video mid-call — follow the actual
             // media so both sides always render the SAME in-call screen.
-            if (call.kind == "VIDEO" || engine.hasRemoteVideo) InCallVideoScreen(call) else InCallVoiceScreen(call)
+            if (call.kind == "VIDEO" || engine.hasRemoteVideo) InCallVideoScreen(call) else VoiceCallScreen(call)
+        // Incoming ringing needs its own Accept/Decline screen; everything
+        // else voice (outgoing ringing, connecting, in-call) is THE SAME
+        // screen on caller and receiver — one UI, per design.
         call.incoming && call.status == "RINGING" -> IncomingCallScreen(call)
         call.kind == "VIDEO" -> OutgoingVideoScreen(call)
-        else -> OutgoingVoiceScreen(call)
+        else -> VoiceCallScreen(call)
     }
 
     if (engine.toast.isNotBlank()) {
@@ -193,56 +196,122 @@ fun IncomingCallScreen(call: CallUi) {
 }
 
 /* ------------------------------------------------------------------ */
-/* OUTGOING VOICE — dark, pulse ring, early controls + cancel          */
+/* VOICE CALL — THE single screen for BOTH sides: while ringing only   */
+/* Speaker is enabled; once connected Speaker / Mute / Add call all    */
+/* come alive. Caller and receiver see exactly this same UI.           */
 /* ------------------------------------------------------------------ */
 
 @Composable
-fun OutgoingVoiceScreen(call: CallUi) {
+fun VoiceCallScreen(call: CallUi) {
     val engine = CallEngine.instance ?: return
+    val haptics = rememberHaptics()
+    val secs = rememberTick(call.startedAt, call.connecting)
+    val connected = call.status == "ACTIVE" || engine.hasRemote
+
     DarkCallScaffold {
         Column(
             Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
                 .navigationBarsPadding()
-                .padding(bottom = 22.dp),
+                .padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Spacer(Modifier.weight(0.7f))
+            Spacer(Modifier.weight(0.62f))
             PulseRing {
-                KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 108.dp, ring = false)
+                KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 116.dp, ring = false)
             }
-            Spacer(Modifier.height(26.dp))
-            Text(call.otherName, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(28.dp))
+            Text(call.otherName, color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(8.dp))
             Text(
                 when {
+                    engine.onHold -> "On hold"
+                    connected -> clockText(secs)
                     call.connecting -> "Connecting…"
+                    call.incoming -> "Ringing…"
                     call.otherOnline -> "Ringing…"
                     else -> "Calling…"
                 },
                 color = Color(0xB3FFFFFF),
-                fontSize = 14.sp,
+                fontSize = 15.sp,
             )
             Spacer(Modifier.weight(1f))
-            /* frosted early controls while ringing */
-            Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                FrostedPill(
-                    if (engine.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
-                    if (engine.muted) "Unmute" else "Mute",
-                    active = engine.muted,
-                ) { engine.toggleMute() }
-                FrostedPill(
+
+            /* control grid — disabled buttons dim to 35% while ringing */
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+            ) {
+                CallAction(
                     if (engine.speaker) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
                     if (engine.speaker) "Speaker on" else "Speaker",
                     active = engine.speaker,
+                    enabled = true,
                 ) { engine.toggleSpeaker() }
+                CallAction(
+                    if (engine.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
+                    if (engine.muted) "Unmute" else "Mute",
+                    active = engine.muted,
+                    enabled = connected,
+                ) { engine.toggleMute() }
+                CallAction(
+                    Icons.Filled.PersonAddAlt1,
+                    "Add call",
+                    active = false,
+                    enabled = connected,
+                ) { engine.notify("Adding calls is coming in a future update.") }
             }
-            Spacer(Modifier.height(34.dp))
-            CallCircle(Red, 66.dp, onClick = { engine.hangup() }) {
-                Icon(Icons.Filled.CallEnd, "Cancel", tint = Color.White, modifier = Modifier.size(28.dp))
+            Spacer(Modifier.height(22.dp))
+            CallCircle(Red, 68.dp, onClick = { haptics.heavy(); engine.hangup() }) {
+                Icon(Icons.Filled.CallEnd, "End call", tint = Color.White, modifier = Modifier.size(29.dp))
             }
+            Spacer(Modifier.height(30.dp))
+            Text(
+                if (connected) "End call" else "Cancel",
+                color = Color(0x99FFFFFF),
+                fontSize = 13.sp,
+            )
+            Spacer(Modifier.height(14.dp))
         }
+    }
+}
+
+/** Dark rounded call-control button with an explicit enabled state. */
+@Composable
+private fun CallAction(
+    icon: ImageVector,
+    label: String,
+    active: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val haptics = rememberHaptics()
+    val alpha = if (enabled) 1f else 0.35f
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.alpha(alpha)) {
+        Box(
+            Modifier
+                .size(64.dp)
+                .clip(CircleShape)
+                .background(
+                    when {
+                        active -> Gold
+                        else -> Color(0x2EFFFFFF)
+                    },
+                )
+                .border(1.dp, Color(0x33FFFFFF), CircleShape)
+                .clickable(enabled = enabled) { haptics.tap(); onClick() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                icon,
+                contentDescription = label,
+                tint = if (active) Color.White else Color(0xF5FFFFFF),
+                modifier = Modifier.size(26.dp),
+            )
+        }
+        Spacer(Modifier.height(7.dp))
+        Text(label, color = Color(0xB3FFFFFF), fontSize = 12.sp)
     }
 }
 
@@ -303,93 +372,6 @@ fun OutgoingVideoScreen(call: CallUi) {
                 active = engine.cameraOff,
             ) { engine.toggleCamera() }
             StripAction(Icons.Filled.CallEnd, "Cancel", active = false, danger = true) { engine.hangup() }
-        }
-    }
-}
-
-/* ------------------------------------------------------------------ */
-/* IN-CALL VOICE — light airy: cream top + white sheet grid            */
-/* controls: Mute / Speaker / Hold / Add call / End                    */
-/* ------------------------------------------------------------------ */
-
-@Composable
-fun InCallVoiceScreen(call: CallUi) {
-    val engine = CallEngine.instance ?: return
-    val haptics = rememberHaptics()
-    val secs = rememberTick(call.startedAt, call.connecting)
-
-    Column(Modifier.fillMaxSize().background(Cream)) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .background(Cream)
-                .statusBarsPadding()
-                .padding(bottom = 26.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Spacer(Modifier.height(26.dp))
-            KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 92.dp)
-            Spacer(Modifier.height(14.dp))
-            Text(call.otherName, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(4.dp))
-            Text(
-                when {
-                    engine.onHold -> "On hold"
-                    call.connecting && !engine.hasRemote -> "Connecting…"
-                    secs > 0 -> clockText(secs)
-                    else -> "00:00"
-                },
-                color = if (engine.onHold) GoldDeep else Ink,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
-        Column(
-            Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
-                .background(Color.White)
-                .navigationBarsPadding()
-                .padding(horizontal = 26.dp, vertical = 30.dp),
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Row(
-                Modifier.fillMaxWidth().padding(vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-            ) {
-                GridAction(
-                    if (engine.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
-                    if (engine.muted) "Unmute" else "Mute",
-                    active = engine.muted,
-                ) { engine.toggleMute() }
-                GridAction(
-                    Icons.Filled.VolumeUp,
-                    if (engine.speaker) "Speaker on" else "Speaker",
-                    active = engine.speaker,
-                ) { engine.toggleSpeaker() }
-                GridAction(
-                    Icons.Filled.Pause,
-                    if (engine.onHold) "Resume" else "Hold",
-                    active = engine.onHold,
-                ) { engine.toggleHold() }
-            }
-            Row(
-                Modifier.fillMaxWidth().padding(vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-            ) {
-                GridAction(
-                    Icons.Filled.PersonAddAlt1,
-                    "Add call",
-                    active = false,
-                ) { engine.notify("Adding calls is coming in a future update.") }
-                GridAction(
-                    Icons.Filled.CallEnd,
-                    "End call",
-                    active = false,
-                    danger = true,
-                ) { haptics.heavy(); engine.hangup() }
-            }
         }
     }
 }
@@ -521,64 +503,6 @@ private fun CallCircle(
             },
         contentAlignment = Alignment.Center,
     ) { icon() }
-}
-
-@Composable
-private fun FrostedPill(icon: ImageVector, label: String, active: Boolean, onClick: () -> Unit) {
-    val haptics = rememberHaptics()
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            Modifier
-                .size(56.dp)
-                .clip(CircleShape)
-                .background(if (active) Color(0x66FFFFFF) else Color(0x26FFFFFF))
-                .border(1.dp, Color(0x40FFFFFF), CircleShape)
-                .clickable { haptics.tap(); onClick() },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(icon, contentDescription = label, tint = Color.White, modifier = Modifier.size(24.dp))
-        }
-        Spacer(Modifier.height(5.dp))
-        Text(label, color = Color(0x99FFFFFF), fontSize = 11.sp)
-    }
-}
-
-@Composable
-private fun GridAction(
-    icon: ImageVector,
-    label: String,
-    active: Boolean,
-    danger: Boolean = false,
-    onClick: () -> Unit,
-) {
-    val haptics = rememberHaptics()
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.clickable { haptics.tap(); onClick() },
-    ) {
-        Box(
-            Modifier
-                .size(64.dp)
-                .clip(CircleShape)
-                .background(
-                    when {
-                        danger -> Red
-                        active -> Gold
-                        else -> Cream
-                    },
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                icon,
-                contentDescription = label,
-                tint = if (danger || active) Color.White else Ink,
-                modifier = Modifier.size(27.dp),
-            )
-        }
-        Spacer(Modifier.height(7.dp))
-        Text(label, color = if (danger) Red else Muted, fontSize = 12.sp)
-    }
 }
 
 @Composable

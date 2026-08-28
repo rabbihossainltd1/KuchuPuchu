@@ -64,6 +64,7 @@ fun KpApp() {
                     StatusViewerScreen(nav, whose)
                 }
                 composable("statusphoto") { StatusPhotoScreen(nav) }
+                composable("archive") { ArchiveScreen(nav) }
                 composable("profile/{id}") { entry ->
                     ProfileScreen(nav, entry.arguments?.getString("id") ?: "")
                 }
