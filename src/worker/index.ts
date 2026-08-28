@@ -1587,6 +1587,28 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   }
 
   const msgDeleteMatch = path.match(/^\/api\/messages\/([^/]+)$/);
+  if (msgDeleteMatch && method === "PATCH") {
+    // Edit: sender only, text only, within one minute of sending.
+    const msg = await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", msgDeleteMatch[1]!);
+    if (!msg) fail(404, "Message not found.");
+    if (msg.sender_id !== uid) fail(403, "You can only edit your own messages.");
+    if (msg.kind !== "TEXT") fail(400, "Only text messages can be edited.");
+    if (Date.now() - Date.parse(msg.created_at) > 60_000)
+      fail(400, "You can no longer edit this message.");
+    const text = String(body.body ?? "").slice(0, 4000);
+    if (!text.trim()) fail(400, "Message can't be empty.");
+    const meta = parseJson<Record<string, unknown>>(msg.meta_json, {});
+    meta.edited = true;
+    await run(
+      db,
+      "UPDATE messages SET body = ?, meta_json = ? WHERE id = ?",
+      text,
+      JSON.stringify(meta),
+      msg.id,
+    );
+    const fresh = (await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", msg.id))!;
+    return json({ message: msgFrom(fresh) });
+  }
   if (msgDeleteMatch && method === "DELETE") {
     const row = await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", msgDeleteMatch[1]!);
     if (!row) fail(404, "Message not found.");
@@ -1784,6 +1806,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           text: row.text,
           bgStyle: row.bg_style,
           hasMedia: !!row.media,
+          seconds: parseJson<{ seconds?: number }>(row.meta_json, {}).seconds ?? 0,
           createdAt: row.created_at,
           expiresAt: row.expires_at,
           viewers: (viewersByStatus.get(row.id) ?? []).length,
@@ -1820,6 +1843,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           text: row.text,
           bgStyle: row.bg_style,
           hasMedia: !!row.media,
+          seconds: parseJson<{ seconds?: number }>(row.meta_json, {}).seconds ?? 0,
           createdAt: row.created_at,
           expiresAt: row.expires_at,
         })),
@@ -2228,6 +2252,7 @@ function msgFrom(row: MsgRow) {
     clientId?: string;
     voice?: boolean;
     seconds?: number;
+    edited?: boolean;
   }>(row.meta_json, {});
   const imageFile = row.kind === "FILE" && String(meta.type || "").startsWith("image/");
   return {
@@ -2245,6 +2270,7 @@ function msgFrom(row: MsgRow) {
     clientId: meta.clientId,
     deliveredAt: row.delivered_at ? row.delivered_at : undefined,
     createdAt: row.created_at,
+    edited: !!meta.edited,
   };
 }
 
@@ -2255,6 +2281,7 @@ type StatusRow = {
   text: string | null;
   bg_style: string | null;
   media: string | null;
+  meta_json: string | null;
   created_at: string;
   expires_at: string;
 };

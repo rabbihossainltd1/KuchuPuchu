@@ -17,6 +17,32 @@ import java.io.File
 object ScreenStore {
     private var disk: File? = null
 
+    /**
+     * Message ids hidden on THIS device only ("Delete for me"). Others still
+     * see them; the owner's list just skips them. Persisted locally.
+     */
+    val hiddenMsgIds = mutableSetOf<String>()
+    private var hiddenFile: File? = null
+
+    fun hideMessage(id: String) {
+        if (id.isNotBlank()) {
+            hiddenMsgIds.add(id)
+            saveHidden()
+        }
+    }
+
+    private fun saveHidden() {
+        runCatching { hiddenFile?.writeText(JSONObject().put("ids", JSONArray(hiddenMsgIds.toList())).toString()) }
+    }
+
+    private fun loadHidden() {
+        runCatching {
+            val raw = hiddenFile?.takeIf { it.exists() }?.readText() ?: return@runCatching
+            val arr = JSONObject(raw).optJSONArray("ids") ?: return@runCatching
+            for (i in 0 until arr.length()) hiddenMsgIds.add(arr.optString(i))
+        }
+    }
+
     /** When set, ChatScreen opens in-chat search for this conversation. */
     var pendingChatSearch: String? = null
 
@@ -70,6 +96,8 @@ object ScreenStore {
 
     fun hydrate(ctx: Context) {
         disk = File(ctx.filesDir, "kp-screens.json")
+        hiddenFile = File(ctx.filesDir, "kp-hidden.json")
+        loadHidden()
         val raw = disk?.takeIf { it.exists() }?.readText() ?: return
         runCatching {
             val o = JSONObject(raw)

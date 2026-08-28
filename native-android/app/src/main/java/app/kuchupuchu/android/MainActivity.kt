@@ -70,6 +70,7 @@ class MainActivity : ComponentActivity() {
         }
 
         handleIntent(intent)
+        askBackgroundPermissions()
         setContent { KpTheme { KpApp() } }
     }
 
@@ -103,6 +104,40 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         Store.foreground = false
         super.onPause()
+    }
+
+    /**
+     * One-time, gentle setup so messages/calls arrive instantly:
+     *  1. the system battery-optimization whitelist dialog
+     *  2. MIUI's autostart page when present (no public API — best effort)
+     * Skipped forever once handled (and on any device without the activity).
+     */
+    private fun askBackgroundPermissions() {
+        val prefs = getSharedPreferences("kp", 0)
+        val pm = getSystemService(POWER_SERVICE) as android.os.PowerManager
+        if (!pm.isIgnoringBatteryOptimizations(packageName) && !prefs.getBoolean("bg_asked", false)) {
+            prefs.edit().putBoolean("bg_asked", true).apply()
+            runCatching {
+                startActivity(
+                    android.content.Intent(
+                        android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                        android.net.Uri.parse("package:$packageName"),
+                    ),
+                )
+            }
+            return
+        }
+        if (pm.isIgnoringBatteryOptimizations(packageName) && !prefs.getBoolean("miui_asked", false)) {
+            prefs.edit().putBoolean("miui_asked", true).apply()
+            runCatching {
+                startActivity(
+                    android.content.Intent().setClassName(
+                        "com.miui.securitycenter",
+                        "com.miui.permcenter.autostart.AutoStartManagementActivity",
+                    ).putExtra("package", packageName),
+                )
+            }
+        }
     }
 
     fun restoreChrome() {

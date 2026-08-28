@@ -1,10 +1,14 @@
 package app.kuchupuchu.android
 
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.util.Base64
 import androidx.core.content.FileProvider
 import java.io.ByteArrayOutputStream
@@ -77,6 +81,32 @@ object FilesUtil {
         val jpeg = imageToJpeg(uri, ctx, maxSide, maxBytes = maxChars * 3 / 4) ?: return null
         return "data:image/jpeg;base64," + Base64.encodeToString(jpeg, Base64.NO_WRAP)
     }
+
+    /**
+     * Saves image bytes into the gallery (Pictures/KuchuPuchu) and returns the
+     * target Uri, or null on failure. Scoped-storage safe on every API level.
+     */
+    fun saveImage(ctx: Context, bytes: ByteArray, displayName: String): Uri? = runCatching {
+        val safe = displayName.ifBlank { "kuchupuchu_${System.currentTimeMillis()}.jpg" }
+        val values =
+            ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, safe)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                if (Build.VERSION.SDK_INT >= 29) {
+                    put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/KuchuPuchu")
+                    put(MediaStore.Images.Media.IS_PENDING, 1)
+                }
+            }
+        val uri =
+            ctx.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return null
+        ctx.contentResolver.openOutputStream(uri)?.use { it.write(bytes) } ?: return null
+        if (Build.VERSION.SDK_INT >= 29) {
+            values.clear()
+            values.put(MediaStore.Images.Media.IS_PENDING, 0)
+            ctx.contentResolver.update(uri, values, null, null)
+        }
+        uri
+    }.getOrNull()
 
     /** Reads any picked document's bytes + guessed mime. */
     fun readDocument(ctx: Context, uri: Uri): Pair<String, ByteArray>? = runCatching {

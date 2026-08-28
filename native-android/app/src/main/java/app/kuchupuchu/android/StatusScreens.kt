@@ -495,7 +495,15 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
             runCatching { withContext(Dispatchers.IO) { Api.post("/api/statuses/${s.optString("id")}/view") } }
         }
         progress = 0f
-        val hold = if (s.optString("kind") == "VIDEO") 60_000L else 5_000L
+        // Progress bar duration must MATCH the clip: the server stores the
+        // video length in seconds; the old fixed 60s made a 10s video crawl.
+        val videoSecs = s.optInt("seconds", 0)
+        val hold =
+            when {
+                s.optString("kind") != "VIDEO" -> 5_000L
+                videoSecs > 0 -> (videoSecs * 1000L).coerceIn(5_000L, 120_000L)
+                else -> 30_000L
+            }
         val start = System.currentTimeMillis()
         while (System.currentTimeMillis() - start < hold) {
             progress = (System.currentTimeMillis() - start) / hold.toFloat()
@@ -509,11 +517,22 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
     }
 
     fun deleteStatus() {
-        if (idx >= statuses.size) return
-        val s = statuses[idx]
+        val s = statuses.getOrNull(idx) ?: return
+        val removedId = s.optString("id")
+        // Leave the viewer IMMEDIATELY (the old code waited for the API, so a
+        // second delete click could double-fire) and prune local state so the
+        // next recomposition can't index into a shrunken list — that was the
+        // white-screen crash on double-delete. Network delete runs behind.
+        groups.clear()
+        groups.addAll(statuses.filter { it.optString("id") != removedId })
+        ScreenStore.pokeInbox()
+        nav.popBackStack()
         scope.launch {
-            runCatching { withContext(Dispatchers.IO) { Api.delete("/api/statuses/${s.optString("id")}") } }
-            nav.popBackStack()
+            runCatching { withContext(Dispatchers.IO) { Api.delete("/api/statuses/$removedId") } }
+            runCatching {
+                val data = withContext(Dispatchers.IO) { Api.get("/api/statuses", true) }
+                ScreenStore.setStatuses(data.arr("items").objects())
+            }
         }
     }
 
@@ -580,7 +599,14 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                 }
             }
         } else {
-            val s = statuses[minOf(idx, statuses.size - 1)]
+            val s = statuses.getOrNull(minOf(idx, statuses.size - 1)) ?: run {
+                // List shrank under us (deleted elsewhere): show the empty
+                // state instead of crashing with IndexOutOfBounds (white screen).
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Gold)
+                }
+                return
+            }
 
             /* background: photo or gradient text card */
             if (s.optString("kind") == "IMAGE" || s.optString("kind") == "VIDEO") {

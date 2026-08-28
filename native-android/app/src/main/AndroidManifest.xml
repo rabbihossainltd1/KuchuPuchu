@@ -11,6 +11,9 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Let the user whitelist the app from battery savers so FCM pushes and
+         calls arrive instantly (many OEMs delay/kil background network). -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <!-- Call foreground service types (call round re-enables the service itself) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />

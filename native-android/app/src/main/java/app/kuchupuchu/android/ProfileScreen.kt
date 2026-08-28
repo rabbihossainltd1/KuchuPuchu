@@ -2,6 +2,8 @@ package app.kuchupuchu.android
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,6 +21,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PermMedia
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Videocam
@@ -35,6 +39,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -95,11 +101,27 @@ fun ProfileScreen(nav: NavController, userId: String) {
             Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            KpAvatar(
-                u.optText("displayName").ifBlank { "?" },
-                u.optText("avatarUrl").ifBlank { null },
-                88.dp,
-            )
+            var viewerUrl by remember { mutableStateOf<String?>(null) }
+            Box {
+                KpAvatar(
+                    u.optText("displayName").ifBlank { "?" },
+                    u.optText("avatarUrl").ifBlank { null },
+                    88.dp,
+                )
+                // Tapping the photo opens it full-screen (zoom + save).
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .clickable { u.optText("avatarUrl").takeIf { it.isNotBlank() }?.let { viewerUrl = it } },
+                )
+            }
+            viewerUrl?.let { url ->
+                ProfilePhotoDialog(
+                    url = url,
+                    name = u.optText("displayName"),
+                    onClose = { viewerUrl = null },
+                )
+            }
             Spacer(Modifier.height(10.dp))
             Text(u.optText("displayName").ifBlank { "—" }, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
             val uname = u.optText("username")
@@ -227,4 +249,78 @@ private fun profileSnapshot(userId: String): JSONObject? {
         if (o != null && o.optString("id") == userId) return o
     }
     return Cache.peek("/api/users/$userId")?.optJSONObject("user")
+}
+
+/** Full-screen profile photo with zoom + save-to-gallery. */
+@Composable
+private fun ProfilePhotoDialog(url: String, name: String, onClose: () -> Unit) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var scale by remember { mutableStateOf(1f) }
+    var offX by remember { mutableStateOf(0f) }
+    var offY by remember { mutableStateOf(0f) }
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onClose,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        androidx.compose.foundation.gestures.detectTransformGestures { _, pan, zoom, _ ->
+                            scale = (scale * zoom).coerceIn(1f, 6f)
+                            offX = if (scale > 1f) offX + pan.x else 0f
+                            offY = if (scale > 1f) offY + pan.y else 0f
+                        }
+                    },
+            ) {
+                KpNetImage(
+                    url,
+                    name,
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer(scaleX = scale, scaleY = scale, translationX = offX, translationY = offY),
+                    androidx.compose.ui.layout.ContentScale.Fit,
+                )
+            }
+            IconButton(onClick = onClose, Modifier.align(Alignment.TopStart).padding(6.dp)) {
+                Icon(Icons.Filled.Close, "Close", tint = Color.White)
+            }
+            Column(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(18.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                IconButton(onClick = {
+                    scope.launch {
+                        val bytes = withContext(Dispatchers.IO) {
+                            runCatching {
+                                if (url.startsWith("data:")) {
+                                    android.util.Base64.decode(url.substringAfter(","), android.util.Base64.DEFAULT)
+                                } else if (url.startsWith("http")) {
+                                    java.net.URL(url).openStream().use { it.readBytes() }
+                                } else Api.download(url)
+                            }.getOrNull()
+                        }
+                        if (bytes == null) {
+                            android.widget.Toast.makeText(ctx, "Could not download the photo", android.widget.Toast.LENGTH_SHORT).show()
+                        } else {
+                            val saved = FilesUtil.saveImage(ctx, bytes, "kuchupuchu_${System.currentTimeMillis()}.jpg")
+                            android.widget.Toast.makeText(
+                                ctx,
+                                if (saved != null) "Saved to Pictures/KuchuPuchu" else "Could not save",
+                                android.widget.Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                    }
+                }) {
+                    Icon(Icons.Filled.Download, "Save to gallery", tint = Color.White, modifier = Modifier.size(26.dp))
+                }
+                Text("Save", color = Color.White, fontSize = 12.sp)
+            }
+        }
+    }
 }

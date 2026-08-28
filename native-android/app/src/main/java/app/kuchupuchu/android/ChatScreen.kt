@@ -35,6 +35,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -57,6 +61,10 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.CallMissed
+import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Reply
 
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.NotificationsOff
@@ -87,10 +95,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -101,6 +111,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.OutlinedTextField
 import androidx.navigation.NavController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -144,9 +159,14 @@ fun ChatScreen(nav: NavController, convId: String) {
     var muteInFlight by remember { mutableStateOf(false) }
     var searchQ by remember { mutableStateOf("") }
     var searchHits by remember { mutableStateOf(listOf<JSONObject>()) }
+    // Selection mode (long-press): delete-for-me / unsend / edit / forward.
+    val selected = remember { mutableStateListOf<String>() }
+    var viewerMsg by remember { mutableStateOf<JSONObject?>(null) }
+    var editing by remember { mutableStateOf<JSONObject?>(null) }
+    var forwarding by remember { mutableStateOf(false) }
 
     fun paintFromStore() {
-        val next = ScreenStore.msgsOf(convId)
+        val next = ScreenStore.msgsOf(convId).filter { it.optString("id") !in ScreenStore.hiddenMsgIds }
         if (msgs.isEmpty()) {
             msgs.addAll(next)
             return
@@ -250,6 +270,16 @@ fun ChatScreen(nav: NavController, convId: String) {
     /* single stable background refresh loop while this chat is open */
     LaunchedEffect(convId, ScreenStore.poke) {
         if (Store.route == "chat/$convId") refreshMessages()
+    }
+
+    // Opening a chat ALWAYS lands on the newest message (instant, not animated,
+    // so it never lags behind a fast paint on a slow device).
+    var didInitialScroll by remember { mutableStateOf(false) }
+    LaunchedEffect(msgs.size, pending.size) {
+        if (!didInitialScroll && msgs.isNotEmpty()) {
+            listState.scrollToItem(msgs.size + pending.size - 1)
+            didInitialScroll = true
+        }
     }
 
     LaunchedEffect(convId) {
@@ -546,7 +576,112 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
+    /* ---- selection actions: unsend (everyone) / delete (me) / edit / forward ---- */
+    fun pendingEchoOf(m: JSONObject): Boolean =
+        pending.any { it.optString("clientId") == m.optString("clientId") || it.optString("id") == m.optString("id") }
+
+    fun selectedMessages(): List<JSONObject> {
+        val ids = selected.toList()
+        return msgs.filter { it.optString("id") in ids } + pending.filter { it.optString("id") in ids }
+    }
+
+    fun canEdit(m: JSONObject): Boolean =
+        m.optString("senderId") == Store.myId() &&
+            m.optString("kind") == "TEXT" &&
+            m.optString("mediaUrl").isBlank() &&
+            runCatching {
+                java.time.Duration.between(
+                    java.time.Instant.parse(m.optString("createdAt")),
+                    java.time.Instant.now(),
+                ).seconds < 60
+            }.getOrDefault(false)
+
+    fun unsendSelected() {
+        val ids = selected.toList()
+        selected.clear()
+        scope.launch {
+            ids.forEach { id ->
+                runCatching { withContext(Dispatchers.IO) { Api.delete("/api/messages/$id") } }
+            }
+            refreshMessages()
+        }
+    }
+
+    fun deleteForMe() {
+        val ids = selected.toList()
+        selected.clear()
+        ids.forEach { ScreenStore.hideMessage(it) }
+        paintFromStore()
+    }
+
+    fun forwardSelected(targetConvId: String) {
+        val items = selectedMessages()
+        forwarding = false
+        scope.launch {
+            for (m in items) {
+                runCatching {
+                    val key = m.optText("fileKey")
+                    when {
+                        key.isNotBlank() ->
+                            Api.post(
+                                "/api/conversations/$targetConvId/messages",
+                                JSONObject()
+                                    .put("kind", "FILE")
+                                    .put("fileKey", key)
+                                    .put("fileName", m.optText("fileName").ifBlank { "File" })
+                                    .put("fileType", m.optText("fileType").ifBlank { "application/octet-stream" })
+                                    .put("fileSize", m.optInt("fileSize")),
+                            )
+                        m.optText("mediaUrl").startsWith("data:") ->
+                            Api.post(
+                                "/api/conversations/$targetConvId/messages",
+                                JSONObject()
+                                    .put("kind", "IMAGE")
+                                    .put("imageData", m.optText("mediaUrl")),
+                            )
+                        m.optText("mediaUrl").isNotBlank() -> {
+                            // Server-hosted media (photo message): re-upload to the
+                            // target chat so both chats own their own copy.
+                            val bytes = withContext(Dispatchers.IO) { Api.download(m.optText("mediaUrl")) }
+                            val up = withContext(Dispatchers.IO) {
+                                Api.upload(m.optText("fileName").ifBlank { "photo.jpg" }, "image/jpeg", bytes)
+                            }
+                            Api.post(
+                                "/api/conversations/$targetConvId/messages",
+                                JSONObject()
+                                    .put("kind", "FILE")
+                                    .put("fileKey", up.optString("fileKey"))
+                                    .put("fileName", m.optText("fileName").ifBlank { "photo.jpg" })
+                                    .put("fileType", "image/jpeg")
+                                    .put("fileSize", bytes.size),
+                            )
+                        }
+                        else ->
+                            Api.post(
+                                "/api/conversations/$targetConvId/messages",
+                                JSONObject().put("kind", "TEXT").put("body", m.optText("body")),
+                            )
+                    }
+                }
+            }
+            error = "Forwarded"
+        }
+    }
+
     val chatTheme = cTheme(conv.value)
+    val single = selected.size == 1
+    val singleMsg = if (single) selectedMessages().firstOrNull() else null
+    val c = conv.value
+    val isGroup = c?.optBoolean("isGroup") == true
+    val rawTitle =
+        if (isGroup) c?.optText("title")?.ifBlank { "Group" } ?: "…"
+        else c?.optJSONObject("other")?.optText("displayName")?.ifBlank { "…" } ?: "…"
+    // Long names collapse to the first word so the header always stays a
+    // single line (the full name lives on the contact page).
+    val title =
+        if (rawTitle.length > 14 && rawTitle.contains(' ')) rawTitle.substringBefore(' ') else rawTitle
+    val avatarUrl = if (isGroup) null else c?.optJSONObject("other")?.optString("avatarUrl")
+    val online = !isGroup && c?.optJSONObject("other")?.optBoolean("online") == true
     Column(
         Modifier
             .fillMaxSize()
@@ -554,18 +689,45 @@ fun ChatScreen(nav: NavController, convId: String) {
             .statusBarsPadding()
             .navigationBarsPadding(),
     ) {
-        /* ---------------- top bar ---------------- */
-        val c = conv.value
-        val isGroup = c?.optBoolean("isGroup") == true
-        val rawTitle =
-            if (isGroup) c?.optText("title")?.ifBlank { "Group" } ?: "…"
-            else c?.optJSONObject("other")?.optText("displayName")?.ifBlank { "…" } ?: "…"
-        // Long names collapse to the first word so the header always stays a
-        // single line (the full name lives on the contact page).
-        val title =
-            if (rawTitle.length > 14 && rawTitle.contains(' ')) rawTitle.substringBefore(' ') else rawTitle
-        val avatarUrl = if (isGroup) null else c?.optJSONObject("other")?.optString("avatarUrl")
-        val online = !isGroup && c?.optJSONObject("other")?.optBoolean("online") == true
+        /* ---------------- top bar (or selection bar) ---------------- */
+        if (selected.isNotEmpty()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(Cream)
+                    .padding(horizontal = 4.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = { selected.clear() }) {
+                    Icon(Icons.Filled.Close, "Clear selection", tint = Ink)
+                }
+                Text(
+                    "${selected.size} selected",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Ink,
+                    modifier = Modifier.weight(1f),
+                )
+                if (single) {
+                    IconButton(onClick = { forwarding = true }) {
+                        Icon(Icons.AutoMirrored.Filled.Send, "Forward", tint = GoldDeep, modifier = Modifier.size(22.dp))
+                    }
+                    if (singleMsg != null && canEdit(singleMsg)) {
+                        IconButton(onClick = { editing = singleMsg; selected.clear() }) {
+                            Icon(Icons.Filled.Edit, "Edit", tint = GoldDeep, modifier = Modifier.size(22.dp))
+                        }
+                    }
+                    if (singleMsg != null && singleMsg.optString("senderId") == Store.myId() && !pendingEchoOf(singleMsg)) {
+                        IconButton(onClick = { unsendSelected() }) {
+                            Icon(Icons.Filled.DeleteForever, "Unsend for everyone", tint = Red, modifier = Modifier.size(22.dp))
+                        }
+                    }
+                }
+                IconButton(onClick = { deleteForMe() }) {
+                    Icon(Icons.Filled.Delete, "Delete for me", tint = Red, modifier = Modifier.size(22.dp))
+                }
+            }
+        } else {
         Row(
             Modifier
                 .fillMaxWidth()
@@ -597,6 +759,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     color = Ink,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
                 )
                 Text(
                     when {
@@ -691,6 +854,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 }
             }
         }
+        }
 
         /* ---------------- message list on coin wallpaper ---------------- */
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -710,14 +874,19 @@ fun ChatScreen(nav: NavController, convId: String) {
                 contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 10.dp),
             ) {
                 items(msgs, key = { it.optString("clientId").ifBlank { it.optString("id") } }) { m ->
-                    Box {
-                        MessageRow(m, isGroup, Store.myId(), otherReadAt, player) { id ->
-                            scope.launch {
-                                runCatching { withContext(Dispatchers.IO) { Api.delete("/api/messages/$id") } }
-                                refreshMessages()
-                            }
-                        }
-                    }
+                    MessageRow(
+                        m,
+                        isGroup,
+                        Store.myId(),
+                        otherReadAt,
+                        player,
+                        selectedIds = selected.toList(),
+                        onToggleSelect = { msg ->
+                            val id = msg.optString("id")
+                            if (id in selected) selected.remove(id) else selected.add(id)
+                        },
+                        onOpenImage = { msg -> viewerMsg = msg },
+                    )
                 }
                 items(
                     pending.filter { p ->
@@ -726,7 +895,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     },
                     key = { it.optString("clientId").ifBlank { it.optString("id") } },
                 ) { m ->
-                    MessageRow(m, isGroup, Store.myId(), otherReadAt, player, pendingEcho = true) {}
+                    MessageRow(m, isGroup, Store.myId(), otherReadAt, player, pendingEcho = true)
                 }
                 if (uploading > 0) {
                     item {
@@ -888,6 +1057,45 @@ fun ChatScreen(nav: NavController, convId: String) {
                 }
             },
         )
+
+        viewerMsg?.let { m ->
+            ImageViewerDialog(
+                m = m,
+                onClose = { viewerMsg = null },
+                onForward = {
+                    viewerMsg = null
+                    if (m.optString("id") !in selected) selected.clear()
+                    selected.add(m.optString("id"))
+                    forwarding = true
+                },
+            )
+        }
+        editing?.let { m ->
+            EditDialog(
+                original = m.optText("body"),
+                onClose = { editing = null },
+                onSave = { newText ->
+                    val id = m.optString("id")
+                    editing = null
+                    scope.launch {
+                        runCatching {
+                            withContext(Dispatchers.IO) {
+                                Api.patch("/api/messages/$id", JSONObject().put("body", newText))
+                            }
+                        }
+                        refreshMessages()
+                    }
+                },
+            )
+        }
+        if (forwarding) {
+            ForwardDialog(
+                onClose = { forwarding = false },
+                onPick = { targetId ->
+                    forwardSelected(targetId)
+                },
+            )
+        }
     }
 }
 
@@ -1118,6 +1326,183 @@ private fun PulsingDot() {
     )
 }
 
+
+/**
+ * Full-screen photo viewer: pinch/double-tap zoom, pan, save to gallery and
+ * forward. Plain taps on chat photos used to offer "delete" — far too easy
+ * to hit by accident; now photos OPEN instead.
+ */
+@Composable
+private fun ImageViewerDialog(
+    m: JSONObject,
+    onClose: () -> Unit,
+    onForward: () -> Unit,
+) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val url =
+        m.optText("mediaUrl").takeIf { it.isNotBlank() }
+            ?: m.optText("fileKey").takeIf { it.isNotBlank() }?.let { key ->
+                if (key.startsWith("data:") || key.startsWith("http") || key.startsWith("/")) key
+                else "/api/files/$key"
+            } ?: ""
+    var scale by remember { mutableStateOf(1f) }
+    var offX by remember { mutableStateOf(0f) }
+    var offY by remember { mutableStateOf(0f) }
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTransformGestures { _, pan, zoom, _ ->
+                            scale = (scale * zoom).coerceIn(1f, 6f)
+                            offX = if (scale > 1f) offX + pan.x else 0f
+                            offY = if (scale > 1f) offY + pan.y else 0f
+                        }
+                    }
+                    .pointerInput(Unit) {
+                        detectTapGestures(onDoubleTap = {
+                            if (scale > 1f) {
+                                scale = 1f; offX = 0f; offY = 0f
+                            } else {
+                                scale = 2.5f
+                            }
+                        })
+                    },
+            ) {
+                KpNetImage(
+                    url,
+                    "Photo",
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer(
+                            scaleX = scale,
+                            scaleY = scale,
+                            translationX = offX,
+                            translationY = offY,
+                        ),
+                    androidx.compose.ui.layout.ContentScale.Fit,
+                )
+            }
+            IconButton(onClick = onClose, Modifier.align(Alignment.TopStart).padding(6.dp)) {
+                Icon(Icons.Filled.Close, "Close", tint = Color.White)
+            }
+            Row(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(18.dp),
+                horizontalArrangement = Arrangement.spacedBy(28.dp),
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    IconButton(
+                        onClick = {
+                            scope.launch {
+                                val bytes = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        if (url.startsWith("data:")) {
+                                            android.util.Base64.decode(url.substringAfter(","), android.util.Base64.DEFAULT)
+                                        } else if (url.startsWith("http")) {
+                                            java.net.URL(url).openStream().use { it.readBytes() }
+                                        } else Api.download(url)
+                                    }.getOrNull()
+                                }
+                                if (bytes == null) {
+                                    android.widget.Toast.makeText(ctx, "Could not download the photo", android.widget.Toast.LENGTH_SHORT).show()
+                                } else {
+                                    val saved = FilesUtil.saveImage(ctx, bytes, "kuchupuchu_${System.currentTimeMillis()}.jpg")
+                                    android.widget.Toast.makeText(
+                                        ctx,
+                                        if (saved != null) "Saved to Pictures/KuchuPuchu" else "Could not save",
+                                        android.widget.Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                            }
+                        },
+                    ) {
+                        Icon(Icons.Filled.Download, "Save to gallery", tint = Color.White, modifier = Modifier.size(26.dp))
+                    }
+                    Text("Save", color = Color.White, fontSize = 12.sp)
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    IconButton(onClick = onForward) {
+                        Icon(Icons.Filled.Reply, "Forward", tint = Color.White, modifier = Modifier.size(26.dp))
+                    }
+                    Text("Forward", color = Color.White, fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+
+/** Edit window: one minute from send, text messages only (enforced server-side too). */
+@Composable
+private fun EditDialog(original: String, onClose: () -> Unit, onSave: (String) -> Unit) {
+    var text by remember { mutableStateOf(original) }
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Edit message") },
+        text = {
+            OutlinedTextField(
+                text,
+                { text = it.take(4000) },
+                singleLine = false,
+                maxLines = 4,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { if (text.isNotBlank()) onSave(text.trim()) }, enabled = text.isNotBlank()) {
+                Text("Save", color = GoldDeep, fontWeight = FontWeight.SemiBold)
+            }
+        },
+        dismissButton = { TextButton(onClick = onClose) { Text("Cancel", color = Muted) } },
+    )
+}
+
+/** Pick a conversation to forward the selected message(s) to. */
+@Composable
+private fun ForwardDialog(onClose: () -> Unit, onPick: (String) -> Unit) {
+    val convs = ScreenStore.convs
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Forward to") },
+        text = {
+            LazyColumn(
+                Modifier.heightIn(max = 380.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                if (convs.isEmpty()) {
+                    item { Text("No chats yet.", color = Muted, fontSize = 14.sp) }
+                }
+                items(convs, key = { it.optString("id") }) { c ->
+                    val isGroup = c.optBoolean("isGroup")
+                    val other = c.optJSONObject("other")
+                    val name =
+                        if (isGroup) c.optText("title").ifBlank { "Group" }
+                        else other?.optText("displayName")?.ifBlank { "Chat" } ?: "Chat"
+                    val avatarUrl = if (isGroup) null else other?.optString("avatarUrl")
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Cream)
+                            .clickable { onPick(c.optString("id")) }
+                            .padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        KpAvatar(name, avatarUrl, 40.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Text(name, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onClose) { Text("Cancel", color = Muted) } },
+    )
+}
+
 /** Snapshot of a chat list row → a pseudo conversation object for instant paint. */
 private fun convRowSnapshot(convId: String): JSONObject? {
     val row = ScreenStore.convs.firstOrNull { it.optString("id") == convId } ?: return null
@@ -1135,6 +1520,7 @@ private fun convRowSnapshot(convId: String): JSONObject? {
 
 /* ------------------------------------------------------------------ */
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MessageRow(
     m: JSONObject,
@@ -1143,11 +1529,13 @@ private fun MessageRow(
     otherReadAt: String?,
     player: VoicePlayer,
     pendingEcho: Boolean = false,
-    onDelete: (String) -> Unit,
+    selectedIds: List<String> = emptyList(),
+    onToggleSelect: (JSONObject) -> Unit = {},
+    onOpenImage: (JSONObject) -> Unit = {},
 ) {
-    val ctx = LocalContext.current
     val mine = m.optString("senderId") == myId
     val kind = m.optString("kind")
+    val isSelected = m.optString("id") in selectedIds
 
     if (kind == "SYSTEM" && !isCallLog(m)) {
         Box(Modifier.fillMaxWidth().padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
@@ -1170,24 +1558,8 @@ private fun MessageRow(
     // timestamp and ticks overlaid on the photo (WhatsApp-style). FILE-kind
     // image uploads (picked as documents) get the same treatment.
     if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m))) {
-        ImageMessageRow(m, mine, pendingEcho, otherReadAt, onDelete)
+        ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage)
         return
-    }
-
-    var showDelete by remember { mutableStateOf(false) }
-    if (showDelete && mine && !pendingEcho) {
-        AlertDialog(
-            onDismissRequest = { showDelete = false },
-            title = { Text("Delete message?") },
-            text = { Text("This deletes the message for everyone in the chat.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    showDelete = false
-                    onDelete(m.optString("id"))
-                }) { Text("Delete", color = Red) }
-            },
-            dismissButton = { TextButton(onClick = { showDelete = false }) { Text("Cancel", color = Muted) } },
-        )
     }
 
     Row(
@@ -1211,7 +1583,10 @@ private fun MessageRow(
                         ),
                     )
                     .background(if (mine) goldFill() else Brush.linearGradient(listOf(Card, Card)))
-                    .clickable { if (mine && !pendingEcho) showDelete = true }
+                    .combinedClickable(
+                        onClick = { if (selectedIds.isNotEmpty() && !pendingEcho) onToggleSelect(m) },
+                        onLongClick = { if (!pendingEcho) onToggleSelect(m) },
+                    )
                     .padding(start = 10.dp, top = 7.dp, end = 8.dp, bottom = 5.dp),
             ) {
                 val senderName = m.optText("senderName")
@@ -1228,7 +1603,11 @@ private fun MessageRow(
                             fontStyle = FontStyle.Italic,
                             color = if (mine) Color(0xE6FFFFFF) else Muted,
                         )
-                        else -> Text(m.optString("body"), fontSize = 14.5.sp, color = Ink)
+                        else -> Text(
+                            m.optText("body") + if (m.optBoolean("edited")) "  (edited)" else "",
+                            fontSize = 14.5.sp,
+                            color = Ink,
+                        )
                     }
                 }
                 Row(
@@ -1268,23 +1647,10 @@ private fun ImageMessageRow(
     mine: Boolean,
     pendingEcho: Boolean,
     otherReadAt: String?,
-    onDelete: (String) -> Unit,
+    selectedIds: List<String>,
+    onToggleSelect: (JSONObject) -> Unit,
+    onOpenImage: (JSONObject) -> Unit,
 ) {
-    var showDelete by remember { mutableStateOf(false) }
-    if (showDelete && mine && !pendingEcho) {
-        AlertDialog(
-            onDismissRequest = { showDelete = false },
-            title = { Text("Delete message?") },
-            text = { Text("This deletes the message for everyone in the chat.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    showDelete = false
-                    onDelete(m.optString("id"))
-                }) { Text("Delete", color = Red) }
-            },
-            dismissButton = { TextButton(onClick = { showDelete = false }) { Text("Cancel", color = Muted) } },
-        )
-    }
     Row(
         Modifier
             .fillMaxWidth()
@@ -1295,8 +1661,15 @@ private fun ImageMessageRow(
         Box(
             Modifier
                 .widthIn(max = 260.dp)
+                .then(if (m.optString("id") in selectedIds) Modifier.border(2.dp, Gold, RoundedCornerShape(14.dp)) else Modifier)
                 .clip(RoundedCornerShape(12.dp))
-                .clickable { if (mine && !pendingEcho) showDelete = true },
+                .combinedClickable(
+                    onClick = {
+                        if (pendingEcho) return@combinedClickable
+                        if (selectedIds.isNotEmpty()) onToggleSelect(m) else onOpenImage(m)
+                    },
+                    onLongClick = { if (!pendingEcho) onToggleSelect(m) },
+                ),
         ) {
             ImageBubble(m, mine)
             // scrim so the stamp never drowns in a bright photo
@@ -1330,6 +1703,7 @@ private fun ImageMessageRow(
 }
 
 @Composable
+@Composable
 private fun ImageBubble(m: JSONObject, mine: Boolean) {
     // Photos arrive two ways: kind=IMAGE carries mediaUrl (/api/messages/:id/media
     // or an inline dataUrl while pending), but uploads sent as kind=FILE only
@@ -1342,22 +1716,54 @@ private fun ImageBubble(m: JSONObject, mine: Boolean) {
                 if (key.startsWith("data:") || key.startsWith("http") || key.startsWith("/")) key
                 else "/api/files/$key"
             }
+    // ORIGINAL aspect ratio (capped): the fixed 160dp box squeezed every
+    // photo into the same shape. Ratio comes from the decoded bitmap (data
+    // URLs) or Coil's intrinsic size (network).
+    var ratio by remember(url) { mutableStateOf(0f) }
+    val dataBmp = if (url?.startsWith("data:") == true) rememberBitmap(url) else null
     Box(
         Modifier
-            .widthIn(max = 260.dp, min = 180.dp)
-            .height(160.dp)
+            .widthIn(max = 260.dp)
+            .then(
+                if (ratio > 0f) {
+                    Modifier
+                        .aspectRatio(ratio)
+                        .heightIn(max = 380.dp)
+                } else {
+                    Modifier
+                        .widthIn(min = 180.dp)
+                        .height(200.dp)
+                },
+            )
             .clip(RoundedCornerShape(12.dp))
             .background(Color(0x22000000)),
         contentAlignment = Alignment.Center,
     ) {
         if (url.isNullOrBlank()) {
             CircularProgressIndicator(color = if (mine) AmberInk else Gold, modifier = Modifier.size(22.dp))
+        } else if (dataBmp != null) {
+            if (ratio <= 0f && dataBmp.height > 0) ratio = dataBmp.width.toFloat() / dataBmp.height.toFloat()
+            Image(
+                dataBmp,
+                contentDescription = "Photo",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            )
         } else {
-            KpNetImage(
-                url,
-                "Photo",
-                Modifier.fillMaxSize(),
-                androidx.compose.ui.layout.ContentScale.FillWidth,
+            coil.compose.AsyncImage(
+                model = coil.request.ImageRequest.Builder(LocalContext.current)
+                    .data(if (url.startsWith("http")) url else Api.BASE + url)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = "Photo",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                onSuccess = { state ->
+                    val d = state.result.drawable
+                    if (d.intrinsicWidth > 0 && d.intrinsicHeight > 0 && ratio <= 0f) {
+                        ratio = d.intrinsicWidth.toFloat() / d.intrinsicHeight.toFloat()
+                    }
+                },
             )
         }
     }
