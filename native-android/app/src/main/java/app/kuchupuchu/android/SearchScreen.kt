@@ -110,12 +110,15 @@ fun SearchScreen(nav: NavController) {
         OutlinedTextField(
             query,
             { query = it },
-            label = { Text("Search people, chats, messages") },
+            placeholder = { Text("Search people, chats, messages", fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
             singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 15.sp),
+            shape = RoundedCornerShape(14.dp),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp),
+                .padding(horizontal = 20.dp)
+                .height(52.dp),
         )
 
         /* filter chips */
@@ -123,22 +126,25 @@ fun SearchScreen(nav: NavController) {
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            listOf("all" to "All", "chats" to "Chats", "media" to "Media", "docs" to "Documents").forEach { (id, label) ->
+            listOf("all" to "All", "chats" to "Chats", "media" to "Media", "docs" to "Docs").forEach { (id, label) ->
                 val selected = filter == id
                 Box(
                     Modifier
-                        .clip(RoundedCornerShape(18.dp))
+                        .clip(RoundedCornerShape(16.dp))
                         .background(if (selected) Gold else Card)
                         .clickable { filter = id }
-                        .padding(horizontal = 16.dp, vertical = 7.dp),
+                        .padding(horizontal = 13.dp, vertical = 7.dp),
                 ) {
                     Text(
                         label,
                         color = if (selected) AmberInk else Muted,
                         fontSize = 13.sp,
                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Clip,
                     )
                 }
             }
