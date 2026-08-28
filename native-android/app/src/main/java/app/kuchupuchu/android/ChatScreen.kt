@@ -148,11 +148,6 @@ fun ChatScreen(nav: NavController, convId: String) {
     val pending = remember { mutableStateListOf<JSONObject>() }
     var input by remember { mutableStateOf("") }
     var lastTypingPing by remember { mutableStateOf(0L) }
-    // System back during selection CLEARS the selection (WhatsApp) — it must
-    // not fling the user out of the chat with bubbles still highlighted.
-    androidx.activity.compose.BackHandler(enabled = selected.isNotEmpty()) {
-        selected.clear()
-    }
     var showAttach by remember { mutableStateOf(false) }
     var showStickers by remember { mutableStateOf(false) }
     var recording by remember { mutableStateOf(false) }
@@ -174,6 +169,11 @@ fun ChatScreen(nav: NavController, convId: String) {
     var searchHits by remember { mutableStateOf(listOf<JSONObject>()) }
     // Selection mode (long-press): delete-for-me / unsend / edit / forward.
     val selected = remember { mutableStateListOf<String>() }
+    // System back during selection CLEARS the selection (WhatsApp) — it must
+    // not fling the user out of the chat with bubbles still highlighted.
+    androidx.activity.compose.BackHandler(enabled = selected.isNotEmpty()) {
+        selected.clear()
+    }
     var viewerMsg by remember { mutableStateOf<JSONObject?>(null) }
     var editing by remember { mutableStateOf<JSONObject?>(null) }
     var forwarding by remember { mutableStateOf(false) }
@@ -1663,6 +1663,7 @@ private fun MessageRow(
     val mine = m.optString("senderId") == myId
     val kind = m.optString("kind")
     val isSelected = m.optString("id") in selectedIds
+    val haptics = rememberHaptics()
 
     if (kind == "SYSTEM" && !isCallLog(m)) {
         Box(Modifier.fillMaxWidth().padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
@@ -1714,7 +1715,7 @@ private fun MessageRow(
                         onClick = { if (selectedIds.isNotEmpty() && !pendingEcho) onToggleSelect(m) },
                         onLongClick = {
                             if (!pendingEcho) {
-                                rememberHaptics().tap()
+                                haptics.tap()
                                 onToggleSelect(m)
                             }
                         },
@@ -1784,6 +1785,7 @@ private fun ImageMessageRow(
     onToggleSelect: (JSONObject) -> Unit,
     onOpenImage: (JSONObject) -> Unit,
 ) {
+    val haptics = rememberHaptics()
     Row(
         Modifier
             .fillMaxWidth()
@@ -1802,7 +1804,7 @@ private fun ImageMessageRow(
                     },
                     onLongClick = {
                         if (!pendingEcho) {
-                            rememberHaptics().tap()
+                            haptics.tap()
                             onToggleSelect(m)
                         }
                     },
