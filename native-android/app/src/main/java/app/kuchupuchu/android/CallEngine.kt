@@ -893,19 +893,3 @@ private suspend fun PeerConnection.setRemoteDescriptionAwait(sdp: SessionDescrip
             sdp,
         )
     }
-(sdp: SessionDescription): Unit =
-    suspendCoroutine { cont ->
-        setRemoteDescription(
-            object : SdpObserver {
-                override fun onCreateSuccess(p0: SessionDescription?) {}
-                override fun onSetSuccess() {
-                    cont.resume(Unit)
-                }
-                override fun onCreateFailure(p0: String?) {}
-                override fun onSetFailure(error: String?) {
-                    cont.resumeWithException(RuntimeException("setRemoteDescription: ${error ?: "failed"}"))
-                }
-            },
-            sdp,
-        )
-    }
