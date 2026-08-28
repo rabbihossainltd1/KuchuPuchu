@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main, v3-whatsapp]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -21,21 +21,15 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: android-actions/setup-android@v3
-      - name: Build debug + release APKs
+      - name: Build APK
         working-directory: native-android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug assembleRelease --no-daemon --stacktrace \
+          ./gradlew assembleDebug --no-daemon --stacktrace \
             -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
-      - name: Upload release APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: kuchupuchu-release-apk
-          path: native-android/app/build/outputs/apk/release/app-release.apk
-          if-no-files-found: error
-      - name: Upload debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: kuchupuchu-debug-apk
+          name: kuchupuchu-apk
           path: native-android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
