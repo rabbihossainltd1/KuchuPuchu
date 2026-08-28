@@ -46,7 +46,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
@@ -1408,25 +1407,6 @@ private fun HeaderCallBtn(onClick: () -> Unit, icon: @Composable () -> Unit) {
     ) { icon() }
 }
 
-/** Gold check badge shown on every bubble the user has long-press selected. */
-@Composable
-private fun SelectionCheck(modifier: Modifier = Modifier) {
-    Box(
-        modifier
-            .size(20.dp)
-            .clip(CircleShape)
-            .background(Gold),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            Icons.Filled.Check,
-            contentDescription = "Selected",
-            tint = Color.White,
-            modifier = Modifier.size(14.dp),
-        )
-    }
-}
-
 /**
  * Full-screen photo viewer: pinch/double-tap zoom, pan, save to gallery and
  * forward. Plain taps on chat photos used to offer "delete" — far too easy
@@ -1734,7 +1714,6 @@ private fun MessageRow(
                     if (!mine && isGroup && senderName.isNotBlank()) {
                         Text(senderName, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = GoldDeep)
                     }
-                    if (isSelected) SelectionCheck()
                     when (kind) {
                         "STICKER" -> Text(m.optString("body"), fontSize = 56.sp)
                         "FILE" -> FileBubble(m, mine, player, pendingEcho)
@@ -1813,9 +1792,6 @@ private fun ImageMessageRow(
                 ),
         ) {
             ImageBubble(m, mine)
-            if (m.optString("id") in selectedIds) {
-                SelectionCheck(Modifier.align(Alignment.TopStart).padding(6.dp))
-            }
             // scrim so the stamp never drowns in a bright photo
             Box(
                 Modifier

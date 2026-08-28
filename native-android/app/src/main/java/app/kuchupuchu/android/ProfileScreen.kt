@@ -1,6 +1,7 @@
 package app.kuchupuchu.android
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -40,6 +42,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -142,30 +146,41 @@ fun ProfileScreen(nav: NavController, userId: String) {
                 .clip(RoundedCornerShape(18.dp))
                 .background(Card),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
         ) {
-            ProfileAction(Icons.Filled.Call, "Voice", Modifier.weight(1f)) {
-                haptics.tap()
-                CallEngine.instance?.startCall(userId, "AUDIO", u.optText("displayName"), u.optText("avatarUrl"))
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                ProfileHeaderCallBtn(onClick = {
+                    haptics.tap()
+                    CallEngine.instance?.startCall(userId, "AUDIO", u.optText("displayName"), u.optText("avatarUrl"))
+                }) {
+                    Icon(Icons.Filled.Call, "Voice call", tint = GoldDeep, modifier = Modifier.size(19.dp))
+                }
             }
-            ProfileActionDivider()
-            ProfileAction(Icons.Filled.Videocam, "Video", Modifier.weight(1f)) {
-                haptics.tap()
-                CallEngine.instance?.startCall(userId, "VIDEO", u.optText("displayName"), u.optText("avatarUrl"))
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                ProfileHeaderCallBtn(onClick = {
+                    haptics.tap()
+                    CallEngine.instance?.startCall(userId, "VIDEO", u.optText("displayName"), u.optText("avatarUrl"))
+                }) {
+                    Icon(Icons.Filled.Videocam, "Video call", tint = GoldDeep, modifier = Modifier.size(21.dp))
+                }
             }
-            ProfileActionDivider()
-            ProfileAction(Icons.Filled.Search, "Search", Modifier.weight(1f)) {
-                haptics.tap()
-                scope.launch {
-                    runCatching {
-                        val data = withContext(Dispatchers.IO) {
-                            Api.post("/api/conversations", JSONObject().put("userId", userId))
-                        }
-                        val cid = data.optJSONObject("conversation")?.optString("id").orEmpty()
-                        if (cid.isNotBlank()) {
-                            ScreenStore.pendingChatSearch = cid
-                            nav.navigate("chat/$cid")
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                ProfileHeaderCallBtn(onClick = {
+                    haptics.tap()
+                    scope.launch {
+                        runCatching {
+                            val data = withContext(Dispatchers.IO) {
+                                Api.post("/api/conversations", JSONObject().put("userId", userId))
+                            }
+                            val cid = data.optJSONObject("conversation")?.optString("id").orEmpty()
+                            if (cid.isNotBlank()) {
+                                ScreenStore.pendingChatSearch = cid
+                                nav.navigate("chat/$cid")
+                            }
                         }
                     }
+                }) {
+                    Icon(Icons.Filled.Search, "Search", tint = GoldDeep, modifier = Modifier.size(19.dp))
                 }
             }
         }
@@ -214,32 +229,19 @@ fun ProfileScreen(nav: NavController, userId: String) {
 }
 
 @Composable
-private fun ProfileAction(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    Column(
-        modifier
-            .clickable { onClick() }
-            .padding(vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Icon(icon, label, tint = GoldDeep, modifier = Modifier.size(20.dp))
-        Spacer(Modifier.height(5.dp))
-        Text(label, color = Muted, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-    }
-}
-
-@Composable
-private fun ProfileActionDivider() {
-    androidx.compose.foundation.layout.Box(
+private fun ProfileHeaderCallBtn(onClick: () -> Unit, icon: @Composable () -> Unit) {
+    val haptics = rememberHaptics()
+    Box(
         Modifier
-            .width(1.dp)
-            .height(28.dp)
-            .background(Line),
-    )
+            .padding(horizontal = 3.dp)
+            .size(38.dp)
+            .shadow(4.dp, CircleShape)
+            .clip(CircleShape)
+            .background(Brush.verticalGradient(listOf(Color(0xFFFFFFFF), Color(0xFFF3E4C6))))
+            .border(1.dp, Color(0x24000000), CircleShape)
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center,
+    ) { icon() }
 }
 
 private fun profileSnapshot(userId: String): JSONObject? {
