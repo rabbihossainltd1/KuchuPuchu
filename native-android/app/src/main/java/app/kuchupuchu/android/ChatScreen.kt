@@ -1331,7 +1331,17 @@ private fun ImageMessageRow(
 
 @Composable
 private fun ImageBubble(m: JSONObject, mine: Boolean) {
-    val url = m.optString("mediaUrl").takeIf { it.isNotBlank() }
+    // Photos arrive two ways: kind=IMAGE carries mediaUrl (/api/messages/:id/media
+    // or an inline dataUrl while pending), but uploads sent as kind=FILE only
+    // carry fileKey. Reading mediaUrl alone left every uploaded photo on an
+    // infinite spinner — the fileKey→URL conversion used to happen in
+    // FileBubble, which the image fast-path now bypasses.
+    val url =
+        m.optText("mediaUrl").takeIf { it.isNotBlank() }
+            ?: m.optText("fileKey").takeIf { it.isNotBlank() }?.let { key ->
+                if (key.startsWith("data:") || key.startsWith("http") || key.startsWith("/")) key
+                else "/api/files/$key"
+            }
     Box(
         Modifier
             .widthIn(max = 260.dp, min = 180.dp)
