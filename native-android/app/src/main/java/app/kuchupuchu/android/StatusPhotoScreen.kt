@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -112,6 +113,17 @@ fun StatusPhotoScreen(nav: NavController) {
             val bmp = rememberBitmap(dataUrl)
             if (bmp != null) {
                 Image(bmp, contentDescription = "Status photo", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+            } else if (videoUri != null) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        Icons.Filled.Videocam,
+                        contentDescription = "Video status",
+                        tint = GoldDeep,
+                        modifier = Modifier.size(64.dp),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text("Video ready · ${videoSecs}s", color = Muted, fontSize = 14.sp)
+                }
             } else {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
@@ -148,22 +160,50 @@ fun StatusPhotoScreen(nav: NavController) {
             horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            GoldBtn("Choose photo") {
-                picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            GoldBtn("Choose photo or video") {
+                // ImageOnly meant the video branch below could never be reached,
+                // even though the picker contract, the duration check and the
+                // viewer all support video.
+                picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
             }
-            if (dataUrl != null) {
+            if (dataUrl != null || videoUri != null) {
                 GoldBtn(if (busy) "…" else "Post", enabled = !busy) {
                     busy = true
                     scope.launch {
                         try {
                             withContext(Dispatchers.IO) {
-                                Api.post(
-                                    "/api/statuses",
-                                    JSONObject()
-                                        .put("kind", "IMAGE")
-                                        .put("imageData", dataUrl)
-                                        .put("text", caption.trim()),
-                                )
+                                val vUri = videoUri
+                                if (vUri != null) {
+                                    // Video goes to R2 as an object, not as a data
+                                    // URL - a minute of video is far past the inline
+                                    // budget the server allows.
+                                    val read = FilesUtil.readDocument(ctx, vUri)
+                                        ?: throw Exception("Could not read that video.")
+                                    val (name, bytes) = read
+                                    // Same ceiling the worker enforces on uploads;
+                                    // failing here says why instead of surfacing a
+                                    // bare "File too large" from the API.
+                                    if (bytes.size > 25 * 1024 * 1024) {
+                                        throw Exception("That video is over 25 MB. Pick a shorter one.")
+                                    }
+                                    val up = Api.upload(name.ifBlank { "status.mp4" }, "video/mp4", bytes)
+                                    Api.post(
+                                        "/api/statuses",
+                                        JSONObject()
+                                            .put("kind", "VIDEO")
+                                            .put("fileKey", up.optString("fileKey"))
+                                            .put("seconds", videoSecs)
+                                            .put("text", caption.trim()),
+                                    )
+                                } else {
+                                    Api.post(
+                                        "/api/statuses",
+                                        JSONObject()
+                                            .put("kind", "IMAGE")
+                                            .put("imageData", dataUrl)
+                                            .put("text", caption.trim()),
+                                    )
+                                }
                             }
                             nav.popBackStack()
                         } catch (e: Exception) {
