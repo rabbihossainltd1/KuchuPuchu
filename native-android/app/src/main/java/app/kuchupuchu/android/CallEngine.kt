@@ -749,7 +749,8 @@ class CallEngine(private val app: Application) {
             runCatching {
                 val data = withContext(Dispatchers.IO) { Api.get("/api/config/ice", true) }
                 val ice = data.optJSONObject("ice") ?: return@runCatching
-                val urls = ice.optJSONArray("urls")?.objects()?.map { it }.orEmpty().filter { it.isNotBlank() }
+                val arr = ice.optJSONArray("urls") ?: return@runCatching
+                val urls = (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotBlank() }
                 if (urls.isNotEmpty()) {
                     turnUrls = urls
                     turnUser = ice.optString("username")
