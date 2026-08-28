@@ -713,7 +713,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = { selected.clear() }) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink)
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Ink, modifier = Modifier.size(28.dp))
                 }
                 Text(
                     "${selected.size}",
@@ -767,7 +767,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 player.stop()
                 nav.popBackStack()
             }) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink)
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Ink, modifier = Modifier.size(28.dp))
             }
             val otherId = c?.optJSONObject("other")?.optString("id") ?: ""
             Row(
@@ -778,10 +778,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             ) {
             KpAvatar(title, avatarUrl, 40.dp)
             Spacer(Modifier.width(10.dp))
-            // Name vertically centred on the avatar (WhatsApp): the block is
-            // nudged down half the subtitle height, so the NAME lands on the
-            // avatar's middle line and "online/typing" hangs just below.
-            Column(Modifier.weight(1f).offset(y = 8.dp)) {
+            Column(Modifier.weight(1f)) {
                 Text(
                     title,
                     fontSize = 16.sp,
@@ -827,33 +824,37 @@ fun ChatScreen(nav: NavController, convId: String) {
                 IconButton(onClick = { menuOpen = true }) {
                     Icon(Icons.Filled.MoreVert, "More", tint = Ink, modifier = Modifier.size(24.dp))
                 }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenu(
+                    expanded = menuOpen,
+                    onDismissRequest = { menuOpen = false },
+                    modifier = Modifier.background(Cream),
+                ) {
                     DropdownMenuItem(
-                        text = { Text("New group") },
-                        leadingIcon = { Icon(Icons.Filled.GroupAdd, null, tint = Ink) },
+                        text = { Text("New group", color = Ink) },
+                        leadingIcon = { Icon(Icons.Filled.GroupAdd, null, tint = GoldDeep) },
                         onClick = { menuOpen = false; nav.navigate("newgroup") },
                     )
                     DropdownMenuItem(
-                        text = { Text("View contact") },
-                        leadingIcon = { Icon(Icons.Filled.Person, null, tint = Ink) },
+                        text = { Text("View contact", color = Ink) },
+                        leadingIcon = { Icon(Icons.Filled.Person, null, tint = GoldDeep) },
                         onClick = {
                             menuOpen = false
                             if (!isGroup && otherId.isNotBlank()) nav.navigate("profile/$otherId")
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text("Search") },
-                        leadingIcon = { Icon(Icons.Filled.Search, null, tint = Ink) },
+                        text = { Text("Search", color = Ink) },
+                        leadingIcon = { Icon(Icons.Filled.Search, null, tint = GoldDeep) },
                         onClick = { menuOpen = false; nav.navigate("search") },
                     )
                     DropdownMenuItem(
-                        text = { Text("Media, links, and docs") },
-                        leadingIcon = { Icon(Icons.Filled.PermMedia, null, tint = Ink) },
+                        text = { Text("Media, links, and docs", color = Ink) },
+                        leadingIcon = { Icon(Icons.Filled.PermMedia, null, tint = GoldDeep) },
                         onClick = { menuOpen = false; nav.navigate("chatmedia/$convId") },
                     )
                     DropdownMenuItem(
-                        text = { Text(if (c?.optBoolean("muted") == true) "Unmute notifications" else "Mute notifications") },
-                        leadingIcon = { Icon(Icons.Filled.NotificationsOff, null, tint = Ink) },
+                        text = { Text(if (c?.optBoolean("muted") == true) "Unmute notifications" else "Mute notifications", color = Ink) },
+                        leadingIcon = { Icon(Icons.Filled.NotificationsOff, null, tint = GoldDeep) },
                         onClick = {
                             menuOpen = false
                             val snap = conv.value ?: c
@@ -877,13 +878,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text("Disappearing messages") },
-                        leadingIcon = { Icon(Icons.Filled.Timer, null, tint = Ink) },
+                        text = { Text("Disappearing messages", color = Ink) },
+                        leadingIcon = { Icon(Icons.Filled.Timer, null, tint = GoldDeep) },
                         onClick = { menuOpen = false; showDisappear = true },
                     )
                     DropdownMenuItem(
-                        text = { Text("Chat theme") },
-                        leadingIcon = { Icon(Icons.Filled.Palette, null, tint = Ink) },
+                        text = { Text("Chat theme", color = Ink) },
+                        leadingIcon = { Icon(Icons.Filled.Palette, null, tint = GoldDeep) },
                         onClick = { menuOpen = false; showTheme = true },
                     )
                 }
