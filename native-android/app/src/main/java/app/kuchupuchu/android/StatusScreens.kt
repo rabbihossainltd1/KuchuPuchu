@@ -106,14 +106,6 @@ fun StatusScreen(nav: NavController) {
 
     Box(Modifier.fillMaxSize().background(Cream)) {
         Column(Modifier.fillMaxSize()) {
-            Text(
-                "Status",
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-                color = Ink,
-                modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 10.dp),
-            )
-
             LazyColumn(
                 Modifier.fillMaxSize(),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
@@ -257,18 +249,6 @@ fun StatusScreen(nav: NavController) {
                     item(key = "loading") {
                         Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
                             CircularProgressIndicator(color = Gold, modifier = Modifier.size(28.dp))
-                        }
-                    }
-                }
-                if (ScreenStore.statusesLoaded && others.isEmpty()) {
-                    item(key = "empty") {
-                        Box(Modifier.fillMaxWidth().padding(top = 20.dp), contentAlignment = Alignment.Center) {
-                            Text(
-                                "No friend statuses yet. Chats korle ekhane status dekha jabe.",
-                                fontSize = 13.5.sp,
-                                color = Muted,
-                                textAlign = TextAlign.Center,
-                            )
                         }
                     }
                 }
