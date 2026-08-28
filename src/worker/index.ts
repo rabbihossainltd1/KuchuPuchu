@@ -790,7 +790,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       .filter(Boolean);
     if (!urls.length) return json({ ice: null });
     return json({
-      ice: { urls, username: String(env.TURN_USERNAME || ""), credential: String(env.TURN_CREDENTIAL || "") },
+      ice: {
+        urls,
+        username: String(env.TURN_USERNAME || ""),
+        credential: String(env.TURN_CREDENTIAL || ""),
+      },
     });
   }
 
