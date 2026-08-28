@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -131,11 +132,12 @@ fun ChatListScreen(nav: NavController) {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 4.dp),
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                TopTab(Icons.Filled.Chat, "Chats", tab == 0, unreadTotal) { haptics.tap(); tab = 0 }
-                TopTab(Icons.Filled.Circle, "Status", tab == 1, dot = unseenStatus) { haptics.tap(); tab = 1 }
-                TopTab(Icons.Filled.Call, "Calls", tab == 2) { haptics.tap(); tab = 2 }
+                TopTab(Icons.Filled.Chat, "Chats", tab == 0, unreadTotal, modifier = Modifier.weight(1f)) { haptics.tap(); tab = 0 }
+                TopTab(Icons.Filled.Circle, "Status", tab == 1, dot = unseenStatus, modifier = Modifier.weight(1f)) { haptics.tap(); tab = 1 }
+                TopTab(Icons.Filled.Call, "Calls", tab == 2, modifier = Modifier.weight(1f)) { haptics.tap(); tab = 2 }
             }
             Box(
                 Modifier
@@ -184,6 +186,7 @@ private fun TopTab(
     selected: Boolean,
     badge: Int = 0,
     dot: Boolean = false,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     val tint = if (selected) GoldDeep else Muted
@@ -191,13 +194,14 @@ private fun TopTab(
         if (selected) Modifier.background(GoldSoft, RoundedCornerShape(14.dp))
         else Modifier
     Row(
-        Modifier
+        modifier
             .padding(4.dp)
             .clip(RoundedCornerShape(14.dp))
             .then(bg)
             .clickable { onClick() }
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+            .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
     ) {
         if (label == "Status") {
             // WhatsApp-style status glyph (ring + dot), not a plain circle.
@@ -417,7 +421,7 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
             }
         }
         Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
+        Column(Modifier.weight(1f).fillMaxWidth()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     name,
@@ -426,7 +430,7 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
                     color = Ink,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
+                    modifier = Modifier.weight(1f),
                 )
                 if (muted) {
                     Spacer(Modifier.width(6.dp))
@@ -436,8 +440,8 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
                         tint = Muted,
                         modifier = Modifier.size(15.dp),
                     )
+                    Spacer(Modifier.width(6.dp))
                 }
-                Spacer(Modifier.weight(1f))
                 Text(stamp, fontSize = 12.sp, color = if (unread > 0) GoldDeep else Muted)
             }
             Spacer(Modifier.height(3.dp))
@@ -448,15 +452,17 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
                     color = Muted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
+                    modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.weight(1f))
                 if (unread > 0) {
+                    Spacer(Modifier.width(8.dp))
                     Box(
                         Modifier
-                            .size(22.dp)
+                            .height(22.dp)
+                            .widthIn(min = 22.dp)
                             .clip(CircleShape)
-                            .background(Gold),
+                            .background(Gold)
+                            .padding(horizontal = 6.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(

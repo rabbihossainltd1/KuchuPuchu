@@ -25,6 +25,9 @@ object Store {
     fun init(ctx: Context) {
         val raw = ctx.getSharedPreferences("kp", 0).getString("kp_me", null)
         me = if (raw.isNullOrBlank()) null else runCatching { JSONObject(raw) }.getOrNull()
+        Cache.init(ctx)
+        Outbox.init(ctx)
+        ScreenStore.hydrate(ctx)
     }
 
     fun saveMe(user: JSONObject?) {
@@ -45,6 +48,7 @@ object Store {
         authed.value = false
         ScreenStore.clearMsgs()
         Cache.bustAll("")
+        Cache.clearDisk()
         ctx.getSharedPreferences("kp", 0).edit().clear().apply()
         Api.saveToken(ctx, null)
     }

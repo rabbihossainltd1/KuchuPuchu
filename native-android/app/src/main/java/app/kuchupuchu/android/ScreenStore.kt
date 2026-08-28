@@ -1,10 +1,13 @@
 package app.kuchupuchu.android
 
+import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
+import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 
 /**
  * In-memory screen data that survives navigation, so revisiting a screen
@@ -12,6 +15,8 @@ import org.json.JSONObject
  * background — no more loading spinners on every screen switch.
  */
 object ScreenStore {
+    private var disk: File? = null
+
     val convs = mutableStateListOf<JSONObject>()
     var convsRaw by mutableStateOf("")
     var convsLoaded by mutableStateOf(false)
@@ -23,6 +28,44 @@ object ScreenStore {
      *  name/avatar instantly instead of flashing "…" then loading. */
     private val convDetail = HashMap<String, JSONObject>()
     val convDetailVersion = mutableStateOf(0)
+
+    fun hydrate(ctx: Context) {
+        disk = File(ctx.filesDir, "kp-screens.json")
+        val raw = disk?.takeIf { it.exists() }?.readText() ?: return
+        runCatching {
+            val o = JSONObject(raw)
+            o.optJSONArray("convs")?.objects()?.let { setConvs(it) }
+            o.optJSONArray("calls")?.objects()?.let { setCalls(it) }
+            o.optJSONArray("statuses")?.objects()?.let { setStatuses(it) }
+            val msgsObj = o.optJSONObject("msgs") ?: JSONObject()
+            msgsObj.keys().forEach { k ->
+                msgs[k] = msgsObj.arr(k).objects().toMutableList()
+            }
+        }
+    }
+
+    private fun persist() {
+        val folder = disk ?: return
+        runCatching {
+            val msgsObj = JSONObject()
+            msgs.forEach { (k, v) ->
+                val arr = JSONArray()
+                v.forEach { arr.put(it) }
+                msgsObj.put(k, arr)
+            }
+            val convArr = JSONArray(); convs.forEach { convArr.put(it) }
+            val callArr = JSONArray(); calls.forEach { callArr.put(it) }
+            val stArr = JSONArray(); statuses.forEach { stArr.put(it) }
+            folder.writeText(
+                JSONObject()
+                    .put("convs", convArr)
+                    .put("calls", callArr)
+                    .put("statuses", stArr)
+                    .put("msgs", msgsObj)
+                    .toString(),
+            )
+        }
+    }
 
     @Synchronized
     fun setConvDetail(convId: String, conv: JSONObject?) {
@@ -51,6 +94,7 @@ object ScreenStore {
             convs.addAll(list)
         }
         convsLoaded = true
+        persist()
     }
 
     @Synchronized
@@ -61,9 +105,15 @@ object ScreenStore {
         val old = msgs[convId]
         val changed = old == null || old.size != list.size ||
             (list.isNotEmpty() && old.isNotEmpty() && list.last().optString("id") != old.last().optString("id"))
-        if (!changed) return
+        val idsChanged = changed
+        val tickChanged =
+            !idsChanged && old != null && list.zip(old).any { (n, o) ->
+                n.optIso("deliveredAt") != o.optIso("deliveredAt")
+            }
+        if (!idsChanged && !tickChanged) return
         msgs[convId] = list.toMutableList()
         msgsVersion.value++
+        persist()
     }
 
     @Synchronized
@@ -90,5 +140,6 @@ object ScreenStore {
             calls.addAll(list)
         }
         callsLoaded = true
+        persist()
     }
 }

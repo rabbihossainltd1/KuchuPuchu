@@ -410,7 +410,19 @@ async function logCallEvent(db: D1Database, caller: string, callee: string, kind
       : status === "DECLINED"
         ? `Declined ${video ? "video" : "voice"} call`
         : `Missed ${video ? "video" : "voice"} call`;
-  await systemMessage(db, convId, label);
+  const mid = id();
+  const created = nowIso();
+  await run(
+    db,
+    "INSERT INTO messages (id, conv_id, sender_id, kind, body, meta_json, created_at) VALUES (?, ?, ?, 'CALL', ?, ?, ?)",
+    mid,
+    convId,
+    caller,
+    label,
+    JSON.stringify({ callKind: kind, status, seconds }),
+    created,
+  );
+  await run(db, "UPDATE conversations SET last_message = ?, last_message_at = ? WHERE id = ?", label, created, convId);
 }
 
 function clockLabel(seconds: number) {
@@ -809,7 +821,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const items = rows.reverse().map((row) => ({ ...msgFrom(row), senderName: names.get(row.sender_id) }));
     // Delivery receipts: the fetching member has now received every message
     // in this page that someone else sent (only mark the ones still pending).
-    const inboxIds = rows.filter((r) => r.sender_id !== uid && !r.delivered_at).map((r) => r.id);
+    const inboxIds = rows.filter((r) => r.sender_id && r.sender_id !== uid && !r.delivered_at).map((r) => r.id);
     if (inboxIds.length) {
       await run(db, `UPDATE messages SET delivered_at = ? WHERE id IN (${inboxIds.map(() => "?").join(",")})`, nowIso(), ...inboxIds);
     }
@@ -842,7 +854,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (!text && !imageData && !fileKey) fail(400, "Write a message.");
     const mid = id();
     const created = nowIso();
-    const meta =
+    let meta =
       kind === "FILE" && fileKey
         ? JSON.stringify({
             name: String(body.fileName || "file").slice(0, 120),
@@ -868,10 +880,17 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       meta,
       created,
     );
+    const clientId =
+      typeof body.clientId === "string" && body.clientId.trim() ? body.clientId.trim().slice(0, 64) : null;
+    if (clientId) {
+      const extra = parseJson<Record<string, unknown>>(meta, {});
+      extra.clientId = clientId;
+      meta = JSON.stringify(extra);
+    }
     const preview =
-      kind === "STICKER"
-        ? "Sticker"
-        : text || (imageData ? "Photo" : kind === "FILE" ? String(body.fileName || "File") : "Message");
+    kind === "STICKER"
+      ? "Sticker"
+      : text || (imageData ? "Photo" : kind === "FILE" ? String(body.fileName || "File") : "Message");
     await run(
       db,
       "UPDATE conversations SET last_message = ?, last_message_at = ?, hidden_json = '{}' WHERE id = ?",
@@ -1092,6 +1111,18 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const kind = body.kind === "VIDEO" ? "VIDEO" : "AUDIO";
     if (!other || other === uid) fail(400, "Bad user.");
     if (await blockedBetween(db, uid, other)) fail(403, "You can't call this user.", "BLOCKED");
+    const convId = pairId(uid, other);
+    if (!(await one(db, "SELECT id FROM conversations WHERE id = ?", convId))) {
+      const createdConv = nowIso();
+      await run(
+        db,
+        "INSERT INTO conversations (id, kind, created_at, hidden_json) VALUES (?, 'SOLO', ?, '{}')",
+        convId,
+        createdConv,
+      );
+      await run(db, "INSERT INTO members (conv_id, user_id, joined_at) VALUES (?, ?, ?)", convId, uid, createdConv);
+      await run(db, "INSERT INTO members (conv_id, user_id, joined_at) VALUES (?, ?, ?)", convId, other, createdConv);
+    }
     const callId = id();
     const created = nowIso();
     await run(

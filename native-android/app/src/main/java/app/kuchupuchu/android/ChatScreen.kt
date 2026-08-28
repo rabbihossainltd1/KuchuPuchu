@@ -53,6 +53,19 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.CallMissed
+
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.GroupAdd
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PermMedia
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -121,10 +134,19 @@ fun ChatScreen(nav: NavController, convId: String) {
     val listState = rememberLazyListState()
     val player = remember { VoicePlayer() }
     var lastTopId by remember { mutableStateOf("") }
+    var menuOpen by remember { mutableStateOf(false) }
 
     fun paintFromStore() {
+        val next = ScreenStore.msgsOf(convId)
+        if (msgs.size == next.size &&
+            msgs.isNotEmpty() &&
+            msgs.zip(next).all { it.first.optString("id") == it.second.optString("id") }
+        ) {
+            next.forEachIndexed { i, o -> msgs[i] = o }
+            return
+        }
         msgs.clear()
-        msgs.addAll(ScreenStore.msgsOf(convId))
+        msgs.addAll(next)
     }
 
     fun refreshMeta() {
@@ -138,7 +160,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     c.arr("members").objects().forEach { m ->
                         val u = m.optJSONObject("user")
                         if (u != null && u.optString("id") != Store.myId()) {
-                            otherReadAt = m.optString("lastReadAt").takeIf { it.isNotBlank() }
+                            otherReadAt = m.optIso("lastReadAt")
                         }
                     }
                 }
@@ -158,23 +180,17 @@ fun ChatScreen(nav: NavController, convId: String) {
                 val newTop = fresh.lastOrNull()?.optString("id") ?: ""
                 ScreenStore.setMsgs(convId, fresh)
                 paintFromStore()
-                // drop optimistic copies the server confirmed (Instant-safe compare)
                 if (pending.isNotEmpty()) {
-                    val confirmed = fresh.filter { it.optString("senderId") == Store.myId() }
+                    val confirmedIds = fresh.map { it.optString("clientId").ifBlank { it.optString("id") } }.toSet()
                     pending.removeAll { p ->
-                        val pAt = runCatching { java.time.Instant.parse(p.optString("createdAt")) }.getOrNull()
-                        confirmed.any { c ->
-                            c.optString("kind") == p.optString("kind") &&
-                                c.optString("body") == p.optString("body") &&
-                                (p.optString("kind") != "FILE" || c.optString("fileName") == p.optString("fileName")) &&
-                                runCatching { java.time.Instant.parse(c.optString("createdAt")) }.getOrNull()
-                                    ?.let { cAt -> pAt == null || !cAt.isBefore(pAt) } == true
-                        }
-                    }
-                    // safety: drop echoes stuck older than 60s
-                    val cutoff = System.currentTimeMillis() - 60_000
-                    pending.removeAll {
-                        runCatching { java.time.Instant.parse(it.optString("createdAt")).toEpochMilli() }.getOrDefault(cutoff) < cutoff
+                        val cid = p.optString("clientId").ifBlank { p.optString("id") }
+                        cid in confirmedIds ||
+                            fresh.any { c ->
+                                c.optString("senderId") == Store.myId() &&
+                                    c.optString("kind") == p.optString("kind") &&
+                                    c.optString("body") == p.optString("body") &&
+                                    (p.optString("kind") != "FILE" || c.optString("fileName") == p.optString("fileName"))
+                            }
                     }
                 }
                 val total = msgs.size + pending.size
@@ -202,6 +218,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         paintFromStore()
         refreshMeta()
         refreshMessages(forceScroll = true, markRead = true)
+        runCatching { Outbox.flush() }
     }
 
     /* single stable background refresh loop while this chat is open */
@@ -218,10 +235,12 @@ fun ChatScreen(nav: NavController, convId: String) {
 
     fun sendText(body: String, kind: String = "TEXT") {
         if (body.isBlank()) return
-        // optimistic echo
+        val clientId = "c_${java.util.UUID.randomUUID()}"
+        val payload = JSONObject().put("kind", kind).put("body", body).put("clientId", clientId)
         pending.add(
             JSONObject()
-                .put("id", "pending_${System.currentTimeMillis()}")
+                .put("id", clientId)
+                .put("clientId", clientId)
                 .put("senderId", Store.myId())
                 .put("kind", kind)
                 .put("body", body)
@@ -233,35 +252,55 @@ fun ChatScreen(nav: NavController, convId: String) {
             KpSounds.send(ctx)
             try {
                 withContext(Dispatchers.IO) {
-                    Api.post(
-                        "/api/conversations/$convId/messages",
-                        JSONObject().put("kind", kind).put("body", body),
-                    )
+                    Api.post("/api/conversations/$convId/messages", payload)
                 }
                 refreshMessages(forceScroll = true)
             } catch (e: Exception) {
-                pending.removeAll { it.optString("body") == body }
-                error = e.message ?: "Could not send."
+                Outbox.add(convId, clientId, payload)
             }
         }
     }
 
     fun sendImage(dataUrl: String) {
-        uploading++
+        val clientId = "c_${java.util.UUID.randomUUID()}"
+        pending.add(
+            JSONObject()
+                .put("id", clientId)
+                .put("clientId", clientId)
+                .put("senderId", Store.myId())
+                .put("kind", "IMAGE")
+                .put("body", "")
+                .put("hasImage", true)
+                .put("createdAt", java.time.Instant.now().toString()),
+        )
         scope.launch {
+            listState.animateScrollToItem(msgs.size + pending.size - 1)
             try {
-                withContext(Dispatchers.IO) {
-                    Api.post(
-                        "/api/conversations/$convId/messages",
-                        JSONObject().put("kind", "IMAGE").put("imageData", dataUrl),
-                    )
+                val jpeg = withContext(Dispatchers.IO) {
+                    val b64 = dataUrl.substringAfter(",", "")
+                    android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
                 }
+                val up = withContext(Dispatchers.IO) { Api.upload("photo.jpg", "image/jpeg", jpeg) }
+                val payload =
+                    JSONObject()
+                        .put("kind", "FILE")
+                        .put("fileKey", up.optString("fileKey"))
+                        .put("fileName", "photo.jpg")
+                        .put("fileType", "image/jpeg")
+                        .put("fileSize", jpeg.size)
+                        .put("clientId", clientId)
+                withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
                 KpSounds.send(ctx)
                 refreshMessages(forceScroll = true)
             } catch (e: Exception) {
-                error = e.message ?: "Could not send photo."
-            } finally {
-                uploading--
+                try {
+                    val payload = JSONObject().put("kind", "IMAGE").put("imageData", dataUrl).put("clientId", clientId)
+                    withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
+                    KpSounds.send(ctx)
+                    refreshMessages(forceScroll = true)
+                } catch (e2: Exception) {
+                    error = e2.message ?: "Could not send photo."
+                }
             }
         }
     }
@@ -293,17 +332,18 @@ fun ChatScreen(nav: NavController, convId: String) {
     }
 
     fun sendVoice(file: File, seconds: Int, name: String) {
-        // Optimistic voice bubble with ticks — no separate "Sending…" row.
+        val clientId = "c_${java.util.UUID.randomUUID()}"
         pending.add(
             JSONObject()
-                .put("id", "pending_${System.currentTimeMillis()}")
+                .put("id", clientId)
+                .put("clientId", clientId)
                 .put("senderId", Store.myId())
                 .put("kind", "FILE")
                 .put("body", "")
                 .put("fileName", name)
                 .put("fileType", "audio/mp4")
                 .put("fileSize", file.length().toInt())
-                .put("meta", JSONObject().put("voice", true).put("seconds", seconds))
+                .put("meta", JSONObject().put("voice", true).put("seconds", seconds).put("clientId", clientId))
                 .put("createdAt", java.time.Instant.now().toString()),
         )
         scope.launch {
@@ -311,24 +351,21 @@ fun ChatScreen(nav: NavController, convId: String) {
             try {
                 val bytes = withContext(Dispatchers.IO) { file.readBytes() }
                 val data = withContext(Dispatchers.IO) { Api.upload(name, "audio/mp4", bytes) }
-                withContext(Dispatchers.IO) {
-                    Api.post(
-                        "/api/conversations/$convId/messages",
-                        JSONObject()
-                            .put("kind", "FILE")
-                            .put("fileKey", data.optString("fileKey"))
-                            .put("fileName", name)
-                            .put("fileType", "audio/mp4")
-                            .put("fileSize", bytes.size)
-                            .put("meta", JSONObject().put("voice", true).put("seconds", seconds)),
-                    )
-                }
+                val payload =
+                    JSONObject()
+                        .put("kind", "FILE")
+                        .put("fileKey", data.optString("fileKey"))
+                        .put("fileName", name)
+                        .put("fileType", "audio/mp4")
+                        .put("fileSize", bytes.size)
+                        .put("clientId", clientId)
+                        .put("meta", JSONObject().put("voice", true).put("seconds", seconds).put("clientId", clientId))
+                withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
                 KpSounds.send(ctx)
                 file.delete()
-                refreshMessages(forceScroll = true)
+                refreshMessages(forceScroll = false)
             } catch (e: Exception) {
-                pending.removeAll { it.optString("fileName") == name }
-                error = e.message ?: "Could not send voice note."
+                Outbox.add(convId, clientId, JSONObject().put("kind", "FILE").put("fileName", name).put("clientId", clientId))
             }
         }
     }
@@ -425,6 +462,61 @@ fun ChatScreen(nav: NavController, convId: String) {
                     }
                 }
             }
+            Box {
+                IconButton(onClick = { menuOpen = true }) {
+                    Icon(Icons.Filled.MoreVert, "More", tint = Ink, modifier = Modifier.size(24.dp))
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("New group") },
+                        leadingIcon = { Icon(Icons.Filled.GroupAdd, null, tint = Ink) },
+                        onClick = { menuOpen = false; nav.navigate("newchat") },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("View contact") },
+                        leadingIcon = { Icon(Icons.Filled.Person, null, tint = Ink) },
+                        onClick = { menuOpen = false },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Search") },
+                        leadingIcon = { Icon(Icons.Filled.Search, null, tint = Ink) },
+                        onClick = { menuOpen = false; nav.navigate("search") },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Media, links, and docs") },
+                        leadingIcon = { Icon(Icons.Filled.PermMedia, null, tint = Ink) },
+                        onClick = { menuOpen = false },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(if (c?.optBoolean("muted") == true) "Unmute notifications" else "Mute notifications") },
+                        leadingIcon = { Icon(Icons.Filled.NotificationsOff, null, tint = Ink) },
+                        onClick = {
+                            menuOpen = false
+                            scope.launch {
+                                runCatching {
+                                    withContext(Dispatchers.IO) {
+                                        Api.post(
+                                            "/api/conversations/$convId/mute",
+                                            JSONObject().put("muted", c?.optBoolean("muted") != true),
+                                        )
+                                    }
+                                }
+                                refreshMeta()
+                            }
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Disappearing messages") },
+                        leadingIcon = { Icon(Icons.Filled.Timer, null, tint = Ink) },
+                        onClick = { menuOpen = false },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Chat theme") },
+                        leadingIcon = { Icon(Icons.Filled.Palette, null, tint = Ink) },
+                        onClick = { menuOpen = false },
+                    )
+                }
+            }
         }
 
         /* ---------------- message list on coin wallpaper ---------------- */
@@ -444,7 +536,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 10.dp),
             ) {
-                items(msgs, key = { it.optString("id") }) { m ->
+                items(msgs, key = { it.optString("clientId").ifBlank { it.optString("id") } }) { m ->
                     Box(Modifier.animateItem()) {
                         MessageRow(m, isGroup, Store.myId(), otherReadAt, player) { id ->
                             scope.launch {
@@ -454,7 +546,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                         }
                     }
                 }
-                items(pending, key = { it.optString("id") }) { m ->
+                items(
+                    pending.filter { p ->
+                        val cid = p.optString("clientId").ifBlank { p.optString("id") }
+                        msgs.none { it.optString("clientId") == cid || it.optString("id") == cid }
+                    },
+                    key = { it.optString("clientId").ifBlank { it.optString("id") } },
+                ) { m ->
                     MessageRow(m, isGroup, Store.myId(), otherReadAt, player, pendingEcho = true) {}
                 }
                 if (uploading > 0) {
@@ -789,7 +887,7 @@ private fun MessageRow(
     val mine = m.optString("senderId") == myId
     val kind = m.optString("kind")
 
-    if (kind == "SYSTEM") {
+    if (kind == "SYSTEM" && !isCallLog(m)) {
         Box(Modifier.fillMaxWidth().padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
             Box(
                 Modifier
@@ -800,6 +898,10 @@ private fun MessageRow(
                 Text(m.optString("body"), fontSize = 12.sp, color = Muted)
             }
         }
+        return
+    }
+    if (kind == "CALL" || isCallLog(m)) {
+        CallLogBubble(m, mine, pendingEcho)
         return
     }
 
@@ -829,7 +931,8 @@ private fun MessageRow(
         Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
             Box(
                 Modifier
-                    .widthIn(max = 290.dp)
+                    .widthIn(min = 72.dp, max = 280.dp)
+                    .wrapContentWidth()
                     .clip(
                         RoundedCornerShape(
                             topStart = 16.dp,
@@ -840,29 +943,28 @@ private fun MessageRow(
                     )
                     .background(if (mine) goldFill() else Brush.linearGradient(listOf(Card, Card)))
                     .clickable { if (mine && !pendingEcho) showDelete = true }
-                    .padding(10.dp),
+                    .padding(start = 10.dp, top = 7.dp, end = 8.dp, bottom = 5.dp),
             ) {
                 val senderName = m.optString("senderName").takeIf { it.isNotBlank() } ?: ""
-                if (!mine && isGroup && senderName.isNotBlank()) {
-                    Text(senderName, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = GoldDeep)
+                Column(Modifier.padding(end = 52.dp, bottom = 2.dp)) {
+                    if (!mine && isGroup && senderName.isNotBlank()) {
+                        Text(senderName, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = GoldDeep)
+                    }
+                    when (kind) {
+                        "IMAGE" -> ImageBubble(m, mine)
+                        "STICKER" -> Text(m.optString("body"), fontSize = 56.sp)
+                        "FILE" -> FileBubble(m, mine, player, pendingEcho)
+                        "DELETED" -> Text(
+                            "This message was deleted",
+                            fontSize = 13.5.sp,
+                            fontStyle = FontStyle.Italic,
+                            color = if (mine) Color(0xE6FFFFFF) else Muted,
+                        )
+                        else -> Text(m.optString("body"), fontSize = 14.5.sp, color = Ink)
+                    }
                 }
-                when (kind) {
-                    "IMAGE" -> ImageBubble(m, mine)
-                    "STICKER" -> Text(m.optString("body"), fontSize = 56.sp)
-                    "FILE" -> FileBubble(m, mine, player, pendingEcho)
-                    "DELETED" -> Text(
-                        "This message was deleted",
-                        fontSize = 13.5.sp,
-                        fontStyle = FontStyle.Italic,
-                        color = if (mine) Color(0xE6FFFFFF) else Muted,
-                    )
-                    else -> Text(m.optString("body"), fontSize = 14.5.sp, color = Ink)
-                }
-                Spacer(Modifier.height(3.dp))
-                /* time + ticks, right-aligned like WhatsApp */
                 Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
+                    Modifier.align(Alignment.BottomEnd),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
@@ -871,39 +973,8 @@ private fun MessageRow(
                         color = if (mine) Color(0xD9FFFFFF) else Muted,
                     )
                     if (mine) {
-                        Spacer(Modifier.width(4.dp))
-                        if (pendingEcho) {
-                            // still uploading / sending
-                            Icon(
-                                Icons.Filled.Schedule,
-                                contentDescription = "Sending",
-                                tint = Color(0xB3FFFFFF),
-                                modifier = Modifier.size(12.dp),
-                            )
-                        } else {
-                            val seen = isReadByOther(otherReadAt, m.optString("createdAt"))
-                            val delivered = m.optString("deliveredAt").isNotBlank()
-                            when {
-                                seen -> Icon(
-                                    Icons.Filled.DoneAll,
-                                    contentDescription = "Seen",
-                                    tint = Color(0xFF53BDEB), // WhatsApp blue
-                                    modifier = Modifier.size(13.dp),
-                                )
-                                delivered -> Icon(
-                                    Icons.Filled.DoneAll,
-                                    contentDescription = "Delivered",
-                                    tint = Color(0xB3FFFFFF),
-                                    modifier = Modifier.size(13.dp),
-                                )
-                                else -> Icon(
-                                    Icons.Filled.Done,
-                                    contentDescription = "Sent",
-                                    tint = Color(0xB3FFFFFF),
-                                    modifier = Modifier.size(13.dp),
-                                )
-                            }
-                        }
+                        Spacer(Modifier.width(3.dp))
+                        TickIcon(m, pendingEcho, otherReadAt)
                     }
                 }
             }
@@ -946,7 +1017,14 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendin
     val fileKey = m.optString("fileKey")
     val fileName = m.optString("fileName").ifBlank { "File" }
     val fileType = m.optString("fileType")
-    val isVoice = fileType.startsWith("audio") || fileName.endsWith(".m4a") || fileName.endsWith(".mp3")
+    val isImage = fileType.startsWith("image") || fileName.endsWith(".jpg") || fileName.endsWith(".jpeg") || fileName.endsWith(".png")
+    if (isImage) {
+        val url = if (fileKey.isNotBlank()) "/api/files/$fileKey" else m.optString("mediaUrl")
+        ImageBubble(JSONObject().put("mediaUrl", url), mine)
+        return
+    }
+    val isVoice = fileType.startsWith("audio") || fileName.endsWith(".m4a") || fileName.endsWith(".mp3") ||
+        m.optJSONObject("meta")?.optBoolean("voice") == true
     val playing = player.playingId == id
     val loading = player.loadingId == id
 
@@ -1060,4 +1138,76 @@ private fun isReadByOther(otherReadAt: String?, createdAt: String): Boolean {
     val read = runCatching { java.time.Instant.parse(otherReadAt) }.getOrNull() ?: return false
     val sent = runCatching { java.time.Instant.parse(createdAt) }.getOrNull() ?: return false
     return !read.isBefore(sent)
+}
+
+@Composable
+private fun TickIcon(m: JSONObject, pendingEcho: Boolean, otherReadAt: String?) {
+    if (pendingEcho) {
+        Icon(Icons.Filled.Schedule, "Sending", tint = Color(0xB3FFFFFF), modifier = Modifier.size(12.dp))
+        return
+    }
+    val seen = isReadByOther(otherReadAt, m.optString("createdAt"))
+    val delivered = m.optIso("deliveredAt") != null
+    when {
+        seen -> Icon(Icons.Filled.DoneAll, "Seen", tint = Color(0xFF53BDEB), modifier = Modifier.size(13.dp))
+        delivered -> Icon(Icons.Filled.DoneAll, "Delivered", tint = Color(0xB3FFFFFF), modifier = Modifier.size(13.dp))
+        else -> Icon(Icons.Filled.Done, "Sent", tint = Color(0xB3FFFFFF), modifier = Modifier.size(13.dp))
+    }
+}
+
+private fun isCallLog(m: JSONObject): Boolean {
+    if (m.optString("kind") == "CALL") return true
+    val b = m.optString("body").lowercase()
+    return b.contains("voice call") || b.contains("video call") || b.startsWith("missed ") || b.startsWith("declined ")
+}
+
+@Composable
+private fun CallLogBubble(m: JSONObject, mine: Boolean, pendingEcho: Boolean) {
+    val meta = m.optJSONObject("meta")
+    val body = m.optString("body")
+    val video = body.contains("Video", true) || meta?.optString("callKind") == "VIDEO"
+    val missed = body.contains("Missed", true) || body.contains("No answer", true) ||
+        meta?.optString("status") == "MISSED"
+    val declined = body.contains("Declined", true) || meta?.optString("status") == "DECLINED"
+    val seconds = meta?.optInt("seconds") ?: 0
+    val title = if (video) "Video call" else "Voice call"
+    val sub =
+        when {
+            declined -> "Declined"
+            missed -> "No answer"
+            seconds > 0 -> "%d:%02d".format(seconds / 60, seconds % 60)
+            else -> body.substringAfter("·").trim().ifBlank { " " }
+        }
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
+    ) {
+        Row(
+            Modifier
+                .widthIn(max = 260.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(if (mine) goldFill() else Brush.linearGradient(listOf(Card, Card)))
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier.size(36.dp).clip(CircleShape).background(if (mine) Color(0x33FFFFFF) else GoldSoft),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    if (missed || declined) Icons.Filled.CallMissed else Icons.Filled.Call,
+                    contentDescription = title,
+                    tint = if (missed) Red else if (mine) Ink else GoldDeep,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text(title, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+                Text(sub, fontSize = 12.sp, color = if (mine) Color(0xCCFFFFFF) else Muted)
+            }
+            Spacer(Modifier.width(12.dp))
+            Text(msgStamp(m.optString("createdAt")), fontSize = 10.sp, color = if (mine) Color(0xD9FFFFFF) else Muted)
+        }
+    }
 }

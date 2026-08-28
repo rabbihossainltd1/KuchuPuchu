@@ -34,9 +34,14 @@ object Api {
 
     fun get(path: String, force: Boolean = false): JSONObject {
         if (!force) Cache.get(path)?.let { return it }
-        val data = request(path, "GET", null)
-        Cache.put(path, data)
-        return data
+        return try {
+            val data = request(path, "GET", null)
+            Cache.put(path, data)
+            data
+        } catch (e: Exception) {
+            Cache.peek(path)?.let { return it }
+            throw e
+        }
     }
 
     fun post(path: String, body: JSONObject? = JSONObject()): JSONObject {
@@ -150,3 +155,10 @@ class ApiException(val status: Int, override val message: String) : Exception(me
 fun JSONObject.arr(key: String): JSONArray = optJSONArray(key) ?: JSONArray()
 
 fun JSONArray.objects(): List<JSONObject> = (0 until length()).map { getJSONObject(it) }
+
+/** Android org.json turns JSON null into the string "null" via optString. */
+fun JSONObject.optIso(key: String): String? {
+    if (!has(key) || isNull(key)) return null
+    val s = optString(key)
+    return s.takeIf { it.isNotBlank() && it != "null" }
+}
