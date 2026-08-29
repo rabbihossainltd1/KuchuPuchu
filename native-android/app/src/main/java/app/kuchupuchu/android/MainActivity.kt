@@ -35,7 +35,7 @@ class MainActivity : ComponentActivity() {
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
             runCatching {
                 java.io.File(filesDir, "kp_crash.txt").writeText(
-                    (e.message ?: e.javaClass.name) + "\n" +
+                    e.javaClass.name + ": " + (e.message ?: "") + "\n" +
                         e.stackTrace.take(8).joinToString("\n") { it.toString() },
                 )
             }

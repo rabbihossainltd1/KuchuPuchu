@@ -984,13 +984,23 @@ fun ChatScreen(nav: NavController, convId: String) {
                     )
                 }
             }
+            // A retried send used to leave TWO server rows with the same
+            // clientId; keys collide and the chat crashed on open ("Key ...
+            // was already used"). Render only the first of any duplicate —
+            // this also heals chats that already contain dup rows.
+            val seenKeys = HashSet<String>()
+            val visibleMsgs =
+                msgs.filter { m ->
+                    val k = m.optString("clientId").ifBlank { m.optString("id") }
+                    k.isNotBlank() && seenKeys.add(k)
+                }
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 10.dp),
             ) {
                 items(
-                    msgs,
+                    visibleMsgs,
                     key = { it.optString("clientId").ifBlank { it.optString("id") } },
                     contentType = { it.optString("kind") },
                 ) { m ->
@@ -1024,7 +1034,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 items(
                     pending.filter { p ->
                         val cid = p.optString("clientId").ifBlank { p.optString("id") }
-                        msgs.none { it.optString("clientId") == cid || it.optString("id") == cid }
+                        visibleMsgs.none { it.optString("clientId") == cid || it.optString("id") == cid }
                     },
                     key = { it.optString("clientId").ifBlank { it.optString("id") } },
                 ) { m ->

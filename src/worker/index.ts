@@ -1645,12 +1645,26 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (kind === "STICKER" && !text) fail(400, "Pick a sticker.");
     if (kind === "STICKER" && text.length > 16) fail(400, "Bad sticker.");
     if (!text && !imageData && !fileKey) fail(400, "Write a message.");
-    const mid = id();
     const created = nowIso();
     const clientId =
       typeof body.clientId === "string" && body.clientId.trim()
         ? body.clientId.trim().slice(0, 64)
         : null;
+    // Idempotent send: a retried POST (timeout after the row already landed,
+    // Outbox flush after a kill) used to insert a SECOND row carrying the
+    // same clientId — the app keys its list items by clientId, so that
+    // duplicate crashed the chat on open ("Key was already used").
+    if (clientId) {
+      const dup = await one<MsgRow>(
+        db,
+        "SELECT * FROM messages WHERE conv_id = ? AND sender_id = ? AND meta_json LIKE ? ORDER BY rowid LIMIT 1",
+        convId,
+        uid,
+        `%"clientId":"${clientId.replace(/[^A-Za-z0-9._-]/g, "")}"%`,
+      );
+      if (dup) return json({ message: msgFrom(dup), duplicate: true }, 200);
+    }
+    const mid = id();
     const incomingMeta = (body.meta as Record<string, unknown> | undefined) ?? {};
     const metaObj: Record<string, unknown> = {
       ...(kind === "FILE" && fileKey
