@@ -942,7 +942,7 @@ class CallEngine(private val app: Application) {
             runCatching {
                 peer.addTransceiver(
                     MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO,
-                    RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_RECEIVE),
+                    RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_RECV),
                 )
             }
         }
