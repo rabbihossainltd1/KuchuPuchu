@@ -21,10 +21,10 @@ export type Env = {
   TURN_URLS?: string;
   TURN_USERNAME?: string;
   TURN_CREDENTIAL?: string;
-  /** Cloudflare Calls TURN — set both and /api/config/ice mints short-lived
-   *  HMAC credentials automatically (no per-request secret exposure). */
+  /** Cloudflare Realtime TURN (ex-"Calls"): key id + an API token holding
+   *  Realtime Edit; /api/config/ice mints + caches short-lived credentials. */
   TURN_KEY_ID?: string;
-  TURN_KEY?: string;
+  TURN_API_TOKEN?: string;
 };
 
 type Json = Record<string, unknown>;
@@ -508,6 +508,11 @@ function fcmPublicConfig(env: Env): Record<string, string> | null {
 }
 
 let fcmTokenCache: { token: string; projectId: string; exp: number } | null = null;
+// Cloudflare Realtime TURN credential cache (minted via rtc.live.cloudflare.com).
+let turnCredCache: {
+  server: { urls: string[]; username: string; credential: string };
+  expiresAt: number;
+} | null = null;
 
 function base64UrlEncode(bytes: Uint8Array | string): string {
   let bin = "";
@@ -840,41 +845,52 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   // Optional TURN relay config for the dialer. The app falls back to its
   // built-in STUN/TURN list when this is null, so an empty config is fine.
   //
-  // Preferred: Cloudflare Calls TURN — set secrets TURN_KEY_ID + TURN_KEY.
-  // Credentials are short-lived HMACs generated right here (no network call):
-  //   username = "{expiry_epoch}:{key_id}"
-  //   password = base64url(HMAC-SHA256(key_secret, username))
+  // Cloudflare Realtime TURN (the product once named "Calls"): set secrets
+  // TURN_KEY_ID + TURN_API_TOKEN (a CF API token with Realtime Edit). Each
+  // credential is minted by rtc.live.cloudflare.com and cached until near
+  // expiry, so app polls cost at most one upstream call per TTL window.
   if (path === "/api/config/ice" && method === "GET") {
     const keyId = env.TURN_KEY_ID;
-    const keySecret = env.TURN_KEY;
-    if (keyId && keySecret) {
-      const expiry = Math.floor(Date.now() / 1000) + 6 * 3600;
-      const username = `${expiry}:${keyId}`;
-      const raw = await crypto.subtle.sign(
-        "HMAC",
-        await crypto.subtle.importKey(
-          "raw",
-          new TextEncoder().encode(keySecret),
-          { name: "HMAC", hash: "SHA-256" },
-          false,
-          ["sign"],
-        ),
-        new TextEncoder().encode(username),
-      );
-      let bin = "";
-      for (const b of new Uint8Array(raw)) bin += String.fromCharCode(b);
-      const credential = btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-      return json({
-        ice: {
-          urls: [
-            "turn:turn.cloudflare.com:3478?transport=udp",
-            "turn:turn.cloudflare.com:3478?transport=tcp",
-            "turns:turn.cloudflare.com:443?transport=tcp",
-          ],
-          username,
-          credential,
-        },
-      });
+    const apiToken = env.TURN_API_TOKEN;
+    if (keyId && apiToken) {
+      let cached = turnCredCache;
+      if (!cached || cached.expiresAt < Date.now() + 5 * 60_000) {
+        const mint = await fetch(
+          `https://rtc.live.cloudflare.com/v1/turn/keys/${keyId}/credentials/generate-ice-servers`,
+          {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${apiToken}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ ttl: 86400 }),
+          },
+        );
+        if (mint.ok) {
+          const data = (await mint.json()) as {
+            iceServers?: { urls: string[]; username?: string; credential?: string }[];
+          };
+          // The mint returns TWO entries (STUN-only + TURN with creds).
+          // Merge into one: every url, plus the username/credential from
+          // the TURN entry — the app applies creds to all urls harmlessly.
+          const all = data.iceServers ?? [];
+          const turn = all.find((e) => e.username && e.credential);
+          if (turn) {
+            cached = {
+              server: {
+                urls: all.flatMap((e) => e.urls ?? []),
+                username: turn.username!,
+                credential: turn.credential!,
+              },
+              expiresAt: Date.now() + 86_000_000,
+            };
+            turnCredCache = cached;
+          }
+        } else {
+          console.log("turn_mint_error", JSON.stringify({ status: mint.status }));
+        }
+      }
+      if (cached) return json({ ice: cached.server });
     }
     const urls = String(env.TURN_URLS || "")
       .split(",")
