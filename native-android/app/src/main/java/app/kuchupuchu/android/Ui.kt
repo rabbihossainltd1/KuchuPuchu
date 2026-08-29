@@ -67,16 +67,28 @@ object Bitmaps {
     }
 
     private fun decode(url: String): Bitmap? = runCatching {
-        if (url.startsWith("data:")) {
-            val b64 = url.substringAfter(",", "")
-            if (b64.isBlank()) null else {
-                val decoded = Base64.decode(b64, Base64.DEFAULT)
-                BitmapFactory.decodeByteArray(decoded, 0, decoded.size)
+        val bytes =
+            when {
+                url.startsWith("data:") -> {
+                    val b64 = url.substringAfter(",", "")
+                    if (b64.isBlank()) return null
+                    Base64.decode(b64, Base64.DEFAULT)
+                }
+                url.startsWith("http") || url.startsWith("/") -> Api.download(url)
+                else -> return null
             }
-        } else if (url.startsWith("http") || url.startsWith("/")) {
-            val bytes = Api.download(url)
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-        } else null
+        // Bounds-decode then sample: a 4000x3000 data-URI photo is ~48MB
+        // decoded whole — that transient spike OOM-crashed heavy chats even
+        // with a bounded cache. Avatars/bubbles never draw beyond ~1080px.
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        var sample = 1
+        var side = maxOf(bounds.outWidth, bounds.outHeight)
+        while (side / 2 >= 1080) {
+            sample *= 2
+            side /= 2
+        }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
     }.getOrNull()
 }
 

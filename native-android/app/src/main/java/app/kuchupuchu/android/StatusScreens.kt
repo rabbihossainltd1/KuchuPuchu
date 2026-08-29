@@ -594,6 +594,12 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
         val target = user.optString("id")
         val text = reply.trim()
         val snippet = statuses.getOrNull(idx)?.optString("text")?.take(40).orEmpty()
+        // Optimistic: the box clears the moment you hit send — the network
+        // fires behind and only a failure speaks up.
+        reply = ""
+        replyError = ""
+        replyFocused = false
+        runCatching { KpSounds.send(ctx) }
         scope.launch {
             try {
                 val conv = withContext(Dispatchers.IO) {
@@ -605,11 +611,13 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                 withContext(Dispatchers.IO) {
                     Api.post("/api/conversations/$cid/messages", JSONObject().put("body", body))
                 }
-                reply = ""
-                replyError = ""
-                replyFocused = false
+                ScreenStore.pokeInbox()
             } catch (e: Exception) {
-                replyError = e.message ?: "Reply didn't send. Try again."
+                android.widget.Toast.makeText(
+                    ctx,
+                    "Reply patha jayni — abar try koro",
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
             }
         }
     }
@@ -754,8 +762,24 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                         }
                     }
                 }
+                val openTheirChat: () -> Unit = {
+                    val uid = user?.optString("id").orEmpty()
+                    if (!isMine && uid.isNotBlank()) {
+                        scope.launch {
+                            runCatching {
+                                val conv = withContext(Dispatchers.IO) {
+                                    Api.post("/api/conversations", JSONObject().put("userId", uid))
+                                }
+                                val cid = conv.optJSONObject("conversation")?.optString("id").orEmpty()
+                                if (cid.isNotBlank()) nav.navigate("chat/$cid")
+                            }
+                        }
+                    }
+                }
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp).let { m ->
+                        if (!isMine) m.clickable { openTheirChat() } else m
+                    },
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     KpAvatar(

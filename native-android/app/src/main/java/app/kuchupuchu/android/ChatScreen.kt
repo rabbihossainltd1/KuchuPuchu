@@ -311,9 +311,9 @@ fun ChatScreen(nav: NavController, convId: String) {
         while (true) {
             if (Store.foreground && Store.route == "chat/$convId") {
                 refreshMessages()
-                delay(800)
+                delay(400)
             } else {
-                delay(2_000)
+                delay(1_500)
             }
         }
     }

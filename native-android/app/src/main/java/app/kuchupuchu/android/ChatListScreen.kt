@@ -126,7 +126,7 @@ fun ChatListScreen(nav: NavController) {
         // the open chat polls even faster at 800ms, FCM pokes refill
         // instantly).
         while (true) {
-            delay(2_000)
+            delay(1_200)
             if (Store.foreground) refresh()
         }
     }
@@ -267,7 +267,8 @@ private fun ArchivePullArea(nav: NavController, content: @Composable () -> Unit)
 @Composable
 fun ArchiveScreen(nav: NavController) {
     val convs = ScreenStore.convs
-    val archived = convs.filter { ScreenStore.isArchived(it.optString("id")) }
+    var rev by remember { mutableStateOf(0) }
+    val archived = remember(rev, convs.size) { convs.filter { ScreenStore.isArchived(it.optString("id")) } }
     val ctx = LocalContext.current
     Column(Modifier.fillMaxSize().background(Cream).statusBarsPadding()) {
         Row(
@@ -290,24 +291,15 @@ fun ArchiveScreen(nav: NavController) {
                 )
             }
         } else {
+            // Same swipe language as the main list, mirrored for archive:
+            // left swipe = Unarchive, right swipe = Mute + Delete.
             LazyColumn(
                 Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(archived, key = { it.optString("id") }) { conv ->
-                    Row(Modifier.fillMaxWidth().height(76.dp)) {
-                        Box(Modifier.weight(1f)) { ConvCard(conv, nav) }
-                        IconButton(
-                            onClick = {
-                                ScreenStore.unarchiveConv(conv.optString("id"))
-                                android.widget.Toast.makeText(ctx, "Chat unarchived", android.widget.Toast.LENGTH_SHORT).show()
-                            },
-                            modifier = Modifier.align(Alignment.CenterVertically),
-                        ) {
-                            Icon(Icons.Filled.Unarchive, "Unarchive", tint = GoldDeep)
-                        }
-                    }
+                    SwipeConvRow(conv, nav, { rev++ }, archivedMode = true)
                 }
             }
         }
@@ -431,7 +423,12 @@ private fun ChatListBody(
  *   swipe RIGHT → archive (local — pull the list down to reach it)
  */
 @Composable
-private fun SwipeConvRow(conv: JSONObject, nav: NavController, onChange: () -> Unit) {
+private fun SwipeConvRow(
+    conv: JSONObject,
+    nav: NavController,
+    onChange: () -> Unit,
+    archivedMode: Boolean = false,
+) {
     val scope = rememberCoroutineScope()
     val haptics = rememberHaptics()
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -454,7 +451,45 @@ private fun SwipeConvRow(conv: JSONObject, nav: NavController, onChange: () -> U
                     .clip(RoundedCornerShape(16.dp))
                     .background(Line),
             ) {
-                if (offset < 0f) {
+                if (offset < 0f && archivedMode) {
+                    ActionSlot(
+                        icon = if (conv.optBoolean("muted")) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
+                        bg = GoldSoft,
+                        tint = GoldDeep,
+                        label = if (conv.optBoolean("muted")) "Unmute" else "Mute",
+                    ) {
+                        haptics.confirm()
+                        val id = conv.optString("id")
+                        val next = !conv.optBoolean("muted")
+                        ScreenStore.setMuted(id, next)
+                        dragged = 0f
+                        scope.launch {
+                            runCatching {
+                                withContext(Dispatchers.IO) {
+                                    Api.post("/api/conversations/$id/mute", JSONObject().put("muted", next))
+                                }
+                            }.onFailure { ScreenStore.setMuted(id, !next) }
+                        }
+                    }
+                    ActionSlot(
+                        icon = Icons.Filled.Delete,
+                        bg = Color(0xFFFEE2E2),
+                        tint = Red,
+                        label = "Delete",
+                    ) {
+                        scope.launch {
+                            haptics.heavy()
+                            runCatching {
+                                withContext(Dispatchers.IO) {
+                                    Api.delete("/api/conversations/${conv.optString("id")}")
+                                }
+                            }
+                            dragged = 0f
+                            onChange()
+                        }
+                    }
+                }
+                if (offset < 0f && !archivedMode) {
                     ActionSlot(
                         icon = Icons.Filled.Archive,
                         bg = Color(0xFFE7F0E7),
@@ -477,7 +512,21 @@ private fun SwipeConvRow(conv: JSONObject, nav: NavController, onChange: () -> U
                     .clip(RoundedCornerShape(16.dp))
                     .background(Line),
             ) {
-                if (offset >= 0f) {
+                if (offset >= 0f && archivedMode) {
+                    ActionSlot(
+                        icon = Icons.Filled.Unarchive,
+                        bg = Color(0xFFE7F0E7),
+                        tint = Color(0xFF2E7D32),
+                        label = "Unarchive",
+                    ) {
+                        haptics.confirm()
+                        ScreenStore.unarchiveConv(conv.optString("id"))
+                        android.widget.Toast.makeText(ctx, "Chat unarchived", android.widget.Toast.LENGTH_SHORT).show()
+                        dragged = 0f
+                        onChange()
+                    }
+                }
+                if (offset >= 0f && !archivedMode) {
                     ActionSlot(
                         icon = if (conv.optBoolean("muted")) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
                         bg = GoldSoft,
