@@ -127,7 +127,7 @@ fun AttachPanel(
     val dragTotal = remember { mutableStateOf(0f) }
 
     val screenH = LocalConfiguration.current.screenHeightDp.dp
-    val targetH = if (fullscreen) screenH - 132.dp else screenH * 0.44f
+    val targetH = if (fullscreen) screenH - 132.dp else screenH * 0.40f
     val panelH by animateDpAsState(targetH, tween(260), label = "attachPanelH")
 
     fun hasRead(): Boolean =
@@ -243,7 +243,7 @@ fun AttachPanel(
                         dragTotal.value += amount
                     }
                 }
-                .padding(top = 6.dp, bottom = 4.dp),
+                .padding(top = 4.dp, bottom = 3.dp),
             contentAlignment = Alignment.Center,
         ) {
             Box(
@@ -294,7 +294,7 @@ fun AttachPanel(
         )
         rows.forEach { row ->
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 1.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
                 row.forEach { a -> AttachTile(a.icon, a.tint, a.label, a.onClick) }
@@ -316,7 +316,7 @@ fun AttachPanel(
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, end = 12.dp, top = 4.dp),
+                .padding(start = 14.dp, end = 10.dp, top = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -614,20 +614,20 @@ private fun AttachTile(icon: ImageVector, tint: Color, label: String, onClick: (
         modifier = Modifier
             .clip(RoundedCornerShape(14.dp))
             .clickable { onClick() }
-            .padding(horizontal = 6.dp, vertical = 3.dp),
+            .padding(horizontal = 4.dp, vertical = 2.dp),
     ) {
         Box(
             Modifier
-                .size(46.dp)
+                .size(38.dp)
                 .clip(CircleShape)
                 .border(1.dp, Color(0x1F1C1917), CircleShape)
                 .background(Color(0xFFFFFFFF)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(21.dp))
+            Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(17.dp))
         }
-        Spacer(Modifier.height(3.dp))
-        Text(label, fontSize = 11.sp, color = Ink, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(2.dp))
+        Text(label, fontSize = 10.sp, color = Ink, fontWeight = FontWeight.Medium)
     }
 }
 

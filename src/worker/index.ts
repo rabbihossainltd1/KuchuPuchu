@@ -1659,27 +1659,19 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     for (const memberId of members) {
       if (memberId.user_id === uid) continue;
       ctx.waitUntil(
-        pushToUser(
-          env,
-          db,
-          memberId.user_id,
-          {
-            type: "message",
-            convoId: convId,
-            kind: conv.kind,
-            // "from" is a RESERVED FCM data key — every push with it has
-            // been rejected 400 since day one ("Invalid data payload key").
-            fromName: me.display_name,
-            body: preview.slice(0, 120),
-            // lands as an intent extra when the system notification is tapped
-            kp_chat: convId,
-          },
-          {
-            title: me.display_name || "KuchuPuchu",
-            body: preview.slice(0, 120) || "New message",
-            channel: "kp_messages_v2",
-          },
-        ),
+        // DATA-ONLY on purpose: a high-priority data message wakes the app
+        // process, so KpNotify renders the notification WITH Reply/Like
+        // actions. The FCM notification payload can never carry actions.
+        // ("from" would be a reserved FCM data key — hence fromName.)
+        pushToUser(env, db, memberId.user_id, {
+          type: "message",
+          convoId: convId,
+          kind: conv.kind,
+          fromName: me.display_name,
+          body: preview.slice(0, 120),
+          // lands as an intent extra when the notification is tapped
+          kp_chat: convId,
+        }),
       );
     }
     return json({ message }, 201);

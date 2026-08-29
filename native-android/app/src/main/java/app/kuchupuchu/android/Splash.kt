@@ -10,9 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Text
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -22,7 +20,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 
 /**
@@ -43,7 +40,7 @@ fun SplashGate(content: @Composable () -> Unit) {
             Box(
                 Modifier
                     .fillMaxSize()
-                    .background(Color(0xFF12100D))
+                    .background(Color(0xFFF6EBD7))
                     .clickable { show = false },
                 contentAlignment = Alignment.Center,
             ) {
@@ -57,21 +54,13 @@ fun SplashGate(content: @Composable () -> Unit) {
                             setOnPreparedListener { mp ->
                                 mp.isLooping = false
                                 mp.setVolume(0f, 0f)
-                                mp.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT)
+                                // fill the whole screen (crop edges) — no letterbox bars
+                                mp.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING)
                                 start()
                             }
                             setOnCompletionListener { show = false }
                         }
                     },
-                )
-                Text(
-                    "Tap to skip",
-                    color = Color.White.copy(alpha = 0.35f),
-                    fontSize = 12.sp,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .navigationBarsPadding()
-                        .padding(bottom = 26.dp),
                 )
             }
         }

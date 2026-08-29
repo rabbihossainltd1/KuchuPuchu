@@ -26,10 +26,9 @@ const val CALL_ACCEPT = "app.kuchupuchu.android.CALL_ACCEPT"
 const val CALL_DECLINE = "app.kuchupuchu.android.CALL_DECLINE"
 private const val INCOMING_ID = 7101
 private const val ONGOING_ID = 7102
-// v2: the original "kp-calls" channel was created with
-// USAGE_NOTIFICATION_RINGTONE, which silent mode mutes — and channels are
-// immutable, so a fresh id with USAGE_ALARM is the only way out.
-private const val CH_IN = "kp-calls-v2"
+// v3: back to the NORMAL ringtone stream — a stock dialer respects the
+// phone's silent/volume settings, so do we. (v2 had forced USAGE_ALARM.)
+private const val CH_IN = "kp-calls-v3"
 private const val CH_FG = "kp-call-fg"
 
 /** Ringtone + vibration while an incoming call rings. */
@@ -53,7 +52,7 @@ object CallSounds {
             runCatching { MediaPlayer.create(ctx.applicationContext, R.raw.kp_ring, attrs, 1) }.getOrNull()
                 ?: return
         player.isLooping = true
-        runCatching { player.setVolume(0.8f, 0.8f) }
+        runCatching { player.setVolume(0.62f, 0.62f) }
         runCatching { player.start() }
         ringback = player
     }
@@ -65,28 +64,14 @@ object CallSounds {
         ringback = null
     }
 
-    /** Previous ALARM volume, restored when the ring stops. */
-    private var prevAlarmVol: Int? = null
-
     @Synchronized
     fun startRing(ctx: Context) {
         if (ring != null) return
-        // Mute-proofing: silent mode doesn't touch the ALARM stream, but a
-        // device with alarm volume at 0 would still be silent — lift it.
-        runCatching {
-            val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            val max = am.getStreamMaxVolume(AudioManager.STREAM_ALARM)
-            val cur = am.getStreamVolume(AudioManager.STREAM_ALARM)
-            if (cur < max * 0.6f) {
-                prevAlarmVol = cur
-                am.setStreamVolume(AudioManager.STREAM_ALARM, Math.round(max * 0.8f), 0)
-            }
-        }
         val attrs = android.media.AudioAttributes.Builder()
             .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            // USAGE_ALARM: plays even when the phone is on silent/vibrate —
-            // RINGTONE usage was the reason a silenced phone never rang.
-            .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+            // Normal call ring: follows the phone's volume/silent settings,
+            // exactly like a stock dialer.
+            .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
             .build()
         val player =
             runCatching {
@@ -137,14 +122,6 @@ object CallSounds {
 
     @Synchronized
     fun stop(ctx: Context? = null) {
-        prevAlarmVol?.let { v ->
-            runCatching {
-                (ctx ?: return@let).getSystemService(Context.AUDIO_SERVICE)?.let { svc ->
-                    (svc as AudioManager).setStreamVolume(AudioManager.STREAM_ALARM, v, 0)
-                }
-            }
-            prevAlarmVol = null
-        }
         runCatching { ring?.stop() }
         ring?.release()
         ring = null
@@ -174,9 +151,7 @@ object CallNotify {
             ch.setSound(
                 Uri.parse("android.resource://${ctx.packageName}/${R.raw.kp_ring2}"),
                 AudioAttributes.Builder()
-                    // ALARM stream: the ring ignores the phone's silent switch,
-                    // like a real phone call should.
-                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .build(),
             )

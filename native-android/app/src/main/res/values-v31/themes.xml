@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ system splash: blend into the mp4 splash — cream
+         background, invisible icon, so the video feels like the FIRST
+         thing on screen. -->
+    <style name="Theme.KuchuPuchu" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">#F7F6F4</item>
+        <item name="android:navigationBarColor">#FFFFFF</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowBackground">@color/kp_splash_cream</item>
+        <item name="android:windowSplashScreenBackground">@color/kp_splash_cream</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_empty</item>
+    </style>
+</resources>

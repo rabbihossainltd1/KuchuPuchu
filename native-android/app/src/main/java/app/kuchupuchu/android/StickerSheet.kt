@@ -77,7 +77,7 @@ fun StickerPanel(
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 6.dp),
+                .padding(horizontal = 12.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
@@ -150,8 +150,8 @@ fun StickerPanel(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        .padding(horizontal = 12.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
                     recents.take(6).forEach { s ->
                         Text(
@@ -218,10 +218,10 @@ fun StickerPanel(
                 }
             LazyVerticalGrid(
                 columns = GridCells.Fixed(5),
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 5.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(258.dp),
+                    .height(212.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
@@ -231,7 +231,7 @@ fun StickerPanel(
                     Box(
                         Modifier
                             .fillMaxWidth()
-                            .height(56.dp)
+                            .height(48.dp)
                             .clip(RoundedCornerShape(14.dp))
                             .background(if (pressed) Color(0x1A1C1917) else Color.Transparent)
                             .clickable(interactionSource = interaction, indication = null) {
@@ -243,7 +243,7 @@ fun StickerPanel(
                     ) {
                         Text(
                             sticker,
-                            fontSize = 32.sp,
+                            fontSize = 27.sp,
                             modifier = Modifier.scale(if (pressed) 1.25f else 1f),
                         )
                     }
@@ -253,7 +253,7 @@ fun StickerPanel(
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(258.dp),
+                    .height(212.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text("GIFs are coming in a future update", color = Color(0x801C1917), fontSize = 14.sp)
@@ -264,7 +264,7 @@ fun StickerPanel(
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 8.dp),
+                .padding(horizontal = 18.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
