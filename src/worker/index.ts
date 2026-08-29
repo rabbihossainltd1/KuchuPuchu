@@ -357,6 +357,23 @@ async function ensureSchema(db: D1Database) {
   await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN disappear_seconds INTEGER`);
   await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN theme TEXT`);
   await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN disappear_since TEXT`);
+  await runCatchingSql(db, `ALTER TABLE messages ADD COLUMN client_id TEXT`);
+  await runCatchingSql(
+    db,
+    `CREATE INDEX IF NOT EXISTS idx_messages_dedupe ON messages(conv_id, sender_id, client_id)`,
+  );
+  // One-time backfill: legacy rows carry clientId only inside meta_json.
+  // After this, every row has the column (future INSERTs always set it), so
+  // the WHERE matches nothing and this stays a cheap no-op on later boots.
+  try {
+    await run(
+      db,
+      `UPDATE messages SET client_id = json_extract(meta_json, '$.clientId')
+       WHERE client_id IS NULL AND meta_json IS NOT NULL`,
+    );
+  } catch (err) {
+    console.error(`client_id backfill failed: ${err instanceof Error ? err.message : err}`);
+  }
   schemaReady = true;
 }
 
@@ -1676,12 +1693,15 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // same clientId — the app keys its list items by clientId, so that
     // duplicate crashed the chat on open ("Key was already used").
     if (clientId) {
+      // Exact indexed lookup (client_id column). The earlier meta_json LIKE
+      // probe blew up on real conversations — D1 raised "LIKE or GLOB pattern
+      // too complex", which turned EVERY send in a busy chat into a 500.
       const dup = await one<MsgRow>(
         db,
-        "SELECT * FROM messages WHERE conv_id = ? AND sender_id = ? AND meta_json LIKE ? ORDER BY rowid LIMIT 1",
+        "SELECT * FROM messages WHERE conv_id = ? AND sender_id = ? AND client_id = ? LIMIT 1",
         convId,
         uid,
-        `%"clientId":"${clientId.replace(/[^A-Za-z0-9._-]/g, "")}"%`,
+        clientId,
       );
       if (dup) return json({ message: msgFrom(dup), duplicate: true }, 200);
     }
@@ -1700,18 +1720,34 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     };
     if (clientId) metaObj.clientId = clientId;
     const meta = Object.keys(metaObj).length ? JSON.stringify(metaObj) : null;
-    await run(
-      db,
-      "INSERT INTO messages (id, conv_id, sender_id, kind, body, media, meta_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-      mid,
-      convId,
-      uid,
-      imageData ? "IMAGE" : fileKey ? "FILE" : kind,
-      text,
-      imageData ?? fileKey ?? null,
-      meta,
-      created,
-    );
+    try {
+      await run(
+        db,
+        "INSERT INTO messages (id, conv_id, sender_id, kind, body, media, meta_json, created_at, client_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        mid,
+        convId,
+        uid,
+        imageData ? "IMAGE" : fileKey ? "FILE" : kind,
+        text,
+        imageData ?? fileKey ?? null,
+        meta,
+        created,
+        clientId,
+      );
+    } catch (err) {
+      // Two identical POSTs racing past the dup check: the UNIQUE index lets
+      // exactly one win — the loser returns the winner's row (never a 500).
+      if (!/UNIQUE/i.test(String(err instanceof Error ? err.message : err))) throw err;
+      const winner = await one<MsgRow>(
+        db,
+        "SELECT * FROM messages WHERE conv_id = ? AND sender_id = ? AND client_id = ? LIMIT 1",
+        convId,
+        uid,
+        clientId ?? "",
+      );
+      if (winner) return json({ message: msgFrom(winner), duplicate: true }, 200);
+      throw err;
+    }
     // Bind the uploaded object to this conversation so GET /api/files/:key can
     // authorize every other member. Without this the authz check would reject
     // the recipient, who is not the uploader.
