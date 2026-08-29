@@ -76,7 +76,7 @@ object KpNotify {
     fun message(ctx: Context, from: String, body: String, convoId: String) {
         ensureChannels(ctx)
         // WhatsApp-style direct actions: reply straight from the
-        // notification, or send a like with one tap — no app open needed.
+        // notification, like with one tap, or mark read — no app open needed.
         val remoteInput = RemoteInput.Builder(KEY_REPLY).setLabel("Reply").build()
         val replyPending =
             PendingIntent.getBroadcast(
@@ -96,6 +96,15 @@ object KpNotify {
                     .putExtra("convoId", convoId),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
+        val readPending =
+            PendingIntent.getBroadcast(
+                ctx,
+                convoId.hashCode() * 4 + 3,
+                Intent(ctx, KpNotifActionReceiver::class.java)
+                    .setAction(KpNotifActionReceiver.ACTION_MARK_READ)
+                    .putExtra("convoId", convoId),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
         val replyAction =
             NotificationCompat.Action.Builder(android.R.drawable.ic_menu_send, "Reply", replyPending)
                 .addRemoteInput(remoteInput)
@@ -103,6 +112,9 @@ object KpNotify {
                 .build()
         val likeAction =
             NotificationCompat.Action.Builder(android.R.drawable.ic_menu_agenda, "Like", likePending)
+                .build()
+        val readAction =
+            NotificationCompat.Action.Builder(android.R.drawable.ic_menu_view, "Mark as read", readPending)
                 .build()
         val n =
             NotificationCompat.Builder(ctx, CHAT_CHANNEL)
@@ -114,6 +126,7 @@ object KpNotify {
                 .setContentIntent(chatTap(ctx, convoId))
                 .addAction(replyAction)
                 .addAction(likeAction)
+                .addAction(readAction)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
                 .setSound(defaultSound())
@@ -259,7 +272,7 @@ object KpNotify {
     }
 }
 
-/** Handles Reply / Like straight from the message notification. */
+/** Handles Reply / Like / Mark-as-read straight from the message notification. */
 class KpNotifActionReceiver : android.content.BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         val convoId = intent.getStringExtra("convoId") ?: return
@@ -279,6 +292,17 @@ class KpNotifActionReceiver : android.content.BroadcastReceiver() {
                                 .put("clientId", "c_${java.util.UUID.randomUUID()}"),
                         )
                     }
+                    pending.finish()
+                }.start()
+            }
+            ACTION_MARK_READ -> {
+                // Just dismisses + marks read server-side — no reply sent,
+                // no app open, matches the messenger-style tick behaviour.
+                nm.cancel(convoId.hashCode())
+                val pending = goAsync()
+                Thread {
+                    runCatching { Api.post("/api/conversations/$convoId/read") }
+                    runCatching { ScreenStore.markRead(convoId) }
                     pending.finish()
                 }.start()
             }
@@ -318,5 +342,6 @@ class KpNotifActionReceiver : android.content.BroadcastReceiver() {
     companion object {
         const val ACTION_REPLY = "app.kuchupuchu.android.NOTIF_REPLY"
         const val ACTION_LIKE = "app.kuchupuchu.android.NOTIF_LIKE"
+        const val ACTION_MARK_READ = "app.kuchupuchu.android.NOTIF_MARK_READ"
     }
 }
