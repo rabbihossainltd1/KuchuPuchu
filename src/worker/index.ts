@@ -1659,19 +1659,29 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     for (const memberId of members) {
       if (memberId.user_id === uid) continue;
       ctx.waitUntil(
-        // DATA-ONLY on purpose: a high-priority data message wakes the app
-        // process, so KpNotify renders the notification WITH Reply/Like
-        // actions. The FCM notification payload can never carry actions.
+        // Payload delivery: Google Play services displays background
+        // notifications itself — data-only relied on waking the app process,
+        // which MIUI refuses, so messages silently vanished. Payload also
+        // carries the data as tap intent extras (kp_chat deep link).
         // ("from" would be a reserved FCM data key — hence fromName.)
-        pushToUser(env, db, memberId.user_id, {
-          type: "message",
-          convoId: convId,
-          kind: conv.kind,
-          fromName: me.display_name,
-          body: preview.slice(0, 120),
-          // lands as an intent extra when the notification is tapped
-          kp_chat: convId,
-        }),
+        pushToUser(
+          env,
+          db,
+          memberId.user_id,
+          {
+            type: "message",
+            convoId: convId,
+            kind: conv.kind,
+            fromName: me.display_name,
+            body: preview.slice(0, 120),
+            kp_chat: convId,
+          },
+          {
+            title: me.display_name || "KuchuPuchu",
+            body: preview.slice(0, 120) || "New message",
+            channel: "kp_messages_v2",
+          },
+        ),
       );
     }
     return json({ message }, 201);

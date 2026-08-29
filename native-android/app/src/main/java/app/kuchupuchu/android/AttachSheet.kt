@@ -254,7 +254,8 @@ fun AttachPanel(
             )
         }
 
-        /* action grid — 2 x 4 */
+        /* action grid — 2 x 4; swiping the handle up HIDES it so the
+           gallery grid takes the whole panel (WhatsApp behaviour) */
         val rows = listOf(
             listOf(
                 AttachAction(Icons.Filled.Image, Color(0xFF60A5FA), "Gallery") {
@@ -292,12 +293,14 @@ fun AttachPanel(
                 AttachAction(Icons.Filled.AutoAwesome, Color(0xFF818CF8), "AI images") { comingSoon() },
             ),
         )
-        rows.forEach { row ->
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 1.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-            ) {
-                row.forEach { a -> AttachTile(a.icon, a.tint, a.label, a.onClick) }
+        if (!fullscreen) {
+            rows.forEach { row ->
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 1.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                ) {
+                    row.forEach { a -> AttachTile(a.icon, a.tint, a.label, a.onClick) }
+                }
             }
         }
 
