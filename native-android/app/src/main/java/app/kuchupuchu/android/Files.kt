@@ -31,8 +31,8 @@ object FilesUtil {
     }
 
     /** Opens an already-on-disk file with the system viewer. */
-    fun openFile(ctx: Context, name: String, f: File, mime: String) {
-        openUri(
+    fun openFile(ctx: Context, name: String, f: File, mime: String): Boolean {
+        return openUri(
             ctx,
             androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f),
             name,
