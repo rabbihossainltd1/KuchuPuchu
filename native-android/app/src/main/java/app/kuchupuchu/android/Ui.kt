@@ -45,21 +45,24 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Shared image helpers. Avatars are data-URLs the worker stores inline, so
  * decoding them once into a memory map is cheap and offline-friendly.
  */
 object Bitmaps {
-    private val mem = ConcurrentHashMap<String, Bitmap>()
+    // Byte-budgeted LRU (KB units). The old map dumped ALL ~60 avatars at
+    // once when full — a re-decode storm that hit mid-scroll exactly when the
+    // chat was busiest. LRU evicts one bitmap at a time instead.
+    private val mem = object : android.util.LruCache<String, Bitmap>(16 * 1024) {
+        override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount / 1024
+    }
 
     fun load(url: String?): Bitmap? {
         if (url.isNullOrBlank()) return null
-        mem[url]?.let { return it }
+        mem.get(url)?.let { return it }
         val bmp = decode(url) ?: return null
-        if (mem.size > 60) mem.clear()
-        mem[url] = bmp
+        mem.put(url, bmp)
         return bmp
     }
 

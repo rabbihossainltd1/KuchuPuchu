@@ -74,6 +74,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -559,7 +560,11 @@ private fun MediaCell(
 ) {
     val thumb by produceState<ImageBitmap?>(initialValue = null, key1 = item.uri) {
         value = withContext(Dispatchers.IO) {
-            runCatching { decodeThumb(item.uri, ctx, item.isVideo) }.getOrNull()
+            // Scrolling a long grid evicts cells; re-entering them used to
+            // re-decode the SAME thumbnail from disk. A small LRU keeps the
+            // last screenful of thumbs warm.
+            ThumbCache.get(item.uri) ?: runCatching { decodeThumb(item.uri, ctx, item.isVideo) }.getOrNull()
+                ?.also { ThumbCache.put(item.uri, it) }
         }
     }
     Box(
@@ -617,6 +622,17 @@ private fun MediaCell(
             }
         }
     }
+}
+
+/** Grid-cell thumbnail LRU (~24 MB of bitmaps) so grid re-entry doesn't re-decode. */
+private object ThumbCache {
+    private val lru = object : android.util.LruCache<String, ImageBitmap>(24 * 1024) {
+        override fun sizeOf(key: String, value: ImageBitmap): Int = value.asAndroidBitmap().byteCount / 1024
+    }
+
+    fun get(uri: Uri): ImageBitmap? = lru.get(uri.toString())
+
+    fun put(uri: Uri, bmp: ImageBitmap) = lru.put(uri.toString(), bmp)
 }
 
 private fun decodeThumb(uri: Uri, ctx: android.content.Context, isVideo: Boolean): ImageBitmap? =

@@ -126,7 +126,20 @@ class KpPushService : FirebaseMessagingService() {
         // worker sends "fromName" — "from" is a reserved FCM data key and
         // was silently rejected (400) by FCM, which is why pushes never
         // reached a killed app.
+        // ONE card per call. On MIUI a live process receives onMessageReceived
+        // AND the OS still draws the plain payload card — the "double call
+        // notification, ekta te Receive arekta te nai" bug. Drop every call
+        // card first, then post our heads-up.
+        KpNotify.cancelSystemCallCards(this)
         KpNotify.callHeadsUp(this, data["fromName"] ?: data["from"] ?: "KuchuPuchu", data["kind"] == "VIDEO", callId)
+        // The OS card can land AFTER the cancel above; sweep again shortly.
+        // Payload cards only — the engine's full-screen Accept/Decline card
+        // (1.6s callee grace) can't exist yet, and this sweep never touches
+        // category-bearing cards anyway.
+        Thread {
+            Thread.sleep(700)
+            runCatching { KpNotify.cancelPayloadCallCards(applicationContext) }
+        }.start()
     }
 
     private fun handleMessage(data: Map<String, String>) {

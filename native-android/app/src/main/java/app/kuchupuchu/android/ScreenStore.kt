@@ -317,8 +317,12 @@ object ScreenStore {
         persist()
     }
 
+    // Zero-copy: setMsgs always REPLACES the stored list (never mutates it in
+    // place), so a handed-out reference is a stable snapshot. The old
+    // ?.toList() allocated a full defensive copy of the whole chat on every
+    // recomposition read of every poll cycle.
     @Synchronized
-    fun msgsOf(convId: String): List<JSONObject> = msgs[convId]?.toList() ?: emptyList()
+    fun msgsOf(convId: String): List<JSONObject> = msgs[convId] ?: emptyList()
 
     /**
      * Full per-message signature. The old check only compared the list length

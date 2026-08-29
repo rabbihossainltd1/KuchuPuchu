@@ -35,6 +35,35 @@ private const val CH_FG = "kp-call-fg"
 object CallSounds {
     private var ring: MediaPlayer? = null
     private var ringback: MediaPlayer? = null
+    private var liftedFrom = -1
+
+    /**
+     * R23 proved the ALARM stream alone isn't enough: a phone left at ALARM
+     * volume 0 stays dead-silent even for alarms — no ring, no ringback.
+     * Lift it while a call is audible, restore the user's level after.
+     */
+    private fun liftAlarmVolume(ctx: Context) {
+        if (liftedFrom >= 0) return
+        runCatching {
+            val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val cur = am.getStreamVolume(AudioManager.STREAM_ALARM)
+            if (cur <= 0) {
+                val max = am.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+                am.setStreamVolume(AudioManager.STREAM_ALARM, (max * 3 / 5).coerceIn(1, max), 0)
+                liftedFrom = cur
+            }
+        }
+    }
+
+    /** Restore only once no call sound is playing anymore. */
+    private fun maybeRestoreAlarmVolume(ctx: Context) {
+        if (liftedFrom < 0 || ring != null || ringback != null) return
+        runCatching {
+            (ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
+                .setStreamVolume(AudioManager.STREAM_ALARM, liftedFrom, 0)
+        }
+        liftedFrom = -1
+    }
 
     /**
      * RingBACK — the tone the CALLER hears while waiting (a real phone
@@ -46,13 +75,18 @@ object CallSounds {
         if (ringback != null || ring != null) return
         val attrs = android.media.AudioAttributes.Builder()
             .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+            // Ringback rides the ALARM stream too: the old NOTIFICATION_RINGTONE
+            // usage was muted by silent mode, so the caller sat in total silence
+            // while "Ringing…" showed — a real dialer is never silent for the
+            // caller.
+            .setUsage(android.media.AudioAttributes.USAGE_ALARM)
             .build()
         val player =
             runCatching { MediaPlayer.create(ctx.applicationContext, R.raw.kp_ring, attrs, 1) }.getOrNull()
                 ?: return
         player.isLooping = true
         runCatching { player.setVolume(0.62f, 0.62f) }
+        liftAlarmVolume(ctx.applicationContext)
         runCatching { player.start() }
         ringback = player
     }
@@ -62,6 +96,8 @@ object CallSounds {
         runCatching { ringback?.stop() }
         ringback?.release()
         ringback = null
+        // stop() has no Context param; without one we can't restore the alarm
+        // volume here — stop(ctx) handles it, and this null-guard just defers.
     }
 
     @Synchronized
@@ -96,6 +132,7 @@ object CallSounds {
                 }
                 ?: return
         player.isLooping = true
+        liftAlarmVolume(ctx.applicationContext)
         runCatching { player.start() }
         ring = player
         vibrate(ctx, longArrayOf(0, 500, 400, 500))
@@ -128,6 +165,8 @@ object CallSounds {
         runCatching { ringback?.stop() }
         ringback?.release()
         ringback = null
+        // Give the user's alarm-volume level back once nothing rings.
+        ctx?.let { maybeRestoreAlarmVolume(it) }
         ctx?.let {
             val vib =
                 if (Build.VERSION.SDK_INT >= 31) {

@@ -218,14 +218,38 @@ object KpNotify {
     }
 
     /**
-     * Dismisses the plain system-drawn call card (FCM payload, no actions)
-     * once our own ringing UI takes over the call.
+     * Dismisses call cards: our own heads-up (category CALL) AND the plain
+     * OS-drawn FCM payload card. The payload card has NO category — matching
+     * on category alone never removed it, which was the double-notification
+     * bug (one card with buttons, one without). Missed-call cards carry
+     * CATEGORY_MISSED_CALL and are always spared.
      */
-    fun cancelSystemCallCards(ctx: Context) {
+    fun cancelSystemCallCards(ctx: Context, keepId: Int? = null) {
         runCatching {
             val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
             nm.activeNotifications
-                .filter { it.notification.category == android.app.Notification.CATEGORY_CALL }
+                .filter {
+                    val n = it.notification
+                    it.id != keepId &&
+                        (
+                            n.category == android.app.Notification.CATEGORY_CALL ||
+                                (n.channelId == CALL_CHANNEL && n.category == null)
+                            )
+                }
+                .forEach { nm.cancel(it.id) }
+        }
+    }
+
+    /**
+     * OS-drawn payload cards ONLY (call channel, no category) — safe to call
+     * at ANY moment: it can never touch our heads-up, the full-screen
+     * Accept/Decline card, or missed-call alerts.
+     */
+    fun cancelPayloadCallCards(ctx: Context) {
+        runCatching {
+            val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            nm.activeNotifications
+                .filter { it.notification.channelId == CALL_CHANNEL && it.notification.category == null }
                 .forEach { nm.cancel(it.id) }
         }
     }
