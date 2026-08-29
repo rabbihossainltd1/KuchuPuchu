@@ -69,10 +69,7 @@ object KpNotify {
         PendingIntent.getActivity(
             ctx,
             convoId.hashCode(),
-            Intent(ctx, MainActivity::class.java).apply {
-                putExtra("kp_chat", convoId)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            },
+            chatTapIntent(ctx, convoId),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
@@ -152,6 +149,60 @@ object KpNotify {
 
     private fun defaultSound(): Uri = android.provider.Settings.System.DEFAULT_NOTIFICATION_URI
 
+    /**
+     * Missed-call alert with Call back / Message actions. Actions only show
+     * when OUR process builds this (app alive); the FCM payload fallback
+     * (app killed) is system-drawn and cannot carry actions — tapping it
+     * deep-links via the data extras instead.
+     */
+    fun missedCall(
+        ctx: Context,
+        from: String,
+        video: Boolean,
+        otherId: String,
+        convoId: String,
+    ) {
+        ensureChannels(ctx)
+        val callBack =
+            PendingIntent.getActivity(
+                ctx,
+                otherId.hashCode() * 4 + 3,
+                Intent(ctx, MainActivity::class.java)
+                    .putExtra("kp_callback", otherId)
+                    .putExtra("kp_callback_kind", if (video) "VIDEO" else "AUDIO")
+                    .putExtra("kp_callback_name", from)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        val message =
+            PendingIntent.getActivity(
+                ctx,
+                otherId.hashCode() * 4 + 4,
+                chatTapIntent(ctx, convoId),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        val n =
+            NotificationCompat.Builder(ctx, CALL_CHANNEL)
+                .setSmallIcon(R.mipmap.ic_stat_kp)
+                .setContentTitle("Missed call · $from")
+                .setContentText(if (video) "📹 Missed video call" else "📞 Missed voice call")
+                .setAutoCancel(true)
+                .setContentIntent(message)
+                .addAction(0, "Call back", callBack)
+                .addAction(0, "Message", message)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setCategory(NotificationCompat.CATEGORY_MISSED_CALL)
+                .build()
+        runCatching { NotificationManagerCompat.from(ctx).notify(("missed$otherId").hashCode(), n) }
+    }
+
+    /** The chatTap PendingIntent without the notify wrapper. */
+    private fun chatTapIntent(ctx: Context, convoId: String): Intent =
+        Intent(ctx, MainActivity::class.java).apply {
+            putExtra("kp_chat", convoId)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+
     /** Quiet confirmation shown after replying from the notification. */
     fun replySent(ctx: Context, convoId: String, text: String) {
         val n =
@@ -164,6 +215,19 @@ object KpNotify {
                 .setPriority(NotificationCompat.PRIORITY_MIN)
                 .build()
         runCatching { NotificationManagerCompat.from(ctx).notify(convoId.hashCode(), n) }
+    }
+
+    /**
+     * Dismisses the plain system-drawn call card (FCM payload, no actions)
+     * once our own ringing UI takes over the call.
+     */
+    fun cancelSystemCallCards(ctx: Context) {
+        runCatching {
+            val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            nm.activeNotifications
+                .filter { it.notification.category == android.app.Notification.CATEGORY_CALL }
+                .forEach { nm.cancel(it.id) }
+        }
     }
 
     fun cancelAll(ctx: Context) {

@@ -454,12 +454,16 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
     var menuOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var videoReady by remember { mutableStateOf(false) }
+    var videoProgress by remember { mutableStateOf(0f) }
     // Viewed-by lists are cached per status: reopening the sheet must not
     // re-fetch ("viewers list bar bar load hocche").
     val viewersCache = remember { HashMap<String, List<JSONObject>>() }
     // New status => new clip: the readiness flag must reset or the next
     // video's bar would start before its own buffering finished.
-    LaunchedEffect(idx) { videoReady = false }
+    LaunchedEffect(idx) {
+        videoReady = false
+        videoProgress = 0f
+    }
     val ctx = LocalContext.current
 
     // Dark screen → status bar icons must be white while viewing, and back to
@@ -532,15 +536,31 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                 else -> 30_000L
             }
         if (s.optString("kind") == "VIDEO" && !videoReady) return@LaunchedEffect
-        var elapsed = 0L
-        while (elapsed < hold) {
-            if (showViewers || replyFocused) {
-                delay(100)
-                continue
+        if (s.optString("kind") == "VIDEO") {
+            // VIDEO: the bar mirrors the player's real position (onProgress
+            // below) and we advance the moment the clip actually ends — no
+            // more 1-2s skew between bar and clip.
+            var waited = 0L
+            val maxWait = hold + 8_000L
+            while (videoProgress < 0.99f && waited < maxWait) {
+                if (showViewers || replyFocused) {
+                    delay(100)
+                    continue
+                }
+                delay(50)
+                waited += 50
             }
-            delay(50)
-            elapsed += 50
-            progress = elapsed.toFloat() / hold
+        } else {
+            var elapsed = 0L
+            while (elapsed < hold) {
+                if (showViewers || replyFocused) {
+                    delay(100)
+                    continue
+                }
+                delay(50)
+                elapsed += 50
+                progress = elapsed.toFloat() / hold
+            }
         }
         if (idx + 1 < statuses.size) {
             idx++
@@ -673,6 +693,10 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                         "${Api.BASE}/api/statuses/${s.optString("id")}/media",
                         paused = showViewers || replyFocused,
                         onReady = { videoReady = true },
+                        onProgress = { p ->
+                            videoProgress = p
+                            progress = p
+                        },
                     )
                 } else {
                     KpNetImage(
@@ -1046,9 +1070,39 @@ private fun ViewersSheet(
 }
 
 @Composable
-private fun StatusVideoPlayer(url: String, paused: Boolean = false, onReady: () -> Unit = {}) {
+private fun StatusVideoPlayer(
+    url: String,
+    paused: Boolean = false,
+    onReady: () -> Unit = {},
+    onProgress: (Float) -> Unit = {},
+) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     var path by remember(url) { mutableStateOf<String?>(null) }
+    var viewRef by remember(url) { mutableStateOf<android.widget.VideoView?>(null) }
+
+    // The progress BAR follows the PLAYER's real position — the stored
+    // `seconds` metadata used to drift 1-2s from the compressed clip.
+    LaunchedEffect(viewRef, paused) {
+        val view = viewRef ?: return@LaunchedEffect
+        while (true) {
+            val view0 = viewRef
+            if (view0 == null) break
+            if (paused) {
+                delay(80)
+                continue
+            }
+            runCatching {
+                val dur = view0.duration
+                if (dur > 0 && view0.isPlaying) {
+                    onProgress((view0.currentPosition.toFloat() / dur).coerceIn(0f, 1f))
+                } else if (dur > 0 && view0.currentPosition > 0) {
+                    // playback finished (or was never started) — close the bar
+                    onProgress(1f)
+                }
+            }
+            delay(50)
+        }
+    }
     // VideoView stretches video to its own bounds, so the view MUST match the
     // clip's aspect ratio — otherwise portrait clips fill the whole screen
     // and come out distorted.
@@ -1092,6 +1146,7 @@ private fun StatusVideoPlayer(url: String, paused: Boolean = false, onReady: () 
                         onReady()
                         start()
                     }
+                    viewRef = this
                 }
             },
             // Reconstructed on `paused` change: freeze the clip while the

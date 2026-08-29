@@ -933,8 +933,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                             player,
                             selectedIds = selected.toList(),
                             onToggleSelect = { msg ->
-                                val id = msg.optString("id")
-                                if (id in selected) selected.remove(id) else selected.add(id)
+                                // Deleted tombstones are not selectable: they
+                                // can't be deleted-again, forwarded or copied.
+                                if (msg.optString("kind") != "DELETED") {
+                                    val id = msg.optString("id")
+                                    if (id in selected) selected.remove(id) else selected.add(id)
+                                }
                             },
                             onOpenImage = { msg -> viewerMsg = msg },
                         )
@@ -1048,6 +1052,11 @@ fun ChatScreen(nav: NavController, convId: String) {
             input = input,
             onInput = { v ->
                 input = v
+                // Typing means the user wants the keyboard, not the panel.
+                if (v.isNotBlank() && (showAttach || showStickers)) {
+                    showAttach = false
+                    showStickers = false
+                }
                 if (v.isNotBlank()) {
                     val now = System.currentTimeMillis()
                     if (now - lastTypingPing > 3_000) {
@@ -1066,12 +1075,19 @@ fun ChatScreen(nav: NavController, convId: String) {
             onSticker = { haptics.tap(); showAttach = false; showStickers = true },
             onSend = {
                 haptics.confirm()
+                showAttach = false
+                showStickers = false
                 sendText(input)
                 input = ""
             },
             recording = recording,
             recMs = recMs,
-            onStartRecord = { haptics.tap(); startRecording() },
+            onStartRecord = {
+                haptics.tap()
+                showAttach = false
+                showStickers = false
+                startRecording()
+            },
             onFinishRecord = { cancelled -> finishRecording(cancelled) },
         )
 
@@ -1717,7 +1733,15 @@ private fun MessageRow(
                             bottomEnd = if (mine) 5.dp else 16.dp,
                         ),
                     )
-                    .background(if (mine) goldFill() else Brush.linearGradient(listOf(Card, Card)))
+                    .background(
+                        when {
+                            // Deleted tombstones sit in a flat, greyed bubble.
+                            m.optString("kind") == "DELETED" ->
+                                Brush.linearGradient(listOf(Color(0xFFB9B3A9), Color(0xFFB9B3A9)))
+                            mine -> goldFill()
+                            else -> Brush.linearGradient(listOf(Card, Card))
+                        },
+                    )
                     .combinedClickable(
                         onClick = { if (selectedIds.isNotEmpty() && !pendingEcho) onToggleSelect(m) },
                         onLongClick = {
@@ -1741,7 +1765,7 @@ private fun MessageRow(
                             "This message was deleted",
                             fontSize = 13.5.sp,
                             fontStyle = FontStyle.Italic,
-                            color = if (mine) Color(0xE6FFFFFF) else Muted,
+                            color = Color(0xFF4A463F),
                         )
                         else -> Text(
                             m.optText("body") + if (m.optBoolean("edited")) "  (edited)" else "",

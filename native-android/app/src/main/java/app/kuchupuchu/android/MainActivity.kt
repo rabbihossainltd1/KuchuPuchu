@@ -96,6 +96,19 @@ class MainActivity : ComponentActivity() {
             }
         }
         intent.getStringExtra("kp_chat")?.let { pendingChat = it }
+        // Missed-call "Call back" action: start the call right away.
+        intent.getStringExtra("kp_callback")?.let { otherId ->
+            if (otherId.isNotBlank()) {
+                CallEngine.instance?.startCall(
+                    otherId,
+                    intent.getStringExtra("kp_callback_kind") ?: "AUDIO",
+                    intent.getStringExtra("kp_callback_name") ?: "KuchuPuchu",
+                )
+            }
+        }
+        // Incoming-call notification tapped: the always-running engine's
+        // next poll (~1s) surfaces the ringing screen with Accept/Decline —
+        // nothing else to do here.
     }
 
     override fun onResume() {

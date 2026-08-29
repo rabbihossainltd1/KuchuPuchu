@@ -336,6 +336,9 @@ class CallEngine(private val app: Application) {
             CallSounds.startRingback(app)
         }
         if (incoming && status == "RINGING" && !suppressed) {
+            // Our rich ringing screen (Accept/Decline) is taking over —
+            // drop the plain FCM payload card so it doesn't linger.
+            KpNotify.cancelSystemCallCards(app)
             if (ringingId != ui.id) {
                 ringingId = ui.id
                 CallSounds.startRing(app)

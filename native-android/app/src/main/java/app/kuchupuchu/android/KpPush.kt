@@ -87,6 +87,7 @@ class KpPushService : FirebaseMessagingService() {
             "call" -> handleCall(data)
             "call_answer" -> handleCallAnswer(data)
             "message" -> handleMessage(data)
+            "missed_call" -> handleMissedCall(data)
         }
     }
 
@@ -95,6 +96,17 @@ class KpPushService : FirebaseMessagingService() {
      * the ringing screen flips to connected within push latency (~1s) instead
      * of waiting for the next poll tick.
      */
+    /** Missed-call alert with Call back / Message actions (app alive). */
+    private fun handleMissedCall(data: Map<String, String>) {
+        KpNotify.missedCall(
+            this,
+            data["fromName"] ?: "KuchuPuchu",
+            data["kind"] == "VIDEO",
+            data["kp_callback"] ?: "",
+            data["kp_chat"] ?: "",
+        )
+    }
+
     private fun handleCallAnswer(data: Map<String, String>) {
         val callId = data["callId"] ?: return
         CallEngine.instance?.kickPoll(callId)

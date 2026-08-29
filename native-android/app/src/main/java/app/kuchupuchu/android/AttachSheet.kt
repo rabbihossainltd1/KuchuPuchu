@@ -22,6 +22,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -408,6 +412,33 @@ fun AttachPanel(
             }
         }
 
+        /* Swipe the GRID itself, WhatsApp-style: up = fullscreen (actions
+           hidden), down at the top = back to the compact panel. */
+        val gridScroll = remember {
+            object : NestedScrollConnection {
+                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                    if (source == NestedScrollSource.Drag) {
+                        if (available.y < -30f && !fullscreen) {
+                            haptics.tap()
+                            fullscreen = true
+                        }
+                    }
+                    return Offset.Zero
+                }
+
+                override fun onPostScroll(
+                    consumed: Offset,
+                    available: Offset,
+                    source: NestedScrollSource,
+                ): Offset {
+                    if (source == NestedScrollSource.Drag && available.y > 60f && fullscreen) {
+                        fullscreen = false
+                    }
+                    return Offset.Zero
+                }
+            }
+        }
+
         if (shown.isEmpty()) {
             Text(
                 if (foldersOpen) "This folder khali — onno folder try koro" else "No recent media",
@@ -422,6 +453,7 @@ fun AttachPanel(
                 columns = GridCells.Fixed(4),
                 modifier = Modifier
                     .fillMaxWidth()
+                    .nestedScroll(gridScroll)
                     .weight(1f),
                 contentPadding = PaddingValues(horizontal = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),

@@ -584,10 +584,10 @@ async function pushToUser(
   userId: string,
   data: Record<string, string>,
   note?: { title: string; body: string; channel: string },
-) {
+): Promise<boolean> {
   try {
     const auth = await fcmAccessToken(env);
-    if (!auth) return;
+    if (!auth) return false;
     const rows = await all<{ token: string }>(
       db,
       "SELECT token FROM devices WHERE user_id = ?",
@@ -595,6 +595,7 @@ async function pushToUser(
     );
     // One round trip per device used to be sequential; a user on three devices
     // waited for three serial FCM calls before the loop finished.
+    let anyAccepted = false;
     await Promise.all(
       rows.map(async (row) => {
         try {
@@ -627,7 +628,10 @@ async function pushToUser(
               }),
             },
           );
-          if (res.status < 400) return;
+          if (res.status < 400) {
+            anyAccepted = true;
+            return;
+          }
           const err = (await res.json().catch(() => null)) as {
             error?: { details?: Array<{ reason?: string }>; message?: string };
           } | null;
@@ -654,9 +658,11 @@ async function pushToUser(
         }
       }),
     );
+    return anyAccepted;
   } catch {
     /* push is best-effort */
   }
+  return false;
 }
 
 /* ---------------- system messages + call log ---------------- */
@@ -1681,6 +1687,18 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             body: preview.slice(0, 120) || "New message",
             channel: "kp_messages_v2",
           },
+        ).then((ok) =>
+          // Delivery receipt: FCM accepted the push for this member's
+          // device -> the sender's single tick becomes a double tick
+          // without waiting for the recipient to open the chat.
+          ok
+            ? run(
+                db,
+                "UPDATE messages SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL",
+                nowIso(),
+                mid,
+              )
+            : null,
         ),
       );
     }
@@ -2084,6 +2102,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           kind,
           fromName: me.display_name,
           fromId: uid,
+          // delivered as a launch-intent extra when the system notification
+          // is tapped -> MainActivity jumps straight to the ringing screen
+          kp_call: callId,
         },
         {
           title: me.display_name || "KuchuPuchu",
@@ -2127,7 +2148,32 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         nowIso(),
         row.id,
       );
-      if (changed > 0) await logCallEvent(db, row.caller_id, row.callee_id, row.kind, "MISSED");
+      if (changed > 0) {
+        await logCallEvent(db, row.caller_id, row.callee_id, row.kind, "MISSED");
+        // Missed-call push to the callee with Call back / Message deep links.
+        const caller = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row.caller_id);
+        const video = row.kind === "VIDEO";
+        ctx.waitUntil(
+          pushToUser(
+            env,
+            db,
+            row.callee_id,
+            {
+              type: "missed_call",
+              callId: row.id,
+              kind: row.kind,
+              fromName: caller?.display_name ?? "KuchuPuchu",
+              kp_callback: row.caller_id,
+              kp_chat: pairId(row.caller_id, row.callee_id),
+            },
+            {
+              title: `Missed call · ${caller?.display_name ?? "KuchuPuchu"}`,
+              body: video ? "📹 Missed video call" : "📞 Missed voice call",
+              channel: "kp_calls_v4",
+            },
+          ),
+        );
+      }
     }
     const rows = await all<CallRow>(
       db,

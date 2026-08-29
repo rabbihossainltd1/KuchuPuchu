@@ -54,9 +54,21 @@ fun SplashGate(content: @Composable () -> Unit) {
                             setOnPreparedListener { mp ->
                                 mp.isLooping = false
                                 mp.setVolume(0f, 0f)
-                                // fill the whole screen (crop edges) — no letterbox bars
-                                mp.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING)
                                 start()
+                                // Zoom-to-COVER: scale the view by the larger
+                                // of the two axis ratios so the video fills
+                                // every pixel — no gaps, no bars.
+                                post {
+                                    val vw = mp.videoWidth
+                                    val vh = mp.videoHeight
+                                    if (vw > 0 && vh > 0 && width > 0 && height > 0) {
+                                        val sx = width.toFloat() / vw
+                                        val sy = height.toFloat() / vh
+                                        val cover = maxOf(sx, sy) * 1.02f
+                                        scaleX = cover
+                                        scaleY = cover
+                                    }
+                                }
                             }
                             setOnCompletionListener { show = false }
                         }
