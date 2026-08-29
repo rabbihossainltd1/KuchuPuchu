@@ -127,6 +127,12 @@ fun AttachPanel(
     var foldersOpen by remember { mutableStateOf(false) }
     var folder by remember { mutableStateOf<String?>(null) }
     var fullscreen by remember { mutableStateOf(false) }
+    // Swiping up IS the expand: fullscreen automatically reveals the folder
+    // chips (Camera / Screenshots / Download…) — no chevron tap needed.
+    androidx.compose.runtime.LaunchedEffect(fullscreen) {
+        foldersOpen = fullscreen
+        if (!fullscreen) folder = null
+    }
     val sel = remember { mutableStateListOf<MediaItem>() }
     val dragTotal = remember { mutableStateOf(0f) }
 

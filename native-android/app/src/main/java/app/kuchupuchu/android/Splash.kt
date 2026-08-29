@@ -22,6 +22,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 
+/** TEMPORARILY off while diagnosing push/action behaviour on-device. */
+private const val SPLASH_ENABLED = false
+
 /**
  * Cold-start splash: plays the branded MP4 (res/raw/kp_splash) once,
  * fullscreen, then fades into the app. A tap skips it — nobody should be
@@ -29,6 +32,10 @@ import androidx.compose.ui.viewinterop.AndroidView
  */
 @Composable
 fun SplashGate(content: @Composable () -> Unit) {
+    if (!SPLASH_ENABLED) {
+        content()
+        return
+    }
     var show by remember { mutableStateOf(true) }
 
     Box(Modifier.fillMaxSize()) {

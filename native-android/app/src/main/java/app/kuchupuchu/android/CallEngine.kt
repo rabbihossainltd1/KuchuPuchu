@@ -484,6 +484,14 @@ class CallEngine(private val app: Application) {
                 iceCallId = rec.id
                 val peer = newPc()
                 peer.setRemoteDescriptionAwait(SessionDescription(SessionDescription.Type.OFFER, offer))
+                // Belt & braces: the answering side must also offer to SEND
+                // video from the start — a recvonly answer would make any
+                // later camera/screen track silently droppable.
+                runCatching {
+                    peer.transceivers
+                        .firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO }
+                        ?.setDirection(RtpTransceiver.RtpTransceiverDirection.SEND_RECV)
+                }
                 val answer = peer.createAnswerAwait(sdpConstraints())
                 peer.setLocalDescriptionAwait(answer)
                 flushIce()
@@ -607,7 +615,13 @@ class CallEngine(private val app: Application) {
         }
         MainActivity.current?.askShare { code, data ->
             if (code == Activity.RESULT_OK && data != null) {
-                scope.launch { runCatching { startShare(data) }.onFailure { notify("Screen share failed to start.") } }
+                scope.launch {
+                    runCatching { startShare(data) }.onFailure {
+                        // Named so the user's next report tells us exactly
+                        // which stage broke (service/FGS/projection/capturer).
+                        notify("Screen share failed (${it.javaClass.simpleName}). Abar try koro.")
+                    }
+                }
             }
         }
     }

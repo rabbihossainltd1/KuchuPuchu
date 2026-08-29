@@ -21,6 +21,10 @@ export type Env = {
   TURN_URLS?: string;
   TURN_USERNAME?: string;
   TURN_CREDENTIAL?: string;
+  /** Cloudflare Calls TURN — set both and /api/config/ice mints short-lived
+   *  HMAC credentials automatically (no per-request secret exposure). */
+  TURN_KEY_ID?: string;
+  TURN_KEY?: string;
 };
 
 type Json = Record<string, unknown>;
@@ -835,7 +839,43 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   // Optional TURN relay config for the dialer. The app falls back to its
   // built-in STUN/TURN list when this is null, so an empty config is fine.
+  //
+  // Preferred: Cloudflare Calls TURN — set secrets TURN_KEY_ID + TURN_KEY.
+  // Credentials are short-lived HMACs generated right here (no network call):
+  //   username = "{expiry_epoch}:{key_id}"
+  //   password = base64url(HMAC-SHA256(key_secret, username))
   if (path === "/api/config/ice" && method === "GET") {
+    const keyId = env.TURN_KEY_ID;
+    const keySecret = env.TURN_KEY;
+    if (keyId && keySecret) {
+      const expiry = Math.floor(Date.now() / 1000) + 6 * 3600;
+      const username = `${expiry}:${keyId}`;
+      const raw = await crypto.subtle.sign(
+        "HMAC",
+        await crypto.subtle.importKey(
+          "raw",
+          new TextEncoder().encode(keySecret),
+          { name: "HMAC", hash: "SHA-256" },
+          false,
+          ["sign"],
+        ),
+        new TextEncoder().encode(username),
+      );
+      let bin = "";
+      for (const b of new Uint8Array(raw)) bin += String.fromCharCode(b);
+      const credential = btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      return json({
+        ice: {
+          urls: [
+            "turn:turn.cloudflare.com:3478?transport=udp",
+            "turn:turn.cloudflare.com:3478?transport=tcp",
+            "turns:turn.cloudflare.com:443?transport=tcp",
+          ],
+          username,
+          credential,
+        },
+      });
+    }
     const urls = String(env.TURN_URLS || "")
       .split(",")
       .map((s) => s.trim())
