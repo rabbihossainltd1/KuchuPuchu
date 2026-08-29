@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
 import android.location.LocationManager
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.provider.ContactsContract
@@ -13,10 +14,13 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,10 +29,10 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -48,6 +52,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Poll
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -57,6 +62,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,13 +72,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** One device media item for the attach panel grid. */
@@ -91,11 +101,11 @@ private data class AttachAction(
 )
 
 /**
- * Attach panel — INLINE, rendered directly ABOVE the chat input bar (not a
- * floating bottom sheet): two rows of round actions, then a Recent grid of
- * the device's newest photos/videos, so media goes out without ever opening
- * a gallery app. The expand arrow next to "Recent" reveals device FOLDERS
- * (Camera, Screenshots, Download…) to browse deeper.
+ * Attach panel — WhatsApp-exact: sits UNDER the message bar (the bar stays
+ * on top of it), normally NOT fullscreen; tapping the handle or swiping it
+ * up is the ONLY way it goes fullscreen. Grid taps SELECT (multi-select
+ * with numbered badges); a send button appears once something is picked.
+ * The chevron next to "Recent" opens device FOLDERS (Camera, Screenshots…).
  */
 @Composable
 fun AttachPanel(
@@ -106,10 +116,19 @@ fun AttachPanel(
     onLocationRequested: () -> Unit,
 ) {
     val ctx = LocalContext.current
+    val haptics = rememberHaptics()
+    val scope = rememberCoroutineScope()
     var canRead by remember { mutableStateOf(false) }
     var pool by remember { mutableStateOf(listOf<MediaItem>()) }
-    var expanded by remember { mutableStateOf(false) }
+    var foldersOpen by remember { mutableStateOf(false) }
     var folder by remember { mutableStateOf<String?>(null) }
+    var fullscreen by remember { mutableStateOf(false) }
+    val sel = remember { mutableStateListOf<MediaItem>() }
+    val dragTotal = remember { mutableStateOf(0f) }
+
+    val screenH = LocalConfiguration.current.screenHeightDp.dp
+    val targetH = if (fullscreen) screenH - 132.dp else screenH * 0.55f
+    val panelH by animateDpAsState(targetH, tween(260), label = "attachPanelH")
 
     fun hasRead(): Boolean =
         if (Build.VERSION.SDK_INT >= 33) {
@@ -172,6 +191,19 @@ fun AttachPanel(
         Toast.makeText(ctx, "Coming in a future update", Toast.LENGTH_SHORT).show()
     }
 
+    fun sendSelected() {
+        val batch = sel.toList()
+        sel.clear()
+        onDismiss()
+        // fire sequentially so pending outbox keeps its order (photos first,
+        // then videos — WhatsApp mixes, we keep the user's tap order)
+        scope.launch {
+            batch.forEach { item ->
+                if (item.isVideo) onDocumentPicked(item.uri) else onImagePicked(item.uri)
+            }
+        }
+    }
+
     val buckets =
         remember(pool) {
             pool.groupBy { it.bucket }
@@ -180,17 +212,48 @@ fun AttachPanel(
         }
     val shown =
         when {
-            !expanded -> pool.take(14)
-            folder == null -> pool.take(60)
-            else -> pool.filter { it.bucket == folder }.take(60)
+            !foldersOpen -> pool.take(24)
+            folder == null -> pool.take(80)
+            else -> pool.filter { it.bucket == folder }.take(80)
         }
 
     Column(
         Modifier
             .fillMaxWidth()
-            .background(Color(0xFF201E1B))
-            .padding(top = 10.dp),
+            .height(panelH)
+            .background(Color(0xFF201E1B)),
     ) {
+        /* drag handle — tap OR swipe up = fullscreen; swipe down = back.
+           This is the ONLY fullscreen trigger, like WhatsApp. */
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .clickable {
+                    haptics.tap()
+                    fullscreen = !fullscreen
+                }
+                .pointerInput("expandDrag") {
+                    detectVerticalDragGestures(
+                        onDragEnd = {
+                            if (dragTotal.value < -70f) fullscreen = true
+                            else if (dragTotal.value > 70f) fullscreen = false
+                            dragTotal.value = 0f
+                        },
+                    ) { _, amount ->
+                        dragTotal.value += amount
+                    }
+                }
+                .padding(top = 12.dp, bottom = 6.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                Modifier
+                    .size(width = 46.dp, height = 4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color(0x59FFFFFF)),
+            )
+        }
+
         /* action grid — 2 x 4 */
         val rows = listOf(
             listOf(
@@ -238,114 +301,144 @@ fun AttachPanel(
             }
         }
 
-        if (canRead) {
-            /* header: Recent / folder name + expand toggle */
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, end = 8.dp, top = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    if (expanded && folder != null) folder!! else "Recent",
-                    color = Color(0xB3FFFFFF),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f),
-                )
-                Icon(
-                    if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                    contentDescription = "Folders",
-                    tint = Color(0xB3FFFFFF),
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .clickable {
-                            expanded = !expanded
-                            if (!expanded) folder = null
-                        }
-                        .padding(6.dp)
-                        .size(20.dp),
-                )
-            }
-
-            /* folder chips (only when expanded) */
-            if (expanded) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp, vertical = 2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    val all = listOf("All" to buckets.sumOf { it.second })
-                    (all + buckets.map { it.first to it.second }).forEach { (name, count) ->
-                        val selected = (folder == null && name == "All") || folder == name
-                        Row(
-                            Modifier
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(
-                                    if (selected) Color(0x33FFFFFF) else Color(0x14FFFFFF),
-                                )
-                                .clickable {
-                                    if (name == "All") folder = null else folder = name
-                                }
-                                .padding(horizontal = 12.dp, vertical = 5.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                name,
-                                color = if (selected) Color.White else Color(0x99FFFFFF),
-                                fontSize = 12.5.sp,
-                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                            )
-                            Text(
-                                "  $count",
-                                color = Color(0x66FFFFFF),
-                                fontSize = 11.sp,
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (shown.isEmpty()) {
-                Text(
-                    if (expanded) "This folder khali — onno folder try koro" else "No recent media",
-                    color = Color(0x80FFFFFF),
-                    fontSize = 13.sp,
-                    modifier = Modifier
-                        .padding(vertical = 14.dp)
-                        .align(Alignment.CenterHorizontally),
-                )
-            } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(4),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = if (expanded) 430.dp else 320.dp),
-                    contentPadding = PaddingValues(horizontal = 2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    items(shown, key = { it.uri.toString() }) { item ->
-                        MediaCell(item, ctx.contentResolver) {
-                            onDismiss()
-                            // Videos ride the FILE path (raw upload), photos
-                            // the inline image path.
-                            if (item.isVideo) onDocumentPicked(item.uri) else onImagePicked(item.uri)
-                        }
-                    }
-                }
-            }
-        } else {
+        if (!canRead) {
             Text(
                 "Gallery permission off — actions still kaj korbe; recent photos dekhte permission din.",
                 color = Color(0x80FFFFFF),
                 fontSize = 12.sp,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             )
+            return@Column
         }
-        Spacer(Modifier.height(8.dp))
+
+        /* header: Recent / folder name — selection count + SEND replaces the
+           chevron while a selection is active (WhatsApp behavior) */
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 12.dp, top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                if (foldersOpen && folder != null) folder!! else "Recent",
+                color = Color(0xB3FFFFFF),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            if (sel.isNotEmpty()) {
+                Text(
+                    "${sel.size} selected",
+                    color = Color(0xB3FFFFFF),
+                    fontSize = 12.5.sp,
+                )
+                Spacer(Modifier.size(10.dp))
+                Box(
+                    Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFE8A33D))
+                        .clickable {
+                            haptics.confirm()
+                            sendSelected()
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.Send,
+                        contentDescription = "Send selected",
+                        tint = Color(0xFF1C1A17),
+                        modifier = Modifier
+                            .size(20.dp)
+                            .padding(start = 1.dp),
+                    )
+                }
+            } else {
+                Icon(
+                    if (foldersOpen) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    contentDescription = "Folders",
+                    tint = Color(0xB3FFFFFF),
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .clickable {
+                            haptics.tap()
+                            foldersOpen = !foldersOpen
+                            if (!foldersOpen) folder = null
+                        }
+                        .padding(6.dp)
+                        .size(20.dp),
+                )
+            }
+        }
+
+        /* folder chips (only when the chevron opened them) */
+        if (foldersOpen) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                val all = listOf("All" to buckets.sumOf { it.second })
+                (all + buckets.map { it.first to it.second }).forEach { (name, count) ->
+                    val selected = (folder == null && name == "All") || folder == name
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(if (selected) Color(0x33FFFFFF) else Color(0x14FFFFFF))
+                            .clickable {
+                                if (name == "All") folder = null else folder = name
+                            }
+                            .padding(horizontal = 12.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            name,
+                            color = if (selected) Color.White else Color(0x99FFFFFF),
+                            fontSize = 12.5.sp,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                        )
+                        Text("  $count", color = Color(0x66FFFFFF), fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+
+        if (shown.isEmpty()) {
+            Text(
+                if (foldersOpen) "This folder khali — onno folder try koro" else "No recent media",
+                color = Color(0x80FFFFFF),
+                fontSize = 13.sp,
+                modifier = Modifier
+                    .padding(vertical = 14.dp)
+                    .align(Alignment.CenterHorizontally),
+            )
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(4),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentPadding = PaddingValues(horizontal = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                items(shown, key = { it.uri.toString() }) { item ->
+                    val pos = sel.indexOfFirst { it.uri == item.uri }
+                    MediaCell(
+                        item,
+                        ctx,
+                        selected = pos >= 0,
+                        selectIndex = if (pos >= 0) pos + 1 else 0,
+                        onToggle = {
+                            haptics.tap()
+                            if (pos >= 0) sel.removeAll { it.uri == item.uri } else sel.add(item)
+                        },
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -414,19 +507,25 @@ private fun loadMediaPool(ctx: android.content.Context): List<MediaItem> {
     return out.sortedByDescending { it.added }
 }
 
-/** Grid cell: decodes its thumbnail off the main thread, then draws it. */
+/** Grid cell: SELECT toggles (never sends), thumbnail decodes off-thread. */
 @Composable
-private fun MediaCell(item: MediaItem, cr: android.content.ContentResolver, onClick: () -> Unit) {
+private fun MediaCell(
+    item: MediaItem,
+    ctx: android.content.Context,
+    selected: Boolean,
+    selectIndex: Int,
+    onToggle: () -> Unit,
+) {
     val thumb by produceState<ImageBitmap?>(initialValue = null, key1 = item.uri) {
         value = withContext(Dispatchers.IO) {
-            runCatching { decodeThumb(item.uri, cr) }.getOrNull()
+            runCatching { decodeThumb(item.uri, ctx, item.isVideo) }.getOrNull()
         }
     }
     Box(
         Modifier
             .aspectRatio(1f)
             .background(Color(0xFF2B2823))
-            .clickable { onClick() },
+            .clickable { onToggle() },
     ) {
         val bmp = thumb
         if (bmp != null) {
@@ -456,13 +555,49 @@ private fun MediaCell(item: MediaItem, cr: android.content.ContentResolver, onCl
                     .padding(5.dp),
             )
         }
+        /* selection badge — WhatsApp-style numbered circle */
+        Box(
+            Modifier
+                .align(Alignment.TopEnd)
+                .padding(5.dp)
+                .size(22.dp)
+                .clip(CircleShape)
+                .then(
+                    if (selected) {
+                        Modifier.background(Color(0xFFE8A33D))
+                    } else {
+                        Modifier.border(1.5.dp, Color(0x99FFFFFF), CircleShape)
+                    },
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (selected) {
+                Text(
+                    "$selectIndex",
+                    color = Color(0xFF1C1A17),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
     }
 }
 
-private fun decodeThumb(uri: Uri, cr: android.content.ContentResolver): ImageBitmap? =
+private fun decodeThumb(uri: Uri, ctx: android.content.Context, isVideo: Boolean): ImageBitmap? =
     runCatching {
-        if (Build.VERSION.SDK_INT >= 28) {
-            ImageDecoder.decodeBitmap(ImageDecoder.createSource(cr, uri)) { d, _, _ ->
+        if (isVideo) {
+            // ImageDecoder can't touch video URIs — pull a frame instead.
+            val mmr = MediaMetadataRetriever()
+            try {
+                mmr.setDataSource(ctx, uri)
+                val scaled = mmr.getScaledFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 480, 480)
+                    ?: mmr.frameAtTime
+                scaled?.asImageBitmap()
+            } finally {
+                mmr.release()
+            }
+        } else if (Build.VERSION.SDK_INT >= 28) {
+            ImageDecoder.decodeBitmap(ImageDecoder.createSource(ctx.contentResolver, uri)) { d, _, _ ->
                 d.setTargetSampleSize(4)
             }.asImageBitmap()
         } else {

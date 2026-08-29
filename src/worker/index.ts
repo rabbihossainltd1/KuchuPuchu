@@ -629,8 +629,19 @@ async function pushToUser(
           );
           if (res.status < 400) return;
           const err = (await res.json().catch(() => null)) as {
-            error?: { details?: Array<{ reason?: string }> };
+            error?: { details?: Array<{ reason?: string }>; message?: string };
           } | null;
+          // Temporary telemetry: we shipped notification payloads blind —
+          // surface the exact FCM rejection so background-push reports are
+          // diagnosable from `wrangler tail`.
+          console.log(
+            "fcm_error",
+            JSON.stringify({
+              status: res.status,
+              msg: err?.error?.message,
+              details: err?.error?.details,
+            }),
+          );
           const reason = err?.error?.details?.[0]?.reason;
           // UNREGISTERED is the only "this token is dead" signal. INVALID_ARGUMENT
           // was in here too, which meant one malformed payload pruned every
@@ -1656,7 +1667,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             type: "message",
             convoId: convId,
             kind: conv.kind,
-            from: me.display_name,
+            // "from" is a RESERVED FCM data key — every push with it has
+            // been rejected 400 since day one ("Invalid data payload key").
+            fromName: me.display_name,
             body: preview.slice(0, 120),
             // lands as an intent extra when the system notification is tapped
             kp_chat: convId,
@@ -2067,7 +2080,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           type: "call",
           callId,
           kind,
-          from: me.display_name,
+          fromName: me.display_name,
           fromId: uid,
         },
         {

@@ -110,7 +110,10 @@ class KpPushService : FirebaseMessagingService() {
         // notifications effectively never appeared.
         val engine = CallEngine.instance
         if (engine != null && engine.polling) return
-        KpNotify.callHeadsUp(this, data["from"] ?: "KuchuPuchu", data["kind"] == "VIDEO", callId)
+        // worker sends "fromName" — "from" is a reserved FCM data key and
+        // was silently rejected (400) by FCM, which is why pushes never
+        // reached a killed app.
+        KpNotify.callHeadsUp(this, data["fromName"] ?: data["from"] ?: "KuchuPuchu", data["kind"] == "VIDEO", callId)
     }
 
     private fun handleMessage(data: Map<String, String>) {
@@ -123,7 +126,7 @@ class KpPushService : FirebaseMessagingService() {
         // Badge jumps instantly; the next list refresh confirms the same number.
         ScreenStore.bumpUnread(convoId)
         runCatching { KpSounds.receive(this) }
-        KpNotify.message(this, data["from"] ?: "KuchuPuchu", data["body"] ?: "New message", convoId)
+        KpNotify.message(this, data["fromName"] ?: data["from"] ?: "KuchuPuchu", data["body"] ?: "New message", convoId)
     }
 
     override fun onNewToken(token: String) {

@@ -1043,31 +1043,6 @@ fun ChatScreen(nav: NavController, convId: String) {
             },
         )
 
-        /* ---------------- inline panels — glued ABOVE the input bar,
-           never a floating popup ---------------- */
-        if (showAttach) {
-            AttachPanel(
-                onDismiss = { showAttach = false },
-                onImagePicked = ::handleImagePicked,
-                onDocumentPicked = ::handleDocumentPicked,
-                onContactPicked = ::handleContactPicked,
-                onLocationRequested = ::handleLocationRequested,
-            )
-        }
-        if (showStickers) {
-            StickerPanel(
-                onDismiss = { showStickers = false },
-                onSend = {
-                    showStickers = false
-                    sendText(it, "STICKER")
-                },
-            )
-        }
-        androidx.activity.compose.BackHandler(enabled = showAttach || showStickers) {
-            showAttach = false
-            showStickers = false
-        }
-
         /* ---------------- composer (doubles as the recording bar) ---------------- */
         Composer(
             input = input,
@@ -1099,6 +1074,32 @@ fun ChatScreen(nav: NavController, convId: String) {
             onStartRecord = { haptics.tap(); startRecording() },
             onFinishRecord = { cancelled -> finishRecording(cancelled) },
         )
+
+        /* ---------------- inline panels — BELOW the message bar, WhatsApp
+           style: the bar rides on top of the panel; the panel is NOT
+           fullscreen until the user taps/swipes the handle up ---------------- */
+        if (showAttach) {
+            AttachPanel(
+                onDismiss = { showAttach = false },
+                onImagePicked = ::handleImagePicked,
+                onDocumentPicked = ::handleDocumentPicked,
+                onContactPicked = ::handleContactPicked,
+                onLocationRequested = ::handleLocationRequested,
+            )
+        }
+        if (showStickers) {
+            StickerPanel(
+                onDismiss = { showStickers = false },
+                onSend = {
+                    showStickers = false
+                    sendText(it, "STICKER")
+                },
+            )
+        }
+        androidx.activity.compose.BackHandler(enabled = showAttach || showStickers) {
+            showAttach = false
+            showStickers = false
+        }
         if (showDisappear) DisappearDialog(
             current = conv.value?.optInt("disappearSeconds", 0) ?: 0,
             onClose = { showDisappear = false },
