@@ -1474,7 +1474,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   const debugMatch = path.match(/^\/api\/debug\/errors$/);
   if (debugMatch && method === "GET") {
-    if (!env.DEBUG_KEY || url.searchParams.get("key") !== env.DEBUG_KEY) fail(404, "Not found.", "NOT_FOUND");
+    if (!env.DEBUG_KEY || url.searchParams.get("key") !== env.DEBUG_KEY)
+      fail(404, "Not found.", "NOT_FOUND");
     const rows = await all<{ id: string; stack: string; created_at: string }>(
       db,
       "SELECT id, stack, created_at FROM error_log ORDER BY rowid DESC LIMIT 20",
