@@ -90,6 +90,7 @@
             <intent-filter>
                 <action android:name="app.kuchupuchu.android.NOTIF_REPLY" />
                 <action android:name="app.kuchupuchu.android.NOTIF_LIKE" />
+                <action android:name="app.kuchupuchu.android.NOTIF_MARK_READ" />
             </intent-filter>
         </receiver>
 
