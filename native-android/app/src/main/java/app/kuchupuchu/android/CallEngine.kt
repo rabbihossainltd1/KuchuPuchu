@@ -253,7 +253,7 @@ class CallEngine(private val app: Application) {
         }
     }
 
-    fun setAudioRoute(route: AudioRoute) {
+    fun selectAudioRoute(route: AudioRoute) {
         audioRoute = route
         speaker = route == AudioRoute.SPEAKER
         applyAudio()
@@ -265,7 +265,7 @@ class CallEngine(private val app: Application) {
         val list = availableRoutes()
         if (list.isEmpty()) return
         val idx = list.indexOf(audioRoute).coerceAtLeast(0)
-        setAudioRoute(list[(idx + 1) % list.size])
+        selectAudioRoute(list[(idx + 1) % list.size])
     }
 
     fun applyAudio() {
@@ -358,11 +358,11 @@ class CallEngine(private val app: Application) {
                 } else {
                     avail.firstOrNull { it != AudioRoute.SPEAKER } ?: AudioRoute.SPEAKER
                 }
-            setAudioRoute(next)
+            selectAudioRoute(next)
             return
         }
         if ((audioRoute == AudioRoute.EARPIECE || audioRoute == AudioRoute.SPEAKER) && active?.kind != "VIDEO") {
-            avail.firstOrNull { it == AudioRoute.BLUETOOTH || it == AudioRoute.WIRED }?.let { setAudioRoute(it) }
+            avail.firstOrNull { it == AudioRoute.BLUETOOTH || it == AudioRoute.WIRED }?.let { selectAudioRoute(it) }
         }
     }
 
@@ -748,7 +748,7 @@ class CallEngine(private val app: Application) {
                 active = active?.copy(kind = "VIDEO")
                 // Audio→video conversion: speaker becomes the default (user
                 // rule), Bluetooth/wired headsets keep the audio.
-                if (audioRoute == AudioRoute.EARPIECE) setAudioRoute(AudioRoute.SPEAKER)
+                if (audioRoute == AudioRoute.EARPIECE) selectAudioRoute(AudioRoute.SPEAKER)
             }
             return
         }
@@ -756,7 +756,7 @@ class CallEngine(private val app: Application) {
         videoTrack?.setEnabled(!cameraOff)
         if (!cameraOff && active?.kind == "AUDIO") {
             active = active?.copy(kind = "VIDEO")
-            if (audioRoute == AudioRoute.EARPIECE) setAudioRoute(AudioRoute.SPEAKER)
+            if (audioRoute == AudioRoute.EARPIECE) selectAudioRoute(AudioRoute.SPEAKER)
         }
         onChange?.invoke(active)
     }
@@ -827,7 +827,7 @@ class CallEngine(private val app: Application) {
         localView?.setMirror(false)
         localView?.let { runCatching { track.addSink(it) } }
         active = active?.copy(kind = "VIDEO")
-        if (audioRoute == AudioRoute.EARPIECE) setAudioRoute(AudioRoute.SPEAKER)
+        if (audioRoute == AudioRoute.EARPIECE) selectAudioRoute(AudioRoute.SPEAKER)
     }
 
     private fun stopShare() {
@@ -1173,7 +1173,7 @@ override fun onRenegotiationNeeded() {
                     // on "Waiting for video…" forever ("stuck" bug). They can
                     // still tap the camera off if they don't want to send.
                     if (!sharing && videoTrack == null && !cameraOff) {
-                        if (audioRoute == AudioRoute.EARPIECE) setAudioRoute(AudioRoute.SPEAKER)
+                        if (audioRoute == AudioRoute.EARPIECE) selectAudioRoute(AudioRoute.SPEAKER)
                         notify("Video call…")
                         toggleCamera()
                     }
