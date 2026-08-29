@@ -144,6 +144,17 @@ class KpPushService : FirebaseMessagingService() {
 
     private fun handleMessage(data: Map<String, String>) {
         val convoId = data["convoId"] ?: return
+        // Tell the worker this data push ARRIVED: silence inside the grace
+        // window is what triggers the system payload-card fallback.
+        val mid = data["mid"]
+        if (!mid.isNullOrBlank()) {
+            Thread {
+                runCatching {
+                    Api.loadToken(this)
+                    Api.post("/api/push/ack", org.json.JSONObject().put("mid", mid))
+                }
+            }.start()
+        }
         // Breadcrumb: proves a data-only push reached the process, and in
         // which state (foreground / background / woken-from-dead) — the A/B
         // push test depends on exactly this signal.

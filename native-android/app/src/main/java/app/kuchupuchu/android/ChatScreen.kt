@@ -107,6 +107,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontStyle
@@ -120,6 +121,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.OutlinedTextField
 import androidx.navigation.NavController
 import kotlinx.coroutines.Dispatchers
@@ -2190,7 +2193,18 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendin
     // swallowed every error in runCatching, so a failed download looked like
     // a dead button ("open korte parche na").
     var opening by remember { mutableStateOf(false) }
+    // Text-like docs open INSIDE the app — most phones have no .md viewer,
+    // which made "Open" feel dead for exactly these files.
+    var textDoc by remember { mutableStateOf<String?>(null) }
     val ready = fileKey.isNotBlank()
+    fun isTextLike(): Boolean {
+        val n = fileName.lowercase()
+        return fileType.startsWith("text/") || fileType == "application/json" ||
+            n.endsWith(".md") || n.endsWith(".txt") || n.endsWith(".json") ||
+            n.endsWith(".csv") || n.endsWith(".log") || n.endsWith(".kt") ||
+            n.endsWith(".js") || n.endsWith(".ts") || n.endsWith(".py") ||
+            n.endsWith(".html") || n.endsWith(".css")
+    }
     val upFrac = UploadProgress.fracs[m.optString("clientId")]
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -2220,8 +2234,16 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendin
                         }
                         trace("dl", if (ok) "ok " + dest.length() + "b" else "server-refused")
                         if (ok) {
-                            val opened = FilesUtil.openFile(ctx, fileName, dest, FilesUtil.mimeFor(fileName, fileType))
-                            trace("view", if (opened) "viewer-started" else "no-viewer")
+                            if (isTextLike()) {
+                                val body = runCatching {
+                                    dest.readText().take(60_000)
+                                }.getOrDefault("")
+                                withContext(Dispatchers.Main) { textDoc = body }
+                                trace("view", "in-app-text " + body.length + "ch")
+                            } else {
+                                val opened = FilesUtil.openFile(ctx, fileName, dest, FilesUtil.mimeFor(fileName, fileType))
+                                trace("view", if (opened) "viewer-started" else "no-viewer")
+                            }
                         } else {
                             trace("view", "dl-failed")
                             android.widget.Toast.makeText(ctx, "Download korte parini — abar try koro", android.widget.Toast.LENGTH_SHORT).show()
@@ -2280,6 +2302,33 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendin
             }
             else -> Text("Uploading…", fontSize = 11.sp, color = if (mine) Color(0x99FFFFFF) else Muted)
         }
+    }
+    textDoc?.let { body ->
+        val clipboard = LocalClipboardManager.current
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { textDoc = null },
+            confirmButton = {
+                TextButton(onClick = {
+                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(body))
+                    android.widget.Toast.makeText(ctx, "Copy kora holo", android.widget.Toast.LENGTH_SHORT).show()
+                }) { Text("Copy", color = GoldDeep, fontWeight = FontWeight.SemiBold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { textDoc = null }) { Text("Close", color = Muted) }
+            },
+            title = { Text(fileName, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Ink, maxLines = 2) },
+            text = {
+                Text(
+                    body.ifBlank { "(khali file)" },
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    fontSize = 12.5.sp,
+                    color = Ink,
+                    modifier = Modifier
+                        .heightIn(max = 480.dp)
+                        .verticalScroll(rememberScrollState()),
+                )
+            },
+        )
     }
 }
 

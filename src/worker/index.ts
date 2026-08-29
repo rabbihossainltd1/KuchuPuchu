@@ -254,6 +254,9 @@ function slugFrom(value: string) {
 /* ---------------- schema ---------------- */
 
 let schemaReady = false;
+// Rows this isolate created and is responsible for sweeping (kept here so
+// the sweep costs ZERO reads on isolates with nothing pending).
+let pendingPushFallbacks = 0;
 
 /** Throttles the expired-status reaper so reads stay read-only. */
 let nextStatusSweep = 0;
@@ -318,6 +321,7 @@ async function ensureSchema(db: D1Database) {
     `CREATE TABLE IF NOT EXISTS error_log (
       id TEXT PRIMARY KEY, stack TEXT NOT NULL, created_at TEXT NOT NULL
     )`,
+    `CREATE TABLE IF NOT EXISTS push_fallback (mid TEXT, user_id TEXT, payload_json TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (mid, user_id))`,
     `CREATE TABLE IF NOT EXISTS files (
       key TEXT PRIMARY KEY, owner_id TEXT NOT NULL, conv_id TEXT, created_at TEXT NOT NULL
     )`,
@@ -612,6 +616,41 @@ async function fcmAccessToken(env: Env): Promise<{ token: string; projectId: str
  * needed. WhatsApp-style delivery. When the app IS foreground the service
  * still gets onMessageReceived and renders its own rich UI.
  */
+/** Sends the payload-card fallback for data pushes that were never acked. */
+async function sweepPushFallbacks(env: Env, db: D1Database): Promise<void> {
+  try {
+    if (pendingPushFallbacks <= 0) return;
+    const cutoff = new Date(Date.now() - 8000).toISOString();
+    const rows = await all<{ mid: string; user_id: string; payload_json: string }>(
+      db,
+      "SELECT mid, user_id, payload_json FROM push_fallback WHERE created_at <= ? LIMIT 10",
+      cutoff,
+    );
+    if (rows.length === 0) {
+      pendingPushFallbacks = 0;
+      return;
+    }
+    pendingPushFallbacks = Math.max(0, pendingPushFallbacks - rows.length);
+    for (const row of rows) {
+      // Delete first so parallel sweeps can't double-send.
+      await run(
+        db,
+        "DELETE FROM push_fallback WHERE mid = ? AND user_id = ?",
+        row.mid,
+        row.user_id,
+      );
+      const p = parseJson<{
+        data: Record<string, string>;
+        note?: { title: string; body: string; channel: string };
+      }>(row.payload_json, null as never);
+      if (!p?.data) continue;
+      await pushToUser(env, db, row.user_id, p.data, p.note ?? undefined);
+    }
+  } catch (err) {
+    console.error("push_fallback sweep:", err instanceof Error ? err.message : err);
+  }
+}
+
 async function pushToUser(
   env: Env,
   db: D1Database,
@@ -854,6 +893,11 @@ export default {
 async function handle(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const db = env.DB;
   await ensureSchema(db);
+  // Push-fallback sweep: any data-only push that nobody acked within the
+  // grace window gets its system payload card now. Triggered by ANY request
+  // (the sender's own 400ms chat poll makes it fire within a second), so no
+  // timers are ever held open.
+  if (pendingPushFallbacks > 0) ctx.waitUntil(sweepPushFallbacks(env, db));
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/$/, "") || "/";
   const method = request.method.toUpperCase();
@@ -1562,6 +1606,18 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     return json({ devices: rows.length, shape, results });
   }
 
+  // Delivery ack for data-only pushes: the app hits this the instant a
+  // message push reaches the process. No ack inside the grace window => the
+  // worker falls back to the system payload card.
+  if (path === "/api/push/ack" && method === "POST") {
+    const mid = String(body.mid || "").slice(0, 80);
+    if (mid) {
+      // Received => this user's process is alive; cancel their payload fallback.
+      await run(db, "DELETE FROM push_fallback WHERE mid = ? AND user_id = ?", mid, uid);
+    }
+    return json({ ok: true });
+  }
+
   // Client breadcrumbs: the app reports doc-open/push-receive stages so
   // "kichui hoi na" becomes exact evidence instead of a guess.
   if (path === "/api/debug/clientlog" && method === "POST") {
@@ -1886,41 +1942,49 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     for (const memberId of members) {
       if (memberId.user_id === uid) continue;
       ctx.waitUntil(
-        // Payload delivery: Google Play services displays background
-        // notifications itself — data-only relied on waking the app process,
-        // which MIUI refuses, so messages silently vanished. Payload also
-        // carries the data as tap intent extras (kp_chat deep link).
-        // ("from" would be a reserved FCM data key — hence fromName.)
-        pushToUser(
-          env,
-          db,
-          memberId.user_id,
-          {
+        // Messenger-style hybrid, timer-free: DATA-ONLY goes first so a live
+        // app process draws OUR OWN card WITH Reply/Like (system payload
+        // cards can never carry actions). A fallback row is recorded; if the
+        // app doesn't ack it within the grace window, the next API request
+        // (sweep below) sends the system payload card — arrival is
+        // guaranteed even when MIUI never wakes the process.
+        (async () => {
+          const data = {
             type: "message",
             convoId: convId,
             kind: conv.kind,
             fromName: me.display_name,
             body: preview.slice(0, 120),
             kp_chat: convId,
-          },
-          {
+            mid,
+          };
+          const note = {
             title: me.display_name || "KuchuPuchu",
             body: preview.slice(0, 120) || "New message",
             channel: "kp_messages_v2",
-          },
-        ).then((ok) =>
-          // Delivery receipt: FCM accepted the push for this member's
-          // device -> the sender's single tick becomes a double tick
-          // without waiting for the recipient to open the chat.
-          ok
-            ? run(
-                db,
-                "UPDATE messages SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL",
-                nowIso(),
-                mid,
-              )
-            : null,
-        ),
+          };
+          const ok = await pushToUser(env, db, memberId.user_id, data, undefined);
+          if (ok) {
+            await run(
+              db,
+              "UPDATE messages SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL",
+              nowIso(),
+              mid,
+            );
+            pendingPushFallbacks++;
+            await run(
+              db,
+              "INSERT OR IGNORE INTO push_fallback (mid, user_id, payload_json, created_at) VALUES (?, ?, ?, ?)",
+              mid,
+              memberId.user_id,
+              JSON.stringify({ data, note }),
+              nowIso(),
+            );
+          } else {
+            // Nothing accepted the data push at all — payload card right away.
+            await pushToUser(env, db, memberId.user_id, data, note);
+          }
+        })(),
       );
     }
     return json({ message }, 201);
