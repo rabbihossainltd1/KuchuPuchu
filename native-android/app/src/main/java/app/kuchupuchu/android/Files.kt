@@ -27,7 +27,7 @@ object FilesUtil {
 
     /** Opens a downloaded file with the system viewer. */
     fun open(ctx: Context, name: String, bytes: ByteArray, mime: String) {
-        openFile(ctx, name, cacheFile(ctx, name, bytes, mime), name, mime)
+        openFile(ctx, name, cacheFile(ctx, name, bytes, mime), mime)
     }
 
     /** Opens an already-on-disk file with the system viewer. */
