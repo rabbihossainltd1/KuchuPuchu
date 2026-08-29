@@ -26,9 +26,9 @@ const val CALL_ACCEPT = "app.kuchupuchu.android.CALL_ACCEPT"
 const val CALL_DECLINE = "app.kuchupuchu.android.CALL_DECLINE"
 private const val INCOMING_ID = 7101
 private const val ONGOING_ID = 7102
-// v3: back to the NORMAL ringtone stream — a stock dialer respects the
-// phone's silent/volume settings, so do we. (v2 had forced USAGE_ALARM.)
-private const val CH_IN = "kp-calls-v3"
+// v4: incoming-call ring on the ALARM stream — rings even on silent, with
+// the new tring-tring tone.
+private const val CH_IN = "kp-calls-v4"
 private const val CH_FG = "kp-call-fg"
 
 /** Ringtone + vibration while an incoming call rings. */
@@ -69,13 +69,13 @@ object CallSounds {
         if (ring != null) return
         val attrs = android.media.AudioAttributes.Builder()
             .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            // Normal call ring: follows the phone's volume/silent settings,
-            // exactly like a stock dialer.
-            .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+            // Incoming ring on the ALARM stream: rings even when the phone
+            // is silent — per the user's explicit request.
+            .setUsage(android.media.AudioAttributes.USAGE_ALARM)
             .build()
         val player =
             runCatching {
-                MediaPlayer.create(ctx.applicationContext, R.raw.kp_ring2, attrs, 1)
+                MediaPlayer.create(ctx.applicationContext, R.raw.kp_ring3, attrs, 1)
             }.getOrNull()
                 ?: run {
                     // No 4-arg (Uri, attrs) overload exists — build manually:
@@ -149,9 +149,9 @@ object CallNotify {
         if (nm.getNotificationChannel(CH_IN) == null) {
             val ch = NotificationChannel(CH_IN, "Incoming calls", NotificationManager.IMPORTANCE_HIGH)
             ch.setSound(
-                Uri.parse("android.resource://${ctx.packageName}/${R.raw.kp_ring2}"),
+                Uri.parse("android.resource://${ctx.packageName}/${R.raw.kp_ring3}"),
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                    .setUsage(AudioAttributes.USAGE_ALARM)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .build(),
             )

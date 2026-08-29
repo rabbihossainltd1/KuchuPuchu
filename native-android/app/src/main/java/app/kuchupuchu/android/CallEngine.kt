@@ -81,6 +81,16 @@ class CallEngine(private val app: Application) {
     var sharing by mutableStateOf(false)
     var hasRemote by mutableStateOf(false)
 
+    /** True between posting our re-offer and receiving the remote re-answer. */
+    @Volatile
+    private var awaitingReanswer: Boolean = false
+
+    /** The re-offer SDP we already applied (dedupe across poll ticks). */
+    @Volatile
+    private var lastAppliedReoffer: String? = null
+
+    private val renegotiating = java.util.concurrent.atomic.AtomicBoolean(false)
+
     /** True once the remote side is actually sending video — how an
      *  audio→video upgrade is detected, so BOTH phones land on the same
      *  in-call screen even though the server row still says "AUDIO". */
@@ -374,7 +384,10 @@ class CallEngine(private val app: Application) {
             }
         }
         if (status == "ACTIVE" || status == "RINGING") pullIce(ui.id)
-        if (status == "ACTIVE") rebindRemoteVideo()
+        if (status == "ACTIVE") {
+            rebindRemoteVideo()
+            handleRenegotiation(next)
+        }
     }
 
     fun startCall(userId: String, kind: String, name: String, avatar: String = "") {
@@ -938,7 +951,31 @@ class CallEngine(private val app: Application) {
                     }
                     override fun onRemoveStream(p0: MediaStream?) {}
                     override fun onDataChannel(p0: DataChannel?) {}
-                    override fun onRenegotiationNeeded() {}
+override fun onRenegotiationNeeded() {
+                        // Mid-call track changes (screen share, camera on a
+                        // voice call) that need fresh SDP go through here.
+                        if (!renegotiating.compareAndSet(false, true)) return
+                        scope.launch {
+                            try {
+                                val peer = pc ?: return@launch
+                                val id = active?.id ?: return@launch
+                                if (id.startsWith("pending") || awaitingReanswer) return@launch
+                                if (peer.signalingState() != PeerConnection.SignalingState.STABLE) return@launch
+                                val offer = peer.createOfferAwait(sdpConstraints())
+                                peer.setLocalDescriptionAwait(offer)
+                                withContext(Dispatchers.IO) {
+                                    Api.post(
+                                        "/api/calls/$id/reoffer",
+                                        JSONObject().put("sdp", offer.description),
+                                    )
+                                }
+                                awaitingReanswer = true
+                            } catch (_: Exception) {
+                            } finally {
+                                renegotiating.set(false)
+                            }
+                        }
+                    }
                     override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {
                         val track = receiver?.track()
                         if (track is VideoTrack) bindRemote(track)
@@ -1005,6 +1042,64 @@ class CallEngine(private val app: Application) {
             // empty placeholder video track at connect, and promoting on that
             // flipped every voice call straight to the video screen.
             frameGate = FirstFrameGate().also { runCatching { track.addSink(it) } }
+        }
+    }
+
+    /**
+     * Poll-driven renegotiation: the OTHER side's re-offer gets answered,
+     * our own posted re-offer gets its answer applied. "mine" is detected
+     * via reofferFrom.
+     */
+    private suspend fun handleRenegotiation(row: JSONObject) {
+        val peer = pc ?: return
+        val reoffer = row.optIso("reofferSdp").orEmpty()
+        val reofferFrom = row.optString("reofferFrom")
+        val reanswer = row.optIso("reanswerSdp").orEmpty()
+
+        // 1) Their offer arrived: answer it.
+        if (
+            reoffer.isNotBlank() &&
+            reofferFrom != Store.myId() &&
+            reoffer != lastAppliedReoffer &&
+            peer.signalingState() == PeerConnection.SignalingState.STABLE
+        ) {
+            lastAppliedReoffer = reoffer
+            try {
+                peer.setRemoteDescriptionAwait(SessionDescription(SessionDescription.Type.OFFER, reoffer))
+                // keep our tracks flowing in the new SDP
+                peer.transceivers
+                    .firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO }
+                    ?.let { t ->
+                        if (t.direction != RtpTransceiver.RtpTransceiverDirection.SEND_RECV && videoTrack != null) {
+                            runCatching { t.setDirection(RtpTransceiver.RtpTransceiverDirection.SEND_RECV) }
+                        }
+                    }
+                val answer = peer.createAnswerAwait(sdpConstraints())
+                peer.setLocalDescriptionAwait(answer)
+                withContext(Dispatchers.IO) {
+                    Api.post(
+                        "/api/calls/${row.optString("id")}/reanswer",
+                        JSONObject().put("sdp", answer.description),
+                    )
+                }
+            } catch (e: Exception) {
+                lastAppliedReoffer = null
+            }
+            return
+        }
+
+        // 2) The answer to OUR offer arrived.
+        if (
+            awaitingReanswer &&
+            reanswer.isNotBlank() &&
+            peer.signalingState() == PeerConnection.SignalingState.HAVE_LOCAL_OFFER
+        ) {
+            try {
+                peer.setRemoteDescriptionAwait(SessionDescription(SessionDescription.Type.ANSWER, reanswer))
+                awaitingReanswer = false
+                lastAppliedReoffer = null
+            } catch (_: Exception) {
+            }
         }
     }
 

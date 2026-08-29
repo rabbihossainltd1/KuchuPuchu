@@ -23,7 +23,7 @@ private const val KEY_REPLY = "kp_reply_text"
  */
 object KpNotify {
     private const val CHAT_CHANNEL = "kp_messages_v2"
-    private const val CALL_CHANNEL = "kp_calls_v4"
+    private const val CALL_CHANNEL = "kp_calls_v5"
     private const val GROUP = "kp_chats"
 
     fun ensureChannels(ctx: Context) {
@@ -43,18 +43,18 @@ object KpNotify {
                     enableVibration(true)
                 },
         )
-        // v4: normal ringtone stream (a dialer respects silent/volume) with
-        // the new brrring tone.
+        // v5: the user wants incoming calls to RING even on silent (like an
+        // alarm) — new channel id, ALARM stream, new tring-tring tone.
         val ringAttrs = android.media.AudioAttributes.Builder()
             .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+            .setUsage(android.media.AudioAttributes.USAGE_ALARM)
             .build()
         mgr.createNotificationChannel(
             NotificationChannel(CALL_CHANNEL, "Calls", NotificationManager.IMPORTANCE_HIGH)
                 .apply {
                     description = "Incoming calls"
                     setSound(
-                        Uri.parse("android.resource://${ctx.packageName}/${R.raw.kp_ring2}"),
+                        Uri.parse("android.resource://${ctx.packageName}/${R.raw.kp_ring3}"),
                         ringAttrs,
                     )
                     enableVibration(true)

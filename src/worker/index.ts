@@ -346,6 +346,9 @@ async function ensureSchema(db: D1Database) {
   // whole batch back — and each one is individually tolerant.
   await runCatchingSql(db, `ALTER TABLE messages ADD COLUMN delivered_at TEXT`);
   await runCatchingSql(db, `ALTER TABLE calls ADD COLUMN answer_sdp TEXT`);
+  await runCatchingSql(db, `ALTER TABLE calls ADD COLUMN reoffer_sdp TEXT`);
+  await runCatchingSql(db, `ALTER TABLE calls ADD COLUMN reoffer_from TEXT`);
+  await runCatchingSql(db, `ALTER TABLE calls ADD COLUMN reanswer_sdp TEXT`);
   await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN disappear_seconds INTEGER`);
   await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN theme TEXT`);
   await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN disappear_since TEXT`);
@@ -2176,7 +2179,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           {
             title: me.display_name || "KuchuPuchu",
             body: kind === "VIDEO" ? "📹 Incoming video call" : "📞 Incoming voice call",
-            channel: "kp_calls_v4",
+            channel: "kp_calls_v5",
           },
         );
       })(),
@@ -2237,7 +2240,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             {
               title: `Missed call · ${caller?.display_name ?? "KuchuPuchu"}`,
               body: video ? "📹 Missed video call" : "📞 Missed voice call",
-              channel: "kp_calls_v4",
+              channel: "kp_calls_v5",
             },
           ),
         );
@@ -2251,6 +2254,17 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     );
     const items = [];
     for (const row of rows) {
+      // Anti-phantom grace: a RINGING call younger than 1.6s is invisible to
+      // the CALLEE. The push carries the same gate, so a call cancelled
+      // before it ever rang cannot ring the other phone from EITHER path
+      // (FCM payload or the callee's own /active poll).
+      if (
+        row.status === "RINGING" &&
+        row.callee_id === uid &&
+        Date.now() - Date.parse(row.created_at) < 1_600
+      ) {
+        continue;
+      }
       const otherId = row.caller_id === uid ? row.callee_id : row.caller_id;
       const other = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", otherId);
       items.push(callFrom(row, uid, other));
@@ -2419,6 +2433,43 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     }
   }
 
+  // Mid-call renegotiation (screen share / camera on a voice call):
+  // one side posts a fresh offer, the other answers. Data-only pushes
+  // nudge both live clients to poll immediately.
+  const reofferMatch = path.match(/^\/api\/calls\/([^/]+)\/reoffer$/);
+  if (reofferMatch && method === "POST") {
+    const callId = reofferMatch[1]!;
+    const row = await one<CallRow>(db, "SELECT * FROM calls WHERE id = ?", callId);
+    if (!row) fail(404, "Call not found.");
+    if (row.caller_id !== uid && row.callee_id !== uid) fail(403, "Not your call.", "FORBIDDEN");
+    const sdp = String(body.sdp ?? "");
+    if (!sdp) fail(400, "Missing sdp.");
+    await run(
+      db,
+      "UPDATE calls SET reoffer_sdp = ?, reoffer_from = ?, reanswer_sdp = NULL WHERE id = ?",
+      sdp.slice(0, 60_000),
+      uid,
+      callId,
+    );
+    const other = row.caller_id === uid ? row.callee_id : row.caller_id;
+    ctx.waitUntil(pushToUser(env, db, other, { type: "reoffer", callId }));
+    return json({ ok: true }, 201);
+  }
+
+  const reanswerMatch = path.match(/^\/api\/calls\/([^/]+)\/reanswer$/);
+  if (reanswerMatch && method === "POST") {
+    const callId = reanswerMatch[1]!;
+    const row = await one<CallRow>(db, "SELECT * FROM calls WHERE id = ?", callId);
+    if (!row) fail(404, "Call not found.");
+    if (row.caller_id !== uid && row.callee_id !== uid) fail(403, "Not your call.", "FORBIDDEN");
+    const sdp = String(body.sdp ?? "");
+    if (!sdp) fail(400, "Missing sdp.");
+    await run(db, "UPDATE calls SET reanswer_sdp = ? WHERE id = ?", sdp.slice(0, 60_000), callId);
+    const other = row.caller_id === uid ? row.callee_id : row.caller_id;
+    ctx.waitUntil(pushToUser(env, db, other, { type: "reanswer", callId }));
+    return json({ ok: true }, 201);
+  }
+
   /* ---------- search ---------- */
 
   if (path === "/api/search" && method === "GET") {
@@ -2531,6 +2582,9 @@ type CallRow = {
   offer_sdp: string | null;
   answer_sdp: string | null;
   started_at: string | null;
+  reoffer_sdp?: string | null;
+  reoffer_from?: string | null;
+  reanswer_sdp?: string | null;
   ended_at: string | null;
   created_at: string;
 };
@@ -2545,6 +2599,9 @@ function callFrom(row: CallRow, uid: string, other: UserRow | null) {
     calleeId: row.callee_id,
     offerSdp: row.offer_sdp,
     answerSdp: row.answer_sdp,
+    reofferSdp: row.reoffer_sdp ?? undefined,
+    reofferFrom: row.reoffer_from ?? undefined,
+    reanswerSdp: row.reanswer_sdp ?? undefined,
     startedAt: row.started_at,
     endedAt: row.ended_at,
     createdAt: row.created_at,

@@ -88,6 +88,7 @@ class KpPushService : FirebaseMessagingService() {
             "call_answer" -> handleCallAnswer(data)
             "message" -> handleMessage(data)
             "missed_call" -> handleMissedCall(data)
+            "reoffer", "reanswer" -> data["callId"]?.let { CallEngine.instance?.kickPoll(it) }
         }
     }
 

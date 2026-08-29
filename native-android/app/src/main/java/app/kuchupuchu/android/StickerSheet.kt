@@ -218,10 +218,10 @@ fun StickerPanel(
                 }
             LazyVerticalGrid(
                 columns = GridCells.Fixed(5),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 5.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 3.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(212.dp),
+                    .height(188.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
@@ -231,7 +231,7 @@ fun StickerPanel(
                     Box(
                         Modifier
                             .fillMaxWidth()
-                            .height(48.dp)
+                            .height(44.dp)
                             .clip(RoundedCornerShape(14.dp))
                             .background(if (pressed) Color(0x1A1C1917) else Color.Transparent)
                             .clickable(interactionSource = interaction, indication = null) {
@@ -243,7 +243,7 @@ fun StickerPanel(
                     ) {
                         Text(
                             sticker,
-                            fontSize = 27.sp,
+                            fontSize = 24.sp,
                             modifier = Modifier.scale(if (pressed) 1.25f else 1f),
                         )
                     }
@@ -253,7 +253,7 @@ fun StickerPanel(
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(212.dp),
+                    .height(188.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text("GIFs are coming in a future update", color = Color(0x801C1917), fontSize = 14.sp)

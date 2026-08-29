@@ -606,6 +606,41 @@ fun ChatScreen(nav: NavController, convId: String) {
     fun pendingEchoOf(m: JSONObject): Boolean =
         pending.any { it.optString("clientId") == m.optString("clientId") || it.optString("id") == m.optString("id") }
 
+    /**
+     * WhatsApp-style resend: every selected media row (image/video/file)
+     * is fetched from its mediaUrl and pushed through the normal send
+     * pipeline, preserving selection order.
+     */
+    fun sendSelectedMedia() {
+        val items = selectedMessages().filter {
+            it.optString("kind") == "IMAGE" || it.optString("kind") == "FILE"
+        }
+        if (items.isEmpty()) return
+        selected.clear()
+        scope.launch {
+            for (m in items) {
+                val url = m.optString("mediaUrl")
+                if (url.isBlank()) continue
+                try {
+                    val bytes = withContext(Dispatchers.IO) { Api.download(url) }
+                    val name = url.substringAfterLast('/').ifBlank { "media.bin" }
+                    val f = File(ctx.cacheDir, "resend_${System.currentTimeMillis()}_$name")
+                    withContext(Dispatchers.IO) { f.writeBytes(bytes) }
+                    val uri = Uri.fromFile(f)
+                    val kind = m.optString("kind")
+                    withContext(Dispatchers.Main) {
+                        if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m))) {
+                            handleImagePicked(uri)
+                        } else {
+                            handleDocumentPicked(uri)
+                        }
+                    }
+                } catch (_: Exception) {
+                }
+            }
+        }
+    }
+
     fun selectedMessages(): List<JSONObject> {
         val ids = selected.toList()
         return msgs.filter { it.optString("id") in ids } + pending.filter { it.optString("id") in ids }
@@ -1107,6 +1142,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                 startRecording()
             },
             onFinishRecord = { cancelled -> finishRecording(cancelled) },
+            selectCount = selected.size,
+            onSendSelection = { sendSelectedMedia() },
         )
 
         /* ---------------- inline panels — BELOW the message bar, WhatsApp
@@ -1247,6 +1284,8 @@ private fun Composer(
     recMs: Int,
     onStartRecord: () -> Unit,
     onFinishRecord: (cancelled: Boolean) -> Unit,
+    selectCount: Int = 0,
+    onSendSelection: () -> Unit = {},
 ) {
     Row(
         Modifier
@@ -1331,9 +1370,9 @@ private fun Composer(
         }
         Spacer(Modifier.width(8.dp))
 
-        /* mic/send circle. While input is blank this is a HOLD button:
-           press = record, slide left = cancel, release = send. */
-        if (!input.isBlank()) {
+        /* mic/send circle. Text typed OR media selected -> it's SEND;
+           otherwise a HOLD button: press = record, slide = cancel. */
+        if (!input.isBlank() || selectCount > 0) {
             val sendInteraction = remember { MutableInteractionSource() }
             val sendPressed by sendInteraction.collectIsPressedAsState()
             Box(
@@ -1345,7 +1384,10 @@ private fun Composer(
                     .clickable(
                         interactionSource = sendInteraction,
                         indication = null,
-                    ) { onSend() },
+                    ) {
+                        haptics.confirm()
+                        if (selectCount > 0 && input.isBlank()) onSendSelection() else onSend()
+                    },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
