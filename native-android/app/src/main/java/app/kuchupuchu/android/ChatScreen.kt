@@ -398,7 +398,15 @@ fun ChatScreen(nav: NavController, convId: String) {
                         .put("fileType", "image/jpeg")
                         .put("fileSize", jpeg.size)
                         .put("clientId", clientId)
-                withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
+                // The server is idempotent by clientId, so one automatic
+                // retry after a dropped response/timeout is SAFE — it returns
+                // the same message instead of failing the photo.
+                try {
+                    withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
+                } catch (e: Exception) {
+                    delay(1_500)
+                    withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
+                }
                 UploadProgress.done(clientId)
                 KpSounds.send(ctx)
                 refreshMessages(forceScroll = true)
@@ -414,7 +422,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     refreshMessages(forceScroll = true)
                 } catch (e2: Exception) {
                     UploadProgress.done(clientId)
-                    error = (e2.message ?: "Could not send photo.") + "  Tap the banner to retry."
+                    error = "Photo: " + ((e.message?.take(60) + " / ") ?: "") + (e2.message ?: "?") + "  Banner-e tap korle abar pathabe."
                     pending.find { it.optString("clientId") == clientId }?.put("failed", true)
                 }
             }
@@ -2099,9 +2107,13 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendin
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val id = m.optString("id")
-    val fileKey = m.optString("fileKey")
     val fileName = m.optString("fileName").ifBlank { "File" }
     val fileType = m.optString("fileType")
+    // fileKey OR mediaUrl — older messages only carry mediaUrl; without this
+    // fallback those rows were silent dead taps ("kichui hoi na").
+    val fileKey =
+        m.optText("fileKey").takeIf { it.isNotBlank() }
+            ?: m.optText("mediaUrl").takeIf { it.startsWith("/") || it.startsWith("http") } ?: ""
     val isImage = fileType.startsWith("image") || fileName.endsWith(".jpg") || fileName.endsWith(".jpeg") || fileName.endsWith(".png")
     if (isImage) {
         val url = if (fileKey.isNotBlank()) "/api/files/$fileKey" else m.optString("mediaUrl")
@@ -2183,7 +2195,11 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendin
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier =
-            Modifier.clickable(enabled = ready && !opening) {
+            Modifier.clickable(enabled = !opening) {
+                if (!ready) {
+                    android.widget.Toast.makeText(ctx, "Ei file-er source nai — khub purano message", android.widget.Toast.LENGTH_SHORT).show()
+                    return@clickable
+                }
                 scope.launch {
                     opening = true
                     try {

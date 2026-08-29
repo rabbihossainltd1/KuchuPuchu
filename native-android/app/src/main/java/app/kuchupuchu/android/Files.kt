@@ -58,8 +58,38 @@ object FilesUtil {
             try {
                 ctx.startActivity(view("*/*"))
             } catch (e2: Exception) {
-                android.widget.Toast.makeText(ctx, "Ei file open korar kono app nai", android.widget.Toast.LENGTH_SHORT).show()
+                // No viewer on the phone: park the file in Downloads so it is
+                // still reachable from the Files app.
+                runCatching { saveToDownloads(ctx, name, uri) }
+                android.widget.Toast.makeText(
+                    ctx,
+                    "Ei file open korar kono app nai — Downloads-e save kora ache",
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
             }
+        }
+    }
+
+    /** Copies a content Uri into MediaStore Downloads (no viewer needed). */
+    private fun saveToDownloads(ctx: Context, name: String, uri: android.net.Uri) {
+        val safe = name.ifBlank { "kuchupuchu_${System.currentTimeMillis()}" }
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, safe)
+            put(MediaStore.Downloads.MIME_TYPE, "*/*")
+            if (android.os.Build.VERSION.SDK_INT >= 29) put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+        val target =
+            ctx.contentResolver.insert(
+                MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
+                values,
+            ) ?: return
+        ctx.contentResolver.openInputStream(uri)?.use { input ->
+            ctx.contentResolver.openOutputStream(target)?.use { output -> input.copyTo(output, 64 * 1024) }
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            values.clear()
+            values.put(MediaStore.Downloads.IS_PENDING, 0)
+            ctx.contentResolver.update(target, values, null)
         }
     }
 

@@ -24,6 +24,8 @@ export type Env = {
   /** Cloudflare Realtime TURN (ex-"Calls"): key id + an API token holding
    *  Realtime Edit; /api/config/ice mints + caches short-lived credentials. */
   TURN_KEY_ID?: string;
+  /** Shared key for GET /api/debug/errors (worker-side crash log). */
+  DEBUG_KEY?: string;
   TURN_API_TOKEN?: string;
 };
 
@@ -313,6 +315,9 @@ async function ensureSchema(db: D1Database) {
     // Who owns an uploaded object, and which conversation (if any) references it.
     // This is what makes GET /api/files/:key authorizable instead of "anyone who
     // guesses the key".
+    `CREATE TABLE IF NOT EXISTS error_log (
+      id TEXT PRIMARY KEY, stack TEXT NOT NULL, created_at TEXT NOT NULL
+    )`,
     `CREATE TABLE IF NOT EXISTS files (
       key TEXT PRIMARY KEY, owner_id TEXT NOT NULL, conv_id TEXT, created_at TEXT NOT NULL
     )`,
@@ -809,10 +814,15 @@ export default {
       }
       // Never echo the underlying message: it routinely contained SQLite text
       // ("no such table: members") which leaked schema details to any client.
-      console.error(
-        "worker error",
-        err instanceof Error ? (err.stack ?? err.message) : String(err),
-      );
+      const stack = err instanceof Error ? (err.stack ?? err.message) : String(err);
+      console.error("worker error", stack);
+      // Keep the stack so the exact failure can be pulled later via
+      // /api/debug/errors — client banners alone never named the cause.
+      try {
+        await env.DB.prepare("INSERT INTO error_log (id, stack, created_at) VALUES (?, ?, ?)")
+          .bind(crypto.randomUUID(), stack.slice(0, 2000), nowIso())
+          .run();
+      } catch {}
       return json({ error: { code: "CLOUD", message: "Something went wrong. Try again." } }, 500);
     }
   },
@@ -1460,6 +1470,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       );
     }
     return json({ ok: true });
+  }
+
+  const debugMatch = path.match(/^\/api\/debug\/errors$/);
+  if (debugMatch && method === "GET") {
+    if (!env.DEBUG_KEY || url.searchParams.get("key") !== env.DEBUG_KEY) fail(404, "Not found.", "NOT_FOUND");
+    const rows = await all<{ id: string; stack: string; created_at: string }>(
+      db,
+      "SELECT id, stack, created_at FROM error_log ORDER BY rowid DESC LIMIT 20",
+    );
+    return json({ items: rows });
   }
 
   /* ---------- messages ---------- */
