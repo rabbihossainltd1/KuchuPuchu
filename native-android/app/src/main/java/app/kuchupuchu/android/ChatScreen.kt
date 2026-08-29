@@ -2208,9 +2208,22 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendin
                         val safe = fileName.replace(Regex("[^A-Za-z0-9._ ()-]"), "_")
                         val dest = java.io.File(dir, System.currentTimeMillis().toString() + "_" + safe)
                         val ok = withContext(Dispatchers.IO) { Api.downloadToFile(fileKey, dest) }
+                        fun trace(stage: String, detail: String) {
+                            Thread {
+                                runCatching {
+                                    Api.post(
+                                        "/api/debug/clientlog",
+                                        JSONObject().put("stage", "doc-" + stage).put("detail", fileName + " :: " + detail),
+                                    )
+                                }
+                            }.start()
+                        }
+                        trace("dl", if (ok) "ok " + dest.length() + "b" else "server-refused")
                         if (ok) {
-                            FilesUtil.openFile(ctx, fileName, dest, FilesUtil.mimeFor(fileName, fileType))
+                            val opened = FilesUtil.openFile(ctx, fileName, dest, FilesUtil.mimeFor(fileName, fileType))
+                            trace("view", if (opened) "viewer-started" else "no-viewer")
                         } else {
+                            trace("view", "dl-failed")
                             android.widget.Toast.makeText(ctx, "Download korte parini — abar try koro", android.widget.Toast.LENGTH_SHORT).show()
                             dest.delete()
                         }

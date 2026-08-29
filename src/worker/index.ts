@@ -666,6 +666,12 @@ async function pushToUser(
             anyAccepted = true;
             return;
           }
+          // FCM says the app no longer exists on that device — keep the row
+          // and every future push to this user pays for a dead token (and
+          // could get throttled). Drop it.
+          if (res.status === 404) {
+            await run(db, "DELETE FROM devices WHERE token = ?", row.token).catch(() => {});
+          }
           const err = (await res.json().catch(() => null)) as {
             error?: { details?: Array<{ reason?: string }>; message?: string };
           } | null;
@@ -1484,6 +1490,91 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         "UPDATE conversations SET hidden_json = ? WHERE id = ?",
         JSON.stringify(hidden),
         convId,
+      );
+    }
+    return json({ ok: true });
+  }
+
+  // A/B push tester: shape A = notification payload (system-drawn card, no
+  // actions possible), shape B = data-only (our own notification draws
+  // Reply/Like — but only if the OS wakes/hands it to the app process).
+  // This decides the whole push architecture with EVIDENCE, not guesses.
+  if (path === "/api/debug/push" && method === "POST") {
+    if (!env.DEBUG_KEY || url.searchParams.get("key") !== env.DEBUG_KEY)
+      fail(404, "Not found.", "NOT_FOUND");
+    const shape = url.searchParams.get("shape") === "B" ? "B" : "A";
+    const target = String(body.userId || "");
+    if (!target) fail(400, "userId required.");
+    const auth = await fcmAccessToken(env);
+    if (!auth) fail(501, "FCM not configured.");
+    const rows = await all<{ token: string }>(
+      db,
+      "SELECT token FROM devices WHERE user_id = ?",
+      target,
+    );
+    const label = shape === "A" ? "TEST-A payload-card" : "TEST-B data-only-actions";
+    const results: Array<{ token: string; status: number; err?: string }> = [];
+    await Promise.all(
+      rows.map(async (row) => {
+        const msg: Record<string, unknown> = {
+          token: row.token,
+          android: { priority: "HIGH", ttl: "3600s" },
+          data: {
+            type: "message",
+            convoId: String(body.convoId || ""),
+            fromName: label,
+            body: `${label} — ${nowIso().slice(11, 19)}`,
+            kp_chat: String(body.convoId || ""),
+          },
+        };
+        if (shape === "A") {
+          (msg as { android: { notification?: unknown } }).android.notification = {
+            title: label,
+            body: `${label} — ${nowIso().slice(11, 19)}`,
+            channel_id: "kp_messages_v2",
+          };
+        }
+        try {
+          const res = await fetch(
+            `https://fcm.googleapis.com/v1/projects/${auth.projectId}/messages:send`,
+            {
+              method: "POST",
+              headers: {
+                authorization: `Bearer ${auth.token}`,
+                "content-type": "application/json",
+              },
+              body: JSON.stringify({ message: msg }),
+            },
+          );
+          results.push({
+            token: row.token.slice(0, 12),
+            status: res.status,
+            err:
+              res.status >= 400
+                ? JSON.stringify(await res.json().catch(() => null)).slice(0, 200)
+                : undefined,
+          });
+        } catch (e) {
+          results.push({ token: row.token.slice(0, 12), status: 0, err: String(e).slice(0, 120) });
+        }
+      }),
+    );
+    return json({ devices: rows.length, shape, results });
+  }
+
+  // Client breadcrumbs: the app reports doc-open/push-receive stages so
+  // "kichui hoi na" becomes exact evidence instead of a guess.
+  if (path === "/api/debug/clientlog" && method === "POST") {
+    // Already inside the authenticated section: `uid` is the caller.
+    const stage = String(body.stage || "").slice(0, 60);
+    const detail = String(body.detail || "").slice(0, 500);
+    if (stage) {
+      await run(
+        db,
+        "INSERT INTO error_log (id, stack, created_at) VALUES (?, ?, ?)",
+        crypto.randomUUID(),
+        `CLIENT[${uid.slice(0, 8)}] ${stage} :: ${detail}`,
+        nowIso(),
       );
     }
     return json({ ok: true });

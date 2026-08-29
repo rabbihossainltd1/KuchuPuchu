@@ -144,6 +144,20 @@ class KpPushService : FirebaseMessagingService() {
 
     private fun handleMessage(data: Map<String, String>) {
         val convoId = data["convoId"] ?: return
+        // Breadcrumb: proves a data-only push reached the process, and in
+        // which state (foreground / background / woken-from-dead) — the A/B
+        // push test depends on exactly this signal.
+        Thread {
+            runCatching {
+                Api.loadToken(this)
+                Api.post(
+                    "/api/debug/clientlog",
+                    org.json.JSONObject()
+                        .put("stage", "push")
+                        .put("detail", "data-msg fg=" + Store.foreground + " route=" + Store.route + " from=" + data["fromName"]),
+                )
+            }
+        }.start()
         ScreenStore.pokeInbox()
         if (Store.route == "chat/$convoId" && Store.foreground) {
             runCatching { KpSounds.receive(this) }
