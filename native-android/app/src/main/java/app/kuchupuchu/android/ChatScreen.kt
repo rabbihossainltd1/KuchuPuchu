@@ -527,17 +527,6 @@ fun ChatScreen(nav: NavController, convId: String) {
        run on the *chat* screen's scope instead, which lives as long as the
        chat is open, so gallery / camera / document / audio / contact /
        location all survive the sheet closing. */
-    fun sendAttachSelection() {
-        val batch = attachSel.toList()
-        attachSel.clear()
-        showAttach = false
-        scope.launch {
-            batch.forEach { item ->
-                if (item.isVideo) handleDocumentPicked(item.uri) else handleImagePicked(item.uri)
-            }
-        }
-    }
-
     fun handleImagePicked(uri: Uri) {
         scope.launch {
             // 720px / ~100KB: the old 960px/220KB photos took minutes to send AND load
@@ -571,6 +560,16 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
+    fun sendAttachSelection() {
+        val batch = attachSel.toList()
+        attachSel.clear()
+        showAttach = false
+        scope.launch {
+            batch.forEach { item ->
+                if (item.isVideo) handleDocumentPicked(item.uri) else handleImagePicked(item.uri)
+            }
+        }
+    }
     fun handleContactPicked(uri: Uri) {
         scope.launch {
             val text = withContext(Dispatchers.IO) { readContact(ctx, uri) }

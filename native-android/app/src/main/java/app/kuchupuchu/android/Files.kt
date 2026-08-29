@@ -27,19 +27,25 @@ object FilesUtil {
 
     /** Opens a downloaded file with the system viewer. */
     fun open(ctx: Context, name: String, bytes: ByteArray, mime: String) {
-        openFile(ctx, name, cacheFile(ctx, name, bytes, mime), mime)
+        openUri(ctx, cacheFile(ctx, name, bytes, mime), name, mime)
     }
 
     /** Opens an already-on-disk file with the system viewer. */
-    fun openFile(ctx: Context, f: File, mime: String) = openFile(ctx, f.name, f, mime)
+    fun openFile(ctx: Context, name: String, f: File, mime: String) {
+        openUri(
+            ctx,
+            androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f),
+            name,
+            mime,
+        )
+    }
 
     /**
      * Direct ACTION_VIEW — no chooser. The chooser swallowed launch failures
      * and added a MIUI-flaky layer; a direct view + ClipData grant + mime
      * fallback either opens the file or says exactly why not.
      */
-    fun openFile(ctx: Context, name: String, f: File, mime: String) {
-        val uri = androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)
+    fun openUri(ctx: Context, uri: Uri, name: String, mime: String) {
         fun view(type: String) =
             Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(uri, type)
