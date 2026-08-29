@@ -29,6 +29,8 @@ import org.webrtc.EglBase
 import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
 import org.webrtc.MediaStream
+import org.webrtc.MediaStreamTrack
+import org.webrtc.RtpTransceiver
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
 import org.webrtc.RtpReceiver
@@ -82,7 +84,7 @@ class CallEngine(private val app: Application) {
     /** True once the remote side is actually sending video — how an
      *  audio→video upgrade is detected, so BOTH phones land on the same
      *  in-call screen even though the server row still says "AUDIO". */
-    val hasRemoteVideo: Boolean get() = remoteVideo != null
+    val hasRemoteVideo: Boolean get() = hasRemote && remoteVideo != null
     var onHold by mutableStateOf(false)
 
     /** Short-lived message shown by the call screens, e.g. "User offline". */
@@ -306,9 +308,21 @@ class CallEngine(private val app: Application) {
                 otherAvatar = other.optString("avatarUrl").ifBlank { current?.otherAvatar.orEmpty() },
                 startedAt =
                     when {
-                        status == "ACTIVE" && (current?.startedAt ?: 0L) > 0L -> current!!.startedAt
-                        status == "ACTIVE" -> System.currentTimeMillis()
-                        else -> 0L
+                        status != "ACTIVE" -> 0L
+                        // The SERVER's started_at is the single clock both
+                        // phones share — local clocks made the callee's timer
+                        // start instantly while the caller still rang (2-3s skew).
+                        else -> {
+                            val serverMs =
+                                runCatching {
+                                    java.time.Instant.parse(next.optIso("startedAt")).toEpochMilli()
+                                }.getOrDefault(0L)
+                            when {
+                                serverMs > 0L -> serverMs
+                                (current?.startedAt ?: 0L) > 0L -> current!!.startedAt
+                                else -> System.currentTimeMillis()
+                            }
+                        }
                     },
                 connecting = autoAnswer || (current?.connecting == true && status != "ACTIVE"),
             )
@@ -357,6 +371,7 @@ class CallEngine(private val app: Application) {
             }
         }
         if (status == "ACTIVE" || status == "RINGING") pullIce(ui.id)
+        if (status == "ACTIVE") rebindRemoteVideo()
     }
 
     fun startCall(userId: String, kind: String, name: String, avatar: String = "") {
@@ -434,7 +449,10 @@ class CallEngine(private val app: Application) {
         ensureFactory(app)
         applyAudio()
         CallService.start(app, "In a call with ${rec.otherName}")
-        active = rec.copy(status = "ACTIVE", startedAt = System.currentTimeMillis(), connecting = true)
+        // startedAt stays 0 (unknown): the timer runs from the SERVER's
+        // started_at (parsed from the answer response / poll) so both phones
+        // show the exact same duration.
+        active = rec.copy(status = "ACTIVE", startedAt = 0L, connecting = true)
         scope.launch {
             try {
                 // `repeat(24) { ... return@repeat }` here NEVER left the loop —
@@ -466,8 +484,17 @@ class CallEngine(private val app: Application) {
                 val answer = peer.createAnswerAwait(sdpConstraints())
                 peer.setLocalDescriptionAwait(answer)
                 flushIce()
-                withContext(Dispatchers.IO) {
-                    Api.post("/api/calls/${rec.id}/answer", JSONObject().put("answerSdp", answer.description))
+                val answered =
+                    withContext(Dispatchers.IO) {
+                        Api.post("/api/calls/${rec.id}/answer", JSONObject().put("answerSdp", answer.description))
+                    }
+                // Adopt the server clock for the call timer (both sides identical).
+                runCatching {
+                    val ms = java.time.Instant.parse(answered.optJSONObject("call")?.optIso("startedAt")).toEpochMilli()
+                    if (ms > 0L) {
+                        active = active?.copy(startedAt = ms)
+                        onChange?.invoke(active)
+                    }
                 }
                 pullIce(rec.id)
             } catch (e: Exception) {
@@ -547,6 +574,11 @@ class CallEngine(private val app: Application) {
                 withContext(Dispatchers.IO) { runCatching { capture(true) } }
                 videoTrack?.let { track ->
                     val sender = pc?.senders?.find { it.track()?.kind() == "video" }
+                        ?: // Voice call: reuse the always-present sendrecv video
+                           // transceiver (addTrack would need renegotiation).
+                        pc?.transceivers
+                            ?.firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO }
+                            ?.sender
                     if (sender != null) sender.setTrack(track, true) else pc?.addTrack(track)
                     localView?.let { runCatching { track.addSink(it) } }
                 }
@@ -604,6 +636,11 @@ class CallEngine(private val app: Application) {
         screen.startCapture(720, 1280, 20)
         val track = factory!!.createVideoTrack("kp-share", src)
         val sender = pc?.senders?.find { it.track()?.kind() == "video" }
+            ?: // Voice call: the always-created sendrecv video transceiver
+               // provides the sender — no renegotiation needed.
+            pc?.transceivers
+                ?.firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO }
+                ?.sender
         if (sender != null) sender.setTrack(track, true) else pc?.addTrack(track)
         helper?.dispose()
         helper = nextHelper
@@ -635,6 +672,9 @@ class CallEngine(private val app: Application) {
         capture(true)
         videoTrack?.let { track ->
             val sender = pc?.senders?.find { it.track()?.kind() == "video" }
+                ?: pc?.transceivers
+                    ?.firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO }
+                    ?.sender
             if (sender != null) sender.setTrack(track, true) else pc?.addTrack(track)
             localView?.setMirror(currentFacingFront)
             localView?.let { runCatching { track.addSink(it) } }
@@ -724,6 +764,7 @@ class CallEngine(private val app: Application) {
         sharing = false
         onHold = false
         hasRemote = false
+        frameGate = null
         netFailStreak = 0
         outgoingRingAt = 0L
         iceCallId = ""
@@ -836,7 +877,25 @@ class CallEngine(private val app: Application) {
                 rtc,
                 object : PeerConnection.Observer {
                     override fun onSignalingChange(p0: PeerConnection.SignalingState?) {}
-                    override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {}
+                    override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
+                        when (state) {
+                            PeerConnection.IceConnectionState.CONNECTED,
+                            PeerConnection.IceConnectionState.COMPLETED,
+                            -> Handler(Looper.getMainLooper()).post {
+                                val cur = active ?: return@post
+                                active = cur.copy(
+                                    connecting = false,
+                                    startedAt = if (cur.startedAt > 0L) cur.startedAt else System.currentTimeMillis(),
+                                )
+                                onChange?.invoke(active)
+                            }
+                            PeerConnection.IceConnectionState.FAILED ->
+                                Handler(Looper.getMainLooper()).post {
+                                    notify("Call connection failed — net check kore abar try koro")
+                                }
+                            else -> {}
+                        }
+                    }
                     override fun onIceConnectionReceivingChange(p0: Boolean) {}
                     override fun onIceGatheringChange(p0: PeerConnection.IceGatheringState?) {}
                     override fun onIceCandidate(c: IceCandidate?) {
@@ -875,24 +934,71 @@ class CallEngine(private val app: Application) {
             )!!
         audioTrack?.let { peer.addTrack(it, listOf("kp")) }
         videoTrack?.let { peer.addTrack(it, listOf("kp")) }
+        if (videoTrack == null) {
+            // Voice calls still get a sendrecv VIDEO m-line: without it there
+            // is nowhere to put a screen-share track later, and mid-call
+            // addTrack would need renegotiation (which we don't do) — the
+            // other phone then saw nothing at all.
+            runCatching {
+                peer.addTransceiver(
+                    MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO,
+                    RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_RECEIVE),
+                )
+            }
+        }
         pc = peer
         return peer
     }
 
+    /** Counts the first real frame before the UI believes remote video. */
+    private inner class FirstFrameGate : org.webrtc.VideoSink {
+        @Volatile
+        private var seen = false
+
+        override fun onFrame(frame: org.webrtc.VideoFrame) {
+            if (seen) return
+            seen = true
+            Handler(Looper.getMainLooper()).post {
+                hasRemote = true
+                // Remote video arrived on a call this side still labels AUDIO
+                // (the other phone shared its screen / turned the camera on):
+                // promote this side too, otherwise one phone shows the video
+                // screen and the other the voice screen for the same call.
+                if (active?.kind != "VIDEO") active = active?.copy(kind = "VIDEO")
+                onChange?.invoke(active)
+            }
+        }
+    }
+
+    private var frameGate: org.webrtc.VideoSink? = null
+
     private fun bindRemote(track: VideoTrack) {
         scope.launch {
-            remoteView?.let { old -> remoteVideo?.let { runCatching { it.removeSink(old) } } }
+            val old = remoteVideo
+            old?.let { v ->
+                remoteView?.let { runCatching { v.removeSink(it) } }
+                frameGate?.let { runCatching { v.removeSink(it) } }
+            }
             remoteVideo = track
             track.setEnabled(true)
+            // The renderer sink draws frames whenever they start flowing.
             remoteView?.let { runCatching { track.addSink(it) } }
-            hasRemote = true
-            // Remote video arrived on a call this side still labels AUDIO
-            // (the other phone turned its camera on): promote this side too,
-            // otherwise one phone shows the video screen and the other the
-            // voice screen for the same call.
-            if (active?.kind != "VIDEO") active = active?.copy(kind = "VIDEO")
-            onChange?.invoke(active)
+            // Promotion (voice -> video UI, hasRemote) waits for the FIRST
+            // REAL frame: the sendrecv voice-call transceiver surfaces an
+            // empty placeholder video track at connect, and promoting on that
+            // flipped every voice call straight to the video screen.
+            frameGate = FirstFrameGate().also { runCatching { track.addSink(it) } }
         }
+    }
+
+    /** setTrack() swaps don't re-fire onAddTrack — re-detect replaced video. */
+    private fun rebindRemoteVideo() {
+        val peer = pc ?: return
+        val current =
+            peer.receivers
+                .firstNotNullOfOrNull { it.track() as? VideoTrack }
+                ?: return
+        if (current !== remoteVideo) bindRemote(current)
     }
 
     private fun flushIce() {
