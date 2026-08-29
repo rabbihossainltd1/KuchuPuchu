@@ -606,6 +606,11 @@ fun ChatScreen(nav: NavController, convId: String) {
     fun pendingEchoOf(m: JSONObject): Boolean =
         pending.any { it.optString("clientId") == m.optString("clientId") || it.optString("id") == m.optString("id") }
 
+    fun selectedMessages(): List<JSONObject> {
+        val ids = selected.toList()
+        return msgs.filter { it.optString("id") in ids } + pending.filter { it.optString("id") in ids }
+    }
+
     /**
      * WhatsApp-style resend: every selected media row (image/video/file)
      * is fetched from its mediaUrl and pushed through the normal send
@@ -639,11 +644,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                 }
             }
         }
-    }
-
-    fun selectedMessages(): List<JSONObject> {
-        val ids = selected.toList()
-        return msgs.filter { it.optString("id") in ids } + pending.filter { it.optString("id") in ids }
     }
 
     fun canEdit(m: JSONObject): Boolean =
@@ -1385,7 +1385,6 @@ private fun Composer(
                         interactionSource = sendInteraction,
                         indication = null,
                     ) {
-                        haptics.confirm()
                         if (selectCount > 0 && input.isBlank()) onSendSelection() else onSend()
                     },
                 contentAlignment = Alignment.Center,
