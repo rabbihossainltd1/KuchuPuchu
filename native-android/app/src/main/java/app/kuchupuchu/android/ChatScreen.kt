@@ -380,7 +380,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                 return@launch
             }
             try {
-                val up = withContext(Dispatchers.IO) { Api.upload("photo.jpg", "image/jpeg", jpeg) }
+                val up = withContext(Dispatchers.IO) {
+                    Api.upload("photo.jpg", "image/jpeg", jpeg) { w, t -> UploadProgress.set(clientId, w.toFloat() / t) }
+                }
                 val key = up.optString("fileKey")
                 if (key.isBlank()) throw ApiException(500, "Upload returned no file key.")
                 val payload =
@@ -392,6 +394,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         .put("fileSize", jpeg.size)
                         .put("clientId", clientId)
                 withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
+                UploadProgress.done(clientId)
                 KpSounds.send(ctx)
                 refreshMessages(forceScroll = true)
             } catch (e: Exception) {
@@ -401,9 +404,11 @@ fun ChatScreen(nav: NavController, convId: String) {
                     } else dataUrl
                     val payload = JSONObject().put("kind", "IMAGE").put("imageData", small).put("clientId", clientId)
                     withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
+                    UploadProgress.done(clientId)
                     KpSounds.send(ctx)
                     refreshMessages(forceScroll = true)
                 } catch (e2: Exception) {
+                    UploadProgress.done(clientId)
                     error = (e2.message ?: "Could not send photo.") + "  Tap the banner to retry."
                     pending.find { it.optString("clientId") == clientId }?.put("failed", true)
                 }
@@ -426,7 +431,9 @@ fun ChatScreen(nav: NavController, convId: String) {
         )
         scope.launch {
             try {
-                val data = withContext(Dispatchers.IO) { Api.upload(name, mime, bytes) }
+                val data = withContext(Dispatchers.IO) {
+                    Api.upload(name, mime, bytes) { w, t -> UploadProgress.set(clientId, w.toFloat() / t) }
+                }
                 withContext(Dispatchers.IO) {
                     Api.post(
                         "/api/conversations/$convId/messages",
@@ -439,12 +446,14 @@ fun ChatScreen(nav: NavController, convId: String) {
                             .put("clientId", clientId),
                     )
                 }
+                UploadProgress.done(clientId)
                 KpSounds.send(ctx)
                 refreshMessages(forceScroll = true)
             } catch (e: Exception) {
                 // Before this the optimistic bubble stayed on screen forever
                 // looking like it was still uploading: the POST never happened,
                 // so no message with this clientId ever came back to match it.
+                UploadProgress.done(clientId)
                 markPendingFailed(clientId)
                 // No retry hint here on purpose: the picked bytes are gone with
                 // the dismissed picker, so "tap to retry" could never work.
@@ -475,7 +484,9 @@ fun ChatScreen(nav: NavController, convId: String) {
             listState.animateScrollToItem(msgs.size + pending.size - 1)
             try {
                 val bytes = withContext(Dispatchers.IO) { file.readBytes() }
-                val data = withContext(Dispatchers.IO) { Api.upload(name, "audio/mp4", bytes) }
+                val data = withContext(Dispatchers.IO) {
+                    Api.upload(name, "audio/mp4", bytes) { w, t -> UploadProgress.set(clientId, w.toFloat() / t) }
+                }
                 val payload =
                     JSONObject()
                         .put("kind", "FILE")
@@ -486,10 +497,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                         .put("clientId", clientId)
                         .put("meta", JSONObject().put("voice", true).put("seconds", seconds).put("clientId", clientId))
                 withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
+                UploadProgress.done(clientId)
                 KpSounds.send(ctx)
                 file.delete()
                 refreshMessages(forceScroll = false)
             } catch (e: Exception) {
+                UploadProgress.done(clientId)
                 // The old fallback queued a FILE payload with no fileKey. The
                 // server rejects that with 400 every time, and because flush()
                 // stops at the first failure it wedged every later queued
@@ -1936,6 +1949,23 @@ private fun ImageMessageRow(
     }
 }
 
+/**
+ * Live upload fractions keyed by message clientId — bubbles read this to draw
+ * a real progress ring ("kototuku send hoyeche") instead of a blind spinner.
+ */
+object UploadProgress {
+    val fracs = androidx.compose.runtime.mutableStateMapOf<String, Float>()
+
+    fun set(id: String, f: Float) {
+        if (f >= 0.999f) return
+        fracs[id] = f
+    }
+
+    fun done(id: String) {
+        fracs.remove(id)
+    }
+}
+
 @Composable
 private fun ImageBubble(m: JSONObject, mine: Boolean) {
     // Photos arrive two ways: kind=IMAGE carries mediaUrl (/api/messages/:id/media
@@ -2001,6 +2031,28 @@ private fun ImageBubble(m: JSONObject, mine: Boolean) {
                     }
                 },
             )
+        }
+        // Determinate ring while THIS photo is still uploading — the user sees
+        // exactly how much has left, not a spinner that could mean anything.
+        val upFrac = UploadProgress.fracs[m.optString("clientId")]
+        if (upFrac != null) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color(0x59000000)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(
+                        progress = { upFrac },
+                        color = Color.White,
+                        strokeWidth = 3.dp,
+                        modifier = Modifier.size(42.dp),
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text("${(upFrac * 100).toInt()}%", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
         }
     }
 }
@@ -2068,10 +2120,14 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendin
             Column {
                 Text("Voice message", fontSize = 14.sp, color = Ink)
                 val secs = m.optJSONObject("meta")?.optInt("seconds") ?: 0
+                val vFrac = UploadProgress.fracs[m.optString("clientId")]
                 Text(
-                    if (secs > 0) "%d:%02d".format(secs / 60, secs % 60)
-                    else if (pendingEcho) "Sending…"
-                    else FilesUtil.displaySize(m.optInt("fileSize")),
+                    when {
+                        vFrac != null -> "Sending · ${(vFrac * 100).toInt()}%"
+                        secs > 0 -> "%d:%02d".format(secs / 60, secs % 60)
+                        pendingEcho -> "Sending…"
+                        else -> FilesUtil.displaySize(m.optInt("fileSize"))
+                    },
                     fontSize = 11.sp,
                     color = if (mine) Color(0x99FFFFFF) else Muted,
                 )
@@ -2080,7 +2136,33 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendin
         return
     }
 
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    // Documents: the WHOLE row opens (not just a tiny "Open" button), with a
+    // spinner while downloading and a toast if it fails — the old version
+    // swallowed every error in runCatching, so a failed download looked like
+    // a dead button ("open korte parche na").
+    var opening by remember { mutableStateOf(false) }
+    val ready = fileKey.isNotBlank()
+    val upFrac = UploadProgress.fracs[m.optString("clientId")]
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier =
+            Modifier.clickable(enabled = ready && !opening) {
+                scope.launch {
+                    opening = true
+                    try {
+                        val bytes = withContext(Dispatchers.IO) { Api.download(fileKey) }
+                        FilesUtil.open(ctx, fileName, bytes, FilesUtil.mimeFor(fileName, fileType))
+                    } catch (e: Exception) {
+                        android.widget.Toast.makeText(
+                            ctx,
+                            "Could not open \"${fileName.take(28)}…\". Try again.",
+                            android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                    opening = false
+                }
+            },
+    ) {
         Box(
             Modifier
                 .size(40.dp)
@@ -2099,21 +2181,29 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendin
         Column(Modifier.widthIn(max = 180.dp)) {
             Text(fileName, fontSize = 14.sp, color = Ink, maxLines = 2)
             Text(
-                FilesUtil.displaySize(m.optInt("fileSize")),
+                if (upFrac != null) "Sending · ${(upFrac * 100).toInt()}%"
+                else FilesUtil.displaySize(m.optInt("fileSize")),
                 fontSize = 11.sp,
                 color = if (mine) Color(0x99FFFFFF) else Muted,
             )
         }
         Spacer(Modifier.width(6.dp))
-        TextButton(onClick = {
-            scope.launch {
-                runCatching {
-                    val bytes = withContext(Dispatchers.IO) { Api.download(fileKey) }
-                    FilesUtil.open(ctx, fileName, bytes, fileType)
-                }
+        when {
+            opening -> CircularProgressIndicator(
+                color = if (mine) AmberInk else GoldDeep,
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(20.dp),
+            )
+            upFrac != null -> CircularProgressIndicator(
+                progress = { upFrac },
+                color = if (mine) AmberInk else GoldDeep,
+                strokeWidth = 2.5.dp,
+                modifier = Modifier.size(22.dp),
+            )
+            ready -> TextButton(onClick = {}) {
+                Text("Open", color = if (mine) Color.White else GoldDeep, fontWeight = FontWeight.SemiBold)
             }
-        }) {
-            Text("Open", color = if (mine) Color.White else GoldDeep, fontWeight = FontWeight.SemiBold)
+            else -> Text("Uploading…", fontSize = 11.sp, color = if (mine) Color(0x99FFFFFF) else Muted)
         }
     }
 }

@@ -33,7 +33,44 @@ object FilesUtil {
                 setDataAndType(uri, mime.ifBlank { "*/*" })
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-        runCatching { ctx.startActivity(Intent.createChooser(intent, name)) }
+        val chooser = Intent.createChooser(intent, name).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { ctx.startActivity(chooser) }
+    }
+
+    /**
+     * The best mime for OPENING a file: pickers often hand back a generic
+     * "application/octet-stream" (or nothing), and with that most viewers
+     * refuse the doc ("open korte parche na"). Fall back to the extension.
+     */
+    fun mimeFor(name: String, declared: String): String {
+        if (!declared.isBlank() && !declared.equals("application/octet-stream", true) &&
+            !declared.equals("application/binary", true)
+        ) {
+            return declared
+        }
+        return when (name.substringAfterLast('.', "").lowercase()) {
+            "pdf" -> "application/pdf"
+            "doc" -> "application/msword"
+            "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            "xls" -> "application/vnd.ms-excel"
+            "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            "ppt" -> "application/vnd.ms-powerpoint"
+            "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            "txt", "log" -> "text/plain"
+            "csv" -> "text/csv"
+            "zip" -> "application/zip"
+            "mp3" -> "audio/mpeg"
+            "m4a", "aac" -> "audio/mp4"
+            "wav" -> "audio/x-wav"
+            "ogg" -> "audio/ogg"
+            "mp4", "mov" -> "video/mp4"
+            "mkv" -> "video/x-matroska"
+            "jpg", "jpeg" -> "image/jpeg"
+            "png" -> "image/png"
+            "gif" -> "image/gif"
+            "webp" -> "image/webp"
+            else -> declared.ifBlank { "*/*" }
+        }
     }
 
     /**

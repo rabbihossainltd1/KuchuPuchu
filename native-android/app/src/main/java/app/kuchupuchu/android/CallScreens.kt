@@ -25,13 +25,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.PersonAddAlt1
+import androidx.compose.material.icons.filled.PhoneInTalk
 import androidx.compose.material.icons.filled.ScreenShare
-import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
@@ -247,12 +249,16 @@ fun VoiceCallScreen(call: CallUi) {
                 Modifier.fillMaxWidth().padding(vertical = 10.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
+                // Audio output button: shows WHERE sound is going right now
+                // (Bluetooth / headset / earpiece / speaker) and cycles to the
+                // next available output on tap — a headset plugged mid-call is
+                // picked up automatically.
                 CallAction(
-                    if (engine.speaker) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
-                    if (engine.speaker) "Speaker on" else "Speaker",
-                    active = engine.speaker,
+                    routeIcon(engine.audioRoute),
+                    routeLabel(engine.audioRoute),
+                    active = engine.audioRoute != AudioRoute.EARPIECE,
                     enabled = true,
-                ) { engine.toggleSpeaker() }
+                ) { engine.cycleAudioRoute() }
                 CallAction(
                     if (engine.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
                     if (engine.muted) "Unmute" else "Mute",
@@ -658,6 +664,23 @@ private fun rememberTick(startedAt: Long, paused: Boolean): Int {
 }
 
 private fun clockText(secs: Int): String = "%d:%02d".format(secs / 60, secs % 60)
+
+/** Icon + label for the audio-route button (voice call screen). */
+private fun routeIcon(route: AudioRoute): ImageVector =
+    when (route) {
+        AudioRoute.BLUETOOTH -> Icons.Filled.Bluetooth
+        AudioRoute.WIRED -> Icons.Filled.Headset
+        AudioRoute.SPEAKER -> Icons.Filled.VolumeUp
+        AudioRoute.EARPIECE -> Icons.Filled.PhoneInTalk
+    }
+
+private fun routeLabel(route: AudioRoute): String =
+    when (route) {
+        AudioRoute.BLUETOOTH -> "Bluetooth"
+        AudioRoute.WIRED -> "Headset"
+        AudioRoute.SPEAKER -> "Speaker"
+        AudioRoute.EARPIECE -> "Earpiece"
+    }
 
 private fun engineApp(): android.content.Context =
     CallEngine.instance?.appContext ?: MainActivity.current

@@ -3,11 +3,14 @@ package app.kuchupuchu.android
 import android.content.Context
 import okhttp3.ConnectionPool
 import okhttp3.Interceptor
+import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import okio.BufferedSink
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
@@ -77,11 +80,39 @@ object Api {
         return data
     }
 
-    fun upload(name: String, mime: String, bytes: ByteArray): JSONObject {
+    fun upload(name: String, mime: String, bytes: ByteArray): JSONObject = upload(name, mime, bytes, null)
+
+    /**
+     * Upload with byte-level progress: the body writes itself in 8 KB chunks
+     * and reports (written, total) so bubbles can show a real progress ring
+     * instead of a spinner that could mean two seconds or two minutes.
+     */
+    fun upload(name: String, mime: String, bytes: ByteArray, onProgress: ((Long, Long) -> Unit)?): JSONObject {
         val path = "/api/files?name=${q(name)}&type=${q(mime)}"
+        val body: RequestBody =
+            if (onProgress == null) {
+                bytes.toRequestBody(OCTET)
+            } else {
+                val total = bytes.size.toLong()
+                object : RequestBody() {
+                    override fun contentType(): MediaType = OCTET
+
+                    override fun contentLength(): Long = total
+
+                    override fun writeTo(sink: BufferedSink) {
+                        var written = 0L
+                        while (written < total) {
+                            val len = minOf(8192, (total - written).toInt())
+                            sink.write(bytes, written.toInt(), len)
+                            written += len
+                            onProgress(written, total)
+                        }
+                    }
+                }
+            }
         val req = Request.Builder()
             .url(BASE + path)
-            .post(bytes.toRequestBody(OCTET))
+            .post(body)
             .header("Accept", "application/json")
             .build()
         return executeJson(req)
