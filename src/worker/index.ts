@@ -2091,27 +2091,39 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       String(body.offerSdp ?? "") || null,
       created,
     );
+    // Delay ~1.8s, then only push while STILL RINGING: cutting a call
+    // before it ever rang used to let the in-flight push ring the other
+    // phone anyway ("call cut korleo call chole gelo").
     ctx.waitUntil(
-      pushToUser(
-        env,
-        db,
-        other,
-        {
-          type: "call",
+      (async () => {
+        await new Promise((r) => setTimeout(r, 1_800));
+        const fresh = await one<{ status: string }>(
+          db,
+          "SELECT status FROM calls WHERE id = ?",
           callId,
-          kind,
-          fromName: me.display_name,
-          fromId: uid,
-          // delivered as a launch-intent extra when the system notification
-          // is tapped -> MainActivity jumps straight to the ringing screen
-          kp_call: callId,
-        },
-        {
-          title: me.display_name || "KuchuPuchu",
-          body: kind === "VIDEO" ? "📹 Incoming video call" : "📞 Incoming voice call",
-          channel: "kp_calls_v3",
-        },
-      ),
+        );
+        if (!fresh || fresh.status !== "RINGING") return;
+        await pushToUser(
+          env,
+          db,
+          other,
+          {
+            type: "call",
+            callId,
+            kind,
+            fromName: me.display_name,
+            fromId: uid,
+            // delivered as a launch-intent extra when the system notification
+            // is tapped -> MainActivity jumps straight to the ringing screen
+            kp_call: callId,
+          },
+          {
+            title: me.display_name || "KuchuPuchu",
+            body: kind === "VIDEO" ? "📹 Incoming video call" : "📞 Incoming voice call",
+            channel: "kp_calls_v4",
+          },
+        );
+      })(),
     );
     const otherUser = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", other);
     return json(

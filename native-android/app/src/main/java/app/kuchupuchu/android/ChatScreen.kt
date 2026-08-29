@@ -187,7 +187,12 @@ fun ChatScreen(nav: NavController, convId: String) {
         val oldIds = msgs.map { it.optString("id") }
         val newIds = next.map { it.optString("id") }
         if (oldIds == newIds) {
-            next.forEachIndexed { i, o -> msgs[i] = o }
+            // Same ids: only touch the rows whose JSON actually changed —
+            // replacing every object re-composed the whole list on EVERY
+            // poll tick (800ms), which read as constant scroll jank.
+            next.forEachIndexed { i, o ->
+                if (msgs[i] != o) msgs[i] = o
+            }
             return
         }
         if (newIds.size > oldIds.size && newIds.take(oldIds.size) == oldIds) {
@@ -208,7 +213,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                         val localMuted = conv.value?.optBoolean("muted") == true
                         c.put("muted", localMuted)
                     }
-                    conv.value = c
+                    // Skip the state write when nothing changed: assigning a
+                    // fresh JSONObject on every poll re-composed the header
+                    // (and everything reading conv) 60+ times a minute.
+                    if (conv.value != c) conv.value = c
                     ScreenStore.setConvDetail(convId, c)
                     c.arr("members").objects().forEach { m ->
                         val u = m.optJSONObject("user")
@@ -916,7 +924,11 @@ fun ChatScreen(nav: NavController, convId: String) {
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 10.dp),
             ) {
-                items(msgs, key = { it.optString("clientId").ifBlank { it.optString("id") } }) { m ->
+                items(
+                    msgs,
+                    key = { it.optString("clientId").ifBlank { it.optString("id") } },
+                    contentType = { it.optString("kind") },
+                ) { m ->
                     // WhatsApp-style selection: the whole ROW gets a translucent
                     // highlight strip, edge to edge — not just the bubble.
                     val rowSelected = m.optString("id") in selected
@@ -1071,6 +1083,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                     }
                 }
             },
+            onInputTap = {
+                if (showAttach || showStickers) {
+                    showAttach = false
+                    showStickers = false
+                }
+            },
             onAttach = { haptics.tap(); showStickers = false; showAttach = true },
             onSticker = { haptics.tap(); showAttach = false; showStickers = true },
             onSend = {
@@ -1221,6 +1239,7 @@ private fun CoinWallpaper() {
 private fun Composer(
     input: String,
     onInput: (String) -> Unit,
+    onInputTap: () -> Unit = {},
     onAttach: () -> Unit,
     onSticker: () -> Unit,
     onSend: () -> Unit,
@@ -1262,11 +1281,17 @@ private fun Composer(
                                 modifier = Modifier.padding(vertical = 8.dp),
                             )
                         }
+                        val inputInteraction = remember { MutableInteractionSource() }
+                        val inputPressed by inputInteraction.collectIsPressedAsState()
+                        LaunchedEffect(inputPressed) {
+                            if (inputPressed) onInputTap()
+                        }
                         BasicTextField(
                             value = input,
                             onValueChange = onInput,
                             textStyle = TextStyle(color = Ink, fontSize = 15.sp),
                             maxLines = 4,
+                            interactionSource = inputInteraction,
                             modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                         )
                     }
@@ -1716,8 +1741,7 @@ private fun MessageRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 3.dp)
-            .animateContentSize(),
+            .padding(vertical = 3.dp),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
         Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
@@ -1820,8 +1844,7 @@ private fun ImageMessageRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 3.dp)
-            .animateContentSize(),
+            .padding(vertical = 3.dp),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
         Box(
