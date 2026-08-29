@@ -242,6 +242,17 @@ fun SettingsScreen(nav: NavController) {
                 editField = "about"; editValue = me.value.optText("about")
             }
             SettingRow(Icons.Filled.Mail, "Email", me.value.optText("email"), clickable = false) {}
+            // Which build am I running? This row ends the "ami ki notun APK
+            // install korsi?" confusion — bug reports can quote it directly.
+            SettingRow(
+                Icons.Filled.Info,
+                "App version",
+                runCatching {
+                    val pi = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+                    "${pi.versionName} (${pi.versionCode})"
+                }.getOrDefault("?"),
+                clickable = false,
+            ) {}
         }
 
         if (error.isNotBlank()) {
