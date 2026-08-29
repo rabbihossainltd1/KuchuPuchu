@@ -14,6 +14,12 @@
     <!-- Let the user whitelist the app from battery savers so FCM pushes and
          calls arrive instantly (many OEMs delay/kil background network). -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Attach-sheet recent grid (photos/videos on this device) -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <!-- Call foreground service types (call round re-enables the service itself) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />

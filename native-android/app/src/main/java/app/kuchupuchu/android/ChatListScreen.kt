@@ -122,8 +122,11 @@ fun ChatListScreen(nav: NavController) {
 
     LaunchedEffect(Unit) {
         refresh()
+        // ~2s silent sync while the app is open (user-visible latency zero:
+        // the open chat polls even faster at 800ms, FCM pokes refill
+        // instantly).
         while (true) {
-            delay(2_500)
+            delay(2_000)
             if (Store.foreground) refresh()
         }
     }

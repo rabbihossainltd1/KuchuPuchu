@@ -148,7 +148,11 @@ object ScreenStore {
         }
         val prev = lastNotifiedAt[convId]
         lastNotifiedAt[convId] = lastAt
-        return prev != null && prev != lastAt
+        // prev == null (first poll after app open) used to return false, so
+        // exactly the messages that arrived before the first refresh never
+        // notified. Same id is reused for the tray notification, so this
+        // only refreshes an existing FCM notification — no duplicates.
+        return prev != lastAt
     }
 
     val convs = mutableStateListOf<JSONObject>()

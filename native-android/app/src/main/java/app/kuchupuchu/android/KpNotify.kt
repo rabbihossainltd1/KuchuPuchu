@@ -18,8 +18,8 @@ import androidx.core.app.NotificationManagerCompat
  * (they replace this with full-screen ringing + accept/decline).
  */
 object KpNotify {
-    private const val CHAT_CHANNEL = "kp_messages"
-    private const val CALL_CHANNEL = "kp_calls"
+    private const val CHAT_CHANNEL = "kp_messages_v2"
+    private const val CALL_CHANNEL = "kp_calls_v2"
     private const val GROUP = "kp_chats"
 
     fun ensureChannels(ctx: Context) {

@@ -2,61 +2,93 @@ package app.kuchupuchu.android
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.ImageDecoder
 import android.location.LocationManager
 import android.net.Uri
+import android.os.Build
 import android.provider.ContactsContract
+import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.ContactPage
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material3.Icon
-import android.content.Context
+import androidx.compose.material.icons.filled.Poll
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import org.json.JSONObject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+/** One recent gallery item shown in the attach sheet. */
+private data class RecentMedia(
+    val uri: Uri,
+    val isVideo: Boolean,
+    val durationMs: Long,
+    val thumb: ImageBitmap?,
+)
+
+private data class AttachAction(
+    val icon: ImageVector,
+    val tint: Color,
+    val label: String,
+    val onClick: () -> Unit,
+)
 
 /**
- * Attach sheet — locked design #1: classic 3x2 grid.
- * Gallery / Camera / Document / Audio / Location / Contact.
- *
- * This sheet is a *picker only*: it reports the picked [Uri] (or a location
- * request) straight back to the caller and does no IO of its own. Reading a
- * picked photo/document takes hundreds of milliseconds, and the sheet is
- * dismissed the moment the user picks something — so any coroutine launched
- * on this composable's own scope would be cancelled with the sheet before it
- * ever finished, silently dropping the attachment. The owning screen does the
- * decoding/sending on a scope that outlives this sheet.
+ * Attach sheet — WhatsApp-style dark panel that opens right above the chat
+ * bar: two rows of round actions, and a RECENT photos+videos grid under it,
+ * so media goes out without ever opening a gallery app. Videos ride the
+ * document (FILE) upload path, photos the inline image path.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,6 +100,40 @@ fun AttachSheet(
     onLocationRequested: () -> Unit,
 ) {
     val ctx = LocalContext.current
+    var recent by remember { mutableStateOf(listOf<RecentMedia>()) }
+    var canRead by remember { mutableStateOf(false) }
+
+    fun hasRead(): Boolean =
+        if (Build.VERSION.SDK_INT >= 33) {
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED
+        } else {
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        }
+
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        canRead = hasRead()
+    }
+
+    LaunchedEffect(Unit) {
+        canRead = hasRead()
+        if (!canRead) {
+            permission.launch(
+                if (Build.VERSION.SDK_INT >= 33) {
+                    arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
+                } else {
+                    arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+                },
+            )
+        }
+    }
+
+    LaunchedEffect(canRead) {
+        if (!canRead) return@LaunchedEffect
+        recent = withContext(Dispatchers.IO) {
+            runCatching { loadRecentMedia(ctx) }.getOrDefault(emptyList())
+        }
+    }
 
     val gallery =
         rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -99,93 +165,238 @@ fun AttachSheet(
             onDismiss()
             if (granted) onLocationRequested()
         }
+    fun comingSoon() {
+        Toast.makeText(ctx, "Coming in a future update", Toast.LENGTH_SHORT).show()
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = Color.White,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        containerColor = Color(0xFF201E1B),
+        shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp),
     ) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 6.dp)) {
-            Text(
-                "Attach",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Ink,
-                modifier = Modifier.padding(bottom = 14.dp),
+        Column(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+            /* drag handle */
+            Box(
+                Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .padding(top = 2.dp, bottom = 12.dp)
+                    .size(width = 44.dp, height = 4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color(0x40FFFFFF)),
             )
-            for (row in 0 until 2) {
+
+            /* action grid — 2 x 4 like the WhatsApp reference */
+            val rows = listOf(
+                listOf(
+                    AttachAction(Icons.Filled.Image, Color(0xFF60A5FA), "Gallery") {
+                        gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    },
+                    AttachAction(Icons.Filled.CameraAlt, Color(0xFFF472B6), "Camera") {
+                        val f = java.io.File(ctx.cacheDir, "camera_${System.currentTimeMillis()}.jpg")
+                        cameraUri = androidx.core.content.FileProvider.getUriForFile(
+                            ctx,
+                            "${ctx.packageName}.fileprovider",
+                            f,
+                        )
+                        camera.launch(cameraUri!!)
+                    },
+                    AttachAction(Icons.Filled.LocationOn, Color(0xFF34D399), "Location") {
+                        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                            ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                        ) {
+                            onDismiss()
+                            onLocationRequested()
+                        } else {
+                            locationPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                        }
+                    },
+                    AttachAction(Icons.Filled.ContactPage, Color(0xFF38BDF8), "Contact") {
+                        contact.launch(null)
+                    },
+                ),
+                listOf(
+                    AttachAction(Icons.Filled.Description, Color(0xFFA78BFA), "Document") {
+                        document.launch("*/*")
+                    },
+                    AttachAction(Icons.Filled.Poll, Color(0xFFFBBF24), "Poll") { comingSoon() },
+                    AttachAction(Icons.Filled.Event, Color(0xFFF87171), "Event") { comingSoon() },
+                    AttachAction(Icons.Filled.AutoAwesome, Color(0xFF818CF8), "AI images") { comingSoon() },
+                ),
+            )
+            rows.forEach { row ->
                 Row(
-                    Modifier.fillMaxWidth().padding(bottom = 14.dp),
+                    Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                 ) {
-                    for (col in 0 until 3) {
-                        val idx = row * 3 + col
-                        when (idx) {
-                            0 -> AttachTile(Icons.Filled.Image, Gold, "Gallery") {
-                                gallery.launch(
-                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                                )
-                            }
-                            1 -> AttachTile(Icons.Filled.CameraAlt, Color(0xFF0EA5E9), "Camera") {
-                                val f = java.io.File(ctx.cacheDir, "camera_${System.currentTimeMillis()}.jpg")
-                                cameraUri = androidx.core.content.FileProvider.getUriForFile(
-                                    ctx,
-                                    "${ctx.packageName}.fileprovider",
-                                    f,
-                                )
-                                camera.launch(cameraUri!!)
-                            }
-                            2 -> AttachTile(Icons.Filled.Description, Color(0xFF7C3AED), "Document") {
-                                document.launch("*/*")
-                            }
-                            3 -> AttachTile(Icons.Filled.Audiotrack, Color(0xFFEA580C), "Audio") {
-                                audio.launch("audio/*")
-                            }
-                            4 -> AttachTile(Icons.Filled.LocationOn, Color(0xFF16A34A), "Location") {
-                                if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION)
-                                    == PackageManager.PERMISSION_GRANTED ||
-                                    ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_COARSE_LOCATION)
-                                    == PackageManager.PERMISSION_GRANTED
-                                ) {
-                                    onDismiss()
-                                    onLocationRequested()
-                                } else {
-                                    locationPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                    row.forEach { a -> AttachTile(a.icon, a.tint, a.label, a.onClick) }
+                }
+            }
+
+            /* recent media — straight from MediaStore, tap = send */
+            if (canRead) {
+                if (recent.isNotEmpty()) {
+                    Text(
+                        "Recent",
+                        color = Color(0xB3FFFFFF),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 6.dp),
+                    )
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(4),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 340.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        items(recent, key = { it.uri.toString() }) { item ->
+                            Box(
+                                Modifier
+                                    .aspectRatio(1f)
+                                    .background(Color(0xFF2B2823))
+                                    .clickable {
+                                        onDismiss()
+                                        // Videos ride the FILE path (raw upload),
+                                        // photos the inline image path.
+                                        if (item.isVideo) onDocumentPicked(item.uri) else onImagePicked(item.uri)
+                                    },
+                            ) {
+                                val bmp = item.thumb
+                                if (bmp != null) {
+                                    Image(
+                                        bmp,
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop,
+                                    )
                                 }
-                            }
-                            5 -> AttachTile(Icons.Filled.ContactPage, Color(0xFF0891B2), "Contact") {
-                                contact.launch(null)
+                                if (item.isVideo) {
+                                    Icon(
+                                        Icons.Filled.Videocam,
+                                        contentDescription = "Video",
+                                        tint = Color.White,
+                                        modifier = Modifier
+                                            .align(Alignment.TopStart)
+                                            .padding(5.dp)
+                                            .size(15.dp),
+                                    )
+                                    Text(
+                                        formatDuration(item.durationMs),
+                                        color = Color.White,
+                                        fontSize = 10.5.sp,
+                                        modifier = Modifier
+                                            .align(Alignment.BottomEnd)
+                                            .padding(5.dp),
+                                    )
+                                }
                             }
                         }
                     }
+                } else {
+                    Text(
+                        "No recent media",
+                        color = Color(0x80FFFFFF),
+                        fontSize = 13.sp,
+                        modifier = Modifier
+                            .padding(vertical = 14.dp)
+                            .align(Alignment.CenterHorizontally),
+                    )
                 }
+            } else {
+                Text(
+                    "Gallery permission deny korechen — actions still work, recent photos dekhte permission din.",
+                    color = Color(0x80FFFFFF),
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                )
             }
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(6.dp))
         }
     }
 }
 
+private fun formatDuration(ms: Long): String {
+    if (ms <= 0) return "0:00"
+    return "%d:%02d".format(ms / 60_000, (ms % 60_000) / 1000)
+}
+
 @Composable
-private fun AttachTile(icon: ImageVector, bg: Color, label: String, onClick: () -> Unit) {
+private fun AttachTile(icon: ImageVector, tint: Color, label: String, onClick: () -> Unit) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(14.dp))
             .clickable { onClick() }
-            .padding(8.dp),
+            .padding(horizontal = 8.dp, vertical = 5.dp),
     ) {
         Box(
             Modifier
-                .size(58.dp)
+                .size(56.dp)
                 .clip(CircleShape)
-                .background(bg.copy(alpha = 0.14f)),
+                .border(1.dp, Color(0x33FFFFFF), CircleShape)
+                .background(Color(0x14FFFFFF)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, contentDescription = label, tint = bg, modifier = Modifier.size(28.dp))
+            Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(26.dp))
         }
-        Spacer(Modifier.height(6.dp))
-        Text(label, fontSize = 12.5.sp, color = Muted, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(5.dp))
+        Text(label, fontSize = 12.sp, color = Color(0xCCFFFFFF), fontWeight = FontWeight.Medium)
     }
+}
+
+/** Newest photos first, then newest videos — capped for a fast sheet. */
+private fun loadRecentMedia(ctx: android.content.Context): List<RecentMedia> {
+    val out = ArrayList<RecentMedia>()
+
+    fun decode(uri: Uri): ImageBitmap? =
+        runCatching {
+            if (Build.VERSION.SDK_INT >= 28) {
+                ImageDecoder.decodeBitmap(ImageDecoder.createSource(ctx.contentResolver, uri)) { d, _ ->
+                    d.setTargetSampleSize(2)
+                }.asImageBitmap()
+            } else {
+                val raw = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+                android.graphics.BitmapFactory.decodeByteArray(raw, 0, raw.size)?.asImageBitmap()
+            }
+        }.getOrNull()
+
+    runCatching {
+        ctx.contentResolver.query(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            arrayOf(MediaStore.Images.Media._ID),
+            null,
+            null,
+            "${MediaStore.Images.Media.DATE_ADDED} DESC",
+        )?.use { c ->
+            var n = 0
+            while (c.moveToNext() && n < 9) {
+                val id = c.getLong(0)
+                val uri = Uri.withAppendedPath(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id.toString())
+                out.add(RecentMedia(uri, false, 0, decode(uri)))
+                n++
+            }
+        }
+    }
+    runCatching {
+        ctx.contentResolver.query(
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            arrayOf(MediaStore.Video.Media._ID, MediaStore.Video.Media.DURATION),
+            null,
+            null,
+            "${MediaStore.Video.Media.DATE_ADDED} DESC",
+        )?.use { c ->
+            var n = 0
+            while (c.moveToNext() && n < 5) {
+                val id = c.getLong(0)
+                val dur = c.getLong(1)
+                val uri = Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id.toString())
+                out.add(RecentMedia(uri, true, dur, decode(uri)))
+                n++
+            }
+        }
+    }
+    return out.take(14)
 }
 
 private var cameraUri: Uri? = null
@@ -205,7 +416,7 @@ internal fun queryName(ctx: android.content.Context, uri: Uri): String {
 
 @Suppress("MissingPermission")
 internal fun readLocation(ctx: android.content.Context): String {
-    val mgr = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    val mgr = ctx.getSystemService(android.content.Context.LOCATION_SERVICE) as LocationManager
     val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER)
     for (p in providers) {
         runCatching { mgr.getLastKnownLocation(p) }?.getOrNull()?.let { loc ->

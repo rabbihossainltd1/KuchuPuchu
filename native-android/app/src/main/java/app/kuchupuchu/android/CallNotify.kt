@@ -42,12 +42,15 @@ object CallSounds {
     @Synchronized
     fun startRingback(ctx: Context) {
         if (ringback != null || ring != null) return
+        val attrs = android.media.AudioAttributes.Builder()
+            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+            .build()
         val player =
-            runCatching { MediaPlayer.create(ctx.applicationContext, R.raw.kp_ring) }.getOrNull()
+            runCatching { MediaPlayer.create(ctx.applicationContext, R.raw.kp_ring, attrs, 1) }.getOrNull()
                 ?: return
         player.isLooping = true
-        runCatching { player.setVolume(0.45f, 0.45f) }
-        runCatching { player.setAudioStreamType(AudioManager.STREAM_VOICE_CALL) }
+        runCatching { player.setVolume(0.8f, 0.8f) }
         runCatching { player.start() }
         ringback = player
     }
@@ -62,14 +65,24 @@ object CallSounds {
     @Synchronized
     fun startRing(ctx: Context) {
         if (ring != null) return
+        val attrs = android.media.AudioAttributes.Builder()
+            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+            .build()
         val player =
-            runCatching { MediaPlayer.create(ctx.applicationContext, R.raw.kp_ring) }.getOrNull()
+            runCatching {
+                MediaPlayer.create(ctx.applicationContext, R.raw.kp_ring, attrs, 1)
+            }.getOrNull()
                 ?: runCatching {
-                    MediaPlayer.create(ctx.applicationContext, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE))
+                    MediaPlayer.create(
+                        ctx.applicationContext,
+                        RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
+                        attrs,
+                        1,
+                    )
                 }.getOrNull()
                 ?: return
         player.isLooping = true
-        runCatching { player.setAudioStreamType(AudioManager.STREAM_RING) }
         runCatching { player.start() }
         ring = player
         vibrate(ctx, longArrayOf(0, 500, 400, 500))

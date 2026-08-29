@@ -1224,8 +1224,9 @@ private fun Composer(
                     .padding(horizontal = 4.dp, vertical = 4.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onAttach, Modifier.size(40.dp)) {
-                        Icon(Icons.Filled.AttachFile, "Attach", tint = GoldDeep, modifier = Modifier.size(24.dp))
+                    // WhatsApp order: stickers LEFT, attach RIGHT.
+                    IconButton(onClick = onSticker, Modifier.size(40.dp)) {
+                        Icon(Icons.Filled.Mood, "Stickers", tint = GoldDeep, modifier = Modifier.size(24.dp))
                     }
                     Box(Modifier.weight(1f)) {
                         if (input.isEmpty()) {
@@ -1247,8 +1248,8 @@ private fun Composer(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                         )
                     }
-                    IconButton(onClick = onSticker, Modifier.size(40.dp)) {
-                        Icon(Icons.Filled.Mood, "Stickers", tint = GoldDeep, modifier = Modifier.size(24.dp))
+                    IconButton(onClick = onAttach, Modifier.size(40.dp)) {
+                        Icon(Icons.Filled.AttachFile, "Attach", tint = GoldDeep, modifier = Modifier.size(24.dp))
                     }
                 }
                 if (input.length > 800) {

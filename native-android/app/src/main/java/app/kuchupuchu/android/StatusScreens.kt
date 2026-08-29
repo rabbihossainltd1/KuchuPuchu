@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
@@ -821,23 +822,23 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                             ) { _, amount ->
                                 vDrag += amount
                             }
+                        }
+                        .pointerInput("tapzone") {
+                            detectTapGestures { pos ->
+                                progress = 0f
+                                if (pos.x < size.width / 2f) {
+                                    if (idx > 0) idx--
+                                } else {
+                                    if (idx + 1 < statuses.size) idx++ else nav.popBackStack()
+                                }
+                            }
                         },
                 ) {
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .fillMaxSize()
-                            .clickable { if (idx > 0) { idx--; progress = 0f } },
-                    )
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .fillMaxSize()
-                            .clickable {
-                                progress = 0f
-                                if (idx + 1 < statuses.size) idx++ else nav.popBackStack()
-                            },
-                    )
+                    /* plain split — NO .clickable anywhere here: clickable
+                       paints the theme ripple, which showed up as a
+                       half-darkened flash on the tapped half. */
+                    Box(Modifier.weight(1f).fillMaxSize())
+                    Box(Modifier.weight(1f).fillMaxSize())
                 }
                 /* reply bar or my-status views hint */
                 if (isMine) {
