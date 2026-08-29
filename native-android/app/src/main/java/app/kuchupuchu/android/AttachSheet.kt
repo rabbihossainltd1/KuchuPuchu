@@ -127,7 +127,7 @@ fun AttachPanel(
     val dragTotal = remember { mutableStateOf(0f) }
 
     val screenH = LocalConfiguration.current.screenHeightDp.dp
-    val targetH = if (fullscreen) screenH - 132.dp else screenH * 0.55f
+    val targetH = if (fullscreen) screenH - 132.dp else screenH * 0.44f
     val panelH by animateDpAsState(targetH, tween(260), label = "attachPanelH")
 
     fun hasRead(): Boolean =
@@ -221,7 +221,7 @@ fun AttachPanel(
         Modifier
             .fillMaxWidth()
             .height(panelH)
-            .background(Color(0xFF201E1B)),
+            .background(Cream),
     ) {
         /* drag handle — tap OR swipe up = fullscreen; swipe down = back.
            This is the ONLY fullscreen trigger, like WhatsApp. */
@@ -243,12 +243,12 @@ fun AttachPanel(
                         dragTotal.value += amount
                     }
                 }
-                .padding(top = 12.dp, bottom = 6.dp),
+                .padding(top = 6.dp, bottom = 4.dp),
             contentAlignment = Alignment.Center,
         ) {
             Box(
                 Modifier
-                    .size(width = 46.dp, height = 4.dp)
+                    .size(width = 40.dp, height = 4.dp)
                     .clip(RoundedCornerShape(2.dp))
                     .background(Color(0x59FFFFFF)),
             )
@@ -294,7 +294,7 @@ fun AttachPanel(
         )
         rows.forEach { row ->
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
                 row.forEach { a -> AttachTile(a.icon, a.tint, a.label, a.onClick) }
@@ -304,7 +304,7 @@ fun AttachPanel(
         if (!canRead) {
             Text(
                 "Gallery permission off — actions still kaj korbe; recent photos dekhte permission din.",
-                color = Color(0x80FFFFFF),
+                color = Color(0x801C1917),
                 fontSize = 12.sp,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             )
@@ -321,7 +321,7 @@ fun AttachPanel(
         ) {
             Text(
                 if (foldersOpen && folder != null) folder!! else "Recent",
-                color = Color(0xB3FFFFFF),
+                color = Ink,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
@@ -329,7 +329,7 @@ fun AttachPanel(
             if (sel.isNotEmpty()) {
                 Text(
                     "${sel.size} selected",
-                    color = Color(0xB3FFFFFF),
+                    color = Ink,
                     fontSize = 12.5.sp,
                 )
                 Spacer(Modifier.size(10.dp))
@@ -337,7 +337,7 @@ fun AttachPanel(
                     Modifier
                         .size(40.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFFE8A33D))
+                        .background(Gold)
                         .clickable {
                             haptics.confirm()
                             sendSelected()
@@ -347,7 +347,7 @@ fun AttachPanel(
                     Icon(
                         Icons.Filled.Send,
                         contentDescription = "Send selected",
-                        tint = Color(0xFF1C1A17),
+                        tint = Color(0xFFFFFFFF),
                         modifier = Modifier
                             .size(20.dp)
                             .padding(start = 1.dp),
@@ -357,7 +357,7 @@ fun AttachPanel(
                 Icon(
                     if (foldersOpen) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
                     contentDescription = "Folders",
-                    tint = Color(0xB3FFFFFF),
+                    tint = Ink,
                     modifier = Modifier
                         .clip(CircleShape)
                         .clickable {
@@ -386,7 +386,7 @@ fun AttachPanel(
                     Row(
                         Modifier
                             .clip(RoundedCornerShape(16.dp))
-                            .background(if (selected) Color(0x33FFFFFF) else Color(0x14FFFFFF))
+                            .background(if (selected) Color(0xFFFEF3C7) else Color(0x0F1C1917))
                             .clickable {
                                 if (name == "All") folder = null else folder = name
                             }
@@ -395,11 +395,11 @@ fun AttachPanel(
                     ) {
                         Text(
                             name,
-                            color = if (selected) Color.White else Color(0x99FFFFFF),
+                            color = if (selected) GoldDeep else Color(0x991C1917),
                             fontSize = 12.5.sp,
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                         )
-                        Text("  $count", color = Color(0x66FFFFFF), fontSize = 11.sp)
+                        Text("  $count", color = Color(0x661C1917), fontSize = 11.sp)
                     }
                 }
             }
@@ -408,7 +408,7 @@ fun AttachPanel(
         if (shown.isEmpty()) {
             Text(
                 if (foldersOpen) "This folder khali — onno folder try koro" else "No recent media",
-                color = Color(0x80FFFFFF),
+                color = Color(0x801C1917),
                 fontSize = 13.sp,
                 modifier = Modifier
                     .padding(vertical = 14.dp)
@@ -524,7 +524,7 @@ private fun MediaCell(
     Box(
         Modifier
             .aspectRatio(1f)
-            .background(Color(0xFF2B2823))
+            .background(Color(0xFFEAE6DF))
             .clickable { onToggle() },
     ) {
         val bmp = thumb
@@ -555,26 +555,21 @@ private fun MediaCell(
                     .padding(5.dp),
             )
         }
-        /* selection badge — WhatsApp-style numbered circle */
-        Box(
-            Modifier
-                .align(Alignment.TopEnd)
-                .padding(5.dp)
-                .size(22.dp)
-                .clip(CircleShape)
-                .then(
-                    if (selected) {
-                        Modifier.background(Color(0xFFE8A33D))
-                    } else {
-                        Modifier.border(1.5.dp, Color(0x99FFFFFF), CircleShape)
-                    },
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (selected) {
+        /* selection badge — appears ONLY once the item is tapped;
+           unselected cells stay clean (no checkbox clutter) */
+        if (selected) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(5.dp)
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .background(Gold),
+                contentAlignment = Alignment.Center,
+            ) {
                 Text(
                     "$selectIndex",
-                    color = Color(0xFF1C1A17),
+                    color = Color(0xFFFFFFFF),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                 )
@@ -619,20 +614,20 @@ private fun AttachTile(icon: ImageVector, tint: Color, label: String, onClick: (
         modifier = Modifier
             .clip(RoundedCornerShape(14.dp))
             .clickable { onClick() }
-            .padding(horizontal = 8.dp, vertical = 5.dp),
+            .padding(horizontal = 6.dp, vertical = 3.dp),
     ) {
         Box(
             Modifier
-                .size(56.dp)
+                .size(46.dp)
                 .clip(CircleShape)
-                .border(1.dp, Color(0x33FFFFFF), CircleShape)
-                .background(Color(0x14FFFFFF)),
+                .border(1.dp, Color(0x1F1C1917), CircleShape)
+                .background(Color(0xFFFFFFFF)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(26.dp))
+            Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(21.dp))
         }
-        Spacer(Modifier.height(5.dp))
-        Text(label, fontSize = 12.sp, color = Color(0xCCFFFFFF), fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(3.dp))
+        Text(label, fontSize = 11.sp, color = Ink, fontWeight = FontWeight.Medium)
     }
 }
 

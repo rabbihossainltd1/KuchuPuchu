@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.media.RingtoneManager
 import android.net.Uri
+import androidx.core.app.RemoteInput
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 
@@ -18,6 +19,7 @@ import androidx.core.app.NotificationManagerCompat
  * (they replace this with full-screen ringing + accept/decline).
  */
 object KpNotify {
+    private const val KEY_REPLY = "kp_reply_text"
     private const val CHAT_CHANNEL = "kp_messages_v2"
     private const val CALL_CHANNEL = "kp_calls_v3"
     private const val GROUP = "kp_chats"
@@ -75,6 +77,35 @@ object KpNotify {
 
     fun message(ctx: Context, from: String, body: String, convoId: String) {
         ensureChannels(ctx)
+        // WhatsApp-style direct actions: reply straight from the
+        // notification, or send a like with one tap — no app open needed.
+        val remoteInput = RemoteInput.Builder(KEY_REPLY).setLabel("Reply").build()
+        val replyPending =
+            PendingIntent.getBroadcast(
+                ctx,
+                convoId.hashCode() * 4 + 1,
+                Intent(ctx, KpNotifActionReceiver::class.java)
+                    .setAction(KpNotifActionReceiver.ACTION_REPLY)
+                    .putExtra("convoId", convoId),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        val likePending =
+            PendingIntent.getBroadcast(
+                ctx,
+                convoId.hashCode() * 4 + 2,
+                Intent(ctx, KpNotifActionReceiver::class.java)
+                    .setAction(KpNotifActionReceiver.ACTION_LIKE)
+                    .putExtra("convoId", convoId),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        val replyAction =
+            NotificationCompat.Action.Builder(android.R.drawable.ic_menu_send, "Reply", replyPending)
+                .addRemoteInput(remoteInput)
+                .setAllowGeneratedReplies(true)
+                .build()
+        val likeAction =
+            NotificationCompat.Action.Builder(android.R.drawable.ic_menu_agenda, "Like", likePending)
+                .build()
         val n =
             NotificationCompat.Builder(ctx, CHAT_CHANNEL)
                 .setSmallIcon(R.mipmap.ic_stat_kp)
@@ -83,6 +114,8 @@ object KpNotify {
                 .setAutoCancel(true)
                 .setGroup(GROUP)
                 .setContentIntent(chatTap(ctx, convoId))
+                .addAction(replyAction)
+                .addAction(likeAction)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
                 .setSound(defaultSound())
@@ -118,7 +151,83 @@ object KpNotify {
 
     private fun defaultSound(): Uri = android.provider.Settings.System.DEFAULT_NOTIFICATION_URI
 
+    /** Quiet confirmation shown after replying from the notification. */
+    fun replySent(ctx: Context, convoId: String, text: String) {
+        val n =
+            NotificationCompat.Builder(ctx, CHAT_CHANNEL)
+                .setSmallIcon(R.mipmap.ic_stat_kp)
+                .setContentTitle("Sent")
+                .setContentText(text.take(80))
+                .setAutoCancel(true)
+                .setContentIntent(chatTap(ctx, convoId))
+                .setPriority(NotificationCompat.PRIORITY_MIN)
+                .build()
+        runCatching { NotificationManagerCompat.from(ctx).notify(convoId.hashCode(), n) }
+    }
+
     fun cancelAll(ctx: Context) {
         NotificationManagerCompat.from(ctx).cancelAll()
+    }
+}
+
+/** Handles Reply / Like straight from the message notification. */
+class KpNotifActionReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(ctx: Context, intent: Intent) {
+        val convoId = intent.getStringExtra("convoId") ?: return
+        Api.loadToken(ctx)
+        val nm = NotificationManagerCompat.from(ctx)
+        when (intent.action) {
+            ACTION_LIKE -> {
+                nm.cancel(convoId.hashCode())
+                val pending = goAsync()
+                Thread {
+                    runCatching {
+                        Api.post(
+                            "/api/conversations/$convoId/messages",
+                            org.json.JSONObject()
+                                .put("kind", "TEXT")
+                                .put("body", "❤️")
+                                .put("clientId", "c_${java.util.UUID.randomUUID()}"),
+                        )
+                    }
+                    pending.finish()
+                }.start()
+            }
+            ACTION_REPLY -> {
+                val text =
+                    RemoteInput.getResultsFromIntent(intent)
+                        ?.getCharSequence(KEY_REPLY)
+                        ?.toString()
+                        ?.trim()
+                        ?: return
+                if (text.isEmpty()) return
+                val pending = goAsync()
+                Thread {
+                    val ok =
+                        runCatching {
+                            Api.post(
+                                "/api/conversations/$convoId/messages",
+                                org.json.JSONObject()
+                                    .put("kind", "TEXT")
+                                    .put("body", text)
+                                    .put("clientId", "c_${java.util.UUID.randomUUID()}"),
+                            )
+                        }.isSuccess
+                    if (ok) {
+                        nm.cancel(convoId.hashCode())
+                        // Quiet "sent" confirmation replaces the prompt.
+                        runCatching {
+                            KpNotify.replySent(ctx, convoId, text)
+                        }
+                    }
+                    pending.finish()
+                }.start()
+            }
+        }
+    }
+
+    companion object {
+        const val ACTION_REPLY = "app.kuchupuchu.android.NOTIF_REPLY"
+        const val ACTION_LIKE = "app.kuchupuchu.android.NOTIF_LIKE"
     }
 }

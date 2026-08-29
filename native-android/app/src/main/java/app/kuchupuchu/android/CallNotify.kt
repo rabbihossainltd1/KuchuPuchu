@@ -65,9 +65,23 @@ object CallSounds {
         ringback = null
     }
 
+    /** Previous ALARM volume, restored when the ring stops. */
+    private var prevAlarmVol: Int? = null
+
     @Synchronized
     fun startRing(ctx: Context) {
         if (ring != null) return
+        // Mute-proofing: silent mode doesn't touch the ALARM stream, but a
+        // device with alarm volume at 0 would still be silent — lift it.
+        runCatching {
+            val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val max = am.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+            val cur = am.getStreamVolume(AudioManager.STREAM_ALARM)
+            if (cur < max * 0.6f) {
+                prevAlarmVol = cur
+                am.setStreamVolume(AudioManager.STREAM_ALARM, Math.round(max * 0.8f), 0)
+            }
+        }
         val attrs = android.media.AudioAttributes.Builder()
             .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
             // USAGE_ALARM: plays even when the phone is on silent/vibrate —
@@ -123,6 +137,14 @@ object CallSounds {
 
     @Synchronized
     fun stop(ctx: Context? = null) {
+        prevAlarmVol?.let { v ->
+            runCatching {
+                (ctx ?: return@let).getSystemService(Context.AUDIO_SERVICE)?.let { svc ->
+                    (svc as AudioManager).setStreamVolume(AudioManager.STREAM_ALARM, v, 0)
+                }
+            }
+            prevAlarmVol = null
+        }
         runCatching { ring?.stop() }
         ring?.release()
         ring = null

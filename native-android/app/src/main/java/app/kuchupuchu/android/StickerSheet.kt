@@ -70,7 +70,7 @@ fun StickerPanel(
     Column(
         Modifier
             .fillMaxWidth()
-            .background(Color(0xFF201E1B))
+            .background(Cream)
             .padding(top = 10.dp, bottom = 6.dp),
     ) {
         /* top row: search, segmented tabs (emoji | GIF | stickers), edit */
@@ -83,7 +83,7 @@ fun StickerPanel(
             Icon(
                 Icons.Filled.Search,
                 contentDescription = "Search",
-                tint = Color(0x99FFFFFF),
+                tint = Color(0x991C1917),
                 modifier = Modifier.size(20.dp),
             )
             Spacer(Modifier.width(10.dp))
@@ -96,7 +96,7 @@ fun StickerPanel(
                 decorationBox = { inner ->
                     Box {
                         if (query.isEmpty()) {
-                            Text("Search stickers", color = Color(0x66FFFFFF), fontSize = 14.sp)
+                            Text("Search stickers", color = Color(0x661C1917), fontSize = 14.sp)
                         }
                         inner()
                     }
@@ -107,7 +107,7 @@ fun StickerPanel(
             Row(
                 Modifier
                     .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0x1AFFFFFF))
+                    .background(Color(0x141C1917))
                     .padding(2.dp),
             ) {
                 listOf("🙂", "GIF", "⬜").forEachIndexed { i, label ->
@@ -115,7 +115,7 @@ fun StickerPanel(
                     Box(
                         Modifier
                             .clip(RoundedCornerShape(14.dp))
-                            .background(if (sel) Color(0x33FFFFFF) else Color.Transparent)
+                            .background(if (sel) Color(0xFFFEF3C7) else Color.Transparent)
                             .clickable {
                                 haptics.tap()
                                 tab = i
@@ -124,7 +124,7 @@ fun StickerPanel(
                     ) {
                         Text(
                             label,
-                            color = if (sel) Color.White else Color(0x99FFFFFF),
+                            color = if (sel) GoldDeep else Color(0x991C1917),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -135,7 +135,7 @@ fun StickerPanel(
             Icon(
                 Icons.Filled.Edit,
                 contentDescription = "Create",
-                tint = Color(0x99FFFFFF),
+                tint = Color(0x991C1917),
                 modifier = Modifier
                     .size(18.dp)
                     .clickable {
@@ -189,7 +189,7 @@ fun StickerPanel(
                     Box(
                         Modifier
                             .clip(RoundedCornerShape(16.dp))
-                            .background(if (selected) Color(0x33FFFFFF) else Color(0x14FFFFFF))
+                            .background(if (selected) Color(0xFFFEF3C7) else Color(0x0F1C1917))
                             .clickable {
                                 haptics.tap()
                                 pack = i
@@ -198,7 +198,7 @@ fun StickerPanel(
                     ) {
                         Text(
                             name,
-                            color = if (selected) Color.White else Color(0x99FFFFFF),
+                            color = if (selected) GoldDeep else Color(0x991C1917),
                             fontSize = 12.5.sp,
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                         )
@@ -221,7 +221,7 @@ fun StickerPanel(
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(300.dp),
+                    .height(258.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
@@ -231,9 +231,9 @@ fun StickerPanel(
                     Box(
                         Modifier
                             .fillMaxWidth()
-                            .height(64.dp)
+                            .height(56.dp)
                             .clip(RoundedCornerShape(14.dp))
-                            .background(if (pressed) Color(0x2EFFFFFF) else Color.Transparent)
+                            .background(if (pressed) Color(0x1A1C1917) else Color.Transparent)
                             .clickable(interactionSource = interaction, indication = null) {
                                 haptics.confirm()
                                 saveStickerRecent(sticker)
@@ -243,7 +243,7 @@ fun StickerPanel(
                     ) {
                         Text(
                             sticker,
-                            fontSize = 36.sp,
+                            fontSize = 32.sp,
                             modifier = Modifier.scale(if (pressed) 1.25f else 1f),
                         )
                     }
@@ -253,10 +253,10 @@ fun StickerPanel(
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(300.dp),
+                    .height(258.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("GIFs are coming in a future update", color = Color(0x80FFFFFF), fontSize = 14.sp)
+                Text("GIFs are coming in a future update", color = Color(0x801C1917), fontSize = 14.sp)
             }
         }
 
@@ -271,13 +271,13 @@ fun StickerPanel(
             Icon(
                 Icons.Filled.Schedule,
                 contentDescription = "Recent",
-                tint = Color(0x99FFFFFF),
+                tint = Color(0x991C1917),
                 modifier = Modifier.size(22.dp),
             )
             Icon(
                 Icons.Filled.Star,
                 contentDescription = "Favourites",
-                tint = Color(0x99FFFFFF),
+                tint = Color(0x991C1917),
                 modifier = Modifier.size(22.dp),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -286,7 +286,7 @@ fun StickerPanel(
                         Modifier
                             .size(7.dp)
                             .clip(CircleShape)
-                            .background(if (pack == i) Color.White else Color(0x40FFFFFF)),
+                            .background(if (pack == i) Gold else Color(0x331C1917)),
                     )
                 }
             }
@@ -294,10 +294,10 @@ fun StickerPanel(
                 Modifier
                     .size(30.dp)
                     .clip(CircleShape)
-                    .background(Color(0x1AFFFFFF)),
+                    .background(Color(0x141C1917)),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("+", color = Color(0xB3FFFFFF), fontSize = 16.sp)
+                Text("+", color = Color(0xB31C1917), fontSize = 16.sp)
             }
         }
     }
