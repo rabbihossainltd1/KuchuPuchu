@@ -45,7 +45,7 @@ object FilesUtil {
      * and added a MIUI-flaky layer; a direct view + ClipData grant + mime
      * fallback either opens the file or says exactly why not.
      */
-    fun openUri(ctx: Context, uri: Uri, name: String, mime: String) {
+    fun openUri(ctx: Context, uri: Uri, name: String, mime: String): Boolean {
         fun view(type: String) =
             Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(uri, type)
@@ -54,9 +54,11 @@ object FilesUtil {
             }
         try {
             ctx.startActivity(view(mime.ifBlank { "*/*" }))
+            return true
         } catch (e: Exception) {
             try {
                 ctx.startActivity(view("*/*"))
+                return true
             } catch (e2: Exception) {
                 // No viewer on the phone: park the file in Downloads so it is
                 // still reachable from the Files app.
@@ -66,6 +68,7 @@ object FilesUtil {
                     "Ei file open korar kono app nai — Downloads-e save kora ache",
                     android.widget.Toast.LENGTH_LONG,
                 ).show()
+                return false
             }
         }
     }
