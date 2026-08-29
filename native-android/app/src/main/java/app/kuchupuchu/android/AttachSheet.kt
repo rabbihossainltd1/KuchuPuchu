@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.ContactsContract
 import android.provider.MediaStore
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -352,7 +353,7 @@ private fun loadRecentMedia(ctx: android.content.Context): List<RecentMedia> {
     fun decode(uri: Uri): ImageBitmap? =
         runCatching {
             if (Build.VERSION.SDK_INT >= 28) {
-                ImageDecoder.decodeBitmap(ImageDecoder.createSource(ctx.contentResolver, uri)) { d, _ ->
+                ImageDecoder.decodeBitmap(ImageDecoder.createSource(ctx.contentResolver, uri)) { d, _, _ ->
                     d.setTargetSampleSize(2)
                 }.asImageBitmap()
             } else {

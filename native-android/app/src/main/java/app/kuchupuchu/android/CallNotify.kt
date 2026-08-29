@@ -73,14 +73,23 @@ object CallSounds {
             runCatching {
                 MediaPlayer.create(ctx.applicationContext, R.raw.kp_ring, attrs, 1)
             }.getOrNull()
-                ?: runCatching {
-                    MediaPlayer.create(
-                        ctx.applicationContext,
-                        RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
-                        attrs,
-                        1,
-                    )
-                }.getOrNull()
+                ?: run {
+                    // No 4-arg (Uri, attrs) overload exists — build manually:
+                    // setAudioAttributes BEFORE setDataSource/prepare is the
+                    // only order that sticks (post-prepare is ignored).
+                    val fallback = MediaPlayer()
+                    val ok =
+                        runCatching {
+                            fallback.setAudioAttributes(attrs)
+                            fallback.setDataSource(
+                                ctx.applicationContext,
+                                RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
+                            )
+                            fallback.prepare()
+                            true
+                        }.getOrDefault(false)
+                    if (ok) fallback else null
+                }
                 ?: return
         player.isLooping = true
         runCatching { player.start() }

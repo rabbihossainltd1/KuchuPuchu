@@ -10,6 +10,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -21,6 +26,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -114,7 +120,7 @@ fun StickerSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
-                    androidx.compose.material.icons.Icons.Filled.Search,
+                    Icons.Filled.Search,
                     contentDescription = "Search",
                     tint = androidx.compose.ui.graphics.Color(0x99FFFFFF),
                     modifier = Modifier.size(20.dp),
@@ -178,7 +184,7 @@ fun StickerSheet(
                 Spacer(Modifier.width(10.dp))
                 val ctx = LocalContext.current
                 Icon(
-                    androidx.compose.material.icons.Icons.Filled.Edit,
+                    Icons.Filled.Edit,
                     contentDescription = "Create",
                     tint = androidx.compose.ui.graphics.Color(0x99FFFFFF),
                     modifier = Modifier
@@ -212,7 +218,7 @@ fun StickerSheet(
                             }
                         }
                         Icon(
-                            androidx.compose.material.icons.Icons.Filled.Schedule,
+                            Icons.Filled.Schedule,
                             contentDescription = "Recents",
                             tint = androidx.compose.ui.graphics.Color(0x66FFFFFF),
                             modifier = Modifier
@@ -318,13 +324,13 @@ fun StickerSheet(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Icon(
-                    androidx.compose.material.icons.Icons.Filled.Schedule,
+                    Icons.Filled.Schedule,
                     contentDescription = "Recent",
                     tint = androidx.compose.ui.graphics.Color(0x99FFFFFF),
                     modifier = Modifier.size(22.dp),
                 )
                 Icon(
-                    androidx.compose.material.icons.Icons.Filled.Star,
+                    Icons.Filled.Star,
                     contentDescription = "Favourites",
                     tint = androidx.compose.ui.graphics.Color(0x99FFFFFF),
                     modifier = Modifier.size(22.dp),
