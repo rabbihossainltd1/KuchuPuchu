@@ -27,14 +27,34 @@ object FilesUtil {
 
     /** Opens a downloaded file with the system viewer. */
     fun open(ctx: Context, name: String, bytes: ByteArray, mime: String) {
-        val uri = cacheFile(ctx, name, bytes, mime)
-        val intent =
+        openFile(ctx, name, cacheFile(ctx, name, bytes, mime), name, mime)
+    }
+
+    /** Opens an already-on-disk file with the system viewer. */
+    fun openFile(ctx: Context, f: File, mime: String) = openFile(ctx, f.name, f, mime)
+
+    /**
+     * Direct ACTION_VIEW — no chooser. The chooser swallowed launch failures
+     * and added a MIUI-flaky layer; a direct view + ClipData grant + mime
+     * fallback either opens the file or says exactly why not.
+     */
+    fun openFile(ctx: Context, name: String, f: File, mime: String) {
+        val uri = androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)
+        fun view(type: String) =
             Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, mime.ifBlank { "*/*" })
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                setDataAndType(uri, type)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                clipData = android.content.ClipData.newRawUri(name, uri)
             }
-        val chooser = Intent.createChooser(intent, name).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        runCatching { ctx.startActivity(chooser) }
+        try {
+            ctx.startActivity(view(mime.ifBlank { "*/*" }))
+        } catch (e: Exception) {
+            try {
+                ctx.startActivity(view("*/*"))
+            } catch (e2: Exception) {
+                android.widget.Toast.makeText(ctx, "Ei file open korar kono app nai", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     /**

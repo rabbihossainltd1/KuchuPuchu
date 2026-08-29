@@ -270,6 +270,19 @@ fun ArchiveScreen(nav: NavController) {
     var rev by remember { mutableStateOf(0) }
     val archived = remember(rev, convs.size) { convs.filter { ScreenStore.isArchived(it.optString("id")) } }
     val ctx = LocalContext.current
+    // The archive screen has no chat-list poll behind it — deleted/unarchived
+    // rows used to sit there forever. Sync it on its own.
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(2_000)
+            if (Store.foreground) {
+                runCatching {
+                    val data = withContext(Dispatchers.IO) { Api.get("/api/conversations", true) }
+                    ScreenStore.setConvs(data.arr("items").objects())
+                }
+            }
+        }
+    }
     Column(Modifier.fillMaxSize().background(Cream).statusBarsPadding()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
@@ -479,13 +492,18 @@ private fun SwipeConvRow(
                     ) {
                         scope.launch {
                             haptics.heavy()
+                            // Vanish NOW — the server delete runs behind. The old
+                            // flow waited for the next poll, so the row sat there
+                            // long enough to look like "delete hoi na".
+                            ScreenStore.dropConv(conv.optString("id"))
+                            android.widget.Toast.makeText(ctx, "Chat deleted", android.widget.Toast.LENGTH_SHORT).show()
+                            dragged = 0f
+                            onChange()
                             runCatching {
                                 withContext(Dispatchers.IO) {
                                     Api.delete("/api/conversations/${conv.optString("id")}")
                                 }
                             }
-                            dragged = 0f
-                            onChange()
                         }
                     }
                 }
@@ -554,13 +572,18 @@ private fun SwipeConvRow(
                     ) {
                         scope.launch {
                             haptics.heavy()
+                            // Vanish NOW — the server delete runs behind. The old
+                            // flow waited for the next poll, so the row sat there
+                            // long enough to look like "delete hoi na".
+                            ScreenStore.dropConv(conv.optString("id"))
+                            android.widget.Toast.makeText(ctx, "Chat deleted", android.widget.Toast.LENGTH_SHORT).show()
+                            dragged = 0f
+                            onChange()
                             runCatching {
                                 withContext(Dispatchers.IO) {
                                     Api.delete("/api/conversations/${conv.optString("id")}")
                                 }
                             }
-                            dragged = 0f
-                            onChange()
                         }
                     }
                 }

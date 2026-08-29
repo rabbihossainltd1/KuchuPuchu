@@ -118,6 +118,22 @@ object Api {
         return executeJson(req)
     }
 
+    /** Streams a download straight to disk — heavy docs never hit RAM whole. */
+    fun downloadToFile(pathOrKey: String, dest: java.io.File): Boolean {
+        val url =
+            if (pathOrKey.startsWith("http")) pathOrKey
+            else if (pathOrKey.startsWith("/")) BASE + pathOrKey
+            else "$BASE/api/files/${encodePath(pathOrKey)}"
+        val req = Request.Builder().url(url).get().build()
+        http.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return false
+            resp.body?.byteStream()?.use { input ->
+                dest.outputStream().use { output -> input.copyTo(output, 128 * 1024) }
+            } ?: return false
+            return true
+        }
+    }
+
     fun download(pathOrKey: String): ByteArray {
         val url =
             if (pathOrKey.startsWith("http")) pathOrKey

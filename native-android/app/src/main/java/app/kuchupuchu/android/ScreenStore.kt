@@ -132,6 +132,11 @@ object ScreenStore {
         }
     }
 
+    /** Instant local removal after a swipe-delete; the server delete runs behind. */
+    fun dropConv(id: String) {
+        convs.removeAll { it.optString("id") == id }
+    }
+
     /** Instant local badge bump from an FCM push while the chat is not open. */
     fun bumpUnread(convId: String) {
         val i = convs.indexOfFirst { it.optString("id") == convId }

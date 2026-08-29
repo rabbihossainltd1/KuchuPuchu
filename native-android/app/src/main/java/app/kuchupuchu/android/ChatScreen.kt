@@ -169,6 +169,10 @@ fun ChatScreen(nav: NavController, convId: String) {
     var searchHits by remember { mutableStateOf(listOf<JSONObject>()) }
     // Selection mode (long-press): delete-for-me / unsend / edit / forward.
     val selected = remember { mutableStateListOf<String>() }
+    // Attach-panel (gallery grid) selection, hoisted here so the COMPOSER's
+    // mic turns into SEND while the panel has picks (WhatsApp behaviour) —
+    // the panel itself no longer carries its own send button.
+    val attachSel = remember { mutableStateListOf<MediaItem>() }
     // System back during selection CLEARS the selection (WhatsApp) — it must
     // not fling the user out of the chat with bubbles still highlighted.
     androidx.activity.compose.BackHandler(enabled = selected.isNotEmpty()) {
@@ -381,8 +385,9 @@ fun ChatScreen(nav: NavController, convId: String) {
             }
             try {
                 val up = withContext(Dispatchers.IO) {
-                    Api.upload("photo.jpg", "image/jpeg", jpeg) { w, t -> UploadProgress.set(clientId, w.toFloat() / t) }
+                    Api.upload("photo.jpg", "image/jpeg", jpeg) { w, t -> UploadProgress.set(clientId, 0.9f * w / t) }
                 }
+                UploadProgress.set(clientId, 0.95f)
                 val key = up.optString("fileKey")
                 if (key.isBlank()) throw ApiException(500, "Upload returned no file key.")
                 val payload =
@@ -432,8 +437,9 @@ fun ChatScreen(nav: NavController, convId: String) {
         scope.launch {
             try {
                 val data = withContext(Dispatchers.IO) {
-                    Api.upload(name, mime, bytes) { w, t -> UploadProgress.set(clientId, w.toFloat() / t) }
+                    Api.upload(name, mime, bytes) { w, t -> UploadProgress.set(clientId, 0.9f * w / t) }
                 }
+                UploadProgress.set(clientId, 0.95f)
                 withContext(Dispatchers.IO) {
                     Api.post(
                         "/api/conversations/$convId/messages",
@@ -485,8 +491,9 @@ fun ChatScreen(nav: NavController, convId: String) {
             try {
                 val bytes = withContext(Dispatchers.IO) { file.readBytes() }
                 val data = withContext(Dispatchers.IO) {
-                    Api.upload(name, "audio/mp4", bytes) { w, t -> UploadProgress.set(clientId, w.toFloat() / t) }
+                    Api.upload(name, "audio/mp4", bytes) { w, t -> UploadProgress.set(clientId, 0.9f * w / t) }
                 }
+                UploadProgress.set(clientId, 0.95f)
                 val payload =
                     JSONObject()
                         .put("kind", "FILE")
@@ -520,6 +527,17 @@ fun ChatScreen(nav: NavController, convId: String) {
        run on the *chat* screen's scope instead, which lives as long as the
        chat is open, so gallery / camera / document / audio / contact /
        location all survive the sheet closing. */
+    fun sendAttachSelection() {
+        val batch = attachSel.toList()
+        attachSel.clear()
+        showAttach = false
+        scope.launch {
+            batch.forEach { item ->
+                if (item.isVideo) handleDocumentPicked(item.uri) else handleImagePicked(item.uri)
+            }
+        }
+    }
+
     fun handleImagePicked(uri: Uri) {
         scope.launch {
             // 720px / ~100KB: the old 960px/220KB photos took minutes to send AND load
@@ -1157,6 +1175,8 @@ fun ChatScreen(nav: NavController, convId: String) {
             onFinishRecord = { cancelled -> finishRecording(cancelled) },
             selectCount = selected.size,
             onSendSelection = { sendSelectedMedia() },
+            gridSelCount = attachSel.size,
+            onSendGrid = { sendAttachSelection() },
         )
 
         /* ---------------- inline panels — BELOW the message bar, WhatsApp
@@ -1164,6 +1184,8 @@ fun ChatScreen(nav: NavController, convId: String) {
            fullscreen until the user taps/swipes the handle up ---------------- */
         if (showAttach) {
             AttachPanel(
+                sel = attachSel,
+                onSendBatch = { sendAttachSelection() },
                 onDismiss = { showAttach = false },
                 onImagePicked = ::handleImagePicked,
                 onDocumentPicked = ::handleDocumentPicked,
@@ -1299,6 +1321,8 @@ private fun Composer(
     onFinishRecord: (cancelled: Boolean) -> Unit,
     selectCount: Int = 0,
     onSendSelection: () -> Unit = {},
+    gridSelCount: Int = 0,
+    onSendGrid: () -> Unit = {},
 ) {
     Row(
         Modifier
@@ -1385,7 +1409,7 @@ private fun Composer(
 
         /* mic/send circle. Text typed OR media selected -> it's SEND;
            otherwise a HOLD button: press = record, slide = cancel. */
-        if (!input.isBlank() || selectCount > 0) {
+        if (!input.isBlank() || selectCount > 0 || gridSelCount > 0) {
             val sendInteraction = remember { MutableInteractionSource() }
             val sendPressed by sendInteraction.collectIsPressedAsState()
             Box(
@@ -1398,7 +1422,11 @@ private fun Composer(
                         interactionSource = sendInteraction,
                         indication = null,
                     ) {
-                        if (selectCount > 0 && input.isBlank()) onSendSelection() else onSend()
+                        when {
+                            input.isNotBlank() -> onSend()
+                            gridSelCount > 0 -> onSendGrid()
+                            else -> onSendSelection()
+                        }
                     },
                 contentAlignment = Alignment.Center,
             ) {
@@ -1439,7 +1467,7 @@ private fun HoldMicButton(
 
     Box(
         Modifier
-            .size(48.dp)
+            .size(54.dp)
             .offset { IntOffset((if (recording) animX else 0f).roundToInt(), 0) }
             .clip(CircleShape)
             .background(if (cancelArmed) Brush.linearGradient(listOf(Color.White, Color.White)) else goldFill())
@@ -1957,7 +1985,7 @@ object UploadProgress {
     val fracs = androidx.compose.runtime.mutableStateMapOf<String, Float>()
 
     fun set(id: String, f: Float) {
-        if (f >= 0.999f) return
+        if (f >= 1f) return
         fracs[id] = f
     }
 
@@ -1991,7 +2019,7 @@ private fun ImageBubble(m: JSONObject, mine: Boolean) {
             .then(
                 if (ratio > 0f) {
                     Modifier
-                        .aspectRatio(ratio.coerceIn(0.55f, 2.6f))
+                        .aspectRatio(ratio)
                         .heightIn(max = 280.dp)
                 } else {
                     Modifier
@@ -2013,17 +2041,17 @@ private fun ImageBubble(m: JSONObject, mine: Boolean) {
                 dataBmp,
                 contentDescription = "Photo",
                 modifier = Modifier.fillMaxSize(),
-                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                contentScale = androidx.compose.ui.layout.ContentScale.Fit,
             )
         } else {
             coil.compose.AsyncImage(
                 model = coil.request.ImageRequest.Builder(LocalContext.current)
                     .data(if (url.startsWith("http")) url else Api.BASE + url)
-                    .crossfade(false)
+                    .crossfade(false).size(900)
                     .build(),
                 contentDescription = "Photo",
                 modifier = Modifier.fillMaxSize(),
-                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                contentScale = androidx.compose.ui.layout.ContentScale.Fit,
                 onSuccess = { state ->
                     val d = state.result.drawable
                     if (d.intrinsicWidth > 0 && d.intrinsicHeight > 0 && ratio <= 0f) {
@@ -2150,8 +2178,17 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendin
                 scope.launch {
                     opening = true
                     try {
-                        val bytes = withContext(Dispatchers.IO) { Api.download(fileKey) }
-                        FilesUtil.open(ctx, fileName, bytes, FilesUtil.mimeFor(fileName, fileType))
+                        val dir = java.io.File(ctx.cacheDir, "open")
+                        if (!dir.exists()) dir.mkdirs()
+                        val safe = fileName.replace(Regex("[^A-Za-z0-9._ ()-]"), "_")
+                        val dest = java.io.File(dir, System.currentTimeMillis().toString() + "_" + safe)
+                        val ok = withContext(Dispatchers.IO) { Api.downloadToFile(fileKey, dest) }
+                        if (ok) {
+                            FilesUtil.openFile(ctx, fileName, dest, FilesUtil.mimeFor(fileName, fileType))
+                        } else {
+                            android.widget.Toast.makeText(ctx, "Download korte parini — abar try koro", android.widget.Toast.LENGTH_SHORT).show()
+                            dest.delete()
+                        }
                     } catch (e: Exception) {
                         android.widget.Toast.makeText(
                             ctx,

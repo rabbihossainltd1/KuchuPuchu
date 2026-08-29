@@ -48,6 +48,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContactPage
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Event
@@ -90,7 +91,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** One device media item for the attach panel grid. */
-private data class MediaItem(
+data class MediaItem(
     val uri: Uri,
     val isVideo: Boolean,
     val durationMs: Long,
@@ -114,6 +115,8 @@ private data class AttachAction(
  */
 @Composable
 fun AttachPanel(
+    sel: androidx.compose.runtime.snapshots.SnapshotStateList<MediaItem>,
+    onSendBatch: () -> Unit,
     onDismiss: () -> Unit,
     onImagePicked: (Uri) -> Unit,
     onDocumentPicked: (Uri) -> Unit,
@@ -134,7 +137,6 @@ fun AttachPanel(
         foldersOpen = fullscreen
         if (!fullscreen) folder = null
     }
-    val sel = remember { mutableStateListOf<MediaItem>() }
     val dragTotal = remember { mutableStateOf(0f) }
 
     val screenH = LocalConfiguration.current.screenHeightDp.dp
@@ -202,18 +204,7 @@ fun AttachPanel(
         Toast.makeText(ctx, "Coming in a future update", Toast.LENGTH_SHORT).show()
     }
 
-    fun sendSelected() {
-        val batch = sel.toList()
-        sel.clear()
-        onDismiss()
-        // fire sequentially so pending outbox keeps its order (photos first,
-        // then videos — WhatsApp mixes, we keep the user's tap order)
-        scope.launch {
-            batch.forEach { item ->
-                if (item.isVideo) onDocumentPicked(item.uri) else onImagePicked(item.uri)
-            }
-        }
-    }
+
 
     val buckets =
         remember(pool) {
@@ -346,27 +337,23 @@ fun AttachPanel(
                     color = Ink,
                     fontSize = 12.5.sp,
                 )
-                Spacer(Modifier.size(10.dp))
-                Box(
-                    Modifier
-                        .size(40.dp)
+                Spacer(Modifier.size(6.dp))
+                // No send button here on purpose: the composer's mic IS the
+                // send button while a selection is active (same slot, same
+                // size). This tiny x just clears the selection.
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = "Clear selection",
+                    tint = Color(0x801C1917),
+                    modifier = Modifier
                         .clip(CircleShape)
-                        .background(Gold)
                         .clickable {
-                            haptics.confirm()
-                            sendSelected()
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.Filled.Send,
-                        contentDescription = "Send selected",
-                        tint = Color(0xFFFFFFFF),
-                        modifier = Modifier
-                            .size(20.dp)
-                            .padding(start = 1.dp),
-                    )
-                }
+                            haptics.tap()
+                            sel.clear()
+                        }
+                        .padding(6.dp)
+                        .size(18.dp),
+                )
             } else {
                 Icon(
                     if (foldersOpen) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,

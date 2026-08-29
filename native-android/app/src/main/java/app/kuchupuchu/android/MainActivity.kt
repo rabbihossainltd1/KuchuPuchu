@@ -28,6 +28,27 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Crash evidence trap: if the last session crashed, the exact cause
+        // surfaces as a toast (first line + top frames) so it can be
+        // screenshotted and fixed instead of a mystery "app crash kore".
+        val prevHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            runCatching {
+                java.io.File(filesDir, "kp_crash.txt").writeText(
+                    (e.message ?: e.javaClass.name) + "\n" +
+                        e.stackTrace.take(8).joinToString("\n") { it.toString() },
+                )
+            }
+            prevHandler?.uncaughtException(t, e)
+        }
+        runCatching {
+            val f = java.io.File(filesDir, "kp_crash.txt")
+            val text = if (f.exists()) f.readText() else ""
+            if (text.isNotBlank()) {
+                android.widget.Toast.makeText(this, "Last crash: ${text.take(200)}", android.widget.Toast.LENGTH_LONG).show()
+                f.delete()
+            }
+        }
         // Edge-to-edge on every API level, so the Compose-side insets are the
         // single source of truth. (targetSdk 35 forces this on Android 15+
         // anyway — setDecorFitsSystemWindows(true) and statusBarColor are

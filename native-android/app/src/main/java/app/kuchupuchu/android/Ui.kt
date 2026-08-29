@@ -183,7 +183,9 @@ fun KpNetImage(
     val full = if (url.startsWith("http")) url else Api.BASE + url
     val ctx = LocalContext.current
     AsyncImage(
-        model = ImageRequest.Builder(ctx).data(full).crossfade(true).build(),
+        // Bounded decode: the fullscreen viewer used to decode a 12MP photo
+        // whole (~48MB spike) — tap a photo in a heavy chat and the app died.
+        model = ImageRequest.Builder(ctx).data(full).crossfade(true).size(1600).build(),
         contentDescription = contentDescription,
         modifier = modifier,
         contentScale = contentScale,
