@@ -362,3 +362,29 @@ fun statusStamp(iso: String): String {
             "${z.dayOfMonth} ${z.month.toString().take(3).let { m -> m[0] + m.substring(1).lowercase() }}"
     }
 }
+
+/**
+ * Compact status-list timestamp for one-line rows (e.g. "3 updates · 4:39 PM")
+ * — same buckets as [statusStamp] but drops the "Today/Yesterday at" prefix
+ * so it never wraps onto a second line next to the update count.
+ */
+fun statusStampShort(iso: String): String {
+    if (iso.isBlank()) return ""
+    val t = try {
+        java.time.Instant.parse(iso)
+    } catch (e: Exception) {
+        return ""
+    }
+    val now = java.time.ZonedDateTime.now()
+    val z = t.atZone(java.time.ZoneId.systemDefault())
+    fun clock() =
+        String.format("%d:%02d %s", (z.hour % 12f).toInt().let { if (it == 0) 12 else it }, z.minute, if (z.hour >= 12) "PM" else "AM")
+    return when {
+        z.toLocalDate() == now.toLocalDate() -> clock()
+        z.toLocalDate() == now.toLocalDate().minusDays(1) -> "Yesterday"
+        now.toLocalDate().toEpochDay() - z.toLocalDate().toEpochDay() < 7 ->
+            z.dayOfWeek.toString().take(3).let { d -> d[0] + d.substring(1).lowercase() }
+        else ->
+            "${z.dayOfMonth} ${z.month.toString().take(3).let { m -> m[0] + m.substring(1).lowercase() }}"
+    }
+}

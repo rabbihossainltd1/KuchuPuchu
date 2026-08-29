@@ -67,6 +67,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -184,12 +185,14 @@ fun StatusScreen(nav: NavController) {
                                     else -> {
                                         val views = myStatuses.sumOf { it.optInt("viewers", 0) }
                                         val last = myStatuses.maxOfOrNull { it.optString("createdAt") } ?: ""
-                                        "My updates · ${statusStamp(last)}" +
+                                        "My updates · ${statusStampShort(last)}" +
                                             (if (views > 0) " · $views view${if (views == 1) "" else "s"}" else "")
                                     }
                                 },
                                 fontSize = 13.sp,
                                 color = Muted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                     }
@@ -238,9 +241,11 @@ fun StatusScreen(nav: NavController) {
                                 )
                                 Spacer(Modifier.height(2.dp))
                                 Text(
-                                    "${statuses.size} update${if (statuses.size > 1) "s" else ""} · ${statusStamp(lastAt)}",
+                                    "${statuses.size} update${if (statuses.size > 1) "s" else ""} · ${statusStampShort(lastAt)}",
                                     fontSize = 13.sp,
                                     color = Muted,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
                             }
                         }

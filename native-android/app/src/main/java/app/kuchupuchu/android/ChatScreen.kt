@@ -110,6 +110,8 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -999,12 +1001,20 @@ fun ChatScreen(nav: NavController, convId: String) {
             // clientId; keys collide and the chat crashed on open ("Key ...
             // was already used"). Render only the first of any duplicate —
             // this also heals chats that already contain dup rows.
-            val seenKeys = HashSet<String>()
-            val visibleMsgs =
-                msgs.filter { m ->
-                    val k = m.optString("clientId").ifBlank { m.optString("id") }
-                    k.isNotBlank() && seenKeys.add(k)
+            // `derivedStateOf` (not a plain filter) so this list keeps its
+            // IDENTITY across recompositions that don't actually touch `msgs`
+            // (typing pings, read-receipt polls, header repaints, etc.) —
+            // a fresh List every recomposition was defeating LazyColumn's
+            // skip-unchanged-items optimisation and read as scroll jank.
+            val visibleMsgs by remember {
+                androidx.compose.runtime.derivedStateOf {
+                    val seenKeys = HashSet<String>()
+                    msgs.filter { m ->
+                        val k = m.optString("clientId").ifBlank { m.optString("id") }
+                        k.isNotBlank() && seenKeys.add(k)
+                    }
                 }
+            }
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
@@ -1344,37 +1354,52 @@ private fun Composer(
     gridSelCount: Int = 0,
     onSendGrid: () -> Unit = {},
 ) {
+    // Attach/sticker MUST close the keyboard first — otherwise both the IME
+    // and the inline panel push the composer up at once, which read as a
+    // layout "jump" ("upore uthe jai") instead of a clean keyboard->panel swap.
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    fun closeKeyboard() {
+        keyboard?.hide()
+        focusManager.clearFocus(force = true)
+    }
     Row(
         Modifier
             .fillMaxWidth()
             .background(Cream)
             .imePadding()
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            .padding(horizontal = 8.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (!recording) {
             Column(
                 Modifier
                     .weight(1f)
-                    .clip(RoundedCornerShape(22.dp))
+                    .clip(RoundedCornerShape(20.dp))
                     .background(Card)
-                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                    .padding(horizontal = 2.dp, vertical = 2.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     // WhatsApp order: stickers LEFT, attach RIGHT.
-                    IconButton(onClick = onSticker, Modifier.size(40.dp)) {
-                        Icon(Icons.Filled.Mood, "Stickers", tint = GoldDeep, modifier = Modifier.size(24.dp))
+                    IconButton(
+                        onClick = {
+                            closeKeyboard()
+                            onSticker()
+                        },
+                        Modifier.size(32.dp),
+                    ) {
+                        Icon(Icons.Filled.Mood, "Stickers", tint = GoldDeep, modifier = Modifier.size(20.dp))
                     }
                     Box(Modifier.weight(1f)) {
                         if (input.isEmpty()) {
                             // Same vertical padding as the BasicTextField below,
-                            // otherwise the hint floats 8dp above where the
-                            // typed text lands.
+                            // otherwise the hint floats above where the typed
+                            // text lands.
                             Text(
                                 "Message",
                                 color = Muted,
-                                fontSize = 15.sp,
-                                modifier = Modifier.padding(vertical = 8.dp),
+                                fontSize = 14.sp,
+                                modifier = Modifier.padding(vertical = 6.dp),
                             )
                         }
                         val inputInteraction = remember { MutableInteractionSource() }
@@ -1385,14 +1410,20 @@ private fun Composer(
                         BasicTextField(
                             value = input,
                             onValueChange = onInput,
-                            textStyle = TextStyle(color = Ink, fontSize = 15.sp),
+                            textStyle = TextStyle(color = Ink, fontSize = 14.sp),
                             maxLines = 4,
                             interactionSource = inputInteraction,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
                         )
                     }
-                    IconButton(onClick = onAttach, Modifier.size(40.dp)) {
-                        Icon(Icons.Filled.AttachFile, "Attach", tint = GoldDeep, modifier = Modifier.size(24.dp))
+                    IconButton(
+                        onClick = {
+                            closeKeyboard()
+                            onAttach()
+                        },
+                        Modifier.size(32.dp),
+                    ) {
+                        Icon(Icons.Filled.AttachFile, "Attach", tint = GoldDeep, modifier = Modifier.size(20.dp))
                     }
                 }
                 if (input.length > 800) {
@@ -1408,24 +1439,24 @@ private fun Composer(
             Row(
                 Modifier
                     .weight(1f)
-                    .clip(RoundedCornerShape(22.dp))
+                    .clip(RoundedCornerShape(20.dp))
                     .background(Color(0xFFFEE2E2))
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 PulsingDot()
-                Spacer(Modifier.width(10.dp))
+                Spacer(Modifier.width(8.dp))
                 Text(
                     "%d:%02d".format(recMs / 1000 / 60, recMs / 1000 % 60),
                     color = Ink,
-                    fontSize = 14.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                 )
-                Spacer(Modifier.width(10.dp))
-                Text("‹ Slide to cancel", color = Red, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                Spacer(Modifier.width(8.dp))
+                Text("‹ Slide to cancel", color = Red, fontSize = 12.5.sp, modifier = Modifier.weight(1f))
             }
         }
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(6.dp))
 
         /* mic/send circle. Text typed OR media selected -> it's SEND;
            otherwise a HOLD button: press = record, slide = cancel. */
@@ -1434,7 +1465,7 @@ private fun Composer(
             val sendPressed by sendInteraction.collectIsPressedAsState()
             Box(
                 Modifier
-                    .size(54.dp)
+                    .size(42.dp)
                     .pressScale(sendInteraction)
                     .clip(CircleShape)
                     .background(goldFill())
@@ -1454,7 +1485,7 @@ private fun Composer(
                     Icons.AutoMirrored.Filled.Send,
                     contentDescription = "Send",
                     tint = AmberInk,
-                    modifier = Modifier.size(23.dp).scale(if (sendPressed) 0.9f else 1f),
+                    modifier = Modifier.size(19.dp).scale(if (sendPressed) 0.9f else 1f),
                 )
             }
         } else {
@@ -1487,7 +1518,7 @@ private fun HoldMicButton(
 
     Box(
         Modifier
-            .size(54.dp)
+            .size(42.dp)
             .offset { IntOffset((if (recording) animX else 0f).roundToInt(), 0) }
             .clip(CircleShape)
             .background(if (cancelArmed) Brush.linearGradient(listOf(Color.White, Color.White)) else goldFill())
@@ -1520,7 +1551,7 @@ private fun HoldMicButton(
             if (cancelArmed) Icons.Filled.Delete else Icons.Filled.Mic,
             contentDescription = if (cancelArmed) "Release to cancel" else "Hold to record",
             tint = if (cancelArmed) Red else AmberInk,
-            modifier = Modifier.size(23.dp),
+            modifier = Modifier.size(19.dp),
         )
     }
 }
@@ -2209,56 +2240,58 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendin
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier =
-            Modifier.clickable(enabled = !opening) {
-                if (!ready) {
-                    android.widget.Toast.makeText(ctx, "Ei file-er source nai — khub purano message", android.widget.Toast.LENGTH_SHORT).show()
-                    return@clickable
-                }
-                scope.launch {
-                    opening = true
-                    try {
-                        val dir = java.io.File(ctx.cacheDir, "open")
-                        if (!dir.exists()) dir.mkdirs()
-                        val safe = fileName.replace(Regex("[^A-Za-z0-9._ ()-]"), "_")
-                        val dest = java.io.File(dir, System.currentTimeMillis().toString() + "_" + safe)
-                        val ok = withContext(Dispatchers.IO) { Api.downloadToFile(fileKey, dest) }
-                        fun trace(stage: String, detail: String) {
-                            Thread {
-                                runCatching {
-                                    Api.post(
-                                        "/api/debug/clientlog",
-                                        JSONObject().put("stage", "doc-" + stage).put("detail", fileName + " :: " + detail),
-                                    )
-                                }
-                            }.start()
-                        }
-                        trace("dl", if (ok) "ok " + dest.length() + "b" else "server-refused")
-                        if (ok) {
-                            if (isTextLike()) {
-                                val body = runCatching {
-                                    dest.readText().take(60_000)
-                                }.getOrDefault("")
-                                withContext(Dispatchers.Main) { textDoc = body }
-                                trace("view", "in-app-text " + body.length + "ch")
-                            } else {
-                                val opened = FilesUtil.openFile(ctx, fileName, dest, FilesUtil.mimeFor(fileName, fileType))
-                                trace("view", if (opened) "viewer-started" else "no-viewer")
-                            }
-                        } else {
-                            trace("view", "dl-failed")
-                            android.widget.Toast.makeText(ctx, "Download korte parini — abar try koro", android.widget.Toast.LENGTH_SHORT).show()
-                            dest.delete()
-                        }
-                    } catch (e: Exception) {
-                        android.widget.Toast.makeText(
-                            ctx,
-                            "Could not open \"${fileName.take(28)}…\". Try again.",
-                            android.widget.Toast.LENGTH_SHORT,
-                        ).show()
+            Modifier
+                .width(200.dp) // fixed width so the bubble never grows/shrinks on tap
+                .clickable(enabled = !opening) {
+                    if (!ready) {
+                        android.widget.Toast.makeText(ctx, "Ei file-er source nai — khub purano message", android.widget.Toast.LENGTH_SHORT).show()
+                        return@clickable
                     }
-                    opening = false
-                }
-            },
+                    scope.launch {
+                        opening = true
+                        try {
+                            val dir = java.io.File(ctx.cacheDir, "open")
+                            if (!dir.exists()) dir.mkdirs()
+                            val safe = fileName.replace(Regex("[^A-Za-z0-9._ ()-]"), "_")
+                            val dest = java.io.File(dir, System.currentTimeMillis().toString() + "_" + safe)
+                            val ok = withContext(Dispatchers.IO) { Api.downloadToFile(fileKey, dest) }
+                            fun trace(stage: String, detail: String) {
+                                Thread {
+                                    runCatching {
+                                        Api.post(
+                                            "/api/debug/clientlog",
+                                            JSONObject().put("stage", "doc-" + stage).put("detail", fileName + " :: " + detail),
+                                        )
+                                    }
+                                }.start()
+                            }
+                            trace("dl", if (ok) "ok " + dest.length() + "b" else "server-refused")
+                            if (ok) {
+                                if (isTextLike()) {
+                                    val body = runCatching {
+                                        dest.readText().take(60_000)
+                                    }.getOrDefault("")
+                                    withContext(Dispatchers.Main) { textDoc = body }
+                                    trace("view", "in-app-text " + body.length + "ch")
+                                } else {
+                                    val opened = FilesUtil.openFile(ctx, fileName, dest, FilesUtil.mimeFor(fileName, fileType))
+                                    trace("view", if (opened) "viewer-started" else "no-viewer")
+                                }
+                            } else {
+                                trace("view", "dl-failed")
+                                android.widget.Toast.makeText(ctx, "Download korte parini — abar try koro", android.widget.Toast.LENGTH_SHORT).show()
+                                dest.delete()
+                            }
+                        } catch (e: Exception) {
+                            android.widget.Toast.makeText(
+                                ctx,
+                                "Could not open \"${fileName.take(28)}…\". Try again.",
+                                android.widget.Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                        opening = false
+                    }
+                },
     ) {
         Box(
             Modifier
@@ -2275,32 +2308,52 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendin
             )
         }
         Spacer(Modifier.width(10.dp))
-        Column(Modifier.widthIn(max = 180.dp)) {
-            Text(fileName, fontSize = 14.sp, color = Ink, maxLines = 2)
+        Column(Modifier.weight(1f)) {
+            Text(
+                compactFileName(fileName),
+                fontSize = 13.sp,
+                color = Ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             Text(
                 if (upFrac != null) "Sending · ${(upFrac * 100).toInt()}%"
                 else FilesUtil.displaySize(m.optInt("fileSize")),
                 fontSize = 11.sp,
                 color = if (mine) Color(0x99FFFFFF) else Muted,
+                maxLines = 1,
             )
         }
         Spacer(Modifier.width(6.dp))
-        when {
-            opening -> CircularProgressIndicator(
-                color = if (mine) AmberInk else GoldDeep,
-                strokeWidth = 2.dp,
-                modifier = Modifier.size(20.dp),
-            )
-            upFrac != null -> CircularProgressIndicator(
-                progress = { upFrac },
-                color = if (mine) AmberInk else GoldDeep,
-                strokeWidth = 2.5.dp,
-                modifier = Modifier.size(22.dp),
-            )
-            ready -> TextButton(onClick = {}) {
-                Text("Open", color = if (mine) Color.White else GoldDeep, fontWeight = FontWeight.SemiBold)
+        // Fixed-size slot: spinner / progress ring / "Open" all render inside
+        // the SAME box dimensions so the row never grows or shrinks on tap.
+        Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
+            when {
+                opening -> CircularProgressIndicator(
+                    color = if (mine) AmberInk else GoldDeep,
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(20.dp),
+                )
+                upFrac != null -> CircularProgressIndicator(
+                    progress = { upFrac },
+                    color = if (mine) AmberInk else GoldDeep,
+                    strokeWidth = 2.5.dp,
+                    modifier = Modifier.size(22.dp),
+                )
+                ready -> Text(
+                    "Open",
+                    color = if (mine) Color.White else GoldDeep,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 12.5.sp,
+                    maxLines = 1,
+                )
+                else -> Text(
+                    "…",
+                    fontSize = 11.sp,
+                    color = if (mine) Color(0x99FFFFFF) else Muted,
+                    maxLines = 1,
+                )
             }
-            else -> Text("Uploading…", fontSize = 11.sp, color = if (mine) Color(0x99FFFFFF) else Muted)
         }
     }
     textDoc?.let { body ->
@@ -2330,6 +2383,20 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendin
             },
         )
     }
+}
+
+/**
+ * Compact a long filename for the chat bubble: keeps the start (name) and
+ * the extension, dots out the middle — e.g. "VID-20260829-WA0001.mp4" with
+ * a long stem becomes "VID-202629....mp4". Short names pass through as-is.
+ */
+private fun compactFileName(name: String, headKeep: Int = 10, tailDots: Int = 4): String {
+    if (name.length <= headKeep + tailDots + 5) return name
+    val dot = name.lastIndexOf('.')
+    val ext = if (dot in 1 until name.length - 1) name.substring(dot) else ""
+    val stem = if (dot in 1 until name.length - 1) name.substring(0, dot) else name
+    if (stem.length <= headKeep) return name
+    return stem.take(headKeep) + ".".repeat(tailDots) + ext
 }
 
 private fun msgStamp(iso: String): String {

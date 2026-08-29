@@ -407,7 +407,15 @@ fun AttachPanel(
         }
 
         /* Swipe the GRID itself, WhatsApp-style: up = fullscreen (actions
-           hidden), down at the top = back to the compact panel. */
+           hidden), down at the top = back to the compact panel.
+           NOTE: onPostScroll's `available` is only non-zero once the grid
+           itself has nothing left to consume — i.e. it's already scrolled
+           to position 0. Gate on gridState.firstVisibleItemIndex/Offset too
+           so a swipe-down that starts mid-list (grid still has scroll room)
+           reliably collapses back instead of just scrolling the grid, which
+           is exactly the "swipe down doesn't go back to normal" bug. */
+        val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+        val dragAccum = remember { mutableStateOf(0f) }
         val gridScroll = remember {
             object : NestedScrollConnection {
                 override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
@@ -415,6 +423,17 @@ fun AttachPanel(
                         if (available.y < -30f && !fullscreen) {
                             haptics.tap()
                             fullscreen = true
+                        }
+                        val atTop = gridState.firstVisibleItemIndex == 0 && gridState.firstVisibleItemScrollOffset == 0
+                        if (fullscreen && atTop && available.y > 0f) {
+                            dragAccum.value += available.y
+                            if (dragAccum.value > 60f) {
+                                haptics.tap()
+                                fullscreen = false
+                                dragAccum.value = 0f
+                            }
+                        } else if (available.y <= 0f) {
+                            dragAccum.value = 0f
                         }
                     }
                     return Offset.Zero
@@ -427,6 +446,7 @@ fun AttachPanel(
                 ): Offset {
                     if (source == NestedScrollSource.Drag && available.y > 60f && fullscreen) {
                         fullscreen = false
+                        dragAccum.value = 0f
                     }
                     return Offset.Zero
                 }
@@ -443,8 +463,19 @@ fun AttachPanel(
                     .align(Alignment.CenterHorizontally),
             )
         } else {
+            // O(1) lookup per cell instead of an O(n) `indexOfFirst` scan on
+            // every recomposition of every visible cell — with a big
+            // selection that scan-per-cell was a real source of the "laggy
+            // swipe" feel (the grid recomposes every drag frame while the
+            // panel height is animating).
+            val selIndex = remember(sel.toList()) {
+                val map = HashMap<Uri, Int>()
+                sel.forEachIndexed { i, it -> map[it.uri] = i }
+                map
+            }
             LazyVerticalGrid(
                 columns = GridCells.Fixed(4),
+                state = gridState,
                 modifier = Modifier
                     .fillMaxWidth()
                     .nestedScroll(gridScroll)
@@ -454,7 +485,7 @@ fun AttachPanel(
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 items(shown, key = { it.uri.toString() }) { item ->
-                    val pos = sel.indexOfFirst { it.uri == item.uri }
+                    val pos = selIndex[item.uri] ?: -1
                     MediaCell(
                         item,
                         ctx,

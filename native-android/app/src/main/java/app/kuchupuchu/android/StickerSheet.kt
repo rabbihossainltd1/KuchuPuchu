@@ -71,42 +71,42 @@ fun StickerPanel(
         Modifier
             .fillMaxWidth()
             .background(Cream)
-            .padding(top = 10.dp, bottom = 6.dp),
+            .padding(top = 6.dp, bottom = 4.dp),
     ) {
         /* top row: search, segmented tabs (emoji | GIF | stickers), edit */
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 4.dp),
+                .padding(horizontal = 10.dp, vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
                 Icons.Filled.Search,
                 contentDescription = "Search",
                 tint = Color(0x991C1917),
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(16.dp),
             )
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(8.dp))
             BasicTextField(
                 value = query,
                 onValueChange = { query = it },
                 singleLine = true,
-                textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
+                textStyle = TextStyle(color = Color.White, fontSize = 13.sp),
                 modifier = Modifier.weight(1f),
                 decorationBox = { inner ->
                     Box {
                         if (query.isEmpty()) {
-                            Text("Search stickers", color = Color(0x661C1917), fontSize = 14.sp)
+                            Text("Search stickers", color = Color(0x661C1917), fontSize = 13.sp)
                         }
                         inner()
                     }
                 },
             )
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(8.dp))
             /* segmented emoji / GIF / sticker switch */
             Row(
                 Modifier
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(14.dp))
                     .background(Color(0x141C1917))
                     .padding(2.dp),
             ) {
@@ -114,30 +114,31 @@ fun StickerPanel(
                     val sel = tab == i
                     Box(
                         Modifier
-                            .clip(RoundedCornerShape(14.dp))
+                            .clip(RoundedCornerShape(12.dp))
                             .background(if (sel) Color(0xFFFEF3C7) else Color.Transparent)
                             .clickable {
                                 haptics.tap()
                                 tab = i
                             }
-                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                            .padding(horizontal = 9.dp, vertical = 3.dp),
                     ) {
                         Text(
                             label,
                             color = if (sel) GoldDeep else Color(0x991C1917),
-                            fontSize = 12.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
                         )
                     }
                 }
             }
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(8.dp))
             Icon(
                 Icons.Filled.Edit,
                 contentDescription = "Create",
                 tint = Color(0x991C1917),
                 modifier = Modifier
-                    .size(18.dp)
+                    .size(15.dp)
                     .clickable {
                         android.widget.Toast.makeText(ctx, "Sticker creator is coming in a future update", android.widget.Toast.LENGTH_SHORT).show()
                     },
@@ -150,21 +151,21 @@ fun StickerPanel(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        .padding(horizontal = 10.dp, vertical = 1.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     recents.take(6).forEach { s ->
                         Text(
                             s,
-                            fontSize = 26.sp,
+                            fontSize = 21.sp,
                             modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(10.dp))
                                 .clickable {
                                     haptics.confirm()
                                     saveStickerRecent(s)
                                     onSend(s)
                                 }
-                                .padding(4.dp),
+                                .padding(3.dp),
                         )
                     }
                     Icon(
@@ -173,7 +174,7 @@ fun StickerPanel(
                         tint = Color(0x66FFFFFF),
                         modifier = Modifier
                             .align(Alignment.CenterVertically)
-                            .size(16.dp),
+                            .size(14.dp),
                     )
                 }
             }
@@ -181,26 +182,27 @@ fun StickerPanel(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    .padding(horizontal = 12.dp, vertical = 1.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Stickers.packs.forEachIndexed { i, (name, _) ->
                     val selected = pack == i
                     Box(
                         Modifier
-                            .clip(RoundedCornerShape(16.dp))
+                            .clip(RoundedCornerShape(14.dp))
                             .background(if (selected) Color(0xFFFEF3C7) else Color(0x0F1C1917))
                             .clickable {
                                 haptics.tap()
                                 pack = i
                             }
-                            .padding(horizontal = 12.dp, vertical = 5.dp),
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
                     ) {
                         Text(
                             name,
                             color = if (selected) GoldDeep else Color(0x991C1917),
-                            fontSize = 12.5.sp,
+                            fontSize = 11.5.sp,
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                            maxLines = 1,
                         )
                     }
                 }
@@ -218,12 +220,12 @@ fun StickerPanel(
                 }
             LazyVerticalGrid(
                 columns = GridCells.Fixed(5),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 3.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(188.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                    .height(152.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 items(list.distinct()) { sticker ->
                     val interaction = remember { MutableInteractionSource() }
@@ -231,8 +233,8 @@ fun StickerPanel(
                     Box(
                         Modifier
                             .fillMaxWidth()
-                            .height(44.dp)
-                            .clip(RoundedCornerShape(14.dp))
+                            .height(36.dp)
+                            .clip(RoundedCornerShape(12.dp))
                             .background(if (pressed) Color(0x1A1C1917) else Color.Transparent)
                             .clickable(interactionSource = interaction, indication = null) {
                                 haptics.confirm()
@@ -243,7 +245,7 @@ fun StickerPanel(
                     ) {
                         Text(
                             sticker,
-                            fontSize = 24.sp,
+                            fontSize = 20.sp,
                             modifier = Modifier.scale(if (pressed) 1.25f else 1f),
                         )
                     }
@@ -253,10 +255,10 @@ fun StickerPanel(
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(188.dp),
+                    .height(152.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("GIFs are coming in a future update", color = Color(0x801C1917), fontSize = 14.sp)
+                Text("GIFs are coming in a future update", color = Color(0x801C1917), fontSize = 13.sp)
             }
         }
 
@@ -264,7 +266,7 @@ fun StickerPanel(
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 18.dp, vertical = 5.dp),
+                .padding(horizontal = 16.dp, vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
@@ -272,19 +274,19 @@ fun StickerPanel(
                 Icons.Filled.Schedule,
                 contentDescription = "Recent",
                 tint = Color(0x991C1917),
-                modifier = Modifier.size(22.dp),
+                modifier = Modifier.size(18.dp),
             )
             Icon(
                 Icons.Filled.Star,
                 contentDescription = "Favourites",
                 tint = Color(0x991C1917),
-                modifier = Modifier.size(22.dp),
+                modifier = Modifier.size(18.dp),
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 Stickers.packs.forEachIndexed { i, _ ->
                     Box(
                         Modifier
-                            .size(7.dp)
+                            .size(6.dp)
                             .clip(CircleShape)
                             .background(if (pack == i) Gold else Color(0x331C1917)),
                     )
@@ -292,12 +294,12 @@ fun StickerPanel(
             }
             Box(
                 Modifier
-                    .size(30.dp)
+                    .size(24.dp)
                     .clip(CircleShape)
                     .background(Color(0x141C1917)),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("+", color = Color(0xB31C1917), fontSize = 16.sp)
+                Text("+", color = Color(0xB31C1917), fontSize = 14.sp)
             }
         }
     }
