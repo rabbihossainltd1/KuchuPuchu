@@ -11,6 +11,9 @@ import androidx.core.app.RemoteInput
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 
+/** RemoteInput key for the notification reply action (shared with the receiver). */
+private const val KEY_REPLY = "kp_reply_text"
+
 /**
  * Notification channels + builders.
  *
@@ -19,7 +22,6 @@ import androidx.core.app.NotificationManagerCompat
  * (they replace this with full-screen ringing + accept/decline).
  */
 object KpNotify {
-    private const val KEY_REPLY = "kp_reply_text"
     private const val CHAT_CHANNEL = "kp_messages_v2"
     private const val CALL_CHANNEL = "kp_calls_v3"
     private const val GROUP = "kp_chats"
