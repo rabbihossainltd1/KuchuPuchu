@@ -254,9 +254,6 @@ function slugFrom(value: string) {
 /* ---------------- schema ---------------- */
 
 let schemaReady = false;
-// Rows this isolate created and is responsible for sweeping (kept here so
-// the sweep costs ZERO reads on isolates with nothing pending).
-let pendingPushFallbacks = 0;
 
 /** Throttles the expired-status reaper so reads stay read-only. */
 let nextStatusSweep = 0;
@@ -616,41 +613,6 @@ async function fcmAccessToken(env: Env): Promise<{ token: string; projectId: str
  * needed. WhatsApp-style delivery. When the app IS foreground the service
  * still gets onMessageReceived and renders its own rich UI.
  */
-/** Sends the payload-card fallback for data pushes that were never acked. */
-async function sweepPushFallbacks(env: Env, db: D1Database): Promise<void> {
-  try {
-    if (pendingPushFallbacks <= 0) return;
-    const cutoff = new Date(Date.now() - 8000).toISOString();
-    const rows = await all<{ mid: string; user_id: string; payload_json: string }>(
-      db,
-      "SELECT mid, user_id, payload_json FROM push_fallback WHERE created_at <= ? LIMIT 10",
-      cutoff,
-    );
-    if (rows.length === 0) {
-      pendingPushFallbacks = 0;
-      return;
-    }
-    pendingPushFallbacks = Math.max(0, pendingPushFallbacks - rows.length);
-    for (const row of rows) {
-      // Delete first so parallel sweeps can't double-send.
-      await run(
-        db,
-        "DELETE FROM push_fallback WHERE mid = ? AND user_id = ?",
-        row.mid,
-        row.user_id,
-      );
-      const p = parseJson<{
-        data: Record<string, string>;
-        note?: { title: string; body: string; channel: string };
-      }>(row.payload_json, null as never);
-      if (!p?.data) continue;
-      await pushToUser(env, db, row.user_id, p.data, p.note ?? undefined);
-    }
-  } catch (err) {
-    console.error("push_fallback sweep:", err instanceof Error ? err.message : err);
-  }
-}
-
 async function pushToUser(
   env: Env,
   db: D1Database,
@@ -897,7 +859,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   // grace window gets its system payload card now. Triggered by ANY request
   // (the sender's own 400ms chat poll makes it fire within a second), so no
   // timers are ever held open.
-  if (pendingPushFallbacks > 0) ctx.waitUntil(sweepPushFallbacks(env, db));
+
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/$/, "") || "/";
   const method = request.method.toUpperCase();
@@ -1942,49 +1904,40 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     for (const memberId of members) {
       if (memberId.user_id === uid) continue;
       ctx.waitUntil(
-        // Messenger-style hybrid, timer-free: DATA-ONLY goes first so a live
-        // app process draws OUR OWN card WITH Reply/Like (system payload
-        // cards can never carry actions). A fallback row is recorded; if the
-        // app doesn't ack it within the grace window, the next API request
-        // (sweep below) sends the system payload card — arrival is
-        // guaranteed even when MIUI never wakes the process.
-        (async () => {
-          const data = {
+        // PROVEN RELIABLE delivery (reverted the R31 data-first experiment:
+        // MIUI drops data pushes to killed apps, so notifications went
+        // missing). Combined notification+data: Google Play services ALWAYS
+        // posts the system card without waking the app, and the data rides
+        // as tap-intent extras (kp_chat deep link). When the app is OPEN
+        // (foreground), onMessageReceived draws OUR card instead — with
+        // Reply/Like actions. ("from" is a reserved FCM key — hence fromName.)
+        pushToUser(
+          env,
+          db,
+          memberId.user_id,
+          {
             type: "message",
             convoId: convId,
             kind: conv.kind,
             fromName: me.display_name,
             body: preview.slice(0, 120),
             kp_chat: convId,
-            mid,
-          };
-          const note = {
+          },
+          {
             title: me.display_name || "KuchuPuchu",
             body: preview.slice(0, 120) || "New message",
             channel: "kp_messages_v2",
-          };
-          const ok = await pushToUser(env, db, memberId.user_id, data, undefined);
-          if (ok) {
-            await run(
-              db,
-              "UPDATE messages SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL",
-              nowIso(),
-              mid,
-            );
-            pendingPushFallbacks++;
-            await run(
-              db,
-              "INSERT OR IGNORE INTO push_fallback (mid, user_id, payload_json, created_at) VALUES (?, ?, ?, ?)",
-              mid,
-              memberId.user_id,
-              JSON.stringify({ data, note }),
-              nowIso(),
-            );
-          } else {
-            // Nothing accepted the data push at all — payload card right away.
-            await pushToUser(env, db, memberId.user_id, data, note);
-          }
-        })(),
+          },
+        ).then((ok) =>
+          ok
+            ? run(
+                db,
+                "UPDATE messages SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL",
+                nowIso(),
+                mid,
+              )
+            : null,
+        ),
       );
     }
     return json({ message }, 201);
