@@ -26,7 +26,10 @@ const val CALL_ACCEPT = "app.kuchupuchu.android.CALL_ACCEPT"
 const val CALL_DECLINE = "app.kuchupuchu.android.CALL_DECLINE"
 private const val INCOMING_ID = 7101
 private const val ONGOING_ID = 7102
-private const val CH_IN = "kp-calls"
+// v2: the original "kp-calls" channel was created with
+// USAGE_NOTIFICATION_RINGTONE, which silent mode mutes — and channels are
+// immutable, so a fresh id with USAGE_ALARM is the only way out.
+private const val CH_IN = "kp-calls-v2"
 private const val CH_FG = "kp-call-fg"
 
 /** Ringtone + vibration while an incoming call rings. */
@@ -67,11 +70,13 @@ object CallSounds {
         if (ring != null) return
         val attrs = android.media.AudioAttributes.Builder()
             .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+            // USAGE_ALARM: plays even when the phone is on silent/vibrate —
+            // RINGTONE usage was the reason a silenced phone never rang.
+            .setUsage(android.media.AudioAttributes.USAGE_ALARM)
             .build()
         val player =
             runCatching {
-                MediaPlayer.create(ctx.applicationContext, R.raw.kp_ring, attrs, 1)
+                MediaPlayer.create(ctx.applicationContext, R.raw.kp_ring2, attrs, 1)
             }.getOrNull()
                 ?: run {
                     // No 4-arg (Uri, attrs) overload exists — build manually:
@@ -145,9 +150,11 @@ object CallNotify {
         if (nm.getNotificationChannel(CH_IN) == null) {
             val ch = NotificationChannel(CH_IN, "Incoming calls", NotificationManager.IMPORTANCE_HIGH)
             ch.setSound(
-                Uri.parse("android.resource://${ctx.packageName}/${R.raw.kp_ring}"),
+                Uri.parse("android.resource://${ctx.packageName}/${R.raw.kp_ring2}"),
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                    // ALARM stream: the ring ignores the phone's silent switch,
+                    // like a real phone call should.
+                    .setUsage(AudioAttributes.USAGE_ALARM)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .build(),
             )
@@ -204,7 +211,7 @@ object CallNotify {
                 .setFullScreenIntent(open, true)
                 .addAction(0, "Accept", accept)
                 .addAction(0, "Decline", decline)
-                .setSound(Uri.parse("android.resource://${ctx.packageName}/${R.raw.kp_ring}"))
+                .setSound(Uri.parse("android.resource://${ctx.packageName}/${R.raw.kp_ring2}"))
                 .build()
         ctx.getSystemService(NotificationManager::class.java).notify(INCOMING_ID, n)
     }

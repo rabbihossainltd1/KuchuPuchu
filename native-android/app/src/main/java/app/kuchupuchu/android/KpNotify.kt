@@ -19,7 +19,7 @@ import androidx.core.app.NotificationManagerCompat
  */
 object KpNotify {
     private const val CHAT_CHANNEL = "kp_messages_v2"
-    private const val CALL_CHANNEL = "kp_calls_v2"
+    private const val CALL_CHANNEL = "kp_calls_v3"
     private const val GROUP = "kp_chats"
 
     fun ensureChannels(ctx: Context) {
@@ -39,10 +39,23 @@ object KpNotify {
                     enableVibration(true)
                 },
         )
+        // v3: v2 shipped with NO sound (silent channel) — channels are
+        // immutable, so a fresh id was needed. The ring plays on the ALARM
+        // stream so the phone rings even on silent, like a real call.
+        val ringAttrs = android.media.AudioAttributes.Builder()
+            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+            .build()
         mgr.createNotificationChannel(
             NotificationChannel(CALL_CHANNEL, "Calls", NotificationManager.IMPORTANCE_HIGH)
                 .apply {
                     description = "Incoming calls"
+                    setSound(
+                        Uri.parse("android.resource://${ctx.packageName}/${R.raw.kp_ring2}"),
+                        ringAttrs,
+                    )
+                    enableVibration(true)
+                    vibrationPattern = longArrayOf(0, 500, 400, 500)
                     setBypassDnd(true)
                     lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
                 },

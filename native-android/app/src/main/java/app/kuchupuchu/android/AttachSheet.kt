@@ -2,6 +2,7 @@ package app.kuchupuchu.android
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
 import android.location.LocationManager
 import android.net.Uri
@@ -16,9 +17,11 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -31,27 +34,28 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.ContactPage
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Event
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Poll
 import androidx.compose.material.icons.filled.Videocam
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -70,12 +74,13 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** One recent gallery item shown in the attach sheet. */
-private data class RecentMedia(
+/** One device media item for the attach panel grid. */
+private data class MediaItem(
     val uri: Uri,
     val isVideo: Boolean,
     val durationMs: Long,
-    val thumb: ImageBitmap?,
+    val bucket: String,
+    val added: Long,
 )
 
 private data class AttachAction(
@@ -86,14 +91,14 @@ private data class AttachAction(
 )
 
 /**
- * Attach sheet — WhatsApp-style dark panel that opens right above the chat
- * bar: two rows of round actions, and a RECENT photos+videos grid under it,
- * so media goes out without ever opening a gallery app. Videos ride the
- * document (FILE) upload path, photos the inline image path.
+ * Attach panel — INLINE, rendered directly ABOVE the chat input bar (not a
+ * floating bottom sheet): two rows of round actions, then a Recent grid of
+ * the device's newest photos/videos, so media goes out without ever opening
+ * a gallery app. The expand arrow next to "Recent" reveals device FOLDERS
+ * (Camera, Screenshots, Download…) to browse deeper.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AttachSheet(
+fun AttachPanel(
     onDismiss: () -> Unit,
     onImagePicked: (Uri) -> Unit,
     onDocumentPicked: (Uri) -> Unit,
@@ -101,8 +106,10 @@ fun AttachSheet(
     onLocationRequested: () -> Unit,
 ) {
     val ctx = LocalContext.current
-    var recent by remember { mutableStateOf(listOf<RecentMedia>()) }
     var canRead by remember { mutableStateOf(false) }
+    var pool by remember { mutableStateOf(listOf<MediaItem>()) }
+    var expanded by remember { mutableStateOf(false) }
+    var folder by remember { mutableStateOf<String?>(null) }
 
     fun hasRead(): Boolean =
         if (Build.VERSION.SDK_INT >= 33) {
@@ -131,8 +138,8 @@ fun AttachSheet(
 
     LaunchedEffect(canRead) {
         if (!canRead) return@LaunchedEffect
-        recent = withContext(Dispatchers.IO) {
-            runCatching { loadRecentMedia(ctx) }.getOrDefault(emptyList())
+        pool = withContext(Dispatchers.IO) {
+            runCatching { loadMediaPool(ctx) }.getOrDefault(emptyList())
         }
     }
 
@@ -151,11 +158,6 @@ fun AttachSheet(
             onDismiss()
             if (uri != null) onDocumentPicked(uri)
         }
-    val audio =
-        rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-            onDismiss()
-            if (uri != null) onDocumentPicked(uri)
-        }
     val contact =
         rememberLauncherForActivityResult(ActivityResultContracts.PickContact()) { uri ->
             onDismiss()
@@ -170,152 +172,305 @@ fun AttachSheet(
         Toast.makeText(ctx, "Coming in a future update", Toast.LENGTH_SHORT).show()
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = Color(0xFF201E1B),
-        shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp),
+    val buckets =
+        remember(pool) {
+            pool.groupBy { it.bucket }
+                .map { (name, items) -> Triple(name, items.size, items.maxOf { it.added }) }
+                .sortedByDescending { it.third }
+        }
+    val shown =
+        when {
+            !expanded -> pool.take(14)
+            folder == null -> pool.take(60)
+            else -> pool.filter { it.bucket == folder }.take(60)
+        }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(Color(0xFF201E1B))
+            .padding(top = 10.dp),
     ) {
-        Column(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
-            /* drag handle */
-            Box(
-                Modifier
-                    .align(Alignment.CenterHorizontally)
-                    .padding(top = 2.dp, bottom = 12.dp)
-                    .size(width = 44.dp, height = 4.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(Color(0x40FFFFFF)),
-            )
-
-            /* action grid — 2 x 4 like the WhatsApp reference */
-            val rows = listOf(
-                listOf(
-                    AttachAction(Icons.Filled.Image, Color(0xFF60A5FA), "Gallery") {
-                        gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                    },
-                    AttachAction(Icons.Filled.CameraAlt, Color(0xFFF472B6), "Camera") {
-                        val f = java.io.File(ctx.cacheDir, "camera_${System.currentTimeMillis()}.jpg")
-                        cameraUri = androidx.core.content.FileProvider.getUriForFile(
-                            ctx,
-                            "${ctx.packageName}.fileprovider",
-                            f,
-                        )
-                        camera.launch(cameraUri!!)
-                    },
-                    AttachAction(Icons.Filled.LocationOn, Color(0xFF34D399), "Location") {
-                        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
-                            ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-                        ) {
-                            onDismiss()
-                            onLocationRequested()
-                        } else {
-                            locationPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION)
-                        }
-                    },
-                    AttachAction(Icons.Filled.ContactPage, Color(0xFF38BDF8), "Contact") {
-                        contact.launch(null)
-                    },
-                ),
-                listOf(
-                    AttachAction(Icons.Filled.Description, Color(0xFFA78BFA), "Document") {
-                        document.launch("*/*")
-                    },
-                    AttachAction(Icons.Filled.Poll, Color(0xFFFBBF24), "Poll") { comingSoon() },
-                    AttachAction(Icons.Filled.Event, Color(0xFFF87171), "Event") { comingSoon() },
-                    AttachAction(Icons.Filled.AutoAwesome, Color(0xFF818CF8), "AI images") { comingSoon() },
-                ),
-            )
-            rows.forEach { row ->
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                ) {
-                    row.forEach { a -> AttachTile(a.icon, a.tint, a.label, a.onClick) }
-                }
-            }
-
-            /* recent media — straight from MediaStore, tap = send */
-            if (canRead) {
-                if (recent.isNotEmpty()) {
-                    Text(
-                        "Recent",
-                        color = Color(0xB3FFFFFF),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 6.dp),
+        /* action grid — 2 x 4 */
+        val rows = listOf(
+            listOf(
+                AttachAction(Icons.Filled.Image, Color(0xFF60A5FA), "Gallery") {
+                    gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                },
+                AttachAction(Icons.Filled.CameraAlt, Color(0xFFF472B6), "Camera") {
+                    val f = java.io.File(ctx.cacheDir, "camera_${System.currentTimeMillis()}.jpg")
+                    cameraUri = androidx.core.content.FileProvider.getUriForFile(
+                        ctx,
+                        "${ctx.packageName}.fileprovider",
+                        f,
                     )
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(4),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 340.dp),
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    camera.launch(cameraUri!!)
+                },
+                AttachAction(Icons.Filled.LocationOn, Color(0xFF34D399), "Location") {
+                    if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                        ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
                     ) {
-                        items(recent, key = { it.uri.toString() }) { item ->
-                            Box(
-                                Modifier
-                                    .aspectRatio(1f)
-                                    .background(Color(0xFF2B2823))
-                                    .clickable {
-                                        onDismiss()
-                                        // Videos ride the FILE path (raw upload),
-                                        // photos the inline image path.
-                                        if (item.isVideo) onDocumentPicked(item.uri) else onImagePicked(item.uri)
-                                    },
-                            ) {
-                                val bmp = item.thumb
-                                if (bmp != null) {
-                                    Image(
-                                        bmp,
-                                        contentDescription = null,
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Crop,
-                                    )
-                                }
-                                if (item.isVideo) {
-                                    Icon(
-                                        Icons.Filled.Videocam,
-                                        contentDescription = "Video",
-                                        tint = Color.White,
-                                        modifier = Modifier
-                                            .align(Alignment.TopStart)
-                                            .padding(5.dp)
-                                            .size(15.dp),
-                                    )
-                                    Text(
-                                        formatDuration(item.durationMs),
-                                        color = Color.White,
-                                        fontSize = 10.5.sp,
-                                        modifier = Modifier
-                                            .align(Alignment.BottomEnd)
-                                            .padding(5.dp),
-                                    )
-                                }
-                            }
-                        }
+                        onDismiss()
+                        onLocationRequested()
+                    } else {
+                        locationPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION)
                     }
-                } else {
-                    Text(
-                        "No recent media",
-                        color = Color(0x80FFFFFF),
-                        fontSize = 13.sp,
-                        modifier = Modifier
-                            .padding(vertical = 14.dp)
-                            .align(Alignment.CenterHorizontally),
-                    )
-                }
-            } else {
+                },
+                AttachAction(Icons.Filled.ContactPage, Color(0xFF38BDF8), "Contact") {
+                    contact.launch(null)
+                },
+            ),
+            listOf(
+                AttachAction(Icons.Filled.Description, Color(0xFFA78BFA), "Document") {
+                    document.launch("*/*")
+                },
+                AttachAction(Icons.Filled.Poll, Color(0xFFFBBF24), "Poll") { comingSoon() },
+                AttachAction(Icons.Filled.Event, Color(0xFFF87171), "Event") { comingSoon() },
+                AttachAction(Icons.Filled.AutoAwesome, Color(0xFF818CF8), "AI images") { comingSoon() },
+            ),
+        )
+        rows.forEach { row ->
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+            ) {
+                row.forEach { a -> AttachTile(a.icon, a.tint, a.label, a.onClick) }
+            }
+        }
+
+        if (canRead) {
+            /* header: Recent / folder name + expand toggle */
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 8.dp, top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
-                    "Gallery permission deny korechen — actions still work, recent photos dekhte permission din.",
-                    color = Color(0x80FFFFFF),
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    if (expanded && folder != null) folder!! else "Recent",
+                    color = Color(0xB3FFFFFF),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    contentDescription = "Folders",
+                    tint = Color(0xB3FFFFFF),
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .clickable {
+                            expanded = !expanded
+                            if (!expanded) folder = null
+                        }
+                        .padding(6.dp)
+                        .size(20.dp),
                 )
             }
-            Spacer(Modifier.height(6.dp))
+
+            /* folder chips (only when expanded) */
+            if (expanded) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val all = listOf("All" to buckets.sumOf { it.second })
+                    (all + buckets.map { it.first to it.second }).forEach { (name, count) ->
+                        val selected = (folder == null && name == "All") || folder == name
+                        Row(
+                            Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(
+                                    if (selected) Color(0x33FFFFFF) else Color(0x14FFFFFF),
+                                )
+                                .clickable {
+                                    if (name == "All") folder = null else folder = name
+                                }
+                                .padding(horizontal = 12.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                name,
+                                color = if (selected) Color.White else Color(0x99FFFFFF),
+                                fontSize = 12.5.sp,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                            )
+                            Text(
+                                "  $count",
+                                color = Color(0x66FFFFFF),
+                                fontSize = 11.sp,
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (shown.isEmpty()) {
+                Text(
+                    if (expanded) "This folder khali — onno folder try koro" else "No recent media",
+                    color = Color(0x80FFFFFF),
+                    fontSize = 13.sp,
+                    modifier = Modifier
+                        .padding(vertical = 14.dp)
+                        .align(Alignment.CenterHorizontally),
+                )
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(4),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = if (expanded) 430.dp else 320.dp),
+                    contentPadding = PaddingValues(horizontal = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    items(shown, key = { it.uri.toString() }) { item ->
+                        MediaCell(item, ctx.contentResolver) {
+                            onDismiss()
+                            // Videos ride the FILE path (raw upload), photos
+                            // the inline image path.
+                            if (item.isVideo) onDocumentPicked(item.uri) else onImagePicked(item.uri)
+                        }
+                    }
+                }
+            }
+        } else {
+            Text(
+                "Gallery permission off — actions still kaj korbe; recent photos dekhte permission din.",
+                color = Color(0x80FFFFFF),
+                fontSize = 12.sp,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+/** Newest-first device media pool: 400 images + 80 videos, bucket-tagged. */
+private fun loadMediaPool(ctx: android.content.Context): List<MediaItem> {
+    val out = ArrayList<MediaItem>()
+    runCatching {
+        ctx.contentResolver.query(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            arrayOf(
+                MediaStore.Images.Media._ID,
+                MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
+                MediaStore.Images.Media.DATE_ADDED,
+            ),
+            null,
+            null,
+            "${MediaStore.Images.Media.DATE_ADDED} DESC",
+        )?.use { c ->
+            var n = 0
+            while (c.moveToNext() && n < 400) {
+                val id = c.getLong(0)
+                val bucket = c.getString(1)?.ifBlank { null } ?: "Images"
+                out.add(
+                    MediaItem(
+                        Uri.withAppendedPath(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id.toString()),
+                        false,
+                        0,
+                        bucket,
+                        c.getLong(2),
+                    ),
+                )
+                n++
+            }
+        }
+    }
+    runCatching {
+        ctx.contentResolver.query(
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            arrayOf(
+                MediaStore.Video.Media._ID,
+                MediaStore.Video.Media.BUCKET_DISPLAY_NAME,
+                MediaStore.Video.Media.DATE_ADDED,
+                MediaStore.Video.Media.DURATION,
+            ),
+            null,
+            null,
+            "${MediaStore.Video.Media.DATE_ADDED} DESC",
+        )?.use { c ->
+            var n = 0
+            while (c.moveToNext() && n < 80) {
+                val id = c.getLong(0)
+                val bucket = c.getString(1)?.ifBlank { null } ?: "Videos"
+                out.add(
+                    MediaItem(
+                        Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id.toString()),
+                        true,
+                        c.getLong(3),
+                        bucket,
+                        c.getLong(2),
+                    ),
+                )
+                n++
+            }
+        }
+    }
+    return out.sortedByDescending { it.added }
+}
+
+/** Grid cell: decodes its thumbnail off the main thread, then draws it. */
+@Composable
+private fun MediaCell(item: MediaItem, cr: android.content.ContentResolver, onClick: () -> Unit) {
+    val thumb by produceState<ImageBitmap?>(initialValue = null, key1 = item.uri) {
+        value = withContext(Dispatchers.IO) {
+            runCatching { decodeThumb(item.uri, cr) }.getOrNull()
+        }
+    }
+    Box(
+        Modifier
+            .aspectRatio(1f)
+            .background(Color(0xFF2B2823))
+            .clickable { onClick() },
+    ) {
+        val bmp = thumb
+        if (bmp != null) {
+            Image(
+                bmp,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        }
+        if (item.isVideo) {
+            Icon(
+                Icons.Filled.Videocam,
+                contentDescription = "Video",
+                tint = Color.White,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(5.dp)
+                    .size(15.dp),
+            )
+            Text(
+                formatDuration(item.durationMs),
+                color = Color.White,
+                fontSize = 10.5.sp,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(5.dp),
+            )
         }
     }
 }
+
+private fun decodeThumb(uri: Uri, cr: android.content.ContentResolver): ImageBitmap? =
+    runCatching {
+        if (Build.VERSION.SDK_INT >= 28) {
+            ImageDecoder.decodeBitmap(ImageDecoder.createSource(cr, uri)) { d, _, _ ->
+                d.setTargetSampleSize(4)
+            }.asImageBitmap()
+        } else {
+            val raw = cr.openInputStream(uri)?.use { it.readBytes() } ?: return null
+            val opts = BitmapFactory.Options().apply { inSampleSize = 4 }
+            BitmapFactory.decodeByteArray(raw, 0, raw.size, opts)?.asImageBitmap()
+        }
+    }.getOrNull()
 
 private fun formatDuration(ms: Long): String {
     if (ms <= 0) return "0:00"
@@ -344,60 +499,6 @@ private fun AttachTile(icon: ImageVector, tint: Color, label: String, onClick: (
         Spacer(Modifier.height(5.dp))
         Text(label, fontSize = 12.sp, color = Color(0xCCFFFFFF), fontWeight = FontWeight.Medium)
     }
-}
-
-/** Newest photos first, then newest videos — capped for a fast sheet. */
-private fun loadRecentMedia(ctx: android.content.Context): List<RecentMedia> {
-    val out = ArrayList<RecentMedia>()
-
-    fun decode(uri: Uri): ImageBitmap? =
-        runCatching {
-            if (Build.VERSION.SDK_INT >= 28) {
-                ImageDecoder.decodeBitmap(ImageDecoder.createSource(ctx.contentResolver, uri)) { d, _, _ ->
-                    d.setTargetSampleSize(2)
-                }.asImageBitmap()
-            } else {
-                val raw = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
-                android.graphics.BitmapFactory.decodeByteArray(raw, 0, raw.size)?.asImageBitmap()
-            }
-        }.getOrNull()
-
-    runCatching {
-        ctx.contentResolver.query(
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            arrayOf(MediaStore.Images.Media._ID),
-            null,
-            null,
-            "${MediaStore.Images.Media.DATE_ADDED} DESC",
-        )?.use { c ->
-            var n = 0
-            while (c.moveToNext() && n < 9) {
-                val id = c.getLong(0)
-                val uri = Uri.withAppendedPath(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id.toString())
-                out.add(RecentMedia(uri, false, 0, decode(uri)))
-                n++
-            }
-        }
-    }
-    runCatching {
-        ctx.contentResolver.query(
-            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-            arrayOf(MediaStore.Video.Media._ID, MediaStore.Video.Media.DURATION),
-            null,
-            null,
-            "${MediaStore.Video.Media.DATE_ADDED} DESC",
-        )?.use { c ->
-            var n = 0
-            while (c.moveToNext() && n < 5) {
-                val id = c.getLong(0)
-                val dur = c.getLong(1)
-                val uri = Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id.toString())
-                out.add(RecentMedia(uri, true, dur, decode(uri)))
-                n++
-            }
-        }
-    }
-    return out.take(14)
 }
 
 private var cameraUri: Uri? = null

@@ -570,7 +570,21 @@ async function fcmAccessToken(env: Env): Promise<{ token: string; projectId: str
   return { token: data.access_token, projectId: creds.project_id };
 }
 
-async function pushToUser(env: Env, db: D1Database, userId: string, data: Record<string, string>) {
+/**
+ * `note` adds an FCM android NOTIFICATION payload on top of the data:
+ * data-only messages never reach a swiped-away/killed app (the OS won't
+ * spawn the process for them — classic MIUI complaint), but notification
+ * messages are displayed straight by Google Play services, no app process
+ * needed. WhatsApp-style delivery. When the app IS foreground the service
+ * still gets onMessageReceived and renders its own rich UI.
+ */
+async function pushToUser(
+  env: Env,
+  db: D1Database,
+  userId: string,
+  data: Record<string, string>,
+  note?: { title: string; body: string; channel: string },
+) {
   try {
     const auth = await fcmAccessToken(env);
     if (!auth) return;
@@ -593,7 +607,23 @@ async function pushToUser(env: Env, db: D1Database, userId: string, data: Record
                 "content-type": "application/json",
               },
               body: JSON.stringify({
-                message: { token: row.token, android: { priority: "HIGH", ttl: "86400s", data } },
+                message: {
+                  token: row.token,
+                  android: {
+                    priority: "HIGH",
+                    ttl: "86400s",
+                    ...(note
+                      ? {
+                          notification: {
+                            title: note.title,
+                            body: note.body,
+                            channel_id: note.channel,
+                          },
+                        }
+                      : {}),
+                    data,
+                  },
+                },
               }),
             },
           );
@@ -1618,13 +1648,25 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     for (const memberId of members) {
       if (memberId.user_id === uid) continue;
       ctx.waitUntil(
-        pushToUser(env, db, memberId.user_id, {
-          type: "message",
-          convoId: convId,
-          kind: conv.kind,
-          from: me.display_name,
-          body: preview.slice(0, 120),
-        }),
+        pushToUser(
+          env,
+          db,
+          memberId.user_id,
+          {
+            type: "message",
+            convoId: convId,
+            kind: conv.kind,
+            from: me.display_name,
+            body: preview.slice(0, 120),
+            // lands as an intent extra when the system notification is tapped
+            kp_chat: convId,
+          },
+          {
+            title: me.display_name || "KuchuPuchu",
+            body: preview.slice(0, 120) || "New message",
+            channel: "kp_messages_v2",
+          },
+        ),
       );
     }
     return json({ message }, 201);
@@ -2017,13 +2059,23 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       created,
     );
     ctx.waitUntil(
-      pushToUser(env, db, other, {
-        type: "call",
-        callId,
-        kind,
-        from: me.display_name,
-        fromId: uid,
-      }),
+      pushToUser(
+        env,
+        db,
+        other,
+        {
+          type: "call",
+          callId,
+          kind,
+          from: me.display_name,
+          fromId: uid,
+        },
+        {
+          title: me.display_name || "KuchuPuchu",
+          body: kind === "VIDEO" ? "📹 Incoming video call" : "📞 Incoming voice call",
+          channel: "kp_calls_v3",
+        },
+      ),
     );
     const otherUser = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", other);
     return json(

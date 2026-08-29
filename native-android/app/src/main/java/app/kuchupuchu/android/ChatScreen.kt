@@ -1026,26 +1026,6 @@ fun ChatScreen(nav: NavController, convId: String) {
             }
         }
 
-        /* ---------------- sheets ---------------- */
-        if (showAttach) {
-            AttachSheet(
-                onDismiss = { showAttach = false },
-                onImagePicked = ::handleImagePicked,
-                onDocumentPicked = ::handleDocumentPicked,
-                onContactPicked = ::handleContactPicked,
-                onLocationRequested = ::handleLocationRequested,
-            )
-        }
-        if (showStickers) {
-            StickerSheet(
-                onDismiss = { showStickers = false },
-                onSend = {
-                    showStickers = false
-                    sendText(it, "STICKER")
-                },
-            )
-        }
-
         /* ---------------- in-chat search (above the composer so it sits at
            the bottom edge WITH the input bar, never underneath it; the
            composer's imePadding lifts both above the keyboard) ---------------- */
@@ -1062,6 +1042,31 @@ fun ChatScreen(nav: NavController, convId: String) {
                 if (i >= 0) scope.launch { listState.animateScrollToItem(i) }
             },
         )
+
+        /* ---------------- inline panels — glued ABOVE the input bar,
+           never a floating popup ---------------- */
+        if (showAttach) {
+            AttachPanel(
+                onDismiss = { showAttach = false },
+                onImagePicked = ::handleImagePicked,
+                onDocumentPicked = ::handleDocumentPicked,
+                onContactPicked = ::handleContactPicked,
+                onLocationRequested = ::handleLocationRequested,
+            )
+        }
+        if (showStickers) {
+            StickerPanel(
+                onDismiss = { showStickers = false },
+                onSend = {
+                    showStickers = false
+                    sendText(it, "STICKER")
+                },
+            )
+        }
+        androidx.activity.compose.BackHandler(enabled = showAttach || showStickers) {
+            showAttach = false
+            showStickers = false
+        }
 
         /* ---------------- composer (doubles as the recording bar) ---------------- */
         Composer(
@@ -1082,8 +1087,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                     }
                 }
             },
-            onAttach = { haptics.tap(); showAttach = true },
-            onSticker = { haptics.tap(); showStickers = true },
+            onAttach = { haptics.tap(); showStickers = false; showAttach = true },
+            onSticker = { haptics.tap(); showAttach = false; showStickers = true },
             onSend = {
                 haptics.confirm()
                 sendText(input)
