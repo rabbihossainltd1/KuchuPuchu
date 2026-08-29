@@ -1900,17 +1900,24 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       );
     }
     const message = msgFrom((await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", mid))!);
-    // Push: every other member gets a high-priority data message.
+    // Push: every other member gets a high-priority DATA-ONLY message.
     for (const memberId of members) {
       if (memberId.user_id === uid) continue;
       ctx.waitUntil(
-        // PROVEN RELIABLE delivery (reverted the R31 data-first experiment:
-        // MIUI drops data pushes to killed apps, so notifications went
-        // missing). Combined notification+data: Google Play services ALWAYS
-        // posts the system card without waking the app, and the data rides
-        // as tap-intent extras (kp_chat deep link). When the app is OPEN
-        // (foreground), onMessageReceived draws OUR card instead — with
-        // Reply/Like actions. ("from" is a reserved FCM key — hence fromName.)
+        // Data-only on purpose: a combined notification+data payload is
+        // drawn straight into the system tray by Google Play services
+        // whenever the app is backgrounded/killed — onMessageReceived is
+        // SKIPPED entirely in that case, which means our own rich card
+        // (Reply / Like / Mark-as-read actions) never renders. That's the
+        // opposite of what we want: those actions matter MOST when the app
+        // is backgrounded. Data-only always routes through
+        // onMessageReceived -> KpNotify.message() so the actions are always
+        // there. Trade-off: on some OEMs (MIUI/Xiaomi and similar aggressive
+        // battery-savers) a data-only push can be dropped if the app was
+        // force-killed, where a notification-payload push would still have
+        // shown a (button-less) system card. Chosen deliberately — Reply/
+        // Like/Mark-as-read must work everywhere they show up.
+        // ("from" is a reserved FCM key — hence fromName.)
         pushToUser(
           env,
           db,
@@ -1922,11 +1929,6 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             fromName: me.display_name,
             body: preview.slice(0, 120),
             kp_chat: convId,
-          },
-          {
-            title: me.display_name || "KuchuPuchu",
-            body: preview.slice(0, 120) || "New message",
-            channel: "kp_messages_v2",
           },
         ).then((ok) =>
           ok
