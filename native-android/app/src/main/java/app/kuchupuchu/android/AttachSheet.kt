@@ -601,7 +601,7 @@ private fun decodeThumb(uri: Uri, ctx: android.content.Context, isVideo: Boolean
                 d.setTargetSampleSize(4)
             }.asImageBitmap()
         } else {
-            val raw = cr.openInputStream(uri)?.use { it.readBytes() } ?: return null
+            val raw = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
             val opts = BitmapFactory.Options().apply { inSampleSize = 4 }
             BitmapFactory.decodeByteArray(raw, 0, raw.size, opts)?.asImageBitmap()
         }
