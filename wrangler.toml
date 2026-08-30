@@ -18,7 +18,7 @@ class_name = "CallSignal"
 
 [[migrations]]
 tag = "v1-realtime-do"
-new_classes = ["ChatRoom", "CallSignal"]
+new_sqlite_classes = ["ChatRoom", "CallSignal"]
 
 [[d1_databases]]
 binding = "DB"
