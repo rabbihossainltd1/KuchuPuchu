@@ -73,6 +73,13 @@ import org.webrtc.SurfaceViewRenderer
 fun CallGate() {
     val engine = CallEngine.instance ?: return
     val call = engine.active ?: return
+    // The gate only composes while a call exists, so this dispose is exactly
+    // "the call ended" (hangup / decline / remote end / cancel) — play the
+    // user's short end-tone once. Purely audible, renders nothing.
+    val gateCtx = androidx.compose.ui.platform.LocalContext.current
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose { runCatching { CallSounds.playEnd(gateCtx) } }
+    }
 
     LaunchedEffect(call.status, call.kind) {
         MainActivity.current?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)

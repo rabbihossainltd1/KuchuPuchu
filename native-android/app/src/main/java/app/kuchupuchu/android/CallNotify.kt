@@ -38,6 +38,28 @@ object CallSounds {
     private var liftedFrom = -1
 
     /**
+     * Short one-shot "call ended" tone (user-provided kp_call_end). Fired
+     * when the call UI tears down for any reason (hangup, decline, remote
+     * end, cancel). Fire-and-forget on its own thread; the player releases
+     * itself on completion, nothing in the call state machine depends on it.
+     */
+    fun playEnd(ctx: Context) {
+        Thread {
+            runCatching {
+                val attrs = android.media.AudioAttributes.Builder()
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_EVENT)
+                    .build()
+                val player =
+                    MediaPlayer.create(ctx.applicationContext, R.raw.kp_call_end, attrs, 1)
+                        ?: return@runCatching
+                player.setOnCompletionListener { runCatching { it.release() } }
+                runCatching { player.start() }
+            }
+        }.start()
+    }
+
+    /**
      * R23 proved the ALARM stream alone isn't enough: a phone left at ALARM
      * volume 0 stays dead-silent even for alarms — no ring, no ringback.
      * Lift it while a call is audible, restore the user's level after.
