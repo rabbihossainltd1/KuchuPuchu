@@ -438,15 +438,19 @@ async function requireUser(db: D1Database, request: Request) {
   const token = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
   if (!token) fail(401, "Sign in first.", "UNAUTHENTICATED");
   const hash = await sha256Hex(token);
-  const session = await one<{ user_id: string; expires_at: string }>(
+  // Session + user in ONE statement. The two separate SELECTs used to sit on
+  // every authenticated request — two D1 round trips each caller always paid,
+  // which on a poll-every-second chat screen was pure added latency.
+  const row = await one<UserRow & { session_expires_at: string }>(
     db,
-    "SELECT user_id, expires_at FROM sessions WHERE token_hash = ?",
+    `SELECT u.*, s.expires_at AS session_expires_at
+       FROM sessions s JOIN users u ON u.id = s.user_id
+      WHERE s.token_hash = ?`,
     hash,
   );
-  if (!session) fail(401, "Sign in first.", "UNAUTHENTICATED");
-  if (Date.parse(session.expires_at) < Date.now()) fail(401, "Session expired.", "UNAUTHENTICATED");
-  const row = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", session.user_id);
   if (!row) fail(401, "Sign in first.", "UNAUTHENTICATED");
+  if (Date.parse(row.session_expires_at) < Date.now())
+    fail(401, "Session expired.", "UNAUTHENTICATED");
   // Presence used to be written on every authenticated request — including the
   // 800ms chat poll — which turned every read into a D1 write. Only refresh it
   // once the stored value is older than the online window.
@@ -478,20 +482,42 @@ async function membersOf(db: D1Database, convId: string) {
 }
 
 async function requireMember(db: D1Database, convId: string, userId: string) {
-  const conv = await one<{
+  // Conversation + this member's role in ONE statement, and the conversation
+  // columns the hot routes re-fetched afterwards (disappear settings, delete
+  // watermarks) ride along for free. The old shape was a conversations SELECT
+  // plus a members SELECT on every messages GET/POST — extra D1 round trips
+  // on the most-polled route in the app.
+  const row = await one<{
     id: string;
     kind: string;
     title: string | null;
     owner_id: string | null;
-  }>(db, "SELECT id, kind, title, owner_id FROM conversations WHERE id = ?", convId);
-  if (!conv) fail(404, "Conversation not found.");
-  const member = await one<{ user_id: string; role: string }>(
+    hidden_json: string | null;
+    disappear_seconds: number | null;
+    disappear_since: string | null;
+    role: string | null;
+  }>(
     db,
-    "SELECT user_id, role FROM members WHERE conv_id = ? AND user_id = ?",
-    convId,
+    `SELECT c.id, c.kind, c.title, c.owner_id, c.hidden_json,
+            c.disappear_seconds, c.disappear_since, m.role
+       FROM conversations c
+       LEFT JOIN members m ON m.conv_id = c.id AND m.user_id = ?
+      WHERE c.id = ?`,
     userId,
+    convId,
   );
-  if (!member) fail(403, "You are not in this conversation.", "NOT_MEMBER");
+  if (!row) fail(404, "Conversation not found.");
+  if (!row.role) fail(403, "You are not in this conversation.", "NOT_MEMBER");
+  const conv = {
+    id: row.id,
+    kind: row.kind,
+    title: row.title,
+    owner_id: row.owner_id,
+    hidden_json: row.hidden_json,
+    disappear_seconds: row.disappear_seconds,
+    disappear_since: row.disappear_since,
+  };
+  const member = { user_id: userId, role: row.role };
   return { conv, member };
 }
 
@@ -1326,6 +1352,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // Freshness marker: everything the client renders (order fields, unread,
     // preview, mute, hidden-state) folded into one hash. Unchanged marker =>
     // skip the payload entirely on the client.
+    // title + other member's identity are in the hash too: a group rename or
+    // a contact changing their name/avatar must reach marker-gated clients.
+    // (Presence/online is deliberately excluded - it flips too often and
+    // would turn every poll back into a full fetch.)
     const marker = hashSig(
       JSON.stringify([
         list.map((c: Record<string, unknown>) => [
@@ -1334,6 +1364,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           c.lastMessage,
           c.unread,
           c.muted,
+          c.title,
+          c.other ? [(c.other as Record<string, unknown>).displayName, (c.other as Record<string, unknown>).avatarUrl] : null,
         ]),
       ]),
     );
@@ -1584,15 +1616,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     return json({ devices: rows.length, shape, results });
   }
 
-  // Delivery ack for data-only pushes: the app hits this the instant a
-  // message push reaches the process. No ack inside the grace window => the
-  // worker falls back to the system payload card.
+  // Delivery ack for data-only pushes. The R31 payload-fallback table this
+  // used to clean up has had NO writers since the R32 revert, so the per-ack
+  // DELETE was a wasted D1 write on every single push receive — endpoint is
+  // kept (the app still POSTs it) but it no longer touches the database.
   if (path === "/api/push/ack" && method === "POST") {
-    const mid = String(body.mid || "").slice(0, 80);
-    if (mid) {
-      // Received => this user's process is alive; cancel their payload fallback.
-      await run(db, "DELETE FROM push_fallback WHERE mid = ? AND user_id = ?", mid, uid);
-    }
     return json({ ok: true });
   }
 
@@ -1657,13 +1685,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   const msgMatch = path.match(/^\/api\/conversations\/([^/]+)\/messages$/);
   if (msgMatch && method === "GET") {
     const convId = msgMatch[1]!;
-    await requireMember(db, convId, uid);
-    const settings = await one<{
-      disappear_seconds: number | null;
-      disappear_since: string | null;
-    }>(db, "SELECT disappear_seconds, disappear_since FROM conversations WHERE id = ?", convId);
-    const ttl = Number(settings?.disappear_seconds || 0);
-    const disappearSince = settings?.disappear_since || null;
+    // requireMember now carries the disappear settings and the delete
+    // watermarks in its single JOIN — two dedicated SELECTs used to run here
+    // on every poll tick before the page query even started.
+    const { conv } = await requireMember(db, convId, uid);
+    const ttl = Number(conv.disappear_seconds || 0);
+    const disappearSince = conv.disappear_since || null;
     // Nothing expires before the timer was switched on, so history predating it
     // survives. The rows are filtered out of the response below rather than
     // relying on the DELETE having run, and the DELETE itself is throttled: it
@@ -1686,7 +1713,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // Messages the member deleted for themselves stay deleted. Without this a
     // chat that reappeared after a new message came back with its whole
     // history, which is not what "delete chat" means.
-    const mark = watermarkFor(parseJson<HiddenMap>(await hiddenJson(db, convId), {}), uid);
+    const mark = watermarkFor(parseJson<HiddenMap>(conv.hidden_json ?? "{}", {}), uid);
     const sinceClause = mark ? (mark.row >= 0 ? "AND rowid > ?" : "AND created_at > ?") : "";
     const sinceArgs = mark ? [mark.row >= 0 ? mark.row : mark.at] : [];
     // Live means "not expired yet" OR "sent before the timer was armed". The
@@ -1726,15 +1753,17 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           ...sinceArgs,
           ...liveArgs,
         );
-    const senderIds = [...new Set(rows.map((r) => r.sender_id).filter(Boolean))];
+    // Sender names in ONE round trip (chunked IN), not one SELECT per distinct
+    // sender. A 50-message group page used to issue up to 50 extra D1 round
+    // trips — every one of them edge→primary latency on the caller.
     const names = new Map<string, string>();
-    for (const sid of senderIds) {
-      const u = await one<{ display_name: string }>(
+    for (const group of chunked([...new Set(rows.map((r) => r.sender_id).filter(Boolean))])) {
+      const sent = await all<{ id: string; display_name: string }>(
         db,
-        "SELECT display_name FROM users WHERE id = ?",
-        sid,
+        `SELECT id, display_name FROM users WHERE id IN (${inSql(group.length)})`,
+        ...group,
       );
-      if (u) names.set(sid, u.display_name);
+      for (const u of sent) names.set(u.id, u.display_name);
     }
     const items = rows
       .reverse()
@@ -1789,10 +1818,22 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const convId = msgMatch[1]!;
     const { conv } = await requireMember(db, convId, uid);
     const members = await membersOf(db, convId);
-    for (const memberId of members) {
-      if (memberId.user_id !== uid && (await blockedBetween(db, uid, memberId.user_id))) {
-        fail(403, "You can't reach this player.", "BLOCKED");
-      }
+    // Block check for the whole member list in ONE statement (either
+    // direction), instead of a blockedBetween() round trip per member.
+    const others = members.map((m) => m.user_id).filter((mid) => mid !== uid);
+    for (const group of chunked(others)) {
+      const hit = await one(
+        db,
+        `SELECT owner_id FROM blocks
+          WHERE (owner_id = ? AND target_id IN (${inSql(group.length)}))
+             OR (target_id = ? AND owner_id IN (${inSql(group.length)}))
+          LIMIT 1`,
+        uid,
+        ...group,
+        uid,
+        ...group,
+      );
+      if (hit) fail(403, "You can't reach this player.", "BLOCKED");
     }
     const text = String(body.body || "")
       .trim()
@@ -1912,16 +1953,27 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       `$."${uid}"`,
       convId,
     );
-    for (const memberId of members) {
-      if (memberId.user_id === uid) continue;
-      await run(
-        db,
-        "UPDATE members SET unread = unread + 1 WHERE conv_id = ? AND user_id = ?",
-        convId,
-        memberId.user_id,
-      );
-    }
-    const message = msgFrom((await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", mid))!);
+    // One statement bumps unread for every other member — the per-member
+    // UPDATE loop was one D1 round trip per recipient on every send.
+    await run(
+      db,
+      "UPDATE members SET unread = unread + 1 WHERE conv_id = ? AND user_id != ?",
+      convId,
+      uid,
+    );
+    // The response row is exactly what we just wrote (a fresh insert has no
+    // delivered_at), so re-SELECTing it cost one more round trip per send.
+    const message = msgFrom({
+      id: mid,
+      conv_id: convId,
+      sender_id: uid,
+      kind: imageData ? "IMAGE" : fileKey ? "FILE" : kind,
+      body: text,
+      media: imageData ?? fileKey ?? null,
+      meta_json: meta,
+      created_at: created,
+      delivered_at: null,
+    });
     // Push: every other member gets a high-priority DATA-ONLY message.
     for (const memberId of members) {
       if (memberId.user_id === uid) continue;

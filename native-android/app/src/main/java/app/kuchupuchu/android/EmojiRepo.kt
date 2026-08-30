@@ -43,7 +43,18 @@ object EmojiRepo {
     private val lock = Any()
     private var emojis: List<Emoji> = emptyList()
     private val byId = HashMap<String, Emoji>()
+
+    // Pre-indexed search tokens (id parts, category, tag words) -> emojis.
+    // Search used to full-scan + substring-filter the whole pack on every
+    // keystroke; the index answers exact token hits instantly and only rare
+    // partial prefixes fall back to the scan.
+    private val tokenIndex = HashMap<String, MutableList<Emoji>>()
     private var loaded = false
+
+    private fun indexToken(token: String, e: Emoji) {
+        if (token.isBlank()) return
+        tokenIndex.getOrPut(token) { ArrayList() }.add(e)
+    }
 
     private val mem = object : LruCache<String, Bitmap>(16 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount / 1024
@@ -74,7 +85,17 @@ object EmojiRepo {
                     }
                     emojis = list
                     byId.clear()
-                    list.forEach { byId[it.id] = it }
+                    tokenIndex.clear()
+                    for (e in list) {
+                        byId[e.id] = e
+                        e.id.split('_').forEach { part -> indexToken(part.lowercase(), e) }
+                        indexToken(e.id.lowercase(), e)
+                        indexToken(e.category.lowercase(), e)
+                        for (tag in e.tags) {
+                            indexToken(tag.lowercase(), e)
+                            tag.lowercase().split(' ').forEach { word -> indexToken(word, e) }
+                        }
+                    }
                 }
             } catch (_: Exception) {
                 // Broken/missing index: keep empty registry, app still works.
@@ -100,12 +121,29 @@ object EmojiRepo {
     fun inCategory(ctx: Context, category: String): List<Emoji> = all(ctx).filter { it.category == category }
 
     fun search(ctx: Context, query: String): List<Emoji> {
-        val q = query.trim().lowercase()
-        if (q.isEmpty()) return all(ctx)
-        return all(ctx).filter {
-            it.id.lowercase().contains(q) || it.tags.any { t -> t.lowercase().contains(q) } ||
-                it.category.lowercase().contains(q)
+        val tokens = query.trim().lowercase().split(' ').filter { it.isNotBlank() }
+        if (tokens.isEmpty()) return all(ctx)
+        ensure(ctx)
+        // Every token must match (AND). Exact token hits come from the index;
+        // a token with no exact entry falls back to a prefix scan over the
+        // known tokens, then over the pack itself (covers partial words).
+        var candidates: Set<Emoji>? = null
+        for (token in tokens) {
+            var hits = tokenIndex[token]?.toSet()
+            if (hits == null) {
+                hits = tokenIndex.entries.filter { it.key.startsWith(token) }.flatMap { it.value }.toSet()
+            }
+            if (hits == null || hits.isEmpty()) {
+                hits = emojis.filter {
+                    it.id.lowercase().contains(token) || it.tags.any { t -> t.lowercase().contains(token) } ||
+                        it.category.lowercase().contains(token)
+                }.toSet()
+            }
+            candidates = candidates?.intersect(hits) ?: hits
+            if (candidates.isEmpty()) return emptyList()
         }
+        val order = emojis
+        return candidates!!.sortedBy { order.indexOf(it) }
     }
 
     /** Decode with LruCache; returns null for unknown ids or bad assets. */

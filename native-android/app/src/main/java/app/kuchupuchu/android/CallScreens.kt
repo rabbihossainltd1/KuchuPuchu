@@ -76,9 +76,14 @@ fun CallGate() {
     // The gate only composes while a call exists, so this dispose is exactly
     // "the call ended" (hangup / decline / remote end / cancel) — play the
     // user's short end-tone once. Purely audible, renders nothing.
+    // GUARD: a mid-call activity recreate (split-screen, dark-mode toggle,
+    // locale change) also disposes this composition WITHOUT ending the call —
+    // engine.active is still set then, so only speak when it's really over.
     val gateCtx = androidx.compose.ui.platform.LocalContext.current
     androidx.compose.runtime.DisposableEffect(Unit) {
-        onDispose { runCatching { CallSounds.playEnd(gateCtx) } }
+        onDispose {
+            if (engine.active == null) runCatching { CallSounds.playEnd(gateCtx) }
+        }
     }
 
     LaunchedEffect(call.status, call.kind) {

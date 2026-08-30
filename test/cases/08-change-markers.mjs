@@ -102,6 +102,36 @@ async function mk() {
     me.token,
   );
   check("list -> newest marker also stable", r6.json.unchanged === true);
+
+  // identity fields (group title / other member's name+avatar) must break the
+  // marker too - marker-gated clients would otherwise keep a stale title.
+  const me2 = await k.call("PATCH", "/api/me", { displayName: "Mark Renamed" }, me.token);
+  check("rename -> 2xx", me2.status < 300);
+  // my own rename does NOT change how the OTHER user renders in MY list
+  const rOwn = await k.call(
+    "GET",
+    `/api/conversations?marker=${encodeURIComponent(r5.json.marker)}`,
+    undefined,
+    me.token,
+  );
+  check("list -> own rename keeps own marker", rOwn.json.unchanged === true);
+  // the OTHER member renaming must break MY marker (my list shows their name)
+  const o2 = await k.call("PATCH", "/api/me", { displayName: "Other Renamed" }, o.token);
+  check("other rename -> 2xx", o2.status < 300);
+  const r7 = await k.call(
+    "GET",
+    `/api/conversations?marker=${encodeURIComponent(r5.json.marker)}`,
+    undefined,
+    me.token,
+  );
+  check("list -> other rename breaks marker", r7.json.unchanged !== true);
+  const r8 = await k.call(
+    "GET",
+    `/api/conversations?marker=${encodeURIComponent(r7.json.marker)}`,
+    undefined,
+    me.token,
+  );
+  check("list -> post-rename marker stable", r8.json.unchanged === true);
 }
 
 // ---- marker: messages page ----

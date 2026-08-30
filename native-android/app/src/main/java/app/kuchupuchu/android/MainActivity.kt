@@ -83,6 +83,10 @@ class MainActivity : ComponentActivity() {
                 }
             }.start()
         }
+        // Pre-warm the SoundPool so the first send/receive tick never hits the
+        // async-load race (play() on a not-yet-loaded sample is silently
+        // dropped - the first message after a cold start used to be mute).
+        Thread { runCatching { KpSounds.ensure(this) } }.start()
 
         // Call engine: polls active calls, rings, drives the call screens.
         if (CallEngine.instance == null) {
