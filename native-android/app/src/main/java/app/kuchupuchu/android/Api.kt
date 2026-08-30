@@ -46,9 +46,12 @@ object Api {
             .readTimeout(45, TimeUnit.SECONDS)
             .writeTimeout(45, TimeUnit.SECONDS)
             .connectionPool(ConnectionPool(8, 5, TimeUnit.MINUTES))
+            // OkHttp's built-in retry safely owns the exchange lifecycle.
+            // A custom interceptor previously called chain.proceed() again
+            // after an I/O failure; OkHttp can still have that exchange open,
+            // causing a fatal "previous response is still open" exception.
             .retryOnConnectionFailure(true)
             .addInterceptor(AuthInterceptor())
-            .addInterceptor(GetRetryInterceptor())
             .build()
     }
 
@@ -220,26 +223,6 @@ object Api {
         }
     }
 
-    /** Idempotent GET only — POST retries can duplicate messages. */
-    private class GetRetryInterceptor : Interceptor {
-        override fun intercept(chain: Interceptor.Chain): Response {
-            val req = chain.request()
-            if (req.method != "GET") return chain.proceed(req)
-            var lastIo: IOException? = null
-            repeat(3) { attempt ->
-                try {
-                    val resp = chain.proceed(req)
-                    if (resp.isSuccessful || resp.code in 400..499) return resp
-                    resp.close()
-                } catch (e: IOException) {
-                    lastIo = e
-                }
-                if (attempt < 2) Thread.sleep(200L * (1 shl attempt))
-            }
-            lastIo?.let { throw it }
-            return chain.proceed(req)
-        }
-    }
 }
 
 
