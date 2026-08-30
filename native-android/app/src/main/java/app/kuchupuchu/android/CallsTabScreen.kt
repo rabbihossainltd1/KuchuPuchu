@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallMade
 import androidx.compose.material.icons.filled.CallReceived
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -77,7 +78,11 @@ fun CallsScreen(nav: NavController) {
     Column(Modifier.fillMaxSize().background(Cream)) {
         // No "Calls" heading here: this screen only ever appears inside the
         // Calls tab, which is already labelled right above it.
-        if (calls.isEmpty() && !loading) {
+        if (calls.isEmpty() && loading) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = Gold)
+            }
+        } else if (calls.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 EmptyState(
                     icon = Icons.Filled.Call,
