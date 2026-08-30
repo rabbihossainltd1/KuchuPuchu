@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -74,9 +75,11 @@ fun LoginScreen(onAuthed: () -> Unit) {
             .fillMaxSize()
             .background(Cream)
             .statusBarsPadding()
-            .navigationBarsPadding()
-            .verticalScroll(scrollState)
+            // imePadding BEFORE verticalScroll: in edge-to-edge mode the IME
+            // inset must shrink the viewport (so the scrollable area fits above
+            // the keyboard), not pad the content inside the scroll area.
             .imePadding()
+            .verticalScroll(scrollState)
             .padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
