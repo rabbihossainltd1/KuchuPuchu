@@ -368,7 +368,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // read (the server's MIN()/all-read rule). One member's read
                 // frame must not flip them, so a group resyncs instead.
                 "read" ->
-                    if (ev.optString("conversationId") == convId) {
+                    if (
+                        ev.optString("conversationId") == convId &&
+                        ev.optString("userId") != Store.myId()
+                    ) {
                         if (conv.value?.optBoolean("isGroup") == true) refreshMessages()
                         else
                             ev.optString("at").takeIf { it.isNotBlank() }?.let { at ->
@@ -376,7 +379,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                             }
                     }
                 "typing" ->
-                    if (ev.optString("conversationId") == convId) {
+                    if (
+                        ev.optString("conversationId") == convId &&
+                        ev.optString("userId") != Store.myId()
+                    ) {
                         runCatching { java.time.Instant.parse(ev.optString("at")).toEpochMilli() }
                             .getOrNull()
                             ?.let { ms -> if (ms > 0) otherTypingAt = ms }
