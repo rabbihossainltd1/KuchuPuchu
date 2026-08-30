@@ -1385,11 +1385,12 @@ private fun Composer(
             Column(
                 Modifier
                     .weight(1f)
+                    .heightIn(min = 42.dp)
                     .clip(RoundedCornerShape(20.dp))
                     .background(Card)
                     .padding(horizontal = 2.dp, vertical = 2.dp),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 38.dp)) {
                     // WhatsApp order: stickers LEFT, attach RIGHT.
                     IconButton(
                         onClick = {
@@ -1400,7 +1401,7 @@ private fun Composer(
                     ) {
                         Icon(Icons.Filled.Mood, "Stickers", tint = GoldDeep, modifier = Modifier.size(20.dp))
                     }
-                    Box(Modifier.weight(1f)) {
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                         if (input.isEmpty()) {
                             // Same vertical padding as the BasicTextField below,
                             // otherwise the hint floats above where the typed
@@ -1420,10 +1421,17 @@ private fun Composer(
                         BasicTextField(
                             value = input,
                             onValueChange = onInput,
-                            textStyle = TextStyle(color = Ink, fontSize = 14.sp),
+                            textStyle = TextStyle(color = Ink, fontSize = 14.sp, lineHeight = 20.sp),
                             maxLines = 4,
                             interactionSource = inputInteraction,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                            // min height pinned to the placeholder's own line
+                            // height so the bar can never shrink the instant
+                            // you type the first character — before this,
+                            // Text()'s and BasicTextField()'s empty-vs-typed
+                            // line metrics differed by a hair and the whole
+                            // composer visibly "chepe" (squeezed) on the
+                            // empty -> typing transition.
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 20.dp).padding(vertical = 6.dp),
                         )
                     }
                     IconButton(
@@ -1478,7 +1486,12 @@ private fun Composer(
                     .size(42.dp)
                     .pressScale(sendInteraction)
                     .clip(CircleShape)
-                    .background(goldFill())
+                    // Flat solid fill — matches the New Chat FAB / Status
+                    // pencil & camera FABs elsewhere in the app. The old
+                    // gradient (goldFill()) gave this one button alone a
+                    // glossy "3D" look that was inconsistent with the rest
+                    // of the app's flat button language.
+                    .background(Gold)
                     .clickable(
                         interactionSource = sendInteraction,
                         indication = null,
@@ -1531,7 +1544,8 @@ private fun HoldMicButton(
             .size(42.dp)
             .offset { IntOffset((if (recording) animX else 0f).roundToInt(), 0) }
             .clip(CircleShape)
-            .background(if (cancelArmed) Brush.linearGradient(listOf(Color.White, Color.White)) else goldFill())
+            // Flat solid fill, same reasoning as the send button above.
+            .background(if (cancelArmed) Color.White else Gold)
             .border(1.dp, if (cancelArmed) Red else Color.Transparent, CircleShape)
             .pointerInput(Unit) {
                 awaitEachGesture {

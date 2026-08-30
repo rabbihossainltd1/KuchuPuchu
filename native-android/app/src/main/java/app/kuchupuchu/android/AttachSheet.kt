@@ -128,20 +128,50 @@ fun AttachPanel(
     val scope = rememberCoroutineScope()
     var canRead by remember { mutableStateOf(false) }
     var pool by remember { mutableStateOf(listOf<MediaItem>()) }
+    var fullscreen by remember { mutableStateOf(false) }
     var foldersOpen by remember { mutableStateOf(false) }
     var folder by remember { mutableStateOf<String?>(null) }
-    var fullscreen by remember { mutableStateOf(false) }
     // Swiping up IS the expand: fullscreen automatically reveals the folder
     // chips (Camera / Screenshots / Download…) — no chevron tap needed.
-    androidx.compose.runtime.LaunchedEffect(fullscreen) {
-        foldersOpen = fullscreen
-        if (!fullscreen) folder = null
+    // All three flags are set TOGETHER, synchronously, from one place —
+    // they used to be linked only via a LaunchedEffect(fullscreen), which
+    // runs a frame AFTER the state change instead of atomically with it.
+    // That gap was the "swipe down doesn't go back to normal until you
+    // manually shrink folders first" bug: if the chevron had opened/closed
+    // folders independently, swiping down flipped `fullscreen` immediately
+    // but `foldersOpen` only caught up on the NEXT frame, so the panel
+    // briefly (or visibly) rendered the wrong layout instead of always
+    // collapsing folders in the same beat as the panel shrinking.
+    fun setFullscreen(value: Boolean) {
+        fullscreen = value
+        foldersOpen = value
+        if (!value) folder = null
     }
     val dragTotal = remember { mutableStateOf(0f) }
+    // Actively dragging: track height directly (dragTotal), no animation
+    // spec in the loop — animateDpAsState()'ing a value that's already
+    // being driven live by finger position forces the whole panel (and the
+    // LazyVerticalGrid inside it) to re-measure on EVERY settle frame on
+    // top of every drag frame, which is what read as "swipe lag". Only the
+    // release -> settle transition gets an actual animation.
+    var isDragging by remember { mutableStateOf(false) }
 
     val screenH = LocalConfiguration.current.screenHeightDp.dp
-    val targetH = if (fullscreen) screenH - 132.dp else screenH * 0.40f
-    val panelH by animateDpAsState(targetH, tween(260), label = "attachPanelH")
+    val collapsedH = screenH * 0.40f
+    val expandedH = screenH - 132.dp
+    val targetH = if (fullscreen) expandedH else collapsedH
+    val settledH by animateDpAsState(targetH, tween(220), label = "attachPanelH")
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val panelH =
+        if (isDragging) {
+            with(density) {
+                (collapsedH.toPx() - dragTotal.value)
+                    .coerceIn(collapsedH.toPx().coerceAtMost(expandedH.toPx()), expandedH.toPx().coerceAtLeast(collapsedH.toPx()))
+                    .toDp()
+            }
+        } else {
+            settledH
+        }
 
     fun hasRead(): Boolean =
         if (Build.VERSION.SDK_INT >= 33) {
@@ -232,14 +262,20 @@ fun AttachPanel(
                 .fillMaxWidth()
                 .clickable {
                     haptics.tap()
-                    fullscreen = !fullscreen
+                    setFullscreen(!fullscreen)
                 }
                 .pointerInput("expandDrag") {
                     detectVerticalDragGestures(
+                        onDragStart = { isDragging = true },
                         onDragEnd = {
-                            if (dragTotal.value < -70f) fullscreen = true
-                            else if (dragTotal.value > 70f) fullscreen = false
+                            if (dragTotal.value < -70f) setFullscreen(true)
+                            else if (dragTotal.value > 70f) setFullscreen(false)
                             dragTotal.value = 0f
+                            isDragging = false
+                        },
+                        onDragCancel = {
+                            dragTotal.value = 0f
+                            isDragging = false
                         },
                     ) { _, amount ->
                         dragTotal.value += amount
@@ -422,14 +458,14 @@ fun AttachPanel(
                     if (source == NestedScrollSource.Drag) {
                         if (available.y < -30f && !fullscreen) {
                             haptics.tap()
-                            fullscreen = true
+                            setFullscreen(true)
                         }
                         val atTop = gridState.firstVisibleItemIndex == 0 && gridState.firstVisibleItemScrollOffset == 0
                         if (fullscreen && atTop && available.y > 0f) {
                             dragAccum.value += available.y
                             if (dragAccum.value > 60f) {
                                 haptics.tap()
-                                fullscreen = false
+                                setFullscreen(false)
                                 dragAccum.value = 0f
                             }
                         } else if (available.y <= 0f) {
@@ -445,7 +481,7 @@ fun AttachPanel(
                     source: NestedScrollSource,
                 ): Offset {
                     if (source == NestedScrollSource.Drag && available.y > 60f && fullscreen) {
-                        fullscreen = false
+                        setFullscreen(false)
                         dragAccum.value = 0f
                     }
                     return Offset.Zero
@@ -468,7 +504,7 @@ fun AttachPanel(
             // selection that scan-per-cell was a real source of the "laggy
             // swipe" feel (the grid recomposes every drag frame while the
             // panel height is animating).
-            val selIndex = remember(sel.toList()) {
+            val selIndex = remember(sel.size) {
                 val map = HashMap<Uri, Int>()
                 sel.forEachIndexed { i, it -> map[it.uri] = i }
                 map
