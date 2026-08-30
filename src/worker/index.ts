@@ -1365,7 +1365,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           c.unread,
           c.muted,
           c.title,
-          c.other ? [(c.other as Record<string, unknown>).displayName, (c.other as Record<string, unknown>).avatarUrl] : null,
+          c.other
+            ? [
+                (c.other as Record<string, unknown>).displayName,
+                (c.other as Record<string, unknown>).avatarUrl,
+              ]
+            : null,
         ]),
       ]),
     );
