@@ -635,13 +635,15 @@ private fun MediaCell(
     selectIndex: Int,
     onToggle: () -> Unit,
 ) {
-    val thumb by produceState<ImageBitmap?>(initialValue = null, key1 = item.uri) {
-        value = withContext(Dispatchers.IO) {
-            // Scrolling a long grid evicts cells; re-entering them used to
-            // re-decode the SAME thumbnail from disk. A small LRU keeps the
-            // last screenful of thumbs warm.
-            ThumbCache.get(item.uri) ?: ThumbDecodeGate.decode(item.uri, ctx, item.isVideo)
-                ?.also { ThumbCache.put(item.uri, it) }
+    // Seed synchronously from the process LRU. LazyGrid disposes off-screen
+    // cells; starting every re-entry at null showed a placeholder frame even
+    // on a 100% cache hit, which looked like repeated thumbnail loading.
+    val thumb by produceState<ImageBitmap?>(initialValue = ThumbCache.get(item.uri), key1 = item.uri) {
+        if (value == null) {
+            value = withContext(Dispatchers.IO) {
+                ThumbCache.get(item.uri) ?: ThumbDecodeGate.decode(item.uri, ctx, item.isVideo)
+                    ?.also { ThumbCache.put(item.uri, it) }
+            }
         }
     }
     Box(

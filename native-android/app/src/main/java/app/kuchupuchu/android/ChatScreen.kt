@@ -2214,11 +2214,16 @@ private fun ImageBubble(m: JSONObject, mine: Boolean) {
                 contentScale = androidx.compose.ui.layout.ContentScale.Fit,
             )
         } else {
-            coil.compose.AsyncImage(
-                model = coil.request.ImageRequest.Builder(LocalContext.current)
+            val imageContext = LocalContext.current
+            val imageRequest = remember(url) {
+                coil.request.ImageRequest.Builder(imageContext)
                     .data(if (url.startsWith("http")) url else Api.BASE + url)
-                    .crossfade(false).size(720)
-                    .build(),
+                    .crossfade(false)
+                    .size(720)
+                    .build()
+            }
+            coil.compose.AsyncImage(
+                model = imageRequest,
                 contentDescription = "Photo",
                 modifier = Modifier.fillMaxSize(),
                 contentScale = androidx.compose.ui.layout.ContentScale.Fit,
