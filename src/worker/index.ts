@@ -3167,8 +3167,20 @@ const MEMBER_COLS = "conv_id, user_id, role, muted, unread, last_read_at";
 /** Placeholder list for an IN(...) clause. */
 const inSql = (n: number) => Array.from({ length: n }, () => "?").join(",");
 
-/** Keeps an IN(...) clause inside SQLite's bound-parameter limit. */
-function chunked<T>(items: T[], size = 200): T[][] {
+/**
+ * Keeps an IN(...) clause inside D1's bound-parameter limit.
+ *
+ * D1 enforces a hard cap of 100 bound parameters per statement (SQLite's
+ * default is 999, but D1 lowered it). Two-sided block-check queries use
+ * 2 + 2n binds, so n=44 is the safe ceiling (2 + 2*44 = 90, leaving
+ * 10 slots of headroom). One-sided IN queries can use up to ~90.
+ *
+ * The old default of 200 meant a group with 51+ members or a user with
+ * 101+ conversations hit `7500 too many SQL variables` on every hot
+ * route — and CI never caught it because the test harness uses
+ * better-sqlite3 (limit 999).
+ */
+function chunked<T>(items: T[], size = 44): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
   return out;
