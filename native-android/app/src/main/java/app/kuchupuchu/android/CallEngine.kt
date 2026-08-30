@@ -84,6 +84,9 @@ class CallEngine(private val app: Application) {
     var minimized by mutableStateOf(false)
         private set
 
+    fun minimizeCall() { minimized = true }
+    fun restoreCallUi() { minimized = false }
+
     var speaker by mutableStateOf(false)
 
     /** Current audio output — drives the voice-screen button's icon/label. */

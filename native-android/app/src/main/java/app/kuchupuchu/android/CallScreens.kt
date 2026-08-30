@@ -77,7 +77,7 @@ fun CallGate() {
     androidx.activity.compose.BackHandler {
         // Minimize only the call overlay; keep MainActivity and the underlying
         // app navigation alive while CallService's ongoing notification stays.
-        engine.minimized = true
+        engine.minimizeCall()
     }
     // The gate only composes while a call exists, so this dispose is exactly
     // "the call ended" (hangup / decline / remote end / cancel) — play the

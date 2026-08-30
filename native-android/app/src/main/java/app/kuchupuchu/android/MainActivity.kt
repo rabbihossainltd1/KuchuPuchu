@@ -148,7 +148,7 @@ class MainActivity : ComponentActivity() {
         if (intent == null) return
         // Tapping the ongoing notification restores a previously minimized
         // Compose call overlay without recreating the call/session.
-        CallEngine.instance?.minimized = false
+        CallEngine.instance?.restoreCallUi()
         if (intent.getBooleanExtra("kp_accept", false)) {
             CallEngine.instance?.let {
                 CallEngine.suppressIncomingFor(15_000)
