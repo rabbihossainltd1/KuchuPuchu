@@ -2,6 +2,8 @@ package app.kuchupuchu.android
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -32,9 +34,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -51,6 +55,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
     // onAuthed flips Store.authed via KpApp
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    val focusManager: FocusManager = LocalFocusManager.current
     var mode by remember { mutableStateOf("login") }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -74,10 +79,19 @@ fun LoginScreen(onAuthed: () -> Unit) {
             .fillMaxSize()
             .background(Cream)
             .statusBarsPadding()
-            .navigationBarsPadding()
-            .verticalScroll(scrollState)
+            // imePadding BEFORE verticalScroll: in edge-to-edge mode the IME
+            // inset must shrink the viewport (so the scrollable area fits above
+            // the keyboard), not pad the content inside the scroll area.
+            // navigationBarsPadding is dropped here because imePadding already
+            // handles the bottom inset when the keyboard is visible, and
+            // edge-to-edge provides its own system bar insets.
             .imePadding()
-            .padding(24.dp),
+            .verticalScroll(scrollState)
+            .padding(24.dp)
+            // Tap-outside-dismiss: tapping anywhere outside a text field
+            // clears focus and hides the keyboard.
+            .clickable(interactionSource = remember { MutableInteractionSource() },
+                       indication = null) { focusManager.clearFocus() },
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
