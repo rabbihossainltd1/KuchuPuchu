@@ -41,14 +41,6 @@ class MainActivity : ComponentActivity() {
             }
             prevHandler?.uncaughtException(t, e)
         }
-        runCatching {
-            val f = java.io.File(filesDir, "kp_crash.txt")
-            val text = if (f.exists()) f.readText() else ""
-            if (text.isNotBlank()) {
-                android.widget.Toast.makeText(this, "Last crash: ${text.take(200)}", android.widget.Toast.LENGTH_LONG).show()
-                f.delete()
-            }
-        }
         // Edge-to-edge on every API level, so the Compose-side insets are the
         // single source of truth. (targetSdk 35 forces this on Android 15+
         // anyway — setDecorFitsSystemWindows(true) and statusBarColor are
@@ -56,6 +48,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         current = this
         Api.loadToken(this)
+        reportPreviousCrash()
         Coil.setImageLoader(
             ImageLoader.Builder(applicationContext)
                 .okHttpClient { Api.http }
@@ -103,6 +96,38 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * Uploads the previous process' complete uncaught-exception report while
+     * the auth token is available. Keep the file until the worker accepts it:
+     * this makes the diagnostic reliable even with a short-lived crash loop.
+     */
+    private fun reportPreviousCrash() {
+        val file = java.io.File(filesDir, "kp_crash.txt")
+        val text = runCatching { if (file.exists()) file.readText() else "" }.getOrDefault("")
+        if (text.isBlank()) return
+
+        // The toast remains a quick visual signal, while clientlog preserves
+        // the complete message and stack (Android 12 truncates long toasts).
+        android.widget.Toast.makeText(
+            this,
+            "Previous crash captured; uploading diagnostics",
+            android.widget.Toast.LENGTH_LONG,
+        ).show()
+        Thread {
+            val uploaded =
+                runCatching {
+                    Api.post(
+                        "/api/debug/clientlog",
+                        org.json.JSONObject()
+                            .put("stage", "crash")
+                            .put("detail", text.take(12_000)),
+                    )
+                    true
+                }.getOrDefault(false)
+            if (uploaded) runCatching { file.delete() }
+        }.start()
     }
 
     override fun onNewIntent(intent: Intent) {
