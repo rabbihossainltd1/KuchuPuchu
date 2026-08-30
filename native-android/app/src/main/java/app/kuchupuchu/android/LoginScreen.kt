@@ -5,9 +5,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -21,6 +23,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -53,6 +57,17 @@ fun LoginScreen(onAuthed: () -> Unit) {
     var displayName by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
+
+    // Auto-scroll to bottom when keyboard appears so the submit button stays visible.
+    val imeVisible = WindowInsets.isImeVisible
+    LaunchedEffect(imeVisible) {
+        if (imeVisible) {
+            // Small delay to let the keyboard animation settle, then scroll to bottom.
+            kotlinx.coroutines.delay(300)
+            scrollState.animateScrollTo(scrollState.maxValue)
+        }
+    }
 
     Column(
         Modifier
@@ -60,7 +75,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
             .background(Cream)
             .statusBarsPadding()
             .navigationBarsPadding()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
             .imePadding()
             .padding(24.dp),
         verticalArrangement = Arrangement.Center,
@@ -147,14 +162,18 @@ fun LoginScreen(onAuthed: () -> Unit) {
                         val user = data.optJSONObject("user")
                             ?: withContext(Dispatchers.IO) { Api.get("/api/me").optJSONObject("user") }
                         Store.saveMe(user ?: JSONObject())
-                        Store.authed.value = true
+                        // Navigate first, then register push in background.
+                        // Setting authed.value removes this composable from the tree,
+                        // so all context-dependent work must finish BEFORE that flip.
+                        onAuthed()
                         // Register for push now that we're signed in.
+                        // Use applicationContext to avoid referencing a stale composable scope.
+                        val appCtx = ctx.applicationContext
                         withContext(Dispatchers.IO) {
                             runCatching {
-                                if (KpPush.tryInit(ctx)) KpPush.registerToken(ctx)
+                                if (KpPush.tryInit(appCtx)) KpPush.registerToken(appCtx)
                             }
                         }
-                        onAuthed()
                     } catch (e: Exception) {
                         error = e.message ?: "Could not sign in."
                     } finally {
