@@ -88,6 +88,8 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 /** One device media item for the attach panel grid. */
@@ -202,6 +204,21 @@ fun AttachPanel(
         if (!canRead) return@LaunchedEffect
         pool = withContext(Dispatchers.IO) {
             runCatching { loadMediaPool(ctx) }.getOrDefault(emptyList())
+        }
+    }
+
+    // Warm the first screenful while the user is still looking at the action
+    // row. DecodeGate keeps this prefetch and visible-cell requests within the
+    // same small CPU budget, avoiding a 12-20 decoder burst during a fling.
+    LaunchedEffect(pool) {
+        withContext(Dispatchers.IO) {
+            pool.take(24).forEach { item ->
+                if (ThumbCache.get(item.uri) == null) {
+                    ThumbDecodeGate.decode(item.uri, ctx, item.isVideo)?.also {
+                        ThumbCache.put(item.uri, it)
+                    }
+                }
+            }
         }
     }
 
@@ -623,7 +640,7 @@ private fun MediaCell(
             // Scrolling a long grid evicts cells; re-entering them used to
             // re-decode the SAME thumbnail from disk. A small LRU keeps the
             // last screenful of thumbs warm.
-            ThumbCache.get(item.uri) ?: runCatching { decodeThumb(item.uri, ctx, item.isVideo) }.getOrNull()
+            ThumbCache.get(item.uri) ?: ThumbDecodeGate.decode(item.uri, ctx, item.isVideo)
                 ?.also { ThumbCache.put(item.uri, it) }
         }
     }
@@ -682,6 +699,22 @@ private fun MediaCell(
             }
         }
     }
+}
+
+/**
+ * Bound image work to four decoders total and one video frame extractor.
+ * Unbounded per-cell IO coroutines saturated mid-range CPUs during flings and
+ * every completed bitmap triggered another visible-grid recomposition.
+ */
+private object ThumbDecodeGate {
+    private val all = Semaphore(4)
+    private val video = Semaphore(1)
+
+    suspend fun decode(uri: Uri, ctx: android.content.Context, isVideo: Boolean): ImageBitmap? =
+        all.withPermit {
+            if (isVideo) video.withPermit { decodeThumb(uri, ctx, true) }
+            else decodeThumb(uri, ctx, false)
+        }
 }
 
 /** Grid-cell thumbnail LRU (~24 MB of bitmaps) so grid re-entry doesn't re-decode. */
