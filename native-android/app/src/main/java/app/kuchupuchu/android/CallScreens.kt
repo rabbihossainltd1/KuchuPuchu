@@ -73,6 +73,12 @@ import org.webrtc.SurfaceViewRenderer
 fun CallGate() {
     val engine = CallEngine.instance ?: return
     val call = engine.active ?: return
+    if (engine.minimized) return
+    androidx.activity.compose.BackHandler {
+        // Minimize only the call overlay; keep MainActivity and the underlying
+        // app navigation alive while CallService's ongoing notification stays.
+        engine.minimized = true
+    }
     // The gate only composes while a call exists, so this dispose is exactly
     // "the call ended" (hangup / decline / remote end / cancel) — play the
     // user's short end-tone once. Purely audible, renders nothing.
@@ -437,8 +443,22 @@ fun InCallVideoScreen(call: CallUi) {
     val engine = CallEngine.instance ?: return
     val haptics = rememberHaptics()
     val secs = rememberTick(call.startedAt, call.connecting)
+    var controlsVisible by remember { mutableStateOf(true) }
+    LaunchedEffect(controlsVisible) {
+        if (controlsVisible) {
+            kotlinx.coroutines.delay(3_000)
+            controlsVisible = false
+        }
+    }
 
-    Box(Modifier.fillMaxSize().background(Dark)) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Dark)
+            // Consume the full video surface so taps never fall through to
+            // the chat below; the same gesture toggles the controls.
+            .clickable { controlsVisible = !controlsVisible },
+    ) {
         /* remote video full-bleed */
         VideoRenderer(engine, remote = true)
 
@@ -496,7 +516,7 @@ fun InCallVideoScreen(call: CallUi) {
         }
 
         /* bottom control strip */
-        Row(
+        if (controlsVisible) Row(
             Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()

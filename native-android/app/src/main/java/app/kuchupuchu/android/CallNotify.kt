@@ -24,6 +24,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 const val CALL_ACCEPT = "app.kuchupuchu.android.CALL_ACCEPT"
 const val CALL_DECLINE = "app.kuchupuchu.android.CALL_DECLINE"
+const val CALL_END = "app.kuchupuchu.android.CALL_END"
+const val CALL_SPEAKER = "app.kuchupuchu.android.CALL_SPEAKER"
 private const val INCOMING_ID = 7101
 private const val ONGOING_ID = 7102
 // v4: incoming-call ring on the ALARM stream — rings even on silent, with
@@ -228,6 +230,10 @@ object CallNotify {
     }
 
     fun incoming(ctx: Context, name: String, video: Boolean, callId: String? = null) {
+        // The Compose IncomingCallScreen is already the foreground control
+        // surface; posting a high-priority/full-screen notification as well
+        // produced duplicate UI. Background/killed delivery still notifies.
+        if (Store.foreground) return
         ensure(ctx)
         val open =
             PendingIntent.getActivity(
@@ -283,6 +289,18 @@ object CallNotify {
                 Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
+        val end = PendingIntent.getBroadcast(
+            ctx,
+            5,
+            Intent(ctx, CallActionReceiver::class.java).setAction(CALL_END),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val speaker = PendingIntent.getBroadcast(
+            ctx,
+            6,
+            Intent(ctx, CallActionReceiver::class.java).setAction(CALL_SPEAKER),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         return NotificationCompat.Builder(ctx, CH_FG)
             .setSmallIcon(R.mipmap.ic_stat_kp)
             .setContentTitle(title)
@@ -290,6 +308,8 @@ object CallNotify {
             .setOngoing(true)
             .setContentIntent(open)
             .setCategory(NotificationCompat.CATEGORY_CALL)
+            .addAction(0, "Speaker", speaker)
+            .addAction(0, "End call", end)
             .build()
     }
 
@@ -320,6 +340,8 @@ class CallActionReceiver : BroadcastReceiver() {
                 }.start()
                 CallNotify.cancelIncoming(ctx)
             }
+            CALL_END -> CallEngine.instance?.hangup()
+            CALL_SPEAKER -> CallEngine.instance?.toggleSpeaker()
         }
     }
 }

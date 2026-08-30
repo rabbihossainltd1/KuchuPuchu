@@ -81,6 +81,7 @@ class CallEngine(private val app: Application) {
 
     /** Compose state: call screens recompose when this changes. */
     var active by mutableStateOf<CallUi?>(null)
+    var minimized by mutableStateOf(false)
         private set
 
     var speaker by mutableStateOf(false)
@@ -304,9 +305,12 @@ class CallEngine(private val app: Application) {
     fun defaultRoute(kind: String): AudioRoute {
         val avail = availableRoutes()
         return when {
-            kind == "VIDEO" -> AudioRoute.SPEAKER
+            // A connected personal output always wins, including video calls.
+            // Previously VIDEO forced speaker before these checks, leaking
+            // audio despite a headset already being connected.
             AudioRoute.BLUETOOTH in avail -> AudioRoute.BLUETOOTH
             AudioRoute.WIRED in avail -> AudioRoute.WIRED
+            kind == "VIDEO" -> AudioRoute.SPEAKER
             else -> AudioRoute.EARPIECE
         }
     }
@@ -584,6 +588,7 @@ class CallEngine(private val app: Application) {
 
     fun startCall(userId: String, kind: String, name: String, avatar: String = "") {
         if (active != null) return
+        minimized = false
         left.set(false)
         hasRemote = false
         onHold = false
@@ -650,6 +655,7 @@ class CallEngine(private val app: Application) {
     }
 
     fun answer() {
+        minimized = false
         // A stale true from a previous call would drop this side straight
         // onto the in-call screen instead of ringing.
         hasRemote = false
@@ -817,7 +823,7 @@ class CallEngine(private val app: Application) {
                 active = active?.copy(kind = "VIDEO")
                 // Audio→video conversion: speaker becomes the default (user
                 // rule), Bluetooth/wired headsets keep the audio.
-                if (audioRoute == AudioRoute.EARPIECE) selectAudioRoute(AudioRoute.SPEAKER)
+                if (audioRoute == AudioRoute.EARPIECE) selectAudioRoute(defaultRoute("VIDEO"))
             }
             return
         }
@@ -825,7 +831,7 @@ class CallEngine(private val app: Application) {
         videoTrack?.setEnabled(!cameraOff)
         if (!cameraOff && active?.kind == "AUDIO") {
             active = active?.copy(kind = "VIDEO")
-            if (audioRoute == AudioRoute.EARPIECE) selectAudioRoute(AudioRoute.SPEAKER)
+            if (audioRoute == AudioRoute.EARPIECE) selectAudioRoute(defaultRoute("VIDEO"))
         }
         onChange?.invoke(active)
     }
@@ -842,7 +848,18 @@ class CallEngine(private val app: Application) {
         MainActivity.current?.askShare { code, data ->
             if (code == Activity.RESULT_OK && data != null) {
                 scope.launch {
-                    runCatching { startShare(data) }.onFailure {
+                    runCatching { startShare(data) }
+                        .onSuccess {
+                            if (sharing) {
+                                android.widget.Toast.makeText(
+                                    app,
+                                    "You're Sharing Your Screen",
+                                    android.widget.Toast.LENGTH_LONG,
+                                ).show()
+                                MainActivity.current?.moveTaskToBack(true)
+                            }
+                        }
+                        .onFailure {
                         // Named so the user's next report tells us exactly
                         // which stage broke (service/FGS/projection/capturer).
                         notify("Screen share failed (${it.javaClass.simpleName}). Abar try koro.")
@@ -896,7 +913,7 @@ class CallEngine(private val app: Application) {
         localView?.setMirror(false)
         localView?.let { runCatching { track.addSink(it) } }
         active = active?.copy(kind = "VIDEO")
-        if (audioRoute == AudioRoute.EARPIECE) selectAudioRoute(AudioRoute.SPEAKER)
+        if (audioRoute == AudioRoute.EARPIECE) selectAudioRoute(defaultRoute("VIDEO"))
     }
 
     private fun stopShare() {
@@ -1246,7 +1263,7 @@ override fun onRenegotiationNeeded() {
                     // on "Waiting for video…" forever ("stuck" bug). They can
                     // still tap the camera off if they don't want to send.
                     if (!sharing && videoTrack == null && !cameraOff) {
-                        if (audioRoute == AudioRoute.EARPIECE) selectAudioRoute(AudioRoute.SPEAKER)
+                        if (audioRoute == AudioRoute.EARPIECE) selectAudioRoute(defaultRoute("VIDEO"))
                         notify("Video call…")
                         toggleCamera()
                     }
