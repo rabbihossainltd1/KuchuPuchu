@@ -1918,19 +1918,14 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         // shown a (button-less) system card. Chosen deliberately — Reply/
         // Like/Mark-as-read must work everywhere they show up.
         // ("from" is a reserved FCM key — hence fromName.)
-        pushToUser(
-          env,
-          db,
-          memberId.user_id,
-          {
-            type: "message",
-            convoId: convId,
-            kind: conv.kind,
-            fromName: me.display_name,
-            body: preview.slice(0, 120),
-            kp_chat: convId,
-          },
-        ).then((ok) =>
+        pushToUser(env, db, memberId.user_id, {
+          type: "message",
+          convoId: convId,
+          kind: conv.kind,
+          fromName: me.display_name,
+          body: preview.slice(0, 120),
+          kp_chat: convId,
+        }).then((ok) =>
           ok
             ? run(
                 db,
