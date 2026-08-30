@@ -99,7 +99,20 @@ fun ChatListScreen(nav: NavController) {
     fun refresh() {
         scope.launch {
             try {
-                val data = withContext(Dispatchers.IO) { Api.get("/api/conversations", true) }
+                // Cheap freshness check: send back the last marker; an
+                // unchanged tick returns a tiny payload and skips parse/
+                // diff/notify entirely. Full data still arrives whenever
+                // anything actually moved.
+                val m = ScreenStore.convsMarker
+                val url =
+                    if (m.isBlank()) "/api/conversations"
+                    else "/api/conversations?marker=$m"
+                val data = withContext(Dispatchers.IO) { Api.get(url, true) }
+                if (data.optBoolean("unchanged")) {
+                    loading = false
+                    return@launch
+                }
+                ScreenStore.convsMarker = data.optString("marker")
                 val items = data.arr("items").objects()
                 items.forEach { c ->
                     val id = c.optString("id")
@@ -664,6 +677,7 @@ private fun friendlyPreview(raw: String): String {
     val audioExts = listOf(".m4a", ".mp3", ".aac", ".ogg", ".wav", ".opus", ".flac")
     val docExts = listOf(".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".zip", ".rar", ".txt", ".csv")
     if (t == "Photo" || t == "📷 Photo") return "📷 Photo"
+    if (EmojiRepo.isCustomId(t)) return "🙂 Emoji"
     return when {
         lower.startsWith("voice_") || lower.startsWith("voice ") -> "🎤 Voice message"
         lower == "video" -> "🎬 Video"

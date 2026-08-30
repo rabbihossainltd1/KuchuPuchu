@@ -1,0 +1,242 @@
+{
+ "version": 1,
+ "emojis": [
+  {
+   "id": "kcp_bunny_01",
+   "category": "animals",
+   "asset": "animals/kcp_bunny_01.webp",
+   "tags": [
+    "bunny",
+    "rabbit",
+    "khoroc"
+   ]
+  },
+  {
+   "id": "kcp_cat_01",
+   "category": "animals",
+   "asset": "animals/kcp_cat_01.webp",
+   "tags": [
+    "cat",
+    "biral",
+    "meow"
+   ]
+  },
+  {
+   "id": "kcp_frog_01",
+   "category": "animals",
+   "asset": "animals/kcp_frog_01.webp",
+   "tags": [
+    "frog",
+    "bang"
+   ]
+  },
+  {
+   "id": "kcp_panda_01",
+   "category": "animals",
+   "asset": "animals/kcp_panda_01.webp",
+   "tags": [
+    "panda",
+    "cute"
+   ]
+  },
+  {
+   "id": "kcp_apple_01",
+   "category": "food",
+   "asset": "food/kcp_apple_01.webp",
+   "tags": [
+    "apple",
+    "fruit",
+    "iphon"
+   ]
+  },
+  {
+   "id": "kcp_cake_01",
+   "category": "food",
+   "asset": "food/kcp_cake_01.webp",
+   "tags": [
+    "cake",
+    "birthday",
+    "janmadin"
+   ]
+  },
+  {
+   "id": "kcp_icecream_01",
+   "category": "food",
+   "asset": "food/kcp_icecream_01.webp",
+   "tags": [
+    "ice cream",
+    "atum",
+    "cold"
+   ]
+  },
+  {
+   "id": "kcp_pizza_01",
+   "category": "food",
+   "asset": "food/kcp_pizza_01.webp",
+   "tags": [
+    "pizza",
+    "food",
+    "khabar"
+   ]
+  },
+  {
+   "id": "kcp_broken_01",
+   "category": "hearts",
+   "asset": "hearts/kcp_broken_01.webp",
+   "tags": [
+    "broken heart",
+    "sad",
+    "breakup"
+   ]
+  },
+  {
+   "id": "kcp_gheart_01",
+   "category": "hearts",
+   "asset": "hearts/kcp_gheart_01.webp",
+   "tags": [
+    "heart",
+    "green",
+    "love"
+   ]
+  },
+  {
+   "id": "kcp_heart_01",
+   "category": "hearts",
+   "asset": "hearts/kcp_heart_01.webp",
+   "tags": [
+    "heart",
+    "love",
+    "bhalobasha"
+   ]
+  },
+  {
+   "id": "kcp_pheart_01",
+   "category": "hearts",
+   "asset": "hearts/kcp_pheart_01.webp",
+   "tags": [
+    "heart",
+    "purple",
+    "love"
+   ]
+  },
+  {
+   "id": "kcp_angry_01",
+   "category": "smileys",
+   "asset": "smileys/kcp_angry_01.webp",
+   "tags": [
+    "angry",
+    "rag"
+   ]
+  },
+  {
+   "id": "kcp_cool_01",
+   "category": "smileys",
+   "asset": "smileys/kcp_cool_01.webp",
+   "tags": [
+    "cool",
+    "sunglasses",
+    "master"
+   ]
+  },
+  {
+   "id": "kcp_cry_01",
+   "category": "smileys",
+   "asset": "smileys/kcp_cry_01.webp",
+   "tags": [
+    "cry",
+    "kanna",
+    "sad"
+   ]
+  },
+  {
+   "id": "kcp_grin_01",
+   "category": "smileys",
+   "asset": "smileys/kcp_grin_01.webp",
+   "tags": [
+    "grin",
+    "laugh",
+    "big smile"
+   ]
+  },
+  {
+   "id": "kcp_joy_01",
+   "category": "smileys",
+   "asset": "smileys/kcp_joy_01.webp",
+   "tags": [
+    "joy",
+    "laugh",
+    "tears",
+    "lol"
+   ]
+  },
+  {
+   "id": "kcp_sad_01",
+   "category": "smileys",
+   "asset": "smileys/kcp_sad_01.webp",
+   "tags": [
+    "sad",
+    "mongo"
+   ]
+  },
+  {
+   "id": "kcp_smile_01",
+   "category": "smileys",
+   "asset": "smileys/kcp_smile_01.webp",
+   "tags": [
+    "smile",
+    "happy",
+    "hasi"
+   ]
+  },
+  {
+   "id": "kcp_wink_01",
+   "category": "smileys",
+   "asset": "smileys/kcp_wink_01.webp",
+   "tags": [
+    "wink",
+    "ish"
+   ]
+  },
+  {
+   "id": "kcp_100_01",
+   "category": "symbols",
+   "asset": "symbols/kcp_100_01.webp",
+   "tags": [
+    "100",
+    "hundred",
+    "perfect",
+    "osadharon"
+   ]
+  },
+  {
+   "id": "kcp_fire_01",
+   "category": "symbols",
+   "asset": "symbols/kcp_fire_01.webp",
+   "tags": [
+    "fire",
+    "agni",
+    "hot",
+    "lit"
+   ]
+  },
+  {
+   "id": "kcp_spark_01",
+   "category": "symbols",
+   "asset": "symbols/kcp_spark_01.webp",
+   "tags": [
+    "sparkles",
+    "shine",
+    "new"
+   ]
+  },
+  {
+   "id": "kcp_star_01",
+   "category": "symbols",
+   "asset": "symbols/kcp_star_01.webp",
+   "tags": [
+    "star",
+    "tara"
+   ]
+  }
+ ]
+}

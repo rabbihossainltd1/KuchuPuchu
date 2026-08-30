@@ -125,7 +125,16 @@ object ScreenStore {
 
     /** Instant local read: zero the unread badge without waiting for the next
      *  list refresh (the next server response carries the same 0 anyway). */
+    // Freshness marker for the conversations list (last full response).
+    var convsMarker: String = ""
+
+    // Locally-marked-read ids with a timestamp: a poll that lands before the
+    // read POST commits still carries unread > 0 — the optimistic zero wins
+    // for a short grace window instead of flickering back.
+    private val pendingReadMarks = HashMap<String, Long>()
+
     fun markRead(convId: String) {
+        synchronized(pendingReadMarks) { pendingReadMarks[convId] = System.currentTimeMillis() }
         val i = convs.indexOfFirst { it.optString("id") == convId }
         if (i >= 0 && convs[i].optInt("unread", 0) != 0) {
             convs[i] = JSONObject(convs[i].toString()).put("unread", 0)
@@ -138,11 +147,26 @@ object ScreenStore {
     }
 
     /** Instant local badge bump from an FCM push while the chat is not open. */
-    fun bumpUnread(convId: String) {
+    fun bumpUnread(convId: String) = bumpUnread(convId, null)
+
+    /**
+     * Badge bump + preview patch from the FCM payload: the row also gets the
+     * real lastMessage/lastMessageAt and jumps to the top of the list, so the
+     * chat list looks correct the moment the push lands instead of waiting
+     * for the next full poll to confirm the same values.
+     */
+    fun bumpUnread(convId: String, preview: String?) {
         val i = convs.indexOfFirst { it.optString("id") == convId }
-        if (i >= 0) {
-            convs[i] = JSONObject(convs[i].toString()).put("unread", convs[i].optInt("unread", 0) + 1)
+        if (i < 0) return
+        var row = JSONObject(convs[i].toString())
+        row = row.put("unread", row.optInt("unread", 0) + 1)
+        if (!preview.isNullOrBlank()) {
+            val fmt = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
+            fmt.timeZone = java.util.TimeZone.getTimeZone("UTC")
+            row = row.put("lastMessage", preview).put("lastMessageAt", fmt.format(java.util.Date()))
         }
+        convs.removeAt(i)
+        convs.add(0, row)
     }
 
     fun shouldNotifyChat(convId: String, lastAt: String, unread: Int): Boolean {
@@ -301,6 +325,21 @@ object ScreenStore {
 
     @Synchronized
     fun setConvs(list: List<JSONObject>) {
+        val now = System.currentTimeMillis()
+        synchronized(pendingReadMarks) {
+            pendingReadMarks.entries.removeAll { now - it.value > 10_000 }
+        }
+        val guarded = list.map { row ->
+            val id = row.optString("id")
+            val markedAt = synchronized(pendingReadMarks) { pendingReadMarks[id] }
+            if (row.optInt("unread", 0) > 0 && markedAt != null && now - markedAt <= 10_000) {
+                JSONObject(row.toString()).put("unread", 0)
+            } else {
+                synchronized(pendingReadMarks) { if (markedAt != null) pendingReadMarks.remove(id) }
+                row
+            }
+        }
+        val list = guarded
         val raw = convSignature(list)
         val changed = raw != convsRaw || convs.isEmpty()
         if (changed) {

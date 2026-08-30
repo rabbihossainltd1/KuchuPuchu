@@ -1,5 +1,6 @@
 package app.kuchupuchu.android
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -39,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -110,7 +112,7 @@ fun StickerPanel(
                     .background(Color(0x141C1917))
                     .padding(2.dp),
             ) {
-                listOf("🙂", "GIF", "⬜").forEachIndexed { i, label ->
+                listOf("🙂", "GIF", "⬜", "KP").forEachIndexed { i, label ->
                     val sel = tab == i
                     Box(
                         Modifier
@@ -248,6 +250,129 @@ fun StickerPanel(
                             fontSize = 20.sp,
                             modifier = Modifier.scale(if (pressed) 1.25f else 1f),
                         )
+                    }
+                }
+            }
+        } else if (tab == 3) {
+            /* KP custom emoji: bundled pack, category chips + recents */
+            val emojis =
+                remember(query) {
+                    if (query.isBlank()) EmojiRepo.all(ctx)
+                    else EmojiRepo.search(ctx, query)
+                }
+            val cats = remember { EmojiRepo.categories(ctx) }
+            var emojiCat by remember { mutableStateOf("") } // "" = recent/all view
+            val emojiRecents = remember { mutableStateOf(EmojiRepo.recent(ctx)) }
+            if (emojiRecents.value.isNotEmpty() && emojiCat.isEmpty() && query.isBlank()) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 1.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    emojiRecents.value.take(6).forEach { id ->
+                        val bmp = rememberEmojiBitmap(id)
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable {
+                                    haptics.confirm()
+                                    EmojiRepo.recordRecent(ctx, id)
+                                    emojiRecents.value = EmojiRepo.recent(ctx)
+                                    onSend(id)
+                                }
+                                .padding(3.dp),
+                        ) {
+                            if (bmp != null) {
+                                Image(bitmap = bmp.asImageBitmap(), contentDescription = id, modifier = Modifier.size(24.dp))
+                            } else {
+                                Text("🙂", fontSize = 18.sp)
+                            }
+                        }
+                    }
+                    Icon(
+                        Icons.Filled.Schedule,
+                        contentDescription = "Recents",
+                        tint = Color(0x66FFFFFF),
+                        modifier = Modifier
+                            .align(Alignment.CenterVertically)
+                            .size(14.dp),
+                    )
+                }
+            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 1.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                listOf("" to "All") + cats.map { it to it.replaceFirstChar { c -> c.uppercase() } }.forEach { (cat, label) ->
+                    val selected = emojiCat == cat
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(if (selected) Color(0xFFFEF3C7) else Color(0x0F1C1917))
+                            .clickable {
+                                haptics.tap()
+                                emojiCat = cat
+                            }
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                    ) {
+                        Text(
+                            label,
+                            color = if (selected) GoldDeep else Color(0x991C1917),
+                            fontSize = 11.5.sp,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+            val gridList =
+                when {
+                    query.isNotBlank() -> emojis
+                    emojiCat.isBlank() -> emojis
+                    else -> EmojiRepo.inCategory(ctx, emojiCat)
+                }
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(5),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(152.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                items(gridList) { e ->
+                    val bmp = rememberEmojiBitmap(e.id)
+                    val interaction = remember { MutableInteractionSource() }
+                    val pressed by interaction.collectIsPressedAsState()
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(36.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (pressed) Color(0x1A1C1917) else Color.Transparent)
+                            .clickable(interactionSource = interaction, indication = null) {
+                                haptics.confirm()
+                                EmojiRepo.recordRecent(ctx, e.id)
+                                emojiRecents.value = EmojiRepo.recent(ctx)
+                                onSend(e.id)
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (bmp != null) {
+                            Image(
+                                bitmap = bmp.asImageBitmap(),
+                                contentDescription = e.id,
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .scale(if (pressed) 1.25f else 1f),
+                            )
+                        } else {
+                            Text("🙂", fontSize = 20.sp)
+                        }
                     }
                 }
             }

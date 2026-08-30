@@ -51,13 +51,17 @@ object Api {
     }
 
     fun get(path: String, force: Boolean = false): JSONObject {
-        if (!force) Cache.get(path)?.let { return it }
+        // Freshness-marker polls differ only by `?marker=...`; they must map
+        // to ONE cache key and never evict the last FULL response with a
+        // tiny {marker, unchanged} shell (offline fallback still needs items).
+        val key = path.substringBefore("?marker=")
+        if (!force) Cache.get(key)?.let { return it }
         return try {
             val data = request(path, "GET", null)
-            Cache.put(path, data)
+            if (!data.has("unchanged")) Cache.put(key, data)
             data
         } catch (e: Exception) {
-            Cache.peek(path)?.let { return it }
+            Cache.peek(key)?.let { return it }
             throw e
         }
     }

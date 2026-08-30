@@ -1323,7 +1323,23 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       }
       list.push(buildConvDetail(conv, membersByConv.get(conv.id) ?? [], users, uid));
     }
-    return json({ items: list });
+    // Freshness marker: everything the client renders (order fields, unread,
+    // preview, mute, hidden-state) folded into one hash. Unchanged marker =>
+    // skip the payload entirely on the client.
+    const marker = hashSig(
+      JSON.stringify([
+        list.map((c: Record<string, unknown>) => [
+          c.id,
+          c.lastMessageAt,
+          c.lastMessage,
+          c.unread,
+          c.muted,
+        ]),
+      ]),
+    );
+    const clientMarker = url.searchParams.get("marker");
+    if (clientMarker && clientMarker === marker) return json({ marker, unchanged: true });
+    return json({ items: list, marker });
   }
 
   const convMatch = path.match(/^\/api\/conversations\/([^/]+)$/);
@@ -1756,11 +1772,17 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       convId,
       uid,
     );
-    return json({
-      items,
-      readAt: readAt ?? null,
-      typingAt: typingRow && Date.now() - Date.parse(typingRow.at) < 6_000 ? typingRow.at : null,
-    });
+    const typingAt =
+      typingRow && Date.now() - Date.parse(typingRow.at) < 6_000 ? typingRow.at : null;
+    // Freshness marker: page contents (id/text/edited/delivery per row) +
+    // read + typing, so every field the client consumes participates in the
+    // check - including repeat edits of the same row.
+    const marker = hashSig(
+      JSON.stringify([items.map((m) => [m.id, m.body, m.edited, m.deliveredAt]), readAt, typingAt]),
+    );
+    const clientMarker = url.searchParams.get("marker");
+    if (clientMarker && clientMarker === marker) return json({ marker, unchanged: true });
+    return json({ items, readAt: readAt ?? null, typingAt, marker });
   }
 
   if (msgMatch && method === "POST") {
@@ -2824,6 +2846,20 @@ type Watermark = { row: number; at: string };
 type HiddenMap = Record<string, Watermark | number>;
 
 /** The watermark for one member, or null when the chat was never deleted. */
+/**
+ * Cheap change-marker for polling: clients send back the last marker they
+ * saw and get `unchanged: true` instead of the full payload when nothing
+ * moved. Computed from data the handler already has in memory.
+ */
+function hashSig(input: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
+}
+
 function watermarkFor(hidden: HiddenMap, uid: string): Watermark | null {
   const raw = hidden[uid];
   if (raw === undefined || raw === null) return null;

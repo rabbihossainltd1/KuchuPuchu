@@ -165,6 +165,8 @@ fun ChatScreen(nav: NavController, convId: String) {
     val listState = rememberLazyListState()
     val player = remember { VoicePlayer() }
     var lastTopId by remember { mutableStateOf("") }
+    // Freshness marker for this conversation message page (see refreshMessages).
+    var msgsMarker by remember { mutableStateOf("") }
     var menuOpen by remember { mutableStateOf(false) }
     var showChatSearch by remember { mutableStateOf(false) }
     var showDisappear by remember { mutableStateOf(false) }
@@ -241,7 +243,15 @@ fun ChatScreen(nav: NavController, convId: String) {
     fun refreshMessages(forceScroll: Boolean = false, markRead: Boolean = false) {
         scope.launch {
             try {
-                val data = withContext(Dispatchers.IO) { Api.get("/api/conversations/$convId/messages") }
+                // Cheap freshness check: an unchanged tick returns a tiny
+                // payload - no parse, no diff, no state write.
+                val m = msgsMarker
+                val url =
+                    if (m.isBlank()) "/api/conversations/$convId/messages"
+                    else "/api/conversations/$convId/messages?marker=$m"
+                val data = withContext(Dispatchers.IO) { Api.get(url) }
+                if (data.optBoolean("unchanged")) return@launch
+                msgsMarker = data.optString("marker")
                 val fresh = data.arr("items").objects()
                 // Live read receipts: the sender's ticks turn blue without
                 // reopening the chat.
@@ -320,7 +330,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         while (true) {
             if (Store.foreground && Store.route == "chat/$convId") {
                 refreshMessages()
-                delay(400)
+                delay(2_000)
             } else {
                 delay(1_500)
             }
@@ -1916,7 +1926,11 @@ private fun MessageRow(
                         Text(senderName, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = GoldDeep)
                     }
                     when (kind) {
-                        "STICKER" -> Text(m.optString("body"), fontSize = 56.sp)
+                        "STICKER" -> {
+                            val st = m.optString("body")
+                            if (EmojiRepo.isCustomId(st)) CustomEmojiOrFallback(st)
+                            else Text(st, fontSize = 56.sp)
+                        }
                         "FILE" -> FileBubble(m, mine, player, pendingEcho)
                         "DELETED" -> Text(
                             "This message was deleted",
