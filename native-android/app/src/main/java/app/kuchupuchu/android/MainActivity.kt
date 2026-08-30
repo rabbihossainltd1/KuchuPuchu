@@ -57,7 +57,7 @@ class MainActivity : ComponentActivity() {
                 // cache evicted earlier bubbles after one fullscreen image.
                 .memoryCache {
                     MemoryCache.Builder(applicationContext)
-                        .maxSizeBytes(64L * 1024L * 1024L)
+                        .maxSizeBytes(64 * 1024 * 1024)
                         .build()
                 }
                 .crossfade(true)
