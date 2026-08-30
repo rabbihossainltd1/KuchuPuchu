@@ -62,22 +62,24 @@ async function mk() {
     undefined,
     me.token,
   );
-  check("list -> unchanged:true with same marker", r2.json.unchanged === true, JSON.stringify(r2.json));
+  check(
+    "list -> unchanged:true with same marker",
+    r2.json.unchanged === true,
+    JSON.stringify(r2.json),
+  );
   check("list -> unchanged response skips items", r2.json.items === undefined);
 
-  await k.call(
-    "POST",
-    `/api/conversations/${cid}/messages`,
-    { body: "hello marker" },
-    o.token,
-  );
+  await k.call("POST", `/api/conversations/${cid}/messages`, { body: "hello marker" }, o.token);
   const r3 = await k.call(
     "GET",
     `/api/conversations?marker=${encodeURIComponent(r1.json.marker)}`,
     undefined,
     me.token,
   );
-  check("list -> new message breaks marker", r3.json.unchanged !== true && r3.json.items?.length === 1);
+  check(
+    "list -> new message breaks marker",
+    r3.json.unchanged !== true && r3.json.items?.length === 1,
+  );
   check("list -> unread counted after new message", r3.json.items?.[0]?.unread === 1);
   const r4 = await k.call("POST", `/api/conversations/${cid}/read`, {}, me.token);
   check("read -> 2xx", r4.status < 300);
@@ -87,7 +89,10 @@ async function mk() {
     undefined,
     me.token,
   );
-  check("list -> read state breaks marker", r5.json.unchanged !== true && r5.json.items?.[0]?.unread === 0);
+  check(
+    "list -> read state breaks marker",
+    r5.json.unchanged !== true && r5.json.items?.[0]?.unread === 0,
+  );
 
   // marker stays same across repeat unchanged polls (idempotent)
   const r6 = await k.call(
@@ -140,7 +145,10 @@ async function mk() {
     undefined,
     me.token,
   );
-  check("messages -> new row breaks marker", r3.json.unchanged !== true && r3.json.items?.length === 2);
+  check(
+    "messages -> new row breaks marker",
+    r3.json.unchanged !== true && r3.json.items?.length === 2,
+  );
 }
 
 // ---- sticker passthrough for custom emoji ids ----
@@ -156,7 +164,11 @@ async function mk() {
     { kind: "STICKER", body: "kcp_smile_01" },
     me.token,
   );
-  check("sticker -> kcp id accepted", r1.status === 201 || r1.json.duplicate === true, `${r1.status} ${JSON.stringify(r1.json).slice(0, 80)}`);
+  check(
+    "sticker -> kcp id accepted",
+    r1.status === 201 || r1.json.duplicate === true,
+    `${r1.status} ${JSON.stringify(r1.json).slice(0, 80)}`,
+  );
   const r2 = await k.call(
     "POST",
     `/api/conversations/${cid}/messages`,
