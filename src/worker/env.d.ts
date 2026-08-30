@@ -50,4 +50,32 @@ declare global {
     waitUntil(promise: Promise<unknown>): void;
     passThroughOnException(): void;
   }
+
+  interface DurableObjectStub {
+    fetch(
+      input: string | Request,
+      init?: { method?: string; headers?: Record<string, string>; body?: string },
+    ): Promise<Response>;
+  }
+
+  interface DurableObjectNamespace {
+    idFromName(name: string): { toString(): string };
+    get(id: { toString(): string }): DurableObjectStub;
+  }
+
+  /** Workers-runtime WebSocket (the subset the DO layer uses). */
+  interface WebSocket {
+    readyState: number; // 0 connecting, 1 open, 2 closing, 3 closed
+    accept(): void;
+    send(data: string): void;
+    close(code?: number, reason?: string): void;
+    addEventListener(type: "close" | "error" | "message", listener: (ev: never) => void): void;
+  }
+
+  interface WebSocketPair {
+    0: WebSocket;
+    1: WebSocket;
+  }
+
+  declare var WebSocketPair: { new (): WebSocketPair };
 }

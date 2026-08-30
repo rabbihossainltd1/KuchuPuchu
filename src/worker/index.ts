@@ -32,6 +32,11 @@ export type Env = {
   /** Shared key for GET /api/debug/errors (worker-side crash log). */
   DEBUG_KEY?: string;
   TURN_API_TOKEN?: string;
+  /** Realtime fan-out Durable Objects (Steps 2-3). Optional on purpose: the
+   *  test harness and any deploy without the bindings keep the plain REST
+   *  path — every broadcast call guards on presence and no-ops without it. */
+  CHAT_ROOM?: DurableObjectNamespace;
+  CALL_SIGNAL?: DurableObjectNamespace;
 };
 
 type Json = Record<string, unknown>;
@@ -323,7 +328,9 @@ async function ensureSchema(db: D1Database) {
     `CREATE TABLE IF NOT EXISTS error_log (
       id TEXT PRIMARY KEY, stack TEXT NOT NULL, created_at TEXT NOT NULL
     )`,
-    `CREATE TABLE IF NOT EXISTS push_fallback (mid TEXT, user_id TEXT, payload_json TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (mid, user_id))`,
+    // (push_fallback removed: the R32 revert dropped every INSERT, so the
+    // table stayed empty forever while every push ack kept paying a DELETE.
+    // The table itself is left to exist harmlessly in already-deployed DBs.)
     `CREATE TABLE IF NOT EXISTS files (
       key TEXT PRIMARY KEY, owner_id TEXT NOT NULL, conv_id TEXT, created_at TEXT NOT NULL
     )`,
@@ -644,6 +651,39 @@ async function fcmAccessToken(env: Env): Promise<{ token: string; projectId: str
  * needed. WhatsApp-style delivery. When the app IS foreground the service
  * still gets onMessageReceived and renders its own rich UI.
  */
+/**
+ * Realtime fan-out into a ChatRoom Durable Object (keyed by conversation id
+ * or "user:<id>" for a user's list channel). Without the binding (test
+ * harness, older deploys) this is a deliberate NO-OP so REST behavior is
+ * unchanged. Broadcast must never be able to fail a request: if the realtime
+ * layer is down, the app degrades to exactly the polling it shipped with.
+ */
+async function broadcastRoomEvent(env: Env, roomKey: string, event: Record<string, unknown>) {
+  if (!env.CHAT_ROOM) return;
+  try {
+    const stub = env.CHAT_ROOM.get(env.CHAT_ROOM.idFromName(roomKey));
+    await stub.fetch("https://chat-room/broadcast", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(event),
+    });
+  } catch (err) {
+    console.log(
+      "broadcast_failed",
+      JSON.stringify({ roomKey, err: err instanceof Error ? err.message : String(err) }),
+    );
+  }
+}
+
+/** Light "something in this conversation changed" poke for a user's chat list. */
+function pokeUserConversation(env: Env, userId: string, conversationId: string, at: string) {
+  return broadcastRoomEvent(env, `user:${userId}`, {
+    type: "conv",
+    conversationId,
+    at,
+  });
+}
+
 async function pushToUser(
   env: Env,
   db: D1Database,
@@ -886,10 +926,6 @@ export default {
 async function handle(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const db = env.DB;
   await ensureSchema(db);
-  // Push-fallback sweep: any data-only push that nobody acked within the
-  // grace window gets its system payload card now. Triggered by ANY request
-  // (the sender's own 400ms chat poll makes it fire within a second), so no
-  // timers are ever held open.
 
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/$/, "") || "/";
@@ -1063,6 +1099,34 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   const me = await requireUser(db, request);
   const uid = me.id;
+
+  /* ---------- realtime WebSocket upgrades (ChatRoom fan-out) ---------- */
+
+  // One socket per open chat screen. Membership is verified HERE, before the
+  // upgrade is forwarded to the Durable Object — the DO trusts the worker,
+  // never the client. Auth rides the Authorization header (OkHttp sends it
+  // on WS opens, unlike browsers).
+  const wsChatMatch = path.match(/^\/ws\/chat\/([^/]+)$/);
+  if (wsChatMatch && method === "GET" && env.CHAT_ROOM) {
+    const convId = wsChatMatch[1]!;
+    await requireMember(db, convId, uid);
+    const stub = env.CHAT_ROOM.get(env.CHAT_ROOM.idFromName(convId));
+    return stub.fetch(
+      new Request("https://chat-room/connect", {
+        headers: { upgrade: "websocket", "x-kp-user": uid },
+      }),
+    );
+  }
+
+  // Per-user chat-list channel: badges, previews, ordering updates.
+  if (path === "/ws/user" && method === "GET" && env.CHAT_ROOM) {
+    const stub = env.CHAT_ROOM.get(env.CHAT_ROOM.idFromName(`user:${uid}`));
+    return stub.fetch(
+      new Request("https://chat-room/connect", {
+        headers: { upgrade: "websocket", "x-kp-user": uid },
+      }),
+    );
+  }
 
   if (path === "/api/me" && method === "GET") return json({ user: userSelf(me, true) });
 
@@ -1512,12 +1576,24 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   const readMatch = path.match(/^\/api\/conversations\/([^/]+)\/read$/);
   if (readMatch && method === "POST") {
     await requireMember(db, readMatch[1]!, uid);
+    const at = nowIso();
     await run(
       db,
       "UPDATE members SET last_read_at = ?, unread = 0 WHERE conv_id = ? AND user_id = ?",
-      nowIso(),
+      at,
       readMatch[1]!,
       uid,
+    );
+    // Realtime: the sender's ticks flip blue the moment this lands, not on
+    // their next poll. (WS only — the poll fallback still reads it from the
+    // messages endpoint.)
+    ctx.waitUntil(
+      broadcastRoomEvent(env, readMatch[1]!, {
+        type: "read",
+        conversationId: readMatch[1]!,
+        userId: uid,
+        at,
+      }),
     );
     return json({ ok: true });
   }
@@ -1628,8 +1704,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   // Delivery ack for data-only pushes. The R31 payload-fallback table this
   // used to clean up has had NO writers since the R32 revert, so the per-ack
-  // DELETE was a wasted D1 write on every single push receive — endpoint is
-  // kept (the app still POSTs it) but it no longer touches the database.
+  // DELETE was a wasted D1 write on every single push receive. Kept as a
+  // no-op endpoint: older app builds still POST it.
   if (path === "/api/push/ack" && method === "POST") {
     return json({ ok: true });
   }
@@ -1677,6 +1753,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       convId,
       uid,
       at,
+    );
+    // Realtime typing indicator: the other side's "typing…" header lights up
+    // instantly instead of on its next poll tick.
+    ctx.waitUntil(
+      broadcastRoomEvent(env, convId, {
+        type: "typing",
+        conversationId: convId,
+        userId: uid,
+        at,
+      }),
     );
     // Cheap lazy expiry: pings older than a minute are dead weight.
     if (Date.now() > nextTypingSweep) {
@@ -1984,6 +2070,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       created_at: created,
       delivered_at: null,
     });
+    // Realtime: anyone with this chat open hears about the message the
+    // instant it lands; everyone else's chat list gets a light poke. FCM
+    // (below) still wakes fully backgrounded apps — WS is the foreground path.
+    ctx.waitUntil(
+      broadcastRoomEvent(env, convId, { type: "message", conversationId: convId, message }),
+    );
+    for (const memberId of members) {
+      if (memberId.user_id !== uid)
+        ctx.waitUntil(pokeUserConversation(env, memberId.user_id, convId, created));
+    }
     // Push: every other member gets a high-priority DATA-ONLY message.
     for (const memberId of members) {
       if (memberId.user_id === uid) continue;
