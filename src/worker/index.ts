@@ -684,6 +684,28 @@ function pokeUserConversation(env: Env, userId: string, conversationId: string, 
   });
 }
 
+/**
+ * Realtime signalling relay into the per-call CallSignal Durable Object.
+ * Same contract as broadcastRoomEvent: no binding / any failure => no-op,
+ * the REST write has already landed and polling still works.
+ */
+async function broadcastCallEvent(env: Env, callId: string, event: Record<string, unknown>) {
+  if (!env.CALL_SIGNAL) return;
+  try {
+    const stub = env.CALL_SIGNAL.get(env.CALL_SIGNAL.idFromName(callId));
+    await stub.fetch("https://call-signal/broadcast", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(event),
+    });
+  } catch (err) {
+    console.log(
+      "call_broadcast_failed",
+      JSON.stringify({ callId, err: err instanceof Error ? err.message : String(err) }),
+    );
+  }
+}
+
 async function pushToUser(
   env: Env,
   db: D1Database,
@@ -1123,6 +1145,26 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const stub = env.CHAT_ROOM.get(env.CHAT_ROOM.idFromName(`user:${uid}`));
     return stub.fetch(
       new Request("https://chat-room/connect", {
+        headers: { upgrade: "websocket", "x-kp-user": uid },
+      }),
+    );
+  }
+
+  // Per-call signalling channel (Step 3): state changes, ICE, renegotiation.
+  // Only the two call participants may hold a socket to it.
+  const wsCallMatch = path.match(/^\/ws\/call\/([^/]+)$/);
+  if (wsCallMatch && method === "GET" && env.CALL_SIGNAL) {
+    const callId = wsCallMatch[1]!;
+    const row = await one<{ caller_id: string; callee_id: string }>(
+      db,
+      "SELECT caller_id, callee_id FROM calls WHERE id = ?",
+      callId,
+    );
+    if (!row) fail(404, "Call not found.");
+    if (row.caller_id !== uid && row.callee_id !== uid) fail(403, "Not your call.", "FORBIDDEN");
+    const stub = env.CALL_SIGNAL.get(env.CALL_SIGNAL.idFromName(callId));
+    return stub.fetch(
+      new Request("https://call-signal/connect", {
         headers: { upgrade: "websocket", "x-kp-user": uid },
       }),
     );
@@ -2518,6 +2560,15 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           callId,
         );
         if (!fresh || fresh.status !== "RINGING") return;
+        // Instant foreground path: the callee's always-on user channel rings
+        // them the same moment FCM fires, under the SAME still-RINGING gate.
+        await broadcastRoomEvent(env, `user:${other}`, {
+          type: "call",
+          callId,
+          kind,
+          fromId: uid,
+          fromName: me.display_name,
+        });
         await pushToUser(
           env,
           db,
@@ -2539,6 +2590,20 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           },
         );
       })(),
+    );
+    // Realtime: the caller's own devices flip to the ringing screen without
+    // waiting for a poll. The CALLEE is not pinged here — their instant path
+    // is the delayed, still-RINGING-checked relay inside the waitUntil block
+    // below, which carries the same anti-phantom gate as the FCM push.
+    ctx.waitUntil(
+      broadcastCallEvent(env, callId, {
+        type: "call",
+        callId,
+        status: "RINGING",
+        kind,
+        callerId: uid,
+        calleeId: other,
+      }),
     );
     const otherUser = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", other);
     return json(
@@ -2670,6 +2735,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         kind: row.kind,
       }),
     );
+    // Realtime: both live sockets hear ANSWERED the instant the row flips.
+    ctx.waitUntil(broadcastCallEvent(env, callId, { type: "call", callId, status: "ACTIVE" }));
     return json({ call: callFrom(fresh, uid, await otherUser(db, fresh, uid)) });
   }
 
@@ -2686,6 +2753,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         callId,
       );
       await logCallEvent(db, row.caller_id, row.callee_id, row.kind, "DECLINED");
+      ctx.waitUntil(broadcastCallEvent(env, callId, { type: "call", callId, status: "DECLINED" }));
     }
     return json({ ok: true });
   }
@@ -2715,6 +2783,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         nowIso(),
         callId,
       );
+      if (changed > 0) {
+        ctx.waitUntil(broadcastCallEvent(env, callId, { type: "call", callId, status: "ENDED" }));
+      }
       if (changed > 0 && row.started_at) {
         await logCallEvent(db, row.caller_id, row.callee_id, row.kind, "ENDED", seconds);
       }
@@ -2744,13 +2815,24 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
               sdpMid: raw.sdpMid ?? null,
               sdpMLineIndex: raw.sdpMLineIndex ?? 0,
             });
+      const iceAt = nowIso();
       await run(
         db,
         "INSERT INTO call_ice (call_id, sender_id, candidate_json, created_at) VALUES (?, ?, ?, ?)",
         callId,
         uid,
         payload.slice(0, 4000),
-        nowIso(),
+        iceAt,
+      );
+      // Realtime: the peer applies this candidate immediately instead of on
+      // its next ICE poll. Payload shape == one GET /ice item.
+      ctx.waitUntil(
+        broadcastCallEvent(env, callId, {
+          type: "ice",
+          callId,
+          candidate: parseJson<Record<string, unknown>>(payload, {}),
+          createdAt: iceAt,
+        }),
       );
       return json({ ok: true }, 201);
     }
@@ -2809,6 +2891,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     );
     const other = row.caller_id === uid ? row.callee_id : row.caller_id;
     ctx.waitUntil(pushToUser(env, db, other, { type: "reoffer", callId }));
+    ctx.waitUntil(broadcastCallEvent(env, callId, { type: "reoffer", callId }));
     return json({ ok: true }, 201);
   }
 
@@ -2823,6 +2906,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     await run(db, "UPDATE calls SET reanswer_sdp = ? WHERE id = ?", sdp.slice(0, 60_000), callId);
     const other = row.caller_id === uid ? row.callee_id : row.caller_id;
     ctx.waitUntil(pushToUser(env, db, other, { type: "reanswer", callId }));
+    ctx.waitUntil(broadcastCallEvent(env, callId, { type: "reanswer", callId }));
     return json({ ok: true }, 201);
   }
 
