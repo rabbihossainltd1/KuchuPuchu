@@ -719,9 +719,9 @@ private object ThumbDecodeGate {
 
 /** Grid-cell thumbnail LRU (~24 MB of bitmaps) so grid re-entry doesn't re-decode. */
 private object ThumbCache {
-    // Cell-sized thumbnails are ~256 KiB; 48 MiB retains roughly 4-7
-    // screenfuls instead of evicting the previous row during every fling.
-    private val lru = object : android.util.LruCache<String, ImageBitmap>(48 * 1024) {
+    // Cell-sized thumbnails are ~192-256 KiB; 32 MiB retains roughly seven
+    // screenfuls while leaving headroom for Coil on low-memory devices.
+    private val lru = object : android.util.LruCache<String, ImageBitmap>(32 * 1024) {
         override fun sizeOf(key: String, value: ImageBitmap): Int = value.asAndroidBitmap().byteCount / 1024
     }
 
