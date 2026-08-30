@@ -12,6 +12,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import coil.Coil
 import coil.ImageLoader
+import coil.memory.MemoryCache
 
 class MainActivity : ComponentActivity() {
 
@@ -52,6 +53,13 @@ class MainActivity : ComponentActivity() {
         Coil.setImageLoader(
             ImageLoader.Builder(applicationContext)
                 .okHttpClient { Api.http }
+                // Keep typical chat-photo working sets resident. The default
+                // cache evicted earlier bubbles after one fullscreen image.
+                .memoryCache {
+                    MemoryCache.Builder(applicationContext)
+                        .maxSizeBytes(64L * 1024L * 1024L)
+                        .build()
+                }
                 .crossfade(true)
                 .build(),
         )

@@ -2217,7 +2217,7 @@ private fun ImageBubble(m: JSONObject, mine: Boolean) {
             coil.compose.AsyncImage(
                 model = coil.request.ImageRequest.Builder(LocalContext.current)
                     .data(if (url.startsWith("http")) url else Api.BASE + url)
-                    .crossfade(false).size(900)
+                    .crossfade(false).size(720)
                     .build(),
                 contentDescription = "Photo",
                 modifier = Modifier.fillMaxSize(),

@@ -719,7 +719,9 @@ private object ThumbDecodeGate {
 
 /** Grid-cell thumbnail LRU (~24 MB of bitmaps) so grid re-entry doesn't re-decode. */
 private object ThumbCache {
-    private val lru = object : android.util.LruCache<String, ImageBitmap>(24 * 1024) {
+    // Cell-sized thumbnails are ~256 KiB; 48 MiB retains roughly 4-7
+    // screenfuls instead of evicting the previous row during every fling.
+    private val lru = object : android.util.LruCache<String, ImageBitmap>(48 * 1024) {
         override fun sizeOf(key: String, value: ImageBitmap): Int = value.asAndroidBitmap().byteCount / 1024
     }
 
@@ -735,15 +737,21 @@ private fun decodeThumb(uri: Uri, ctx: android.content.Context, isVideo: Boolean
             val mmr = MediaMetadataRetriever()
             try {
                 mmr.setDataSource(ctx, uri)
-                val scaled = mmr.getScaledFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 480, 480)
+                val scaled = mmr.getScaledFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 256, 256)
                     ?: mmr.frameAtTime
                 scaled?.asImageBitmap()
             } finally {
                 mmr.release()
             }
         } else if (Build.VERSION.SDK_INT >= 28) {
-            ImageDecoder.decodeBitmap(ImageDecoder.createSource(ctx.contentResolver, uri)) { d, _, _ ->
-                d.setTargetSampleSize(4)
+            ImageDecoder.decodeBitmap(ImageDecoder.createSource(ctx.contentResolver, uri)) { d, info, _ ->
+                val srcW = info.size.width.coerceAtLeast(1)
+                val srcH = info.size.height.coerceAtLeast(1)
+                val scale = minOf(256f / srcW, 256f / srcH)
+                d.setTargetSize(
+                    (srcW * scale).toInt().coerceAtLeast(1),
+                    (srcH * scale).toInt().coerceAtLeast(1),
+                )
             }.asImageBitmap()
         } else {
             val raw = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null

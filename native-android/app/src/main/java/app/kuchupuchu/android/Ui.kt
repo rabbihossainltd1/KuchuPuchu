@@ -185,7 +185,7 @@ fun KpNetImage(
     AsyncImage(
         // Bounded decode: the fullscreen viewer used to decode a 12MP photo
         // whole (~48MB spike) — tap a photo in a heavy chat and the app died.
-        model = ImageRequest.Builder(ctx).data(full).crossfade(true).size(1600).build(),
+        model = ImageRequest.Builder(ctx).data(full).crossfade(true).size(1200).build(),
         contentDescription = contentDescription,
         modifier = modifier,
         contentScale = contentScale,
