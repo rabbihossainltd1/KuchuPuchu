@@ -866,7 +866,19 @@ fun ChatScreen(nav: NavController, convId: String) {
         if (rawTitle.length > 14 && rawTitle.contains(' ')) rawTitle.substringBefore(' ') else rawTitle
     val avatarUrl = if (isGroup) null else c?.optJSONObject("other")?.optString("avatarUrl")
     val online = !isGroup && c?.optJSONObject("other")?.optBoolean("online") == true
-    val typingNow = !isGroup && System.currentTimeMillis() - otherTypingAt < 6_000
+    // Recompose exactly when the six-second typing lease expires. Computing
+    // directly from currentTimeMillis() left the label visible indefinitely
+    // on an otherwise idle screen because time passing is not Compose state.
+    var typingLeaseActive by remember { mutableStateOf(false) }
+    LaunchedEffect(otherTypingAt, isGroup) {
+        val remaining = 6_000L - (System.currentTimeMillis() - otherTypingAt)
+        typingLeaseActive = !isGroup && remaining > 0
+        if (typingLeaseActive) {
+            delay(remaining)
+            typingLeaseActive = false
+        }
+    }
+    val typingNow = typingLeaseActive
     val other = c?.optJSONObject("other")
     Column(
         Modifier
