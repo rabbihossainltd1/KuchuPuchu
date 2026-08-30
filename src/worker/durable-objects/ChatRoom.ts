@@ -11,15 +11,22 @@
  * apply the payload directly) — so if the object restarts and sockets drop,
  * nothing is lost: the next REST sync heals the state.
  *
- * Wire format: every frame is one JSON string. The worker only ever sends
+ * HIBERNATION: sockets are accepted via ctx.acceptWebSocket() (tagged with
+ * the verified user id), not server.accept(). The object then sleeps while
+ * connections stay open server-side — a chat screen left open for an hour
+ * costs zero active duration instead of an hour of GB-s billing. /broadcast
+ * wakes the object, getWebSockets() fans the frame out, done.
+ *
+ * Wire format: one JSON string per frame. The worker only ever sends
  * {"type": "hello"|"message"|"typing"|"read"|"conv", ...}; clients send
- * nothing (the connection is receive-only, which also means no client can
- * spoof events into a room — only the worker's /broadcast endpoint can).
+ * nothing (receive-only), so no client can spoof events into a room — only
+ * the worker's /broadcast endpoint can.
  */
 export class ChatRoom {
-  private sockets = new Set<WebSocket>();
-
-  constructor(_ctx: unknown, _env: unknown) {}
+  constructor(
+    private ctx: DurableObjectState,
+    _env: unknown,
+  ) {}
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -28,16 +35,12 @@ export class ChatRoom {
     if (url.pathname === "/broadcast") {
       const payload = await request.text();
       let sent = 0;
-      for (const ws of this.sockets) {
-        if (ws.readyState === 1) {
-          try {
-            ws.send(payload);
-            sent++;
-          } catch {
-            this.sockets.delete(ws);
-          }
-        } else if (ws.readyState > 1) {
-          this.sockets.delete(ws);
+      for (const ws of this.ctx.getWebSockets()) {
+        try {
+          ws.send(payload);
+          sent++;
+        } catch {
+          /* the runtime reaps dead sockets; nothing to clean up by hand */
         }
       }
       return Response.json({ ok: true, sent });
@@ -53,14 +56,11 @@ export class ChatRoom {
       const pair = new WebSocketPair();
       const client = pair[0];
       const server = pair[1];
-      server.accept();
       const user = request.headers.get("x-kp-user") ?? "anon";
-      this.sockets.add(server);
-      const drop = () => this.sockets.delete(server);
-      server.addEventListener("close", drop);
-      server.addEventListener("error", drop);
-      // Greet so the client can flip to "live" mode and run its sync-on-connect.
-      server.send(JSON.stringify({ type: "hello", user, listeners: this.sockets.size }));
+      this.ctx.acceptWebSocket(server, [`user:${user}`]);
+      server.send(
+        JSON.stringify({ type: "hello", user, listeners: this.ctx.getWebSockets().length }),
+      );
       return new Response(null, { status: 101, webSocket: client } as unknown as ResponseInit);
     }
 

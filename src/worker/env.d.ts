@@ -63,6 +63,12 @@ declare global {
     get(id: { toString(): string }): DurableObjectStub;
   }
 
+  /** Hibernation API: sockets stay open across DO sleeps, tagged for lookup. */
+  interface DurableObjectState {
+    acceptWebSocket(ws: WebSocket, tags?: string[]): void;
+    getWebSockets(tag?: string): WebSocket[];
+  }
+
   /** Workers-runtime WebSocket (the subset the DO layer uses). */
   interface WebSocket {
     readyState: number; // 0 connecting, 1 open, 2 closing, 3 closed

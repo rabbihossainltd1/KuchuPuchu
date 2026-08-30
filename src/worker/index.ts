@@ -1250,11 +1250,25 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           "SELECT * FROM users WHERE id != ? ORDER BY last_active_at DESC LIMIT 20",
           uid,
         );
-    const list = [];
-    for (const row of rows) {
-      if (await blockedBetween(db, uid, row.id)) continue;
-      list.push(userFrom(row, onlineNow(row)));
+    // Block filtering in one two-sided query instead of a blockedBetween()
+    // round trip per row — the new-chat screen was 2+N for a 20-user page.
+    const blocked = new Set<string>();
+    for (const group of chunked(rows.map((r) => r.id))) {
+      const hit = await all<{ owner_id: string; target_id: string }>(
+        db,
+        `SELECT owner_id, target_id FROM blocks
+          WHERE (owner_id = ? AND target_id IN (${inSql(group.length)}))
+             OR (target_id = ? AND owner_id IN (${inSql(group.length)}))`,
+        uid,
+        ...group,
+        uid,
+        ...group,
+      );
+      for (const b of hit) blocked.add(b.owner_id === uid ? b.target_id : b.owner_id);
     }
+    const list = rows
+      .filter((row) => !blocked.has(row.id))
+      .map((row) => userFrom(row, onlineNow(row)));
     return json({ users: list });
   }
 
@@ -2673,6 +2687,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       uid,
       uid,
     );
+    const othersById = await usersById(
+      db,
+      rows.map((row) => (row.caller_id === uid ? row.callee_id : row.caller_id)),
+    );
     const items = [];
     for (const row of rows) {
       // Anti-phantom grace: a RINGING call younger than 1.6s is invisible to
@@ -2687,8 +2705,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         continue;
       }
       const otherId = row.caller_id === uid ? row.callee_id : row.caller_id;
-      const other = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", otherId);
-      items.push(callFrom(row, uid, other));
+      items.push(callFrom(row, uid, othersById.get(otherId) ?? null));
     }
     return json({ items });
   }
@@ -2700,12 +2717,15 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       uid,
       uid,
     );
-    const items = [];
-    for (const row of rows) {
-      const otherId = row.caller_id === uid ? row.callee_id : row.caller_id;
-      const other = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", otherId);
-      items.push(callFrom(row, uid, other));
-    }
+    // One batched usersById() instead of a per-row SELECT — the Calls tab was
+    // 2+N round trips, so a 100-call history read as ~8s from South Asia.
+    const others = await usersById(
+      db,
+      rows.map((row) => (row.caller_id === uid ? row.callee_id : row.caller_id)),
+    );
+    const items = rows.map((row) =>
+      callFrom(row, uid, others.get(row.caller_id === uid ? row.callee_id : row.caller_id) ?? null),
+    );
     return json({ items });
   }
 
@@ -2936,12 +2956,34 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       uid,
       likeTerm(q),
     );
-    const convIds = new Set(msgRows.map((row) => row.conv_id));
-    const chats = [];
-    for (const convId of convIds) {
-      const conv = await conversationDetail(db, convId, uid);
-      chats.push(conv);
+    // Batched conversation/members/users lookups (the list route's pattern)
+    // instead of conversationDetail() — 3 queries — per matched chat.
+    const convIdList = [...new Set(msgRows.map((row) => row.conv_id))];
+    const convs = new Map<string, ConvRow>();
+    const membersByConv = new Map<string, ConvMemberRow[]>();
+    const userIds: string[] = [];
+    for (const group of chunked(convIdList)) {
+      for (const c of await all<ConvRow>(
+        db,
+        `SELECT ${CONV_COLS} FROM conversations WHERE id IN (${inSql(group.length)})`,
+        ...group,
+      ))
+        convs.set(c.id, c);
+      for (const m of await all<ConvMemberRow>(
+        db,
+        `SELECT ${MEMBER_COLS} FROM members WHERE conv_id IN (${inSql(group.length)})`,
+        ...group,
+      )) {
+        const bucket = membersByConv.get(m.conv_id!);
+        if (bucket) bucket.push(m);
+        else membersByConv.set(m.conv_id!, [m]);
+        userIds.push(m.user_id);
+      }
     }
+    const chatUsers = await usersById(db, userIds);
+    const chats = convIdList
+      .filter((id) => convs.has(id))
+      .map((id) => buildConvDetail(convs.get(id)!, membersByConv.get(id) ?? [], chatUsers, uid));
     return json({
       users,
       chats,
