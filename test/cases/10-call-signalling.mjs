@@ -141,6 +141,19 @@ async function mk(withDo) {
     "ENDED frame on the call room",
     k.callFrames.some((f) => f.body.type === "call" && f.body.status === "ENDED"),
   );
+
+  const history = await k.call("GET", "/api/calls/history", undefined, a.token);
+  const historyRow = history.json.items?.find((item) => item.id === callId);
+  check("ended call appears in history", history.status === 200 && !!historyRow);
+  check(
+    "history strips signalling-only SDP fields",
+    historyRow &&
+      !("offerSdp" in historyRow) &&
+      !("answerSdp" in historyRow) &&
+      !("reofferSdp" in historyRow) &&
+      !("reanswerSdp" in historyRow),
+    historyRow ? JSON.stringify(historyRow) : "none",
+  );
 }
 
 // ---- 2. ICE + renegotiation relay with GET /ice item shape ----

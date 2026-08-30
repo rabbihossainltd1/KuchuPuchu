@@ -2747,7 +2747,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       rows.map((row) => (row.caller_id === uid ? row.callee_id : row.caller_id)),
     );
     const items = rows.map((row) =>
-      callFrom(row, uid, others.get(row.caller_id === uid ? row.callee_id : row.caller_id) ?? null),
+      callHistoryFrom(
+        row,
+        uid,
+        others.get(row.caller_id === uid ? row.callee_id : row.caller_id) ?? null,
+      ),
     );
     return json({ items });
   }
@@ -3112,6 +3116,18 @@ function callFrom(row: CallRow, uid: string, other: UserRow | null) {
     createdAt: row.created_at,
     other: other ? userFrom(other, onlineNow(other)) : null,
   };
+}
+
+// History rows are display-only. SDP belongs to the live signalling routes;
+// returning four large SDP documents for each of up to 100 rows made this
+// endpoint ~19x larger and dominated Calls-tab startup on mobile networks.
+function callHistoryFrom(row: CallRow, uid: string, other: UserRow | null) {
+  const { offerSdp, answerSdp, reofferSdp, reofferFrom, reanswerSdp, ...history } = callFrom(
+    row,
+    uid,
+    other,
+  );
+  return history;
 }
 
 async function hiddenJson(db: D1Database, convId: string) {
