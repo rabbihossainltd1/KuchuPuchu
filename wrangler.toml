@@ -4,6 +4,22 @@ compatibility_date = "2025-08-01"
 account_id = "92081fac7caf54a46a756c382081544b"
 workers_dev = true
 
+# Realtime fan-out (Steps 2-3 fill in the class bodies). One ChatRoom object
+# per conversation (plus "user:<id>" list channels); one CallSignal object per
+# call for WebRTC signalling. D1 stays the source of truth — the objects only
+# hold live WebSocket connections and broadcast what the REST handlers write.
+[[durable_objects.bindings]]
+name = "CHAT_ROOM"
+class_name = "ChatRoom"
+
+[[durable_objects.bindings]]
+name = "CALL_SIGNAL"
+class_name = "CallSignal"
+
+[[migrations]]
+tag = "v1-realtime-do"
+new_classes = ["ChatRoom", "CallSignal"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "kuchupuchu-v3"

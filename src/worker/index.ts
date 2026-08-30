@@ -11,6 +11,11 @@ import {
   SESSION_TTL_MS,
 } from "../shared/constants.js";
 
+// Durable Object classes this worker exports (see wrangler.toml bindings).
+// Re-exported here because src/worker/index.ts is the upload entrypoint.
+export { ChatRoom } from "./durable-objects/ChatRoom.js";
+export { CallSignal } from "./durable-objects/CallSignal.js";
+
 export type Env = {
   DB: D1Database;
   MEDIA?: R2Bucket;
