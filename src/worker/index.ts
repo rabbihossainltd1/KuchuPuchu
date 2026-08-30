@@ -1926,12 +1926,35 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       .filter((r) => r.sender_id && r.sender_id !== uid && !r.delivered_at)
       .map((r) => r.id);
     if (inboxIds.length) {
+      const deliveredAt = nowIso();
       await run(
         db,
         `UPDATE messages SET delivered_at = ? WHERE id IN (${inboxIds.map(() => "?").join(",")})`,
-        nowIso(),
+        deliveredAt,
         ...inboxIds,
       );
+      // An offline recipient has just pulled these messages. Notify every
+      // affected sender immediately; otherwise a sender whose room socket is
+      // healthy never polls and their tick remains stuck on "sent".
+      const senderIds = [
+        ...new Set(
+          rows
+            .filter((r) => inboxIds.includes(r.id) && r.sender_id && r.sender_id !== uid)
+            .map((r) => r.sender_id),
+        ),
+      ];
+      ctx.waitUntil(
+        broadcastRoomEvent(env, convId, {
+          type: "delivered",
+          conversationId: convId,
+          messageIds: inboxIds,
+          senderIds,
+          at: deliveredAt,
+        }),
+      );
+      for (const senderId of senderIds) {
+        ctx.waitUntil(pokeUserConversation(env, senderId, convId, deliveredAt));
+      }
     }
     // Read receipts for the sender. In a group this is the *oldest* read time
     // and only when every other member has read something — MAX() used to flip

@@ -129,7 +129,48 @@ async function mk(withDo) {
   );
 }
 
-// ---- 3. no binding: zero broadcasts, plain REST, sends still work ----
+// ---- 3. offline recipient fetch broadcasts delivery to the sender ----
+{
+  const k = await mk(true);
+  const a = await k.reg("rt3a@x.com", "rt3a");
+  const b = await k.reg("rt3b@x.com", "rt3b");
+  const conv = await k.call("POST", "/api/conversations", { userId: b.user.id }, a.token);
+  const cid = conv.json.conversation.id;
+  const sent = await k.call(
+    "POST",
+    `/api/conversations/${cid}/messages`,
+    { body: "offline delivery", clientId: "rt-delivered" },
+    a.token,
+  );
+  const mid = sent.json.message.id;
+  k.broadcasts.length = 0;
+
+  const fetched = await k.call("GET", `/api/conversations/${cid}/messages`, undefined, b.token);
+  check("offline recipient fetch still succeeds", fetched.status === 200, String(fetched.status));
+  const delivered = k.broadcasts.find((x) => x.room === cid && x.body.type === "delivered");
+  check(
+    "recipient fetch broadcasts delivered event to the room",
+    delivered &&
+      delivered.body.messageIds.includes(mid) &&
+      delivered.body.senderIds.includes(a.user.id) &&
+      !!delivered.body.at,
+    delivered ? JSON.stringify(delivered.body) : "none",
+  );
+  check(
+    "affected sender's list channel gets a conversation poke",
+    k.broadcasts.some(
+      (x) =>
+        x.room === `user:${a.user.id}` && x.body.type === "conv" && x.body.conversationId === cid,
+    ),
+    JSON.stringify(k.broadcasts.map((x) => ({ room: x.room, type: x.body.type }))),
+  );
+  check(
+    "fetching recipient is not redundantly poked",
+    !k.broadcasts.some((x) => x.room === `user:${b.user.id}` && x.body.type === "conv"),
+  );
+}
+
+// ---- 4. no binding: zero broadcasts, plain REST, sends still work ----
 {
   const k = await mk(false);
   const a = await k.reg("rt3a@x.com", "rt3a");

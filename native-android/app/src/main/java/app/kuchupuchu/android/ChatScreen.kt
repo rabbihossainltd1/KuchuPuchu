@@ -348,7 +348,22 @@ fun ChatScreen(nav: NavController, convId: String) {
                             refreshMessages()
                         }
                     }
-                // Read + typing carry their payload — apply directly, no GET.
+                // Receipt + typing events carry their payload — apply directly,
+                // no marker GET. Delivery includes exact message ids so only
+                // the bubbles fetched by the formerly-offline recipient flip.
+                "delivered" ->
+                    if (ev.optString("conversationId") == convId) {
+                        val at = ev.optString("at")
+                        val ids = ev.arr("messageIds")
+                        val deliveredIds = buildSet {
+                            for (i in 0 until ids.length()) add(ids.optString(i))
+                        }
+                        msgs.forEachIndexed { i, message ->
+                            if (message.optString("id") in deliveredIds && message.optString("deliveredAt").isBlank()) {
+                                msgs[i] = JSONObject(message.toString()).put("deliveredAt", at)
+                            }
+                        }
+                    }
                 // GROUPS are the exception: blue ticks mean EVERY member has
                 // read (the server's MIN()/all-read rule). One member's read
                 // frame must not flip them, so a group resyncs instead.
