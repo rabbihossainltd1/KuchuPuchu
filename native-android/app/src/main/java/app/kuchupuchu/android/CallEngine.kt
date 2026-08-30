@@ -128,6 +128,12 @@ class CallEngine(private val app: Application) {
     private val left = AtomicBoolean(false)
     private var poll: Job? = null
     private val scope = CoroutineScope(Dispatchers.Main)
+
+    // v3.7 realtime: the call's signalling socket + one shared event listener.
+    private var wsListener: (() -> Unit)? = null
+    private var wsCallId = ""
+    private val pokeRequested = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val pokeDraining = java.util.concurrent.atomic.AtomicBoolean(false)
     @Volatile
     private var iceCallId: String = ""
 
@@ -178,6 +184,21 @@ class CallEngine(private val app: Application) {
     fun start(ctx: Context) {
         CallNotify.ensure(ctx)
         loadIceConfig()
+        // v3.7 realtime: state/ICE/renegotiation frames for OUR call — and
+        // incoming-call pokes when we have none — trigger an immediate tick().
+        // The timer loop below stays as the safety net for whenever the
+        // socket is down (backgrounded app, flaky network).
+        if (wsListener == null) {
+            wsListener = KpSocket.onEvent { ev ->
+                val t = ev.optString("type")
+                val cid = ev.optString("callId")
+                val mine = active?.id
+                when {
+                    t == "call" && mine == null && cid.isNotBlank() -> pokeTick()
+                    cid.isNotBlank() && cid == mine -> pokeTick()
+                }
+            }
+        }
         poll?.cancel()
         poll =
             scope.launch {
@@ -187,8 +208,17 @@ class CallEngine(private val app: Application) {
                         // A throw out of tick() used to kill this coroutine, which
                         // meant no more call polling at all for the process.
                         runCatching { tick() }.onFailure { notify("Call update failed. Retrying.") }
+                        val wsId =
+                            active?.id?.takeIf { it.isNotBlank() && !it.startsWith("pending") }
+                                ?: iceCallId.takeIf { it.isNotBlank() }
                         delay(
                             when {
+                                // Signalling socket live: the timer is a
+                                // safety net, not the delivery path.
+                                // 5s, not 500ms: with live frames the net
+                                // only covers missed-edge cases, but it stays
+                                // low enough that a dropped frame is bounded.
+                                wsId != null && KpSocket.callLive(wsId) -> 5_000L
                                 active != null -> 500L
                                 Store.foreground -> 1500L
                                 else -> 4000L
@@ -199,6 +229,27 @@ class CallEngine(private val app: Application) {
                     polling = false
                 }
             }
+    }
+
+    /**
+     * Realtime-triggered tick, coalesced WITHOUT dropping: frames arriving
+     * while a tick is in flight (an ANSWER landing mid-ICE-burst) set a flag
+     * and cost exactly one more tick afterwards — a dropped ANSWER frame
+     * would otherwise park the caller on "Ringing…" until the safety net.
+     */
+    private fun pokeTick() {
+        pokeRequested.set(true)
+        if (pokeDraining.getAndSet(true)) return
+        scope.launch {
+            try {
+                do {
+                    pokeRequested.set(false)
+                    runCatching { tick() }
+                } while (pokeRequested.get())
+            } finally {
+                pokeDraining.set(false)
+            }
+        }
     }
 
     private fun ensureFactory(ctx: Context) {
@@ -469,6 +520,12 @@ class CallEngine(private val app: Application) {
         } else {
             active = ui
         }
+        // v3.7: hold the call's realtime signalling socket while it lives.
+        if (!ui.id.startsWith("pending") && wsCallId != ui.id) {
+            if (wsCallId.isNotBlank()) KpSocket.leaveCall(wsCallId)
+            wsCallId = ui.id
+            KpSocket.joinCall(ui.id)
+        }
         // Caller side: ringback tone so the waiting isn't silent.
         if (!incoming && status == "RINGING") {
             CallSounds.startRingback(app)
@@ -556,6 +613,11 @@ class CallEngine(private val app: Application) {
                     return@launch
                 }
                 iceCallId = call.optString("id")
+                if (iceCallId.isNotBlank() && wsCallId != iceCallId) {
+                    if (wsCallId.isNotBlank()) KpSocket.leaveCall(wsCallId)
+                    wsCallId = iceCallId
+                    KpSocket.joinCall(iceCallId)
+                }
                 flushIce()
                 // If the other side answered while the offer was still being
                 // posted (fast accept), the poll already flipped us ACTIVE —
@@ -945,6 +1007,10 @@ class CallEngine(private val app: Application) {
         netFailStreak = 0
         outgoingRingAt = 0L
         iceCallId = ""
+        if (wsCallId.isNotBlank()) {
+            KpSocket.leaveCall(wsCallId)
+            wsCallId = ""
+        }
         pendingIce.clear()
         left.set(false)
         answering.set(false)

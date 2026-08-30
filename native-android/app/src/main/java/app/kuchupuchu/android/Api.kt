@@ -1,6 +1,12 @@
 package app.kuchupuchu.android
 
 import android.content.Context
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import okhttp3.ConnectionPool
 import okhttp3.Interceptor
 import okhttp3.MediaType
@@ -10,6 +16,10 @@ import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 import okio.BufferedSink
 import org.json.JSONArray
 import org.json.JSONObject
@@ -226,6 +236,134 @@ object Api {
             return chain.proceed(req)
         }
     }
+}
+
+
+/**
+ * v3.7 realtime layer: foreground delivery over WebSockets instead of timer
+ * polling. One connection per channel — the open chat, the user's list
+ * channel, the live call — each with exponential-backoff reconnect.
+ *
+ * Events are TRIGGERS, not data: a listener that gets {type:"message"} runs
+ * the exact sync it always ran (a marker GET), just instantly. A socket that
+ * is down changes nothing — callers fall back to their legacy poll loops, so
+ * the worst case is the behaviour the app shipped with.
+ */
+object KpSocket {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    /**
+     * The API client's config plus a WS ping every 20s. Cloudflare closes
+     * idle sockets; without pings a quiet chat socket dies to an idle
+     * timeout and every frame after that is lost until reconnect.
+     */
+    private val wsHttp: OkHttpClient by lazy {
+        Api.http.newBuilder().pingInterval(20, TimeUnit.SECONDS).build()
+    }
+
+    private class Conn(val path: String) {
+        @Volatile var ws: WebSocket? = null
+        @Volatile var want = false
+        @Volatile var attempts = 0
+        val live = MutableStateFlow(false)
+    }
+
+    private val conns = ConcurrentHashMap<String, Conn>()
+    private val listeners = CopyOnWriteArrayList<(JSONObject) -> Unit>()
+
+    /** Register an event listener; the returned closure unregisters it. */
+    fun onEvent(fn: (JSONObject) -> Unit): () -> Unit {
+        listeners.add(fn)
+        return { listeners.remove(fn) }
+    }
+
+    fun isLive(path: String): Boolean = conns[path]?.live?.value == true
+
+    fun join(path: String) {
+        val c = conns.getOrPut(path) { Conn(path) }
+        if (c.want && c.ws != null) return
+        c.want = true
+        connect(c)
+    }
+
+    fun leave(path: String) {
+        val c = conns.remove(path) ?: return
+        c.want = false
+        c.live.value = false
+        runCatching { c.ws?.close(1000, "leave") }
+        c.ws = null
+    }
+
+    private fun connect(c: Conn) {
+        if (!c.want || c.ws != null) return
+        val token = Api.token
+        if (token.isNullOrBlank()) {
+            scheduleReconnect(c)
+            return
+        }
+        val req =
+            Request.Builder()
+                .url(Api.BASE + c.path)
+                .header("Authorization", "Bearer $token")
+                .build()
+        c.ws = wsHttp.newWebSocket(
+            req,
+            object : WebSocketListener() {
+                override fun onOpen(webSocket: WebSocket, response: Response) {
+                    c.attempts = 0
+                    c.live.value = true
+                }
+
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    val ev = runCatching { JSONObject(text) }.getOrNull() ?: return
+                    if (ev.optString("type") == "hello") c.live.value = true
+                    listeners.forEach { l -> runCatching { l(ev) } }
+                }
+
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    // The socket is DEAD: clear it or every future join()
+                    // early-returns on the stale reference and the channel
+                    // stays silent for the rest of the process's life.
+                    c.ws = null
+                    c.live.value = false
+                    if (c.want) scheduleReconnect(c)
+                }
+
+                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    // ANY close while we still want the channel reconnects —
+                    // including server idle-timeout close(1000). Deliberate
+                    // leave() clears `want` first, so it never reconnects.
+                    c.ws = null
+                    c.live.value = false
+                    if (c.want) scheduleReconnect(c)
+                }
+            },
+        )
+    }
+
+    private fun scheduleReconnect(c: Conn) {
+        if (!c.want) return
+        val backoff = minOf(30_000L, 1_000L shl minOf(c.attempts, 5))
+        c.attempts += 1
+        scope.launch {
+            delay(backoff)
+            connect(c)
+        }
+    }
+
+    /* channel helpers */
+
+    fun joinChat(convId: String) = join("/ws/chat/$convId")
+    fun leaveChat(convId: String) = leave("/ws/chat/$convId")
+    fun chatLive(convId: String) = isLive("/ws/chat/$convId")
+
+    fun joinUser() = join("/ws/user")
+    fun leaveUser() = leave("/ws/user")
+    fun userLive() = isLive("/ws/user")
+
+    fun joinCall(callId: String) = join("/ws/call/$callId")
+    fun leaveCall(callId: String) = leave("/ws/call/$callId")
+    fun callLive(callId: String) = isLive("/ws/call/$callId")
 }
 
 class ApiException(val status: Int, override val message: String) : Exception(message)

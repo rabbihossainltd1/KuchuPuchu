@@ -167,6 +167,10 @@ fun ChatScreen(nav: NavController, convId: String) {
     var lastTopId by remember { mutableStateOf("") }
     // Freshness marker for this conversation message page (see refreshMessages).
     var msgsMarker by remember { mutableStateOf("") }
+    // Burst coalescing for realtime message events: K frames inside one
+    // 120ms window trigger ONE marker sync, not K (groups spamming emoji
+    // used to fire a request per bubble).
+    val msgSyncPending = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
     var menuOpen by remember { mutableStateOf(false) }
     var showChatSearch by remember { mutableStateOf(false) }
     var showDisappear by remember { mutableStateOf(false) }
@@ -326,14 +330,59 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
+    // v3.7 realtime: the chat socket delivers message/read/typing events the
+    // instant they happen. The ticker below is only a FALLBACK — it acts when
+    // the socket is down, or once right after the app returns to the
+    // foreground. Socket up + foreground = no periodic requests at all.
     LaunchedEffect(convId) {
-        while (true) {
-            if (Store.foreground && Store.route == "chat/$convId") {
-                refreshMessages()
-                delay(1_000)
-            } else {
-                delay(1_500)
+        KpSocket.joinChat(convId)
+        val removeListener = KpSocket.onEvent { ev ->
+            when (ev.optString("type")) {
+                // (Re)connected: one catch-up sync covers anything missed.
+                "hello" -> refreshMessages()
+                "message" ->
+                    if (ev.optString("conversationId") == convId && msgSyncPending.compareAndSet(false, true)) {
+                        scope.launch {
+                            delay(120)
+                            msgSyncPending.set(false)
+                            refreshMessages()
+                        }
+                    }
+                // Read + typing carry their payload — apply directly, no GET.
+                // GROUPS are the exception: blue ticks mean EVERY member has
+                // read (the server's MIN()/all-read rule). One member's read
+                // frame must not flip them, so a group resyncs instead.
+                "read" ->
+                    if (ev.optString("conversationId") == convId) {
+                        if (conv.value?.optBoolean("isGroup") == true) refreshMessages()
+                        else
+                            ev.optString("at").takeIf { it.isNotBlank() }?.let { at ->
+                                if (at > (otherReadAt ?: "")) otherReadAt = at
+                            }
+                    }
+                "typing" ->
+                    if (ev.optString("conversationId") == convId) {
+                        runCatching { java.time.Instant.parse(ev.optString("at")).toEpochMilli() }
+                            .getOrNull()
+                            ?.let { ms -> if (ms > 0) otherTypingAt = ms }
+                    }
             }
+        }
+        var lastForeground = Store.foreground
+        try {
+            while (true) {
+                delay(1_000)
+                val fg = Store.foreground
+                val justReturned = fg && !lastForeground
+                lastForeground = fg
+                if (!fg) continue
+                val onScreen = Store.route == "chat/$convId"
+                if (justReturned && onScreen) refreshMessages()
+                else if (!KpSocket.chatLive(convId) && onScreen) refreshMessages()
+            }
+        } finally {
+            removeListener()
+            KpSocket.leaveChat(convId)
         }
     }
 

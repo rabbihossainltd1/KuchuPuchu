@@ -135,12 +135,28 @@ fun ChatListScreen(nav: NavController) {
 
     LaunchedEffect(Unit) {
         refresh()
-        // ~2s silent sync while the app is open (user-visible latency zero:
-        // the open chat polls even faster at 800ms, FCM pokes refill
-        // instantly).
-        while (true) {
-            delay(1_200)
-            if (Store.foreground) refresh()
+        // v3.7 realtime: the user channel pushes a poke the instant anything
+        // changes (new message, read, group rename). The ticker below only
+        // fires when the socket is DOWN or the app just came forward.
+        KpSocket.joinUser()
+        val removeListener = KpSocket.onEvent { ev ->
+            when (ev.optString("type")) {
+                "hello", "conv" -> refresh()
+                // "call" pokes are CallEngine's business, not the list's.
+            }
+        }
+        var lastForeground = Store.foreground
+        try {
+            while (true) {
+                delay(2_000)
+                val fg = Store.foreground
+                val justReturned = fg && !lastForeground
+                lastForeground = fg
+                if (fg && (justReturned || !KpSocket.userLive())) refresh()
+            }
+        } finally {
+            removeListener()
+            KpSocket.leaveUser()
         }
     }
     // onResume pokes this — the list syncs the moment the app comes forward.
