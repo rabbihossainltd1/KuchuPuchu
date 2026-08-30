@@ -249,10 +249,63 @@ fun AttachPanel(
             else -> pool.filter { it.bucket == folder }.take(80)
         }
 
+    /* Swipe the GRID itself, WhatsApp-style: up = fullscreen (actions
+       hidden), down at the top = back to the compact panel.
+       IMPORTANT: this NestedScrollConnection is installed on the PARENT
+       Column below via Modifier.nestedScroll, NOT on the LazyVerticalGrid's
+       own modifier chain. A connection attached to the very same node as
+       the scrollable it's meant to watch sits at the wrong point in the
+       dispatch chain and only sees leftovers when the grid HAPPENS to
+       already be at scroll-position 0 — which is exactly why swiping down
+       used to only work after manually collapsing the folder chips first
+       (that changed the item count and could put the grid back at offset
+       0 by coincidence). A parent-level connection always sees pre-scroll
+       before the grid touches it and post-scroll after — the standard,
+       reliable Compose nested-scroll pattern. */
+    val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+    var gridDragTotal by remember { mutableStateOf(0f) }
+    val gridScroll = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.Drag && available.y < -30f && !fullscreen) {
+                    haptics.tap()
+                    setFullscreen(true)
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset {
+                // `available.y` here is what the grid did NOT consume —
+                // non-zero exactly when the grid is already pinned at its
+                // start (can't scroll back further) and the user is still
+                // dragging down. That is the correct, reliable "at the top
+                // and pulling down" signal.
+                if (source == NestedScrollSource.Drag && fullscreen) {
+                    if (available.y > 0f) {
+                        gridDragTotal += available.y
+                        if (gridDragTotal > 60f) {
+                            haptics.tap()
+                            setFullscreen(false)
+                            gridDragTotal = 0f
+                        }
+                    } else {
+                        gridDragTotal = 0f
+                    }
+                }
+                return Offset.Zero
+            }
+        }
+    }
+
     Column(
         Modifier
             .fillMaxWidth()
             .height(panelH)
+            .nestedScroll(gridScroll)
             .background(Cream),
     ) {
         /* drag handle — tap OR swipe up = fullscreen; swipe down = back.
@@ -442,52 +495,6 @@ fun AttachPanel(
             }
         }
 
-        /* Swipe the GRID itself, WhatsApp-style: up = fullscreen (actions
-           hidden), down at the top = back to the compact panel.
-           NOTE: onPostScroll's `available` is only non-zero once the grid
-           itself has nothing left to consume — i.e. it's already scrolled
-           to position 0. Gate on gridState.firstVisibleItemIndex/Offset too
-           so a swipe-down that starts mid-list (grid still has scroll room)
-           reliably collapses back instead of just scrolling the grid, which
-           is exactly the "swipe down doesn't go back to normal" bug. */
-        val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
-        val dragAccum = remember { mutableStateOf(0f) }
-        val gridScroll = remember {
-            object : NestedScrollConnection {
-                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                    if (source == NestedScrollSource.Drag) {
-                        if (available.y < -30f && !fullscreen) {
-                            haptics.tap()
-                            setFullscreen(true)
-                        }
-                        val atTop = gridState.firstVisibleItemIndex == 0 && gridState.firstVisibleItemScrollOffset == 0
-                        if (fullscreen && atTop && available.y > 0f) {
-                            dragAccum.value += available.y
-                            if (dragAccum.value > 60f) {
-                                haptics.tap()
-                                setFullscreen(false)
-                                dragAccum.value = 0f
-                            }
-                        } else if (available.y <= 0f) {
-                            dragAccum.value = 0f
-                        }
-                    }
-                    return Offset.Zero
-                }
-
-                override fun onPostScroll(
-                    consumed: Offset,
-                    available: Offset,
-                    source: NestedScrollSource,
-                ): Offset {
-                    if (source == NestedScrollSource.Drag && available.y > 60f && fullscreen) {
-                        setFullscreen(false)
-                        dragAccum.value = 0f
-                    }
-                    return Offset.Zero
-                }
-            }
-        }
 
         if (shown.isEmpty()) {
             Text(
@@ -514,7 +521,6 @@ fun AttachPanel(
                 state = gridState,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .nestedScroll(gridScroll)
                     .weight(1f),
                 contentPadding = PaddingValues(horizontal = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),

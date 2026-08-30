@@ -812,11 +812,11 @@ fun ChatScreen(nav: NavController, convId: String) {
                 Modifier
                     .fillMaxWidth()
                     .background(Cream)
-                    .padding(horizontal = 2.dp, vertical = 6.dp),
+                    .padding(horizontal = 2.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = { selected.clear() }) {
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Ink, modifier = Modifier.size(28.dp))
+                IconButton(onClick = { selected.clear() }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Ink, modifier = Modifier.size(26.dp))
                 }
                 Text(
                     "${selected.size}",
@@ -862,15 +862,24 @@ fun ChatScreen(nav: NavController, convId: String) {
             Modifier
                 .fillMaxWidth()
                 .background(Cream)
-                .padding(horizontal = 4.dp, vertical = 6.dp),
+                .padding(horizontal = 4.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = {
-                Store.route = ""
-                player.stop()
-                nav.popBackStack()
-            }) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Ink, modifier = Modifier.size(28.dp))
+            IconButton(
+                onClick = {
+                    Store.route = ""
+                    player.stop()
+                    nav.popBackStack()
+                },
+                // Material3's IconButton defaults to a 48dp touch target;
+                // three/four of these sitting in one Row (back arrow, call,
+                // video, more) was inflating the whole header's height well
+                // past what the 40dp avatar + two lines of text actually
+                // need — that's the "extra empty space under the header"
+                // you were seeing. Pinned to match the visual icon size.
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Ink, modifier = Modifier.size(26.dp))
             }
             val otherId = c?.optJSONObject("other")?.optString("id") ?: ""
             Row(
@@ -924,8 +933,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                 }
             }
             Box {
-                IconButton(onClick = { menuOpen = true }) {
-                    Icon(Icons.Filled.MoreVert, "More", tint = Ink, modifier = Modifier.size(24.dp))
+                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Filled.MoreVert, "More", tint = Ink, modifier = Modifier.size(22.dp))
                 }
                 DropdownMenu(
                     expanded = menuOpen,
@@ -1028,7 +1037,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 10.dp),
+                contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
             ) {
                 items(
                     visibleMsgs,
@@ -1378,19 +1387,19 @@ private fun Composer(
             .fillMaxWidth()
             .background(Cream)
             .imePadding()
-            .padding(horizontal = 8.dp, vertical = 5.dp),
+            .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (!recording) {
             Column(
                 Modifier
                     .weight(1f)
-                    .heightIn(min = 42.dp)
-                    .clip(RoundedCornerShape(20.dp))
+                    .heightIn(min = 38.dp)
+                    .clip(RoundedCornerShape(19.dp))
                     .background(Card)
-                    .padding(horizontal = 2.dp, vertical = 2.dp),
+                    .padding(horizontal = 2.dp, vertical = 1.dp),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 38.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 34.dp)) {
                     // WhatsApp order: stickers LEFT, attach RIGHT.
                     IconButton(
                         onClick = {
