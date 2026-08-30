@@ -1,6 +1,7 @@
 package app.kuchupuchu.android
 
 import android.content.Context
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -194,7 +195,10 @@ object Api {
                 // no way out. Flip the auth gate so the login screen comes back.
                 if (resp.code == 401 && !token.isNullOrBlank()) {
                     token = null
-                    Store.authed.value = false
+                    // Post to main thread: Compose state must be written on Main.
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        Store.authed.value = false
+                    }
                 }
                 throw ApiException(resp.code, msg)
             }
@@ -250,7 +254,12 @@ object Api {
  * the worst case is the behaviour the app shipped with.
  */
 object KpSocket {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Main.immediate +
+            CoroutineExceptionHandler { _, throwable ->
+                android.util.Log.e("KP_CRASH", "KpSocket uncaught", throwable)
+            }
+    )
 
     /**
      * The API client's config plus a WS ping every 20s. Cloudflare closes

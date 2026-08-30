@@ -10,9 +10,11 @@ import android.os.Looper
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -127,7 +129,12 @@ class CallEngine(private val app: Application) {
     private val seenIce = mutableSetOf<String>()
     private val left = AtomicBoolean(false)
     private var poll: Job? = null
-    private val scope = CoroutineScope(Dispatchers.Main)
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Main.immediate +
+            CoroutineExceptionHandler { _, throwable ->
+                android.util.Log.e("KP_CRASH", "CallEngine uncaught", throwable)
+            }
+    )
 
     // v3.7 realtime: the call's signalling socket + one shared event listener.
     private var wsListener: (() -> Unit)? = null
