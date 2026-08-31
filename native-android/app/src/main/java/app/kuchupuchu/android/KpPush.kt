@@ -28,8 +28,15 @@ object KpPush {
         val cfg =
             runCatching { Api.get("/api/config/firebase", force = true).optJSONObject("firebase") }.getOrNull()
         if (cfg == null || cfg.optString("applicationId").isBlank()) {
-            decided = true
-            enabled = false
+            // Do NOT latch `enabled = false` any more. This route is public, so
+            // the only ways it fails are transient (offline cold start, DNS/TLS
+            // hiccup, worker 5xx) — and the build ships NO google-services.json
+            // (build.gradle: "config comes from the worker"), which means
+            // "tryInit never succeeded" == FirebaseApp is never created == no FCM
+            // token == ZERO message notifications for the whole app run. The old
+            // one-shot latch turned one bad fetch at startup into "notifications
+            // are broken" until the user force-restarted the app, and neither
+            // side logged anything. Callers now retry (see boot()).
             return false
         }
         val ok =
@@ -50,6 +57,47 @@ object KpPush {
         enabled = ok
         decided = true
         return ok
+    }
+
+    @Volatile
+    private var booting = false
+
+    @Volatile
+    private var registered = false
+
+    /**
+     * Bring push up, with bounded retries: init Firebase, then register this
+     * device's FCM token. Safe to call from onCreate AND onResume — it returns
+     * immediately once both steps are done.
+     *
+     * Replaces the old `if (!Api.token.isNullOrBlank()) { tryInit(); register() }`
+     * at MainActivity, which (a) raced the session token being restored on a
+     * background thread — on a normal cold start `Api.token` was still null, so
+     * the whole push init was skipped and only a sign-in would retry it, and
+     * (b) had exactly one attempt at the Firebase config fetch.
+     */
+    fun boot(ctx: Context) {
+        if (enabled && registered) return
+        val app = ctx.applicationContext
+        if (booting) return
+        booting = true
+        Thread {
+            try {
+                // Registration needs a session; loading it here (rather than
+                // requiring the caller to have one) is what kills the race.
+                runCatching { Api.loadToken(app) }
+                for (wait in longArrayOf(0, 1_500, 4_000, 10_000, 30_000, 90_000)) {
+                    if (wait > 0) Thread.sleep(wait)
+                    if (tryInit(app)) {
+                        registerToken(app)
+                        break
+                    }
+                }
+            } catch (_: Throwable) {
+            } finally {
+                booting = false
+            }
+        }.start()
     }
 
     /**
@@ -95,6 +143,7 @@ object KpPush {
                         .getOrDefault(false)
                     if (ok) {
                         prefs.edit().putString("registered", token).apply()
+                        registered = true
                         break
                     }
                 }
