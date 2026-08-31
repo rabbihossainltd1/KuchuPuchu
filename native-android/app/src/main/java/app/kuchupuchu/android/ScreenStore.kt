@@ -367,6 +367,17 @@ object ScreenStore {
             convs.addAll(list)
         }
         convsLoaded = true
+        // userId -> conversation id, refreshed with every list response.
+        // Calls-history rows, status viewers and search results all open a
+        // chat from a USER id, not a conversation id — without this map they
+        // had to POST /api/conversations first, i.e. one full round trip of
+        // "nothing happens" before the chat appeared (the "instant open hocche
+        // na, ektu late" report). With the map they navigate in the same frame.
+        for (row in guarded) {
+            if (row.optBoolean("isGroup")) continue
+            val uid = row.optJSONObject("other")?.optString("id").orEmpty()
+            if (uid.isNotBlank()) convIdForUser[uid] = row.optString("id")
+        }
         // The chat list polls every 2.5s. Rewriting the whole cache on every
         // one of those polls, when almost none of them change anything, was
         // most of the cost; only a real change needs to reach disk.

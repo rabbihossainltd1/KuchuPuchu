@@ -14,6 +14,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -59,6 +60,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.unit.IntOffset
 import kotlin.math.roundToInt
@@ -459,8 +462,10 @@ fun InCallVideoScreen(call: CallUi) {
     // with the boxed mutableStateOf<Float>, each pixel of drag allocated
     // and triggered a state read/write cycle that showed up as PiP drag
     // lag, worse the longer the call ran.
-    var pipX by remember { mutableFloatStateOf(0f) }
-    var pipY by remember { mutableFloatStateOf(0f) }
+    // -1f means: not placed yet; the first layout pass parks the tile in the
+    // bottom-right corner inside the safe area.
+    var pipX by remember { mutableFloatStateOf(-1f) }
+    var pipY by remember { mutableFloatStateOf(-1f) }
     LaunchedEffect(controlsVisible) {
         if (controlsVisible) {
             kotlinx.coroutines.delay(3_000)
@@ -519,37 +524,65 @@ fun InCallVideoScreen(call: CallUi) {
             }
         }
 
-        /* PiP self-view */
-        Box(
-            Modifier
-                .align(Alignment.BottomEnd)
-                .navigationBarsPadding()
-                .padding(bottom = 150.dp, end = 14.dp)
-                .offset { IntOffset(pipX.roundToInt(), pipY.roundToInt()) }
-                // Single pointerInput handling BOTH drag and tap-to-swap:
-                // layering a separate .clickable on the same box made two
-                // gesture detectors arbitrate every touch, which is what
-                // made the drag feel laggy the moment a tap almost landed.
-                .pointerInput(Unit) {
-                    awaitEachGesture {
-                        val down = awaitFirstDown()
-                        var moved = false
-                        drag(down.id) { change ->
-                            change.consume()
-                            val d = change.positionChange()
-                            if (d.x != 0f || d.y != 0f) moved = true
-                            pipX = (pipX + d.x).coerceIn(-size.width.toFloat() + 96f, 0f)
-                            pipY = (pipY + d.y).coerceIn(-size.height.toFloat() + 132f, 0f)
-                        }
-                        if (!moved) swapped = !swapped
-                    }
+        /* PiP self-view — draggable anywhere on the frame.
+         *
+         * The old clamp used `size` from INSIDE the tile's own pointerInput,
+         * i.e. the tile's own 96x132dp box rather than the screen — so the
+         * reachable area was roughly 60x80dp next to the corner it was pinned
+         * to. That is the whole "freely move kora jai na" report. Offsets are
+         * now absolute coordinates inside the full-screen BoxWithConstraints,
+         * clamped to (parent - self), so the tile reaches every edge while
+         * staying fully visible. */
+        BoxWithConstraints(Modifier.fillMaxSize().zIndex(1f)) {
+            val dm = LocalDensity.current
+            val parentW = with(dm) { maxWidth.toPx() }
+            val parentH = with(dm) { maxHeight.toPx() }
+            val selfW = with(dm) { 96.dp.toPx() }
+            val selfH = with(dm) { 132.dp.toPx() }
+            val edge = with(dm) { 14.dp.toPx() }
+            val topLimit = with(dm) { 54.dp.toPx() }
+            val bottomLimit = with(dm) { 150.dp.toPx() }
+            LaunchedEffect(parentW, parentH) {
+                if (pipX < 0f) {
+                    pipX = (parentW - selfW - edge).coerceAtLeast(0f)
+                    pipY = (parentH - selfH - bottomLimit).coerceAtLeast(topLimit)
                 }
-                .size(width = 96.dp, height = 132.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(Color(0xFF33302B))
-                .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(14.dp)),
-        ) {
-            VideoRenderer(engine, remote = swapped, fit = true)
+                // Rotation / a resize must not leave the tile off-screen.
+                pipX = pipX.coerceIn(0f, (parentW - selfW).coerceAtLeast(0f))
+                pipY = pipY.coerceIn(topLimit, (parentH - selfH).coerceAtLeast(topLimit))
+            }
+            Box(
+                Modifier
+                    .offset { IntOffset(pipX.roundToInt(), pipY.roundToInt()) }
+                    // One pointerInput for BOTH drag and tap-to-swap: layering a
+                    // separate .clickable on the same box made two gesture
+                    // detectors arbitrate every touch (the old drag lag). The
+                    // first down is consumed too, so a tap no longer leaks
+                    // through to the full-screen Box and flickers the controls.
+                    .pointerInput(parentW, parentH) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown().also { it.consume() }
+                            var moved = false
+                            drag(down.id) { change ->
+                                change.consume()
+                                val d = change.positionChange()
+                                if (d.x != 0f || d.y != 0f) moved = true
+                                pipX = (pipX + d.x).coerceIn(0f, (parentW - selfW).coerceAtLeast(0f))
+                                pipY = (pipY + d.y).coerceIn(topLimit, (parentH - selfH).coerceAtLeast(topLimit))
+                            }
+                            // Tap the self-view and the two feeds swap places:
+                            // own camera full-screen, opponent's video in the
+                            // tile (and back).
+                            if (!moved) swapped = !swapped
+                        }
+                    }
+                    .size(width = 96.dp, height = 132.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFF33302B))
+                    .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(14.dp)),
+            ) {
+                VideoRenderer(engine, remote = swapped, fit = true, pip = true)
+            }
         }
 
         /* bottom control strip */
@@ -692,15 +725,26 @@ private fun PulseRing(content: @Composable () -> Unit) {
     Box(Modifier.scale(s)) { content() }
 }
 
-/** WebRTC video renderer (remote full-bleed or local PiP). */
+/**
+ * WebRTC video renderer (remote full-bleed or local PiP).
+ *
+ * `pip` decides the SURFACE LAYER, and it must not be derived from `remote`.
+ * Both feeds are SurfaceViews: the plain one is composited *behind* the window
+ * (punch-through), the `setZOrderMediaOverlay(true)` one above it. As long as
+ * "small tile" and "local camera" were the same thing that worked — but tap to
+ * swap them and the opponent's video landed in the tile on the base layer,
+ * under the main feed, i.e. the swap appeared to do nothing (the
+ * "preview e click korle opponent er video choto preview er jaigay dekha jay na"
+ * report). The small tile is now always the overlay, whoever is inside it.
+ */
 @Composable
-fun VideoRenderer(engine: CallEngine, remote: Boolean, fit: Boolean = false) {
-    key(remote) {
+fun VideoRenderer(engine: CallEngine, remote: Boolean, fit: Boolean = false, pip: Boolean = false) {
+    key(remote, pip) {
     AndroidView(
         factory = { c ->
             SurfaceViewRenderer(c).apply {
                 init(engine.egl.eglBaseContext, null)
-                if (!remote) {
+                if (pip) {
                     setZOrderMediaOverlay(true)
                     clipToOutline = true
                     outlineProvider = object : android.view.ViewOutlineProvider() {

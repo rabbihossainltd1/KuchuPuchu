@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.displayCutoutPadding
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -756,8 +758,23 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                 }
             }
 
-            /* progress segments + header */
-            Column(Modifier.fillMaxSize().statusBarsPadding()) {
+            /* progress segments + header.
+             *
+             * zIndex(2f) + displayCutoutPadding: the clip is an AndroidView
+             * (SurfaceView-backed VideoView) that paints over the whole box
+             * including its own letterbar, so the header had to be forced above
+             * it in the layer order — otherwise the poster row reads as
+             * half-eaten at the top edge on cutout phones / letterboxed clips
+             * ("user er name kemon hide hoye ache"). statusBarsPadding alone is
+             * not enough when a display cutout is taller than the status bar. */
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .zIndex(2f)
+                    .statusBarsPadding()
+                    .displayCutoutPadding()
+                    .padding(top = 4.dp),
+            ) {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),

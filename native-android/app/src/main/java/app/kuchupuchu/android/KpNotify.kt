@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.media.RingtoneManager
 import android.net.Uri
+import android.os.Build
 import androidx.core.app.RemoteInput
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -31,6 +32,14 @@ object KpNotify {
     private const val GROUP = "kp_chats"
 
     fun ensureChannels(ctx: Context) {
+        // NotificationChannel is API 26 and the module ships minSdk 24, so on
+        // Android 7.x this line threw NoSuchMethodError *before* any
+        // notification got posted — message notifications could never appear at
+        // all there, and because ensureChannels() runs inside
+        // KpPushService.onMessageReceived the whole push delivery blew up.
+        // Pre-26 the builders' own setSound/setPriority/setVibrationPattern
+        // carry the behaviour, so simply skipping the channel is correct.
+        if (Build.VERSION.SDK_INT < 26) return
         val mgr = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         // API 26+: the CHANNEL decides sound/vibration; a per-notification
         // setSound() is ignored. Channels created without an explicit sound
@@ -176,8 +185,16 @@ object KpNotify {
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
                 .build()
+        val mgr = NotificationManagerCompat.from(ctx)
+        if (!mgr.areNotificationsEnabled()) {
+            // This exact case was silently swallowed before, which is why
+            // "message notification jai na" was undiagnosable from the server
+            // side: the push HAD arrived, the user (or MIUI) had the channel
+            // muted, and nothing anywhere recorded it.
+            reportSkip(ctx, "blocked: system notifications disabled for app/channel")
+            return
+        }
         runCatching {
-            val mgr = NotificationManagerCompat.from(ctx)
             // ONE card per message — a shared per-convo id used to make the
             // SECOND message silently replace the first card (no new
             // heads-up/sound on many OEMs). But the id must be recomputable
@@ -192,6 +209,8 @@ object KpNotify {
                     ?: (convoId.hashCode() and 0x00FFFFFF) or ((System.nanoTime() and 0x7F).toInt() shl 24)
             mgr.notify(msgId, n)
             mgr.notify(GROUP.hashCode(), summary)
+        }.onFailure { e ->
+            reportSkip(ctx, "notify threw " + e.javaClass.simpleName + ": " + (e.message?.take(120) ?: ""))
         }
     }
 
@@ -219,6 +238,23 @@ object KpNotify {
                 .setSound(defaultSound())
                 .build()
         runCatching { NotificationManagerCompat.from(ctx).notify(callId.hashCode(), n) }
+    }
+
+    /**
+     * Fire-and-forget breadcrumb for the "why is there no card" cases. Never
+     * throws, never blocks: called straight from the push path, where anything
+     * that fails must not take the delivery down with it.
+     */
+    private fun reportSkip(ctx: Context, why: String) {
+        Thread {
+            runCatching {
+                Api.loadToken(ctx)
+                Api.post(
+                    "/api/debug/clientlog",
+                    org.json.JSONObject().put("stage", "notify").put("detail", why),
+                )
+            }
+        }.start()
     }
 
     private fun defaultSound(): Uri = android.provider.Settings.System.DEFAULT_NOTIFICATION_URI

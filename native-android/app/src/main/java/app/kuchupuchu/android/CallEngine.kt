@@ -15,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -100,7 +101,15 @@ class CallEngine(private val app: Application) {
     private var proximityLock: android.os.PowerManager.WakeLock? = null
 
     private fun updateProximityLock() {
-        val shouldHold = active?.kind == "AUDIO" && active?.status == "ACTIVE" &&
+        // A voice call holds the screen-off lock in EVERY live phase —
+        // ringing, outgoing "Calling…", "Connecting…" and connected. Gating on
+        // ACTIVE alone meant a phone in a pocket could press mute / speaker /
+        // decline for the whole first seconds of the call, which is the
+        // "sensor only connected hole kore" report. The route check still lets
+        // the screen back on as soon as sound leaves the earpiece.
+        val call = active
+        val shouldHold = call?.kind == "AUDIO" &&
+            (call.status == "ACTIVE" || call.status == "RINGING") &&
             audioRoute == AudioRoute.EARPIECE
         if (shouldHold) {
             if (proximityLock?.isHeld != true) {
@@ -127,6 +136,17 @@ class CallEngine(private val app: Application) {
     private var lastAppliedReoffer: String? = null
 
     private val renegotiating = java.util.concurrent.atomic.AtomicBoolean(false)
+    /**
+     * A renegotiation that could not run right now (an answer still in flight,
+     * a non-STABLE signalling state) is remembered and retried later instead of
+     * being dropped. Dropping it is exactly how "screen share dileo opponent
+     * kichu dekhe na" happened: the sharer had the track, the peer was never
+     * told about it, and nothing ever re-offered.
+     */
+    private val renegotiationQueued = java.util.concurrent.atomic.AtomicBoolean(false)
+    /** One relay-only retry per call after ICE FAILED (see the FAILED branch). */
+    @Volatile
+    private var relayRetryUsed = false
 
     /** True once the remote side is actually sending video — how an
      *  audio→video upgrade is detected, so BOTH phones land on the same
@@ -216,6 +236,11 @@ class CallEngine(private val app: Application) {
     fun start(ctx: Context) {
         CallNotify.ensure(ctx)
         loadIceConfig()
+        // PeerConnectionFactory.initialize + factory creation used to happen
+        // inside the first startCall()/answer() — 100-200ms of it landed on
+        // the "Connecting…" path of the very first call of every session.
+        // Warm it here, off the UI thread; ensureFactory is idempotent.
+        scope.launch(Dispatchers.IO) { runCatching { ensureFactory(ctx) } }
         // v3.7 realtime: state/ICE/renegotiation frames for OUR call — and
         // incoming-call pokes when we have none — trigger an immediate tick().
         // The timer loop below stays as the safety net for whenever the
@@ -284,6 +309,7 @@ class CallEngine(private val app: Application) {
         }
     }
 
+    @Synchronized
     private fun ensureFactory(ctx: Context) {
         if (factory != null) return
         PeerConnectionFactory.initialize(
@@ -627,6 +653,9 @@ class CallEngine(private val app: Application) {
         left.set(false)
         hasRemote = false
         onHold = false
+        // Fresh call, fresh relay-retry budget (see the ICE FAILED branch).
+        relayRetryUsed = false
+        renegotiationQueued.set(false)
         // Video calls start on SPEAKER (user rule); audio calls grab
         // Bluetooth/wired when present, else the earpiece.
         audioRoute = defaultRoute(kind)
@@ -723,8 +752,14 @@ class CallEngine(private val app: Application) {
                 // re-fetching for the whole 6s while ITS OWN screen already
                 // showed "connected". The caller kept hearing the ringtone the
                 // whole time because the answer wasn't on the server yet.
+                // Opening the camera (a cold one costs 300-900ms) used to sit
+                // between the Accept tap and the SDP answer, so the caller kept
+                // hearing ringback on "Connecting…" for that whole time. Start
+                // capture now, in parallel with fetching the offer, and join
+                // before the answer is built.
+                val capturing = async(Dispatchers.IO) { runCatching { capture(rec.kind == "VIDEO") } }
                 var offer = ""
-                for (attempt in 0 until 24) {
+                for (attempt in 0 until 100) {
                     offer =
                         withContext(Dispatchers.IO) {
                             Api.get("/api/calls/active", true).arr("items").objects()
@@ -733,14 +768,19 @@ class CallEngine(private val app: Application) {
                                 .orEmpty()
                         }
                     if (offer.isNotBlank() || left.get()) break
-                    delay(250)
+                    // 250ms was a full extra poll-tick of latency on the answer
+                    // path for no benefit: the offer is already on the server by
+                    // the time the callee taps Accept in the overwhelming
+                    // majority of cases, so this loop usually runs once.
+                    delay(120)
                 }
                 if (offer.isBlank() || left.get()) {
+                    capturing.await()
                     answering.set(false)
                     hangupLocal()
                     return@launch
                 }
-                capture(rec.kind == "VIDEO")
+                capturing.await()
                 iceCallId = rec.id
                 val peer = newPc()
                 peer.setRemoteDescriptionAwait(SessionDescription(SessionDescription.Type.OFFER, offer))
@@ -1130,6 +1170,37 @@ class CallEngine(private val app: Application) {
                 .createIceServer(),
         )
 
+    /**
+     * Same relays, minus the STUN-only entries and TCP/TLS-first: used for the
+     * single automatic retry after ICE FAILED. Direct + peer-reflexive pairing
+     * is what dies behind a VPN / carrier-grade NAT / restrictive networks,
+     * while a relay still works there — that is the difference between "call
+     * connected hoy na" and a call that connects one second later.
+     */
+    private fun relayFirstIceServers(): List<PeerConnection.IceServer> =
+        customTurnServers() + listOf(
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80?transport=tcp")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer(),
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443?transport=tcp")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer(),
+            PeerConnection.IceServer.builder("turns:openrelay.metered.ca:443?transport=tcp")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer(),
+        )
+
+    private fun relayConfig(): PeerConnection.RTCConfiguration =
+        PeerConnection.RTCConfiguration(relayFirstIceServers()).apply {
+            sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
+            continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+            iceTransportsType = PeerConnection.RTCConfiguration.IceTransportsType.RELAY
+            tcpCandidatePolicy = PeerConnection.RTCConfiguration.TcpCandidatePolicy.ENABLED
+        }
+
     @Volatile private var turnUrls: List<String> = emptyList()
     @Volatile private var turnUser: String = ""
     @Volatile private var turnPass: String = ""
@@ -1214,6 +1285,29 @@ class CallEngine(private val app: Application) {
         Handler(Looper.getMainLooper()).postDelayed(runnable, 12_000L)
     }
 
+    /**
+     * Build + send a reoffer. Returns false when it could not run yet — and
+     * REMEMBERS to try again (on the answer landing, or when ICE reconnects)
+     * rather than dropping the change like the old `return@launch` guards did.
+     */
+    private suspend fun renegotiateNow(): Boolean {
+        val peer = pc ?: return false
+        val id = active?.id
+        if (id.isNullOrBlank() || id.startsWith("pending")) return false
+        if (awaitingReanswer || peer.signalingState() != PeerConnection.SignalingState.STABLE) {
+            renegotiationQueued.set(true)
+            return false
+        }
+        val offer = peer.createOfferAwait(sdpConstraints())
+        peer.setLocalDescriptionAwait(offer)
+        withContext(Dispatchers.IO) {
+            Api.post("/api/calls/$id/reoffer", JSONObject().put("sdp", offer.description))
+        }
+        awaitingReanswer = true
+        renegotiationQueued.set(false)
+        return true
+    }
+
     private fun sdpConstraints() =
         MediaConstraints().apply {
             mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
@@ -1226,6 +1320,11 @@ class CallEngine(private val app: Application) {
                 sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
                 continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
                 iceCandidatePoolSize = 2
+                // UDP is blocked by plenty of VPNs / office & hotel Wi-Fi while
+                // 443/TLS is open; without TCP candidates those networks have no
+                // fallback and the call simply fails.
+                tcpCandidatePolicy = PeerConnection.RTCConfiguration.TcpCandidatePolicy.ENABLED
+                iceTransportsType = PeerConnection.RTCConfiguration.IceTransportsType.ALL
             }
         val peer =
             factory!!.createPeerConnection(
@@ -1247,9 +1346,28 @@ class CallEngine(private val app: Application) {
                                     // prevents Connecting from revealing a
                                     // counter already at 0:05/0:06.
                                     connecting = false,
-                                    startedAt = System.currentTimeMillis(),
+                                    // …but only the FIRST time media is live.
+                                    // CONNECTED/COMPLETED re-fires after every ICE
+                                    // restart, Wi-Fi→data handover and every
+                                    // mid-call renegotiation (screen share, camera
+                                    // on). Re-stamping the epoch there rewound the
+                                    // running timer to 0:00 minutes into a call —
+                                    // the "2 minute er beshi hole time reset hoye
+                                    // jay / wrong time" report — and hangup()
+                                    // derives the stored duration from the same
+                                    // field, so the call HISTORY was wrong too.
+                                    startedAt =
+                                        if (cur.startedAt > 0L) cur.startedAt
+                                        else System.currentTimeMillis(),
                                 )
                                 onChange?.invoke(active)
+                                // The far side may have swapped a track in via
+                                // setTrack() (screen share on a voice call),
+                                // which never re-fires onAddTrack — re-detect.
+                                rebindRemoteVideo()
+                                if (renegotiationQueued.compareAndSet(true, false)) {
+                                    scope.launch { runCatching { renegotiateNow() } }
+                                }
                                 // Proximity screen-off only re-evaluated inside
                                 // applyAudio() before — a voice call becoming
                                 // ACTIVE here didn't call that, so the sensor
@@ -1263,6 +1381,44 @@ class CallEngine(private val app: Application) {
                             }
                             PeerConnection.IceConnectionState.FAILED ->
                                 Handler(Looper.getMainLooper()).post {
+                                    // One automatic rescue before blaming the
+                                    // user's network: reconfigure TURN-first /
+                                    // relay-only and restart ICE. VPN, symmetric
+                                    // NAT and hostile-country routes fail exactly
+                                    // at this step and succeed over a relay.
+                                    if (!relayRetryUsed && pc != null) {
+                                        relayRetryUsed = true
+                                        notify("Network e direct hole na — relay theke try kora hochhe…")
+                                        runCatching { pc?.setConfiguration(relayConfig()) }
+                                        scope.launch {
+                                            try {
+                                                val peer = pc ?: return@launch
+                                                if (peer.signalingState() != PeerConnection.SignalingState.STABLE) {
+                                                    renegotiationQueued.set(true)
+                                                    return@launch
+                                                }
+                                                val cons = sdpConstraints().apply {
+                                                    mandatory.add(
+                                                        MediaConstraints.KeyValuePair("IceRestart", "true"),
+                                                    )
+                                                }
+                                                val off = peer.createOfferAwait(cons)
+                                                peer.setLocalDescriptionAwait(off)
+                                                val cid = active?.id
+                                                if (!cid.isNullOrBlank() && !cid.startsWith("pending")) {
+                                                    withContext(Dispatchers.IO) {
+                                                        Api.post(
+                                                            "/api/calls/$cid/reoffer",
+                                                            JSONObject().put("sdp", off.description),
+                                                        )
+                                                    }
+                                                    awaitingReanswer = true
+                                                }
+                                            } catch (_: Exception) {
+                                            }
+                                        }
+                                        return@post
+                                    }
                                     notify("Call connection failed — net check kore abar try koro")
                                 }
                             PeerConnection.IceConnectionState.DISCONNECTED ->
@@ -1301,19 +1457,7 @@ override fun onRenegotiationNeeded() {
                         if (!renegotiating.compareAndSet(false, true)) return
                         scope.launch {
                             try {
-                                val peer = pc ?: return@launch
-                                val id = active?.id ?: return@launch
-                                if (id.startsWith("pending") || awaitingReanswer) return@launch
-                                if (peer.signalingState() != PeerConnection.SignalingState.STABLE) return@launch
-                                val offer = peer.createOfferAwait(sdpConstraints())
-                                peer.setLocalDescriptionAwait(offer)
-                                withContext(Dispatchers.IO) {
-                                    Api.post(
-                                        "/api/calls/$id/reoffer",
-                                        JSONObject().put("sdp", offer.description),
-                                    )
-                                }
-                                awaitingReanswer = true
+                                renegotiateNow()
                             } catch (_: Exception) {
                             } finally {
                                 renegotiating.set(false)
@@ -1473,6 +1617,10 @@ override fun onRenegotiationNeeded() {
                 // The renegotiated SDP may have re-created the remote video
                 // receiver — re-detect it so the gate/renderer reattach.
                 rebindRemoteVideo()
+                // Anything that had to wait for this answer goes out now.
+                if (renegotiationQueued.compareAndSet(true, false)) {
+                    runCatching { renegotiateNow() }
+                }
             } catch (_: Exception) {
             }
         }
@@ -1485,7 +1633,18 @@ override fun onRenegotiationNeeded() {
             peer.receivers
                 .firstNotNullOfOrNull { it.track() as? VideoTrack }
                 ?: return
-        if (current !== remoteVideo) bindRemote(current)
+        // A voice call already carries an empty placeholder video track (the
+        // sendrecv transceiver), and a mid-call setTrack() — screen share, or
+        // the other side switching their camera on — can keep that SAME track
+        // object. Nothing to rebind then, but a track the audio-only answer
+        // left disabled delivers no frames, so the first-frame gate (and with
+        // it the whole voice→video promotion) would never fire: this is why an
+        // incoming screen share showed nothing on a voice call.
+        if (current === remoteVideo) {
+            if (!hasRemote) runCatching { current.setEnabled(true) }
+            return
+        }
+        bindRemote(current)
     }
 
     private fun flushIce() {
