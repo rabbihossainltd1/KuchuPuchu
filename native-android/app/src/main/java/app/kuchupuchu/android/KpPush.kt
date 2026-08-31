@@ -130,8 +130,21 @@ class KpPushService : FirebaseMessagingService() {
         // AND the OS still draws the plain payload card — the "double call
         // notification, ekta te Receive arekta te nai" bug. Drop every call
         // card first, then post our heads-up.
-        KpNotify.cancelSystemCallCards(this)
-        KpNotify.callHeadsUp(this, data["fromName"] ?: data["from"] ?: "KuchuPuchu", data["kind"] == "VIDEO", callId)
+        // Revalidate against authoritative state immediately before painting.
+        // This closes the delayed-push race where Cancel wins on the server
+        // while an already-delivered FCM callback is still pending locally.
+        Thread {
+            val stillRinging = runCatching {
+                Api.get("/api/calls/active", force = true).arr("items").objects().any {
+                    it.optString("id") == callId && it.optString("status") == "RINGING"
+                }
+            }.getOrDefault(false)
+            if (!stillRinging || callId in CallEngine.ignoredCalls) return@Thread
+            KpNotify.cancelSystemCallCards(this)
+            KpNotify.callHeadsUp(this, data["fromName"] ?: data["from"] ?: "KuchuPuchu", data["kind"] == "VIDEO", callId)
+        }.start()
+        // Data-only calls no longer create a later OS payload card, but retain
+        // this harmless sweep for upgrades with one stale queued payload.
         // The OS card can land AFTER the cancel above; sweep again shortly.
         // Payload cards only — the engine's full-screen Accept/Decline card
         // (1.6s callee grace) can't exist yet, and this sweep never touches

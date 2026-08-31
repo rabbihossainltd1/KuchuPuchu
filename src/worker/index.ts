@@ -2620,11 +2620,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             // is tapped -> MainActivity jumps straight to the ringing screen
             kp_call: callId,
           },
-          {
-            title: me.display_name || "KuchuPuchu",
-            body: kind === "VIDEO" ? "📹 Incoming video call" : "📞 Incoming voice call",
-            channel: "kp_calls_v5",
-          },
+          // Calls are deliberately data-only. A notification payload can be
+          // painted by Android after this Worker has observed a cancellation,
+          // creating a phantom incoming card that app code cannot retract.
+          undefined,
         );
       })(),
     );

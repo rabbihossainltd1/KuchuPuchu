@@ -1176,8 +1176,18 @@ private fun StatusVideoPlayer(
                     // bar waits for this instead of racing the buffering.
                     setOnPreparedListener {
                         it.isLooping = false
+                        // Prime and paint the first decoded frame immediately;
+                        // previously VideoView stayed black until the menu
+                        // caused an unrelated recomposition/layout pass.
+                        seekTo(1)
+                        requestLayout()
+                        invalidate()
                         onReady()
                         start()
+                    }
+                    setOnInfoListener { _, what, _ ->
+                        if (what == android.media.MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) invalidate()
+                        false
                     }
                     viewRef = this
                 }

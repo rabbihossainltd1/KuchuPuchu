@@ -9,6 +9,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -44,6 +46,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -52,6 +55,9 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -444,6 +450,9 @@ fun InCallVideoScreen(call: CallUi) {
     val haptics = rememberHaptics()
     val secs = rememberTick(call.startedAt, call.connecting)
     var controlsVisible by remember { mutableStateOf(true) }
+    var swapped by remember { mutableStateOf(false) }
+    var pipX by remember { mutableStateOf(0f) }
+    var pipY by remember { mutableStateOf(0f) }
     LaunchedEffect(controlsVisible) {
         if (controlsVisible) {
             kotlinx.coroutines.delay(3_000)
@@ -459,8 +468,8 @@ fun InCallVideoScreen(call: CallUi) {
             // the chat below; the same gesture toggles the controls.
             .clickable { controlsVisible = !controlsVisible },
     ) {
-        /* remote video full-bleed */
-        VideoRenderer(engine, remote = true)
+        /* Either feed can be promoted full-screen by tapping the PiP. */
+        VideoRenderer(engine, remote = !swapped)
 
         if (!engine.hasRemote) {
             Column(
@@ -508,12 +517,21 @@ fun InCallVideoScreen(call: CallUi) {
                 .align(Alignment.BottomEnd)
                 .navigationBarsPadding()
                 .padding(bottom = 150.dp, end = 14.dp)
+                .offset { IntOffset(pipX.roundToInt(), pipY.roundToInt()) }
+                .pointerInput(Unit) {
+                    detectDragGestures { change, drag ->
+                        change.consume()
+                        pipX = (pipX + drag.x).coerceIn(-size.width.toFloat() + 96f, 0f)
+                        pipY = (pipY + drag.y).coerceIn(-size.height.toFloat() + 132f, 0f)
+                    }
+                }
+                .clickable { swapped = !swapped }
                 .size(width = 96.dp, height = 132.dp)
                 .clip(RoundedCornerShape(14.dp))
                 .background(Color(0xFF33302B))
                 .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(14.dp)),
         ) {
-            VideoRenderer(engine, remote = false, fit = true)
+            VideoRenderer(engine, remote = swapped, fit = true)
         }
 
         /* bottom control strip */
@@ -659,10 +677,20 @@ private fun PulseRing(content: @Composable () -> Unit) {
 /** WebRTC video renderer (remote full-bleed or local PiP). */
 @Composable
 fun VideoRenderer(engine: CallEngine, remote: Boolean, fit: Boolean = false) {
+    key(remote) {
     AndroidView(
         factory = { c ->
             SurfaceViewRenderer(c).apply {
                 init(engine.egl.eglBaseContext, null)
+                if (!remote) {
+                    setZOrderMediaOverlay(true)
+                    clipToOutline = true
+                    outlineProvider = object : android.view.ViewOutlineProvider() {
+                        override fun getOutline(view: android.view.View, outline: android.graphics.Outline) {
+                            outline.setRoundRect(0, 0, view.width, view.height, 14f * resources.displayMetrics.density)
+                        }
+                    }
+                }
                 setEnableHardwareScaler(true)
                 setMirror(!remote)
                 setScalingType(
@@ -678,6 +706,7 @@ fun VideoRenderer(engine: CallEngine, remote: Boolean, fit: Boolean = false) {
         },
         modifier = Modifier.fillMaxSize(),
     )
+    }
 }
 
 @Composable

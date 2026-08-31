@@ -97,6 +97,27 @@ class CallEngine(private val app: Application) {
     var sharing by mutableStateOf(false)
     var hasRemote by mutableStateOf(false)
 
+    private var proximityLock: android.os.PowerManager.WakeLock? = null
+
+    private fun updateProximityLock() {
+        val shouldHold = active?.kind == "AUDIO" && active?.status == "ACTIVE" &&
+            audioRoute == AudioRoute.EARPIECE
+        if (shouldHold) {
+            if (proximityLock?.isHeld != true) {
+                val pm = app.getSystemService(android.os.PowerManager::class.java)
+                if (pm.isWakeLockLevelSupported(android.os.PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)) {
+                    proximityLock = pm.newWakeLock(
+                        android.os.PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK,
+                        "KuchuPuchu:voice-proximity",
+                    ).also { runCatching { it.acquire() } }
+                }
+            }
+        } else {
+            proximityLock?.let { if (it.isHeld) runCatching { it.release() } }
+            proximityLock = null
+        }
+    }
+
     /** True between posting our re-offer and receiving the remote re-answer. */
     @Volatile
     private var awaitingReanswer: Boolean = false
@@ -376,6 +397,7 @@ class CallEngine(private val app: Application) {
         } else {
             runCatching { @Suppress("DEPRECATION") am.isSpeakerphoneOn = audioRoute == AudioRoute.SPEAKER }
         }
+        updateProximityLock()
     }
 
     private var audioCb: android.media.AudioDeviceCallback? = null
@@ -1026,6 +1048,8 @@ class CallEngine(private val app: Application) {
         seenIce.clear()
         speaker = false
         audioRoute = AudioRoute.EARPIECE
+        proximityLock?.let { if (it.isHeld) runCatching { it.release() } }
+        proximityLock = null
         unregisterAudioCallback()
         runCatching {
             val am = app.getSystemService(android.media.AudioManager::class.java)
@@ -1175,6 +1199,9 @@ class CallEngine(private val app: Application) {
                                     startedAt = System.currentTimeMillis(),
                                 )
                                 onChange?.invoke(active)
+                                // Rebuild the ongoing notification with the
+                                // media-ready chronometer epoch and call kind.
+                                CallService.start(app, "In a call with ${cur.otherName}")
                             }
                             PeerConnection.IceConnectionState.FAILED ->
                                 Handler(Looper.getMainLooper()).post {

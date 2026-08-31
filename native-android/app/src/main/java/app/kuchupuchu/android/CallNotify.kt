@@ -301,16 +301,26 @@ object CallNotify {
             Intent(ctx, CallActionReceiver::class.java).setAction(CALL_SPEAKER),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        return NotificationCompat.Builder(ctx, CH_FG)
+        val call = CallEngine.instance?.active
+        val startedAt = call?.startedAt ?: 0L
+        val isVideo = call?.kind == "VIDEO"
+        val builder = NotificationCompat.Builder(ctx, CH_FG)
             .setSmallIcon(R.mipmap.ic_stat_kp)
             .setContentTitle(title)
-            .setContentText("Tap to return to the call")
+            .setContentText(if (startedAt > 0L) "Call in progress" else "Connecting…")
             .setOngoing(true)
             .setContentIntent(open)
             .setCategory(NotificationCompat.CATEGORY_CALL)
-            .addAction(0, "Speaker", speaker)
-            .addAction(0, "End call", end)
-            .build()
+            .setOnlyAlertOnce(true)
+        if (startedAt > 0L) {
+            builder.setWhen(startedAt).setUsesChronometer(true).setShowWhen(true)
+        } else {
+            builder.setShowWhen(false)
+        }
+        // Video uses the screen controls for routing; its notification has
+        // End only. Voice calls retain Speaker + End.
+        if (!isVideo) builder.addAction(0, "Speaker", speaker)
+        return builder.addAction(0, "End call", end).build()
     }
 
     fun cancelIncoming(ctx: Context) {
@@ -353,8 +363,13 @@ class CallService : Service() {
         private var started = false
         private var lastShare = false
         private var lastTitle: String? = null
+        private var lastStartedAt = -1L
+        private var lastKind: String? = null
 
         fun start(ctx: Context, title: String, share: Boolean = false) {
+            val call = CallEngine.instance?.active
+            val callStartedAt = call?.startedAt ?: 0L
+            val callKind = call?.kind
             if (started) {
                 // Only skip when there is genuinely nothing to change. This
                 // used to compare `share` alone, so the second start() of every
@@ -362,12 +377,16 @@ class CallService : Service() {
                 // with Alice" once the callee picks up - was dropped and the
                 // notification stayed frozen on the ringing text for the whole
                 // call.
-                if (share == lastShare && title == lastTitle) return
+                if (share == lastShare && title == lastTitle &&
+                    callStartedAt == lastStartedAt && callKind == lastKind
+                ) return
                 // Reset fgReady so callers wait for onStartCommand to
                 // re-declare the service types (Android 14+ requires the
                 // mediaProjection type before getMediaProjection()).
                 lastShare = share
                 lastTitle = title
+                lastStartedAt = callStartedAt
+                lastKind = callKind
                 fgReady.set(false)
                 runCatching {
                     ctx.startService(
@@ -379,6 +398,8 @@ class CallService : Service() {
             started = true
             lastShare = share
             lastTitle = title
+            lastStartedAt = callStartedAt
+            lastKind = callKind
             fgReady.set(false)
             val intent = Intent(ctx, CallService::class.java).putExtra("title", title).putExtra("share", share)
             runCatching {
@@ -395,6 +416,8 @@ class CallService : Service() {
             started = false
             lastShare = false
             lastTitle = null
+            lastStartedAt = -1L
+            lastKind = null
             // The next call has to wait for a real startForeground again. This
             // used to stay true, so a caller could race past the wait and hit
             // getMediaProjection() with no foreground service behind it.
@@ -407,6 +430,8 @@ class CallService : Service() {
             started = false
             lastShare = false
             lastTitle = null
+            lastStartedAt = -1L
+            lastKind = null
             fgReady.set(false)
         }
     }
