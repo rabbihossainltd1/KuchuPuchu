@@ -137,6 +137,19 @@ import java.io.File
 import kotlin.math.roundToInt
 
 /**
+ * Everything the background half of a messages refresh derives from the
+ * response JSON. It carries no Compose-visible side effects on purpose: the
+ * coroutine hands this snapshot back to Main, which is where state changes.
+ */
+private class MsgPage(
+    val marker: String,
+    val items: List<JSONObject>,
+    val topId: String,
+    val readAt: String?,
+    val typingAt: Long,
+)
+
+/**
  * Chat screen — locked design #7 "Chat Box": coin wallpaper, gradient
  * outgoing bubbles, voice notes, stickers, read ticks. Instant paint from
  * ScreenStore, silent background refresh, optimistic text/sticker sends.
@@ -251,25 +264,50 @@ fun ChatScreen(nav: NavController, convId: String) {
     ) {
         scope.launch {
             try {
+                // Compose state is READ here, on Main, before Main is left
+                // behind — and written again only once the work below lands.
+                val m = msgsMarker
+                val prevTop = lastTopId
                 // Cheap freshness check: an unchanged tick returns a tiny
                 // payload - no parse, no diff, no state write.
-                val m = msgsMarker
                 val url =
                     if (m.isBlank()) "/api/conversations/$convId/messages"
                     else "/api/conversations/$convId/messages?marker=$m"
-                val data = withContext(Dispatchers.IO) { Api.get(url, force = forceNetwork) }
-                if (data.optBoolean("unchanged")) return@launch
-                msgsMarker = data.optString("marker")
-                val fresh = data.arr("items").objects()
+                // v3.9: only the request itself used to run off-Main. Parsing
+                // the page (arr()/objects() rebuilds every bubble), the id diff
+                // and the timestamp stamps all executed on the UI thread inside
+                // this launch{} — that is where the "jank while someone is
+                // typing" frames came from on long threads. The fetch stays on
+                // IO, every bit of JSON work moves to Default, and Main keeps
+                // only the state writes.
+                val parsed =
+                    withContext(Dispatchers.Default) {
+                        val data = withContext(Dispatchers.IO) { Api.get(url, force = forceNetwork) }
+                        if (data.optBoolean("unchanged")) null
+                        else {
+                            val fresh = data.arr("items").objects()
+                            MsgPage(
+                                marker = data.optString("marker"),
+                                items = fresh,
+                                topId = fresh.lastOrNull()?.optString("id") ?: "",
+                                readAt = data.optString("readAt").takeIf { it.isNotBlank() },
+                                typingAt =
+                                    (runCatching {
+                                            java.time.Instant.parse(data.optString("typingAt")).toEpochMilli()
+                                        }
+                                        .getOrNull()
+                                        ?: 0L),
+                            )
+                        }
+                    }
+                        ?: return@launch
+                val fresh = parsed.items
+                msgsMarker = parsed.marker
                 // Live read receipts: the sender's ticks turn blue without
                 // reopening the chat.
-                data.optString("readAt").takeIf { it.isNotBlank() }?.let { otherReadAt = it }
-                data.optString("typingAt").takeIf { it.isNotBlank() }?.let {
-                    (runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() ?: 0L)
-                        .takeIf { ms -> ms > 0 }?.let { ms -> otherTypingAt = ms }
-                }
-                val prevTop = lastTopId
-                val newTop = fresh.lastOrNull()?.optString("id") ?: ""
+                parsed.readAt?.let { otherReadAt = it }
+                if (parsed.typingAt > 0) otherTypingAt = parsed.typingAt
+                val newTop = parsed.topId
                 ScreenStore.setMsgs(convId, fresh)
                 paintFromStore()
                 if (pending.isNotEmpty()) {
@@ -335,14 +373,16 @@ fun ChatScreen(nav: NavController, convId: String) {
     }
 
     // v3.7 realtime: the chat socket delivers message/read/typing events the
-    // instant they happen. The ticker below is a FALLBACK, not an
-    // optimization: it fires (a) right after the app returns to the
-    // foreground and (b) whenever the socket is down — PLUS a cheap marker
-    // GET roughly every 3s even with the socket alive. That last one is a
-    // deliberate lost-fanout safety net (a dropped DO broadcast is
-    // otherwise invisible until a reopen), so "socket up = zero requests"
-    // is intentionally NOT the case; the marker GET is a tiny response when
-    // nothing changed.
+    // instant they happen. The ticker below is a FALLBACK only: it forces a
+    // refresh (a) right after the app returns to the foreground and (b) on a
+    // 10s tick while the chat socket is DOWN.
+    // v3.9: the third branch — a forced marker GET roughly every 3s even with
+    // the socket alive — is gone. With the socket up it could only ever catch
+    // a lost Durable-Object broadcast, and it paid for that with a round trip
+    // every 3s for every open chat (plus a full parse, until the parsing move
+    // above). A socket that actually reconnects syncs through its "hello"
+    // event, and the FCM poke path refreshes unprompted, so the gap that
+    // remains is one dropped broadcast inside an open, healthy chat.
     LaunchedEffect(convId) {
         KpSocket.joinChat(convId)
         val removeListener = KpSocket.onEvent { ev ->
@@ -403,6 +443,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             }
         }
         var lastForeground = Store.foreground
+        var lastFallbackRefresh = 0L
         try {
             while (true) {
                 delay(1_000)
@@ -412,13 +453,16 @@ fun ChatScreen(nav: NavController, convId: String) {
                 if (!fg) continue
                 val onScreen = Store.route == "chat/$convId"
                 if (justReturned && onScreen) refreshMessages(forceNetwork = true)
-                else if (onScreen && (!KpSocket.chatLive(convId) ||
-                        System.currentTimeMillis() % 3_000L < 1_000L)
-                ) {
-                    // Realtime transports are advisory, not the source of
-                    // truth. A cheap marker GET every ~3s closes a lost-fanout
-                    // gap even when typing frames prove the socket is alive.
-                    refreshMessages(forceNetwork = true)
+                else if (onScreen && !KpSocket.chatLive(convId)) {
+                    // Socket down: this loop IS the delivery path, so keep
+                    // polling — but at 10s, not on every tick of a 1s loop.
+                    // The counter starts at 0 so a chat opened with no socket
+                    // syncs on the first tick instead of waiting 10s.
+                    val now = System.currentTimeMillis()
+                    if (now - lastFallbackRefresh >= 10_000) {
+                        lastFallbackRefresh = now
+                        refreshMessages(forceNetwork = true)
+                    }
                 }
             }
         } finally {
