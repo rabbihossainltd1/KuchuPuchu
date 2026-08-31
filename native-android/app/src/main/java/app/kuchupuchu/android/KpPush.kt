@@ -52,25 +52,75 @@ object KpPush {
         return ok
     }
 
-    /** Registers (or refreshes) this device's FCM token with the worker. */
+    /**
+     * Registers (or refreshes) this device's FCM token with the worker.
+     *
+     * Both registration paths used to be a ONE-SHOT `runCatching { Api.post(...) }`.
+     * A single transient failure — first launch with no network, a worker 5xx,
+     * the session not loaded yet — meant the token never reached `devices`, and
+     * the server then had literally nobody to push to until the app was next
+     * restarted (or FCM happened to rotate the token, which it rarely does).
+     * From the phone that is indistinguishable from "notifications are broken",
+     * and nothing was recorded anywhere. Registration now retries with backoff
+     * and remembers the token that last got through, so a healthy install costs
+     * one POST.
+     */
     fun registerToken(ctx: Context) {
         if (!enabled) return
+        // Kept for unregister(), which has no Context of its own (it is called
+        // from the sign-out path).
+        app0 = ctx.applicationContext
         runCatching {
             FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
-                if (token.isNotBlank()) {
-                    Thread { runCatching { Api.post("/api/devices", JSONObject().put("token", token)) } }.start()
-                }
+                if (token.isNotBlank()) post(ctx, token)
             }
         }
+    }
+
+    private val posting = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** Bounded backoff — covers the realistic "flaky first minute" without WorkManager. */
+    /** Shared by registerToken() and KpPushService.onNewToken() (hence internal). */
+    internal fun post(ctx: Context, token: String) {
+        val app = ctx.applicationContext
+        if (!posting.compareAndSet(false, true)) return
+        Thread {
+            try {
+                Api.loadToken(app)
+                val prefs = app.getSharedPreferences("kp_push", Context.MODE_PRIVATE)
+                if (prefs.getString("registered", null) == token) return@Thread
+                for (wait in longArrayOf(0, 2_000, 6_000, 20_000, 60_000, 180_000, 420_000)) {
+                    if (wait > 0) Thread.sleep(wait)
+                    val ok = runCatching { Api.post("/api/devices", JSONObject().put("token", token)); true }
+                        .getOrDefault(false)
+                    if (ok) {
+                        prefs.edit().putString("registered", token).apply()
+                        break
+                    }
+                }
+            } catch (_: Throwable) {
+            } finally {
+                posting.set(false)
+            }
+        }.start()
     }
 
     /** Removes this device from push delivery (logout). */
     fun unregister() {
         if (!enabled) return
         runCatching { FirebaseMessaging.getInstance().deleteToken() }
+        // Forget the accepted token: the next sign-in must re-register even if
+        // FCM hands back the same string (it does, on the same install).
+        runCatching {
+            app0?.getSharedPreferences("kp_push", Context.MODE_PRIVATE)?.edit()?.remove("registered")?.apply()
+        }
         enabled = false
         decided = false
     }
+
+    /** Set once by ensure() so logout-side clean-up has a Context to work with. */
+    @Volatile
+    private var app0: Context? = null
 }
 
 /**
@@ -197,7 +247,9 @@ class KpPushService : FirebaseMessagingService() {
 
     override fun onNewToken(token: String) {
         if (token.isNotBlank()) {
-            Thread { runCatching { Api.post("/api/devices", JSONObject().put("token", token)) } }.start()
+            // Rotated tokens are exactly when a stale row in `devices` starts
+            // eating every push — post them through the same retry path.
+            KpPush.post(this, token)
         }
     }
 }

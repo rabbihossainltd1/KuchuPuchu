@@ -181,7 +181,16 @@ object ScreenStore {
     /** True when the recipient muted this conversation (bell icon off). */
     fun isMuted(convId: String): Boolean {
         val i = convs.indexOfFirst { it.optString("id") == convId }
-        return i >= 0 && (convs[i].optInt("muted", 0) == 1)
+        if (i < 0) return false
+        // The API sends `muted` as a BOOLEAN (`meMuted = row.muted === 1` in the
+        // worker) and JSONObject.optInt() does NOT coerce booleans - it returns
+        // the fallback. So this read 0, i.e. "not muted", for every conversation:
+        // the in-app alert (shouldNotifyChat) buzzed for muted chats, and only
+        // the `muted:"1"` string riding in the push payload hid it some of the
+        // time. `convSignature` below already used optBoolean, which is why the
+        // bell icon looked correct while the behaviour was not.
+        val c = convs[i]
+        return c.optBoolean("muted", false) || c.optInt("muted", 0) == 1
     }
 
     fun shouldNotifyChat(convId: String, lastAt: String, unread: Int): Boolean {
