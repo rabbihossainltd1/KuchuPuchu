@@ -523,11 +523,17 @@ class CallEngine(private val app: Application) {
                             when {
                                 serverMs > 0L -> serverMs
                                 (current?.startedAt ?: 0L) > 0L -> current!!.startedAt
-                                else -> System.currentTimeMillis()
+                                // Never invent a local clock. Both peers wait
+                                // for the same server startedAt, preventing a
+                                // visible timer jump after answer/ICE connect.
+                                else -> 0L
                             }
                         }
                     },
-                connecting = autoAnswer || (current?.connecting == true && status != "ACTIVE"),
+                connecting =
+                    autoAnswer ||
+                        (status == "ACTIVE" && next.optIso("startedAt").isNullOrBlank()) ||
+                        (current?.connecting == true && status != "ACTIVE"),
             )
         if (current?.id?.startsWith("pending") == true) {
             active = ui.copy(otherName = current.otherName, otherAvatar = current.otherAvatar)
@@ -560,7 +566,7 @@ class CallEngine(private val app: Application) {
         if (autoAnswer) {
             // Jump straight past the ringing screen into the connecting state.
             if (active?.status != "ACTIVE") {
-                active = ui.copy(status = "ACTIVE", startedAt = System.currentTimeMillis(), connecting = true)
+                active = ui.copy(status = "ACTIVE", startedAt = 0L, connecting = true)
             }
             if (pendingAccept) {
                 pendingAccept = false
@@ -1154,8 +1160,11 @@ class CallEngine(private val app: Application) {
                             -> Handler(Looper.getMainLooper()).post {
                                 val cur = active ?: return@post
                                 active = cur.copy(
-                                    connecting = false,
-                                    startedAt = if (cur.startedAt > 0L) cur.startedAt else System.currentTimeMillis(),
+                                    // ICE alone does not define the shared call
+                                    // clock. Keep Connecting until poll/WS
+                                    // supplies the server's startedAt.
+                                    connecting = cur.startedAt <= 0L,
+                                    startedAt = cur.startedAt,
                                 )
                                 onChange?.invoke(active)
                             }

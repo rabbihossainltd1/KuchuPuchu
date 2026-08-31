@@ -248,8 +248,8 @@ fun VoiceCallScreen(call: CallUi) {
             Text(
                 when {
                     engine.onHold -> "On hold"
+                    call.connecting || call.startedAt <= 0L -> "Connecting…"
                     connected -> clockText(secs)
-                    call.connecting -> "Connecting…"
                     call.incoming -> "Ringing…"
                     call.otherOnline -> "Ringing…"
                     else -> "Calling…"
@@ -492,8 +492,9 @@ fun InCallVideoScreen(call: CallUi) {
                 Text(
                     when {
                         engine.sharing -> "You are sharing your screen"
+                        call.connecting || call.startedAt <= 0L -> "Connecting…"
                         secs > 0 -> clockText(secs)
-                        else -> "00:00"
+                        else -> "Connecting…"
                     },
                     color = Color(0xB3FFFFFF),
                     fontSize = 12.sp,
