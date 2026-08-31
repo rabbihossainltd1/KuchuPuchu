@@ -178,8 +178,18 @@ object ScreenStore {
         convs.add(0, row)
     }
 
+    /** True when the recipient muted this conversation (bell icon off). */
+    fun isMuted(convId: String): Boolean {
+        val i = convs.indexOfFirst { it.optString("id") == convId }
+        return i >= 0 && (convs[i].optInt("muted", 0) == 1)
+    }
+
     fun shouldNotifyChat(convId: String, lastAt: String, unread: Int): Boolean {
         if (unread <= 0 || lastAt.isBlank()) return false
+        // Muted chats: no in-app alert either. (The push path checks the same
+        // flag; before this, Mute only changed the bell icon and everything
+        // still buzzed.)
+        if (isMuted(convId)) return false
         if (Store.route == "chat/$convId") {
             lastNotifiedAt[convId] = lastAt
             return false

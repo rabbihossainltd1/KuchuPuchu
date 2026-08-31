@@ -335,9 +335,14 @@ fun ChatScreen(nav: NavController, convId: String) {
     }
 
     // v3.7 realtime: the chat socket delivers message/read/typing events the
-    // instant they happen. The ticker below is only a FALLBACK — it acts when
-    // the socket is down, or once right after the app returns to the
-    // foreground. Socket up + foreground = no periodic requests at all.
+    // instant they happen. The ticker below is a FALLBACK, not an
+    // optimization: it fires (a) right after the app returns to the
+    // foreground and (b) whenever the socket is down — PLUS a cheap marker
+    // GET roughly every 3s even with the socket alive. That last one is a
+    // deliberate lost-fanout safety net (a dropped DO broadcast is
+    // otherwise invisible until a reopen), so "socket up = zero requests"
+    // is intentionally NOT the case; the marker GET is a tiny response when
+    // nothing changed.
     LaunchedEffect(convId) {
         KpSocket.joinChat(convId)
         val removeListener = KpSocket.onEvent { ev ->

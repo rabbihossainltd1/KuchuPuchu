@@ -490,7 +490,13 @@ async function blockedBetween(db: D1Database, a: string, b: string) {
 }
 
 async function membersOf(db: D1Database, convId: string) {
-  return all<{ user_id: string }>(db, "SELECT user_id FROM members WHERE conv_id = ?", convId);
+  // `muted` rides along: the send handler needs each recipient's mute flag
+  // to route their push to a silent channel (one extra column, same query).
+  return all<{ user_id: string; muted: number }>(
+    db,
+    "SELECT user_id, muted FROM members WHERE conv_id = ?",
+    convId,
+  );
 }
 
 async function requireMember(db: D1Database, convId: string, userId: string) {
@@ -2177,13 +2183,23 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         // shown a (button-less) system card. Chosen deliberately — Reply/
         // Like/Mark-as-read must work everywhere they show up.
         // ("from" is a reserved FCM key — hence fromName.)
+        // `muted`: the recipient's per-conversation mute. The push still goes
+        // out (the badge/list must update) but the client routes it to a
+        // silent channel — previously nobody checked the flag, so a muted
+        // chat still rang with a full heads-up.
+        // `mid`: the message id, so the client's notification card carries a
+        // stable, recomputable id. The Reply/Like/Mark-as-read actions cancel
+        // THAT exact card; the old random high bits made nm.cancel() miss the
+        // card ~127/128 of the time.
         pushToUser(env, db, memberId.user_id, {
           type: "message",
           convoId: convId,
+          mid,
           kind: conv.kind,
           fromName: me.display_name,
           body: preview.slice(0, 120),
           kp_chat: convId,
+          muted: memberId.muted === 1 ? "1" : "0",
         }).then((ok) =>
           ok
             ? run(

@@ -75,7 +75,7 @@ blocks         (owner_id, target_id)
 
 ### R2
 - Bucket: `kp-media` (files + status media + avatars)
-- Presigned PUT (client upload, 100MB cap), GET auth-check + redirect
+- Multipart POST /api/files (client upload, 25MB cap — enforced server-side), GET auth-check (owner or conversation member) + redirect
 - Image thumbnails: client-side resize before upload (app e compress korbe, R2 e ek copy)
 
 ## Android v3
