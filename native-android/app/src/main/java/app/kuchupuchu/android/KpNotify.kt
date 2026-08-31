@@ -52,7 +52,9 @@ object KpNotify {
                 .apply {
                     description = "Messages from muted conversations"
                     setSound(null, null)
-                    disableVibration()
+                    // Single-zero pattern = no vibration (works on every API
+                    // level; setVibrationEnabled() is API 30+ only).
+                    setVibrationPattern(longArrayOf(0))
                 },
         )
         // v5: the user wants incoming calls to RING even on silent (like an
