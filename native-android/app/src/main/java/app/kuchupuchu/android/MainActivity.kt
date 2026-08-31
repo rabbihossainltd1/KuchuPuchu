@@ -77,13 +77,10 @@ class MainActivity : ComponentActivity() {
 
         // Push mode is live on the v3 worker: init Firebase + register the
         // device token. No always-on service, no permanent notification.
-        if (!Api.token.isNullOrBlank()) {
-            Thread {
-                runCatching {
-                    if (KpPush.tryInit(this)) KpPush.registerToken(this)
-                }
-            }.start()
-        }
+        // boot() owns the retries and loads the session itself — gating on
+        // Api.token here used to skip push entirely whenever this ran before
+        // the stored session was restored, i.e. most cold starts.
+        KpPush.boot(this)
         // Pre-warm the SoundPool so the first send/receive tick never hits the
         // async-load race (play() on a not-yet-loaded sample is silently
         // dropped - the first message after a cold start used to be mute).
@@ -173,6 +170,10 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onResume() {
+        // A cold start that could not reach the worker (no network yet)
+        // left push un-init'd for the whole run; re-arm whenever the app is
+        // back in front. No-op once Firebase + registration have succeeded.
+        KpPush.boot(this)
         super.onResume()
         Store.foreground = true
         // Returning to the app triggers an instant re-sync of the open screens
