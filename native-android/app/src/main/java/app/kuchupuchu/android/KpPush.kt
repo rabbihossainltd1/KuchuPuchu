@@ -80,7 +80,8 @@ object KpPush {
     private val posting = java.util.concurrent.atomic.AtomicBoolean(false)
 
     /** Bounded backoff — covers the realistic "flaky first minute" without WorkManager. */
-    private fun post(ctx: Context, token: String) {
+    /** Shared by registerToken() and KpPushService.onNewToken() (hence internal). */
+    internal fun post(ctx: Context, token: String) {
         val app = ctx.applicationContext
         if (!posting.compareAndSet(false, true)) return
         Thread {
