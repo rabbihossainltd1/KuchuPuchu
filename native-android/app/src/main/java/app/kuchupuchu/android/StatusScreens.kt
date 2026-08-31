@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.displayCutoutPadding
-import androidx.compose.ui.zIndex
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -760,17 +759,16 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
 
             /* progress segments + header.
              *
-             * zIndex(2f) + displayCutoutPadding: the clip is an AndroidView
-             * (SurfaceView-backed VideoView) that paints over the whole box
-             * including its own letterbar, so the header had to be forced above
-             * it in the layer order — otherwise the poster row reads as
-             * half-eaten at the top edge on cutout phones / letterboxed clips
-             * ("user er name kemon hide hoye ache"). statusBarsPadding alone is
-             * not enough when a display cutout is taller than the status bar. */
+             * The name used to sit UNDER the clip: the player was a
+             * SurfaceView-backed VideoView running with setZOrderOnTop(true),
+             * which composites that surface above the WHOLE window - no Compose
+             * zIndex could ever beat it (photo statuses looked fine because an
+             * image is an ordinary view). The player is a TextureView now, so
+             * the header simply draws on top. The cutout padding stays because a
+             * tall display cutout is not always covered by statusBarsPadding. */
             Column(
                 Modifier
                     .fillMaxSize()
-                    .zIndex(2f)
                     .statusBarsPadding()
                     .displayCutoutPadding()
                     .padding(top = 4.dp),
@@ -1138,6 +1136,22 @@ private fun ViewersSheet(
     }
 }
 
+/**
+ * Status clip player — TextureView, NOT VideoView.
+ *
+ * VideoView is a SurfaceView, and this player used to run it with
+ * setZOrderOnTop(true) so its surface would not fall behind the Compose layer.
+ * That flag puts the surface above the ENTIRE window, so nothing the app draws
+ * can cover it: the poster avatar + name row ended up UNDER the video
+ * ("status a video ta user er name er upore chole geche") while photo statuses
+ * were fine, because an image is an ordinary view. The z-order hack also
+ * depended on Android re-ordering surfaces, which sometimes only happened after
+ * an unrelated layout pass — hence a clip sitting there not playing until the
+ * ⋮ menu forced one ("3 dot a click korle dekhi play hoi").
+ *
+ * A TextureView renders inside the view hierarchy: no z-order flags, no surface
+ * race, nothing to re-trigger, and pause/resume can drive a plain MediaPlayer.
+ */
 @Composable
 private fun StatusVideoPlayer(
     url: String,
@@ -1147,35 +1161,12 @@ private fun StatusVideoPlayer(
 ) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     var path by remember(url) { mutableStateOf<String?>(null) }
-    var viewRef by remember(url) { mutableStateOf<android.widget.VideoView?>(null) }
-
-    // The progress BAR follows the PLAYER's real position — the stored
-    // `seconds` metadata used to drift 1-2s from the compressed clip.
-    LaunchedEffect(viewRef, paused) {
-        val view = viewRef ?: return@LaunchedEffect
-        while (true) {
-            val view0 = viewRef
-            if (view0 == null) break
-            if (paused) {
-                delay(80)
-                continue
-            }
-            runCatching {
-                val dur = view0.duration
-                if (dur > 0 && view0.isPlaying) {
-                    onProgress((view0.currentPosition.toFloat() / dur).coerceIn(0f, 1f))
-                } else if (dur > 0 && view0.currentPosition > 0) {
-                    // playback finished (or was never started) — close the bar
-                    onProgress(1f)
-                }
-            }
-            delay(50)
-        }
-    }
-    // VideoView stretches video to its own bounds, so the view MUST match the
-    // clip's aspect ratio — otherwise portrait clips fill the whole screen
+    // VideoView stretched the clip to its own bounds, so the view still MUST
+    // match the clip's aspect ratio — otherwise portrait clips fill the screen
     // and come out distorted.
     var aspect by remember(url) { mutableStateOf(9f / 16f) }
+    var player by remember(url) { mutableStateOf<StatusClipPlayer?>(null) }
+
     LaunchedEffect(url) {
         val p = withContext(Dispatchers.IO) {
             runCatching {
@@ -1197,7 +1188,32 @@ private fun StatusVideoPlayer(
             runCatching { r.release() }
         }
     }
-    if (path == null) {
+
+    // The progress BAR follows the PLAYER's real position — the stored
+    // `seconds` metadata used to drift 1-2s from the compressed clip.
+    LaunchedEffect(player, paused) {
+        while (true) {
+            val p = player
+            if (p != null && !paused) {
+                p.snapshot()?.let { (cur, dur, playing) ->
+                    if (dur > 0 && playing) {
+                        onProgress((cur.toFloat() / dur).coerceIn(0f, 1f))
+                    } else if (dur > 0 && cur > 0) {
+                        // playback finished — close the bar
+                        onProgress(1f)
+                    }
+                }
+            }
+            delay(50)
+        }
+    }
+    // The clip PAUSES exactly when the progress clock pauses (views sheet open /
+    // reply focused) — video and bar stay in lock-step instead of the video
+    // running on.
+    LaunchedEffect(player, paused) { player?.setPaused(paused) }
+
+    val ready = path
+    if (ready == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(color = Gold)
         }
@@ -1206,54 +1222,112 @@ private fun StatusVideoPlayer(
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         androidx.compose.ui.viewinterop.AndroidView(
             factory = { c ->
-                android.widget.VideoView(c).apply {
-                    // VideoView is SurfaceView-backed. Inside Compose its
-                    // surface could remain behind the host until opening ⋮
-                    // triggered a new traversal; explicitly layer it above
-                    // the Compose surface and request a transparent surface.
-                    setZOrderOnTop(true)
-                    holder.setFormat(android.graphics.PixelFormat.TRANSLUCENT)
-                    setVideoPath(path)
-                    // Tell the viewer the clip is about to play: the progress
-                    // bar waits for this instead of racing the buffering.
-                    setOnPreparedListener {
-                        it.isLooping = false
-                        seekTo(1)
-                        onReady()
-                        start()
-                        // The SurfaceView-backed VideoView can finish
-                        // preparing before Compose gives it its real size —
-                        // its window surface then sits behind the Compose
-                        // surface, fully black, until SOME unrelated layout
-                        // pass (e.g. opening the ⋮ menu) forces Android to
-                        // re-order the surfaces. Force that pass ourselves,
-                        // on the next frame, instead of waiting for the user
-                        // to accidentally trigger one.
-                        post {
-                            requestLayout()
-                            invalidate()
-                        }
-                    }
-                    setOnInfoListener { _, what, _ ->
-                        if (what == android.media.MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) {
-                            post { requestLayout(); invalidate() }
-                        }
-                        false
-                    }
-                    viewRef = this
+                android.view.TextureView(c).apply {
+                    isOpaque = false
+                    player = StatusClipPlayer(this, ready, onReady, onProgress).also { it.attach() }
                 }
             },
-            // Reconstructed on `paused` change: freeze the clip while the
-            // progress bar is paused (views sheet / keyboard), resume after.
-            update = { view ->
-                if (paused) {
-                    if (view.isPlaying) view.pause()
-                } else if (!view.isPlaying) {
-                    runCatching { view.start() }
-                }
+            onRelease = {
+                runCatching { player?.release() }
+                player = null
             },
             modifier = Modifier.fillMaxSize().aspectRatio(aspect),
         )
+    }
+}
+
+/** MediaPlayer glued to a TextureView surface, re-attaching itself after the
+ *  surface is destroyed (screen off, navigation away) instead of restarting. */
+private class StatusClipPlayer(
+    private val view: android.view.TextureView,
+    private val path: String,
+    private val onReady: () -> Unit,
+    private val onProgress: (Float) -> Unit,
+) : android.view.TextureView.SurfaceTextureListener {
+
+    private var mp: android.media.MediaPlayer? = null
+    private var prepared = false
+    private var wantPaused = false
+    private var resumeAt = 0
+
+    fun attach() {
+        view.surfaceTextureListener = this
+        if (view.surfaceTexture != null) bind()
+    }
+
+    private fun bind() {
+        val st = view.surfaceTexture ?: return
+        val existing = mp
+        if (existing != null) {
+            runCatching { existing.setSurface(android.view.Surface(st)) }
+            if (resumeAt > 0) runCatching { existing.seekTo(resumeAt) }
+            if (!wantPaused) runCatching { existing.start() }
+            return
+        }
+        mp =
+            android.media.MediaPlayer().apply {
+                runCatching {
+                    setDataSource(path)
+                    setScreenOnWhilePlaying(true)
+                    setOnPreparedListener { p ->
+                        prepared = true
+                        // The progress bar waits for this instead of racing the
+                        // buffering; 1ms in keeps "0:00" from showing a blank.
+                        runCatching { if (resumeAt > 0) p.seekTo(resumeAt) else p.seekTo(1) }
+                        onReady()
+                        if (!wantPaused) runCatching { p.start() }
+                    }
+                    setOnCompletionListener { onProgress(1f) }
+                    // A clip the decoder refuses must not freeze the viewer:
+                    // treat it as finished so the segment advances (the old
+                    // VideoView just sat there on a black frame).
+                    setOnErrorListener { _, _, _ ->
+                        onProgress(1f)
+                        true
+                    }
+                    prepareAsync()
+                }
+            }
+        runCatching { mp?.setSurface(android.view.Surface(st)) }
+    }
+
+    override fun onSurfaceTextureAvailable(surface: android.graphics.SurfaceTexture, width: Int, height: Int) {
+        bind()
+    }
+
+    override fun onSurfaceTextureSizeChanged(surface: android.graphics.SurfaceTexture, width: Int, height: Int) {}
+
+    override fun onSurfaceTextureDestroyed(surface: android.graphics.SurfaceTexture): Boolean {
+        // Stop the ghost audio-only playback and remember the position, so the
+        // clip continues where it was instead of restarting from zero.
+        resumeAt = runCatching { mp?.currentPosition ?: resumeAt }.getOrDefault(resumeAt)
+        runCatching { mp?.pause() }
+        runCatching { mp?.setSurface(null) }
+        return true
+    }
+
+    override fun onSurfaceTextureUpdated(surface: android.graphics.SurfaceTexture) {}
+
+    fun setPaused(p: Boolean) {
+        wantPaused = p
+        val m = mp ?: return
+        if (!prepared) return
+        runCatching { if (p) m.pause() else m.start() }
+    }
+
+    /** (positionMs, durationMs, isPlaying), or null until the clip is prepared. */
+    fun snapshot(): Triple<Int, Int, Boolean>? {
+        val m = mp ?: return null
+        if (!prepared) return null
+        return runCatching { Triple(m.currentPosition, m.duration, m.isPlaying) }.getOrNull()
+    }
+
+    fun release() {
+        prepared = false
+        runCatching { mp?.stop() }
+        runCatching { mp?.release() }
+        mp = null
+        runCatching { view.surfaceTextureListener = null }
     }
 }
 
