@@ -154,6 +154,17 @@ function likeTerm(q: string) {
 }
 
 const ESCAPED_LIKE = " ESCAPE '\\'";
+/**
+ * SQLite bails out with "LIKE or GLOB pattern too complex" once a pattern
+ * carries enough wildcards/escapes — that was firing in production (13 rows in
+ * error_log from the user-search endpoints) and the user just saw an empty
+ * search. instr() is a plain substring test: no pattern engine, no complexity
+ * limit, and backslashes/percent signs in a query stop needing escaping.
+ */
+const instrLike = (col: string) => `instr(lower(${col}), ?) > 0`;
+/** The bound value for instrLike(): a plain needle, no % wrapping, no
+ *  escaping — both search routes already trim + lowercase the query. */
+const instrTerm = (q: string) => q.trim().toLowerCase().slice(0, 64);
 
 /** Content types we are willing to serve back out of R2 / data URLs. */
 const SAFE_MEDIA_TYPES = new Set([
@@ -489,12 +500,45 @@ async function blockedBetween(db: D1Database, a: string, b: string) {
   ));
 }
 
+/**
+ * Data-only pushes are what let our rich card (Reply / Like / Mark-as-read)
+ * render at all — but on MIUI/Xiaomi and friends the OS freezes or kills the
+ * process, and a data-only message arriving then is never handed to the app.
+ * That is the "message notification jai na" class of report, and it is
+ * invisible from the server: FCM answers 200 either way.
+ *
+ * So the trigger is deliberately conservative — a full IDLE_PUSH_WINDOW_MS of
+ * server silence, which means the app is not even polling its list, i.e. it is
+ * frozen or killed and onMessageReceived will never run. Anything livelier than
+ * that (including the ordinary "app in background" case) keeps the data-only
+ * path and its Reply/Like/Mark-as-read actions untouched. No double card: with
+ * the app in the FOREGROUND Firebase still calls onMessageReceived and does not
+ * display the payload's notification, so the rich card stays the only one.
+ */
+const IDLE_PUSH_WINDOW_MS = 5 * 60_000;
+
+function recipientAlert(
+  member: { last_active: string | null },
+  preview: string,
+  fromName: string,
+): { title: string; body: string; channel: string } | undefined {
+  const last = member.last_active ? Date.parse(member.last_active) : 0;
+  if (!last || Date.now() - last < IDLE_PUSH_WINDOW_MS) return undefined;
+  return {
+    title: fromName || "KuchuPuchu",
+    body: preview.slice(0, 120),
+    channel: "kp_messages_v2",
+  };
+}
+
 async function membersOf(db: D1Database, convId: string) {
   // `muted` rides along: the send handler needs each recipient's mute flag
   // to route their push to a silent channel (one extra column, same query).
-  return all<{ user_id: string; muted: number }>(
+  return all<{ user_id: string; muted: number; last_active: string | null }>(
     db,
-    "SELECT user_id, muted FROM members WHERE conv_id = ?",
+    `SELECT user_id, muted,
+            (SELECT last_active_at FROM users WHERE id = members.user_id) AS last_active
+       FROM members WHERE conv_id = ?`,
     convId,
   );
 }
@@ -1246,9 +1290,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const rows = q
       ? await all<UserRow>(
           db,
-          `SELECT * FROM users WHERE (LOWER(username) LIKE ?${ESCAPED_LIKE} OR LOWER(display_name) LIKE ?${ESCAPED_LIKE}) AND id != ? ORDER BY last_active_at DESC LIMIT 20`,
-          likeTerm(q),
-          likeTerm(q),
+          `SELECT * FROM users WHERE (${instrLike("username")} OR ${instrLike("display_name")}) AND id != ? ORDER BY last_active_at DESC LIMIT 20`,
+          instrTerm(q),
+          instrTerm(q),
           uid,
         )
       : await all<UserRow>(
@@ -2181,7 +2225,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         // battery-savers) a data-only push can be dropped if the app was
         // force-killed, where a notification-payload push would still have
         // shown a (button-less) system card. Chosen deliberately — Reply/
-        // Like/Mark-as-read must work everywhere they show up.
+        // Like/Mark-as-read must work everywhere they show up. That trade-off is
+        // why recipientAlert() exists: it re-attaches the system payload ONLY for
+        // a recipient whose app has gone completely silent (frozen/killed), where
+        // a data-only push is by definition wasted.
         // ("from" is a reserved FCM key — hence fromName.)
         // `muted`: the recipient's per-conversation mute. The push still goes
         // out (the badge/list must update) but the client routes it to a
@@ -2191,16 +2238,22 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         // stable, recomputable id. The Reply/Like/Mark-as-read actions cancel
         // THAT exact card; the old random high bits made nm.cancel() miss the
         // card ~127/128 of the time.
-        pushToUser(env, db, memberId.user_id, {
-          type: "message",
-          convoId: convId,
-          mid,
-          kind: conv.kind,
-          fromName: me.display_name,
-          body: preview.slice(0, 120),
-          kp_chat: convId,
-          muted: memberId.muted === 1 ? "1" : "0",
-        }).then((ok) =>
+        pushToUser(
+          env,
+          db,
+          memberId.user_id,
+          {
+            type: "message",
+            convoId: convId,
+            mid,
+            kind: conv.kind,
+            fromName: me.display_name,
+            body: preview.slice(0, 120),
+            kp_chat: convId,
+            muted: memberId.muted === 1 ? "1" : "0",
+          },
+          recipientAlert(memberId, preview, me.display_name),
+        ).then((ok) =>
           ok
             ? run(
                 db,
@@ -2979,9 +3032,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (q.length < 2) return json({ users: [], messages: [], chats: [] });
     const userRows = await all<UserRow>(
       db,
-      `SELECT * FROM users WHERE (LOWER(username) LIKE ?${ESCAPED_LIKE} OR LOWER(display_name) LIKE ?${ESCAPED_LIKE}) AND id != ? LIMIT 10`,
-      likeTerm(q),
-      likeTerm(q),
+      `SELECT * FROM users WHERE (${instrLike("username")} OR ${instrLike("display_name")}) AND id != ? LIMIT 10`,
+      instrTerm(q),
+      instrTerm(q),
       uid,
     );
     const users = [];

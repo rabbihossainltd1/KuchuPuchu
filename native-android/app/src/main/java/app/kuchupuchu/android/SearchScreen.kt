@@ -69,12 +69,21 @@ fun SearchScreen(nav: NavController) {
     var searching by remember { mutableStateOf(false) }
 
     fun openChatWith(userId: String) {
+        // Cache first (ScreenStore fills it from every chat-list refresh): a
+        // chat the user already has opens on the SAME frame instead of after a
+        // POST /api/conversations round trip. Unknown user -> create path.
+        val cached = ScreenStore.convIdForUser[userId]
+        if (cached != null) {
+            nav.navigate("chat/$cached") { popUpTo("main") }
+            return
+        }
         scope.launch {
             runCatching {
                 val conv = withContext(Dispatchers.IO) {
                     Api.post("/api/conversations", JSONObject().put("userId", userId))
                 }
                 conv.optJSONObject("conversation")?.optString("id")?.let {
+                    ScreenStore.convIdForUser[userId] = it
                     nav.navigate("chat/$it") { popUpTo("main") }
                 }
             }
