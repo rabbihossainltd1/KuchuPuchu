@@ -256,7 +256,14 @@ object KpSocket {
     private class Conn(val path: String) {
         @Volatile var ws: WebSocket? = null
         @Volatile var want = false
+        // True while newWebSocket() is in flight (before onOpen/onFailure).
+        // Without it, a join() arriving mid-handshake starts a SECOND socket
+        // on the same channel; leave() then closes only the latest one and
+        // the older stays open (duplicate events + server-side leak until
+        // the Cloudflare idle timeout).
+        @Volatile var connecting = false
         @Volatile var attempts = 0
+        @Volatile var reconnectJob: kotlinx.coroutines.Job? = null
         val live = MutableStateFlow(false)
     }
 
@@ -273,7 +280,10 @@ object KpSocket {
 
     fun join(path: String) {
         val c = conns.getOrPut(path) { Conn(path) }
-        if (c.want && c.ws != null) return
+        // `connecting` in the guard: a socket can be wanted-but-not-yet-open
+        // (handshake in flight, or backoff pending); joining again there used
+        // to spawn a parallel WebSocket on the same channel.
+        if (c.want && (c.ws != null || c.connecting)) return
         c.want = true
         connect(c)
     }
@@ -282,12 +292,14 @@ object KpSocket {
         val c = conns.remove(path) ?: return
         c.want = false
         c.live.value = false
+        c.reconnectJob?.cancel()
         runCatching { c.ws?.close(1000, "leave") }
         c.ws = null
+        c.connecting = false
     }
 
     private fun connect(c: Conn) {
-        if (!c.want || c.ws != null) return
+        if (!c.want || c.ws != null || c.connecting) return
         val token = Api.token
         if (token.isNullOrBlank()) {
             scheduleReconnect(c)
@@ -298,10 +310,12 @@ object KpSocket {
                 .url(Api.BASE + c.path)
                 .header("Authorization", "Bearer $token")
                 .build()
+        c.connecting = true
         c.ws = wsHttp.newWebSocket(
             req,
             object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
+                    c.connecting = false
                     c.attempts = 0
                     c.live.value = true
                 }
@@ -313,19 +327,26 @@ object KpSocket {
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    // Stale socket (a newer one already replaced it): ignore
+                    // — acting on a dead socket's late callback is what used
+                    // to schedule a second reconnect and double-connect.
+                    if (webSocket !== c.ws) return
                     // The socket is DEAD: clear it or every future join()
                     // early-returns on the stale reference and the channel
                     // stays silent for the rest of the process's life.
                     c.ws = null
+                    c.connecting = false
                     c.live.value = false
                     if (c.want) scheduleReconnect(c)
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    if (webSocket !== c.ws) return
                     // ANY close while we still want the channel reconnects —
                     // including server idle-timeout close(1000). Deliberate
                     // leave() clears `want` first, so it never reconnects.
                     c.ws = null
+                    c.connecting = false
                     c.live.value = false
                     if (c.want) scheduleReconnect(c)
                 }
@@ -335,9 +356,12 @@ object KpSocket {
 
     private fun scheduleReconnect(c: Conn) {
         if (!c.want) return
+        // One pending reconnect per channel: overlapping timers each used to
+        // call connect() and create extra sockets on the same path.
+        c.reconnectJob?.cancel()
         val backoff = minOf(30_000L, 1_000L shl minOf(c.attempts, 5))
         c.attempts += 1
-        scope.launch {
+        c.reconnectJob = scope.launch {
             delay(backoff)
             connect(c)
         }

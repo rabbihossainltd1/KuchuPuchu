@@ -157,17 +157,12 @@ class KpPushService : FirebaseMessagingService() {
 
     private fun handleMessage(data: Map<String, String>) {
         val convoId = data["convoId"] ?: return
-        // Tell the worker this data push ARRIVED: silence inside the grace
-        // window is what triggers the system payload-card fallback.
         val mid = data["mid"]
-        if (!mid.isNullOrBlank()) {
-            Thread {
-                runCatching {
-                    Api.loadToken(this)
-                    Api.post("/api/push/ack", org.json.JSONObject().put("mid", mid))
-                }
-            }.start()
-        }
+        // Mute is honored on BOTH sides of the wire: the worker tags the push
+        // with the recipient's flag, and we also re-check the locally cached
+        // conversation (covers a push sent between the user tapping Mute and
+        // the next list refresh — the flag the server saw was already stale).
+        val muted = data["muted"] == "1" || ScreenStore.isMuted(convoId)
         // Breadcrumb: proves a data-only push reached the process, and in
         // which state (foreground / background / woken-from-dead) — the A/B
         // push test depends on exactly this signal.
@@ -178,19 +173,26 @@ class KpPushService : FirebaseMessagingService() {
                     "/api/debug/clientlog",
                     org.json.JSONObject()
                         .put("stage", "push")
-                        .put("detail", "data-msg fg=" + Store.foreground + " route=" + Store.route + " from=" + data["fromName"]),
+                        .put("detail", "data-msg fg=" + Store.foreground + " route=" + Store.route + " muted=" + muted + " from=" + data["fromName"]),
                 )
             }
         }.start()
         ScreenStore.pokeInbox()
         if (Store.route == "chat/$convoId" && Store.foreground) {
-            runCatching { KpSounds.receive(this) }
+            if (!muted) runCatching { KpSounds.receive(this) }
             return
         }
         // Badge jumps instantly; the next list refresh confirms the same number.
         ScreenStore.bumpUnread(convoId, data["body"])
-        runCatching { KpSounds.receive(this) }
-        KpNotify.message(this, data["fromName"] ?: data["from"] ?: "KuchuPuchu", data["body"] ?: "New message", convoId)
+        if (!muted) runCatching { KpSounds.receive(this) }
+        KpNotify.message(
+            this,
+            data["fromName"] ?: data["from"] ?: "KuchuPuchu",
+            data["body"] ?: "New message",
+            convoId,
+            muted = muted,
+            mid = mid,
+        )
     }
 
     override fun onNewToken(token: String) {

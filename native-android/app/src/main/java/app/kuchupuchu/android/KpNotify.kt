@@ -23,6 +23,10 @@ private const val KEY_REPLY = "kp_reply_text"
  */
 object KpNotify {
     private const val CHAT_CHANNEL = "kp_messages_v2"
+    // Muted conversations land here: badge + shade entry, but no sound and
+    // no vibration (IMPORTANCE_DEFAULT). The mute toggle used to change only
+    // the bell icon — every message still rang on the loud channel above.
+    private const val SILENT_CHANNEL = "kp_silent_v1"
     private const val CALL_CHANNEL = "kp_calls_v5"
     private const val GROUP = "kp_chats"
 
@@ -41,6 +45,14 @@ object KpNotify {
                     description = "New chat messages"
                     setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION), attrs)
                     enableVibration(true)
+                },
+        )
+        mgr.createNotificationChannel(
+            NotificationChannel(SILENT_CHANNEL, "Muted chats", NotificationManager.IMPORTANCE_DEFAULT)
+                .apply {
+                    description = "Messages from muted conversations"
+                    setSound(null, null)
+                    disableVibration()
                 },
         )
         // v5: the user wants incoming calls to RING even on silent (like an
@@ -73,10 +85,19 @@ object KpNotify {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-    fun message(ctx: Context, from: String, body: String, convoId: String) {
+    fun message(
+        ctx: Context,
+        from: String,
+        body: String,
+        convoId: String,
+        muted: Boolean = false,
+        mid: String? = null,
+    ) {
         ensureChannels(ctx)
         // WhatsApp-style direct actions: reply straight from the
         // notification, like with one tap, or mark read — no app open needed.
+        // Each action carries the message id so it can cancel the EXACT card
+        // (card ids below are derived from `mid`).
         val remoteInput = RemoteInput.Builder(KEY_REPLY).setLabel("Reply").build()
         val replyPending =
             PendingIntent.getBroadcast(
@@ -84,7 +105,8 @@ object KpNotify {
                 convoId.hashCode() * 4 + 1,
                 Intent(ctx, KpNotifActionReceiver::class.java)
                     .setAction(KpNotifActionReceiver.ACTION_REPLY)
-                    .putExtra("convoId", convoId),
+                    .putExtra("convoId", convoId)
+                    .putExtra("mid", mid ?: ""),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
         val likePending =
@@ -93,7 +115,8 @@ object KpNotify {
                 convoId.hashCode() * 4 + 2,
                 Intent(ctx, KpNotifActionReceiver::class.java)
                     .setAction(KpNotifActionReceiver.ACTION_LIKE)
-                    .putExtra("convoId", convoId),
+                    .putExtra("convoId", convoId)
+                    .putExtra("mid", mid ?: ""),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
         val readPending =
@@ -102,7 +125,8 @@ object KpNotify {
                 convoId.hashCode() * 4 + 3,
                 Intent(ctx, KpNotifActionReceiver::class.java)
                     .setAction(KpNotifActionReceiver.ACTION_MARK_READ)
-                    .putExtra("convoId", convoId),
+                    .putExtra("convoId", convoId)
+                    .putExtra("mid", mid ?: ""),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
         val replyAction =
@@ -117,7 +141,7 @@ object KpNotify {
             NotificationCompat.Action.Builder(android.R.drawable.ic_menu_view, "Mark as read", readPending)
                 .build()
         val n =
-            NotificationCompat.Builder(ctx, CHAT_CHANNEL)
+            NotificationCompat.Builder(ctx, if (muted) SILENT_CHANNEL else CHAT_CHANNEL)
                 .setSmallIcon(R.mipmap.ic_stat_kp)
                 .setContentTitle(from)
                 .setContentText(body)
@@ -128,9 +152,11 @@ object KpNotify {
                 .addAction(replyAction)
                 .addAction(likeAction)
                 .addAction(readAction)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                // Muted: no heads-up, no sound — channel is silent anyway,
+                // and PRIORITY_DEFAULT keeps it out of the full-intent path.
+                .setPriority(if (muted) NotificationCompat.PRIORITY_DEFAULT else NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-                .setSound(defaultSound())
+                .apply { if (!muted) setSound(defaultSound()) }
                 .build()
         // A group summary is REQUIRED once >1 grouped notification is
         // posted — without one, several OEM launchers (and Android itself
@@ -150,14 +176,18 @@ object KpNotify {
                 .build()
         runCatching {
             val mgr = NotificationManagerCompat.from(ctx)
-            // Same convoId used to reuse the exact same notification id —
-            // a SECOND message from the same person while the first
-            // notification was still showing silently REPLACED it instead
-            // of alerting again (no new heads-up/sound on many OEMs). Each
-            // message now gets its own id; convoId.hashCode() stays as the
-            // low bits so ids for the same conversation cluster together
-            // without colliding.
-            val msgId = (convoId.hashCode() and 0x00FFFFFF) or ((System.nanoTime() and 0x7F).toInt() shl 24)
+            // ONE card per message — a shared per-convo id used to make the
+            // SECOND message silently replace the first card (no new
+            // heads-up/sound on many OEMs). But the id must be recomputable
+            // by the action buttons: they cancel THIS card. With the worker's
+            // `mid` in the push payload the card id is simply mid.hashCode()
+            // — unique per message AND known to the Reply/Like/Mark-as-read
+            // actions (they carry `mid` as an extra). The old random high
+            // bits made nm.cancel(convoId.hashCode()) miss the card ~127/128
+            // of the time, so actions "did nothing".
+            val msgId =
+                mid?.takeIf { it.isNotBlank() }?.hashCode()
+                    ?: (convoId.hashCode() and 0x00FFFFFF) or ((System.nanoTime() and 0x7F).toInt() shl 24)
             mgr.notify(msgId, n)
             mgr.notify(GROUP.hashCode(), summary)
         }
@@ -245,8 +275,13 @@ object KpNotify {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
 
-    /** Quiet confirmation shown after replying from the notification. */
-    fun replySent(ctx: Context, convoId: String, text: String) {
+    /**
+     * Quiet confirmation shown after replying from the notification.
+     * `cardId` (the original card's id) is reused so this REPLACES the card
+     * in place — a second, differently-id'd "Sent" card used to pile up next
+     * to the one that failed to dismiss.
+     */
+    fun replySent(ctx: Context, convoId: String, text: String, cardId: Int) {
         val n =
             NotificationCompat.Builder(ctx, CHAT_CHANNEL)
                 .setSmallIcon(R.mipmap.ic_stat_kp)
@@ -256,7 +291,7 @@ object KpNotify {
                 .setContentIntent(chatTap(ctx, convoId))
                 .setPriority(NotificationCompat.PRIORITY_MIN)
                 .build()
-        runCatching { NotificationManagerCompat.from(ctx).notify(convoId.hashCode(), n) }
+        runCatching { NotificationManagerCompat.from(ctx).notify(cardId, n) }
     }
 
     /**
@@ -305,11 +340,19 @@ object KpNotify {
 class KpNotifActionReceiver : android.content.BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         val convoId = intent.getStringExtra("convoId") ?: return
+        // The exact card this action came from (worker `mid` in the extras).
+        // Legacy cards (pre-`mid` pushes) fall back to the old cancel id —
+        // they were the ones that leaked, but at least we never make it worse.
+        val cardId =
+            intent.getStringExtra("mid")
+                ?.takeIf { it.isNotBlank() }
+                ?.hashCode()
+                ?: convoId.hashCode()
         Api.loadToken(ctx)
         val nm = NotificationManagerCompat.from(ctx)
         when (intent.action) {
             ACTION_LIKE -> {
-                nm.cancel(convoId.hashCode())
+                nm.cancel(cardId)
                 val pending = goAsync()
                 Thread {
                     runCatching {
@@ -327,7 +370,7 @@ class KpNotifActionReceiver : android.content.BroadcastReceiver() {
             ACTION_MARK_READ -> {
                 // Just dismisses + marks read server-side — no reply sent,
                 // no app open, matches the messenger-style tick behaviour.
-                nm.cancel(convoId.hashCode())
+                nm.cancel(cardId)
                 val pending = goAsync()
                 Thread {
                     runCatching { Api.post("/api/conversations/$convoId/read") }
@@ -356,10 +399,13 @@ class KpNotifActionReceiver : android.content.BroadcastReceiver() {
                             )
                         }.isSuccess
                     if (ok) {
-                        nm.cancel(convoId.hashCode())
-                        // Quiet "sent" confirmation replaces the prompt.
+                        nm.cancel(cardId)
+                        // Quiet "sent" confirmation REPLACES the same card
+                        // (same id) — the old code posted a second card with
+                        // convoId.hashCode(), so users saw the original card
+                        // still there PLUS a duplicate "Sent" one.
                         runCatching {
-                            KpNotify.replySent(ctx, convoId, text)
+                            KpNotify.replySent(ctx, convoId, text, cardId)
                         }
                     }
                     pending.finish()

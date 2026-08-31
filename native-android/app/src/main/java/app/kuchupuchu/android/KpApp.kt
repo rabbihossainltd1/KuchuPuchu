@@ -27,12 +27,18 @@ fun KpApp() {
     val nav = rememberNavController()
     val authed by Store.authed
 
-    // Notification tap → open the conversation once authed.
+    // Notification tap → open the conversation. Collect the FLOW instead of
+    // reading a one-shot var: a tap while already signed in (singleTop
+    // onNewIntent) emits here immediately, and on a cold start a tap that
+    // lands pre-login is replayed by the StateFlow once this effect runs
+    // again after `authed` flips. (The old read-once var was silently
+    // dropped in exactly the common case: app open, user taps the card.)
     LaunchedEffect(authed) {
-        val pending = MainActivity.pendingChat
-        if (authed && !pending.isNullOrBlank()) {
-            MainActivity.pendingChat = null
-            nav.navigate("chat/$pending")
+        MainActivity.pendingChat.collect { pending ->
+            if (authed && !pending.isNullOrBlank()) {
+                MainActivity.pendingChat.value = null
+                nav.navigate("chat/$pending") { launchSingleTop = true }
+            }
         }
     }
 

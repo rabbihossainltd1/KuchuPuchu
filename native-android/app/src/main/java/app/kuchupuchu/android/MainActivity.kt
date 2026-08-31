@@ -156,7 +156,7 @@ class MainActivity : ComponentActivity() {
                 it.answer()
             }
         }
-        intent.getStringExtra("kp_chat")?.let { pendingChat = it }
+        intent.getStringExtra("kp_chat")?.let { pendingChat.value = it }
         // Missed-call "Call back" action: start the call right away.
         intent.getStringExtra("kp_callback")?.let { otherId ->
             if (otherId.isNotBlank()) {
@@ -245,8 +245,15 @@ class MainActivity : ComponentActivity() {
         @Volatile
         var current: MainActivity? = null
 
-        /** Conversation to open from a notification tap. */
-        @Volatile
-        var pendingChat: String? = null
+        /** Conversation to open from a notification tap.
+         *
+         *  A StateFlow, not a @Volatile var: a tap while the user is ALREADY
+         *  signed in (singleTop onNewIntent) used to write the var and then
+         *  wait forever — the only consumer was a LaunchedEffect(authed) that
+         *  re-runs only when `authed` flips. KpApp now collects this flow, so
+         *  every tap is observed; StateFlow replay also picks up taps that
+         *  landed before login on a cold start.
+         */
+        val pendingChat = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
     }
 }
