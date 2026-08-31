@@ -1171,6 +1171,12 @@ private fun StatusVideoPlayer(
         androidx.compose.ui.viewinterop.AndroidView(
             factory = { c ->
                 android.widget.VideoView(c).apply {
+                    // VideoView is SurfaceView-backed. Inside Compose its
+                    // surface could remain behind the host until opening ⋮
+                    // triggered a new traversal; explicitly layer it above
+                    // the Compose surface and request a transparent surface.
+                    setZOrderOnTop(true)
+                    holder.setFormat(android.graphics.PixelFormat.TRANSLUCENT)
                     setVideoPath(path)
                     // Tell the viewer the clip is about to play: the progress
                     // bar waits for this instead of racing the buffering.

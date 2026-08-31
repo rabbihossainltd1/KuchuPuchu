@@ -244,7 +244,11 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
-    fun refreshMessages(forceScroll: Boolean = false, markRead: Boolean = false) {
+    fun refreshMessages(
+        forceScroll: Boolean = false,
+        markRead: Boolean = false,
+        forceNetwork: Boolean = false,
+    ) {
         scope.launch {
             try {
                 // Cheap freshness check: an unchanged tick returns a tiny
@@ -253,7 +257,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 val url =
                     if (m.isBlank()) "/api/conversations/$convId/messages"
                     else "/api/conversations/$convId/messages?marker=$m"
-                val data = withContext(Dispatchers.IO) { Api.get(url) }
+                val data = withContext(Dispatchers.IO) { Api.get(url, force = forceNetwork) }
                 if (data.optBoolean("unchanged")) return@launch
                 msgsMarker = data.optString("marker")
                 val fresh = data.arr("items").objects()
@@ -339,13 +343,17 @@ fun ChatScreen(nav: NavController, convId: String) {
         val removeListener = KpSocket.onEvent { ev ->
             when (ev.optString("type")) {
                 // (Re)connected: one catch-up sync covers anything missed.
-                "hello" -> refreshMessages()
+                "hello" -> refreshMessages(forceNetwork = true)
                 "message" ->
                     if (ev.optString("conversationId") == convId && msgSyncPending.compareAndSet(false, true)) {
                         scope.launch {
+                            // Force the authoritative GET: a realtime event is
+                            // proof the cached page is stale. Without this the
+                            // recipient could show typing yet never paint the
+                            // message body until reopening the thread.
                             delay(120)
                             msgSyncPending.set(false)
-                            refreshMessages()
+                            refreshMessages(forceNetwork = true)
                         }
                     }
                 // Receipt + typing events carry their payload — apply directly,
@@ -398,8 +406,15 @@ fun ChatScreen(nav: NavController, convId: String) {
                 lastForeground = fg
                 if (!fg) continue
                 val onScreen = Store.route == "chat/$convId"
-                if (justReturned && onScreen) refreshMessages()
-                else if (!KpSocket.chatLive(convId) && onScreen) refreshMessages()
+                if (justReturned && onScreen) refreshMessages(forceNetwork = true)
+                else if (onScreen && (!KpSocket.chatLive(convId) ||
+                        System.currentTimeMillis() % 3_000L < 1_000L)
+                ) {
+                    // Realtime transports are advisory, not the source of
+                    // truth. A cheap marker GET every ~3s closes a lost-fanout
+                    // gap even when typing frames prove the socket is alive.
+                    refreshMessages(forceNetwork = true)
+                }
             }
         } finally {
             removeListener()
