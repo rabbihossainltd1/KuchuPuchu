@@ -533,7 +533,10 @@ class CallEngine(private val app: Application) {
                 connecting =
                     autoAnswer ||
                         (status == "ACTIVE" && next.optIso("startedAt").isNullOrBlank()) ||
-                        (current?.connecting == true && status != "ACTIVE"),
+                        // Polling must not clear the media gate merely because
+                        // answer-time startedAt has arrived. ICE owns the
+                        // transition from Connecting to the running timer.
+                        current?.connecting == true,
             )
         if (current?.id?.startsWith("pending") == true) {
             active = ui.copy(otherName = current.otherName, otherAvatar = current.otherAvatar)
@@ -737,7 +740,10 @@ class CallEngine(private val app: Application) {
                 runCatching {
                     val ms = java.time.Instant.parse(answered.optJSONObject("call")?.optIso("startedAt")).toEpochMilli()
                     if (ms > 0L) {
-                        active = active?.copy(startedAt = ms)
+                        // Answer time is the shared timer base, but media may
+                        // not be connected yet. Keep the UI on Connecting
+                        // until ICE explicitly reports CONNECTED/COMPLETED.
+                        active = active?.copy(startedAt = ms, connecting = true)
                         onChange?.invoke(active)
                     }
                 }
@@ -1160,10 +1166,10 @@ class CallEngine(private val app: Application) {
                             -> Handler(Looper.getMainLooper()).post {
                                 val cur = active ?: return@post
                                 active = cur.copy(
-                                    // ICE alone does not define the shared call
-                                    // clock. Keep Connecting until poll/WS
-                                    // supplies the server's startedAt.
-                                    connecting = cur.startedAt <= 0L,
+                                    // Media is now usable. Reveal the timer if
+                                    // its server base is present; otherwise the
+                                    // UI's startedAt guard keeps Connecting.
+                                    connecting = false,
                                     startedAt = cur.startedAt,
                                 )
                                 onChange?.invoke(active)
