@@ -1046,6 +1046,8 @@ class CallEngine(private val app: Application) {
         pc?.close()
         pc = null
         seenIce.clear()
+        iceWatchdog?.let { Handler(Looper.getMainLooper()).removeCallbacks(it) }
+        iceWatchdog = null
         speaker = false
         audioRoute = AudioRoute.EARPIECE
         proximityLock?.let { if (it.isHeld) runCatching { it.release() } }
@@ -1166,6 +1168,52 @@ class CallEngine(private val app: Application) {
         }
     }
 
+    private var iceWatchdog: Runnable? = null
+
+    /**
+     * ICE can get permanently stuck in CHECKING on weak/asymmetric mobile
+     * networks (one bar, carrier NAT) with no callback ever firing again —
+     * that left the callee's screen on "Connecting…" forever with nothing
+     * to recover it. If we're not CONNECTED within 12s of entering
+     * CHECKING/DISCONNECTED, force an ICE restart (fresh candidates,
+     * same call) instead of hanging silently.
+     */
+    private fun armIceWatchdog() {
+        iceWatchdog?.let { Handler(Looper.getMainLooper()).removeCallbacks(it) }
+        val callId = active?.id ?: return
+        val runnable = Runnable {
+            if (active?.id != callId) return@Runnable
+            if (active?.connecting != true) return@Runnable
+            val peer = pc ?: return@Runnable
+            if (peer.iceConnectionState() == PeerConnection.IceConnectionState.CONNECTED ||
+                peer.iceConnectionState() == PeerConnection.IceConnectionState.COMPLETED
+            ) {
+                return@Runnable
+            }
+            notify("Reconnecting…")
+            scope.launch {
+                try {
+                    if (peer.signalingState() != PeerConnection.SignalingState.STABLE) return@launch
+                    val constraints = sdpConstraints().apply {
+                        mandatory.add(MediaConstraints.KeyValuePair("IceRestart", "true"))
+                    }
+                    val offer = peer.createOfferAwait(constraints)
+                    peer.setLocalDescriptionAwait(offer)
+                    withContext(Dispatchers.IO) {
+                        Api.post("/api/calls/$callId/reoffer", JSONObject().put("sdp", offer.description))
+                    }
+                    awaitingReanswer = true
+                    // If the restart itself doesn't recover either, don't
+                    // loop forever — one retry is enough to not leave the
+                    // user stuck with no recourse but hanging up.
+                } catch (_: Exception) {
+                }
+            }
+        }
+        iceWatchdog = runnable
+        Handler(Looper.getMainLooper()).postDelayed(runnable, 12_000L)
+    }
+
     private fun sdpConstraints() =
         MediaConstraints().apply {
             mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
@@ -1186,9 +1234,12 @@ class CallEngine(private val app: Application) {
                     override fun onSignalingChange(p0: PeerConnection.SignalingState?) {}
                     override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
                         when (state) {
+                            PeerConnection.IceConnectionState.CHECKING ->
+                                Handler(Looper.getMainLooper()).post { armIceWatchdog() }
                             PeerConnection.IceConnectionState.CONNECTED,
                             PeerConnection.IceConnectionState.COMPLETED,
                             -> Handler(Looper.getMainLooper()).post {
+                                iceWatchdog?.let { Handler(Looper.getMainLooper()).removeCallbacks(it) }
                                 val cur = active ?: return@post
                                 active = cur.copy(
                                     // The visible duration starts when media is
@@ -1199,6 +1250,13 @@ class CallEngine(private val app: Application) {
                                     startedAt = System.currentTimeMillis(),
                                 )
                                 onChange?.invoke(active)
+                                // Proximity screen-off only re-evaluated inside
+                                // applyAudio() before — a voice call becoming
+                                // ACTIVE here didn't call that, so the sensor
+                                // stayed off until the user touched the audio
+                                // route button. Arm it the instant media is
+                                // actually live.
+                                updateProximityLock()
                                 // Rebuild the ongoing notification with the
                                 // media-ready chronometer epoch and call kind.
                                 CallService.start(app, "In a call with ${cur.otherName}")
@@ -1207,6 +1265,8 @@ class CallEngine(private val app: Application) {
                                 Handler(Looper.getMainLooper()).post {
                                     notify("Call connection failed — net check kore abar try koro")
                                 }
+                            PeerConnection.IceConnectionState.DISCONNECTED ->
+                                Handler(Looper.getMainLooper()).post { armIceWatchdog() }
                             else -> {}
                         }
                     }

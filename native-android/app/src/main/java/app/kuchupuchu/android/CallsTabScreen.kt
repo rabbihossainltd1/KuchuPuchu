@@ -73,7 +73,11 @@ fun CallsScreen(nav: NavController) {
         }
     }
 
-    val sections = groupByDay(calls)
+    // Regrouping re-parses every timestamp in the list — memoized on the
+    // list identity so scrolling (which just recomposes visible rows, not
+    // this screen-level call) no longer re-runs it on every frame. This was
+    // the "call tab a scrolling ta laggy" cause.
+    val sections = remember(calls) { groupByDay(calls) }
 
     Column(Modifier.fillMaxSize().background(Cream)) {
         // No "Calls" heading here: this screen only ever appears inside the
@@ -111,13 +115,19 @@ fun CallsScreen(nav: NavController) {
                             if (call.optBoolean("incoming")) call.optString("callerId")
                             else call.optString("calleeId")
                         if (otherId.isNotBlank()) {
-                            scope.launch {
-                                runCatching {
-                                    val conv = withContext(Dispatchers.IO) {
-                                        Api.post("/api/conversations", JSONObject().put("userId", otherId))
-                                    }
-                                    conv.optJSONObject("conversation")?.optString("id")?.let {
-                                        nav.navigate("chat/$it")
+                            val cached = ScreenStore.convIdForUser[otherId]
+                            if (cached != null) {
+                                nav.navigate("chat/$cached")
+                            } else {
+                                scope.launch {
+                                    runCatching {
+                                        val conv = withContext(Dispatchers.IO) {
+                                            Api.post("/api/conversations", JSONObject().put("userId", otherId))
+                                        }
+                                        conv.optJSONObject("conversation")?.optString("id")?.let {
+                                            ScreenStore.convIdForUser[otherId] = it
+                                            nav.navigate("chat/$it")
+                                        }
                                     }
                                 }
                             }

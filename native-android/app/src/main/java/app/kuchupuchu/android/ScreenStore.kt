@@ -32,6 +32,15 @@ object ScreenStore {
     val archivedConvIds = mutableSetOf<String>()
     private var archiveFile: File? = null
 
+    /**
+     * userId -> conversationId cache. Opening a chat from status/calls
+     * always needs a server round trip the FIRST time (the id doesn't
+     * exist locally yet), but every repeat open of the SAME person now
+     * navigates instantly instead of re-waiting on the network — this is
+     * the fix for "user er upor click korle instant open hoi na".
+     */
+    val convIdForUser = java.util.concurrent.ConcurrentHashMap<String, String>()
+
     fun archiveConv(id: String) {
         if (id.isNotBlank()) {
             archivedConvIds.add(id)

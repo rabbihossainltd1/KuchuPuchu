@@ -9,7 +9,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,6 +48,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -56,6 +59,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.unit.IntOffset
 import kotlin.math.roundToInt
 import androidx.compose.ui.graphics.Brush
@@ -451,8 +455,12 @@ fun InCallVideoScreen(call: CallUi) {
     val secs = rememberTick(call.startedAt, call.connecting)
     var controlsVisible by remember { mutableStateOf(true) }
     var swapped by remember { mutableStateOf(false) }
-    var pipX by remember { mutableStateOf(0f) }
-    var pipY by remember { mutableStateOf(0f) }
+    // mutableFloatStateOf avoids boxing a Float on every drag delta —
+    // with the boxed mutableStateOf<Float>, each pixel of drag allocated
+    // and triggered a state read/write cycle that showed up as PiP drag
+    // lag, worse the longer the call ran.
+    var pipX by remember { mutableFloatStateOf(0f) }
+    var pipY by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(controlsVisible) {
         if (controlsVisible) {
             kotlinx.coroutines.delay(3_000)
@@ -518,14 +526,24 @@ fun InCallVideoScreen(call: CallUi) {
                 .navigationBarsPadding()
                 .padding(bottom = 150.dp, end = 14.dp)
                 .offset { IntOffset(pipX.roundToInt(), pipY.roundToInt()) }
+                // Single pointerInput handling BOTH drag and tap-to-swap:
+                // layering a separate .clickable on the same box made two
+                // gesture detectors arbitrate every touch, which is what
+                // made the drag feel laggy the moment a tap almost landed.
                 .pointerInput(Unit) {
-                    detectDragGestures { change, drag ->
-                        change.consume()
-                        pipX = (pipX + drag.x).coerceIn(-size.width.toFloat() + 96f, 0f)
-                        pipY = (pipY + drag.y).coerceIn(-size.height.toFloat() + 132f, 0f)
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        var moved = false
+                        drag(down.id) { change ->
+                            change.consume()
+                            val d = change.positionChange()
+                            if (d.x != 0f || d.y != 0f) moved = true
+                            pipX = (pipX + d.x).coerceIn(-size.width.toFloat() + 96f, 0f)
+                            pipY = (pipY + d.y).coerceIn(-size.height.toFloat() + 132f, 0f)
+                        }
+                        if (!moved) swapped = !swapped
                     }
                 }
-                .clickable { swapped = !swapped }
                 .size(width = 96.dp, height = 132.dp)
                 .clip(RoundedCornerShape(14.dp))
                 .background(Color(0xFF33302B))

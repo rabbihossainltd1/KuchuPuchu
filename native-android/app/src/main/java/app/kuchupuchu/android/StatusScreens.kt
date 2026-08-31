@@ -655,14 +655,22 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
         }
     }
 
-    /** Open (or create) the 1:1 chat with this user, then go there. */
+    /** Open (or create) the 1:1 chat with this user, then go there.
+     *  Cached id => navigates the SAME frame, no network wait. */
     fun openChatWith(userId: String) {
         if (userId.isBlank()) return
+        val cached = ScreenStore.convIdForUser[userId]
+        if (cached != null) {
+            showViewers = false
+            nav.navigate("chat/$cached")
+            return
+        }
         scope.launch {
             runCatching {
                 val conv = withContext(Dispatchers.IO) { Api.post("/api/conversations", JSONObject().put("userId", userId)) }
                 val cid = conv.optJSONObject("conversation")?.optString("id").orEmpty()
                 if (cid.isNotBlank()) {
+                    ScreenStore.convIdForUser[userId] = cid
                     showViewers = false
                     nav.navigate("chat/$cid")
                 }
@@ -774,13 +782,21 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                 val openTheirChat: () -> Unit = {
                     val uid = user?.optString("id").orEmpty()
                     if (!isMine && uid.isNotBlank()) {
-                        scope.launch {
-                            runCatching {
-                                val conv = withContext(Dispatchers.IO) {
-                                    Api.post("/api/conversations", JSONObject().put("userId", uid))
+                        val cached = ScreenStore.convIdForUser[uid]
+                        if (cached != null) {
+                            nav.navigate("chat/$cached")
+                        } else {
+                            scope.launch {
+                                runCatching {
+                                    val conv = withContext(Dispatchers.IO) {
+                                        Api.post("/api/conversations", JSONObject().put("userId", uid))
+                                    }
+                                    val cid = conv.optJSONObject("conversation")?.optString("id").orEmpty()
+                                    if (cid.isNotBlank()) {
+                                        ScreenStore.convIdForUser[uid] = cid
+                                        nav.navigate("chat/$cid")
+                                    }
                                 }
-                                val cid = conv.optJSONObject("conversation")?.optString("id").orEmpty()
-                                if (cid.isNotBlank()) nav.navigate("chat/$cid")
                             }
                         }
                     }
@@ -798,20 +814,23 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                         ring = false,
                     )
                     Spacer(Modifier.width(10.dp))
-                    Column {
+                    Column(Modifier.weight(1f)) {
                         Text(
                             user?.optText("displayName") ?: "My status",
                             color = Color.White,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 15.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         Text(
                             statusStamp(s.optString("createdAt")),
                             color = Color.White.copy(alpha = 0.75f),
                             fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    Spacer(Modifier.weight(1f))
                     IconButton(onClick = { nav.popBackStack() }) {
                         Icon(Icons.Filled.Close, "Close", tint = Color.White)
                     }
@@ -1182,17 +1201,26 @@ private fun StatusVideoPlayer(
                     // bar waits for this instead of racing the buffering.
                     setOnPreparedListener {
                         it.isLooping = false
-                        // Prime and paint the first decoded frame immediately;
-                        // previously VideoView stayed black until the menu
-                        // caused an unrelated recomposition/layout pass.
                         seekTo(1)
-                        requestLayout()
-                        invalidate()
                         onReady()
                         start()
+                        // The SurfaceView-backed VideoView can finish
+                        // preparing before Compose gives it its real size —
+                        // its window surface then sits behind the Compose
+                        // surface, fully black, until SOME unrelated layout
+                        // pass (e.g. opening the ⋮ menu) forces Android to
+                        // re-order the surfaces. Force that pass ourselves,
+                        // on the next frame, instead of waiting for the user
+                        // to accidentally trigger one.
+                        post {
+                            requestLayout()
+                            invalidate()
+                        }
                     }
                     setOnInfoListener { _, what, _ ->
-                        if (what == android.media.MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) invalidate()
+                        if (what == android.media.MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) {
+                            post { requestLayout(); invalidate() }
+                        }
                         false
                     }
                     viewRef = this

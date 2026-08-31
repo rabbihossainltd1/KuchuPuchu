@@ -123,6 +123,7 @@ object KpNotify {
                 .setContentText(body)
                 .setAutoCancel(true)
                 .setGroup(GROUP)
+                .setWhen(System.currentTimeMillis())
                 .setContentIntent(chatTap(ctx, convoId))
                 .addAction(replyAction)
                 .addAction(likeAction)
@@ -131,7 +132,35 @@ object KpNotify {
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
                 .setSound(defaultSound())
                 .build()
-        runCatching { NotificationManagerCompat.from(ctx).notify(convoId.hashCode(), n) }
+        // A group summary is REQUIRED once >1 grouped notification is
+        // posted — without one, several OEM launchers (and Android itself
+        // on some versions) silently collapse everything down to nothing
+        // visible in the shade. This was part of "message notification
+        // jacche na" — messages WERE posted, some launchers just never
+        // surfaced them.
+        val summary =
+            NotificationCompat.Builder(ctx, CHAT_CHANNEL)
+                .setSmallIcon(R.mipmap.ic_stat_kp)
+                .setContentTitle("KuchuPuchu")
+                .setGroup(GROUP)
+                .setGroupSummary(true)
+                .setAutoCancel(true)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                .build()
+        runCatching {
+            val mgr = NotificationManagerCompat.from(ctx)
+            // Same convoId used to reuse the exact same notification id —
+            // a SECOND message from the same person while the first
+            // notification was still showing silently REPLACED it instead
+            // of alerting again (no new heads-up/sound on many OEMs). Each
+            // message now gets its own id; convoId.hashCode() stays as the
+            // low bits so ids for the same conversation cluster together
+            // without colliding.
+            val msgId = (convoId.hashCode() and 0x00FFFFFF) or ((System.nanoTime() and 0x7F).toInt() shl 24)
+            mgr.notify(msgId, n)
+            mgr.notify(GROUP.hashCode(), summary)
+        }
     }
 
     /** Incoming-call heads-up when the engine isn't alive yet; opening the app lets it take over. */
