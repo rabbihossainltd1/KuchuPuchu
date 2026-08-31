@@ -148,7 +148,15 @@ fun ChatListScreen(nav: NavController) {
         var lastForeground = Store.foreground
         try {
             while (true) {
-                delay(2_000)
+                // v3.9: the 2s tick was never a 2s REQUEST — `refresh()` below
+                // only runs when the socket is down or the app just came
+                // forward, and the forward case is already event-driven
+                // (onResume bumps ScreenStore.poke, which the effect under this
+                // one listens to). So with a healthy socket the loop's only
+                // job is to notice that the socket DIED — waking twice a
+                // second for that is pure battery. 10s bounds that detection,
+                // and the moment the socket is down we are back to a 2s poll.
+                delay(if (KpSocket.userLive()) 10_000 else 2_000)
                 val fg = Store.foreground
                 val justReturned = fg && !lastForeground
                 lastForeground = fg
@@ -299,15 +307,32 @@ fun ArchiveScreen(nav: NavController) {
     var rev by remember { mutableStateOf(0) }
     val archived = remember(rev, convs.size) { convs.filter { ScreenStore.isArchived(it.optString("id")) } }
     val ctx = LocalContext.current
-    // The archive screen has no chat-list poll behind it — deleted/unarchived
-    // rows used to sit there forever. Sync it on its own.
     LaunchedEffect(Unit) {
+        // The archive screen has no chat-list poll behind it — deleted/unarchived
+        // rows used to sit there forever. Sync it on its own.
+        //
+        // v3.9: "on its own" used to mean a FORCED, marker-less GET of the
+        // whole conversation list every 2s — the full payload, parsed and
+        // pushed through setConvs, even when nothing had changed. It now uses
+        // the same freshness marker the chat list uses, so an idle tick is a
+        // tiny {unchanged:true} body, and it backs off to 10s while the user
+        // socket is alive. The marker is kept LOCALLY on purpose: advancing
+        // ScreenStore.convsMarker from here would make the chat list's next
+        // poll come back "unchanged" and skip the shouldNotifyChat pass —
+        // messages that landed while this screen was open would never alert.
+        var localMarker = ""
         while (true) {
-            delay(2_000)
+            delay(if (KpSocket.userLive()) 10_000 else 2_000)
             if (Store.foreground) {
                 runCatching {
-                    val data = withContext(Dispatchers.IO) { Api.get("/api/conversations", true) }
-                    ScreenStore.setConvs(data.arr("items").objects())
+                    val url =
+                        if (localMarker.isBlank()) "/api/conversations"
+                        else "/api/conversations?marker=$localMarker"
+                    val data = withContext(Dispatchers.IO) { Api.get(url, true) }
+                    if (!data.optBoolean("unchanged")) {
+                        localMarker = data.optString("marker")
+                        ScreenStore.setConvs(data.arr("items").objects())
+                    }
                 }
             }
         }
