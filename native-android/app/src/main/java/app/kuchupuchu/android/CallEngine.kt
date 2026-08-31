@@ -1197,8 +1197,8 @@ class CallEngine(private val app: Application) {
         PeerConnection.RTCConfiguration(relayFirstIceServers()).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
-            iceTransportsType = PeerConnection.RTCConfiguration.IceTransportsType.RELAY
-            tcpCandidatePolicy = PeerConnection.RTCConfiguration.TcpCandidatePolicy.ENABLED
+            iceTransportsType = PeerConnection.IceTransportsType.RELAY
+            tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.ENABLED
         }
 
     @Volatile private var turnUrls: List<String> = emptyList()
@@ -1323,8 +1323,8 @@ class CallEngine(private val app: Application) {
                 // UDP is blocked by plenty of VPNs / office & hotel Wi-Fi while
                 // 443/TLS is open; without TCP candidates those networks have no
                 // fallback and the call simply fails.
-                tcpCandidatePolicy = PeerConnection.RTCConfiguration.TcpCandidatePolicy.ENABLED
-                iceTransportsType = PeerConnection.RTCConfiguration.IceTransportsType.ALL
+                tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.ENABLED
+                iceTransportsType = PeerConnection.IceTransportsType.ALL
             }
         val peer =
             factory!!.createPeerConnection(
