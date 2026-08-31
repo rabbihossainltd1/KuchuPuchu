@@ -521,11 +521,12 @@ class CallEngine(private val app: Application) {
                                     java.time.Instant.parse(next.optIso("startedAt")).toEpochMilli()
                                 }.getOrDefault(0L)
                             when {
+                                // Once ICE establishes the local display epoch,
+                                // polling must not replace it with the earlier
+                                // server answer timestamp and jump the clock.
+                                current?.connecting == false && (current.startedAt > 0L) -> current.startedAt
                                 serverMs > 0L -> serverMs
                                 (current?.startedAt ?: 0L) > 0L -> current!!.startedAt
-                                // Never invent a local clock. Both peers wait
-                                // for the same server startedAt, preventing a
-                                // visible timer jump after answer/ICE connect.
                                 else -> 0L
                             }
                         }
@@ -1166,11 +1167,12 @@ class CallEngine(private val app: Application) {
                             -> Handler(Looper.getMainLooper()).post {
                                 val cur = active ?: return@post
                                 active = cur.copy(
-                                    // Media is now usable. Reveal the timer if
-                                    // its server base is present; otherwise the
-                                    // UI's startedAt guard keeps Connecting.
+                                    // The visible duration starts when media is
+                                    // actually usable, not at answer time. This
+                                    // prevents Connecting from revealing a
+                                    // counter already at 0:05/0:06.
                                     connecting = false,
-                                    startedAt = cur.startedAt,
+                                    startedAt = System.currentTimeMillis(),
                                 )
                                 onChange?.invoke(active)
                             }

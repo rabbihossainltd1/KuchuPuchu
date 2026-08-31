@@ -248,7 +248,7 @@ fun VoiceCallScreen(call: CallUi) {
             Text(
                 when {
                     engine.onHold -> "On hold"
-                    call.connecting || call.startedAt <= 0L -> "Connecting…"
+                    call.status == "ACTIVE" && (call.connecting || call.startedAt <= 0L) -> "Connecting…"
                     connected -> clockText(secs)
                     call.incoming -> "Ringing…"
                     call.otherOnline -> "Ringing…"
