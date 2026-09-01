@@ -573,29 +573,20 @@ function recipientAlert(
     body: preview.slice(0, 120),
     channel: "kp_messages_v2",
   });
-  const goneQuiet = () => {
-    const last = member.last_active ? Date.parse(member.last_active) : 0;
-    return !last || Date.now() - last >= IDLE_PUSH_WINDOW_MS;
-  };
-  // Not connected right now (sockets closed: swiped from recents, process
-  // reaped, or was never started). A HIGH-priority FCM data message still wakes
-  // onMessageReceived in most of these cases (a recents-swipe is NOT a
-  // force-stop), letting us draw our OWN rich card with Reply / Like /
-  // Mark-as-read — the WhatsApp behaviour. We only fall back to the system
-  // payload once the user has genuinely gone quiet (idle >= IDLE window), where
-  // waking the process is unreliable and a guaranteed tray card beats silence.
-  // (Previously liveSockets === 0 always got the payload, so a swiped-away app
-  // that was still wakeable was handed a button-less system card — the exact
-  // "app background e message notification actions button chara" report.)
-  if (liveSockets === 0) return goneQuiet() ? sysCard() : undefined;
-  // Connected: data-only, rich actions untouched. Except when that socket has
-  // been silent for the whole idle window — a launcher that FREEZES the process
-  // (rather than killing it) leaves TCP half-open, so the socket still counts
-  // while onMessageReceived will never run. The idle check catches that lie.
-  if (liveSockets > 0) return goneQuiet() ? sysCard() : undefined;
-  // Realtime layer unavailable: fall back to the old conservative idle rule.
-  if (goneQuiet()) return sysCard();
-  return undefined;
+  // Rule (WhatsApp behaviour, per product owner): the app draws its OWN rich
+  // card (Reply / Like / Mark-as-read) whenever the recipient is reachable —
+  // whether or not a socket is currently open. A HIGH-priority FCM data
+  // message wakes onMessageReceived even for a recents-swiped app (a swipe is
+  // NOT a force-stop), so we send DATA-ONLY so the process can paint the rich
+  // card. We only fall back to the system payload when the recipient has been
+  // genuinely idle for the whole IDLE window (process frozen / dead / force-
+  // stopped), where waking is unreliable and a guaranteed plain tray card beats
+  // silence. Previously liveSockets === 0 ALWAYS got the payload, handing a
+  // still-wakeable swiped-away app a button-less system card — the exact
+  // "background e message notification actions button chara" report.
+  const idle =
+    !member.last_active || Date.now() - Date.parse(member.last_active) >= IDLE_PUSH_WINDOW_MS;
+  return idle ? sysCard() : undefined;
 }
 
 async function membersOf(db: D1Database, convId: string) {
@@ -2865,15 +2856,18 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           fromId: uid,
           fromName: me.display_name,
         });
-        // WhatsApp-style delivery for a NOT-connected app. A connected callee
-        // (liveSockets > 0) is already rung by its own in-process poll engine,
-        // which draws the full-screen Accept/Decline UI — a payload there would
-        // only duplicate it and could outlive a cancellation on a live process.
-        // A not-connected / dead / unreachable-realtime app (live <= 0) gets the
-        // system payload, so an incoming call still surfaces even when the user
-        // swiped the app away. Still under the same still-RINGING gate above, so
-        // a call cancelled before it ever rang cannot paint a phantom card.
-        const live = await pokeUserConversation(env, other, pairId(uid, other), nowIso());
+        // WhatsApp-style delivery. We send DATA-ONLY so a reachable callee's
+        // onMessageReceived draws our OWN full-screen ring (CallNotify.incoming,
+        // which carries a fullScreenIntent + Accept/Decline) — no socket needed,
+        // the high-priority data message wakes the process even after a recents
+        // swipe. A payload here would be drawn by the OS on top of our card and
+        // could outlive a cancellation (the old double-call-card bug), so we only
+        // attach it for a genuinely idle recipient where waking is unreliable.
+        // Still under the same still-RINGING gate above, so a call cancelled
+        // before it ever rang cannot paint a phantom card.
+        const otherUser = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", other);
+        const last = otherUser?.last_active_at ? Date.parse(otherUser.last_active_at) : 0;
+        const idle = !last || Date.now() - last >= IDLE_PUSH_WINDOW_MS;
         await pushToUser(
           env,
           db,
@@ -2888,7 +2882,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             // is tapped -> MainActivity jumps straight to the ringing screen
             kp_call: callId,
           },
-          live <= 0
+          idle
             ? {
                 title: `${me.display_name} is calling`,
                 body: kind === "VIDEO" ? "Incoming video call" : "Incoming voice call",
@@ -2955,30 +2949,24 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         const video = row.kind === "VIDEO";
         ctx.waitUntil(
           (async () => {
-            // Same decision as the message path. A recipient whose process is
-            // demonstrably live (liveSockets > 0) and not idle for the whole
-            // IDLE window gets a DATA-ONLY push so onMessageReceived runs and we
-            // draw our own rich card with Call back / Message actions. A
-            // not-connected app (liveSockets === 0), an unavailable realtime
-            // layer (< 0), or a half-open timeout (live but > idle) gets the
-            // system payload so at least a tray card shows — a system card
-            // cannot carry our actions, but silence is worse than a plain card.
-            const live = await pokeUserConversation(
-              env,
-              row.callee_id,
-              pairId(row.caller_id, row.callee_id),
-              nowIso(),
-            );
+            // Same decision as the message path (recipientAlert): send DATA-ONLY
+            // so onMessageReceived runs and the app draws its OWN rich card with
+            // Call back / Message actions — for a reachable recipient the data
+            // message wakes the process even when no socket is open. Only a
+            // genuinely idle (>= IDLE window: frozen / dead / force-stopped)
+            // recipient gets the system payload, so at least a plain tray card
+            // shows (a system card cannot carry our actions, but silence is
+            // worse). No double card: a connected app is already handled by its
+            // poll engine; this data-only message is only the wake-up.
             const last = callee?.last_active_at ? Date.parse(callee.last_active_at) : 0;
             const idle = !last || Date.now() - last >= IDLE_PUSH_WINDOW_MS;
-            const note =
-              live > 0 && !idle
-                ? undefined
-                : {
-                    title: `Missed call · ${caller?.display_name ?? "KuchuPuchu"}`,
-                    body: video ? "📹 Missed video call" : "📞 Missed voice call",
-                    channel: "kp_calls_v5",
-                  };
+            const note = idle
+              ? {
+                  title: `Missed call · ${caller?.display_name ?? "KuchuPuchu"}`,
+                  body: video ? "📹 Missed video call" : "📞 Missed voice call",
+                  channel: "kp_calls_v5",
+                }
+              : undefined;
             await pushToUser(
               env,
               db,

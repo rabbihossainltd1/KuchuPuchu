@@ -203,6 +203,15 @@ class KpPushService : FirebaseMessagingService() {
         // background (process alive), where the rich Call back / Message action
         // card is the desired behaviour.
         if (Store.foreground) return
+        // Retract the stuck "incoming / X is calling" card for THIS call before
+        // posting the "Missed call" card. The old code only posted the missed
+        // card, leaving the earlier callHeadsUp / CallNotify.incoming card
+        // visible forever ("calling you notification stuck, auto hide hoy na").
+        // Cancel any across-category call card + the fullscreen incoming (which
+        // also stops the ring tone), then post the rich missed-call card
+        // (Call back / Message).
+        CallNotify.cancelIncoming(this)
+        KpNotify.cancelSystemCallCards(this)
         KpNotify.missedCall(
             this,
             data["fromName"] ?: "KuchuPuchu",
@@ -245,8 +254,24 @@ class KpPushService : FirebaseMessagingService() {
                 }
             }.getOrDefault(false)
             if (!stillRinging || callId in CallEngine.ignoredCalls) return@Thread
+            // Foreground: the app is already rendering the ring via CallGate /
+            // the engine's poll — just nudge it so it doesn't wait a tick.
+            if (Store.foreground) {
+                CallEngine.instance?.kickPoll(callId)
+                return@Thread
+            }
+            // Background (process alive, engine not in front): post a full-screen
+            // incoming-call notification. CallNotify.incoming carries a
+            // fullScreenIntent + Accept/Decline, so the system launches
+            // KuchuPuchu fullscreen — the WhatsApp-style ring for a backgrounded
+            // app. Drop any other call card first (no double card).
             KpNotify.cancelSystemCallCards(this)
-            KpNotify.callHeadsUp(this, data["fromName"] ?: data["from"] ?: "KuchuPuchu", data["kind"] == "VIDEO", callId)
+            CallNotify.incoming(
+                this,
+                data["fromName"] ?: data["from"] ?: "KuchuPuchu",
+                data["kind"] == "VIDEO",
+                callId,
+            )
         }.start()
         // Data-only calls no longer create a later OS payload card, but retain
         // this harmless sweep for upgrades with one stale queued payload.
