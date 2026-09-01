@@ -680,55 +680,55 @@ async function fcmAccessToken(env: Env): Promise<{ token: string; projectId: str
     return { token: fcmTokenCache.token, projectId: fcmTokenCache.projectId };
   }
   try {
-  const creds = JSON.parse(env.FCM_CREDENTIALS) as FcmServiceAccount;
-  const tokenUri = creds.token_uri ?? "https://oauth2.googleapis.com/token";
-  const now = Math.floor(Date.now() / 1000);
-  const header = base64UrlEncode(JSON.stringify({ alg: "RS256", typ: "JWT" }));
-  const claims = base64UrlEncode(
-    JSON.stringify({
-      iss: creds.client_email,
-      scope: "https://www.googleapis.com/auth/firebase.messaging",
-      aud: tokenUri,
-      iat: now,
-      exp: now + 3600,
-    }),
-  );
-  const key = await crypto.subtle.importKey(
-    "pkcs8",
-    pemToPkcs8(creds.private_key) as unknown as ArrayBuffer,
-    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const signature = await crypto.subtle.sign(
-    "RSASSA-PKCS1-v1_5",
-    key,
-    new TextEncoder().encode(`${header}.${claims}`),
-  );
-  const jwt = `${header}.${claims}.${base64UrlEncode(new Uint8Array(signature))}`;
-  const res = await fetch(tokenUri, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
-  });
-  if (!res.ok) {
-    console.log(
-      "fcm_oauth_failed",
-      JSON.stringify({ status: res.status, body: (await res.text()).slice(0, 200) }),
+    const creds = JSON.parse(env.FCM_CREDENTIALS) as FcmServiceAccount;
+    const tokenUri = creds.token_uri ?? "https://oauth2.googleapis.com/token";
+    const now = Math.floor(Date.now() / 1000);
+    const header = base64UrlEncode(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+    const claims = base64UrlEncode(
+      JSON.stringify({
+        iss: creds.client_email,
+        scope: "https://www.googleapis.com/auth/firebase.messaging",
+        aud: tokenUri,
+        iat: now,
+        exp: now + 3600,
+      }),
     );
-    return null;
-  }
-  const data = (await res.json()) as { access_token?: string; expires_in?: number };
-  if (!data.access_token) {
-    console.log("fcm_oauth_no_token", JSON.stringify({}));
-    return null;
-  }
-  fcmTokenCache = {
-    token: data.access_token,
-    projectId: creds.project_id,
-    exp: Date.now() + (data.expires_in ?? 3600) * 1000,
-  };
-  return { token: data.access_token, projectId: creds.project_id };
+    const key = await crypto.subtle.importKey(
+      "pkcs8",
+      pemToPkcs8(creds.private_key) as unknown as ArrayBuffer,
+      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    const signature = await crypto.subtle.sign(
+      "RSASSA-PKCS1-v1_5",
+      key,
+      new TextEncoder().encode(`${header}.${claims}`),
+    );
+    const jwt = `${header}.${claims}.${base64UrlEncode(new Uint8Array(signature))}`;
+    const res = await fetch(tokenUri, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
+    });
+    if (!res.ok) {
+      console.log(
+        "fcm_oauth_failed",
+        JSON.stringify({ status: res.status, body: (await res.text()).slice(0, 200) }),
+      );
+      return null;
+    }
+    const data = (await res.json()) as { access_token?: string; expires_in?: number };
+    if (!data.access_token) {
+      console.log("fcm_oauth_no_token", JSON.stringify({}));
+      return null;
+    }
+    fcmTokenCache = {
+      token: data.access_token,
+      projectId: creds.project_id,
+      exp: Date.now() + (data.expires_in ?? 3600) * 1000,
+    };
+    return { token: data.access_token, projectId: creds.project_id };
   } catch (err) {
     // Malformed/missing key material used to throw up into pushToUser()'s
     // catch and vanished as a silent push failure — keep a trace.
