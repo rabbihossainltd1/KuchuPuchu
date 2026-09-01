@@ -104,6 +104,10 @@ object CallSounds {
             // while "Ringing…" showed — a real dialer is never silent for the
             // caller.
             .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+            // Pin the tone to whatever the CALL is routed to. The alarm stream
+            // ignores communication routing, so with buds in the ring came out of
+            // the loudspeaker as well — the "audio on both sources" complaint.
+            .setPreferredDevice(AudioRouter.tonePlaybackDevice(ctx.applicationContext))
             .build()
         val player =
             runCatching { MediaPlayer.create(ctx.applicationContext, R.raw.kp_ring, attrs, 1) }.getOrNull()
@@ -132,6 +136,10 @@ object CallSounds {
             // Incoming ring on the ALARM stream: rings even when the phone
             // is silent — per the user's explicit request.
             .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+            // Pin the tone to whatever the CALL is routed to. The alarm stream
+            // ignores communication routing, so with buds in the ring came out of
+            // the loudspeaker as well — the "audio on both sources" complaint.
+            .setPreferredDevice(AudioRouter.tonePlaybackDevice(ctx.applicationContext))
             .build()
         val player =
             runCatching {

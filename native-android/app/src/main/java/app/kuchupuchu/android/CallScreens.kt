@@ -1,5 +1,8 @@
 package app.kuchupuchu.android
 
+import androidx.compose.ui.platform.LocalContext
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.rememberLauncherForActivityResult
 import android.view.WindowManager
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -301,16 +304,17 @@ fun VoiceCallScreen(call: CallUi) {
                 Modifier.fillMaxWidth().padding(vertical = 10.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
-                // Audio output button: shows WHERE sound is going right now
-                // (Bluetooth / headset / earpiece / speaker) and cycles to the
-                // next available output on tap — a headset plugged mid-call is
-                // picked up automatically.
+                // Audio output button: shows WHERE sound is going (Bluetooth /
+                // headset / earpiece / speaker — labelled with the device's own
+                // name when it has one), steps to the next real output per tap, and
+                // a headset plugged in mid-call is picked up automatically.
+                val routeAction = rememberRouteAction(engine)
                 CallAction(
-                    routeIcon(engine.audioRoute),
-                    routeLabel(engine.audioRoute),
+                    routeAction.icon,
+                    routeAction.label,
                     active = engine.audioRoute != AudioRoute.EARPIECE,
                     enabled = true,
-                ) { engine.cycleAudioRoute() }
+                ) { routeAction.onClick() }
                 CallAction(
                     if (engine.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
                     if (engine.muted) "Unmute" else "Mute",
@@ -452,6 +456,10 @@ fun OutgoingVideoScreen(call: CallUi) {
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            val routeAction = rememberRouteAction(engine)
+            StripAction(routeAction.icon, routeAction.label, active = engine.audioRoute != AudioRoute.EARPIECE) {
+                routeAction.onClick()
+            }
             StripAction(
                 if (engine.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
                 if (engine.muted) "Unmute" else "Mute",
@@ -619,6 +627,10 @@ fun InCallVideoScreen(call: CallUi) {
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            val routeAction = rememberRouteAction(engine)
+            StripAction(routeAction.icon, routeAction.label, active = engine.audioRoute != AudioRoute.EARPIECE) {
+                routeAction.onClick()
+            }
             StripAction(
                 if (engine.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
                 if (engine.muted) "Unmute" else "Mute",
@@ -811,21 +823,63 @@ private fun rememberTick(startedAt: Long, paused: Boolean): Int {
 private fun clockText(secs: Int): String = "%d:%02d".format(secs / 60, secs % 60)
 
 /** Icon + label for the audio-route button (voice call screen). */
+private class RouteAction(val icon: ImageVector, val label: String, val onClick: () -> Unit)
+
+/**
+ * Everything the audio-output button needs, on any call screen: the current icon
+ * and label, the tap that steps to the next real output, and the BLUETOOTH_CONNECT
+ * request API 31+ requires before a call may move to a headset. The router
+ * refuses Bluetooth without it (the framework throws SecurityException, which the
+ * old code swallowed), so the button asks instead of looking dead. When a headset
+ * is already connected as the call starts, it asks once up front so the call can
+ * actually move there.
+ */
+@Composable
+private fun rememberRouteAction(engine: CallEngine): RouteAction {
+    val ctx = LocalContext.current
+    var pendingBt by remember { mutableStateOf(false) }
+    val launcher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (pendingBt) {
+                pendingBt = false
+                // The engine owns the message: it knows whether the route it can
+                // actually program changed, so it does not toast on top of itself.
+                engine.retryBluetoothRoute(granted)
+            }
+        }
+    LaunchedEffect(Unit) {
+        if (AudioRouter.blockedByPermission(ctx, AudioRouter.current())) {
+            pendingBt = true
+            runCatching { launcher.launch(android.Manifest.permission.BLUETOOTH_CONNECT) }
+        }
+    }
+    return RouteAction(
+        icon = routeIcon(engine.audioRoute),
+        label = routeLabel(ctx, engine.audioRoute),
+        onClick = {
+            val want = AudioRouter.next(ctx, engine.audioRoute)
+            if (AudioRouter.blockedByPermission(ctx, want)) {
+                pendingBt = true
+                runCatching { launcher.launch(android.Manifest.permission.BLUETOOTH_CONNECT) }
+            } else {
+                engine.selectAudioRoute(want)
+            }
+        },
+    )
+}
+
 private fun routeIcon(route: AudioRoute): ImageVector =
     when (route) {
         AudioRoute.BLUETOOTH -> Icons.Filled.Bluetooth
         AudioRoute.WIRED -> Icons.Filled.Headset
-        AudioRoute.SPEAKER -> Icons.Filled.VolumeUp
+        // A loudspeaker glyph, not a volume slider: this button says WHERE the
+        // audio is going, so the icon has to follow the source.
+        AudioRoute.SPEAKER -> Icons.Filled.Speaker
         AudioRoute.EARPIECE -> Icons.Filled.PhoneInTalk
     }
 
-private fun routeLabel(route: AudioRoute): String =
-    when (route) {
-        AudioRoute.BLUETOOTH -> "Bluetooth"
-        AudioRoute.WIRED -> "Headset"
-        AudioRoute.SPEAKER -> "Speaker"
-        AudioRoute.EARPIECE -> "Earpiece"
-    }
+private fun routeLabel(ctx: android.content.Context, route: AudioRoute): String =
+    AudioRouter.label(ctx, route)
 
 private fun engineApp(): android.content.Context =
     CallEngine.instance?.appContext ?: MainActivity.current

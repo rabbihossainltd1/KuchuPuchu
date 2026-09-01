@@ -64,12 +64,6 @@ data class CallUi(
 )
 
 /**
- * Where call audio comes out. The voice-screen button cycles through whatever
- * is physically available (Bluetooth > wired headset > earpiece > speaker).
- */
-enum class AudioRoute { BLUETOOTH, WIRED, EARPIECE, SPEAKER }
-
-/**
  * WebRTC call engine for v3 — polls /api/calls/active, drives the peer
  * connection, relays ICE through the worker, and exposes Compose state
  * (active call, muted, speaker, camera, sharing) for the call screens.
@@ -231,6 +225,18 @@ class CallEngine(private val app: Application) {
 
     init {
         instance = this
+        // The router owns the audio stack; when it moves the call by itself
+        // (headset plugged in mid-call, SCO just finished opening, the chosen
+        // device disappeared) the button has to follow immediately.
+        AudioRouter.onNotice = { message -> Handler(Looper.getMainLooper()).post { notify(message) } }
+        AudioRouter.onRouteChanged = { route ->
+            Handler(Looper.getMainLooper()).post {
+                if (audioRoute != route) audioRoute = route
+                speaker = route == AudioRoute.SPEAKER
+                updateProximityLock()
+                onChange?.invoke(active)
+            }
+        }
     }
 
     fun start(ctx: Context) {
@@ -330,152 +336,50 @@ class CallEngine(private val app: Application) {
                 .createPeerConnectionFactory()
     }
 
-    /** Outputs that physically exist right now, best-first. */
-    fun availableRoutes(): List<AudioRoute> {
-        val am = app.getSystemService(android.media.AudioManager::class.java)
-        val outputs = am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)
-        val out = ArrayList<AudioRoute>()
-        if (outputs.any { it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO }) out.add(AudioRoute.BLUETOOTH)
-        if (outputs.any {
-                it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET ||
-                    it.type == android.media.AudioDeviceInfo.TYPE_USB_HEADSET
-            }
-        ) {
-            out.add(AudioRoute.WIRED)
-        }
-        if (outputs.any { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_EARPIECE }) out.add(AudioRoute.EARPIECE)
-        out.add(AudioRoute.SPEAKER)
-        return out
-    }
+    /* ---- audio routing: everything lives in AudioRouter.kt ---------------- */
 
     /**
-     * Where a fresh call should start: video calls on SPEAKER (user rule),
-     * audio calls on Bluetooth/wired when present, else the earpiece.
+     * Push the wanted route to the audio stack and mirror whatever it actually
+     * took effect (a device can vanish, or Bluetooth can still lack its runtime
+     * permission) so the button never lies about where sound is going.
      */
-    fun defaultRoute(kind: String): AudioRoute {
-        val avail = availableRoutes()
-        return when {
-            // A connected personal output always wins, including video calls.
-            // Previously VIDEO forced speaker before these checks, leaking
-            // audio despite a headset already being connected.
-            AudioRoute.BLUETOOTH in avail -> AudioRoute.BLUETOOTH
-            AudioRoute.WIRED in avail -> AudioRoute.WIRED
-            kind == "VIDEO" -> AudioRoute.SPEAKER
-            else -> AudioRoute.EARPIECE
-        }
+    fun applyAudio() {
+        val applied = AudioRouter.apply(app, audioRoute)
+        if (applied != audioRoute) audioRoute = applied
+        speaker = applied == AudioRoute.SPEAKER
+        updateProximityLock()
+    }
+
+    /** Tap: step to the next output that physically exists. */
+    fun cycleAudioRoute() {
+        selectAudioRoute(AudioRouter.next(app, audioRoute))
     }
 
     fun selectAudioRoute(route: AudioRoute) {
         audioRoute = route
-        speaker = route == AudioRoute.SPEAKER
         applyAudio()
         onChange?.invoke(active)
     }
 
-    /** The voice-screen audio button: step to the next available output. */
-    fun cycleAudioRoute() {
-        val list = availableRoutes()
-        if (list.isEmpty()) return
-        val idx = list.indexOf(audioRoute).coerceAtLeast(0)
-        selectAudioRoute(list[(idx + 1) % list.size])
-    }
-
-    fun applyAudio() {
-        val am = app.getSystemService(android.media.AudioManager::class.java)
-        am.mode = android.media.AudioManager.MODE_IN_COMMUNICATION
-        // A device sitting at ~0 in-call volume is the classic "I can't hear
-        // anything" report — nudge it to a sane level if it's silenced.
-        runCatching {
-            val max = am.getStreamMaxVolume(android.media.AudioManager.STREAM_VOICE_CALL)
-            if (am.getStreamVolume(android.media.AudioManager.STREAM_VOICE_CALL) <= max / 10) {
-                am.setStreamVolume(android.media.AudioManager.STREAM_VOICE_CALL, (max * 0.45f).toInt().coerceAtLeast(1), 0)
-            }
-        }
-        // If the chosen output vanished (BT off), fall back before routing.
-        val avail = availableRoutes()
-        if (audioRoute !in avail) {
-            audioRoute = avail.firstOrNull() ?: AudioRoute.EARPIECE
-            speaker = audioRoute == AudioRoute.SPEAKER
-        }
-        val outputs = am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)
-        fun find(type: Int) = outputs.firstOrNull { it.type == type }
-        val wanted =
-            when (audioRoute) {
-                AudioRoute.BLUETOOTH -> find(android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
-                AudioRoute.WIRED ->
-                    find(android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET)
-                        ?: find(android.media.AudioDeviceInfo.TYPE_USB_HEADSET)
-                AudioRoute.SPEAKER -> find(android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
-                AudioRoute.EARPIECE ->
-                    find(android.media.AudioDeviceInfo.TYPE_BUILTIN_EARPIECE)
-                        ?: find(android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
-            }
-        // SCO has to be running before a Bluetooth headset can carry call audio.
-        if (audioRoute == AudioRoute.BLUETOOTH) {
-            runCatching { am.startBluetoothSco() }
-        } else {
-            runCatching { am.stopBluetoothSco() }
-        }
-        if (Build.VERSION.SDK_INT >= 31) {
-            runCatching {
-                if (wanted != null) am.setCommunicationDevice(wanted) else am.clearCommunicationDevice()
-            }
-        } else {
-            runCatching { @Suppress("DEPRECATION") am.isSpeakerphoneOn = audioRoute == AudioRoute.SPEAKER }
-        }
-        updateProximityLock()
-    }
-
-    private var audioCb: android.media.AudioDeviceCallback? = null
-
-    private fun registerAudioCallback() {
-        if (audioCb != null) return
-        val am = app.getSystemService(android.media.AudioManager::class.java)
-        val cb =
-            object : android.media.AudioDeviceCallback() {
-                override fun onAudioDevicesAdded(addedDevices: Array<out android.media.AudioDeviceInfo>) {
-                    onOutputsChanged()
-                }
-
-                override fun onAudioDevicesRemoved(removedDevices: Array<out android.media.AudioDeviceInfo>) {
-                    onOutputsChanged()
-                }
-            }
-        runCatching {
-            am.registerAudioDeviceCallback(cb, android.os.Handler(android.os.Looper.getMainLooper()))
-        }
-        audioCb = cb
-    }
-
-    private fun unregisterAudioCallback() {
-        audioCb?.let {
-            runCatching {
-                app.getSystemService(android.media.AudioManager::class.java).unregisterAudioDeviceCallback(it)
-            }
-        }
-        audioCb = null
-    }
-
     /**
-     * Headset/Bluetooth plugged or unplugged mid-call: follow it like a real
-     * dialer. Audio calls grab a newly connected headset; if the current
-     * output disappears, fall back (video stays on speaker).
+     * Called back from the BLUETOOTH_CONNECT prompt. Granted → take the headset
+     * now; refused → re-assert whatever the stack can actually do so the button
+     * stops pointing at a route that cannot be programmed.
      */
-    private fun onOutputsChanged() {
-        val avail = availableRoutes()
-        if (audioRoute !in avail) {
-            val video = active?.kind == "VIDEO" || videoTrack != null
-            val next =
-                if (video && AudioRoute.SPEAKER in avail) {
-                    AudioRoute.SPEAKER
-                } else {
-                    avail.firstOrNull { it != AudioRoute.SPEAKER } ?: AudioRoute.SPEAKER
-                }
-            selectAudioRoute(next)
-            return
+    fun retryBluetoothRoute(granted: Boolean) {
+        if (granted && AudioRoute.BLUETOOTH in AudioRouter.available(app)) {
+            selectAudioRoute(AudioRoute.BLUETOOTH)
+        } else {
+            applyAudio()
+            if (!granted) notify("Bluetooth unavailable — call stays on the phone.")
         }
-        if ((audioRoute == AudioRoute.EARPIECE || audioRoute == AudioRoute.SPEAKER) && active?.kind != "VIDEO") {
-            avail.firstOrNull { it == AudioRoute.BLUETOOTH || it == AudioRoute.WIRED }?.let { selectAudioRoute(it) }
+    }
+
+    /** An audio call that became video: speaker is the fallback, not the earpiece. */
+    private fun markVideoRoute() {
+        AudioRouter.setVideoCall(true)
+        if (audioRoute == AudioRoute.EARPIECE) {
+            selectAudioRoute(AudioRouter.defaultRoute(app, "VIDEO"))
         }
     }
 
@@ -663,13 +567,13 @@ class CallEngine(private val app: Application) {
         // Fresh call, fresh relay-retry budget (see the ICE FAILED branch).
         relayRetryUsed = false
         renegotiationQueued.set(false)
-        // Video calls start on SPEAKER (user rule); audio calls grab
-        // Bluetooth/wired when present, else the earpiece.
-        audioRoute = defaultRoute(kind)
-        speaker = audioRoute == AudioRoute.SPEAKER
-        registerAudioCallback()
+        // Start wherever the user's audio actually is: a connected
+        // headset/earbud wins for voice AND video; else video on the speaker,
+        // voice on the earpiece. Also starts the hot-plug watch.
+        val start = AudioRouter.begin(app, kind)
+        audioRoute = start
+        speaker = start == AudioRoute.SPEAKER
         ensureFactory(app)
-        applyAudio()
         active = CallUi("pending", kind, "RINGING", false, name, userId, otherAvatar = avatar)
         CallService.start(app, if (kind == "VIDEO") "Video calling $name" else "Calling $name")
         scope.launch {
@@ -741,12 +645,11 @@ class CallEngine(private val app: Application) {
         ringingId = null
         clearIncomingSuppression()
         ensureFactory(app)
-        // Same routing defaults as the caller: video → speaker, audio → BT/
-        // wired when connected, else earpiece.
-        audioRoute = defaultRoute(rec.kind)
-        speaker = audioRoute == AudioRoute.SPEAKER
-        registerAudioCallback()
-        applyAudio()
+        // Same rule as the caller: a connected personal output first, else
+        // video → speaker, audio → earpiece.
+        val start = AudioRouter.begin(app, rec.kind)
+        audioRoute = start
+        speaker = start == AudioRoute.SPEAKER
         CallService.start(app, "In a call with ${rec.otherName}")
         // startedAt stays 0 (unknown): the timer runs from the SERVER's
         // started_at (parsed from the answer response / poll) so both phones
@@ -908,7 +811,7 @@ class CallEngine(private val app: Application) {
                 active = active?.copy(kind = "VIDEO")
                 // Audio→video conversion: speaker becomes the default (user
                 // rule), Bluetooth/wired headsets keep the audio.
-                if (audioRoute == AudioRoute.EARPIECE) selectAudioRoute(defaultRoute("VIDEO"))
+                markVideoRoute()
             }
             return
         }
@@ -916,7 +819,7 @@ class CallEngine(private val app: Application) {
         videoTrack?.setEnabled(!cameraOff)
         if (!cameraOff && active?.kind == "AUDIO") {
             active = active?.copy(kind = "VIDEO")
-            if (audioRoute == AudioRoute.EARPIECE) selectAudioRoute(defaultRoute("VIDEO"))
+            markVideoRoute()
         }
         onChange?.invoke(active)
     }
@@ -998,7 +901,7 @@ class CallEngine(private val app: Application) {
         localView?.setMirror(false)
         localView?.let { runCatching { track.addSink(it) } }
         active = active?.copy(kind = "VIDEO")
-        if (audioRoute == AudioRoute.EARPIECE) selectAudioRoute(defaultRoute("VIDEO"))
+        markVideoRoute()
     }
 
     private fun stopShare() {
@@ -1099,18 +1002,9 @@ class CallEngine(private val app: Application) {
         audioRoute = AudioRoute.EARPIECE
         proximityLock?.let { if (it.isHeld) runCatching { it.release() } }
         proximityLock = null
-        unregisterAudioCallback()
-        runCatching {
-            val am = app.getSystemService(android.media.AudioManager::class.java)
-            if (Build.VERSION.SDK_INT >= 31) {
-                runCatching { am.clearCommunicationDevice() }
-            } else {
-                runCatching { @Suppress("DEPRECATION") am.isSpeakerphoneOn = false }
-            }
-            @Suppress("DEPRECATION")
-            runCatching { am.stopBluetoothSco() }
-            am.mode = android.media.AudioManager.MODE_NORMAL
-        }
+        // Release the audio stack: clear the communication device, close SCO,
+        // drop out of MODE_IN_COMMUNICATION, stop watching for hot-plug.
+        AudioRouter.end(app)
         muted = false
         cameraOff = false
         sharing = false
@@ -1521,7 +1415,7 @@ override fun onRenegotiationNeeded() {
                     // on "Waiting for video…" forever ("stuck" bug). They can
                     // still tap the camera off if they don't want to send.
                     if (!sharing && videoTrack == null && !cameraOff) {
-                        if (audioRoute == AudioRoute.EARPIECE) selectAudioRoute(defaultRoute("VIDEO"))
+                        markVideoRoute()
                         notify("Video call…")
                         toggleCamera()
                     }
