@@ -113,12 +113,13 @@ fun rememberBitmap(url: String?): ImageBitmap? {
  * cached in SharedPreferences, so a contact's avatar costs one fetch for its
  * lifetime instead of being inlined into every 2s chat-list poll.
  */
+private const val AVATAR_PREFS = "kp_avatars"
+
 private val avatarRefCache = object {
-    private const val PREF = "kp_avatars"
     fun get(ctx: android.content.Context, ref: String): String? =
-        runCatching { ctx.getSharedPreferences(PREF, 0).getString(ref, null) }.getOrNull()
+        runCatching { ctx.getSharedPreferences(AVATAR_PREFS, 0).getString(ref, null) }.getOrNull()
     fun put(ctx: android.content.Context, ref: String, url: String) =
-        runCatching { ctx.getSharedPreferences(PREF, 0).edit().putString(ref, url).apply() }.getOrNull()
+        runCatching { ctx.getSharedPreferences(AVATAR_PREFS, 0).edit().putString(ref, url).apply() }.getOrNull()
 }
 
 @Composable
