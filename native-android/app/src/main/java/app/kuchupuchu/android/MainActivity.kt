@@ -186,6 +186,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         Store.foreground = false
+        // Handing over to the keep-alive service exactly when the user leaves —
+        // the old design only promoted on an arriving push, so the FIRST
+        // background message was still racing a process the launcher was free to
+        // freeze. Hidden notification while in front, service while not.
+        if (!Api.token.isNullOrBlank()) KeepAliveService.ensureRunning(this)
         super.onPause()
     }
 

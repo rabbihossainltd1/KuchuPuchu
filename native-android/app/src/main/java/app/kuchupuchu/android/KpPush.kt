@@ -156,6 +156,9 @@ object KpPush {
 
     /** Removes this device from push delivery (logout). */
     fun unregister() {
+        // No session => no reason to hold the process up: drop the keep-alive
+        // service here (MainActivity only drops it while the app is in front).
+        runCatching { app0?.let { KeepAliveService.release(it) } }
         if (!enabled) return
         runCatching { FirebaseMessaging.getInstance().deleteToken() }
         // Forget the accepted token: the next sign-in must re-register even if
@@ -214,6 +217,7 @@ class KpPushService : FirebaseMessagingService() {
 
     private fun handleCall(data: Map<String, String>) {
         val callId = data["callId"]
+        KpDiag.log(this, "call ${callId?.take(8)} fg=${Store.foreground}")
         if (callId.isNullOrBlank()) return
         if (callId in CallEngine.ignoredCalls) return
         // Only skip the heads-up when the engine is actually alive and polling.
@@ -276,6 +280,10 @@ class KpPushService : FirebaseMessagingService() {
                 )
             }
         }.start()
+        KpDiag.log(
+            this,
+            "msg ${convoId.take(8)} fg=${Store.foreground} route=${Store.route.take(22)} muted=${muted}",
+        )
         ScreenStore.pokeInbox()
         // Push received => we are alive; hold that state so the NEXT message or
         // call is not dropped by Doze/OEM trimming (see KeepAliveService).

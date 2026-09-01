@@ -262,6 +262,22 @@ fun SettingsScreen(nav: NavController) {
                 bgRestricted = KpSetup.needsSetup(ctx)
                 bgStatus = KpSetup.statusText(ctx)
             }
+            // The device's own witness, for exactly the report "background e
+            // message ashe na": the server can never answer it (FCM says 200
+            // whether or not the phone delivered), so the app keeps its own log
+            // of every push that reached onMessageReceived. Entry for that
+            // minute => our bug. Empty => FCM/OEM never handed it over.
+            var diag by remember { mutableStateOf<List<String>>(emptyList()) }
+            var showDiag by remember { mutableStateOf(false) }
+            SettingRow(
+                Icons.Filled.Info,
+                "Push log (this device)",
+                if (diag.isEmpty()) "tap: did the app receive it?"
+                else "${diag.size} entries — latest ${diag.first().take(30)}",
+            ) {
+                diag = KpDiag.recent(ctx)
+                showDiag = true
+            }
             // Which build am I running? This row ends the "ami ki notun APK
             // install korsi?" confusion — bug reports can quote it directly.
             SettingRow(
@@ -273,6 +289,42 @@ fun SettingsScreen(nav: NavController) {
                 }.getOrDefault("?"),
                 clickable = false,
             ) {}
+        }
+
+        if (showDiag) {
+            AlertDialog(
+                onDismissRequest = { showDiag = false },
+                title = { Text("Push log — this device", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink) },
+                text = {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(240.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        if (diag.isEmpty()) {
+                            Text(
+                                "Nothing has reached the app since install/clear. If a message was sent in that " +
+                                    "window, FCM never delivered it to the process — that is the launcher's kill, " +
+                                    "not app code: turn on auto-launch (Background notifications row above).",
+                                fontSize = 12.sp,
+                                color = Muted,
+                            )
+                        }
+                        diag.forEach { line ->
+                            Text(line, fontSize = 12.sp, color = Ink, modifier = Modifier.padding(vertical = 3.dp))
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        KpDiag.clear(ctx)
+                        diag = emptyList()
+                        showDiag = false
+                    }) { Text("Clear", color = Red, fontWeight = FontWeight.SemiBold) }
+                },
+                dismissButton = { TextButton(onClick = { showDiag = false }) { Text("Close", color = Muted) } },
+            )
         }
 
         if (error.isNotBlank()) {

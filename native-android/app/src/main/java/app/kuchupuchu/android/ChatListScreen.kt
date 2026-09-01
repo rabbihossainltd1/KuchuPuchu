@@ -96,9 +96,26 @@ fun ChatListScreen(nav: NavController) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val haptics = rememberHaptics()
 
+    // FOUR things can ask for the same list at the same instant: the socket
+    // "hello" on connect, the socket "conv" poke, the push path bumping
+    // ScreenStore.poke, and the foreground/reconnect tick. Each one used to run
+    // its own /api/conversations round trip + full parse + setConvs write, so an
+    // incoming message while a chat was open meant 2-3 list recompositions in a
+    // row — that is exactly what "laggy" feels like. One flight at a time now,
+    // with a single trailing pass so a trigger that arrives mid-flight is not
+    // lost (dropping it would delay the badge until the next tick).
+    val refreshInflight = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    val refreshAgain = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+
     fun refresh() {
+        if (!refreshInflight.compareAndSet(false, true)) {
+            refreshAgain.set(true)
+            return
+        }
         scope.launch {
             try {
+                do {
+                    refreshAgain.set(false)
                 // Cheap freshness check: send back the last marker; an
                 // unchanged tick returns a tiny payload and skips parse/
                 // diff/notify entirely. Full data still arrives whenever
@@ -127,8 +144,12 @@ fun ChatListScreen(nav: NavController) {
                 }
                 ScreenStore.setConvs(items)
                 loading = false
+                if (refreshAgain.get()) delay(200)
+                } while (refreshAgain.get())
             } catch (_: Exception) {
                 loading = false
+            } finally {
+                refreshInflight.set(false)
             }
         }
     }
