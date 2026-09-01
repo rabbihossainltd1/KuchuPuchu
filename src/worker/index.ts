@@ -382,6 +382,12 @@ async function ensureSchema(db: D1Database) {
   await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN theme TEXT`);
   await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN disappear_since TEXT`);
   await runCatchingSql(db, `ALTER TABLE messages ADD COLUMN client_id TEXT`);
+  // Bumped whenever the profile photo changes; it backs the lightweight
+  // avatarRef token in list responses so clients cache avatars per version.
+  await runCatchingSql(
+    db,
+    `ALTER TABLE users ADD COLUMN avatar_version INTEGER NOT NULL DEFAULT 0`,
+  );
   await runCatchingSql(
     db,
     `CREATE INDEX IF NOT EXISTS idx_messages_dedupe ON messages(conv_id, sender_id, client_id)`,
@@ -432,6 +438,7 @@ type UserRow = {
   about: string | null;
   created_at: string;
   last_active_at: string;
+  avatar_version: number | null;
 };
 
 /**
@@ -439,16 +446,33 @@ type UserRow = {
  * in chat lists, member lists, search results and call payloads, so leaking it
  * there let any signed-in user harvest every address in the database.
  */
-function userFrom(row: UserRow, online = false) {
-  return {
+// Hot list endpoints (chat list, discovery, calls) used to inline the full
+// avatar data-URI (up to ~200KB each) inside every user object. The chat list
+// is polled every 2s with the socket down and re-parsed end to end every time,
+// so a handful of avatar'd contacts made every poll transfer and parse
+// hundreds of KB that almost never changed. `light` keeps only a stable
+// reference; clients fetch the bytes once from /api/users/:id/avatar and cache
+// them (see Android Bitmaps cache). Detail/profile endpoints stay full.
+function userFrom(row: UserRow, online = false, light = false) {
+  const base = {
     id: row.id,
     username: row.username,
     displayName: row.display_name,
-    avatarUrl: row.avatar_url,
     about: row.about,
     online,
     lastActiveAt: row.last_active_at,
   };
+  if (light) {
+    return {
+      ...base,
+      avatarUrl: null,
+      // Stable per-avatar token; bumped on every profile-photo change, so a
+      // client can cache the avatar data-URI forever keyed by this ref and
+      // only re-fetch when it actually changes.
+      avatarRef: row.avatar_url ? `${row.id}@v${row.avatar_version ?? 0}` : null,
+    };
+  }
+  return { ...base, avatarUrl: row.avatar_url };
 }
 
 /** Full shape, only ever returned for the signed-in user themself. */
@@ -1339,9 +1363,13 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       // data:text/html used to be accepted here and then served back verbatim by
       // the media endpoints — a stored XSS on the API origin.
       if (avatar && !isSafeDataUrl(avatar)) fail(400, "Bad avatar.", "BAD_MEDIA");
-      if (avatar.length > 200_000) fail(400, "Avatar too large — pick a smaller image.");
+      // Avatars render at ~54dp; a 200KB data-URI inlined into every hot poll
+      // was pure bandwidth/parse cost. 60KB still looks crisp at avatar size.
+      if (avatar.length > 80_000) fail(400, "Avatar too large — pick a smaller image.");
       sets.push("avatar_url = ?");
       values.push(avatar || null);
+      // Bump the cache token so every client refreshes this avatar once.
+      sets.push("avatar_version = avatar_version + 1");
     }
     if (sets.length) {
       values.push(uid);
@@ -1405,8 +1433,46 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     }
     const list = rows
       .filter((row) => !blocked.has(row.id))
-      .map((row) => userFrom(row, onlineNow(row)));
+      // Light: discovery pages render rows of 54dp avatars — the data-URI
+      // for every result is fetched once per avatarRef by the client.
+      .map((row) => userFrom(row, onlineNow(row), true));
     return json({ users: list });
+  }
+
+  // Avatar bytes keyed by the user id; the data-URI only (the list endpoints
+  // send a tiny avatarRef instead). ETag/If-None-Match plus a long CDN lifetime
+  // make this one fetch per avatar *change* — not per poll.
+  const avatarMatch = path.match(/^\/api\/users\/([^/]+)\/avatar$/);
+  if (avatarMatch && method === "GET") {
+    const row = await one<{ avatar_url: string | null; avatar_version: number | null }>(
+      db,
+      "SELECT avatar_url, avatar_version FROM users WHERE id = ?",
+      avatarMatch[1]!,
+    );
+    const version = row?.avatar_version ?? 0;
+    const etag = `"av-${avatarMatch[1]!.slice(0, 8)}-v${version}"`;
+    if (request.headers.get("if-none-match") === etag) {
+      return new Response(null, { status: 304, headers: { etag } });
+    }
+    if (!row?.avatar_url)
+      return new Response(JSON.stringify({ avatarUrl: null, avatarRef: null }), {
+        headers: {
+          "content-type": "application/json",
+          etag,
+          "cache-control": "private, max-age=300",
+        },
+      });
+    return new Response(
+      JSON.stringify({ avatarUrl: row.avatar_url, avatarRef: `${avatarMatch[1]}@v${version}` }),
+      {
+        headers: {
+          "content-type": "application/json",
+          etag,
+          // data-URIs are immutable per version; let the client keep them.
+          "cache-control": "private, max-age=86400",
+        },
+      },
+    );
   }
 
   const userNameMatch = path.match(/^\/api\/users\/username\/([a-z0-9_]+)$/);
@@ -1423,6 +1489,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (!row) fail(404, "User not found.");
     return json({ user: userFrom(row, onlineNow(row)) });
   }
+
+  // Profile lookups embedded by the search/chats screens were full
+  // userFrom() rows including the data-URI avatar; keep those hot lists light.
 
   /* ---------- blocks ---------- */
 
@@ -1609,7 +1678,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           if (!lastAt || lastAt <= Date.parse(mark.at)) continue;
         }
       }
-      list.push(buildConvDetail(conv, membersByConv.get(conv.id) ?? [], users, uid));
+      list.push(buildConvDetail(conv, membersByConv.get(conv.id) ?? [], users, uid, true));
     }
     // Freshness marker: everything the client renders (order fields, unread,
     // preview, mute, hidden-state) folded into one hash. Unchanged marker =>
@@ -1630,7 +1699,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           c.other
             ? [
                 (c.other as Record<string, unknown>).displayName,
-                (c.other as Record<string, unknown>).avatarUrl,
+                // avatarUrl is null in the light list shape; the avatar cache
+                // token is what must change here when a contact swaps photos.
+                (c.other as Record<string, unknown>).avatarRef ??
+                  (c.other as Record<string, unknown>).avatarUrl,
               ]
             : null,
         ]),
@@ -3416,6 +3488,11 @@ function buildConvDetail(
   memberRows: ConvMemberRow[],
   users: Map<string, UserRow>,
   uid: string,
+  // The chat LIST is the hottest endpoint in the app (polled every 2s with
+  // the socket down) — there avatars go as a tiny avatarRef and the client
+  // fetches each data-URI once per version from /api/users/:id/avatar.
+  // Opening a conversation is a one-off call, so it keeps the full shape.
+  light = false,
 ) {
   const members = [];
   let other = null;
@@ -3425,11 +3502,11 @@ function buildConvDetail(
     const user = users.get(row.user_id);
     if (!user) continue;
     members.push({
-      user: userFrom(user, onlineNow(user)),
+      user: userFrom(user, onlineNow(user), light),
       role: row.role,
       lastReadAt: row.last_read_at,
     });
-    if (row.user_id !== uid && conv.kind === "SOLO") other = userFrom(user, onlineNow(user));
+    if (row.user_id !== uid && conv.kind === "SOLO") other = userFrom(user, onlineNow(user), light);
     if (row.user_id === uid) {
       meMuted = row.muted === 1;
       unread = row.unread;

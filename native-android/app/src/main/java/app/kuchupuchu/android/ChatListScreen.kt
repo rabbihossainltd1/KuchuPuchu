@@ -760,6 +760,7 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
         if (isGroup) conv.optText("title").ifBlank { "Group" }
         else other?.optText("displayName")?.takeIf { it.isNotBlank() } ?: "Chat"
     val avatarUrl = if (isGroup) null else other?.optString("avatarUrl")
+    val avatarRef = if (isGroup) null else other?.optString("avatarRef")
     val preview = friendlyPreview(conv.optText("lastMessage"))
     val stamp = listStamp(conv.optString("lastMessageAt"))
     val unread = conv.optInt("unread", 0)
@@ -776,7 +777,7 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box {
-            KpAvatar(name, avatarUrl, 54.dp)
+            KpAvatar(name, avatarUrl, 54.dp, avatarRef = avatarRef)
             if (online) {
                 Box(
                     Modifier

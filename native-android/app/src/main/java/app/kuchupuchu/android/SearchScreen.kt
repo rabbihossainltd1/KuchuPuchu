@@ -199,7 +199,7 @@ fun SearchScreen(nav: NavController) {
                     item { SectionLabel("People") }
                     items(users, key = { "u" + it.optString("id") }) { u ->
                         ResultCard(onClick = { haptics.tap(); openChatWith(u.optString("id")) }) {
-                            KpAvatar(u.optString("displayName"), u.optString("avatarUrl"), 42.dp, ring = false)
+                            KpAvatar(u.optString("displayName"), u.optString("avatarUrl"), 42.dp, ring = false, avatarRef = u.optString("avatarRef").ifBlank { null })
                             Spacer(Modifier.width(12.dp))
                             Column {
                                 Highlight(u.optText("displayName"), query)

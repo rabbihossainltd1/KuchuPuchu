@@ -12,6 +12,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import coil.Coil
 import coil.ImageLoader
+import coil.disk.DiskCache
 import coil.memory.MemoryCache
 
 class MainActivity : ComponentActivity() {
@@ -60,6 +61,20 @@ class MainActivity : ComponentActivity() {
                         .maxSizeBytes(64 * 1024 * 1024)
                         .build()
                 }
+                // Disk cache: previously every photo re-downloaded after a
+                // process restart (or memory-cache eviction), which made
+                // scrolling back through a media-heavy chat re-fetch the whole
+                // thread and stutter. The worker serves /api/files with
+                // cache-control max-age=7d, so disk hits are authoritative.
+                .diskCache {
+                    DiskCache.Builder()
+                        .directory(cacheDir.resolve("kp-image-cache"))
+                        .maxSizeBytes(256L * 1024 * 1024)
+                        .build()
+                }
+                // Respect the server's cache directives instead of always
+                // revalidating, so cached media costs zero network.
+                .respectCacheHeaders(true)
                 .crossfade(true)
                 .build(),
         )

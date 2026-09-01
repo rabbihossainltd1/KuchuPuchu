@@ -203,7 +203,7 @@ fun CreateGroupScreen(nav: NavController) {
                             .padding(horizontal = 14.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        KpAvatar(user.optString("displayName"), user.optString("avatarUrl"), 46.dp)
+                        KpAvatar(user.optString("displayName"), user.optString("avatarUrl"), 46.dp, avatarRef = user.optString("avatarRef").ifBlank { null })
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(

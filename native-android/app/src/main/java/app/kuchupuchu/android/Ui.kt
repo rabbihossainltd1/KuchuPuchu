@@ -107,6 +107,46 @@ fun rememberBitmap(url: String?): ImageBitmap? {
  * The signature avatar: amber gradient ring (locked Chat List #7 look)
  * with initials or photo inside.
  */
+/**
+ * Resolves an avatar reference (`"<userId>@v<version>"` from the worker's light
+ * list responses) to the full data-URI. The URI is fetched once per ref and
+ * cached in SharedPreferences, so a contact's avatar costs one fetch for its
+ * lifetime instead of being inlined into every 2s chat-list poll.
+ */
+private val avatarRefCache = object {
+    private const val PREF = "kp_avatars"
+    fun get(ctx: android.content.Context, ref: String): String? =
+        runCatching { ctx.getSharedPreferences(PREF, 0).getString(ref, null) }.getOrNull()
+    fun put(ctx: android.content.Context, ref: String, url: String) =
+        runCatching { ctx.getSharedPreferences(PREF, 0).edit().putString(ref, url).apply() }.getOrNull()
+}
+
+@Composable
+private fun rememberAvatarUrl(url: String?, avatarRef: String?): String? {
+    // Inline data-URI / http URL: use directly (old response shapes and the
+    // full profile endpoint).
+    if (!url.isNullOrBlank()) return url
+    if (avatarRef.isNullOrBlank() || !avatarRef.contains("@v")) return null
+    val ctx = LocalContext.current
+    val state = remember(avatarRef) { mutableStateOf(avatarRefCache.get(ctx, avatarRef)) }
+    LaunchedEffect(avatarRef) {
+        if (state.value != null) return@LaunchedEffect
+        val fetched =
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    val userId = avatarRef.substringBefore("@v")
+                    val data = Api.get("/api/users/$userId/avatar", force = true)
+                    data.optString("avatarUrl").takeIf { it.startsWith("data:") }
+                }.getOrNull()
+            }
+        if (fetched != null) {
+            avatarRefCache.put(ctx, avatarRef, fetched)
+            state.value = fetched
+        }
+    }
+    return state.value
+}
+
 @Composable
 fun KpAvatar(
     name: String,
@@ -114,10 +154,12 @@ fun KpAvatar(
     size: Dp,
     ring: Boolean = true,
     ringWidth: Dp = 2.5.dp,
+    avatarRef: String? = null,
 ) {
     val inner = size - if (ring) ringWidth * 2 else 0.dp
-    val dataUrl = url?.startsWith("data:") == true
-    val bmp = if (dataUrl) rememberBitmap(url) else null
+    val resolved = rememberAvatarUrl(url, avatarRef)
+    val dataUrl = resolved?.startsWith("data:") == true
+    val bmp = if (dataUrl) rememberBitmap(resolved) else null
     Box(Modifier.size(size), contentAlignment = Alignment.Center) {
         if (ring) {
             Box(
@@ -154,8 +196,8 @@ fun KpAvatar(
                     modifier = Modifier.size(inner),
                     contentScale = ContentScale.Crop,
                 )
-                !url.isNullOrBlank() && !dataUrl -> KpNetImage(
-                    url,
+                !resolved.isNullOrBlank() && !dataUrl -> KpNetImage(
+                    resolved,
                     name,
                     Modifier.size(inner),
                     ContentScale.Crop,
