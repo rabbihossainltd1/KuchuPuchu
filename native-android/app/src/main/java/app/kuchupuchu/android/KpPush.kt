@@ -277,6 +277,9 @@ class KpPushService : FirebaseMessagingService() {
             }
         }.start()
         ScreenStore.pokeInbox()
+        // Push received => we are alive; hold that state so the NEXT message or
+        // call is not dropped by Doze/OEM trimming (see KeepAliveService).
+        KeepAliveService.promote(this)
         if (Store.route == "chat/$convoId" && Store.foreground) {
             if (!muted) runCatching { KpSounds.receive(this) }
             return
