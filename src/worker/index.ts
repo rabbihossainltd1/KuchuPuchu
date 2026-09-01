@@ -472,7 +472,15 @@ function userFrom(row: UserRow, online = false, light = false) {
       avatarRef: row.avatar_url ? `${row.id}@v${row.avatar_version ?? 0}` : null,
     };
   }
-  return { ...base, avatarUrl: row.avatar_url };
+  return {
+    ...base,
+    avatarUrl: row.avatar_url,
+    // Also expose the stable per-version ref on the FULL shape, so clients can
+    // render an avatar from its persistent cache even when a detail/profile
+    // response brings the data-URI along (which re-transfers hundreds of KB on
+    // every screen open — the "profile picture reloads every launch" bug).
+    avatarRef: row.avatar_url ? `${row.id}@v${row.avatar_version ?? 0}` : null,
+  };
 }
 
 /** Full shape, only ever returned for the signed-in user themself. */
@@ -3434,7 +3442,7 @@ type CallRow = {
   created_at: string;
 };
 
-function callFrom(row: CallRow, uid: string, other: UserRow | null) {
+function callFrom(row: CallRow, uid: string, other: UserRow | null, light = false) {
   return {
     id: row.id,
     kind: row.kind,
@@ -3450,18 +3458,25 @@ function callFrom(row: CallRow, uid: string, other: UserRow | null) {
     startedAt: row.started_at,
     endedAt: row.ended_at,
     createdAt: row.created_at,
-    other: other ? userFrom(other, onlineNow(other)) : null,
+    other: other ? userFrom(other, onlineNow(other), light) : null,
   };
 }
 
 // History rows are display-only. SDP belongs to the live signalling routes;
 // returning four large SDP documents for each of up to 100 rows made this
 // endpoint ~19x larger and dominated Calls-tab startup on mobile networks.
+// `other` is also LIGHT (avatarUrl:null + avatarRef, no 200KB data-URI per
+// row), so a 100-call history is a tiny payload and the client renders each
+// avatar from its persistent per-version cache instead of re-transferring and
+// re-parsing hundreds of KB (the "call history laggy / avatar reloads on
+// scroll" bug). Live /api/calls/active + start-call responses keep the full
+// shape (light=false).
 function callHistoryFrom(row: CallRow, uid: string, other: UserRow | null) {
   const { offerSdp, answerSdp, reofferSdp, reofferFrom, reanswerSdp, ...history } = callFrom(
     row,
     uid,
     other,
+    true,
   );
   return history;
 }

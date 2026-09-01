@@ -131,11 +131,21 @@ fun ChatListScreen(nav: NavController) {
                 }
                 ScreenStore.convsMarker = data.optString("marker")
                 val items = data.arr("items").objects()
+                // NON-FOREGROUND guard: posting a card here (on a fresh list
+                // sync) used to fire even when the app was open on ANOTHER
+                // screen, which is the locked "open other screen -> sound only,
+                // NO card" bug. The FCM data push is the single notification
+                // source: it posts the rich Reply/Like/Read card in background
+                // and is sound-only in foreground. This list-refresh path only
+                // carries the unread badge / preview / reorder (setConvs below)
+                // and, in background, MAY post a card as a fallback if the push
+                // did not. It must never fire while the app is on screen.
+                val fg = Store.foreground
                 items.forEach { c ->
                     val id = c.optString("id")
                     val last = c.optString("lastMessageAt")
                     val unread = c.optInt("unread", 0)
-                    if (ScreenStore.shouldNotifyChat(id, last, unread)) {
+                    if (!fg && ScreenStore.shouldNotifyChat(id, last, unread)) {
                         val name =
                             if (c.optBoolean("isGroup")) c.optString("title").ifBlank { "Group" }
                             else c.optJSONObject("other")?.optText("displayName")?.ifBlank { "KuchuPuchu" } ?: "KuchuPuchu"

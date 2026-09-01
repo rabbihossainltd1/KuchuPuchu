@@ -125,8 +125,18 @@ private val avatarRefCache = object {
 @Composable
 private fun rememberAvatarUrl(url: String?, avatarRef: String?): String? {
     // Inline data-URI / http URL: use directly (old response shapes and the
-    // full profile endpoint).
-    if (!url.isNullOrBlank()) return url
+    // full profile endpoint). When a stable avatarRef is ALSO present (the
+    // worker now sends it on the full shape too), prefer the persistent
+    // per-version cache so a detail/profile re-open renders instantly instead
+    // of re-decoding a data-URI that was already shown once this session.
+    if (!url.isNullOrBlank()) {
+        if (!avatarRef.isNullOrBlank() && avatarRef.contains("@v")) {
+            val ctx = LocalContext.current
+            val cached = avatarRefCache.get(ctx, avatarRef)
+            if (cached != null) return cached
+        }
+        return url
+    }
     if (avatarRef.isNullOrBlank() || !avatarRef.contains("@v")) return null
     val ctx = LocalContext.current
     val state = remember(avatarRef) { mutableStateOf(avatarRefCache.get(ctx, avatarRef)) }
