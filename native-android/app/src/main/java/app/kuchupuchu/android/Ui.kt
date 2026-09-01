@@ -58,6 +58,9 @@ object Bitmaps {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount / 1024
     }
 
+    /** Cache hit only, never decodes: lets a row that re-enters a list paint on frame one. */
+    fun peek(url: String?): Bitmap? = if (url.isNullOrBlank()) null else mem.get(url)
+
     fun load(url: String?): Bitmap? {
         if (url.isNullOrBlank()) return null
         mem.get(url)?.let { return it }
@@ -94,9 +97,14 @@ object Bitmaps {
 
 @Composable
 fun rememberBitmap(url: String?): ImageBitmap? {
-    val state = remember(url) { mutableStateOf<ImageBitmap?>(null) }
+    // Seed from the memory cache synchronously. Starting at null meant every row
+    // that re-entered composition (scroll-back, reopen after the app was killed,
+    // a chat-list poll) painted the placeholder for a frame and then the photo —
+    // that flash is what read as "the profile keeps loading again".
+    val state = remember(url) { mutableStateOf(Bitmaps.peek(url)?.asImageBitmap()) }
     LaunchedEffect(url) {
         if (url.isNullOrBlank()) return@LaunchedEffect
+        if (state.value != null) return@LaunchedEffect
         val bmp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Bitmaps.load(url) }
         state.value = bmp?.asImageBitmap()
     }
@@ -122,36 +130,60 @@ private val avatarRefCache = object {
         runCatching { ctx.getSharedPreferences(AVATAR_PREFS, 0).edit().putString(ref, url).apply() }.getOrNull()
 }
 
+/**
+ * org.json's `optString()` maps a JSON null to the STRING "null" (that is why
+ * `optIso()` exists — see Api.kt). Every LIGHT payload the worker sends carries
+ * `"avatarUrl": null`, so a raw `optString` hands the renderer the four-letter
+ * text "null", which is not blank: the avatarRef lookup got skipped and Coil was
+ * aimed at `<BASE>null` (404). Chat-list and call-history rows sat on the
+ * placeholder forever because of that. Anything that does not look like an image
+ * reference is therefore treated as absent here, at the one choke point.
+ */
+private fun avatarValue(raw: String?): String? =
+    raw?.trim()?.takeUnless { it.isEmpty() || it == "null" }
+
+/** An inline avatar only if it is something `Bitmaps`/Coil can actually fetch. */
+private fun inlineAvatar(raw: String?): String? =
+    avatarValue(raw)?.takeIf { it.startsWith("data:") || it.startsWith("http") || it.startsWith("/") }
+
+/** `<userId>@v<version>` — the cache token the light endpoints send. */
+private fun avatarRefOf(raw: String?): String? = avatarValue(raw)?.takeIf { it.contains("@v") }
+
 @Composable
 private fun rememberAvatarUrl(url: String?, avatarRef: String?): String? {
-    // Inline data-URI / http URL: use directly (old response shapes and the
-    // full profile endpoint). When a stable avatarRef is ALSO present (the
-    // worker now sends it on the full shape too), prefer the persistent
-    // per-version cache so a detail/profile re-open renders instantly instead
-    // of re-decoding a data-URI that was already shown once this session.
-    if (!url.isNullOrBlank()) {
-        if (!avatarRef.isNullOrBlank() && avatarRef.contains("@v")) {
-            val ctx = LocalContext.current
-            val cached = avatarRefCache.get(ctx, avatarRef)
-            if (cached != null) return cached
-        }
-        return url
-    }
-    if (avatarRef.isNullOrBlank() || !avatarRef.contains("@v")) return null
+    val inline = inlineAvatar(url)
+    val ref = avatarRefOf(avatarRef)
+    // No cache token (a group, or a full payload with no ref): render the inline
+    // value, whatever it is.
+    if (ref == null) return inline
     val ctx = LocalContext.current
-    val state = remember(avatarRef) { mutableStateOf(avatarRefCache.get(ctx, avatarRef)) }
-    LaunchedEffect(avatarRef) {
-        if (state.value != null) return@LaunchedEffect
+    // The persistent per-version cache wins, so a contact's photo survives an app
+    // restart and a light row resolves to the bytes fetched for the FULL shape.
+    val state = remember(ref) { mutableStateOf(avatarRefCache.get(ctx, ref) ?: inline) }
+    LaunchedEffect(ref) {
+        val have = state.value
+        if (have != null) {
+            // We are rendering an inline data-URI (chat box header, /api/me):
+            // file it under the ref so the next open — and every light row that
+            // shows the same person — paints from cache instead of re-decoding
+            // and re-fetching. That is the "profile loads over and over" fix.
+            // Only the immutable data-URI belongs in the persistent cache — an
+            // http URL may carry an expiring query and must not be pinned.
+            if (have.startsWith("data:") && avatarRefCache.get(ctx, ref) == null) {
+                avatarRefCache.put(ctx, ref, have)
+            }
+            return@LaunchedEffect
+        }
         val fetched =
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 runCatching {
-                    val userId = avatarRef.substringBefore("@v")
+                    val userId = ref.substringBefore("@v")
                     val data = Api.get("/api/users/$userId/avatar", force = true)
                     data.optString("avatarUrl").takeIf { it.startsWith("data:") }
                 }.getOrNull()
             }
         if (fetched != null) {
-            avatarRefCache.put(ctx, avatarRef, fetched)
+            avatarRefCache.put(ctx, ref, fetched)
             state.value = fetched
         }
     }

@@ -199,7 +199,7 @@ fun SearchScreen(nav: NavController) {
                     item { SectionLabel("People") }
                     items(users, key = { "u" + it.optString("id") }) { u ->
                         ResultCard(onClick = { haptics.tap(); openChatWith(u.optString("id")) }) {
-                            KpAvatar(u.optString("displayName"), u.optString("avatarUrl"), 42.dp, ring = false, avatarRef = u.optString("avatarRef").ifBlank { null })
+                            KpAvatar(u.optString("displayName"), u.optIso("avatarUrl"), 42.dp, ring = false, avatarRef = u.optIso("avatarRef"))
                             Spacer(Modifier.width(12.dp))
                             Column {
                                 Highlight(u.optText("displayName"), query)
@@ -226,7 +226,13 @@ fun SearchScreen(nav: NavController) {
                             ResultCard(onClick = {
                                 nav.navigate("chat/${c.optString("id")}") { popUpTo("main") }
                             }) {
-                                KpAvatar(title, if (c.optBoolean("isGroup")) null else other?.optString("avatarUrl"), 42.dp, ring = false)
+                                KpAvatar(
+                                    title,
+                                    if (c.optBoolean("isGroup")) null else other?.optIso("avatarUrl"),
+                                    42.dp,
+                                    ring = false,
+                                    avatarRef = if (c.optBoolean("isGroup")) null else other?.optIso("avatarRef"),
+                                )
                                 Spacer(Modifier.width(12.dp))
                                 Column {
                                     Highlight(title, query)

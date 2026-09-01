@@ -171,7 +171,7 @@ fun SettingsScreen(nav: NavController) {
                 Box {
                     KpAvatar(
                         me.value.optText("displayName"),
-                        me.value.optString("avatarUrl"),
+                        me.value.optIso("avatarUrl"),
                         76.dp,
                         ring = false,
                     )

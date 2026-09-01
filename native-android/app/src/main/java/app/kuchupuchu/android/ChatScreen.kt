@@ -964,7 +964,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     // single line (the full name lives on the contact page).
     val title =
         if (rawTitle.length > 14 && rawTitle.contains(' ')) rawTitle.substringBefore(' ') else rawTitle
-    val avatarUrl = if (isGroup) null else c?.optJSONObject("other")?.optString("avatarUrl")
+    val avatarUrl = if (isGroup) null else c?.optJSONObject("other")?.optIso("avatarUrl")
+    // The ref is what makes the header paint without re-fetching: pass it too.
+    val avatarRef = if (isGroup) null else c?.optJSONObject("other")?.optIso("avatarRef")
     val online = !isGroup && c?.optJSONObject("other")?.optBoolean("online") == true
     // Recompose exactly when the six-second typing lease expires. Computing
     // directly from currentTimeMillis() left the label visible indefinitely
@@ -1070,7 +1072,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-            KpAvatar(title, avatarUrl, 40.dp)
+            KpAvatar(title, avatarUrl, 40.dp, avatarRef = avatarRef)
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(
@@ -2005,7 +2007,7 @@ private fun ForwardDialog(onClose: () -> Unit, onPick: (String) -> Unit) {
                     val name =
                         if (isGroup) c.optText("title").ifBlank { "Group" }
                         else other?.optText("displayName")?.ifBlank { "Chat" } ?: "Chat"
-                    val avatarUrl = if (isGroup) null else other?.optString("avatarUrl")
+                    val avatarUrl = if (isGroup) null else other?.optIso("avatarUrl")
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -2015,7 +2017,12 @@ private fun ForwardDialog(onClose: () -> Unit, onPick: (String) -> Unit) {
                             .padding(10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        KpAvatar(name, avatarUrl, 40.dp)
+                        KpAvatar(
+                            name,
+                            avatarUrl,
+                            40.dp,
+                            avatarRef = if (isGroup) null else other?.optIso("avatarRef"),
+                        )
                         Spacer(Modifier.width(10.dp))
                         Text(name, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
@@ -2032,7 +2039,11 @@ private fun convRowSnapshot(convId: String): JSONObject? {
     val other = JSONObject()
         .put("id", row.optJSONObject("other")?.optString("id") ?: "")
         .put("displayName", row.optJSONObject("other")?.optText("displayName") ?: "")
-        .put("avatarUrl", row.optJSONObject("other")?.optString("avatarUrl") ?: "")
+        .put("avatarUrl", row.optJSONObject("other")?.optIso("avatarUrl").orEmpty())
+        // The snapshot is built from a LIGHT chat-list row, so the photo itself is
+        // not there — without the ref the header had nothing to resolve and the
+        // avatar only appeared after the conversation fetch (the reload flash).
+        .put("avatarRef", row.optJSONObject("other")?.optIso("avatarRef").orEmpty())
         .put("online", row.optJSONObject("other")?.optBoolean("online") ?: false)
     return JSONObject()
         .put("id", convId)

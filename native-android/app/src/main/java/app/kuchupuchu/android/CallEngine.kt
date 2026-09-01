@@ -556,7 +556,7 @@ class CallEngine(private val app: Application) {
                 otherName = other.optString("displayName").ifBlank { current?.otherName ?: "KuchuPuchu" },
                 otherId = other.optString("id").ifBlank { current?.otherId.orEmpty() },
                 otherOnline = other.optBoolean("online"),
-                otherAvatar = other.optString("avatarUrl").ifBlank { current?.otherAvatar.orEmpty() },
+                otherAvatar = other.optIso("avatarUrl").orEmpty().ifBlank { current?.otherAvatar.orEmpty() },
                 startedAt =
                     when {
                         status != "ACTIVE" -> 0L

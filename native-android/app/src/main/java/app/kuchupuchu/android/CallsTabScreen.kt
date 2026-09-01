@@ -145,11 +145,11 @@ private fun CallRow(call: JSONObject, onOpenChat: () -> Unit) {
     val incoming = call.optBoolean("incoming")
     val other = call.optJSONObject("other")
     val name = other?.optText("displayName")?.takeIf { it.isNotBlank() } ?: "Unknown"
-    val avatar = other?.optString("avatarUrl")
+    val avatar = other?.optIso("avatarUrl")
     // The worker sends history rows LIGHT (avatarUrl:null + avatarRef) so the
     // payload stays small; KpAvatar resolves the ref through the persistent
     // per-version cache rather than re-transferring a data-URI per row.
-    val avatarRef = other?.optString("avatarRef")
+    val avatarRef = other?.optIso("avatarRef")
     val kind = call.optString("kind")
     val status = call.optString("status")
     val video = kind == "VIDEO"

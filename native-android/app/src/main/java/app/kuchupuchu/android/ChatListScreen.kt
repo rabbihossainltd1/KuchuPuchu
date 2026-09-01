@@ -775,8 +775,10 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
     val name =
         if (isGroup) conv.optText("title").ifBlank { "Group" }
         else other?.optText("displayName")?.takeIf { it.isNotBlank() } ?: "Chat"
-    val avatarUrl = if (isGroup) null else other?.optString("avatarUrl")
-    val avatarRef = if (isGroup) null else other?.optString("avatarRef")
+    // optIso, not optString: the list rows are LIGHT, so avatarUrl is JSON null
+    // there, and "null" as a string defeats the avatarRef lookup (see KpAvatar).
+    val avatarUrl = if (isGroup) null else other?.optIso("avatarUrl")
+    val avatarRef = if (isGroup) null else other?.optIso("avatarRef")
     val preview = friendlyPreview(conv.optText("lastMessage"))
     val stamp = listStamp(conv.optString("lastMessageAt"))
     val unread = conv.optInt("unread", 0)

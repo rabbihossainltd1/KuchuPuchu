@@ -133,13 +133,13 @@ fun StatusScreen(nav: NavController) {
                             if (myStatuses.isNotEmpty()) {
                                 StatusRingAvatar(
                                     Store.myName(),
-                                    Store.me?.optString("avatarUrl"),
+                                    Store.me?.optIso("avatarUrl"),
                                     60.dp,
                                     segments = myStatuses.size,
                                     seen = false,
                                 )
                             } else {
-                                KpAvatar(Store.myName(), Store.me?.optString("avatarUrl"), 60.dp, ring = false)
+                                KpAvatar(Store.myName(), Store.me?.optIso("avatarUrl"), 60.dp, ring = false)
                             }
                             // The little "+" opens the same thing as the row:
                             // your latest status if one exists, else composer.
@@ -824,7 +824,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                 ) {
                     KpAvatar(
                         user?.optText("displayName") ?: Store.myName(),
-                        user?.optText("avatarUrl") ?: Store.me?.optString("avatarUrl"),
+                        user?.optText("avatarUrl") ?: Store.me?.optIso("avatarUrl"),
                         42.dp,
                         ring = false,
                     )
