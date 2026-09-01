@@ -2924,26 +2924,49 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         await logCallEvent(db, row.caller_id, row.callee_id, row.kind, "MISSED");
         // Missed-call push to the callee with Call back / Message deep links.
         const caller = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row.caller_id);
+        const callee = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row.callee_id);
         const video = row.kind === "VIDEO";
         ctx.waitUntil(
-          pushToUser(
-            env,
-            db,
-            row.callee_id,
-            {
-              type: "missed_call",
-              callId: row.id,
-              kind: row.kind,
-              fromName: caller?.display_name ?? "KuchuPuchu",
-              kp_callback: row.caller_id,
-              kp_chat: pairId(row.caller_id, row.callee_id),
-            },
-            {
-              title: `Missed call · ${caller?.display_name ?? "KuchuPuchu"}`,
-              body: video ? "📹 Missed video call" : "📞 Missed voice call",
-              channel: "kp_calls_v5",
-            },
-          ),
+          (async () => {
+            // Same decision as the message path. A recipient whose process is
+            // demonstrably live (liveSockets > 0) and not idle for the whole
+            // IDLE window gets a DATA-ONLY push so onMessageReceived runs and we
+            // draw our own rich card with Call back / Message actions. A
+            // not-connected app (liveSockets === 0), an unavailable realtime
+            // layer (< 0), or a half-open timeout (live but > idle) gets the
+            // system payload so at least a tray card shows — a system card
+            // cannot carry our actions, but silence is worse than a plain card.
+            const live = await pokeUserConversation(
+              env,
+              row.callee_id,
+              pairId(row.caller_id, row.callee_id),
+              nowIso(),
+            );
+            const last = callee?.last_active_at ? Date.parse(callee.last_active_at) : 0;
+            const idle = !last || Date.now() - last >= IDLE_PUSH_WINDOW_MS;
+            const note =
+              live > 0 && !idle
+                ? undefined
+                : {
+                    title: `Missed call · ${caller?.display_name ?? "KuchuPuchu"}`,
+                    body: video ? "📹 Missed video call" : "📞 Missed voice call",
+                    channel: "kp_calls_v5",
+                  };
+            await pushToUser(
+              env,
+              db,
+              row.callee_id,
+              {
+                type: "missed_call",
+                callId: row.id,
+                kind: row.kind,
+                fromName: caller?.display_name ?? "KuchuPuchu",
+                kp_callback: row.caller_id,
+                kp_chat: pairId(row.caller_id, row.callee_id),
+              },
+              note,
+            );
+          })(),
         );
       }
     }

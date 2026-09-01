@@ -198,6 +198,11 @@ class KpPushService : FirebaseMessagingService() {
      */
     /** Missed-call alert with Call back / Message actions (app alive). */
     private fun handleMissedCall(data: Map<String, String>) {
+        // Foreground: the incoming-call ring UI already showed this call, so a
+        // redundant "missed call" banner is noise — skip it. It only fires in
+        // background (process alive), where the rich Call back / Message action
+        // card is the desired behaviour.
+        if (Store.foreground) return
         KpNotify.missedCall(
             this,
             data["fromName"] ?: "KuchuPuchu",
@@ -282,10 +287,19 @@ class KpPushService : FirebaseMessagingService() {
             "msg ${convoId.take(8)} fg=${Store.foreground} route=${Store.route.take(22)} muted=${muted}",
         )
         ScreenStore.pokeInbox()
-        if (Store.route == "chat/$convoId" && Store.foreground) {
+        // Foreground rule (locked spec): a notification card is NEVER shown
+        // while the app is on screen. In the open chat the WS "message"/"conv"
+        // event repaints the thread live, so here we only play the message
+        // tone; on any other screen the chat list is refreshed by the WS "conv"
+        // poke, so we keep the unread badge accurate and play the tone (sound
+        // only, no card). Background stays on the rich card path below.
+        if (Store.foreground) {
+            // Badge jumps instantly; the next list refresh confirms the same number.
+            ScreenStore.bumpUnread(convoId, data["body"])
             if (!muted) runCatching { KpSounds.receive(this) }
             return
         }
+        // Background (process alive): message card WITH Reply / Like / Mark-as-read.
         // Badge jumps instantly; the next list refresh confirms the same number.
         ScreenStore.bumpUnread(convoId, data["body"])
         if (!muted) runCatching { KpSounds.receive(this) }
