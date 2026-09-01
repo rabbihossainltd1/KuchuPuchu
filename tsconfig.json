@@ -4,7 +4,6 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "jsx": "react-jsx",
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
@@ -14,13 +13,7 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "baseUrl": ".",
-    "paths": {
-      "@domain/*": ["src/domain/*"],
-      "@shared/*": ["src/shared/*"],
-      "@server/*": ["src/server/*"]
-    },
     "types": ["node"]
   },
-  "include": ["src", "prisma", "scripts", "vite.config.ts", "vitest.config.ts", "eslint.config.js"]
+  "include": ["src", "test", "scripts"]
 }

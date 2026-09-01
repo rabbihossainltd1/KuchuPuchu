@@ -15,7 +15,7 @@ const PATTERNS: { name: string; regex: RegExp }[] = [
   },
 ];
 
-const IGNORE = new Set(["scripts/secret-scan.ts", "arena agent command.md", "package-lock.json"]);
+const IGNORE = new Set(["scripts/secret-scan.ts", "package-lock.json"]);
 
 function filesToScan(): string[] {
   try {

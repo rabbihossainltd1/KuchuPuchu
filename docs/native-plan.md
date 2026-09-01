@@ -3,7 +3,7 @@
 Package: `app.kuchupuchu.android` (same applicationId as the Capacitor APK — updates replace it).
 API: `https://kuchupuchu-api.kuchupuchu.workers.dev`
 
-CI APK job now builds `native-android/` (Compose). WebView `android/` stays in the repo as a fallback until the native APK is accepted on phones.
+CI APK job builds `native-android/` (Compose). The old WebView shell was deleted; there is no fallback client in this repo.
 
 ## Locked UI
 

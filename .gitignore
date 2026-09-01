@@ -2,9 +2,6 @@ node_modules
 dist
 build
 coverage
-.turbo
-.vite
-.next
 .cache
 .arena
 *.log
@@ -15,8 +12,6 @@ coverage
 *.db-journal
 *.db-wal
 *.db-shm
-prisma/dev.db
-prisma/test.db
 .DS_Store
 uploads
 tmp
@@ -24,8 +19,6 @@ tmp
 .idea
 .vscode
 *.tsbuildinfo
-playwright-report
-test-results
 secrets.md
 SECRETS.md
 local.properties

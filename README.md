@@ -1,6 +1,10 @@
 # KuchuPuchu
 
-Social app for Free Fire players: chat, statuses, audio/video calls, contacts, and a coin wallet.
+Messenger for Free Fire players: 1:1 + group chat, media and file send, 24h statuses,
+WebRTC audio/video calls with screen share, blocks, and FCM push.
+
+There is no coin wallet, store, gifting, matchmaking, or payments in this product — those
+belonged to the abandoned v2 social-network spec and were removed from the repo.
 
 Live API: `https://kuchupuchu-api.kuchupuchu.workers.dev`
 Android id: `app.kuchupuchu.android` (do not change).
@@ -89,11 +93,16 @@ Source is `native-android/app/src/main/java/app/kuchupuchu/android/`. The pieces
 ## Repo map
 
 - `src/worker/index.ts` — the whole API
-- `src/shared/` — limits the worker enforces (message length, bio length, session TTL, presence window)
+- `src/shared/constants.ts` — the limits the worker enforces (message length, bio length, session TTL, presence window)
 - `native-android/` — the Android client
 - `test/` — worker test harness and cases
 - `scripts/secret-scan.ts` — the `security:secrets` check
-- `docs/` — original product spec
+- `docs/native-plan.md` — locked in-call UI decisions
+
+Everything else that used to sit in `docs/` was the pre-pivot product spec (discovery,
+matchmaking, coins, store, gifting, referrals, SPV payments, admin panel, moderation) for
+features the worker never implemented. It is gone from the tree; `git log --diff-filter=D -- docs/`
+brings it back if it is ever needed again.
 
 ## Known sharp edges
 
