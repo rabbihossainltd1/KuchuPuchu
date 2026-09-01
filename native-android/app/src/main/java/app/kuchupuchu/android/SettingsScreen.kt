@@ -242,6 +242,26 @@ fun SettingsScreen(nav: NavController) {
                 editField = "about"; editValue = me.value.optText("about")
             }
             SettingRow(Icons.Filled.Mail, "Email", me.value.optText("email"), clickable = false) {}
+            // Live OEM sleep-state readout: this row is how a user (and a bug
+            // report) tells "the app is broken" apart from "the ROM froze the
+            // app", which used to look identical from the outside.
+            var bgRestricted by remember { mutableStateOf(KpSetup.needsSetup(ctx)) }
+            var bgStatus by remember { mutableStateOf(KpSetup.statusText(ctx)) }
+            LaunchedEffect(Unit) {
+                bgRestricted = KpSetup.needsSetup(ctx)
+                bgStatus = KpSetup.statusText(ctx)
+            }
+            SettingRow(
+                Icons.Filled.Info,
+                "Background notifications",
+                if (bgRestricted) "$bgStatus — tap to fix" else bgStatus,
+            ) {
+                // openFixIt already falls back (autostart -> exemption dialog ->
+                // app info), so there is nothing to inspect here.
+                KpSetup.openFixIt(ctx)
+                bgRestricted = KpSetup.needsSetup(ctx)
+                bgStatus = KpSetup.statusText(ctx)
+            }
             // Which build am I running? This row ends the "ami ki notun APK
             // install korsi?" confusion — bug reports can quote it directly.
             SettingRow(
