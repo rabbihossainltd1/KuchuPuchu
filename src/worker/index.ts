@@ -975,6 +975,86 @@ async function pushToUser(
   return false;
 }
 
+/**
+ * Server-side reaper for stale RINGING calls.
+ *
+ * The MISSED transition + `missed_call` push used to live ONLY inside
+ * GET /api/calls/active, so when both phones were backgrounded nobody polled
+ * and a call stayed RINGING forever: the callee's "X is calling" card hung
+ * with no "Missed call" card (the reported stuck-card bug). Now it also runs
+ * on a one-minute cron, so the call flips to MISSED and the missed-call push
+ * fires without any client poll. Returns how many calls it reaped.
+ */
+async function reapStaleCalls(env: Env, db: D1Database, ctx: ExecutionContext): Promise<number> {
+  const cutoff = new Date(Date.now() - 60_000).toISOString();
+  const stale = await all<{ id: string; caller_id: string; callee_id: string; kind: string }>(
+    db,
+    "SELECT id, caller_id, callee_id, kind FROM calls WHERE status = 'RINGING' AND created_at < ?",
+    cutoff,
+  );
+  let reaped = 0;
+  for (const row of stale) {
+    // Conditional UPDATE + row count: this endpoint is polled by every client,
+    // so two simultaneous polls used to each insert their own "Missed call"
+    // bubble for the same call.
+    const changed = await run(
+      db,
+      "UPDATE calls SET status = 'MISSED', ended_at = ? WHERE id = ? AND status = 'RINGING'",
+      nowIso(),
+      row.id,
+    );
+    if (changed > 0) {
+      reaped++;
+      await logCallEvent(db, row.caller_id, row.callee_id, row.kind, "MISSED");
+      // Missed-call push to the callee with Call back / Message deep links.
+      const caller = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row.caller_id);
+      const video = row.kind === "VIDEO";
+      ctx.waitUntil(
+        (async () => {
+          // Same rule as the message path (recipientAlert):
+          //   - NO live socket (swiped-away / killed / frozen) => system
+          //     notification payload (guaranteed card). A high-priority
+          //     data-only missed-call message is NOT delivered on MIUI &
+          //     similar once the process is gone — the user's exact report
+          //     ("background swipe — missed call no notification"). The system
+          //     card has no actions on a dead process, but silence is worse.
+          //   - Live socket (process alive, background) => DATA-ONLY so
+          //     onMessageReceived draws our OWN rich card (Call back / Message).
+          const live = await pokeUserConversation(
+            env,
+            row.callee_id,
+            pairId(row.caller_id, row.callee_id),
+            nowIso(),
+          );
+          const note =
+            live <= 0
+              ? {
+                  title: `Missed call · ${caller?.display_name ?? "KuchuPuchu"}`,
+                  body: video ? "📹 Missed video call" : "📞 Missed voice call",
+                  channel: "kp_calls_v5",
+                }
+              : undefined;
+          await pushToUser(
+            env,
+            db,
+            row.callee_id,
+            {
+              type: "missed_call",
+              callId: row.id,
+              kind: row.kind,
+              fromName: caller?.display_name ?? "KuchuPuchu",
+              kp_callback: row.caller_id,
+              kp_chat: pairId(row.caller_id, row.callee_id),
+            },
+            note,
+          );
+        })(),
+      );
+    }
+  }
+  return reaped;
+}
+
 /* ---------------- system messages + call log ---------------- */
 
 async function systemMessage(db: D1Database, convId: string, body: string) {
@@ -1117,6 +1197,25 @@ export default {
           .run();
       } catch {}
       return json({ error: { code: "CLOUD", message: "Something went wrong. Try again." } }, 500);
+    }
+  },
+  // One-minute cron: reap stale RINGING calls so a call that nobody polls
+  // (both phones backgrounded) still flips to MISSED and the missed-call push
+  // fires. Without this the callee's "X is calling" card hangs indefinitely.
+  // Mirrors the reaper inside GET /api/calls/active.
+  async scheduled(
+    _controller: ScheduledController,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<void> {
+    try {
+      const reaped = await reapStaleCalls(env, env.DB, ctx);
+      console.log("cron_reap", JSON.stringify({ reaped }));
+    } catch (err) {
+      console.error(
+        "cron_reap_error",
+        JSON.stringify({ err: err instanceof Error ? err.message : String(err) }),
+      );
     }
   },
 };
@@ -2933,71 +3032,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   }
 
   if (path === "/api/calls/active" && method === "GET") {
-    const cutoff = new Date(Date.now() - 60_000).toISOString();
-    const stale = await all<{ id: string; caller_id: string; callee_id: string; kind: string }>(
-      db,
-      "SELECT id, caller_id, callee_id, kind FROM calls WHERE status = 'RINGING' AND created_at < ?",
-      cutoff,
-    );
-    for (const row of stale) {
-      // Conditional UPDATE + row count: this endpoint is polled by every client,
-      // so two simultaneous polls used to each insert their own "Missed call"
-      // bubble for the same call.
-      const changed = await run(
-        db,
-        "UPDATE calls SET status = 'MISSED', ended_at = ? WHERE id = ? AND status = 'RINGING'",
-        nowIso(),
-        row.id,
-      );
-      if (changed > 0) {
-        await logCallEvent(db, row.caller_id, row.callee_id, row.kind, "MISSED");
-        // Missed-call push to the callee with Call back / Message deep links.
-        const caller = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row.caller_id);
-        const callee = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row.callee_id);
-        const video = row.kind === "VIDEO";
-        ctx.waitUntil(
-          (async () => {
-            // Same rule as the message path (recipientAlert):
-            //   - NO live socket (swiped-away / killed / frozen) => system
-            //     notification payload (guaranteed card). A high-priority
-            //     data-only missed-call message is NOT delivered on MIUI &
-            //     similar once the process is gone — the user's exact report
-            //     ("background swipe — missed call no notification"). The system
-            //     card has no actions on a dead process, but silence is worse.
-            //   - Live socket (process alive, background) => DATA-ONLY so
-            //     onMessageReceived draws our OWN rich card (Call back / Message).
-            const live = await pokeUserConversation(
-              env,
-              row.callee_id,
-              pairId(row.caller_id, row.callee_id),
-              nowIso(),
-            );
-            const note =
-              live <= 0
-                ? {
-                    title: `Missed call · ${caller?.display_name ?? "KuchuPuchu"}`,
-                    body: video ? "📹 Missed video call" : "📞 Missed voice call",
-                    channel: "kp_calls_v5",
-                  }
-                : undefined;
-            await pushToUser(
-              env,
-              db,
-              row.callee_id,
-              {
-                type: "missed_call",
-                callId: row.id,
-                kind: row.kind,
-                fromName: caller?.display_name ?? "KuchuPuchu",
-                kp_callback: row.caller_id,
-                kp_chat: pairId(row.caller_id, row.callee_id),
-              },
-              note,
-            );
-          })(),
-        );
-      }
-    }
+    // Reap stale RINGING calls + fire their missed-call pushes. Also runs as a
+    // one-minute cron (see the `scheduled` handler) so the transition happens
+    // even when BOTH phones are backgrounded and nobody polls — the stuck
+    // "X is calling" card bug.
+    await reapStaleCalls(env, db, ctx);
     const rows = await all<CallRow>(
       db,
       "SELECT * FROM calls WHERE (caller_id = ? OR callee_id = ?) AND status IN ('RINGING', 'ACTIVE') ORDER BY created_at DESC",

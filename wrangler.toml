@@ -4,6 +4,12 @@ compatibility_date = "2025-08-01"
 account_id = "92081fac7caf54a46a756c382081544b"
 workers_dev = true
 
+# One-minute cron: reap stale RINGING calls so a call nobody polls (both phones
+# backgrounded) still flips to MISSED and fires the missed-call push — the
+# "X is calling card stuck, no missed call" bug.
+[triggers]
+crons = ["* * * * *"]
+
 # Realtime fan-out (Steps 2-3 fill in the class bodies). One ChatRoom object
 # per conversation (plus "user:<id>" list channels); one CallSignal object per
 # call for WebRTC signalling. D1 stays the source of truth — the objects only

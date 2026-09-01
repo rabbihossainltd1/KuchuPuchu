@@ -51,6 +51,12 @@ declare global {
     passThroughOnException(): void;
   }
 
+  /** Minimal subset of the Workers `scheduled` handler's controller. */
+  interface ScheduledController {
+    scheduledTime: number;
+    cron: string;
+  }
+
   interface DurableObjectStub {
     fetch(
       input: string | Request,
