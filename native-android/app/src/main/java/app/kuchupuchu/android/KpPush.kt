@@ -156,9 +156,6 @@ object KpPush {
 
     /** Removes this device from push delivery (logout). */
     fun unregister() {
-        // No session => no reason to hold the process up: drop the keep-alive
-        // service here (MainActivity only drops it while the app is in front).
-        runCatching { app0?.let { KeepAliveService.release(it) } }
         if (!enabled) return
         runCatching { FirebaseMessaging.getInstance().deleteToken() }
         // Forget the accepted token: the next sign-in must re-register even if
@@ -285,9 +282,6 @@ class KpPushService : FirebaseMessagingService() {
             "msg ${convoId.take(8)} fg=${Store.foreground} route=${Store.route.take(22)} muted=${muted}",
         )
         ScreenStore.pokeInbox()
-        // Push received => we are alive; hold that state so the NEXT message or
-        // call is not dropped by Doze/OEM trimming (see KeepAliveService).
-        KeepAliveService.promote(this)
         if (Store.route == "chat/$convoId" && Store.foreground) {
             if (!muted) runCatching { KpSounds.receive(this) }
             return

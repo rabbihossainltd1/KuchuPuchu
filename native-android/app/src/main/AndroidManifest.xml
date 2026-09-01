@@ -11,7 +11,6 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
     <!-- Let the user whitelist the app from battery savers so FCM pushes and
          calls arrive instantly (many OEMs delay/kil background network). -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
@@ -63,11 +62,14 @@
             </intent-filter>
         </activity>
         <!-- Push delivery: high-priority FCM data messages wake the app
-             just-in-time. There is still no ALWAYS-ON service: KeepAliveService
-             is started from inside onMessageReceived (Android exempts exactly
-             that case for background FGS starts) and stops the moment the user
-             opens the app, so nothing runs permanently and the notification only
-             exists while the phone is actually holding the connection open. -->
+             just-in-time. There is deliberately NO other service here. A
+             remoteMessaging keep-alive foreground service (PR #7, and later
+             armed from onPause) was tried and removed: the only thing it
+             reliably produced was an ongoing "KuchuPuchu is listening"
+             notification, it did not make the OEM let a backgrounded process
+             receive anything it was not already going to deliver, and it died to
+             a recents swipe anyway. Re-introducing it needs evidence that the
+             process IS being reached (see KpDiag / Settings -> Push log). -->
         <service
             android:name=".KpPushService"
             android:exported="false">
@@ -75,10 +77,6 @@
                 <action android:name="com.google.firebase.messaging.RECEIVE" />
             </intent-filter>
         </service>
-        <service
-            android:name=".KeepAliveService"
-            android:exported="false"
-            android:foregroundServiceType="remoteMessaging" />
         <!-- Shares picked-camera photos and downloaded files with system apps. -->
         <provider
             android:name="androidx.core.content.FileProvider"

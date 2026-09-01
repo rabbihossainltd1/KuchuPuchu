@@ -17,8 +17,9 @@ import android.content.Intent
  * waiting for the user. Same story for a reboot with autostart disabled.
  *
  * It deliberately starts no service: starting a foreground service from a
- * boot/replace broadcast is not an Android 12+ exemption, and KeepAliveService
- * is promoted by the push path itself, which is the legal hook.
+ * boot/replace broadcast is not an Android 12+ exemption, and the app ships no
+ * background service at all (the keep-alive FGS was removed — see the manifest
+ * note over KpPushService).
  */
 class KpWakeupReceiver : BroadcastReceiver() {
 
