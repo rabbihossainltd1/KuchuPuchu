@@ -173,9 +173,6 @@ class MainActivity : ComponentActivity() {
         // left push un-init'd for the whole run; re-arm whenever the app is
         // back in front. No-op once Firebase + registration have succeeded.
         KpPush.boot(this)
-        // The user is here: normal (socket + poll) delivery resumes, so the
-        // background keep-alive notification is no longer wanted.
-        KeepAliveService.release(this)
         super.onResume()
         Store.foreground = true
         // Returning to the app triggers an instant re-sync of the open screens
@@ -186,11 +183,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         Store.foreground = false
-        // Handing over to the keep-alive service exactly when the user leaves —
-        // the old design only promoted on an arriving push, so the FIRST
-        // background message was still racing a process the launcher was free to
-        // freeze. Hidden notification while in front, service while not.
-        if (!Api.token.isNullOrBlank()) KeepAliveService.ensureRunning(this)
         super.onPause()
     }
 
