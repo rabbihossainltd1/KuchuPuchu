@@ -872,9 +872,11 @@ private fun routeIcon(route: AudioRoute): ImageVector =
     when (route) {
         AudioRoute.BLUETOOTH -> Icons.Filled.Bluetooth
         AudioRoute.WIRED -> Icons.Filled.Headset
-        // A loudspeaker glyph, not a volume slider: this button says WHERE the
-        // audio is going, so the icon has to follow the source.
-        AudioRoute.SPEAKER -> Icons.Filled.Speaker
+        // Its own glyph per route, so the button visibly changes as the user
+        // steps through outputs. Loudspeaker is VolumeUp rather than
+        // Icons.Filled.Speaker: the icon artifact this app resolves has no
+        // Speaker, and a name that does not compile is worse than a plain one.
+        AudioRoute.SPEAKER -> Icons.Filled.VolumeUp
         AudioRoute.EARPIECE -> Icons.Filled.PhoneInTalk
     }
 

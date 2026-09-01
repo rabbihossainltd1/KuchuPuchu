@@ -79,7 +79,9 @@ object AudioRouter {
     private val CALL_BT_TYPES: IntArray by lazy {
         val t = ArrayList<Int>()
         t.add(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
-        if (Build.VERSION.SDK_INT >= 31) t.add(AudioDeviceInfo.TYPE_BLE_EARPHONE)
+        // TYPE_BLE_EARPHONE (31) is gone again from 33, so it cannot be named
+        // against a modern compileSdk; an LE Audio earbud on 31/32 that the
+        // framework accepted is covered by [btCommitted] instead.
         if (Build.VERSION.SDK_INT >= 33) {
             t.add(AudioDeviceInfo.TYPE_BLE_HEADSET)
             t.add(AudioDeviceInfo.TYPE_BLE_SPEAKER)
@@ -129,11 +131,21 @@ object AudioRouter {
     fun deviceFor(ctx: Context, route: AudioRoute): AudioDeviceInfo? {
         val outs = outputs(ctx)
         return when (route) {
-            AudioRoute.BLUETOOTH -> BT_TYPES.firstNotNullOfOrNull { t -> outs.firstOrNull { it.type == t } }
-            AudioRoute.WIRED -> WIRED_TYPES.firstNotNullOfOrNull { t -> outs.firstOrNull { it.type == t } }
+            AudioRoute.BLUETOOTH -> pick(outs, BT_TYPES)
+            AudioRoute.WIRED -> pick(outs, WIRED_TYPES)
             AudioRoute.EARPIECE -> outs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE }
             AudioRoute.SPEAKER -> outs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
         }
+    }
+
+    /**
+     * First device of any of [types], in the order the list was built (so the
+     * preferred profile wins). A loop rather than Collections sugar: there is no
+     * firstNotNullOfOrNull for IntArray, and this runs on the call's hot path.
+     */
+    private fun pick(outs: List<AudioDeviceInfo>, types: IntArray): AudioDeviceInfo? {
+        for (t in types) outs.firstOrNull { it.type == t }?.let { return it }
+        return null
     }
 
     /** Outputs usable for a call right now, best first. */
@@ -417,14 +429,10 @@ object AudioRouter {
                 }
             }
         val filter = IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED)
-        val main = Handler(Looper.getMainLooper())
-        runCatching {
-            if (Build.VERSION.SDK_INT >= 33) {
-                ctx.registerReceiver(rx, filter, Context.RECEIVER_NOT_EXPORTED, main)
-            } else {
-                ctx.registerReceiver(rx, filter, null, main)
-            }
-        }
+        // ContextCompat rather than Context's overload: the framework has both a
+        // (permission: String) and a (flags: Int) 4-arg form, and the raw call
+        // binds the wrong one on a modern compileSdk.
+        runCatching { ContextCompat.registerReceiver(ctx, rx, filter, ContextCompat.RECEIVER_NOT_EXPORTED, Handler(Looper.getMainLooper())) }
         scoRx = rx
     }
 

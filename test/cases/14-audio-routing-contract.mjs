@@ -97,7 +97,19 @@ function main() {
   has(router, "setBluetoothScoOn(true)", "SCO is switched on, not only started");
   has(router, "startBluetoothSco()", "SCO link requested");
   has(router, "stopBluetoothSco()", "SCO released on teardown");
-  has(router, "RECEIVER_NOT_EXPORTED", "receiver uses the exported-flag API on 33+");
+  has(router, "ContextCompat.registerReceiver", "receiver registered through androidx.core");
+  // Two APIs that do not exist on the compileSdk this app builds against, both
+  // caught by CI: they are banned here so nobody reaches for them again.
+  lacks(router, "Context.RECEIVER_NOT_EXPORTED", "no raw registerReceiver flags overload");
+  // Qualified / call-site form only: the files *explain* these two traps in
+  // comments, and a guard that fires on prose is worth nothing.
+  lacks(
+    router,
+    "AudioDeviceInfo.TYPE_BLE_EARPHONE",
+    "no use of TYPE_BLE_EARPHONE (removed from the SDK in 33)",
+  );
+  lacks(router, ".firstNotNullOfOrNull", "no firstNotNullOfOrNull on an IntArray");
+  has(router, "CALL_BT_TYPES", "call-capable Bluetooth profiles listed separately from A2DP");
   // Media-only A2DP has to be caught, or the button claims a headset that the
   // call never reached.
   has(router, "armScoWatchdog", "SCO gets a grace period before the route is believed");
@@ -120,8 +132,13 @@ function main() {
   has(router, "videoCall", "video calls keep their own fallback (speaker, not earpiece)");
 
   // Contract 5: ring + ringback follow the route (ALARM stream ignores comms routing).
-  const pinned = (notify.match(/setPreferredDevice/g) || []).length;
+  // setPreferredDevice does not exist on AudioAttributes.Builder — the only real
+  // handle is MediaPlayer.setDevice (API 28+), applied per player.
+  const pinned = (notify.match(/pinToCallOutput\(ctx, player\)/g) || []).length;
   check("ring and ringback are both pinned to the call output", pinned >= 2, `found ${pinned}`);
+  lacks(notify, "setPreferredDevice", "no AudioAttributes.setPreferredDevice (not an API)");
+  has(notify, "setDevice(", "the player itself is pinned via MediaPlayer.setDevice");
+  has(notify, "SDK_INT < 28", "the pinning is guarded to the API level that has it");
   has(notify, "tonePlaybackDevice", "tones ask the router for the device");
   has(router, "fun tonePlaybackDevice", "router exposes the tone device (incl. pre-answer ring)");
 

@@ -104,16 +104,13 @@ object CallSounds {
             // while "Ringing…" showed — a real dialer is never silent for the
             // caller.
             .setUsage(android.media.AudioAttributes.USAGE_ALARM)
-            // Pin the tone to whatever the CALL is routed to. The alarm stream
-            // ignores communication routing, so with buds in the ring came out of
-            // the loudspeaker as well — the "audio on both sources" complaint.
-            .setPreferredDevice(AudioRouter.tonePlaybackDevice(ctx.applicationContext))
             .build()
         val player =
             runCatching { MediaPlayer.create(ctx.applicationContext, R.raw.kp_ring, attrs, 1) }.getOrNull()
                 ?: return
         player.isLooping = true
         runCatching { player.setVolume(0.62f, 0.62f) }
+        pinToCallOutput(ctx, player)
         liftAlarmVolume(ctx.applicationContext)
         runCatching { player.start() }
         ringback = player
@@ -136,10 +133,6 @@ object CallSounds {
             // Incoming ring on the ALARM stream: rings even when the phone
             // is silent — per the user's explicit request.
             .setUsage(android.media.AudioAttributes.USAGE_ALARM)
-            // Pin the tone to whatever the CALL is routed to. The alarm stream
-            // ignores communication routing, so with buds in the ring came out of
-            // the loudspeaker as well — the "audio on both sources" complaint.
-            .setPreferredDevice(AudioRouter.tonePlaybackDevice(ctx.applicationContext))
             .build()
         val player =
             runCatching {
@@ -164,10 +157,26 @@ object CallSounds {
                 }
                 ?: return
         player.isLooping = true
+        pinToCallOutput(ctx, player)
         liftAlarmVolume(ctx.applicationContext)
         runCatching { player.start() }
         ring = player
         vibrate(ctx, longArrayOf(0, 500, 400, 500))
+    }
+
+    /**
+     * Send a call tone to the device the CALL is on.
+     *
+     * These tones ride the ALARM stream, which ignores communication routing
+     * entirely — so with buds in, the ring came out of the loudspeaker as well
+     * and the user heard "both sources at once". AudioAttributes cannot express a
+     * preferred device at all (no such builder method); MediaPlayer.setDevice is
+     * the only real handle, so it is applied once the player is prepared.
+     */
+    private fun pinToCallOutput(ctx: Context, player: MediaPlayer) {
+        if (Build.VERSION.SDK_INT < 28) return
+        val device = runCatching { AudioRouter.tonePlaybackDevice(ctx.applicationContext) }.getOrNull()
+        runCatching { player.setDevice(device) }
     }
 
     @Synchronized

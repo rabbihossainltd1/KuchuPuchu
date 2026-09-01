@@ -40,6 +40,11 @@ the phone hardware — it looks exactly like a routing bug. Hence:
 Never let a refused permission become a silent fallthrough: the user gets one
 toast saying the call stayed on the phone.
 
+LE Audio earbuds on API 31/32 report `TYPE_BLE_EARPHONE`, a constant the SDK
+removed again in 33 — so it cannot be named in source. Those devices are covered
+by the `btCommitted` flag instead (the framework accepted the device), which the
+watchdog honours.
+
 ## Contract 3 — SCO is a link, not a flag
 
 `startBluetoothSco()` is asynchronous. `AudioRouter` keeps an
@@ -60,15 +65,20 @@ mid-call.
 
 `CallNotify` plays ring and ringback on `STREAM_ALARM` with `USAGE_ALARM` so the
 phone stays loud and DND-immune. That stream ignores communication routing, so
-both builders additionally set `AudioAttributes.Builder.setPreferredDevice` from
-`AudioRouter.tonePlaybackDevice(ctx)`. An incoming ring (no call object yet) is
+each player is pinned with `MediaPlayer.setDevice(AudioRouter.tonePlaybackDevice(
+ctx))` — API 28+, and note that `AudioAttributes.Builder` has no preferred-device
+method at all, which is what the first cut assumed. An incoming ring (no call object yet) is
 pinned to the connected headset over A2DP — the same thing a dialer does — and
 SCO is only opened once the call is answered.
 
 ## Contract 6 — the icon states the truth
 
-`routeIcon` maps BLUETOOTH → `Bluetooth`, WIRED → `Headset`, SPEAKER → `Speaker`,
-EARPIECE → `PhoneInTalk`. When the stack exposes one, `AudioRouter.label()` uses the device's own
+`routeIcon` maps BLUETOOTH → `Bluetooth`, WIRED → `Headset`, SPEAKER → `VolumeUp`,
+EARPIECE → `PhoneInTalk`. `Icons.Filled.Speaker` is deliberately NOT used: the
+`material-icons-extended` artifact this app resolves does not contain it, and CI
+is the only thing that can see that before a phone does — so the loudspeaker gets
+a glyph that is already compiled elsewhere in the app. Any new icon name has to
+clear that bar. When the stack exposes one, `AudioRouter.label()` uses the device's own
 `productName` (accepted between 3 and 18 characters, so junk like "USB" or a
 20-char model string does not wreck the row), so the strip says "Galaxy Buds"
 rather than just "Bluetooth".
