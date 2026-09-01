@@ -174,6 +174,9 @@ class MainActivity : ComponentActivity() {
         // left push un-init'd for the whole run; re-arm whenever the app is
         // back in front. No-op once Firebase + registration have succeeded.
         KpPush.boot(this)
+        // The user is here: normal (socket + poll) delivery resumes, so the
+        // background keep-alive notification is no longer wanted.
+        KeepAliveService.release(this)
         super.onResume()
         Store.foreground = true
         // Returning to the app triggers an instant re-sync of the open screens

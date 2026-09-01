@@ -11,6 +11,7 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
     <!-- Let the user whitelist the app from battery savers so FCM pushes and
          calls arrive instantly (many OEMs delay/kil background network). -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
@@ -61,7 +62,11 @@
             </intent-filter>
         </activity>
         <!-- Push delivery: high-priority FCM data messages wake the app
-             just-in-time. No always-on service, no permanent notification. -->
+             just-in-time. There is still no ALWAYS-ON service: KeepAliveService
+             is started from inside onMessageReceived (Android exempts exactly
+             that case for background FGS starts) and stops the moment the user
+             opens the app, so nothing runs permanently and the notification only
+             exists while the phone is actually holding the connection open. -->
         <service
             android:name=".KpPushService"
             android:exported="false">
@@ -69,6 +74,10 @@
                 <action android:name="com.google.firebase.messaging.RECEIVE" />
             </intent-filter>
         </service>
+        <service
+            android:name=".KeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="remoteMessaging" />
         <!-- Shares picked-camera photos and downloaded files with system apps. -->
         <provider
             android:name="androidx.core.content.FileProvider"
