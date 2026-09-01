@@ -22,11 +22,26 @@
  * sockets are receive-only, so neither party can spoof signalling into the
  * other's connection.
  */
+const STALE_MS = 45_000;
+
 export class CallSignal {
+  /**
+   * lastSeen: WebSocket -> last inbound data-frame timestamp (same heartbeat
+   * liveness contract as ChatRoom). Only sockets that heartbeated within
+   * STALE_MS count as alive, so a frozen/killed participant's half-open socket
+   * does not make the worker think signalling was delivered when it never will be.
+   */
+  private lastSeen = new Map<WebSocket, number>();
+
   constructor(
     private ctx: DurableObjectState,
     _env: unknown,
   ) {}
+
+  /** Called by the runtime for every inbound data frame on a hibernatable socket. */
+  async webSocketMessage(ws: WebSocket, _message: string | ArrayBuffer) {
+    this.lastSeen.set(ws, Date.now());
+  }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -35,13 +50,21 @@ export class CallSignal {
     if (url.pathname === "/broadcast") {
       const payload = await request.text();
       let sent = 0;
-      for (const ws of this.ctx.getWebSockets()) {
+      const now = Date.now();
+      const live = this.ctx.getWebSockets();
+      for (const ws of live) {
+        if ((this.lastSeen.get(ws) ?? 0) < now - STALE_MS) continue;
         try {
           ws.send(payload);
           sent++;
         } catch {
           /* hibernation: the runtime tracks liveness, nothing to prune */
         }
+      }
+      // Prune closed-socket entries so the map stays bounded.
+      if (this.lastSeen.size > live.length) {
+        const keep = new Set(live);
+        for (const ws of this.lastSeen.keys()) if (!keep.has(ws)) this.lastSeen.delete(ws);
       }
       return Response.json({ ok: true, sent });
     }
@@ -57,6 +80,7 @@ export class CallSignal {
       const server = pair[1];
       const user = request.headers.get("x-kp-user") ?? "anon";
       this.ctx.acceptWebSocket(server, [`user:${user}`]);
+      this.lastSeen.set(server, Date.now());
       server.send(
         JSON.stringify({ type: "hello", user, participants: this.ctx.getWebSockets().length }),
       );

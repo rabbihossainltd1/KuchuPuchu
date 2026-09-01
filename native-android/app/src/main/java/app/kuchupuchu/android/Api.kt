@@ -264,6 +264,7 @@ object KpSocket {
         @Volatile var connecting = false
         @Volatile var attempts = 0
         @Volatile var reconnectJob: kotlinx.coroutines.Job? = null
+        @Volatile var hbJob: kotlinx.coroutines.Job? = null
         val live = MutableStateFlow(false)
     }
 
@@ -293,6 +294,8 @@ object KpSocket {
         c.want = false
         c.live.value = false
         c.reconnectJob?.cancel()
+        c.hbJob?.cancel()
+        c.hbJob = null
         runCatching { c.ws?.close(1000, "leave") }
         c.ws = null
         c.connecting = false
@@ -318,6 +321,7 @@ object KpSocket {
                     c.connecting = false
                     c.attempts = 0
                     c.live.value = true
+                    startHeartbeat(c, webSocket)
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
@@ -334,6 +338,8 @@ object KpSocket {
                     // The socket is DEAD: clear it or every future join()
                     // early-returns on the stale reference and the channel
                     // stays silent for the rest of the process's life.
+                    c.hbJob?.cancel()
+                    c.hbJob = null
                     c.ws = null
                     c.connecting = false
                     c.live.value = false
@@ -345,6 +351,8 @@ object KpSocket {
                     // ANY close while we still want the channel reconnects —
                     // including server idle-timeout close(1000). Deliberate
                     // leave() clears `want` first, so it never reconnects.
+                    c.hbJob?.cancel()
+                    c.hbJob = null
                     c.ws = null
                     c.connecting = false
                     c.live.value = false
@@ -352,6 +360,30 @@ object KpSocket {
                 }
             },
         )
+    }
+
+    /**
+     * App-level heartbeat. The OkHttp pingInterval(20s) sends a WebSocket
+     * *control* Ping frame, which Cloudflare's Durable-Object Hibernation API
+     * answers automatically at the protocol level — it does NOT surface to the
+     * DO's webSocketMessage handler. So the server cannot use it to tell a live
+     * process from a frozen/killed one, which is exactly the "swipe but the
+     * socket half-open" false positive that made push choose the wrong shape.
+     * We send a real data frame instead: the DO records it (webSocketMessage)
+     * and only counts a socket as alive if it heartbeated within STALE_MS. A
+     * process the OEM froze/killed stops sending immediately, so the socket is
+     * correctly classified as dead and the push falls back to the guaranteed
+     * system payload instead of a silent data-only send.
+     */
+    private fun startHeartbeat(c: Conn, ws: WebSocket) {
+        c.hbJob?.cancel()
+        c.hbJob = scope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(20_000)
+                if (!c.live.value) break
+                runCatching { ws.send("{\"type\":\"hb\",\"at\":${System.currentTimeMillis()}}") }
+            }
+        }
     }
 
     private fun scheduleReconnect(c: Conn) {

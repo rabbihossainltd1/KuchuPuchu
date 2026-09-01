@@ -273,10 +273,14 @@ fun SettingsScreen(nav: NavController) {
             // whether or not the phone delivered), so the app keeps its own log
             // of every push that reached onMessageReceived. Entry for that
             // minute => our bug. Empty => FCM/OEM never handed it over.
+            // The on-device witness for every push/call/background notification
+            // decision. Shows "did the app GET the push, and WHAT branch did it
+            // take (sound-only / rich card / fullscreen call / missed call)".
+            // This is what proves whether a fix that "should" work actually ran.
             SettingRow(
                 Icons.Filled.Info,
-                "Push log (this device)",
-                if (diag.isEmpty()) "tap: did the app receive it?"
+                "App log (this device)",
+                if (diag.isEmpty()) "tap: verify push/call decisions" 
                 else "${diag.size} entries — latest ${diag.first().take(30)}",
             ) {
                 diag = KpDiag.recent(ctx)
@@ -298,12 +302,12 @@ fun SettingsScreen(nav: NavController) {
         if (showDiag) {
             AlertDialog(
                 onDismissRequest = { showDiag = false },
-                title = { Text("Push log — this device", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink) },
+                title = { Text("App log — this device", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink) },
                 text = {
                     Column(
                         Modifier
                             .fillMaxWidth()
-                            .height(240.dp)
+                            .height(280.dp)
                             .verticalScroll(rememberScrollState()),
                     ) {
                         if (diag.isEmpty()) {
@@ -315,6 +319,15 @@ fun SettingsScreen(nav: NavController) {
                                 color = Muted,
                             )
                         }
+                        Text(
+                            "⚡ FCM data received …  -> the app GOT the push (our bug if nothing shows)\n" +
+                                "💬 msg … SOUND_ONLY / RICH_CARD  -> foreground sound-only, or background rich card\n" +
+                                "📞 call … FULLSCREEN / engine polling  -> how a ring was surfaced\n" +
+                                "📵 missed_call … no entry  -> the missed push never landed (OEM kill)",
+                            fontSize = 11.sp,
+                            color = Muted,
+                            modifier = Modifier.padding(bottom = 8.dp),
+                        )
                         diag.forEach { line ->
                             Text(line, fontSize = 12.sp, color = Ink, modifier = Modifier.padding(vertical = 3.dp))
                         }
@@ -351,7 +364,14 @@ fun SettingsScreen(nav: NavController) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("KuchuPuchu v3.2.0", fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+                    val ver =
+                        remember {
+                            runCatching {
+                                val pi = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+                                "${pi.versionName} (${pi.versionCode})"
+                            }.getOrDefault("?")
+                        }
+                    Text("KuchuPuchu $ver", fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, color = Ink)
                     Text("kuchupuchu-api.kuchupuchu.workers.dev", fontSize = 12.sp, color = Muted)
                 }
             }
