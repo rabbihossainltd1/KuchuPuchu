@@ -110,6 +110,16 @@ object KpNotify {
         // Each action carries the message id so it can cancel the EXACT card
         // (card ids below are derived from `mid`).
         val remoteInput = RemoteInput.Builder(KEY_REPLY).setLabel("Reply").build()
+        // The reply action is the ONLY one with a RemoteInput — and on Android
+        // 14+ (API 34) a notification whose action has remote inputs is refused
+        // outright unless that action's PendingIntent is FLAG_MUTABLE:
+        //   IllegalArgumentException: "... Not posted. PendingIntents attached
+        //   to actions with remote inputs must be mutable"
+        // The system then drops the ENTIRE card, so every message notification
+        // silently vanished on 14/15 devices — that is the real "message
+        // notification ashe na" (the push itself arrives; error_log's
+        // stage:"notify" breadcrumb recorded this exact throw). Like / mark-read
+        // carry no input, so they keep FLAG_IMMUTABLE, which S+ requires.
         val replyPending =
             PendingIntent.getBroadcast(
                 ctx,
@@ -118,7 +128,9 @@ object KpNotify {
                     .setAction(KpNotifActionReceiver.ACTION_REPLY)
                     .putExtra("convoId", convoId)
                     .putExtra("mid", mid ?: ""),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                PendingIntent.FLAG_UPDATE_CURRENT or
+                    (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE
+                     else 0),
             )
         val likePending =
             PendingIntent.getBroadcast(
@@ -205,7 +217,7 @@ object KpNotify {
             // bits made nm.cancel(convoId.hashCode()) miss the card ~127/128
             // of the time, so actions "did nothing".
             val msgId =
-                mid?.takeIf { it.isNotBlank() }?.hashCode()
+                mid?.takeIf { it.isNotBlank() }?.hashCode()?.and(Int.MAX_VALUE)
                     ?: (convoId.hashCode() and 0x00FFFFFF) or ((System.nanoTime() and 0x7F).toInt() shl 24)
             mgr.notify(msgId, n)
             mgr.notify(GROUP.hashCode(), summary)
