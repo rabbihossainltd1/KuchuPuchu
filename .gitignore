@@ -30,3 +30,6 @@ secrets.md
 SECRETS.md
 local.properties
 .gradle
+ci-watch.log
+.ci-seen
+scripts/.gh-token
