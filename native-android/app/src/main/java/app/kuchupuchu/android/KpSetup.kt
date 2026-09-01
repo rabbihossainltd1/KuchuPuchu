@@ -62,11 +62,27 @@ object KpSetup {
         return runCatching { Build.DISPLAY.lowercase().contains("miui") }.getOrDefault(false)
     }
 
+    /** ColorOS / Realme UI / OxygenOS-HeyOS family (Realme, Oppo, OnePlus, Oplus). */
+    private val COLOR_MAKERS = setOf("realme", "oppo", "oneplus", "oplus", "oneplus tech", "heytap")
+
+    fun isColorOS(): Boolean {
+        val maker = Build.MANUFACTURER.lowercase()
+        val brand = Build.BRAND.lowercase()
+        if (maker in COLOR_MAKERS || brand in COLOR_MAKERS) return true
+        val d = runCatching { Build.DISPLAY.lowercase() }.getOrDefault("")
+        return d.contains("coloros") || d.contains("realme ui") || d.contains("realmeui") || d.contains("heyos")
+    }
+
     /** One-line state for the Settings row / dialog. */
     fun statusText(ctx: Context): String {
         val bg = if (backgroundRestricted(ctx)) "background: restricted" else "background: allowed"
         val battery = if (ignoresBattery(ctx)) "battery: unrestricted" else "battery: optimised"
-        return if (needsSetup(ctx)) "$bg, $battery — messages may be delayed" else "$bg, $battery"
+        val base = if (needsSetup(ctx)) "$bg, $battery — messages may be delayed" else "$bg, $battery"
+        return when {
+            isColorOS() -> "$base · ColorOS: on Auto-launch + lock app in Recents"
+            isMiui() -> "$base · MIUI: turn on Auto-launch"
+            else -> base
+        }
     }
 
     /** The system dialog that flips "Allow background activity" to on. */
@@ -109,9 +125,47 @@ object KpSetup {
         return candidates.any { launch(ctx, it) }
     }
 
-    /** Best available single tap: autostart page on MIUI, else the exemption dialog. */
+    /**
+     * ColorOS / Realme UI / HeyOS: there is no public API for "Auto-launch".
+     * These are best-effort per-RPM auto-start manager intents; whichever one
+     * resolves wins, otherwise we fall through to the battery dialog / app info
+     * (where the toggle also lives under App info → Auto-launch).
+     */
+    fun openAutoLaunchColorOS(ctx: Context): Boolean {
+        val candidates =
+            listOf(
+                Intent("com.heytap.coloros.action.OP_AUTO_START"),
+                Intent("com.coloros.action.OP_AUTO_START"),
+                Intent("com.oplus.action.OP_AUTO_START"),
+                Intent().setClassName(
+                    "com.coloros.securitycenter",
+                    "com.coloros.permcenter.autostart.AutoStartManagementActivity",
+                ),
+                Intent().setClassName(
+                    "com.oplus.securitycenter",
+                    "com.oplus.permcenter.autostart.AutoStartManagementActivity",
+                ),
+                Intent().setClassName(
+                    "com.realme.securitycenter",
+                    "com.realme.permcenter.autostart.AutoStartManagementActivity",
+                ),
+            )
+        return candidates.any { launch(ctx, it) }
+    }
+
+    /**
+     * Best available single tap: autostart page on MIUI, ColorOS auto-launch
+     * page on Realme/Oppo/OnePlus (else battery dialog else app info), else the
+     * standard battery-exemption dialog, else the app info page.
+     */
     fun openFixIt(ctx: Context) {
         if (isMiui() && openAutostart(ctx)) return
+        if (isColorOS()) {
+            if (openAutoLaunchColorOS(ctx)) return
+            if (openBatteryExemption(ctx)) return
+            openAppDetails(ctx)
+            return
+        }
         if (openBatteryExemption(ctx)) return
         openAppDetails(ctx)
     }
