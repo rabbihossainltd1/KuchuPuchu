@@ -75,6 +75,12 @@ fun SettingsScreen(nav: NavController) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var confirmLogout by remember { mutableStateOf(false) }
+    // Push-log dialog state. Must live at the composable's top level: the row
+    // that opens it is inside the list Column, the dialog itself is a sibling
+    // of that Column, and a `remember` declared in the inner scope is not
+    // visible from there (this is what broke the first build).
+    var diag by remember { mutableStateOf<List<String>>(emptyList()) }
+    var showDiag by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         runCatching {
@@ -267,8 +273,6 @@ fun SettingsScreen(nav: NavController) {
             // whether or not the phone delivered), so the app keeps its own log
             // of every push that reached onMessageReceived. Entry for that
             // minute => our bug. Empty => FCM/OEM never handed it over.
-            var diag by remember { mutableStateOf<List<String>>(emptyList()) }
-            var showDiag by remember { mutableStateOf(false) }
             SettingRow(
                 Icons.Filled.Info,
                 "Push log (this device)",
