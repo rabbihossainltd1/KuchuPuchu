@@ -103,6 +103,20 @@ class KeepAliveService : Service() {
         private const val CHANNEL = "kp_presence_v1"
         private const val ID = 770_001
 
+        /**
+         * Called when the app goes to the background, while a session is live.
+         * Starting here (instead of only on the first push) is what closes the
+         * "app was never opened after the last message" hole: the process is
+         * already at foreground priority BEFORE the push has to be delivered, so
+         * the first background message is not the one that has to wake us up.
+         * Legal because an activity in the foreground is an allowed trigger.
+         */
+        fun ensureRunning(ctx: Context) {
+            runCatching {
+                ContextCompat.startForegroundService(ctx, Intent(ctx, KeepAliveService::class.java))
+            }
+        }
+
         /** Called from the push path — legal only because the trigger is a
          *  high-priority FCM message (see the class comment). */
         fun promote(ctx: Context) {
