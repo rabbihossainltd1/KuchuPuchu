@@ -97,7 +97,11 @@ function main() {
   has(router, "setBluetoothScoOn(true)", "SCO is switched on, not only started");
   has(router, "startBluetoothSco()", "SCO link requested");
   has(router, "stopBluetoothSco()", "SCO released on teardown");
-  has(router, "ContextCompat.registerReceiver", "receiver registered through androidx.core");
+  has(
+    router,
+    "registerReceiver(ctx, rx, filter, ContextCompat.RECEIVER_NOT_EXPORTED)",
+    "receiver registered through androidx.core's 4-arg form",
+  );
   // Two APIs that do not exist on the compileSdk this app builds against, both
   // caught by CI: they are banned here so nobody reaches for them again.
   lacks(router, "Context.RECEIVER_NOT_EXPORTED", "no raw registerReceiver flags overload");
@@ -132,15 +136,26 @@ function main() {
   has(router, "videoCall", "video calls keep their own fallback (speaker, not earpiece)");
 
   // Contract 5: ring + ringback follow the route (ALARM stream ignores comms routing).
-  // setPreferredDevice does not exist on AudioAttributes.Builder — the only real
-  // handle is MediaPlayer.setDevice (API 28+), applied per player.
-  const pinned = (notify.match(/pinToCallOutput\(ctx, player\)/g) || []).length;
-  check("ring and ringback are both pinned to the call output", pinned >= 2, `found ${pinned}`);
+  // Tones follow the route by choosing the STREAM, not the device: neither
+  // AudioAttributes.setPreferredDevice nor MediaPlayer.setDevice exists on this
+  // compileSdk (CI proved both), and USAGE_VOICE_COMMUNICATION is the lever that
+  // actually obeys setCommunicationDevice.
+  const pinned = (notify.match(/setUsage\(toneUsage\(ctx\)\)/g) || []).length;
+  check(
+    "ring and ringback both ask the router which stream to ride",
+    pinned >= 2,
+    `found ${pinned}`,
+  );
   lacks(notify, "setPreferredDevice", "no AudioAttributes.setPreferredDevice (not an API)");
-  has(notify, "setDevice(", "the player itself is pinned via MediaPlayer.setDevice");
-  has(notify, "SDK_INT < 28", "the pinning is guarded to the API level that has it");
-  has(notify, "tonePlaybackDevice", "tones ask the router for the device");
-  has(router, "fun tonePlaybackDevice", "router exposes the tone device (incl. pre-answer ring)");
+  lacks(notify, ".setDevice(", "no MediaPlayer.setDevice (not public on this compileSdk)");
+  has(
+    notify,
+    "USAGE_VOICE_COMMUNICATION",
+    "an external call route moves tones onto the comms stream",
+  );
+  has(notify, "USAGE_ALARM", "otherwise the ring stays on the alarm stream (silent mode + DND)");
+  has(router, "fun toneFollowsCallRoute", "the router decides, the notifier obeys");
+  lacks(router, "tonePlaybackDevice", "no unused device helper left behind");
 
   // Contract 6: the button exists everywhere, cycles, and its icon tells the truth.
   const buttons = (screens.match(/rememberRouteAction\(engine\)/g) || []).length;

@@ -99,18 +99,17 @@ object CallSounds {
         if (ringback != null || ring != null) return
         val attrs = android.media.AudioAttributes.Builder()
             .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            // Ringback rides the ALARM stream too: the old NOTIFICATION_RINGTONE
-            // usage was muted by silent mode, so the caller sat in total silence
-            // while "Ringing…" showed — a real dialer is never silent for the
-            // caller.
-            .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+            .setUsage(toneUsage(ctx))
+            // Ringback rides the ALARM stream (the old NOTIFICATION_RINGTONE usage
+            // was muted by silent mode, so the caller sat in total silence while
+            // "Ringing…" showed — a real dialer is never silent for the caller),
+            // EXCEPT once the call has a headset route: see toneUsage().
             .build()
         val player =
             runCatching { MediaPlayer.create(ctx.applicationContext, R.raw.kp_ring, attrs, 1) }.getOrNull()
                 ?: return
         player.isLooping = true
         runCatching { player.setVolume(0.62f, 0.62f) }
-        pinToCallOutput(ctx, player)
         liftAlarmVolume(ctx.applicationContext)
         runCatching { player.start() }
         ringback = player
@@ -130,9 +129,10 @@ object CallSounds {
         if (ring != null) return
         val attrs = android.media.AudioAttributes.Builder()
             .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            // Incoming ring on the ALARM stream: rings even when the phone
-            // is silent — per the user's explicit request.
-            .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+            .setUsage(toneUsage(ctx))
+            // Incoming ring on the ALARM stream: rings even when the phone is
+            // silent — per the user's explicit request. Before it is answered
+            // there is no call route yet, so nothing changes there either.
             .build()
         val player =
             runCatching {
@@ -157,7 +157,6 @@ object CallSounds {
                 }
                 ?: return
         player.isLooping = true
-        pinToCallOutput(ctx, player)
         liftAlarmVolume(ctx.applicationContext)
         runCatching { player.start() }
         ring = player
@@ -173,11 +172,22 @@ object CallSounds {
      * preferred device at all (no such builder method); MediaPlayer.setDevice is
      * the only real handle, so it is applied once the player is prepared.
      */
-    private fun pinToCallOutput(ctx: Context, player: MediaPlayer) {
-        if (Build.VERSION.SDK_INT < 28) return
-        val device = runCatching { AudioRouter.tonePlaybackDevice(ctx.applicationContext) }.getOrNull()
-        runCatching { player.setDevice(device) }
-    }
+    /**
+     * Which stream a call tone rides.
+     *
+     * USAGE_ALARM is why this app is heard through silent mode and Do Not
+     * Disturb, but that stream is routed by the alarm policy — it plays on the
+     * phone even when the call itself is sitting in a headset, which is the
+     * "audio comes out of both sources" report. While a call has an external
+     * route, the tones switch to USAGE_VOICE_COMMUNICATION, which follows the
+     * committed device and nothing else. (Pinning the player directly is not an
+     * option: AudioAttributes has no preferred-device method and MediaPlayer has
+     * no public setDevice on this compileSdk — CI proved both.)
+     */
+    private fun toneUsage(ctx: Context): Int =
+        if (runCatching { AudioRouter.toneFollowsCallRoute(ctx.applicationContext) }.getOrDefault(false))
+            android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION
+        else android.media.AudioAttributes.USAGE_ALARM
 
     @Synchronized
     fun vibrate(ctx: Context, pattern: LongArray) {

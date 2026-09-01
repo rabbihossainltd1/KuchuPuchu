@@ -63,13 +63,20 @@ mid-call.
 
 ## Contract 5 — the ring follows the route
 
-`CallNotify` plays ring and ringback on `STREAM_ALARM` with `USAGE_ALARM` so the
-phone stays loud and DND-immune. That stream ignores communication routing, so
-each player is pinned with `MediaPlayer.setDevice(AudioRouter.tonePlaybackDevice(
-ctx))` — API 28+, and note that `AudioAttributes.Builder` has no preferred-device
-method at all, which is what the first cut assumed. An incoming ring (no call object yet) is
-pinned to the connected headset over A2DP — the same thing a dialer does — and
-SCO is only opened once the call is answered.
+`CallNotify` plays ring and ringback on `STREAM_ALARM` with `USAGE_ALARM`, which is
+what keeps the ring audible through silent mode and Do Not Disturb. That stream is
+routed by the alarm policy and ignores communication routing — so with buds in,
+the tone came out of the phone while the call sat in the headset.
+`toneUsage(ctx)` is the fix: while the call has an external route (`inCall` and a
+real device behind it) the tones switch to `USAGE_VOICE_COMMUNICATION`, which
+follows the committed device and nothing else; otherwise they stay on the alarm
+stream, so an unanswered incoming ring is still loud through silent mode.
+
+Two tempting APIs are NOT available here and must not be reached for again:
+`AudioAttributes.Builder` has no `setPreferredDevice`, and `MediaPlayer` has no
+public `setDevice` on this compileSdk — CI caught both. Choosing the stream is the
+lever that works on every version, and it also means the pre-answer ring keeps the
+dialer behaviour (A2DP media output, SCO only once the call is answered).
 
 ## Contract 6 — the icon states the truth
 

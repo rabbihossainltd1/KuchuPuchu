@@ -214,30 +214,23 @@ object AudioRouter {
         return from
     }
 
-    /**
-     * The device call TONES (ring, ringback) should be pinned to. The alarm
-     * stream these use ignores communication routing, so without this the phone
-     * rang out loud next to a pair of buds that was already carrying the call —
-     * the "audio goes to both sources" report.
-     *
-     * During a call this follows the route the user chose; while an incoming call
-     * is only ringing (no route decided yet) it goes to whatever is connected,
-     * over A2DP — the same thing a real dialer does, and SCO is opened later by
-     * [begin] when the call is actually answered.
-     *
-     * Null means "let the framework decide", i.e. phone hardware.
-     */
-    fun tonePlaybackDevice(ctx: Context): AudioDeviceInfo? {
-        if (inCall) return if (needsExternalDevice(wanted)) deviceFor(ctx, wanted) else null
-        if (AudioRoute.BLUETOOTH in available(ctx) && !needsBluetoothPermission(ctx)) {
-            return deviceFor(ctx, AudioRoute.BLUETOOTH)
-        }
-        if (AudioRoute.WIRED in available(ctx)) return deviceFor(ctx, AudioRoute.WIRED)
-        return null
-    }
-
     /** The route in effect, for the UI. */
     fun current(): AudioRoute = wanted
+
+    /**
+     * Whether call TONES should ride the communication stream instead of the
+     * alarm stream.
+     *
+     * The alarm stream is what keeps this app's ring loud and DND-immune, but it
+     * ignores communication routing completely — and `MediaPlayer` has no public
+     * way to pin itself to a device, so the only correct lever is the usage
+     * itself: USAGE_VOICE_COMMUNICATION follows whichever output [apply]
+     * committed to, and only that one. Before a route exists (an incoming call
+     * still ringing on a silent phone) this stays false and the alarm behaviour is
+     * untouched.
+     */
+    fun toneFollowsCallRoute(ctx: Context): Boolean =
+        inCall && needsExternalDevice(wanted) && deviceFor(ctx, wanted) != null
 
     // ── hardware ─────────────────────────────────────────────────────────────
 
@@ -429,10 +422,11 @@ object AudioRouter {
                 }
             }
         val filter = IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED)
-        // ContextCompat rather than Context's overload: the framework has both a
-        // (permission: String) and a (flags: Int) 4-arg form, and the raw call
-        // binds the wrong one on a modern compileSdk.
-        runCatching { ContextCompat.registerReceiver(ctx, rx, filter, ContextCompat.RECEIVER_NOT_EXPORTED, Handler(Looper.getMainLooper())) }
+        // ContextCompat rather than Context's overload: the framework also has a
+        // (permission: String) 4-arg form, and the raw call binds that one on a
+        // modern compileSdk. Without a scheduler the receiver is delivered on the
+        // main thread, which is exactly where the rest of routing runs.
+        runCatching { ContextCompat.registerReceiver(ctx, rx, filter, ContextCompat.RECEIVER_NOT_EXPORTED) }
         scoRx = rx
     }
 
