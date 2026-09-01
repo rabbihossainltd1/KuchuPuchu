@@ -8,9 +8,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import coil.Coil
@@ -20,10 +17,6 @@ import coil.memory.MemoryCache
 class MainActivity : ComponentActivity() {
 
     private var shareCb: ((Int, Intent?) -> Unit)? = null
-
-    /** Set on cold start while the ROM is still restricting background work. */
-    var showBgSetup by mutableStateOf(false)
-        private set
 
     private val ask =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
@@ -100,14 +93,10 @@ class MainActivity : ComponentActivity() {
         }
 
         handleIntent(intent)
-        askBackgroundPermissions()
         setContent {
             KpTheme {
                 SplashGate {
                     KpApp()
-                    if (showBgSetup) {
-                        KpSetupDialog(onDismiss = { showBgSetup = false })
-                    }
                 }
             }
         }
@@ -198,18 +187,6 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         Store.foreground = false
         super.onPause()
-    }
-
-    /**
-     * Cold-start nudge for the OEM sleep switches (see KpSetup). It is a
-     * Compose dialog rather than a raw system intent so the state can be
-     * re-checked: the old version latched a `bg_asked` flag before checking
-     * whether anything was actually granted, so a device that stayed
-     * "restricted" was never asked again — which is precisely how
-     * "background e notification ashe na" survived three rounds of fixes.
-     */
-    private fun askBackgroundPermissions() {
-        showBgSetup = KpSetup.shouldNag(this)
     }
 
     fun restoreChrome() {
