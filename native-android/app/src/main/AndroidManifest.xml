@@ -15,6 +15,7 @@
     <!-- Let the user whitelist the app from battery savers so FCM pushes and
          calls arrive instantly (many OEMs delay/kil background network). -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Attach-sheet recent grid (photos/videos on this device) -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
@@ -100,6 +101,19 @@
                 <action android:name="app.kuchupuchu.android.NOTIF_REPLY" />
                 <action android:name="app.kuchupuchu.android.NOTIF_LIKE" />
                 <action android:name="app.kuchupuchu.android.NOTIF_MARK_READ" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Push registration refresh after an update (force-stopped app) or a
+             reboot; see KpWakeupReceiver. -->
+        <receiver
+            android:name=".KpWakeupReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
 

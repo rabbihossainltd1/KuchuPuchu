@@ -8,6 +8,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import coil.Coil
@@ -17,6 +20,10 @@ import coil.memory.MemoryCache
 class MainActivity : ComponentActivity() {
 
     private var shareCb: ((Int, Intent?) -> Unit)? = null
+
+    /** Set on cold start while the ROM is still restricting background work. */
+    var showBgSetup by mutableStateOf(false)
+        private set
 
     private val ask =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
@@ -98,6 +105,9 @@ class MainActivity : ComponentActivity() {
             KpTheme {
                 SplashGate {
                     KpApp()
+                    if (showBgSetup) {
+                        KpSetupDialog(onDismiss = { showBgSetup = false })
+                    }
                 }
             }
         }
@@ -191,37 +201,15 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * One-time, gentle setup so messages/calls arrive instantly:
-     *  1. the system battery-optimization whitelist dialog
-     *  2. MIUI's autostart page when present (no public API — best effort)
-     * Skipped forever once handled (and on any device without the activity).
+     * Cold-start nudge for the OEM sleep switches (see KpSetup). It is a
+     * Compose dialog rather than a raw system intent so the state can be
+     * re-checked: the old version latched a `bg_asked` flag before checking
+     * whether anything was actually granted, so a device that stayed
+     * "restricted" was never asked again — which is precisely how
+     * "background e notification ashe na" survived three rounds of fixes.
      */
     private fun askBackgroundPermissions() {
-        val prefs = getSharedPreferences("kp", 0)
-        val pm = getSystemService(POWER_SERVICE) as android.os.PowerManager
-        if (!pm.isIgnoringBatteryOptimizations(packageName) && !prefs.getBoolean("bg_asked", false)) {
-            prefs.edit().putBoolean("bg_asked", true).apply()
-            runCatching {
-                startActivity(
-                    android.content.Intent(
-                        android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                        android.net.Uri.parse("package:$packageName"),
-                    ),
-                )
-            }
-            return
-        }
-        if (pm.isIgnoringBatteryOptimizations(packageName) && !prefs.getBoolean("miui_asked", false)) {
-            prefs.edit().putBoolean("miui_asked", true).apply()
-            runCatching {
-                startActivity(
-                    android.content.Intent().setClassName(
-                        "com.miui.securitycenter",
-                        "com.miui.permcenter.autostart.AutoStartManagementActivity",
-                    ).putExtra("package", packageName),
-                )
-            }
-        }
+        showBgSetup = KpSetup.shouldNag(this)
     }
 
     fun restoreChrome() {
