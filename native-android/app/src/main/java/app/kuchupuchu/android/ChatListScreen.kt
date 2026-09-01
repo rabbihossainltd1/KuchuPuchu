@@ -158,8 +158,11 @@ fun ChatListScreen(nav: NavController) {
         refresh()
         // v3.7 realtime: the user channel pushes a poke the instant anything
         // changes (new message, read, group rename). The ticker below only
-        // fires when the socket is DOWN or the app just came forward.
-        KpSocket.joinUser()
+        // fires when the socket is DOWN or the app just came forward. The
+        // socket itself is owned at the process level now (MainActivity joins
+        // it and never leaves), so it stays up when this screen is not in
+        // front — that is what lets a backgrounded process keep rich action
+        // cards. Here we only subscribe to events.
         val removeListener = KpSocket.onEvent { ev ->
             when (ev.optString("type")) {
                 "hello", "conv" -> refresh()
@@ -185,7 +188,10 @@ fun ChatListScreen(nav: NavController) {
             }
         } finally {
             removeListener()
-            KpSocket.leaveUser()
+            // NO KpSocket.leaveUser() here: the user channel is owned by
+            // MainActivity for the process lifetime, so leaving it on this
+            // screen's dispose would close the socket (and kill background
+            // rich cards) merely by navigating to a chat.
         }
     }
     // onResume pokes this — the list syncs the moment the app comes forward.

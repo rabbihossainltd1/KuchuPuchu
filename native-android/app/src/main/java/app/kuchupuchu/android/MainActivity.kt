@@ -96,6 +96,17 @@ class MainActivity : ComponentActivity() {
         // Api.token here used to skip push entirely whenever this ran before
         // the stored session was restored, i.e. most cold starts.
         KpPush.boot(this)
+        // Realtime user channel, held for the life of the PROCESS (not tied to
+        // any one screen, which is what used to drop it the moment the user left
+        // the chat list). This is what makes the worker's push-shape decision
+        // trustworthy: while the process is alive (foreground OR background but
+        // not frozen) the socket heartbeats, so liveSockets > 0 and the worker
+        // sends a DATA-ONLY message whose rich Reply / Like / Mark-as-read card
+        // the app can draw. If ColorOS freezes/kills the process the heartbeat
+        // stops, the socket is classified dead within STALE_MS, and the worker
+        // falls back to the guaranteed system payload — a bare tray card beats
+        // silence. No foreground service, no visible notification.
+        KpSocket.joinUser()
         // Pre-warm the SoundPool so the first send/receive tick never hits the
         // async-load race (play() on a not-yet-loaded sample is silently
         // dropped - the first message after a cold start used to be mute).

@@ -586,13 +586,16 @@ function recipientAlert(
   // So: no socket => system payload (guaranteed card; no rich buttons possible,
   // but silence is worse).
   if (liveSockets === 0) return sysCard();
-  // Live socket: the process IS running and its poll/engine can draw our own
-  // rich card (Reply / Like / Mark-as-read) — so keep DATA-ONLY, rich actions
-  // intact. Except when the socket has been silent the whole idle window — a
-  // launcher that FREEZES the process (not kills it) leaves TCP half-open, so
-  // the socket still counts while onMessageReceived never runs. That lie is
-  // caught by the idle check, which falls back to the guaranteed payload.
-  if (liveSockets > 0) return goneQuiet() ? sysCard() : undefined;
+  // Live socket: the process IS running (it heartbeated within STALE_MS, so
+  // this is trustworthy — an okhttp ping frame never surfaces here, so a
+  // frozen/killed process stops being counted the moment it stops sending our
+  // data heartbeat) and onMessageReceived WILL run. So keep DATA-ONLY so the
+  // app draws its OWN rich card (Reply / Like / Mark-as-read) and the actions
+  // are never lost on the device that needs them. NO idle-window override: a
+  // backgrounded-but-alive process may make no HTTP calls for a long time, so
+  // goneQuiet() (which reads last_active_at) is not a liveness signal here and
+  // would wrongly demote a live recipient to a bare system payload.
+  if (liveSockets > 0) return undefined;
   // Realtime layer unavailable: fall back to the conservative idle rule.
   if (goneQuiet()) return sysCard();
   return undefined;
