@@ -533,10 +533,16 @@ async function blockedBetween(db: D1Database, a: string, b: string) {
  *
  * The trigger is a real measurement, not a guess: the ChatRoom object for
  * `user:<id>` reports how many open sockets took the poke, so liveSockets === 0
- * means the app is NOT connected — it was swiped away, frozen by the launcher,
- * or never started after an update — and onMessageReceived will never run. In
- * that case the payload is the only thing that can show anything, and Google Play
- * services draw it without our process (WhatsApp-style).
+ * means the app currently has no open socket — it was swiped from recents, the
+ * process was frozen by the launcher, or it was never started after an update.
+ * For a *recently active* recipient this is still normally wakeable: a HIGH
+ * priority FCM data message fires onMessageReceived and the app draws its own
+ * rich card (with buttons) — that is the WhatsApp behaviour and the reason we
+ * ONLY attach the system payload as a last resort (see recipientAlert above),
+ * not unconditionally. A recents swipe is NOT a force-stop; Android still lets
+ * a high-priority data message start the process. The system payload is
+ * reserved for the genuinely-idle case, where waking the process is unreliable
+ * and a guaranteed tray card beats silence.
  *
  * This is a regression fix. Message pushes used to always carry a payload
  * ("WhatsApp-style FCM notification payloads so killed apps get message/call
@@ -571,8 +577,17 @@ function recipientAlert(
     const last = member.last_active ? Date.parse(member.last_active) : 0;
     return !last || Date.now() - last >= IDLE_PUSH_WINDOW_MS;
   };
-  // Not connected at all: the app cannot draw its own card, so the tray must.
-  if (liveSockets === 0) return sysCard();
+  // Not connected right now (sockets closed: swiped from recents, process
+  // reaped, or was never started). A HIGH-priority FCM data message still wakes
+  // onMessageReceived in most of these cases (a recents-swipe is NOT a
+  // force-stop), letting us draw our OWN rich card with Reply / Like /
+  // Mark-as-read — the WhatsApp behaviour. We only fall back to the system
+  // payload once the user has genuinely gone quiet (idle >= IDLE window), where
+  // waking the process is unreliable and a guaranteed tray card beats silence.
+  // (Previously liveSockets === 0 always got the payload, so a swiped-away app
+  // that was still wakeable was handed a button-less system card — the exact
+  // "app background e message notification actions button chara" report.)
+  if (liveSockets === 0) return goneQuiet() ? sysCard() : undefined;
   // Connected: data-only, rich actions untouched. Except when that socket has
   // been silent for the whole idle window — a launcher that FREEZES the process
   // (rather than killing it) leaves TCP half-open, so the socket still counts
