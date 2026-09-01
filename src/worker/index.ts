@@ -507,13 +507,28 @@ async function blockedBetween(db: D1Database, a: string, b: string) {
  * That is the "message notification jai na" class of report, and it is
  * invisible from the server: FCM answers 200 either way.
  *
- * So the trigger is deliberately conservative — a full IDLE_PUSH_WINDOW_MS of
- * server silence, which means the app is not even polling its list, i.e. it is
- * frozen or killed and onMessageReceived will never run. Anything livelier than
- * that (including the ordinary "app in background" case) keeps the data-only
- * path and its Reply/Like/Mark-as-read actions untouched. No double card: with
- * the app in the FOREGROUND Firebase still calls onMessageReceived and does not
- * display the payload's notification, so the rich card stays the only one.
+ * The trigger is a real measurement, not a guess: the ChatRoom object for
+ * `user:<id>` reports how many open sockets took the poke, so liveSockets === 0
+ * means the app is NOT connected — it was swiped away, frozen by the launcher,
+ * or never started after an update — and onMessageReceived will never run. In
+ * that case the payload is the only thing that can show anything, and Google Play
+ * services draw it without our process (WhatsApp-style).
+ *
+ * This is a regression fix. Message pushes used to always carry a payload
+ * ("WhatsApp-style FCM notification payloads so killed apps get message/call
+ * pushes", ac3ffbf) and were made data-only to keep the Reply / Like /
+ * Mark-as-read actions (6ab562a). The idle-window fallback added afterwards
+ * (8e66af4) never fired in practice: `last_active` was seconds old in every
+ * two-phone test, so a frozen app got a data-only push and stayed silent. The
+ * history is the report: "age message dilei aste, ekhon noy".
+ *
+ * liveSockets > 0 keeps the data-only path (rich actions intact) — except when
+ * the user has ALSO gone quiet for IDLE_PUSH_WINDOW_MS, which catches a
+ * half-open zombie socket on ROMs that freeze the process without closing TCP.
+ * liveSockets < 0 means the realtime layer could not be asked, so the old
+ * conservative idle rule is all we have. No double card: with the app in the
+ * FOREGROUND Firebase still calls onMessageReceived and does not display the
+ * payload's notification, so the rich card stays the only one.
  */
 const IDLE_PUSH_WINDOW_MS = 5 * 60_000;
 
@@ -521,14 +536,27 @@ function recipientAlert(
   member: { last_active: string | null },
   preview: string,
   fromName: string,
+  liveSockets = -1,
 ): { title: string; body: string; channel: string } | undefined {
-  const last = member.last_active ? Date.parse(member.last_active) : 0;
-  if (!last || Date.now() - last < IDLE_PUSH_WINDOW_MS) return undefined;
-  return {
+  const sysCard = () => ({
     title: fromName || "KuchuPuchu",
     body: preview.slice(0, 120),
     channel: "kp_messages_v2",
+  });
+  const goneQuiet = () => {
+    const last = member.last_active ? Date.parse(member.last_active) : 0;
+    return !last || Date.now() - last >= IDLE_PUSH_WINDOW_MS;
   };
+  // Not connected at all: the app cannot draw its own card, so the tray must.
+  if (liveSockets === 0) return sysCard();
+  // Connected: data-only, rich actions untouched. Except when that socket has
+  // been silent for the whole idle window — a launcher that FREEZES the process
+  // (rather than killing it) leaves TCP half-open, so the socket still counts
+  // while onMessageReceived will never run. The idle check catches that lie.
+  if (liveSockets > 0) return goneQuiet() ? sysCard() : undefined;
+  // Realtime layer unavailable: fall back to the old conservative idle rule.
+  if (goneQuiet()) return sysCard();
+  return undefined;
 }
 
 async function membersOf(db: D1Database, convId: string) {
@@ -725,13 +753,39 @@ async function broadcastRoomEvent(env: Env, roomKey: string, event: Record<strin
   }
 }
 
-/** Light "something in this conversation changed" poke for a user's chat list. */
-function pokeUserConversation(env: Env, userId: string, conversationId: string, at: string) {
-  return broadcastRoomEvent(env, `user:${userId}`, {
-    type: "conv",
-    conversationId,
-    at,
-  });
+/**
+ * Light "something in this conversation changed" poke for a user's chat list.
+ *
+ * Returns how many live WebSocket connections took the frame: -1 when the
+ * realtime layer is unavailable (no binding / DO error, so the caller must not
+ * read anything into it), 0 when the user has no open socket at all, 1+ when
+ * the app process is demonstrably running. Senders use that number to decide
+ * whether a push may be data-only — see recipientAlert().
+ */
+async function pokeUserConversation(
+  env: Env,
+  userId: string,
+  conversationId: string,
+  at: string,
+): Promise<number> {
+  if (!env.CHAT_ROOM) return -1;
+  try {
+    const stub = env.CHAT_ROOM.get(env.CHAT_ROOM.idFromName(`user:${userId}`));
+    const res = await stub.fetch("https://chat-room/broadcast", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "conv", conversationId, at }),
+    });
+    const body = (await res.json().catch(() => null)) as { sent?: number } | null;
+    if (typeof body?.sent !== "number") return -1;
+    return body.sent;
+  } catch (err) {
+    console.log(
+      "poke_failed",
+      JSON.stringify({ userId, err: err instanceof Error ? err.message : String(err) }),
+    );
+    return -1;
+  }
 }
 
 /**
@@ -2205,64 +2259,65 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     ctx.waitUntil(
       broadcastRoomEvent(env, convId, { type: "message", conversationId: convId, message }),
     );
-    for (const memberId of members) {
-      if (memberId.user_id !== uid)
-        ctx.waitUntil(pokeUserConversation(env, memberId.user_id, convId, created));
-    }
-    // Push: every other member gets a high-priority DATA-ONLY message.
+    // Push: every other member gets a high-priority message. The chat-list poke
+    // doubles as a live-connectivity probe, and its answer decides whether the
+    // push is data-only (app connected -> our rich card with actions) or
+    // carries a system payload (app not connected -> only the tray can show it).
     for (const memberId of members) {
       if (memberId.user_id === uid) continue;
       ctx.waitUntil(
-        // Data-only on purpose: a combined notification+data payload is
-        // drawn straight into the system tray by Google Play services
-        // whenever the app is backgrounded/killed — onMessageReceived is
-        // SKIPPED entirely in that case, which means our own rich card
-        // (Reply / Like / Mark-as-read actions) never renders. That's the
-        // opposite of what we want: those actions matter MOST when the app
-        // is backgrounded. Data-only always routes through
-        // onMessageReceived -> KpNotify.message() so the actions are always
-        // there. Trade-off: on some OEMs (MIUI/Xiaomi and similar aggressive
-        // battery-savers) a data-only push can be dropped if the app was
-        // force-killed, where a notification-payload push would still have
-        // shown a (button-less) system card. Chosen deliberately — Reply/
-        // Like/Mark-as-read must work everywhere they show up. That trade-off is
-        // why recipientAlert() exists: it re-attaches the system payload ONLY for
-        // a recipient whose app has gone completely silent (frozen/killed), where
-        // a data-only push is by definition wasted.
-        // ("from" is a reserved FCM key — hence fromName.)
-        // `muted`: the recipient's per-conversation mute. The push still goes
-        // out (the badge/list must update) but the client routes it to a
-        // silent channel — previously nobody checked the flag, so a muted
-        // chat still rang with a full heads-up.
-        // `mid`: the message id, so the client's notification card carries a
-        // stable, recomputable id. The Reply/Like/Mark-as-read actions cancel
-        // THAT exact card; the old random high bits made nm.cancel() miss the
-        // card ~127/128 of the time.
-        pushToUser(
-          env,
-          db,
-          memberId.user_id,
-          {
-            type: "message",
-            convoId: convId,
-            mid,
-            kind: conv.kind,
-            fromName: me.display_name,
-            body: preview.slice(0, 120),
-            kp_chat: convId,
-            muted: memberId.muted === 1 ? "1" : "0",
-          },
-          recipientAlert(memberId, preview, me.display_name),
-        ).then((ok) =>
-          ok
-            ? run(
-                db,
-                "UPDATE messages SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL",
-                nowIso(),
-                mid,
-              )
-            : null,
-        ),
+        (async () => {
+          const live = await pokeUserConversation(env, memberId.user_id, convId, created);
+          await pushMessageToMember(memberId, live);
+        })(),
+      );
+    }
+    // Hoisted below so the poke + the push stay one fire-and-forget unit.
+    async function pushMessageToMember(memberId: (typeof members)[number], live: number) {
+      // Shape is decided per recipient, by the socket count above, not globally:
+      // data-only routes through onMessageReceived -> KpNotify.message() and so
+      // carries our rich card (Reply / Like / Mark-as-read); a combined
+      // notification+data payload is instead drawn straight into the tray by
+      // Google Play services while the app is backgrounded, and onMessageReceived
+      // never runs — rich actions would be lost on exactly the device that needs
+      // them. So: connected recipient => data-only; disconnected recipient =>
+      // recipientAlert() attaches the system payload, because a tray card beats
+      // silence. (Before this, the payload was dropped for everyone, which is
+      // when "background e message ashe na" started: ac3ffbf had it, 6ab562a
+      // removed it, and the idle-only fallback in 8e66af4 almost never fired.)
+      // ("from" is a reserved FCM key — hence fromName.)
+      // `muted`: the recipient's per-conversation mute. The push still goes
+      // out (the badge/list must update) but the client routes it to a
+      // silent channel — previously nobody checked the flag, so a muted
+      // chat still rang with a full heads-up.
+      // `mid`: the message id, so the client's notification card carries a
+      // stable, recomputable id. The Reply/Like/Mark-as-read actions cancel
+      // THAT exact card; the old random high bits made nm.cancel() miss the
+      // card ~127/128 of the time.
+      pushToUser(
+        env,
+        db,
+        memberId.user_id,
+        {
+          type: "message",
+          convoId: convId,
+          mid,
+          kind: conv.kind,
+          fromName: me.display_name,
+          body: preview.slice(0, 120),
+          kp_chat: convId,
+          muted: memberId.muted === 1 ? "1" : "0",
+        },
+        recipientAlert(memberId, preview, me.display_name, live),
+      ).then((ok) =>
+        ok
+          ? run(
+              db,
+              "UPDATE messages SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL",
+              nowIso(),
+              mid,
+            )
+          : null,
       );
     }
     return json({ message }, 201);
