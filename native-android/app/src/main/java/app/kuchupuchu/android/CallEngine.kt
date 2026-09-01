@@ -603,11 +603,18 @@ class CallEngine(private val app: Application) {
             CallSounds.startRingback(app)
         }
         if (incoming && status == "RINGING" && !suppressed) {
-            // Our rich ringing screen (Accept/Decline) is taking over —
-            // drop the plain FCM payload card so it doesn't linger.
-            KpNotify.cancelSystemCallCards(app)
             if (ringingId != ui.id) {
                 ringingId = ui.id
+                // Sweep the plain FCM payload card ONCE, immediately before our
+                // own ringing UI takes over. It used to run on EVERY poll tick
+                // (~2s) and `cancelSystemCallCards` also matches CATEGORY_CALL —
+                // i.e. our own heads-up card — while the re-post below was
+                // skipped because ringingId was already set. Net effect: the
+                // incoming-call notification appeared and then erased itself
+                // 2 seconds later ("call receive er notification 2 seconds por
+                // auto chole jai"). Now the sweep happens exactly once, before
+                // the post, so the card lives for the whole ring.
+                KpNotify.cancelSystemCallCards(app)
                 CallSounds.startRing(app)
                 CallNotify.incoming(app, ui.otherName, ui.kind == "VIDEO", ui.id)
             }
