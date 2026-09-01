@@ -390,15 +390,51 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // (Re)connected: one catch-up sync covers anything missed.
                 "hello" -> refreshMessages(forceNetwork = true)
                 "message" ->
-                    if (ev.optString("conversationId") == convId && msgSyncPending.compareAndSet(false, true)) {
-                        scope.launch {
-                            // Force the authoritative GET: a realtime event is
-                            // proof the cached page is stale. Without this the
-                            // recipient could show typing yet never paint the
-                            // message body until reopening the thread.
-                            delay(120)
-                            msgSyncPending.set(false)
-                            refreshMessages(forceNetwork = true)
+                    if (ev.optString("conversationId") == convId) {
+                        // FAST PAINT: the WS "message" frame carries the FULL
+                        // message object (msgFrom), so we drop the bubble into
+                        // the thread instantly instead of waiting a GET round
+                        // trip. The marker-gated reconcile below confirms order
+                        // + advances the marker; if the fast-paint ever guessed
+                        // wrong (a delete/our own echo racing in), the GET
+                        // self-corrects. The worker skips the sender, so this
+                        // is always SOMEONE ELSE's message (the recipient's own
+                        // optimistic bubble lives in `pending`).
+                        ev.optJSONObject("message")?.let { liveMsg ->
+                            val liveId = liveMsg.optString("id")
+                            val liveCid = liveMsg.optString("clientId")
+                            val idxExisting = msgs.indexOfFirst { it.optString("id") == liveId }
+                            when {
+                                // Same id already present -> replace the row, never
+                                // double it.
+                                idxExisting >= 0 -> msgs[idxExisting] = liveMsg
+                                liveCid.isNotBlank() && msgs.any { it.optString("clientId") == liveCid } ->
+                                    msgs[msgs.indexOfFirst { it.optString("clientId") == liveCid }] = liveMsg
+                                // New inbound message: chronological = append at the
+                                // end (the thread is oldest-first).
+                                else -> {
+                                    msgs.add(liveMsg)
+                                    // Our own optimistic bubble from a previous send
+                                    // that the server just confirmed.
+                                    pending.removeAll { it.optString("clientId") == liveCid }
+                                }
+                            }
+                            ScreenStore.setMsgs(convId, msgs.toList())
+                        }
+                        if (msgSyncPending.compareAndSet(false, true)) {
+                            scope.launch {
+                                // Force the authoritative GET: a realtime event is
+                                // proof the cached page is stale. Without this the
+                                // recipient could show typing yet never paint the
+                                // message body until reopening the thread.
+                                delay(120)
+                                msgSyncPending.set(false)
+                                // Marker-gated: after the fast-paint above the
+                                // marker has moved, so this returns the fresh
+                                // page (which matches what we already painted, so
+                                // the id-diff is a no-op) and advances the marker.
+                                refreshMessages()
+                            }
                         }
                     }
                 // Receipt + typing events carry their payload — apply directly,
