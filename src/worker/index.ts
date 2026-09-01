@@ -573,20 +573,29 @@ function recipientAlert(
     body: preview.slice(0, 120),
     channel: "kp_messages_v2",
   });
-  // Rule (WhatsApp behaviour, per product owner): the app draws its OWN rich
-  // card (Reply / Like / Mark-as-read) whenever the recipient is reachable —
-  // whether or not a socket is currently open. A HIGH-priority FCM data
-  // message wakes onMessageReceived even for a recents-swiped app (a swipe is
-  // NOT a force-stop), so we send DATA-ONLY so the process can paint the rich
-  // card. We only fall back to the system payload when the recipient has been
-  // genuinely idle for the whole IDLE window (process frozen / dead / force-
-  // stopped), where waking is unreliable and a guaranteed plain tray card beats
-  // silence. Previously liveSockets === 0 ALWAYS got the payload, handing a
-  // still-wakeable swiped-away app a button-less system card — the exact
-  // "background e message notification actions button chara" report.
-  const idle =
-    !member.last_active || Date.now() - Date.parse(member.last_active) >= IDLE_PUSH_WINDOW_MS;
-  return idle ? sysCard() : undefined;
+  const goneQuiet = () => {
+    const last = member.last_active ? Date.parse(member.last_active) : 0;
+    return !last || Date.now() - last >= IDLE_PUSH_WINDOW_MS;
+  };
+  // NO live socket (liveSockets === 0): the process is not connected — swiped
+  // from recents, frozen by the launcher, killed, or never started. A high-
+  // priority DATA-only message here is NOT delivered on MIUI/HyperOS & similar
+  // (the user's exact report: "background swipe — massageddilivered but NO
+  // notification"). The only way to guarantee the message is seen is the system
+  // notification payload, which Google Play services draw without our process.
+  // So: no socket => system payload (guaranteed card; no rich buttons possible,
+  // but silence is worse).
+  if (liveSockets === 0) return sysCard();
+  // Live socket: the process IS running and its poll/engine can draw our own
+  // rich card (Reply / Like / Mark-as-read) — so keep DATA-ONLY, rich actions
+  // intact. Except when the socket has been silent the whole idle window — a
+  // launcher that FREEZES the process (not kills it) leaves TCP half-open, so
+  // the socket still counts while onMessageReceived never runs. That lie is
+  // caught by the idle check, which falls back to the guaranteed payload.
+  if (liveSockets > 0) return goneQuiet() ? sysCard() : undefined;
+  // Realtime layer unavailable: fall back to the conservative idle rule.
+  if (goneQuiet()) return sysCard();
+  return undefined;
 }
 
 async function membersOf(db: D1Database, convId: string) {
@@ -2856,18 +2865,17 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           fromId: uid,
           fromName: me.display_name,
         });
-        // WhatsApp-style delivery. We send DATA-ONLY so a reachable callee's
-        // onMessageReceived draws our OWN full-screen ring (CallNotify.incoming,
-        // which carries a fullScreenIntent + Accept/Decline) — no socket needed,
-        // the high-priority data message wakes the process even after a recents
-        // swipe. A payload here would be drawn by the OS on top of our card and
-        // could outlive a cancellation (the old double-call-card bug), so we only
-        // attach it for a genuinely idle recipient where waking is unreliable.
-        // Still under the same still-RINGING gate above, so a call cancelled
-        // before it ever rang cannot paint a phantom card.
-        const otherUser = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", other);
-        const last = otherUser?.last_active_at ? Date.parse(otherUser.last_active_at) : 0;
-        const idle = !last || Date.now() - last >= IDLE_PUSH_WINDOW_MS;
+        // Delivery rule (same as messages / missed calls):
+        //   - NO live socket (swiped-away / killed / frozen) => system
+        //     notification payload, so an incoming call is never silent on
+        //     MIUI & similar where a high-priority data-only message is not
+        //     delivered once the process is gone. Tapping the card launches
+        //     MainActivity (kp_call extra) straight to the ringing screen.
+        //   - Live socket (process alive) => DATA-ONLY. The engine's poll
+        //     already raises its OWN full-screen ring (CallNotify.incoming +
+        //     fullScreenIntent + Accept/Decline) — a payload here would only
+        //     duplicate it and could outlive a cancellation on a live process.
+        const live = await pokeUserConversation(env, other, pairId(uid, other), nowIso());
         await pushToUser(
           env,
           db,
@@ -2882,7 +2890,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             // is tapped -> MainActivity jumps straight to the ringing screen
             kp_call: callId,
           },
-          idle
+          live <= 0
             ? {
                 title: `${me.display_name} is calling`,
                 body: kind === "VIDEO" ? "Incoming video call" : "Incoming voice call",
@@ -2949,24 +2957,29 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         const video = row.kind === "VIDEO";
         ctx.waitUntil(
           (async () => {
-            // Same decision as the message path (recipientAlert): send DATA-ONLY
-            // so onMessageReceived runs and the app draws its OWN rich card with
-            // Call back / Message actions — for a reachable recipient the data
-            // message wakes the process even when no socket is open. Only a
-            // genuinely idle (>= IDLE window: frozen / dead / force-stopped)
-            // recipient gets the system payload, so at least a plain tray card
-            // shows (a system card cannot carry our actions, but silence is
-            // worse). No double card: a connected app is already handled by its
-            // poll engine; this data-only message is only the wake-up.
-            const last = callee?.last_active_at ? Date.parse(callee.last_active_at) : 0;
-            const idle = !last || Date.now() - last >= IDLE_PUSH_WINDOW_MS;
-            const note = idle
-              ? {
-                  title: `Missed call · ${caller?.display_name ?? "KuchuPuchu"}`,
-                  body: video ? "📹 Missed video call" : "📞 Missed voice call",
-                  channel: "kp_calls_v5",
-                }
-              : undefined;
+            // Same rule as the message path (recipientAlert):
+            //   - NO live socket (swiped-away / killed / frozen) => system
+            //     notification payload (guaranteed card). A high-priority
+            //     data-only missed-call message is NOT delivered on MIUI &
+            //     similar once the process is gone — the user's exact report
+            //     ("background swipe — missed call no notification"). The system
+            //     card has no actions on a dead process, but silence is worse.
+            //   - Live socket (process alive, background) => DATA-ONLY so
+            //     onMessageReceived draws our OWN rich card (Call back / Message).
+            const live = await pokeUserConversation(
+              env,
+              row.callee_id,
+              pairId(row.caller_id, row.callee_id),
+              nowIso(),
+            );
+            const note =
+              live <= 0
+                ? {
+                    title: `Missed call · ${caller?.display_name ?? "KuchuPuchu"}`,
+                    body: video ? "📹 Missed video call" : "📞 Missed voice call",
+                    channel: "kp_calls_v5",
+                  }
+                : undefined;
             await pushToUser(
               env,
               db,
