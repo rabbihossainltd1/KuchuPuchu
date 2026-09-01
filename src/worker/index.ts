@@ -679,6 +679,7 @@ async function fcmAccessToken(env: Env): Promise<{ token: string; projectId: str
   if (fcmTokenCache && fcmTokenCache.exp > Date.now() + 60_000) {
     return { token: fcmTokenCache.token, projectId: fcmTokenCache.projectId };
   }
+  try {
   const creds = JSON.parse(env.FCM_CREDENTIALS) as FcmServiceAccount;
   const tokenUri = creds.token_uri ?? "https://oauth2.googleapis.com/token";
   const now = Math.floor(Date.now() / 1000);
@@ -710,15 +711,33 @@ async function fcmAccessToken(env: Env): Promise<{ token: string; projectId: str
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
   });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    console.log(
+      "fcm_oauth_failed",
+      JSON.stringify({ status: res.status, body: (await res.text()).slice(0, 200) }),
+    );
+    return null;
+  }
   const data = (await res.json()) as { access_token?: string; expires_in?: number };
-  if (!data.access_token) return null;
+  if (!data.access_token) {
+    console.log("fcm_oauth_no_token", JSON.stringify({}));
+    return null;
+  }
   fcmTokenCache = {
     token: data.access_token,
     projectId: creds.project_id,
     exp: Date.now() + (data.expires_in ?? 3600) * 1000,
   };
   return { token: data.access_token, projectId: creds.project_id };
+  } catch (err) {
+    // Malformed/missing key material used to throw up into pushToUser()'s
+    // catch and vanished as a silent push failure — keep a trace.
+    console.log(
+      "fcm_oauth_exception",
+      JSON.stringify({ err: err instanceof Error ? err.message : String(err) }),
+    );
+    return null;
+  }
 }
 
 /**
@@ -819,12 +838,26 @@ async function pushToUser(
 ): Promise<boolean> {
   try {
     const auth = await fcmAccessToken(env);
-    if (!auth) return false;
+    if (!auth) {
+      // Used to be a silent `return false`: if FCM_CREDENTIALS was ever bad
+      // or the Google token exchange failed, EVERY push quietly died with zero
+      // trace and no 5xx — the exact shape of a "notifications broke" report.
+      console.log(
+        "fcm_no_auth",
+        JSON.stringify({ hasCreds: !!env.FCM_CREDENTIALS, hasConfig: !!env.FCM_CONFIG }),
+      );
+      return false;
+    }
     const rows = await all<{ token: string }>(
       db,
       "SELECT token FROM devices WHERE user_id = ?",
       userId,
     );
+    if (rows.length === 0) {
+      // No token ever registered for this recipient: a "missing" notification
+      // that is entirely explainable — surface it in tail instead of silence.
+      console.log("fcm_no_device", JSON.stringify({ userId: userId.slice(0, 8) }));
+    }
     // One round trip per device used to be sequential; a user on three devices
     // waited for three serial FCM calls before the loop finished.
     let anyAccepted = false;
@@ -2294,7 +2327,23 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       // stable, recomputable id. The Reply/Like/Mark-as-read actions cancel
       // THAT exact card; the old random high bits made nm.cancel() miss the
       // card ~127/128 of the time.
-      pushToUser(
+      //
+      // MUST be awaited (it was a bare `pushToUser(...).then(...)` dangling
+      // promise before). The outer ctx.waitUntil() only tracks the promise it
+      // is handed — an un-awaited promise created inside an async function is
+      // NOT part of it, so the runtime could (and did, in live tests) end the
+      // worker's work before the FCM fetch promise settled. Consequences, all
+      // invisible from the server side:
+      //   - the FCM v1 send was fired but its RESPONSE was often never read,
+      //   - fcm_error telemetry never appeared in wrangler tail even when the
+      //     send failed (dead/INVALID_ARGUMENT tokens logged nothing),
+      //   - UNREGISTERED-token pruning in pushToUser() could be skipped,
+      //     leaving dead device rows forever,
+      //   - the delivered_at write in the .then() never ran for the push path.
+      // From the phone this reads exactly as "background e message push ashe
+      // na": FCM accepts and 200s what the worker fires, so nothing looks
+      // wrong server-side, but the sends themselves were racing teardown.
+      const ok = await pushToUser(
         env,
         db,
         memberId.user_id,
@@ -2309,16 +2358,15 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           muted: memberId.muted === 1 ? "1" : "0",
         },
         recipientAlert(memberId, preview, me.display_name, live),
-      ).then((ok) =>
-        ok
-          ? run(
-              db,
-              "UPDATE messages SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL",
-              nowIso(),
-              mid,
-            )
-          : null,
       );
+      if (ok) {
+        await run(
+          db,
+          "UPDATE messages SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL",
+          nowIso(),
+          mid,
+        );
+      }
     }
     return json({ message }, 201);
   }
