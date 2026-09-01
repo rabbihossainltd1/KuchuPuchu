@@ -2850,6 +2850,15 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           fromId: uid,
           fromName: me.display_name,
         });
+        // WhatsApp-style delivery for a NOT-connected app. A connected callee
+        // (liveSockets > 0) is already rung by its own in-process poll engine,
+        // which draws the full-screen Accept/Decline UI — a payload there would
+        // only duplicate it and could outlive a cancellation on a live process.
+        // A not-connected / dead / unreachable-realtime app (live <= 0) gets the
+        // system payload, so an incoming call still surfaces even when the user
+        // swiped the app away. Still under the same still-RINGING gate above, so
+        // a call cancelled before it ever rang cannot paint a phantom card.
+        const live = await pokeUserConversation(env, other, pairId(uid, other), nowIso());
         await pushToUser(
           env,
           db,
@@ -2864,10 +2873,13 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             // is tapped -> MainActivity jumps straight to the ringing screen
             kp_call: callId,
           },
-          // Calls are deliberately data-only. A notification payload can be
-          // painted by Android after this Worker has observed a cancellation,
-          // creating a phantom incoming card that app code cannot retract.
-          undefined,
+          live <= 0
+            ? {
+                title: `${me.display_name} is calling`,
+                body: kind === "VIDEO" ? "Incoming video call" : "Incoming voice call",
+                channel: "kp_calls_v5",
+              }
+            : undefined,
         );
       })(),
     );

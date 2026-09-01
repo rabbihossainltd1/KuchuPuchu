@@ -118,35 +118,56 @@ fun CallGate() {
     }
 
     val connected = call.status == "ACTIVE" || engine.hasRemote
-    when {
-        connected ->
-            // hasRemoteVideo: the server row can still say AUDIO after the
-            // other phone upgraded to video mid-call — follow the actual
-            // media so both sides always render the SAME in-call screen.
-            if (call.kind == "VIDEO" || engine.hasRemoteVideo) InCallVideoScreen(call) else VoiceCallScreen(call)
-        // Incoming ringing needs its own Accept/Decline screen; everything
-        // else voice (outgoing ringing, connecting, in-call) is THE SAME
-        // screen on caller and receiver — one UI, per design.
-        call.incoming && call.status == "RINGING" -> IncomingCallScreen(call)
-        call.kind == "VIDEO" -> OutgoingVideoScreen(call)
-        else -> VoiceCallScreen(call)
-    }
-
-    if (engine.toast.isNotBlank()) {
+    Box(Modifier.fillMaxSize()) {
+        // Tap shield: the call overlay's root Box carries only a background,
+        // which is not a pointer hit-target, so a tap on its empty region fell
+        // through to the underlying chat/enabled screen ("voice-call in-call UI
+        // te blank space click korle chat er message er upor pore"). This
+        // full-screen node sits UNDER the call UI and consumes every pointer
+        // event, blank-area taps stay on the call; the dialer buttons are drawn
+        // above it and keep working.
         Box(
             Modifier
-                .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(top = 52.dp),
-            contentAlignment = Alignment.TopCenter,
-        ) {
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val e = awaitPointerEvent()
+                            e.changes.forEach { it.consume() }
+                        }
+                    }
+                },
+        )
+        when {
+            connected ->
+                // hasRemoteVideo: the server row can still say AUDIO after the
+                // other phone upgraded to video mid-call — follow the actual
+                // media so both sides always render the SAME in-call screen.
+                if (call.kind == "VIDEO" || engine.hasRemoteVideo) InCallVideoScreen(call) else VoiceCallScreen(call)
+            // Incoming ringing needs its own Accept/Decline screen; everything
+            // else voice (outgoing ringing, connecting, in-call) is THE SAME
+            // screen on caller and receiver — one UI, per design.
+            call.incoming && call.status == "RINGING" -> IncomingCallScreen(call)
+            call.kind == "VIDEO" -> OutgoingVideoScreen(call)
+            else -> VoiceCallScreen(call)
+        }
+
+        if (engine.toast.isNotBlank()) {
             Box(
                 Modifier
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(Color(0xE61C1917))
-                    .padding(horizontal = 18.dp, vertical = 10.dp),
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(top = 52.dp),
+                contentAlignment = Alignment.TopCenter,
             ) {
-                Text(engine.toast, color = Color.White, fontSize = 13.sp)
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color(0xE61C1917))
+                        .padding(horizontal = 18.dp, vertical = 10.dp),
+                ) {
+                    Text(engine.toast, color = Color.White, fontSize = 13.sp)
+                }
             }
         }
     }
