@@ -17,6 +17,9 @@ const read = (p) => readFileSync(p, "utf8");
 const main = (f) => read(`${ANDROID}/src/main/java/app/kuchupuchu/android/${f}`);
 const ci = read(".github/workflows/ci.yml");
 const gradle = read(`${ANDROID}/build.gradle.kts`);
+// Whitespace-normalised: prettier re-wraps long shell lines in the workflow, and a
+// needle that spans a wrap point is a flake, not a guard.
+const ciFlat = ci.replace(/\s+/g, " ");
 
 {
   const step = ci.slice(ci.indexOf("Unit tests + Android lint"));
@@ -168,7 +171,10 @@ class S { val picker = registerForActivityResult(null); val t = Instant.now() }
     );
     t.cleanup();
   }
-  check("CI prints the full lint report when lint fails", ci.includes("lint-results"));
+  check(
+    "CI prints the full lint report when lint fails",
+    ciFlat.includes("lint-results") && ciFlat.includes('cat "$1"'),
+  );
   check(
     "the app pins the desugaring library like everything else",
     /coreLibraryDesugaring\("com\.android\.tools:desugar_jdk_libs:2\.1\.5"\)/.test(gradle),

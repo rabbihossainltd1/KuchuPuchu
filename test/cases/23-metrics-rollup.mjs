@@ -360,10 +360,7 @@ const today = new Date().toISOString().slice(0, 10);
   );
   const src = (await import("node:fs")).readFileSync("src/worker/index.ts", "utf8");
   const flat = src.replace(/\s+/g, " ");
-  check(
-    "the cron only rolls up behind that gate",
-    flat.includes("if (shouldRollupMetrics(new Date()))"),
-  );
+  check("the cron only rolls up behind that gate", flat.includes("if (shouldRollupMetrics(mNow))"));
   check(
     "a metrics failure cannot stop the pruning it shares a cron with",
     src.includes("cron_metrics_error"),
@@ -381,6 +378,16 @@ const today = new Date().toISOString().slice(0, 10);
     "both tables are WITHOUT ROWID (flat and cheap)",
     /PRIMARY KEY \(day, key\)\s*\) WITHOUT ROWID/.test(src) &&
       /metrics_wm \(source TEXT PRIMARY KEY, hi INTEGER NOT NULL\) WITHOUT ROWID/.test(src),
+  );
+  check(
+    "the cron creates its own tables (a deployed-but-idle isolate still rolls up)",
+    /if \(shouldRollupMetrics\(mNow\)\) \{\s*\/\/[\s\S]{0,600}?await ensureSchema\(env\.DB\);/.test(
+      src,
+    ),
+  );
+  check(
+    "…but only on the hour: the every-minute cron must not pay 20 DDL statements per tick",
+    !/if \(shouldRollupMetrics\(mNow\)\)[\s\S]{0,4000}?\n\s{4}await ensureSchema/.test(src),
   );
   check(
     "no public route serves metrics (nothing to scrape, no quota to spend)",

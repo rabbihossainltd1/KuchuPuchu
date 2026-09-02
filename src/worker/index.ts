@@ -1502,9 +1502,17 @@ export default {
       // without waiting for an hour). Its own failure must not stop the pruning above
       // or vice versa, so it is measured inside its own try.
       let metrics = 0;
-      if (shouldRollupMetrics(new Date())) {
+      const mNow = new Date();
+      if (shouldRollupMetrics(mNow)) {
+        // Inside the gate on purpose. `ensureSchema` runs on every request but is
+        // memoized per isolate, so a deployed-and-idle worker (nobody has the app
+        // open) had no `metrics_*` tables for the rollup to write to: it logged
+        // cron_metrics_error and lost the hour. The cron fires every minute, so
+        // ensuring unconditionally would pay ~20 schema statements per cold isolate
+        // for a job that runs 24 times a day — 480 statements/day instead of 5 760.
+        await ensureSchema(env.DB);
         try {
-          metrics = await rollupMetrics(env.DB);
+          metrics = await rollupMetrics(env.DB, mNow);
         } catch (mErr) {
           console.error(
             "cron_metrics_error",
