@@ -150,6 +150,18 @@ check(
     telecom.includes("private fun syncO(app: android.app.Application)"),
 );
 check(
+  "every function that touches an API-26 symbol carries the annotation lint needs",
+  // No regex here on purpose: this is a substring contract on whitespace-collapsed
+  // source, which is exactly what the `lintDebug` NewApi gate requires (CI run
+  // 33686619793 failed on four such calls that sat in un-annotated private helpers).
+  telecom.split("@androidx.annotation.RequiresApi(Build.VERSION_CODES.O)").length - 1 >= 5 &&
+    telecom.includes("RequiresApi(Build.VERSION_CODES.O) private fun request(") &&
+    telecom.includes("RequiresApi(Build.VERSION_CODES.O) private fun release(") &&
+    telecom.includes("RequiresApi(Build.VERSION_CODES.O) fun onCreated(") &&
+    telecom.includes("RequiresApi(Build.VERSION_CODES.O) private fun syncO(") &&
+    telecom.includes("RequiresApi(Build.VERSION_CODES.O) private fun ensureAccountO("),
+);
+check(
   "permission-checked framework calls handle SecurityException at the call",
   (telecom.match(/catch \(e: SecurityException\)/g) ?? []).length >= 2,
 );

@@ -160,7 +160,10 @@ object KpTelecom {
         }
     }
 
-    /** The framework accepted the registration and bound to [KpConnectionService]. */
+    /** The framework accepted the registration and bound to [KpConnectionService].
+     * Called from `KpConnectionService.mirror`, which returns a refused connection before
+     * this when the device is below API 26 — the annotation is how lint is told. */
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.O)
     fun onCreated(
         connection: KpCallConnection,
         call: CallUi,
@@ -200,6 +203,7 @@ object KpTelecom {
     private fun telecom(app: Context): TelecomManager? =
         app.getSystemService(TelecomManager::class.java)
 
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.O)
     private fun release(call: CallUi?) {
         val connection = live
         live = null
@@ -211,6 +215,7 @@ object KpTelecom {
         }
     }
 
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.O)
     private fun request(
         app: android.app.Application,
         call: CallUi,
