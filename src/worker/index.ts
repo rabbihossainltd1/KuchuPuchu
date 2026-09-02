@@ -31,6 +31,10 @@ export type Env = {
   TURN_KEY_ID?: string;
   /** Shared key for GET /api/debug/errors (worker-side crash log). */
   DEBUG_KEY?: string;
+  /** Base URL the hourly cron probes to measure §52's "backend latency" (see
+   * probeBackendLatency). Config, not a secret, and deliberately not hardcoded: a
+   * preview/alternative origin probes its own health endpoint instead. */
+  SELF_ORIGIN?: string;
   TURN_API_TOKEN?: string;
   /** Realtime fan-out Durable Objects (Steps 2-3). Optional on purpose: the
    *  test harness and any deploy without the bindings keep the plain REST
@@ -1148,6 +1152,87 @@ const METRIC_SOURCES: {
 ];
 
 /**
+ * §52's last uncovered line: "Backend latency".
+ *
+ * It is measured the only way that is honest *and* free on this plan: the hourly cron
+ * fetches its own public `/api/health` (which runs a D1 statement, so the number
+ * includes the database round trip, not just cold-start JS) a few times and stores the
+ * raw sample count, the sum of milliseconds, and the failure count. `lat.sum_ms /
+ * lat.count` is then a mean over those samples, comparable hour to hour and day to day.
+ *
+ * What this deliberately is not: a percentile of real traffic. That would need a
+ * per-request timing written to D1 — one write per request on a worker whose cron
+ * already fires every minute, i.e. the exact quota pattern §52 exists to avoid — and a
+ * "p95" derived from a handful of in-isolate samples would be a fabricated number. The
+ * dashboard's own Workers Metrics has the real distribution when a bad day needs one.
+ *
+ * A day where the probe could not run records `lat.err` rather than a reassuring zero.
+ */
+export const LAT_PROBE_PATH = "/api/health";
+export const LAT_SAMPLES = 3;
+/** A hung origin must not stall the cron that reaps stale calls every minute. */
+export const LAT_TIMEOUT_MS = 5_000;
+
+export async function probeBackendLatency(
+  db: D1Database,
+  origin: string | undefined,
+  now = new Date(),
+  fetcher: typeof fetch = fetch,
+): Promise<{ count: number; sumMs: number; errors: number }> {
+  let count = 0;
+  let sumMs = 0;
+  let errors = 0;
+  if (origin) {
+    const url = `${origin.replace(/\/+$/, "")}${LAT_PROBE_PATH}`;
+    for (let i = 0; i < LAT_SAMPLES; i++) {
+      const started = Date.now();
+      try {
+        const res = await fetcher(url, {
+          method: "GET",
+          signal: AbortSignal.timeout(LAT_TIMEOUT_MS),
+        });
+        if (res.ok) {
+          count++;
+          sumMs += Date.now() - started;
+        } else {
+          errors++;
+        }
+      } catch {
+        errors++;
+      }
+    }
+  }
+  // Counters, not gauges: the hour that runs later must add to today, not replace it,
+  // or `sum / count` would describe only the last hour of the day.
+  const day = now.toISOString().slice(0, 10);
+  await db.batch([
+    counterUpsert(db, day, "lat.count", count),
+    counterUpsert(db, day, "lat.sum_ms", sumMs),
+    counterUpsert(db, day, "lat.err", errors),
+  ]);
+  return { count, sumMs, errors };
+}
+
+/**
+ * The one statement that knows how a *counter* accumulates. Both the table rollups and
+ * the latency probe below go through it, so "counters add, gauges replace" has exactly
+ * one implementation that can drift, and a new metric source cannot quietly invent a
+ * third conflict clause.
+ */
+function counterUpsert(
+  db: D1Database,
+  day: string,
+  key: string,
+  value: number,
+): D1PreparedStatement {
+  return db
+    .prepare(
+      "INSERT INTO metrics_daily (day, key, value) VALUES (?, ?, ?) ON CONFLICT(day, key) DO UPDATE SET value = value + excluded.value",
+    )
+    .bind(day, key, value);
+}
+
+/**
  * Rollups are hourly, not per cron tick: the cron that prunes `error_log` runs every
  * minute (§ stale-RINGING reaping needs that), and metrics do not — an hourly gate
  * costs 4 reads when nothing happened and ~8 + one batch when it did.
@@ -1196,13 +1281,7 @@ export async function rollupMetrics(db: D1Database, now = new Date()): Promise<n
         const v = Number(r[col] ?? 0);
         if (!Number.isFinite(v) || v === 0) continue;
         touched++;
-        writes.push(
-          db
-            .prepare(
-              "INSERT INTO metrics_daily (day, key, value) VALUES (?, ?, ?) ON CONFLICT(day, key) DO UPDATE SET value = value + excluded.value",
-            )
-            .bind(r.day ?? day, key, v),
-        );
+        writes.push(counterUpsert(db, r.day ?? day, key, v));
       }
     }
     writes.push(
@@ -1507,6 +1586,7 @@ export default {
       // without waiting for an hour). Its own failure must not stop the pruning above
       // or vice versa, so it is measured inside its own try.
       let metrics = 0;
+      let lat: { count: number; sumMs: number; errors: number } | null = null;
       const mNow = new Date();
       if (shouldRollupMetrics(mNow)) {
         // Inside the gate on purpose. `ensureSchema` runs on every request but is
@@ -1518,6 +1598,9 @@ export default {
         await ensureSchema(env.DB);
         try {
           metrics = await rollupMetrics(env.DB, mNow);
+          // §52's latency line rides the same hourly gate for the same reason: a
+          // per-minute probe would be 4 320 requests a day against our own origin.
+          lat = await probeBackendLatency(env.DB, env.SELF_ORIGIN, mNow);
         } catch (mErr) {
           console.error(
             "cron_metrics_error",
@@ -1532,6 +1615,7 @@ export default {
           pruned: pruned?.meta?.changes ?? 0,
           devices: devs?.meta?.changes ?? 0,
           metrics,
+          lat,
         }),
       );
     } catch (err) {

@@ -31,6 +31,11 @@ binding = "DB"
 database_name = "kuchupuchu-v3"
 database_id = "dbb7ce3a-332d-4330-b90a-c5d4c11a47e2"
 
+# §52: the hourly cron probes this origin's /api/health to record backend latency
+# (worker + D1 round trip). Unset means the probe reports `lat.err` instead of guessing.
+[vars]
+SELF_ORIGIN = "https://kuchupuchu-api.kuchupuchu.workers.dev"
+
 [[r2_buckets]]
 binding = "MEDIA"
 bucket_name = "kp-media"
