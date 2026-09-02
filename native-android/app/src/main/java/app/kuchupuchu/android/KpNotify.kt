@@ -216,9 +216,7 @@ object KpNotify {
             // actions (they carry `mid` as an extra). The old random high
             // bits made nm.cancel(convoId.hashCode()) miss the card ~127/128
             // of the time, so actions "did nothing".
-            val msgId =
-                mid?.takeIf { it.isNotBlank() }?.hashCode()?.and(Int.MAX_VALUE)
-                    ?: (convoId.hashCode() and 0x00FFFFFF) or ((System.nanoTime() and 0x7F).toInt() shl 24)
+            val msgId = NotifyIds.messageCard(mid, convoId, System.nanoTime())
             mgr.notify(msgId, n)
             mgr.notify(GROUP.hashCode(), summary)
         }.onFailure { e ->
@@ -391,13 +389,13 @@ class KpNotifActionReceiver : android.content.BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         val convoId = intent.getStringExtra("convoId") ?: return
         // The exact card this action came from (worker `mid` in the extras).
-        // Legacy cards (pre-`mid` pushes) fall back to the old cancel id —
-        // they were the ones that leaked, but at least we never make it worse.
+        // Same function the notify path used, so the two ids cannot drift apart
+        // (they had: notify masked the sign bit, this did not, so ~55% of cards
+        // could never be dismissed). Legacy no-`mid` cards keep an id built from
+        // System.nanoTime(), which no other process can recompute — dismissing
+        // those stays impossible by construction, not by oversight.
         val cardId =
-            intent.getStringExtra("mid")
-                ?.takeIf { it.isNotBlank() }
-                ?.hashCode()
-                ?: convoId.hashCode()
+            NotifyIds.messageCard(intent.getStringExtra("mid")) ?: convoId.hashCode()
         Api.loadToken(ctx)
         val nm = NotificationManagerCompat.from(ctx)
         when (intent.action) {

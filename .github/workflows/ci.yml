@@ -50,10 +50,18 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: android-actions/setup-android@v3
-      - name: Build APK
+      # §50 puts unit tests and lint before the build, and until now neither rung
+      # actually ran: `lint { abortOnError = true }` was configured but no CI step
+      # invoked a lint task, and the module had no test sources at all.
+      - name: Unit tests + Android lint
         working-directory: native-android
         run: |
           chmod +x gradlew
+          ./gradlew testDebugUnitTest lintDebug --no-daemon --continue \
+            -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
+      - name: Build APK
+        working-directory: native-android
+        run: |
           ./gradlew assembleDebug --no-daemon --stacktrace \
             -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
       # §50 asks for the release build too, not just debug: R8 + resource shrinking

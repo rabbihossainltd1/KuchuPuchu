@@ -191,20 +191,34 @@ has(list, "Api.PollCadence.failed()", "…and a bad one starts it");
     'item.put("lastErr", err.take(180))',
     "…and the reason it last failed, for scheduled recovery",
   );
+  // §48 moved the arithmetic into OutboxPolicy (so it could be unit-tested at all);
+  // the queue's own contract is that it asks the policy instead of re-deriving it.
   has(
-    cache,
-    "backoffMs[minOf(n - 1, backoffMs.size - 1)]",
+    kt("OutboxPolicy.kt"),
+    "backoffMs[minOf(attempts - 1, backoffMs.size - 1)]",
     "backoff is read from the table by attempt count",
   );
-  has(cache, "MAX_AUTO", "there is an automatic-retry ceiling");
+  has(kt("OutboxPolicy.kt"), "const val MAX_AUTO = 12", "there is an automatic-retry ceiling");
   has(
-    cache,
+    kt("OutboxPolicy.kt"),
     "Long.MAX_VALUE / 4",
     "past the ceiling the item WAITS for a trigger — it is not deleted",
   );
+  has(
+    cache,
+    "System.currentTimeMillis() + OutboxPolicy.waitMs(n)",
+    "the queue defers via the policy, not a local formula",
+  );
+  has(
+    cache,
+    'o.put("nextAt", OutboxPolicy.rearmOnLoad(o.optLong("nextAt"), System.currentTimeMillis()))',
+    "a deadline from before a restart is re-armed to now (queued sends must not park)",
+  );
   check(
     "a deferred item does not block the ones behind it (old code did `break`)",
-    flush.includes('if (!force && item.optLong("nextAt") > System.currentTimeMillis()) continue'),
+    flush.includes(
+      'if (!OutboxPolicy.isDue(item.optLong("nextAt"), System.currentTimeMillis(), force)) continue',
+    ),
     flush.slice(0, 80),
   );
   check(
@@ -255,7 +269,7 @@ has(list, "Api.PollCadence.failed()", "…and a bad one starts it");
   );
   has(
     cache,
-    "kick(backoffMs[0])",
+    "kick(OutboxPolicy.waitMs(1))",
     "the send that just failed is followed by one short-delay retry",
   );
   has(kt("MainActivity.kt"), "Outbox.start(this)", "the app actually starts it");

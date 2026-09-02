@@ -23,5 +23,5 @@ java -jar "$JAR" \
   --editorconfig="$ROOT/scripts/ktlint/.editorconfig" \
   --relative \
   --reporter=plain \
-  "app/src/main/java/**/*.kt" "app/src/main/java/**/*.kts"
+  "app/src/main/java/**/*.kt" "app/src/test/java/**/*.kt" "app/src/main/java/**/*.kts"
 echo "ktlint (import hygiene) clean."

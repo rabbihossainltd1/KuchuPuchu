@@ -157,11 +157,8 @@ object Outbox {
     private var kickJob: Job? = null
     private var netCb: ConnectivityManager.NetworkCallback? = null
 
-    /** How long one message waits after each failed attempt (1.5s → 5min). */
-    private val backoffMs = longArrayOf(1_500L, 4_000L, 12_000L, 30_000L, 60_000L, 180_000L, 300_000L)
-
-    /** Beyond this many automatic attempts only an explicit trigger retries it. */
-    private const val MAX_AUTO = 12
+    // The retry clock itself lives in OutboxPolicy, so it can be unit-tested
+    // (and so `waitMs` cannot be handed an attempt count it would index out of bounds).
 
     fun init(ctx: Context) {
         file = File(ctx.applicationContext.filesDir, "kp-outbox.json")
@@ -175,7 +172,7 @@ object Outbox {
                 if (o.optString("convId").isBlank() || o.optString("clientId").isBlank()) continue
                 // A deadline in the past is "now"; a device restart must never
                 // leave a queued message parked behind an old backoff value.
-                if (o.optLong("nextAt") in 1 until System.currentTimeMillis()) o.put("nextAt", 0L)
+                o.put("nextAt", OutboxPolicy.rearmOnLoad(o.optLong("nextAt"), System.currentTimeMillis()))
                 o.put("body", body)
                 loaded.add(o)
             }
@@ -216,7 +213,7 @@ object Outbox {
         // The send that just failed was the "immediate" attempt; the queue's own
         // first retry is a short delay later, then backoff. A one-off network blip
         // therefore heals by itself instead of waiting for the chat to reopen.
-        kick(backoffMs[0])
+        kick(OutboxPolicy.waitMs(1))
     }
 
     @Synchronized
@@ -233,8 +230,7 @@ object Outbox {
         item.put("attempts", n)
         item.put("lastErr", err.take(180))
         item.put("lastErrAt", System.currentTimeMillis())
-        val wait = if (n >= MAX_AUTO) Long.MAX_VALUE / 4 else backoffMs[minOf(n - 1, backoffMs.size - 1)]
-        item.put("nextAt", System.currentTimeMillis() + wait)
+        item.put("nextAt", System.currentTimeMillis() + OutboxPolicy.waitMs(n))
         save()
     }
 
@@ -295,7 +291,7 @@ object Outbox {
                     purgeInvalid(clientId)
                     continue
                 }
-                if (!force && item.optLong("nextAt") > System.currentTimeMillis()) continue
+                if (!OutboxPolicy.isDue(item.optLong("nextAt"), System.currentTimeMillis(), force)) continue
                 try {
                     val body = item.optJSONObject("body")!!
                     withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", body) }

@@ -16,8 +16,8 @@ android {
         applicationId = "app.kuchupuchu.android"
         minSdk = 24
         targetSdk = 35
-        versionCode = 67
-        versionName = "3.8.21"
+        versionCode = 68
+        versionName = "3.8.22"
     }
     signingConfigs {
         getByName("debug") {
@@ -45,6 +45,9 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+    // Unit tests are pure-JVM on purpose: no Robolectric, no android.jar stubs to
+    // paper over — if a rule needs a Context it belongs in the device checklist.
+    testOptions { unitTests.isIncludeAndroidResources = false }
     buildFeatures { compose = true }
     composeOptions { kotlinCompilerExtensionVersion = "1.5.15" }
     packaging {
@@ -84,4 +87,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // §50's "unit tests" rung: plain JVM tests over the queue's retry clock and the
+    // notification id math (app/src/test). JUnit4 because that is what AGP's
+    // testDebugUnitTest runs without any further configuration, and pinned like every
+    // other dependency here (§51).
+    testImplementation("junit:junit:4.13.2")
 }
