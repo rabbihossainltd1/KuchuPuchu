@@ -188,8 +188,32 @@ object Api {
         return executeJson(builder.build())
     }
 
+    /**
+     * Backpressure, honoured.
+     *
+     * 429 (rate limit) and 503 (the D1 quota guard) carry `Retry-After`; until it
+     * passes, pollers ask `inCooldown()` and skip their tick. Without this a
+     * throttled client retried on its very next 2s tick — a failing backend plus a
+     * fixed-interval poller is a storm, and on 2026-09-01 that storm is what kept
+     * the quota dead for the last hour of the day.
+     */
+    @Volatile private var cooldownUntil = 0L
+    fun inCooldown(): Boolean = System.currentTimeMillis() < cooldownUntil
+
+    private fun noteBackpressure(resp: okhttp3.Response) {
+        when (resp.code) {
+            429, 503 -> {
+                val secs = resp.header("retry-after")?.toLongOrNull()?.coerceIn(5, 300) ?: 30
+                val until = System.currentTimeMillis() + secs * 1000L
+                if (until > cooldownUntil) cooldownUntil = until
+            }
+            else -> if (resp.isSuccessful) cooldownUntil = 0
+        }
+    }
+
     private fun executeJson(req: Request): JSONObject {
         http.newCall(req).execute().use { resp ->
+            noteBackpressure(resp)
             val text = resp.body?.string().orEmpty()
             val json = if (text.isBlank()) JSONObject() else JSONObject(text)
             if (!resp.isSuccessful) {
@@ -207,6 +231,34 @@ object Api {
             }
             return json
         }
+    }
+
+    /**
+     * The gap between background poll ticks.
+     *
+     * A live socket makes the tick irrelevant (10s, just watching for death), so
+     * the 2s fallback only ever runs when realtime is down — which is exactly
+     * when the API is also likely to be failing. Grow the gap on consecutive
+     * failures (2s → 4 → 8 → 15) and reset on the first success: a healthy client
+     * never notices, a struggling one stops amplifying itself, and a process that
+     * spends all day with a dead socket stops costing 43k requests against a
+     * quota it is already failing to hit.
+     */
+    object PollCadence {
+        private val steps = longArrayOf(2_000L, 4_000L, 8_000L, 15_000L)
+
+        @Volatile private var misses = 0
+
+        fun failed() {
+            misses = (misses + 1).coerceAtMost(steps.size - 1)
+        }
+
+        fun succeeded() {
+            misses = 0
+        }
+
+        fun tick(live: Boolean): Long =
+            if (live) 10_000L else steps[misses.coerceIn(0, steps.size - 1)]
     }
 
     fun q(value: String) = URLEncoder.encode(value, "UTF-8")

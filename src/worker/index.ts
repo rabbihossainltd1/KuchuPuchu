@@ -46,14 +46,17 @@ type Json = Record<string, unknown>;
 class ApiError extends Error {
   status: number;
   code: string;
-  constructor(status: number, message: string, code = "CLOUD") {
+  /** Set for the responses a client should back off for (429/503). */
+  retryAfter?: string;
+  constructor(status: number, message: string, code = "CLOUD", retryAfter?: string) {
     super(message);
     this.status = status;
     this.code = code;
+    this.retryAfter = retryAfter;
   }
 }
 
-function json(data: unknown, status = 200) {
+function json(data: unknown, status = 200, extra?: Record<string, string>) {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
@@ -61,12 +64,13 @@ function json(data: unknown, status = 200) {
       "access-control-allow-origin": "*",
       "access-control-allow-headers": "Authorization, Content-Type",
       "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
+      ...extra,
     },
   });
 }
 
-function fail(status: number, message: string, code?: string): never {
-  throw new ApiError(status, message, code);
+function fail(status: number, message: string, code?: string, retryAfter?: string): never {
+  throw new ApiError(status, message, code, retryAfter);
 }
 
 const nowIso = () => new Date().toISOString();
@@ -238,7 +242,10 @@ function rateLimit(key: string, capacity: number, refillPerMinute: number) {
   bucket.stamp = now;
   if (bucket.tokens < 1) {
     rateBuckets.set(key, bucket);
-    fail(429, "Too many attempts. Wait a minute and try again.", "RATE_LIMITED");
+    // The header matters: without Retry-After a 429 is indistinguishable (to the
+    // app) from any other error, so the poll loop came back 2 seconds later and
+    // burned the same budget again.
+    fail(429, "Too many attempts. Wait a minute and try again.", "RATE_LIMITED", "60");
   }
   bucket.tokens -= 1;
   rateBuckets.set(key, bucket);
@@ -1209,7 +1216,11 @@ export default {
       return await handle(request, env, ctx);
     } catch (err) {
       if (err instanceof ApiError) {
-        return json({ error: { code: err.code, message: err.message } }, err.status);
+        return json(
+          { error: { code: err.code, message: err.message } },
+          err.status,
+          err.retryAfter ? { "retry-after": err.retryAfter } : undefined,
+        );
       }
       // Never echo the underlying message: it routinely contained SQLite text
       // ("no such table: members") which leaked schema details to any client.
@@ -1222,7 +1233,24 @@ export default {
           .bind(crypto.randomUUID(), stack.slice(0, 2000), nowIso())
           .run();
       } catch {}
-      return json({ error: { code: "CLOUD", message: "Something went wrong. Try again." } }, 500);
+      // "D1 has exceeded its row-read limit" is not something a client can retry
+      // its way out of — the quota is per UTC day, and every immediate retry spent
+      // more reads on the failing path (that is how yesterday's last hour went from
+      // slow to everything-500 and STAYED there). 503 + Retry-After is the honest
+      // answer, and Api.inCooldown() is how the app's pollers honour it.
+      const quota = /free tier|row read limit|read limit/i.test(stack);
+      return json(
+        {
+          error: {
+            code: quota ? "BUSY" : "CLOUD",
+            message: quota
+              ? "Service is busy right now. Try again in a minute."
+              : "Something went wrong. Try again.",
+          },
+        },
+        quota ? 503 : 500,
+        quota ? { "retry-after": "45" } : undefined,
+      );
     }
   },
   // One-minute cron: reap stale RINGING calls so a call that nobody polls
@@ -1820,9 +1848,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     for (const group of chunked(ids)) {
       for (const c of await all<ConvRow>(
         db,
-        `SELECT ${CONV_COLS},
-                (SELECT MAX(rowid) FROM messages m WHERE m.conv_id = conversations.id) AS max_row
-           FROM conversations WHERE id IN (${inSql(group.length)})`,
+        `SELECT ${CONV_COLS} FROM conversations WHERE id IN (${inSql(group.length)})`,
         ...group,
       )) {
         convs.set(c.id, c);
@@ -1839,6 +1865,38 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       }
     }
     const users = await usersById(db, userIds);
+
+    // The newest-rowid probe exists ONLY for the "delete chat" watermark, and a
+    // watermark only ever exists on a SOLO chat somebody deleted. It used to be a
+    // correlated subquery in the conversation SELECT, so SQLite walked that chat's
+    // whole index range on EVERY list poll, for EVERY chat the user has: the read
+    // cost per tick was ~ the total message count of the account. With a 2s
+    // fallback poll that is 43k ticks a day — which is how an 8.6 MB database
+    // burned 11M row reads and hit D1's free-tier cap (2026-09-01: 75k queries,
+    // 11M rows read, every endpoint 500 for the last hour). Now it runs once, and
+    // only for the handful of conversations that actually carry a numeric mark.
+    const marks = new Map<string, ReturnType<typeof watermarkFor>>();
+    for (const c of convs.values()) {
+      marks.set(
+        c.id,
+        c.kind === "SOLO"
+          ? watermarkFor(parseJson<HiddenMap>(c.hidden_json ?? "{}", {}), uid)
+          : null,
+      );
+    }
+    const needMax = [...convs.values()]
+      .filter((c) => (marks.get(c.id)?.row ?? -1) >= 0)
+      .map((c) => c.id);
+    for (const group of chunked(needMax)) {
+      for (const r of await all<{ conv_id: string; max_row: number }>(
+        db,
+        `SELECT conv_id, MAX(rowid) AS max_row FROM messages WHERE conv_id IN (${inSql(group.length)}) GROUP BY conv_id`,
+        ...group,
+      )) {
+        const c = convs.get(r.conv_id!);
+        if (c) c.max_row = r.max_row;
+      }
+    }
     const list = [];
     for (const row of rows) {
       const conv = convs.get(row.id);
@@ -1849,7 +1907,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       // conversation was a no-op and the row came straight back.
       // hidden_json is only ever written for SOLO chats - deleting a group
       // makes the member leave it instead.
-      const mark = watermarkFor(parseJson<HiddenMap>(conv.hidden_json, {}), uid);
+      const mark = marks.get(conv.id) ?? null;
       if (mark && conv.kind === "SOLO") {
         if (mark.row >= 0) {
           if (Number(conv.max_row || 0) <= mark.row) continue;

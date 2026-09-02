@@ -153,10 +153,12 @@ fun ChatListScreen(nav: NavController) {
                     }
                 }
                 ScreenStore.setConvs(items)
+                Api.PollCadence.succeeded()
                 loading = false
                 if (refreshAgain.get()) delay(200)
                 } while (refreshAgain.get())
             } catch (_: Exception) {
+                Api.PollCadence.failed()
                 loading = false
             } finally {
                 refreshInflight.set(false)
@@ -190,7 +192,12 @@ fun ChatListScreen(nav: NavController) {
                 // job is to notice that the socket DIED — waking twice a
                 // second for that is pure battery. 10s bounds that detection,
                 // and the moment the socket is down we are back to a 2s poll.
-                delay(if (KpSocket.userLive()) 10_000 else 2_000)
+                // PollCadence grows the gap while requests keep failing, and a
+                // Retry-After from the API pauses the loop outright — see Api.kt.
+                delay(
+                    if (Api.inCooldown()) 30_000
+                    else Api.PollCadence.tick(KpSocket.userLive()),
+                )
                 val fg = Store.foreground
                 val justReturned = fg && !lastForeground
                 lastForeground = fg
@@ -359,7 +366,12 @@ fun ArchiveScreen(nav: NavController) {
         // messages that landed while this screen was open would never alert.
         var localMarker = ""
         while (true) {
-            delay(if (KpSocket.userLive()) 10_000 else 2_000)
+            // PollCadence grows the gap while requests keep failing, and a
+            // Retry-After from the API pauses the loop outright — see Api.kt.
+            delay(
+                if (Api.inCooldown()) 30_000
+                else Api.PollCadence.tick(KpSocket.userLive()),
+            )
             if (Store.foreground) {
                 runCatching {
                     val url =

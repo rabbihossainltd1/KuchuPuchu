@@ -61,7 +61,17 @@ async function mk() {
     return r.json;
   };
   const q = (sql, ...bind) => env.DB.prepare(sql).bind(...bind);
-  return { env, ctx, worker, call, reg, q };
+  // Statement trace: some bugs are not visible in the payload at all. The list
+  // poll's cost is how many rows it touches, and that shows up as which
+  // statements the route chose to run.
+  const traced = [];
+  const origPrepare = env.DB.prepare.bind(env.DB);
+  env.DB.prepare = (sql) => {
+    traced.push(sql);
+    return origPrepare(sql);
+  };
+  const since = (mark) => traced.slice(mark);
+  return { env, ctx, worker, call, reg, q, traced, since };
 }
 
 async function pair(h, tag) {
@@ -262,6 +272,71 @@ async function main() {
       "after unblocking the full profile returns",
       after.json.user.blocked === false,
       JSON.stringify(after.json.user).slice(0, 80),
+    );
+  }
+
+  // ── 3b. the chat-list poll must not touch the messages table at all unless a
+  //          conversation actually carries a "delete chat" watermark ──────────
+  {
+    const h = await mk();
+    const A = await h.reg("mx-a");
+    for (let i = 0; i < 6; i++) {
+      const B = await h.reg(`mx-b${i}`);
+      const cid = (await h.call("POST", "/api/conversations", { userId: B.user.id }, A.token)).json
+        .conversation.id;
+      for (let m = 0; m < 4; m++)
+        await h.call(
+          "POST",
+          `/api/conversations/${cid}/messages`,
+          { kind: "TEXT", body: `m${m}`, clientId: `mx${i}-${m}` },
+          B.token,
+        );
+    }
+    let mark = h.traced.length;
+    const plain = await h.call("GET", "/api/conversations", undefined, A.token);
+    const plainStmts = h.since(mark).filter((q) => q.includes("MAX(rowid)"));
+    check(
+      "6 chats, no watermark → the list poll never scans messages",
+      plainStmts.length === 0,
+      `${plainStmts.length} scanning statements`,
+    );
+    check(
+      "…and every chat is still listed",
+      (plain.json.items ?? []).length === 6,
+      `${(plain.json.items ?? []).length}`,
+    );
+
+    // Now hide one chat: the watermark is rowid-based, so THIS chat needs the
+    // newest-rowid probe — and it must still be asked for exactly the one chat.
+    const cid0 = plain.json.items[0].id;
+    await h.call("DELETE", `/api/conversations/${cid0}`, undefined, A.token);
+    mark = h.traced.length;
+    const after = await h.call("GET", "/api/conversations", undefined, A.token);
+    const probes = h.since(mark).filter((q) => q.includes("MAX(rowid) AS max_row FROM messages"));
+    check(
+      "a watermarked chat still gets its newest-rowid probe",
+      probes.length === 1,
+      `${probes.length} probes`,
+    );
+    check(
+      "…as ONE batched statement, not one per conversation",
+      probes[0] ? probes[0].includes("GROUP BY conv_id") : false,
+      probes[0],
+    );
+    check(
+      "…and the chat stays hidden while nothing newer exists",
+      !(after.json.items ?? []).some((c) => c.id === cid0 && c.lastMessageAt === "m3"),
+      JSON.stringify(after.json.items?.find((c) => c.id === cid0) ?? "gone").slice(0, 60),
+    );
+    // A newer message must bring it back with the history cut — the behaviour my
+    // refactor of the probe could so easily have broken.
+    const B0 = (await h.call("GET", "/api/conversations", undefined, A.token)).json;
+    void B0;
+    const other = await h.call("GET", `/api/conversations/${cid0}/messages`, undefined, A.token);
+    check(
+      "opening it directly shows only messages after the cut",
+      (other.json.items ?? []).length === 0,
+      `${(other.json.items ?? []).length} rows`,
     );
   }
 

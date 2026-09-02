@@ -140,6 +140,44 @@ has(newChat, "var searchError by remember", "there is a state to surface it with
 has(main, "val gen = ++shareGen", "each share request takes a generation");
 has(main, "if (gen == shareGen) cb(code, data)", "…and a superseded callback is dropped");
 
+// ── poll storm: a fixed 2s fallback against a failing API is how a quota
+//    problem becomes an outage. The cadence must grow, and back off when told to.
+const api = kt("Api.kt");
+has(api, "@Volatile private var cooldownUntil = 0L", "Api remembers a server-said-stop");
+has(api, "429, 503 -> {", "…from both rate limits and the quota guard");
+has(api, 'resp.header("retry-after")?.toLongOrNull()', "…using the header, not a guess");
+has(api, "else -> if (resp.isSuccessful) cooldownUntil = 0", "…and cleared by any success");
+has(api, "noteBackpressure(resp)", "the hook is inside executeJson, so every call goes through it");
+has(api, "object PollCadence", "there is one place that owns the poll gap");
+const cadStart = api.indexOf("object PollCadence");
+const cad = api.slice(cadStart, cadStart + 900);
+check(
+  "the cadence object is really in Api.kt",
+  cadStart > 0 && cad.includes("fun tick(live: Boolean)"),
+  `index=${cadStart}`,
+);
+check(
+  "cadence grows on failure and resets on success",
+  cad.includes("fun failed()") &&
+    cad.includes("fun succeeded()") &&
+    cad.includes("2_000L, 4_000L, 8_000L, 15_000L"),
+  cad.slice(0, 60),
+);
+const list = kt("ChatListScreen.kt");
+has(list, "if (Api.inCooldown()) 30_000", "the list loop actually skips ticks while throttled");
+has(
+  list,
+  "Api.PollCadence.tick(KpSocket.userLive())",
+  "…and grows its gap when the socket is down",
+);
+check(
+  "…in BOTH of its loops (one wired, one not, would still storm)",
+  (list.match(/Api\.PollCadence\.tick/g) || []).length >= 2,
+  `${(list.match(/Api\.PollCadence\.tick/g) || []).length} sites`,
+);
+has(list, "Api.PollCadence.succeeded()", "a good poll clears the penalty");
+has(list, "Api.PollCadence.failed()", "…and a bad one starts it");
+
 process.stdout.write(lines.join("\n") + "\n");
 const broken = lines.filter((l) => l.startsWith("  BROKEN")).length;
 process.exit(broken ? 1 : 0);
