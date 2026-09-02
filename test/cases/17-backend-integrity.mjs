@@ -10,6 +10,7 @@
 // The statuses case asserts on STATEMENT COUNT, not timing — the free-tier
 // row-read limit does not care how fast each query is, and D1 counts round trips.
 
+import { readFile } from "node:fs/promises";
 import { makeD1, makeR2, makeCtx } from "../d1shim.mjs";
 import { MESSAGE_MAX_LENGTH } from "../../src/shared/constants.ts";
 
@@ -517,6 +518,37 @@ async function main() {
       "a same-length edit still moves the marker",
       sameLen.status === 200 && markerC !== markerB,
       `${markerB} vs ${markerC}`,
+    );
+  }
+
+  // ── 10. the free-tier row-read ceiling is a signalled condition, not a 500 ──
+  {
+    const h = await mk();
+    const A = await h.reg("busy-a");
+    // Only the conversation SELECT fails, exactly like a quota trip does: the
+    // client must be told "come back later", because retrying now spends reads on
+    // the path that is already failing.
+    const orig = h.env.DB.prepare.bind(h.env.DB);
+    h.env.DB.prepare = (sql) => {
+      if (!/FROM conversations/.test(sql)) return orig(sql);
+      const boom = async () => {
+        throw new Error("This Worker has exceeded its daily row read limit.");
+      };
+      const fake = { sql, bind: () => fake, all: boom, first: boom, run: boom };
+      return fake;
+    };
+    const r = await h.call("GET", "/api/conversations", undefined, A.token);
+    const secs = Number(r.headers.get("retry-after"));
+    check(
+      "quota exhaustion answers 503 + Retry-After instead of a bare 500",
+      r.status === 503 && r.json.error?.code === "BUSY" && secs >= 10 && secs <= 300,
+      `${r.status} ${r.json.error?.code} retry-after=${r.headers.get("retry-after")}`,
+    );
+    const src = await readFile(new URL("../../src/worker/index.ts", import.meta.url), "utf8");
+    check(
+      "the throttle header reaches replies in general (rate limit carries 60)",
+      /retryAfter \? \{ "retry-after": err.retryAfter \} : undefined/.test(src) &&
+        /429, "Too many attempts[^"]*", "RATE_LIMITED", "60"/.test(src),
     );
   }
 
