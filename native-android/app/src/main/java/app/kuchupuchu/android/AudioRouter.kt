@@ -8,6 +8,9 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
 import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
@@ -89,6 +92,42 @@ object AudioRouter {
         t.toIntArray()
     }
 
+    /**
+     * Is a Bluetooth headset connected, according to the adapter itself?
+     *
+     * This is the piece the first cut was missing, and it is why a call started
+     * with buds already paired went out of the earpiece until the button was
+     * tapped: the AUDIO stack only lists a Bluetooth device once it is being used
+     * (SCO open, or A2DP actively playing media). An idle-but-connected headset is
+     * in NEITHER getDevices(GET_DEVICES_OUTPUTS) NOR getAvailableCommunicationDevices(),
+     * so the router concluded "no Bluetooth output exists" — and since it never
+     * picked Bluetooth, it never opened SCO, so nothing ever appeared. Asking the
+     * adapter breaks that circle.
+     */
+    private fun btConnected(ctx: Context): Boolean {
+        val now = System.currentTimeMillis()
+        if (now - btSeenAt < 1000) return btSeen
+        btSeenAt = now
+        btSeen = probeBtConnected(ctx)
+        return btSeen
+    }
+
+    private fun probeBtConnected(ctx: Context): Boolean {
+        if (needsBluetoothPermission(ctx)) return false
+        val adapter =
+            runCatching {
+                (ctx.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
+            }.getOrNull() ?: return false
+        if (!runCatching { adapter.isEnabled }.getOrDefault(false)) return false
+        val connected = BluetoothProfile.STATE_CONNECTED
+        return runCatching {
+            adapter.getProfileConnectionState(BluetoothProfile.HEADSET) == connected ||
+                adapter.getProfileConnectionState(BluetoothProfile.A2DP) == connected ||
+                (Build.VERSION.SDK_INT >= 33 &&
+                    adapter.getProfileConnectionState(BluetoothProfile.LE_AUDIO) == connected)
+        }.getOrDefault(false)
+    }
+
     /** A device that must exist before it can be routed to (vs built-in hardware). */
     private fun needsExternalDevice(route: AudioRoute) =
         route == AudioRoute.BLUETOOTH || route == AudioRoute.WIRED
@@ -98,6 +137,8 @@ object AudioRouter {
     private var videoCall = false
     private var wanted = AudioRoute.EARPIECE
     private var scoUp = false
+    private var btSeen = false
+    private var btSeenAt = 0L
     private var btCommitted = false
     private var deviceCb: AudioDeviceCallback? = null
     private var scoRx: BroadcastReceiver? = null
@@ -169,6 +210,11 @@ object AudioRouter {
         return null
     }
 
+    /** Forget the 1s adapter memo: something just changed, so the next read must be live. */
+    private fun forgetBtProbe() {
+        btSeenAt = 0L
+    }
+
     /** Outputs usable for a call right now, best first. */
     fun available(ctx: Context): List<AudioRoute> {
         // From 31 the framework's own "usable for communication" list is
@@ -176,7 +222,7 @@ object AudioRouter {
         // media (A2DP) but not yet for a call is still offered.
         val all = candidates(ctx)
         val out = ArrayList<AudioRoute>(4)
-        if (all.any { it.type in BT_TYPES }) out.add(AudioRoute.BLUETOOTH)
+        if (all.any { it.type in BT_TYPES } || btConnected(ctx)) out.add(AudioRoute.BLUETOOTH)
         if (all.any { it.type in WIRED_TYPES }) out.add(AudioRoute.WIRED)
         if (all.any { it.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE }) out.add(AudioRoute.EARPIECE)
         // The loudspeaker is always a choice, even on a HAL that omits it.
@@ -265,7 +311,10 @@ object AudioRouter {
             target = if (videoCall) AudioRoute.SPEAKER else AudioRoute.EARPIECE
         }
         val avail = available(ctx)
-        val deviceOk = !needsExternalDevice(target) || deviceFor(ctx, target) != null
+        // A connected headset whose SCO link is not up yet has no device entry —
+        // that is a route to go and fetch, not a route to reject.
+        val waitingForSco = target == AudioRoute.BLUETOOTH && btConnected(ctx)
+        val deviceOk = !needsExternalDevice(target) || deviceFor(ctx, target) != null || waitingForSco
         if (target !in avail || !deviceOk) {
             target =
                 avail.firstOrNull { it != AudioRoute.BLUETOOTH || !needsBluetoothPermission(ctx) }
@@ -281,8 +330,13 @@ object AudioRouter {
             // The one exclusive way to choose a communication output from 31 on.
             // Setting it explicitly is also what stops the audio arriving on BOTH
             // the speaker and the headset.
-            btCommitted = device != null && runCatching { a.setCommunicationDevice(device) }.isSuccess
-            if (device == null) runCatching { a.clearCommunicationDevice() }
+            if (device != null) {
+                btCommitted = runCatching { a.setCommunicationDevice(device) }.isSuccess
+            } else if (!waitingForSco) {
+                // Only clear when the caller really wants phone hardware: clearing
+                // it while waiting for SCO would hand the loudspeaker back mid-call.
+                runCatching { a.clearCommunicationDevice() }
+            }
         }
         when (target) {
             AudioRoute.BLUETOOTH -> {
@@ -290,7 +344,9 @@ object AudioRouter {
                 // The SCO link only has to be opened when it is not already the
                 // device we committed to (31+ does that itself for LE Audio).
                 val linkThere = scoUp || (btCommitted && (device?.type ?: -1) in CALL_BT_TYPES)
-                if (!linkThere && (Build.VERSION.SDK_INT < 31 || device?.type != AudioDeviceInfo.TYPE_BLUETOOTH_SCO)) {
+                if ((!linkThere && (Build.VERSION.SDK_INT < 31 || device?.type != AudioDeviceInfo.TYPE_BLUETOOTH_SCO)) ||
+                    (device == null && btConnected(ctx))
+                ) {
                     // SCO is what carries a call plus its mic. Below 31 that is
                     // the only route; from 31 it is needed only when the stack has
                     // not opened SCO on its own yet — the state broadcast then
@@ -338,6 +394,7 @@ object AudioRouter {
         if (Build.VERSION.SDK_INT >= 31) {
             val committed = runCatching { a.communicationDevice }.getOrNull()
             val want = deviceFor(ctx, wanted)
+            if (needsExternalDevice(wanted) && want == null) return false
             return committed != null && want != null && committed.type == want.type
         }
         val speakerOff = !runCatching { a.isSpeakerphoneOn }.getOrDefault(false)
@@ -460,6 +517,7 @@ object AudioRouter {
         app = ctx.applicationContext
         inCall = true
         videoCall = kind == "VIDEO"
+        forgetBtProbe()
         // Listeners BEFORE the first apply(), on purpose: apply() opens SCO, and
         // its CONNECTED broadcast used to land on the floor because the receiver
         // was only registered afterwards. A headset that was already connected
@@ -478,6 +536,7 @@ object AudioRouter {
     @Synchronized
     fun end(ctx: Context) {
         inCall = false
+        forgetBtProbe()
         videoCall = false
         wanted = AudioRoute.EARPIECE
         scoUp = false
@@ -517,6 +576,7 @@ object AudioRouter {
                     if (intent.action != AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED || !inCall) return
                     val state = intent.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, -1)
                     scoUp = state == AudioManager.SCO_AUDIO_STATE_CONNECTED
+                    forgetBtProbe()
                     if (scoUp) {
                         // SCO just opened: the headset is now genuinely selectable,
                         // so commit to it. This is what makes "connect the buds in
@@ -561,6 +621,7 @@ object AudioRouter {
     @Synchronized
     fun onChanged(ctx: Context) {
         if (!inCall) return
+        forgetBtProbe()
         if (needsExternalDevice(wanted) && deviceFor(ctx, wanted) == null) {
             val avail = available(ctx)
             val fallback =

@@ -176,6 +176,34 @@ function main() {
   has(router, "fun next(", "router owns the cycle order");
   has(router, "fun label(", "label comes from the router (device name when known)");
 
+  // Third round: "Bluetooth connected but the call still goes to the earpiece".
+  // The audio device lists only show a Bluetooth output once it is in use, so an
+  // idle paired headset was invisible, and the router never picked Bluetooth —
+  // so it never opened SCO, so the headset stayed invisible. Detection has to ask
+  // the ADAPTER, not the audio stack.
+  has(
+    router,
+    "getProfileConnectionState",
+    "the Bluetooth adapter itself is asked whether a headset is connected",
+  );
+  has(router, "BluetoothProfile.HEADSET", "HFP (the call profile) counts");
+  has(router, "BluetoothProfile.A2DP", "A2DP-only connections count too");
+  has(router, "Context.BLUETOOTH_SERVICE", "through BluetoothManager, no reflection");
+  check(
+    "available() does not depend on the audio device lists alone",
+    /if \(all\.any \{ it\.type in BT_TYPES \} \|\| btConnected\(ctx\)\)/.test(router),
+    "Bluetooth must be offered when the adapter says a headset is connected",
+  );
+  // Picking Bluetooth before SCO exists is a promise to go get it, not a failure:
+  // the route is kept, SCO is opened, and the loudspeaker is not handed the call.
+  has(router, "waitingForSco", "a connected headset with no device entry yet is a pending route");
+  has(router, "else if (!waitingForSco)", "the pending case never clears the communication device");
+  check(
+    "the adapter probe is re-read whenever anything can have changed",
+    (router.match(/forgetBtProbe\(\)/g) || []).length >= 4,
+    "begin/end/hot-plug/SCO must all invalidate the 1s memo",
+  );
+
   // Second-round contract, from the owner's retest: dialling with buds already
   // connected had to be moved to Bluetooth by hand, and for a moment the ring
   // and the call played in two places. Both were ordering/agreement bugs:
