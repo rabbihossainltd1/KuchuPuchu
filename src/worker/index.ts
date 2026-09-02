@@ -410,6 +410,16 @@ async function ensureSchema(db: D1Database) {
     db,
     `ALTER TABLE users ADD COLUMN avatar_version INTEGER NOT NULL DEFAULT 0`,
   );
+  // §16 device identity: one row per install, so signing out on the phone in your
+  // hand can be expressed as "remove THIS device" instead of only "remove them all".
+  await runCatchingSql(db, `ALTER TABLE devices ADD COLUMN device_id TEXT`);
+  await runCatchingSql(db, `ALTER TABLE devices ADD COLUMN platform TEXT`);
+  await runCatchingSql(db, `ALTER TABLE devices ADD COLUMN app_version TEXT`);
+  await runCatchingSql(db, `ALTER TABLE devices ADD COLUMN last_seen_at TEXT`);
+  await runCatchingSql(
+    db,
+    `CREATE INDEX IF NOT EXISTS idx_devices_user_dev ON devices(user_id, device_id)`,
+  );
   await runCatchingSql(
     db,
     `CREATE INDEX IF NOT EXISTS idx_messages_dedupe ON messages(conv_id, sender_id, client_id)`,
@@ -1293,7 +1303,21 @@ export default {
       const pruned = await env.DB.prepare("DELETE FROM error_log WHERE created_at < ?")
         .bind(cutoff)
         .run();
-      console.log("cron_reap", JSON.stringify({ reaped, pruned: pruned?.meta?.changes ?? 0 }));
+      // A device that has not re-registered in 60 days is an uninstalled app (the
+      // handle is refreshed on every start and on boot). Pushing at it is wasted
+      // work, and an FCM token that has been dead that long is never coming back.
+      const devCutoff = new Date(Date.now() - 60 * 864e5).toISOString();
+      const devs = await env.DB.prepare("DELETE FROM devices WHERE updated_at < ?")
+        .bind(devCutoff)
+        .run();
+      console.log(
+        "cron_reap",
+        JSON.stringify({
+          reaped,
+          pruned: pruned?.meta?.changes ?? 0,
+          devices: devs?.meta?.changes ?? 0,
+        }),
+      );
     } catch (err) {
       console.error(
         "cron_reap_error",
@@ -1486,7 +1510,32 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   if (path === "/api/auth/logout" && method === "POST") {
     const header = request.headers.get("authorization") ?? "";
     const token = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
-    if (token) await run(db, "DELETE FROM sessions WHERE token_hash = ?", await sha256Hex(token));
+    if (token) {
+      const hash = await sha256Hex(token);
+      // The session and the push handle die together — and ONLY this device's row.
+      // This has to happen inside the logout request itself: SettingsScreen signs
+      // out first, so a later authenticated DELETE would already be a 401, and
+      // KpPush.unregister() on its own leaves the server pushing at a token the
+      // user just walked away from (a signed-out phone still lighting up for the
+      // old account). No deviceId → no device rows touched: a token revocation
+      // elsewhere must not silence the user's tablet.
+      const deviceId = String(body.deviceId || "")
+        .trim()
+        .slice(0, 64);
+      const owner = await one<{ user_id: string }>(
+        db,
+        "SELECT user_id FROM sessions WHERE token_hash = ?",
+        hash,
+      );
+      await run(db, "DELETE FROM sessions WHERE token_hash = ?", hash);
+      if (deviceId && owner)
+        await run(
+          db,
+          "DELETE FROM devices WHERE user_id = ? AND device_id = ?",
+          owner.user_id,
+          deviceId,
+        );
+    }
     return json({ ok: true });
   }
 
@@ -1596,18 +1645,52 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       .trim()
       .slice(0, 512);
     if (!token) fail(400, "Missing push token.");
+    const deviceId = String(body.deviceId || "")
+      .trim()
+      .slice(0, 64);
+    const platform = String(body.platform || "")
+      .trim()
+      .slice(0, 24);
+    const appVersion = String(body.appVersion || "")
+      .trim()
+      .slice(0, 32);
+    const at = nowIso();
+    // Re-registering the same install refreshes last_seen_at, which is what makes
+    // the cron's stale-device prune safe: an app that is still installed says so
+    // on every start and on every boot.
     await run(
       db,
-      "INSERT OR REPLACE INTO devices (token, user_id, updated_at) VALUES (?, ?, ?)",
+      `INSERT OR REPLACE INTO devices
+         (token, user_id, updated_at, device_id, platform, app_version, last_seen_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       token,
       uid,
-      nowIso(),
+      at,
+      deviceId || null,
+      platform || null,
+      appVersion || null,
+      at,
     );
     return json({ ok: true });
   }
   if (path === "/api/devices" && method === "DELETE") {
-    await run(db, "DELETE FROM devices WHERE user_id = ?", uid);
-    return json({ ok: true });
+    // Targeted on purpose. The old blanket `WHERE user_id = ?` deleted every
+    // device for the account, so "log out of this phone" switched off push on the
+    // tablet too — §16: never assume one account has one device.
+    const wantToken = (url.searchParams.get("token") || "").trim().slice(0, 512);
+    const wantDevice = (url.searchParams.get("deviceId") || "").trim().slice(0, 64);
+    const res = wantDevice
+      ? await db
+          .prepare("DELETE FROM devices WHERE user_id = ? AND device_id = ?")
+          .bind(uid, wantDevice)
+          .run()
+      : wantToken
+        ? await db
+            .prepare("DELETE FROM devices WHERE user_id = ? AND token = ?")
+            .bind(uid, wantToken)
+            .run()
+        : await db.prepare("DELETE FROM devices WHERE user_id = ?").bind(uid).run();
+    return json({ ok: true, removed: res?.meta?.changes ?? 0 });
   }
 
   /* ---------- users & discovery ---------- */

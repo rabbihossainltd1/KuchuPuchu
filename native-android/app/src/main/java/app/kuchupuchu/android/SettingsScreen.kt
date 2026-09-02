@@ -439,7 +439,18 @@ fun SettingsScreen(nav: NavController) {
                 TextButton(onClick = {
                     confirmLogout = false
                     scope.launch {
-                        runCatching { withContext(Dispatchers.IO) { Api.post("/api/auth/logout") } }
+                        // deviceId travels with the logout so the worker removes
+                        // this install's push row in the same request: while the
+                        // bearer is still valid, and without touching the user's
+                        // other devices.
+                        runCatching {
+                            withContext(Dispatchers.IO) {
+                                Api.post(
+                                    "/api/auth/logout",
+                                    org.json.JSONObject().put("deviceId", KpPush.deviceId(ctx)),
+                                )
+                            }
+                        }
                         KpPush.unregister()
                         KpNotify.cancelAll(ctx)
                         Store.signOut(ctx)

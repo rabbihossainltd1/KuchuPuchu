@@ -119,6 +119,26 @@ object KpPush {
      * and remembers the token that last got through, so a healthy install costs
      * one POST.
      */
+    /**
+     * Stable per-install id (§16). It is the handle sign-out uses to remove THIS
+     * device's push row, which is why it is generated once and kept in prefs
+     * rather than derived from the FCM token (FCM hands back a new token string
+     * after a reinstall or a cloud backup restore, and both must keep working).
+     */
+    fun deviceId(ctx: Context): String {
+        val app = ctx.applicationContext
+        val prefs = app.getSharedPreferences("kp_push", Context.MODE_PRIVATE)
+        prefs.getString("device_id", null)?.takeIf { it.isNotBlank() }?.let { return it }
+        val fresh = java.util.UUID.randomUUID().toString()
+        prefs.edit().putString("device_id", fresh).apply()
+        return fresh
+    }
+
+    private fun appVersion(ctx: Context): String = runCatching {
+        val pi = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+        pi.versionName ?: ""
+    }.getOrDefault("")
+
     fun registerToken(ctx: Context) {
         if (!enabled) return
         // Kept for unregister(), which has no Context of its own (it is called
@@ -148,8 +168,17 @@ object KpPush {
                 if (prefs.getString("registered", null) == token) return@Thread
                 for (wait in longArrayOf(0, 2_000, 6_000, 20_000, 60_000, 180_000, 420_000)) {
                     if (wait > 0) Thread.sleep(wait)
-                    val ok = runCatching { Api.post("/api/devices", JSONObject().put("token", token)); true }
-                        .getOrDefault(false)
+                    val ok = runCatching {
+                        Api.post(
+                            "/api/devices",
+                            JSONObject()
+                                .put("token", token)
+                                .put("deviceId", deviceId(app))
+                                .put("platform", "android")
+                                .put("appVersion", appVersion(app)),
+                        )
+                        true
+                    }.getOrDefault(false)
                     if (ok) {
                         prefs.edit().putString("registered", token).apply()
                         registered = true

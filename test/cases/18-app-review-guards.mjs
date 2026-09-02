@@ -277,6 +277,49 @@ has(list, "Api.PollCadence.failed()", "…and a bad one starts it");
   );
 }
 
+// ── §16 push-device lifecycle: sign-out must remove THIS install, no more ─────
+{
+  const push = kt("KpPush.kt");
+  const dStart = push.indexOf("fun deviceId(ctx: Context): String");
+  const dev = push.slice(dStart, dStart + 700);
+  check(
+    "the install id is stable, generated once and kept in prefs",
+    dStart > 0 &&
+      dev.includes('getString("device_id", null)') &&
+      dev.includes('putString("device_id", fresh)'),
+    `index=${dStart}`,
+  );
+  const reg = push.slice(
+    push.indexOf("internal fun post(ctx: Context, token: String)"),
+    push.indexOf("internal fun post(ctx: Context, token: String)") + 1400,
+  );
+  check(
+    "registration carries the §16 identity fields",
+    reg.includes('.put("deviceId", deviceId(app))') &&
+      reg.includes('.put("platform", "android")') &&
+      reg.includes('.put("appVersion", appVersion(app))'),
+    reg.slice(0, 60),
+  );
+  check(
+    "the app version comes from the package, not a BuildConfig that is not generated",
+    !push.includes("BuildConfig") && push.includes("getPackageInfo(ctx.packageName, 0)"),
+  );
+  const settings = kt("SettingsScreen.kt");
+  const outStart = settings.indexOf(
+    'Api.post(\n                                    "/api/auth/logout"',
+  );
+  check(
+    "logout names the device it is signing out of, in the logout request itself",
+    outStart > 0 &&
+      settings.slice(outStart, outStart + 320).includes('put("deviceId", KpPush.deviceId(ctx))'),
+    `index=${outStart}`,
+  );
+  check(
+    "…and the local FCM cleanup still forgets the accepted token (re-login must re-register)",
+    push.includes('remove("registered")') && push.includes("deleteToken()"),
+  );
+}
+
 process.stdout.write(lines.join("\n") + "\n");
 const broken = lines.filter((l) => l.startsWith("  BROKEN")).length;
 process.exit(broken ? 1 : 0);
