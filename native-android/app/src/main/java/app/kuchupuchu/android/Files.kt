@@ -143,7 +143,9 @@ object FilesUtil {
         if (input == null) {
             // Leaving the pending row behind used to put a 0-byte file in
             // Downloads for a copy that never happened.
-            runCatching { ctx.contentResolver.delete(target, null) }
+            // The 2-argument delete()/update() are API 30; these forms date to API 1
+            // and do the same thing on every version this app claims to support.
+            runCatching { ctx.contentResolver.delete(target, null, null) }
             return
         }
         val copied =
@@ -156,12 +158,12 @@ object FilesUtil {
         values.clear()
         if (copied <= 0L) {
             values.put(MediaStore.Downloads.IS_PENDING, 0)
-            runCatching { ctx.contentResolver.delete(target, null) }
+            runCatching { ctx.contentResolver.delete(target, null, null) }
             android.widget.Toast.makeText(ctx, "Could not save that file.", android.widget.Toast.LENGTH_SHORT).show()
             return
         }
         values.put(MediaStore.Downloads.IS_PENDING, 0)
-        ctx.contentResolver.update(target, values, null)
+        ctx.contentResolver.update(target, values, null, null)
     }
 
     /**

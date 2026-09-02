@@ -43,6 +43,16 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // java.time back to API 24. The app has used Instant/Duration/LocalDate since
+        // well before this line existed, with minSdk 24 and no desugaring — lint's
+        // NewApi check reported 128 findings the first time anyone ran it, i.e. every
+        // timestamp in the chat list, the call log, the status list and the clock in
+        // the theme was a NoClassDefFoundError on any Android 7.x/8.0 device. The app
+        // "worked" only because every phone it was tried on was newer than what the
+        // build advertises. D8 compiles the missing APIs into the APK instead; R8
+        // shrinking is compatible with it (AGP docs: "only when using the R8 shrinker",
+        // which is what release uses here).
+        isCoreLibraryDesugaringEnabled = true
     }
     kotlinOptions { jvmTarget = "17" }
     // Unit tests are pure-JVM on purpose: no Robolectric, no android.jar stubs to
@@ -75,6 +85,11 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.activity:activity-compose:1.9.3")
+    // registerForActivityResult() (photo picker, location attach) needs
+    // androidx.fragment >= 1.3.0; Compose pulled 1.5.4 transitively and lint's
+    // InvalidFragmentVersionForActivityResult said so. Named explicitly so it is a
+    // decision, not an accident of what compose-bom happens to resolve.
+    implementation("androidx.fragment:fragment-ktx:1.8.9")
     implementation("androidx.navigation:navigation-compose:2.8.3")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
@@ -91,5 +106,6 @@ dependencies {
     // notification id math (app/src/test). JUnit4 because that is what AGP's
     // testDebugUnitTest runs without any further configuration, and pinned like every
     // other dependency here (§51).
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     testImplementation("junit:junit:4.13.2")
 }

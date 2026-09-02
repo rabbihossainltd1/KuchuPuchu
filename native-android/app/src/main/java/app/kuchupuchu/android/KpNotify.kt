@@ -1,5 +1,6 @@
 package app.kuchupuchu.android
 
+import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -96,6 +97,12 @@ object KpNotify {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
+    // NotificationManagerCompat.notify() does NOT throw when POST_NOTIFICATIONS is
+    // not granted — the system drops the notification — and message() gates on
+    // areNotificationsEnabled() first (reporting why nothing appeared, which is the
+    // part a user can act on). Annotating instead of adding a checkSelfPermission()
+    // per call keeps that one gate in one place.
+    @SuppressLint("MissingPermission")
     fun message(
         ctx: Context,
         from: String,
@@ -209,13 +216,14 @@ object KpNotify {
         runCatching {
             // ONE card per message — a shared per-convo id used to make the
             // SECOND message silently replace the first card (no new
-            // heads-up/sound on many OEMs). But the id must be recomputable
-            // by the action buttons: they cancel THIS card. With the worker's
-            // `mid` in the push payload the card id is simply mid.hashCode()
-            // — unique per message AND known to the Reply/Like/Mark-as-read
-            // actions (they carry `mid` as an extra). The old random high
-            // bits made nm.cancel(convoId.hashCode()) miss the card ~127/128
-            // of the time, so actions "did nothing".
+            // heads-up/sound on many OEMs). But the id must be recomputable by
+            // the action buttons, which cancel THIS card: hence NotifyIds, which
+            // both this call and KpNotifActionReceiver go through. Its history is
+            // the reason it is a function and not an expression here — the first
+            // version used random high bits (nm.cancel missed ~127/128 of the
+            // time), the second masked the sign bit on this side only (a negative
+            // String.hashCode() is ~55% of real ids, so again: actions that
+            // "did nothing").
             val msgId = NotifyIds.messageCard(mid, convoId, System.nanoTime())
             mgr.notify(msgId, n)
             mgr.notify(GROUP.hashCode(), summary)
@@ -225,6 +233,12 @@ object KpNotify {
     }
 
     /** Incoming-call heads-up when the engine isn't alive yet; opening the app lets it take over. */
+    // NotificationManagerCompat.notify() does NOT throw when POST_NOTIFICATIONS is
+    // not granted — the system drops the notification — and message() gates on
+    // areNotificationsEnabled() first (reporting why nothing appeared, which is the
+    // part a user can act on). Annotating instead of adding a checkSelfPermission()
+    // per call keeps that one gate in one place.
+    @SuppressLint("MissingPermission")
     fun callHeadsUp(ctx: Context, from: String, video: Boolean, callId: String) {
         ensureChannels(ctx)
         val open =
@@ -275,6 +289,12 @@ object KpNotify {
      * (app killed) is system-drawn and cannot carry actions — tapping it
      * deep-links via the data extras instead.
      */
+    // NotificationManagerCompat.notify() does NOT throw when POST_NOTIFICATIONS is
+    // not granted — the system drops the notification — and message() gates on
+    // areNotificationsEnabled() first (reporting why nothing appeared, which is the
+    // part a user can act on). Annotating instead of adding a checkSelfPermission()
+    // per call keeps that one gate in one place.
+    @SuppressLint("MissingPermission")
     fun missedCall(
         ctx: Context,
         from: String,
@@ -329,6 +349,12 @@ object KpNotify {
      * in place — a second, differently-id'd "Sent" card used to pile up next
      * to the one that failed to dismiss.
      */
+    // NotificationManagerCompat.notify() does NOT throw when POST_NOTIFICATIONS is
+    // not granted — the system drops the notification — and message() gates on
+    // areNotificationsEnabled() first (reporting why nothing appeared, which is the
+    // part a user can act on). Annotating instead of adding a checkSelfPermission()
+    // per call keeps that one gate in one place.
+    @SuppressLint("MissingPermission")
     fun replySent(ctx: Context, convoId: String, text: String, cardId: Int) {
         val n =
             NotificationCompat.Builder(ctx, CHAT_CHANNEL)
@@ -358,7 +384,14 @@ object KpNotify {
                     it.id != keepId &&
                         (
                             n.category == android.app.Notification.CATEGORY_CALL ||
-                                (n.channelId == CALL_CHANNEL && n.category == null)
+                                // Channels (and getChannelId) are API 26+; below that this
+                                // threw NoSuchMethodError and runCatching ate it, so call
+                                // cards were never dismissed on Android 7.x.
+                                (
+                                    Build.VERSION.SDK_INT >= 26 &&
+                                        n.channelId == CALL_CHANNEL &&
+                                        n.category == null
+                                )
                             )
                 }
                 .forEach { nm.cancel(it.id) }
@@ -371,6 +404,10 @@ object KpNotify {
      * Accept/Decline card, or missed-call alerts.
      */
     fun cancelPayloadCallCards(ctx: Context) {
+        // The whole function is about channels, which do not exist below API 26 —
+        // and Notification#getChannelId is itself 26+, so on Android 7.x this was a
+        // swallowed NoSuchMethodError rather than a no-op.
+        if (Build.VERSION.SDK_INT < 26) return
         runCatching {
             val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
             nm.activeNotifications

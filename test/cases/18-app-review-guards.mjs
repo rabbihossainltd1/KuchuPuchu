@@ -55,7 +55,8 @@ check(
 );
 check(
   "a failed open leaves NO 0-byte row",
-  dl.includes("ctx.contentResolver.delete(target, null)") && dl.includes("if (input == null)"),
+  dl.includes("ctx.contentResolver.delete(target, null, null)") &&
+    dl.includes("if (input == null)"),
   "",
 );
 check(

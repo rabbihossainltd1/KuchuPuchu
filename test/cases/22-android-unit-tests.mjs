@@ -4,6 +4,7 @@
 // tests in native-android/app/src/test (run by `./gradlew testDebugUnitTest` in CI).
 
 import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 
 const lines = [];
 const check = (name, cond, detail) =>
@@ -90,6 +91,95 @@ const gradle = read(`${ANDROID}/build.gradle.kts`);
     "the tables the tests pin are the shipped ones",
     /1_500L, 4_000L, 12_000L, 30_000L, 60_000L, 180_000L, 300_000L/.test(policy) &&
       /const val MAX_AUTO = 12/.test(policy),
+  );
+}
+
+{
+  // The api-level check must fire on the exact configuration that shipped: java.time,
+  // minSdk 24, no desugaring. A guard that never fails is not a guard.
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { validateAndroid } = await import("../../scripts/validate-android.ts");
+  const tree = (gradleBody, srcBody) => {
+    const root = mkdtempSync(join(tmpdir(), "kpapi-"));
+    const main = join(root, "native-android/app/src/main");
+    mkdirSync(join(main, "java/app/kuchupuchu/android"), { recursive: true });
+    writeFileSync(join(main, "AndroidManifest.xml"), "<manifest><application /></manifest>");
+    writeFileSync(join(main, "java/app/kuchupuchu/android/S.kt"), srcBody);
+    writeFileSync(join(root, "native-android/app/build.gradle.kts"), gradleBody);
+    return { root, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+  };
+  const uses = `import java.time.Instant
+import java.time.ZoneId
+class S { val picker = registerForActivityResult(null); val t = Instant.now() }
+`;
+  const noDesugar = `android {
+  defaultConfig { minSdk = 24 }
+  lint { abortOnError = true }
+  implementation("androidx.fragment:fragment-ktx:1.8.9")
+}
+`;
+  const withDesugar =
+    noDesugar +
+    `android {
+  compileOptions { isCoreLibraryDesugaringEnabled = true }
+  coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+}
+`;
+  {
+    const t = tree(noDesugar, uses);
+    const finds = validateAndroid(t.root);
+    check(
+      "java.time + minSdk 24 + no desugaring is a finding",
+      finds.some((f) => f.check === "api-level"),
+      JSON.stringify(finds).slice(0, 160),
+    );
+    t.cleanup();
+  }
+  {
+    const t = tree(withDesugar, uses);
+    const finds = validateAndroid(t.root);
+    check(
+      "…and the same tree with desugaring enabled is clean",
+      !finds.some((f) => f.check === "api-level"),
+      JSON.stringify(finds).slice(0, 160),
+    );
+    t.cleanup();
+  }
+  {
+    const t = tree(noDesugar.replace("fragment-ktx:1.8.9", "fragment-ktx:1.2.5"), uses);
+    const finds = validateAndroid(t.root);
+    check(
+      "an old androidx.fragment under registerForActivityResult is a finding",
+      finds.some((f) => /fragment/.test(f.message)),
+    );
+    t.cleanup();
+  }
+  {
+    const t = tree(
+      `android { defaultConfig { minSdk = 26 } lint { abortOnError = true } implementation("androidx.fragment:fragment-ktx:1.8.9") }`,
+      uses,
+    );
+    const finds = validateAndroid(t.root);
+    check(
+      "minSdk 26 needs no desugaring, so nothing is reported",
+      !finds.some((f) => f.check === "api-level"),
+      JSON.stringify(finds).slice(0, 120),
+    );
+    t.cleanup();
+  }
+  check("CI prints the full lint report when lint fails", ci.includes("lint-results"));
+  check(
+    "the app pins the desugaring library like everything else",
+    /coreLibraryDesugaring\("com\.android\.tools:desugar_jdk_libs:2\.1\.5"\)/.test(gradle),
+  );
+  check(
+    "the API-27-only frame grab is guarded (it was a silent no-thumbnail)",
+    /if \(Build\.VERSION\.SDK_INT >= 27\)/.test(main("AttachSheet.kt")),
+  );
+  check(
+    "Bluetooth probes use the constant set the API documents",
+    /BluetoothAdapter\.STATE_CONNECTED/.test(main("AudioRouter.kt")),
   );
 }
 

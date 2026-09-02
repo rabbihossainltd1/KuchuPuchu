@@ -59,6 +59,14 @@ jobs:
           chmod +x gradlew
           ./gradlew testDebugUnitTest lintDebug --no-daemon --continue \
             -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
+      # The console report is truncated by `maxIssues`, so a red lint run has to
+      # ship the whole text report; otherwise CI says "Lint found 141 errors" and the
+      # only way to see them is to reproduce the build locally.
+      - name: Lint and unit-test reports
+        if: failure()
+        run: |
+          find native-android/app/build/reports -name 'lint-results*.txt' -exec sh -c 'echo "--- $1"; cat "$1"' _ {} \; || true
+          find native-android/app/build/test-results -name '*.xml' -exec sh -c 'echo "--- $1"; head -40 "$1"' _ {} \; || true
       - name: Build APK
         working-directory: native-android
         run: |

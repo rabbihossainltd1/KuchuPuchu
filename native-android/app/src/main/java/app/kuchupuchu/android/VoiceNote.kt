@@ -102,15 +102,7 @@ class VoicePlayer {
                     f.writeBytes(bytes)
                 }
                 val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                val focus = android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
-                    .setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_MEDIA)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                            .build(),
-                    )
-                    .build()
-                am.requestAudioFocus(focus)
+                val focus = gainDuckFocus(am)
                 val p = MediaPlayer()
                 p.setAudioAttributes(
                     AudioAttributes.Builder()
@@ -122,13 +114,13 @@ class VoicePlayer {
                 p.setOnCompletionListener {
                     playingId = null
                     loadingId = null
-                    runCatching { am.abandonAudioFocusRequest(focus) }
+                    releaseDuckFocus(am, focus)
                     onEnded()
                 }
                 p.setOnErrorListener { _, _, _ ->
                     playingId = null
                     loadingId = null
-                    runCatching { am.abandonAudioFocusRequest(focus) }
+                    releaseDuckFocus(am, focus)
                     true
                 }
                 p.prepare() // local file — synchronous prepare is fine
@@ -149,5 +141,48 @@ class VoicePlayer {
         player = null
         playingId = null
         loadingId = null
+    }
+
+    /**
+     * Transient ducking focus, on both platforms: `AudioFocusRequest` is API 26+ and
+     * this module's floor is 24, so building it unguarded meant `requestAudioFocus`
+     * threw NoSuchMethodError at the top of the play block — no voice note played on
+     * Android 7.x at all. Returns the token [releaseDuckFocus] hands back; the play
+     * path does not depend on the result, exactly as before.
+     */
+    @Suppress("DEPRECATION")
+    private fun gainDuckFocus(am: AudioManager): Any? =
+        if (Build.VERSION.SDK_INT >= 26) {
+            val req =
+                android.media.AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build(),
+                    )
+                    .build()
+            if (am.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) req else null
+        } else {
+            val listener = AudioManager.OnAudioFocusChangeListener { }
+            val res =
+                am.requestAudioFocus(
+                    listener,
+                    AudioManager.STREAM_MUSIC,
+                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK,
+                )
+            if (res == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) listener else null
+        }
+
+    /** Releases whatever [gainDuckFocus] took. Branches on the API level, never on `is`:
+     *  a type test on a class the device does not have is itself the crash. */
+    private fun releaseDuckFocus(am: AudioManager, token: Any?) {
+        if (token == null) return
+        if (Build.VERSION.SDK_INT >= 26) {
+            runCatching { am.abandonAudioFocusRequest(token as android.media.AudioFocusRequest) }
+        } else {
+            @Suppress("DEPRECATION")
+            runCatching { am.abandonAudioFocus(token as AudioManager.OnAudioFocusChangeListener) }
+        }
     }
 }

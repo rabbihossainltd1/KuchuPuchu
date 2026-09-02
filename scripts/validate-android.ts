@@ -224,6 +224,43 @@ export function validateAndroid(root: string): Finding[] {
       );
   }
 
+  // 8. API-level honesty. This is the check the first real lint run forced into
+  //    existence: the app used java.time with minSdk 24 and no core library
+  //    desugaring, which is 128 lint errors and a NoClassDefFoundError on every
+  //    Android 7.x / 8.0 device — while assembling and installing fine on the one
+  //    phone anyone had. A build that advertises an API level it cannot serve is a
+  //    shipping bug, so the pair (minSdk, desugaring) is validated, not eyeballed.
+  if (appGradle >= 0) {
+    const t = gradle[appGradle]!;
+    const minSdk = +(t.match(/minSdk\s*=\s*(\d+)/)?.[1] ?? 0);
+    const usesJavaTime = /import\s+java\.time\.[A-Z]/.test(src);
+    const desugared = /isCoreLibraryDesugaringEnabled\s*=\s*true/.test(t);
+    const desugarDep =
+      /coreLibraryDesugaring\(\s*["']com\.android\.tools:desugar_jdk_libs["']?/.test(t);
+    if (usesJavaTime && minSdk > 0 && minSdk < 26 && !desugared)
+      add(
+        "api-level",
+        `minSdk ${minSdk} + java.time without desugaring — java.time needs API 26; every call throws on older devices (enable isCoreLibraryDesugaringEnabled)`,
+      );
+    if (desugared && !desugarDep)
+      add(
+        "api-level",
+        "desugaring is enabled but no coreLibraryDesugaring(dependency) is declared",
+      );
+    // registerForActivityResult() needs androidx.fragment >= 1.3.0; before this was
+    // named in the build it came in transitively at whatever version compose-bom
+    // resolved, which is what lint's InvalidFragmentVersionForActivityResult said.
+    if (/registerForActivityResult/.test(src)) {
+      const frag = /androidx\.fragment:fragment(?:-ktx)?:([\d.]+)/.exec(t);
+      const v = frag?.[1]?.split(".").map(Number) ?? [];
+      if (!frag || (v[0] ?? 0) * 100 + (v[1] ?? 0) < 103)
+        add(
+          "api-level",
+          `registerForActivityResult() with fragment ${frag?.[1] ?? "(transitive)"} — androidx.fragment 1.3.0+ must be named in the build`,
+        );
+    }
+  }
+
   return finds;
 }
 

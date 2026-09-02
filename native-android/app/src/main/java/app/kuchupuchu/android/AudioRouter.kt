@@ -1,6 +1,10 @@
 package app.kuchupuchu.android
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -8,8 +12,6 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
-import android.bluetooth.BluetoothManager
-import android.bluetooth.BluetoothProfile
 import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
@@ -111,6 +113,12 @@ object AudioRouter {
         return btSeen
     }
 
+    // Lint's MissingPermission wants a checkPermission() at the call site; the call
+    // site has one, it is just behind needsBluetoothPermission() (and every probe is
+    // additionally runCatching'd, because a SecurityException here must not take the
+    // audio route down with it). Suppressed rather than re-checked so there is one
+    // guard, not two that can disagree.
+    @SuppressLint("MissingPermission")
     private fun probeBtConnected(ctx: Context): Boolean {
         if (needsBluetoothPermission(ctx)) return false
         val adapter =
@@ -118,7 +126,11 @@ object AudioRouter {
                 (ctx.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
             }.getOrNull() ?: return false
         if (!runCatching { adapter.isEnabled }.getOrDefault(false)) return false
-        val connected = BluetoothProfile.STATE_CONNECTED
+        // BluetoothAdapter.STATE_* is the constant set getProfileConnectionState
+        // documents as its return contract (BluetoothProfile.STATE_* carries the same
+        // numbers, which is why this never misbehaved — but lint's WrongConstant is
+        // right that the other one is the API's own vocabulary).
+        val connected = BluetoothAdapter.STATE_CONNECTED
         return runCatching {
             adapter.getProfileConnectionState(BluetoothProfile.HEADSET) == connected ||
                 adapter.getProfileConnectionState(BluetoothProfile.A2DP) == connected ||

@@ -736,8 +736,17 @@ private fun decodeThumb(uri: Uri, ctx: android.content.Context, isVideo: Boolean
             val mmr = MediaMetadataRetriever()
             try {
                 mmr.setDataSource(ctx, uri)
-                val scaled = mmr.getScaledFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 256, 256)
-                    ?: mmr.frameAtTime
+                // getScaledFrameAtTime is API 27+; on 24-26 it is a NoSuchMethodError,
+                // which the surrounding runCatching turned into "no thumbnail" — so the
+                // video preview was simply missing on those devices. frameAtTime is
+                // API 10+ and the bitmap is downscaled by the caller anyway.
+                val scaled =
+                    if (Build.VERSION.SDK_INT >= 27) {
+                        mmr.getScaledFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 256, 256)
+                            ?: mmr.frameAtTime
+                    } else {
+                        mmr.frameAtTime
+                    }
                 scaled?.asImageBitmap()
             } finally {
                 mmr.release()
