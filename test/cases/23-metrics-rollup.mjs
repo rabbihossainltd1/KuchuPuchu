@@ -395,7 +395,9 @@ const today = new Date().toISOString().slice(0, 10);
   );
   check(
     "the rollup is in the cron log line, so 'no data' is itself visible",
-    flat.includes("devices: devs?.meta?.changes ?? 0, metrics,"),
+    // 0 is a real answer here (nothing to prune / nothing counted), but only if the
+    // reader can tell "ran and found nothing" from "did not run" -> `pruneRan`.
+    flat.includes("pruneRan, pruned, devices: devs, metrics,"),
   );
 }
 

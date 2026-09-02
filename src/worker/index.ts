@@ -404,6 +404,34 @@ async function ensureSchema(db: D1Database) {
     `CREATE INDEX IF NOT EXISTS idx_files_owner ON files(owner_id)`,
   ];
   await db.batch(statements.map((sql) => db.prepare(sql)));
+  // Every cleanup DELETE needs its own index, or D1 bills a full table scan for
+  // it: the free tier counts `row reads` as rows *looked at*, not rows returned.
+  // On 2026-09-02 production hit that 5 M/day ceiling before midnight and every
+  // cron tick after it died with `D1_ERROR: ... free tier daily row read limit`.
+  // The burner was this worker's own bookkeeping: the per-tick stale-RINGING
+  // SELECT plus the sweeps over `error_log`, `devices`, `sessions`, `typing` and
+  // `statuses` had no usable index (idx_status_user leads on user_id, so a bare
+  // `expires_at <` filter still scans), and 7 days of retained `error_log` at
+  // ~3.2 k rows/day is ~23 k rows per tick — ~33 M/day across 1 440 ticks.
+  // `EXPLAIN QUERY PLAN` on the shipped DDL, before: `SCAN error_log`; after:
+  // `SEARCH error_log USING INDEX (created_at<?)`.
+  //
+  // Outside the batch on purpose, like the ALTERs below: building an index reads
+  // the table, so on a day when D1's row-read ceiling is already hit the statement
+  // errors — and in a batch that error would take the CREATE TABLEs with it and
+  // every request would fail until midnight. Here it is just one swallowed line,
+  // retried by the next cold isolate (which is the point: the schema heals itself
+  // the moment the quota resets, with nothing to run by hand).
+  for (const sql of [
+    `CREATE INDEX IF NOT EXISTS idx_calls_status_created ON calls(status, created_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_errorlog_created ON error_log(created_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_devices_updated ON devices(updated_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_typing_at ON typing(at)`,
+    `CREATE INDEX IF NOT EXISTS idx_statuses_expires ON statuses(expires_at)`,
+  ]) {
+    await runCatchingSql(db, sql);
+  }
   // Lightweight migrations: columns added after the first deploy. These are
   // deliberately outside the batch — a duplicate-column error must not roll the
   // whole batch back — and each one is individually tolerant.
@@ -1085,6 +1113,8 @@ async function pushToUser(
  * skipped. A first-ever run sets the watermarks to today's max rowid and counts
  * nothing — no backfill scan, and no pretending history we did not record.
  */
+const PRUNE_MARKER = "prune.done";
+
 const METRIC_SOURCES: {
   source: string;
   table: string;
@@ -1214,6 +1244,19 @@ export async function probeBackendLatency(
 }
 
 /**
+ * The one statement that knows how a *gauge* is written: the newest number wins, so
+ * re-running an hour is idempotent. `pruneAgedRows` uses it for its day marker for the
+ * same reason it must not accumulate.
+ */
+function gaugeUpsert(db: D1Database, day: string, key: string, value: number): D1PreparedStatement {
+  return db
+    .prepare(
+      "INSERT INTO metrics_daily (day, key, value) VALUES (?, ?, ?) ON CONFLICT(day, key) DO UPDATE SET value = excluded.value",
+    )
+    .bind(day, key, value);
+}
+
+/**
  * The one statement that knows how a *counter* accumulates. Both the table rollups and
  * the latency probe below go through it, so "counters add, gauges replace" has exactly
  * one implementation that can drift, and a new metric source cannot quietly invent a
@@ -1230,6 +1273,51 @@ function counterUpsert(
       "INSERT INTO metrics_daily (day, key, value) VALUES (?, ?, ?) ON CONFLICT(day, key) DO UPDATE SET value = value + excluded.value",
     )
     .bind(day, key, value);
+}
+
+/**
+ * Age-based cleanup, at most once per UTC day, keyed on a marker row instead of the
+ * wall clock. The windows are 7 days (`error_log`) and 60 days (`devices`), so the
+ * 1 439 extra runs a day buy nothing — and a `DELETE` whose WHERE has no index to
+ * seek on reads *every* row of the table whether or not it changes one, which is
+ * exactly how this worker exhausted D1's free-tier row reads on 2026-09-02. A marker
+ * row (not `getUTCHours() === 3`) means the cadence survives a restarted isolate, does
+ * not depend on the cron happening to fire in a particular minute, and is visible in
+ * `metrics_daily` as `prune.done` for the day.
+ *
+ * Returns `null` when today's prune has already run. The caller must not let a
+ * failure here stop the rollups below; both `ensureSchema` and the cron gate call it.
+ */
+export async function pruneAgedRows(
+  db: D1Database,
+  now: Date,
+): Promise<{ errorLog: number; devices: number } | null> {
+  const day = now.toISOString().slice(0, 10);
+  const done = await one<{ value: number }>(
+    db,
+    "SELECT value FROM metrics_daily WHERE day = ? AND key = ?",
+    day,
+    PRUNE_MARKER,
+  );
+  if (done) return null;
+  const errorLog = await run(
+    db,
+    "DELETE FROM error_log WHERE created_at < ?",
+    new Date(now.getTime() - 7 * 864e5).toISOString(),
+  );
+  // A device that has not re-registered in 60 days is an uninstalled app (the
+  // handle is refreshed on every start and on boot). Pushing at it is wasted work,
+  // and an FCM token that has been dead that long is never coming back.
+  const devices = await run(
+    db,
+    "DELETE FROM devices WHERE updated_at < ?",
+    new Date(now.getTime() - 60 * 864e5).toISOString(),
+  );
+  // Gauges replace, and this has to be idempotent for the day: a marker written
+  // through the counter path would read 2, 3, 4 and could not be told apart from a
+  // day that pruned several times.
+  await db.batch([gaugeUpsert(db, day, PRUNE_MARKER, 1)]);
+  return { errorLog, devices };
 }
 
 /**
@@ -1301,13 +1389,7 @@ export async function rollupMetrics(db: D1Database, now = new Date()): Promise<n
     .bind(new Date(now.getTime() - 864e5).toISOString())
     .first<{ users: number }>();
   touched++;
-  writes.push(
-    db
-      .prepare(
-        "INSERT INTO metrics_daily (day, key, value) VALUES (?, ?, ?) ON CONFLICT(day, key) DO UPDATE SET value = excluded.value",
-      )
-      .bind(day, "dev.active24h", active?.users ?? 0),
-  );
+  writes.push(gaugeUpsert(db, day, "dev.active24h", active?.users ?? 0));
 
   // Metrics are not an archive: 90 days covers the longest debugging window this
   // project has needed, and keeps the table's row count flat forever.
@@ -1567,23 +1649,8 @@ export default {
   ): Promise<void> {
     try {
       const reaped = await reapStaleCalls(env, env.DB, ctx);
-      // `error_log` is append-only from two places (the catch-all below and
-      // /api/debug/clientlog) and used to never shrink, so the table that exists
-      // to diagnose a bad day became a slow leak on the free tier's row reads.
-      // Seven days is far longer than any of our debugging windows.
-      const cutoff = new Date(Date.now() - 7 * 864e5).toISOString();
-      const pruned = await env.DB.prepare("DELETE FROM error_log WHERE created_at < ?")
-        .bind(cutoff)
-        .run();
-      // A device that has not re-registered in 60 days is an uninstalled app (the
-      // handle is refreshed on every start and on boot). Pushing at it is wasted
-      // work, and an FCM token that has been dead that long is never coming back.
-      const devCutoff = new Date(Date.now() - 60 * 864e5).toISOString();
-      const devs = await env.DB.prepare("DELETE FROM devices WHERE updated_at < ?")
-        .bind(devCutoff)
-        .run();
       // §52 daily rollups, hourly (the gate is a function so it can be tested
-      // without waiting for an hour). Its own failure must not stop the pruning above
+      // without waiting for an hour). Its own failure must not stop the pruning below
       // or vice versa, so it is measured inside its own try.
       let metrics = 0;
       let lat: { count: number; sumMs: number; errors: number } | null = null;
@@ -1608,12 +1675,46 @@ export default {
           );
         }
       }
+      // `error_log` is append-only from two places (the catch-all below and
+      // /api/debug/clientlog) and used to never shrink, so the table that exists to
+      // diagnose a bad day became a slow leak on the free tier's row reads. Seven
+      // days is far longer than any of our debugging windows; `devices` gets 60.
+      //
+      // This used to run on EVERY cron tick — 1 440 times a day over a 22 k-row
+      // `error_log` with no index to seek on — and that is how the account exhausted
+      // D1's free-tier row reads on 2026-09-02, after which every tick failed. It is
+      // now once a day (`pruneAgedRows`, marker-row gated), and the tables it deletes
+      // from are indexed. Placed after the hourly gate on purpose: the gate runs
+      // `ensureSchema`, so on a deployed-and-idle worker the tables and the new
+      // indexes exist before the first prune touches them, and no tick pays
+      // `ensureSchema` unconditionally. The stale-RINGING reap above stays per-tick,
+      // because a call has to become MISSED promptly — it is index-served too.
+      // Its own try: a failed prune (quota, maintenance) must never skip the rollups
+      // or the latency probe, and vice versa.
+      let pruned = 0;
+      let devs = 0;
+      let pruneRan = false;
+      try {
+        const done = await pruneAgedRows(env.DB, new Date());
+        if (done) {
+          pruneRan = true;
+          pruned = done.errorLog;
+          devs = done.devices;
+        }
+      } catch (pErr) {
+        console.error(
+          "cron_prune_error",
+          JSON.stringify({ err: pErr instanceof Error ? pErr.message : String(pErr) }),
+        );
+      }
+
       console.log(
         "cron_reap",
         JSON.stringify({
           reaped,
-          pruned: pruned?.meta?.changes ?? 0,
-          devices: devs?.meta?.changes ?? 0,
+          pruneRan,
+          pruned,
+          devices: devs,
           metrics,
           lat,
         }),
