@@ -68,16 +68,37 @@ class MainActivity : ComponentActivity() {
                 // cache-control max-age=7d, so disk hits are authoritative.
                 .diskCache {
                     DiskCache.Builder()
-                        .directory(cacheDir.resolve("kp-image-cache"))
+                        // filesDir, not cacheDir: cacheDir is exactly the directory
+                        // the system (and ColorOS-style storage managers) purges, so
+                        // "cached" photos re-downloaded after a background kill —
+                        // the chat-photo half of the owner's report. We cap it below
+                        // and evict ourselves instead of leaving it to the OS.
+                        .directory(filesDir.resolve("kp-image-cache"))
                         .maxSizeBytes(256L * 1024 * 1024)
                         .build()
                 }
-                // Respect the server's cache directives instead of always
-                // revalidating, so cached media costs zero network.
-                .respectCacheHeaders(true)
+                // Content-addressed urls (/api/files/<key>, <id>@v<n> refs) never
+                // change under the same key, so revalidating buys nothing and costs
+                // a round trip on every cold start. Cache-Control is still honoured
+                // by OkHttp for the JSON calls; here the key IS the version.
+                .respectCacheHeaders(false)
                 .crossfade(true)
                 .build(),
         )
+        // One-shot cleanup: the image cache lived in cacheDir until it was moved
+        // to filesDir, and an orphaned few hundred MB there is nobody's idea of a
+        // cache. Off the main thread, lowest priority — startup must not pay for
+        // a delete.
+        Thread {
+            runCatching {
+                val stale = cacheDir.resolve("kp-image-cache")
+                if (stale.exists()) stale.deleteRecursively()
+            }
+        }.apply {
+            isDaemon = true
+            priority = Thread.MIN_PRIORITY
+            start()
+        }
         Store.init(this)
         Store.authed.value = !Api.token.isNullOrBlank() && Store.me != null
         KpNotify.ensureChannels(this)

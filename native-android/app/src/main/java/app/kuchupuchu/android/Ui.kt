@@ -58,15 +58,114 @@ object Bitmaps {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount / 1024
     }
 
+    /**
+     * Second tier, on disk. Without it every cold start of the app meant "the
+     * profile is loading again" and a chat's photos re-decoding (or
+     * re-downloading) from scratch, because the memory cache dies with the
+     * process — that is precisely what the owner reported.
+     *
+     * In filesDir, not cacheDir: the system (and ColorOS-style storage
+     * managers) purge cacheDir, which is how "we have a cache" turned into
+     * "the cache is empty again after every background kill". We cap and evict
+     * it ourselves below.
+     */
+    private var dir: java.io.File? = null
+    private const val DISK_CAP = 192L * 1024 * 1024
+
+    /** Above these a disk entry is only read off the IO dispatcher, never inline:
+     * a full-size photo must never be decoded during composition. */
+    private const val INLINE_PAINT_MAX_BYTES = 400 * 1024L
+    private const val INLINE_PAINT_MAX_PIXELS = 400_000
+
+    fun init(ctx: android.content.Context) {
+        dir = java.io.File(ctx.filesDir, "kp-bitmaps").apply { mkdirs() }
+    }
+
+    private fun fileFor(url: String): java.io.File? {
+        val d = dir ?: return null
+        if (url.length < 8) return null
+        return java.io.File(d, sha1(url) + ".img")
+    }
+
+    /** Keys are data-URIs (megabytes long) and content-addressed file urls. */
+    private fun sha1(url: String): String =
+        java.security.MessageDigest.getInstance("SHA-1")
+            .digest(url.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+
     /** Cache hit only, never decodes: lets a row that re-enters a list paint on frame one. */
     fun peek(url: String?): Bitmap? = if (url.isNullOrBlank()) null else mem.get(url)
+
+    /**
+     * Hit the memory cache, then a SMALL disk entry, decoded inline.
+     *
+     * The profile header and the list rows are a few tens of KB — cheaper than the
+     * placeholder frame they replace, and what makes a cold start paint the photo
+     * immediately instead of showing "loading". Anything bigger stays on the
+     * async path below so a full-size photo can never jank a frame.
+     */
+    fun paint(url: String?): Bitmap? {
+        if (url.isNullOrBlank()) return null
+        mem.get(url)?.let { return it }
+        val f = fileFor(url) ?: return null
+        if (!f.exists() || f.length() > INLINE_PAINT_MAX_BYTES) return null
+        // Header read only (no pixel work) to decide whether decoding inline is
+        // safe: avatars and grid thumbs yes, a 12MP photo no.
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        runCatching { BitmapFactory.decodeFile(f.absolutePath, bounds) }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        if (bounds.outWidth.toLong() * bounds.outHeight > INLINE_PAINT_MAX_PIXELS) return null
+        val bmp = runCatching { BitmapFactory.decodeFile(f.absolutePath) }.getOrNull() ?: return null
+        mem.put(url, bmp)
+        return bmp
+    }
 
     fun load(url: String?): Bitmap? {
         if (url.isNullOrBlank()) return null
         mem.get(url)?.let { return it }
+        val f = fileFor(url)
+        if (f != null && f.exists()) {
+            val fromDisk = runCatching { BitmapFactory.decodeFile(f.absolutePath) }.getOrNull()
+            if (fromDisk != null) {
+                mem.put(url, fromDisk)
+                return fromDisk
+            }
+            runCatching { f.delete() } // unreadable entry: re-fetch rather than stay blank
+        }
         val bmp = decode(url) ?: return null
         mem.put(url, bmp)
+        store(url, bmp)
         return bmp
+    }
+
+    /** Write what we actually drew (already downsampled), atomically. */
+    private fun store(url: String, bmp: Bitmap) {
+        val f = fileFor(url) ?: return
+        if (f.exists()) return
+        runCatching {
+            val tmp = java.io.File(f.parentFile, f.name + ".tmp")
+            java.io.FileOutputStream(tmp).use { out ->
+                val fmt =
+                    if (bmp.hasAlpha()) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
+                bmp.compress(fmt, 92, out)
+            }
+            if (!tmp.renameTo(f)) runCatching { tmp.delete() }
+            trim()
+        }
+    }
+
+    /** Own budget, own eviction: delete oldest until the directory fits again. */
+    private fun trim() {
+        val files = dir?.listFiles()?.filter { it.name.endsWith(".img") } ?: return
+        if (files.sumOf { it.length() } <= DISK_CAP) return
+        val sorted = files.sortedBy { it.lastModified() }
+        var freed = 0L
+        val target = files.sumOf { it.length() } - DISK_CAP
+        for (f in sorted) {
+            if (freed >= target) break
+            freed += f.length()
+            runCatching { f.delete() }
+        }
     }
 
     private fun decode(url: String): Bitmap? = runCatching {
@@ -97,11 +196,13 @@ object Bitmaps {
 
 @Composable
 fun rememberBitmap(url: String?): ImageBitmap? {
-    // Seed from the memory cache synchronously. Starting at null meant every row
-    // that re-entered composition (scroll-back, reopen after the app was killed,
-    // a chat-list poll) painted the placeholder for a frame and then the photo —
-    // that flash is what read as "the profile keeps loading again".
-    val state = remember(url) { mutableStateOf(Bitmaps.peek(url)?.asImageBitmap()) }
+    // Seed synchronously from the cache — memory first, then a small disk entry.
+    // Starting at null meant every row that re-entered composition (scroll-back,
+    // reopen after the app was killed, a chat-list poll) painted the placeholder
+    // for a frame and then the photo — that flash is what read as "the profile
+    // keeps loading again", and it is also why a photo looked uncached after a
+    // cold start even though the bytes were on the phone.
+    val state = remember(url) { mutableStateOf(Bitmaps.paint(url)?.asImageBitmap()) }
     LaunchedEffect(url) {
         if (url.isNullOrBlank()) return@LaunchedEffect
         if (state.value != null) return@LaunchedEffect

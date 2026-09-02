@@ -16,6 +16,9 @@ object Cache {
     fun init(ctx: Context) {
         dir = File(ctx.filesDir, "kp-cache").also { it.mkdirs() }
         loadDisk()
+        // Same idea for pixels: the JSON is worthless on screen if the avatar it
+        // names still has to be fetched and decoded.
+        Bitmaps.init(ctx)
     }
 
     fun ttl(path: String): Long =
@@ -23,6 +26,11 @@ object Cache {
             path.contains("/calls") -> 0L
             path.contains("/messages") -> 0L
             path.contains("/statuses") -> 2_000L
+            // A contact's profile is painted from this snapshot and the profile
+            // screen force-refreshes right after, so a long TTL cannot go stale —
+            // it only removes the "Loading…" frame on every cold start (bug the
+            // owner reported as "the profile never stays saved").
+            path.contains("/api/users/") -> 24L * 3600_000L
             path.contains("/conversations") -> 1_500L
             else -> 45_000L
         }
