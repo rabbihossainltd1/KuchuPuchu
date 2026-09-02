@@ -746,8 +746,30 @@ function pemToPkcs8(pem: string): Uint8Array {
   return out;
 }
 
+/**
+ * Push used to fail with zero trace outside `wrangler tail`, and this account is
+ * administered from a phone. One error_log row per isolate per distinct reason is
+ * enough for a single D1 read to answer "is push dead, and why" (secret missing vs
+ * Google rejecting the key vs the JSON being malformed) without any log access.
+ */
+const fcmDiagSeen = new Set<string>();
+async function noteFcmDiag(db: D1Database, reason: string) {
+  const key = reason.slice(0, 120);
+  if (fcmDiagSeen.has(key)) return;
+  fcmDiagSeen.add(key);
+  try {
+    await db
+      .prepare("INSERT INTO error_log (id, stack, created_at) VALUES (?, ?, ?)")
+      .bind(crypto.randomUUID(), `fcm_diag ${reason}`.slice(0, 2000), nowIso())
+      .run();
+  } catch {}
+}
+
 async function fcmAccessToken(env: Env): Promise<{ token: string; projectId: string } | null> {
-  if (!env.FCM_CREDENTIALS) return null;
+  if (!env.FCM_CREDENTIALS) {
+    await noteFcmDiag(env.DB, "credentials_secret_missing");
+    return null;
+  }
   if (fcmTokenCache && fcmTokenCache.exp > Date.now() + 60_000) {
     return { token: fcmTokenCache.token, projectId: fcmTokenCache.projectId };
   }
@@ -784,15 +806,15 @@ async function fcmAccessToken(env: Env): Promise<{ token: string; projectId: str
       body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
     });
     if (!res.ok) {
-      console.log(
-        "fcm_oauth_failed",
-        JSON.stringify({ status: res.status, body: (await res.text()).slice(0, 200) }),
-      );
+      const detail = (await res.text()).slice(0, 200);
+      console.log("fcm_oauth_failed", JSON.stringify({ status: res.status, body: detail }));
+      await noteFcmDiag(env.DB, `oauth_http_${res.status} ${detail}`);
       return null;
     }
     const data = (await res.json()) as { access_token?: string; expires_in?: number };
     if (!data.access_token) {
       console.log("fcm_oauth_no_token", JSON.stringify({}));
+      await noteFcmDiag(env.DB, "oauth_reply_without_token");
       return null;
     }
     fcmTokenCache = {
@@ -804,10 +826,9 @@ async function fcmAccessToken(env: Env): Promise<{ token: string; projectId: str
   } catch (err) {
     // Malformed/missing key material used to throw up into pushToUser()'s
     // catch and vanished as a silent push failure — keep a trace.
-    console.log(
-      "fcm_oauth_exception",
-      JSON.stringify({ err: err instanceof Error ? err.message : String(err) }),
-    );
+    const why = err instanceof Error ? err.message : String(err);
+    console.log("fcm_oauth_exception", JSON.stringify({ err: why }));
+    await noteFcmDiag(env.DB, `credentials_unusable ${why}`.slice(0, 300));
     return null;
   }
 }
@@ -1303,8 +1324,23 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   /* ---------- public ---------- */
 
-  if (path === "/api/health")
-    return json({ ok: true, service: "KuchuPuchu", version: "3.0", time: nowIso() });
+  if (path === "/api/health") {
+    // Presence booleans only — never a value, never a token. "push: false" is the
+    // whole diagnosis for a "no notifications" report; without it the answer lived
+    // only in logs nobody reads from a phone.
+    return json({
+      ok: true,
+      service: "KuchuPuchu",
+      version: "3.0",
+      time: nowIso(),
+      capabilities: {
+        push: !!env.FCM_CONFIG && !!env.FCM_CREDENTIALS,
+        turn: (!!env.TURN_KEY_ID && !!env.TURN_API_TOKEN) || !!env.TURN_URLS,
+        realtime: !!env.CHAT_ROOM && !!env.CALL_SIGNAL,
+        media: !!env.MEDIA,
+      },
+    });
+  }
 
   if (path === "/api/config/firebase" && method === "GET") {
     return json({ firebase: fcmPublicConfig(env) });

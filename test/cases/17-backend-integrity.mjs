@@ -552,6 +552,90 @@ async function main() {
     );
   }
 
+  // ── 12. "is push dead?" must be answerable without log access ───────────────
+  {
+    const h = await mk();
+    const bare = await h.call("GET", "/api/health");
+    const caps = bare.json.capabilities ?? {};
+    check(
+      "health reports push:false while the sender secret is absent",
+      caps.push === false,
+      JSON.stringify(caps),
+    );
+    check(
+      "…turn:false with no TURN configuration at all",
+      caps.turn === false,
+      JSON.stringify(caps),
+    );
+    check(
+      "…and every capability is a boolean, never a value",
+      Object.keys(caps).length >= 3 && Object.values(caps).every((v) => typeof v === "boolean"),
+      JSON.stringify(caps),
+    );
+    h.env.FCM_CONFIG = JSON.stringify({
+      project_info: { project_id: "p", project_number: "1234" },
+      client: [
+        {
+          client_info: {
+            android_client_info: { package_name: "app.kuchupuchu.android" },
+            mobilesdk_app_id: "1:1:android:x",
+          },
+          api_key: [{ current_key: "k" }],
+        },
+      ],
+    });
+    h.env.TURN_URLS = "turn:relay.example.com:3478";
+    const on = await h.call("GET", "/api/health");
+    check(
+      "configuring firebase config alone is still push:false (the app side is not the credential)",
+      on.json.capabilities?.push === false,
+      JSON.stringify(on.json.capabilities),
+    );
+    check(
+      "…while a configured relay shows up as turn:true",
+      on.json.capabilities?.turn === true,
+      JSON.stringify(on.json.capabilities),
+    );
+
+    // The silent-death case itself: push is expected (config present) but the
+    // sending credential is not. Before this, every push just returned false.
+    const A = await h.reg("push-a");
+    const B = await h.reg("push-b");
+    const cid = (await h.call("POST", "/api/conversations", { userId: B.user.id }, A.token)).json
+      .conversation.id;
+    await h.call(
+      "POST",
+      `/api/conversations/${cid}/messages`,
+      { kind: "TEXT", body: "ping", clientId: "pd1" },
+      A.token,
+    );
+    const row = await h.q("SELECT stack FROM error_log WHERE stack LIKE 'fcm_diag%'").first();
+    check(
+      "a dropped push leaves a readable reason in error_log",
+      !!row && /credentials_secret_missing/.test(String(row.stack)),
+      JSON.stringify(row ?? "no row"),
+    );
+
+    // …and once the credential exists, the failure reason must change to the
+    // upstream one, not silently disappear.
+    h.env.FCM_CREDENTIALS = "{ not json";
+    const A2 = await h.reg("push-a2");
+    const cid2 = (await h.call("POST", "/api/conversations", { userId: B.user.id }, A2.token)).json
+      .conversation.id;
+    await h.call(
+      "POST",
+      `/api/conversations/${cid2}/messages`,
+      { kind: "TEXT", body: "ping", clientId: "pd2" },
+      A2.token,
+    );
+    const rows = await h.q("SELECT stack FROM error_log WHERE stack LIKE 'fcm_diag%'").all();
+    check(
+      "malformed credential JSON is reported as unusable, not swallowed",
+      (rows.results ?? []).some((r) => /credentials_unusable/.test(String(r.stack))),
+      JSON.stringify((rows.results ?? []).map((r) => r.stack).slice(0, 3)),
+    );
+  }
+
   process.stdout.write(lines.join("\n") + "\n");
   const broken = lines.filter((l) => l.startsWith("  BROKEN")).length;
   process.exit(broken ? 1 : 0);
