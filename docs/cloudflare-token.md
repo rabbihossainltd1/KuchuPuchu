@@ -17,8 +17,8 @@ surface (`DB`, `MEDIA`, `CHAT_ROOM`, `CALL_SIGNAL`, `DEBUG_KEY`, `FCM_CONFIG`,
 | Account | D1 and SQL databases | **Edit** | Apply schema/fixes to `kuchupuchu-v3` (`wrangler d1 execute --remote`), exports/backups, read-only production queries during diagnosis. `Read` would allow my `SELECT` checks but blocks any repair. |
 | Account | Workers R2 Storage | **Edit** | `kp-media`: verify/read objects when "photo won't open" comes in, delete leaked junk, lifecycle rules so deleted-for-everyone media actually stops counting. |
 | Account | Account Settings | **Read** (Edit if you want subdomain/toggles changed too) | Validates `account_id`; also what a dead token fails against (`GET /accounts` → `9109`). |
-| Account | Workers Tail | **Edit** | `npm run tail` — the only way to see a production worker error live from here; a tail config is *created*, so Read alone is not enough. |
-| Account | Realtime (Cloudflare Calls) | **Edit** | The worker mints TURN credentials at runtime (`TURN_KEY_ID` + `TURN_API_TOKEN`, see `src/worker/index.ts`); to reproduce/rotate those and debug "call connects, no audio" the same scope is needed. |
+| Account | Workers Tail | **Read** | `npm run tail` — the only way to see a production worker error live from here. Verified with a live token: `Read` is enough, `wrangler tail` printed "Successfully created tail" and streamed requests plus the cron. (Listing existing tails via `GET /workers/tails` answers `10001`, but that is not what tailing needs.) |
+| Account | Realtime (Cloudflare Calls) | **Edit** — *optional* | The worker reads TURN credentials from its **own** secrets (`TURN_URLS/USERNAME/KEY_ID/API_TOKEN`), so deploys and diagnosis never need Calls. Probing anyway: `GET /accounts/:id/calls/turn/keys` returned `10001` even with `Realtime:Edit` + `Cloudflare Calls:Edit` granted, i.e. that endpoint family is not authorized by either item under those names. Leave it off until a TURN rotation is actually on the table, then pin the scope by trying the one call. |
 
 ## Only if you want the deploy pipeline fixed too
 
@@ -50,12 +50,18 @@ with `All zones - DNS: Edit` sitting unused is just a wider blast radius.
   audit probe below shows `R2 … NO`, the media bucket is in the other account and
   that one gets added too, nothing else.)
 - **Zone Resources**: none.
+- `GET /accounts/:id/workers/scripts/kuchupuchu-api` returns the **served bundle**
+  as multipart — that is how a deploy is proven rather than assumed (grep the
+  download for a symbol that only exists in the new code).
 - **TTL**: your call; "Never" means a fix round can't stall at 02:00 waiting for
   a paste. **Client IP**: leave empty — this sandbox's egress is not stable.
 
 ## Verify before deploying
 
-`~/.secrets/kp-audit` probes each row with read-only calls and prints `YES` /
+`~/.secrets/kp-audit` probes each row with read-only calls (it prints
+`NO 10001` = missing permission, `NO 7003` = path does not exist in this API
+version — the two failures mean different things and only one of them is fixed by
+granting something) and prints `YES` /
 `NO <code>` per capability, so a missing permission is named before a deploy
 fails, not after. That file, plus `kp-deploy` (wrangler, token redacted from
 output), `kp-d1` (SELECT/WITH/PRAGMA only), `kp-ci`, `kp-push`, lives in
