@@ -150,6 +150,8 @@ object Outbox {
         private set
     private val flushLock = Any()
     private val dropped = LinkedHashSet<String>()
+    /** Full items (body included) the queue gave up on, oldest first. */
+    private val droppedBodies = ArrayList<JSONObject>()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var kickJob: Job? = null
@@ -237,10 +239,29 @@ object Outbox {
     }
 
     @Synchronized
-    private fun markDropped(clientId: String) {
+    private fun markDropped(item: JSONObject) {
+        val clientId = item.optString("clientId")
         if (clientId.isBlank()) return
         dropped.add(clientId)
+        // §20 pairs with this: the text goes back to the composer instead of dying
+        // with the queue entry, so "the server refused it" never means "it's gone".
+        if (item.optJSONObject("body") != null) {
+            droppedBodies.add(JSONObject(item.toString()))
+            while (droppedBodies.size > 16) droppedBodies.removeAt(0)
+        }
         while (dropped.size > 64) dropped.remove(dropped.iterator().next())
+    }
+
+    /** Recovers one refused send's text for [convId] (and consumes it). */
+    @Synchronized
+    fun takeDroppedBody(convId: String): String? {
+        val i = droppedBodies.indexOfFirst { it.optString("convId") == convId }
+        if (i < 0) return null
+        return droppedBodies
+            .removeAt(i)
+            .optJSONObject("body")
+            ?.optString("body")
+            ?.takeIf { it.isNotBlank() }
     }
 
     @Synchronized
@@ -285,7 +306,7 @@ object Outbox {
                 } catch (e: Exception) {
                     val status = (e as? ApiException)?.status ?: 0
                     if (status in 400..499 && status != 408 && status != 429) {
-                        markDropped(clientId)
+                        markDropped(item)
                         remove(clientId)
                         continue
                     }

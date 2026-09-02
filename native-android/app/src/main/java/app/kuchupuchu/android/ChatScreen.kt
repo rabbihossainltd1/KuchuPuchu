@@ -319,6 +319,11 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // removed from the chat, over the length limit) never comes
                     // back as a server row, so without this the bubble sits on
                     // "sending" for the rest of the session.
+                    // A refused send's text returns here (§20 counterpart of §11).
+                    Outbox.takeDroppedBody(convId)?.let { lost ->
+                        input = if (input.isBlank()) lost else "$input\n\n$lost"
+                        Drafts.set(convId, input)
+                    }
                     val refused = Outbox.droppedIds()
                     if (refused.isNotEmpty()) {
                         pending
@@ -358,6 +363,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     LaunchedEffect(convId) {
         Store.route = "chat/$convId"
         paintFromStore()
+        // §20: the draft comes back with the chat — but only into an empty
+        // composer, so returning from a media picker never overwrites live typing.
+        if (input.isBlank()) Drafts.of(convId).takeIf { it.isNotBlank() }?.let { input = it }
         if (ScreenStore.pendingChatSearch == convId) {
             ScreenStore.pendingChatSearch = null
             showChatSearch = true
@@ -549,6 +557,10 @@ fun ChatScreen(nav: NavController, convId: String) {
             } catch (e: Exception) {
                 Outbox.add(convId, clientId, payload)
             }
+            // The draft's job ends here, not at "server said ok": from now on the
+            // text is owned by the server row or by the queue file (and if the
+            // queue refuses it for good, that text comes back to the composer).
+            Drafts.clear(convId)
         }
     }
 
@@ -1399,6 +1411,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             input = input,
             onInput = { v ->
                 input = v
+                Drafts.set(convId, v)
                 // Typing means the user wants the keyboard, not the panel.
                 if (v.isNotBlank() && (showAttach || showStickers)) {
                     showAttach = false

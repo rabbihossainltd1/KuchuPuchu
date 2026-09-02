@@ -27,6 +27,7 @@ object Store {
         me = if (raw.isNullOrBlank()) null else runCatching { JSONObject(raw) }.getOrNull()
         Cache.init(ctx)
         Outbox.init(ctx)
+        Drafts.init(ctx)
         ScreenStore.hydrate(ctx)
     }
 
@@ -47,6 +48,7 @@ object Store {
         route = ""
         authed.value = false
         ScreenStore.clearMsgs()
+        Drafts.clearAll()
         Cache.bustAll("")
         Cache.clearDisk()
         ctx.getSharedPreferences("kp", 0).edit().clear().apply()

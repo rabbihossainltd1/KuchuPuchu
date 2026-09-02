@@ -225,7 +225,7 @@ has(list, "Api.PollCadence.failed()", "…and a bad one starts it");
   );
   check(
     "a permanently refused send is reported, not left spinning",
-    cache.includes("markDropped(clientId)") &&
+    cache.includes("markDropped(item)") &&
       /status in 400\.\.499 && status != 408 && status != 429/.test(cache),
   );
   has(
@@ -318,6 +318,71 @@ has(list, "Api.PollCadence.failed()", "…and a bad one starts it");
     "…and the local FCM cleanup still forgets the accepted token (re-login must re-register)",
     push.includes('remove("registered")') && push.includes("deleteToken()"),
   );
+}
+
+// ── §20 draft auto-save: nothing the user typed may die with the process ──────
+{
+  const dr = kt("Drafts.kt");
+  const dStart = dr.indexOf("object Drafts");
+  check(
+    "there is a real draft store, not a remembered string in a composable",
+    dStart > 0,
+    `index=${dStart}`,
+  );
+  const setFn = dr.slice(
+    dr.indexOf("fun set(convId: String, text: String)"),
+    dr.indexOf("fun set(convId: String, text: String)") + 700,
+  );
+  check(
+    "typing writes on a debounce, never per keystroke (§20)",
+    setFn.includes("if (changed) schedule()") &&
+      dr.includes("delay(DEBOUNCE_MS)") &&
+      dr.includes("writeJob?.cancel()"),
+    setFn.slice(0, 60),
+  );
+  check(
+    "…and a no-op change is not even counted as a change",
+    setFn.includes("map[convId].orEmpty() == clean) false"),
+    setFn.slice(0, 60),
+  );
+  has(
+    dr,
+    'File(ctx.applicationContext.filesDir, "kp-drafts.json")',
+    "drafts live in filesDir, so a process kill cannot eat them",
+  );
+  has(dr, "${f.name}.tmp", "…written atomically");
+  has(dr, "fun clearAll()", "signing out wipes them");
+  has(dr, "MAX_CHARS", "…and the cap mirrors the server's MESSAGE_MAX_LENGTH");
+  has(kt("Store.kt"), "Drafts.init(ctx)", "the store is loaded at startup, not on first paint");
+  const so = kt("Store.kt");
+  const soStart = so.indexOf("fun signOut(ctx: Context)");
+  check(
+    "sign-out clears drafts BEFORE wiping the caches",
+    soStart > 0 && so.slice(soStart, soStart + 400).includes("Drafts.clearAll()"),
+    `index=${soStart}`,
+  );
+  const chat = kt("ChatScreen.kt");
+  check(
+    "opening a chat restores the draft only into an empty composer",
+    chat.includes(
+      "if (input.isBlank()) Drafts.of(convId).takeIf { it.isNotBlank() }?.let { input = it }",
+    ),
+  );
+  check(
+    "every composer edit feeds the draft store",
+    /input = v\n\s+Drafts\.set\(convId, v\)/.test(chat),
+  );
+  check(
+    "the draft is released when the server OR the queue owns the text",
+    chat.includes("Drafts.clear(convId)") && chat.includes("Outbox.add(convId, clientId, payload)"),
+  );
+  check(
+    "…and a send the queue refuses for good hands its text back to the composer",
+    chat.includes("Outbox.takeDroppedBody(convId)") && cacheTakesBack(),
+  );
+  function cacheTakesBack() {
+    return kt("Cache.kt").includes("fun takeDroppedBody(convId: String): String?");
+  }
 }
 
 process.stdout.write(lines.join("\n") + "\n");
