@@ -234,6 +234,11 @@ class CallEngine(private val app: Application) {
                 if (audioRoute != route) audioRoute = route
                 speaker = route == AudioRoute.SPEAKER
                 updateProximityLock()
+                // A tone still playing (the caller's ringback during
+                // "Ringing…") has to move with the route, otherwise the phone
+                // keeps ringing out loud beside a call that just went to the
+                // headset.
+                CallSounds.retuneTones(app)
                 onChange?.invoke(active)
             }
         }
@@ -271,6 +276,12 @@ class CallEngine(private val app: Application) {
                         // A throw out of tick() used to kill this coroutine, which
                         // meant no more call polling at all for the process.
                         runCatching { tick() }.onFailure { notify("Call update failed. Retrying.") }
+                        // Once a second, ask the framework whether the call is
+                        // still where the button says it is — and make it stop
+                        // carrying the audio anywhere else. OEM stacks move
+                        // communication output on their own, and "headset AND
+                        // speaker" has to be impossible, not merely unlikely.
+                        runCatching { AudioRouter.enforceExclusive(app) }
                         val wsId =
                             active?.id?.takeIf { it.isNotBlank() && !it.startsWith("pending") }
                                 ?: iceCallId.takeIf { it.isNotBlank() }

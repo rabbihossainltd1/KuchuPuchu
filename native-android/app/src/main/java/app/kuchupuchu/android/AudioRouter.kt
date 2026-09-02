@@ -102,7 +102,10 @@ object AudioRouter {
     private var deviceCb: AudioDeviceCallback? = null
     private var scoRx: BroadcastReceiver? = null
     private val main = Handler(Looper.getMainLooper())
-    private var btWatchdog: Runnable? = null
+    private var settle: Runnable? = null
+    private var settleUntil = 0L
+    private val SETTLE_MS = 4000L
+    private val SETTLE_STEP_MS = 250L
 
     /** Fired when routing changes underneath the UI (hot-plug, SCO up/down). */
     var onRouteChanged: ((AudioRoute) -> Unit)? = null
@@ -128,8 +131,26 @@ object AudioRouter {
     private fun amDevices(ctx: Context): List<AudioDeviceInfo> =
         manager(ctx).getDevices(AudioManager.GET_DEVICES_OUTPUTS).toList()
 
+    /**
+     * Devices the framework will accept for a CALL. From API 31 that is a
+     * different list from the output list, and it is the only one
+     * setCommunicationDevice() takes — picking the headset out of the output list
+     * alone is what made the commit throw at call start (so the call stayed on
+     * the loudspeaker until the user tapped the button themselves).
+     */
+    private fun routable(ctx: Context): List<AudioDeviceInfo> =
+        if (Build.VERSION.SDK_INT >= 31) {
+            runCatching { manager(ctx).availableCommunicationDevices.toList() }.getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
+
+    /** Everything worth considering for a call: what plays, plus what can route. */
+    private fun candidates(ctx: Context): List<AudioDeviceInfo> =
+        (outputs(ctx) + routable(ctx)).distinctBy { it.type to it.id }
+
     fun deviceFor(ctx: Context, route: AudioRoute): AudioDeviceInfo? {
-        val outs = outputs(ctx)
+        val outs = candidates(ctx)
         return when (route) {
             AudioRoute.BLUETOOTH -> pick(outs, BT_TYPES)
             AudioRoute.WIRED -> pick(outs, WIRED_TYPES)
@@ -153,13 +174,7 @@ object AudioRouter {
         // From 31 the framework's own "usable for communication" list is
         // authoritative; union it with the output list so a headset connected for
         // media (A2DP) but not yet for a call is still offered.
-        val routable =
-            if (Build.VERSION.SDK_INT >= 31) {
-                runCatching { manager(ctx).availableCommunicationDevices.toList() }.getOrDefault(emptyList())
-            } else {
-                emptyList()
-            }
-        val all = (outputs(ctx) + routable).distinctBy { it.type }
+        val all = candidates(ctx)
         val out = ArrayList<AudioRoute>(4)
         if (all.any { it.type in BT_TYPES }) out.add(AudioRoute.BLUETOOTH)
         if (all.any { it.type in WIRED_TYPES }) out.add(AudioRoute.WIRED)
@@ -282,20 +297,20 @@ object AudioRouter {
                     // re-applies once the device shows up.
                     runCatching { @Suppress("DEPRECATION") a.setBluetoothScoOn(true) }
                     runCatching { a.startBluetoothSco() }
-                    armScoWatchdog(ctx)
                 }
             }
             AudioRoute.WIRED, AudioRoute.EARPIECE -> {
                 runCatching { @Suppress("DEPRECATION") a.isSpeakerphoneOn = false }
                 stopSco(a)
-                btWatchdog?.let { main.removeCallbacks(it) }
-                btWatchdog = null
             }
             AudioRoute.SPEAKER -> {
                 runCatching { @Suppress("DEPRECATION") a.isSpeakerphoneOn = true }
                 stopSco(a)
             }
         }
+        // Believing the framework is not the same as checking it: a Bluetooth
+        // device only becomes committable a moment after SCO has come up.
+        armSettle(ctx)
         return target
     }
 
@@ -309,19 +324,112 @@ object AudioRouter {
      * A headset that is merely slow is harmless here: the SCO broadcast re-commits
      * to Bluetooth the moment it arrives, whether or not this already fired.
      */
-    private fun armScoWatchdog(ctx: Context) {
-        btWatchdog?.let { main.removeCallbacks(it) }
-        val r =
-            Runnable {
-                btWatchdog = null
-                if (!inCall || wanted != AudioRoute.BLUETOOTH || scoUp || btCommitted) return@Runnable
-                if (outputs(ctx).any { it.type in CALL_BT_TYPES }) return@Runnable
-                val applied = apply(ctx, if (videoCall) AudioRoute.SPEAKER else AudioRoute.EARPIECE)
-                onNotice?.invoke("This Bluetooth device can't carry calls — using the phone.")
-                onRouteChanged?.invoke(applied)
+    /**
+     * Is the call provably carried by ONE output?
+     *
+     * Asking the framework, not remembering what we asked for: from 31 the
+     * committed communication device must be the wanted one, and below that the
+     * loudspeaker must be off with SCO actually up for Bluetooth (speaker on +
+     * SCO on IS the two-outputs state) or SCO closed for a phone route, since an
+     * open SCO link keeps playing in the buds whatever else is committed.
+     */
+    private fun settled(ctx: Context): Boolean {
+        val a = manager(ctx)
+        if (Build.VERSION.SDK_INT >= 31) {
+            val committed = runCatching { a.communicationDevice }.getOrNull()
+            val want = deviceFor(ctx, wanted)
+            return committed != null && want != null && committed.type == want.type
+        }
+        val speakerOff = !runCatching { a.isSpeakerphoneOn }.getOrDefault(false)
+        val scoOn = scoUp || runCatching { a.isBluetoothScoOn }.getOrDefault(false)
+        return when {
+            wanted == AudioRoute.BLUETOOTH -> speakerOff && scoUp
+            needsExternalDevice(wanted) -> speakerOff
+            wanted == AudioRoute.SPEAKER -> !scoOn
+            else -> !scoOn && speakerOff
+        }
+    }
+
+    /**
+     * The "never in two places at once" guard, run whenever the route is set,
+     * whenever a device appears or disappears, and once a second while the call
+     * is up (OEM stacks re-route behind our back).
+     *
+     * A headset route that the framework has not taken yet is not treated as a
+     * failure — SCO is (re)asked for and the commit retried, which is what makes
+     * "buds were already connected when I dialled" land in the buds by itself.
+     * A phone route has the parallel paths shut: no SCO, no committed headset.
+     */
+    @Synchronized
+    fun enforceExclusive(ctx: Context): AudioRoute {
+        if (!inCall) return wanted
+        app = ctx.applicationContext
+        if (settled(ctx)) return wanted
+        val a = manager(ctx)
+        if (needsExternalDevice(wanted)) {
+            runCatching { @Suppress("DEPRECATION") a.isSpeakerphoneOn = false }
+            if (wanted == AudioRoute.BLUETOOTH &&
+                !scoUp &&
+                !runCatching { a.isBluetoothScoOn }.getOrDefault(false)
+            ) {
+                runCatching { @Suppress("DEPRECATION") a.setBluetoothScoOn(true) }
+                runCatching { a.startBluetoothSco() }
             }
-        btWatchdog = r
-        main.postDelayed(r, 1500)
+            if (Build.VERSION.SDK_INT >= 31) {
+                deviceFor(ctx, wanted)?.let { dev ->
+                    if (runCatching { a.setCommunicationDevice(dev) }.isSuccess) btCommitted = true
+                }
+            }
+        } else {
+            stopSco(a)
+            if (Build.VERSION.SDK_INT >= 31) {
+                val committed = runCatching { a.communicationDevice }.getOrNull()
+                val want = deviceFor(ctx, wanted)
+                if (committed != null && want != null && committed.type != want.type) {
+                    runCatching { a.setCommunicationDevice(want) }
+                }
+            }
+        }
+        return wanted
+    }
+
+    /**
+     * Bluetooth routing is not instant: SCO has to come up before the device can
+     * be committed. Retry on a bounded window (the old code committed once, gave
+     * up silently, and left the call on the loudspeaker) and only at the end of
+     * it decide that the device cannot carry a call at all — a pair of media-only
+     * buds — and fall back to the phone, saying so, instead of letting the button
+     * claim a route the audio never took.
+     */
+    private fun armSettle(ctx: Context) {
+        settleUntil = System.currentTimeMillis() + SETTLE_MS
+        if (settle != null) return
+        val r =
+            object : Runnable {
+                override fun run() {
+                    settle = null
+                    val c = app ?: return
+                    if (!inCall) return
+                    val before = wanted
+                    enforceExclusive(c)
+                    if (settled(c)) {
+                        if (before != wanted) onRouteChanged?.invoke(wanted)
+                        return
+                    }
+                    if (System.currentTimeMillis() < settleUntil) {
+                        settle = this
+                        main.postDelayed(this, SETTLE_STEP_MS)
+                        return
+                    }
+                    if (wanted == AudioRoute.BLUETOOTH) {
+                        val applied = apply(c, if (videoCall) AudioRoute.SPEAKER else AudioRoute.EARPIECE)
+                        onNotice?.invoke("Bluetooth didn't take the call — using the phone.")
+                        onRouteChanged?.invoke(applied)
+                    }
+                }
+            }
+        settle = r
+        main.postDelayed(r, SETTLE_STEP_MS)
     }
 
     private fun stopSco(a: AudioManager) {
@@ -352,10 +460,14 @@ object AudioRouter {
         app = ctx.applicationContext
         inCall = true
         videoCall = kind == "VIDEO"
-        val applied = apply(ctx, defaultRoute(ctx, kind))
+        // Listeners BEFORE the first apply(), on purpose: apply() opens SCO, and
+        // its CONNECTED broadcast used to land on the floor because the receiver
+        // was only registered afterwards. A headset that was already connected
+        // when the call started is exactly that case — no broadcast comes at all
+        // later, so the call sat on the phone until the user tapped the button.
         watchDevices(ctx)
         watchSco(ctx)
-        return applied
+        return apply(ctx, defaultRoute(ctx, kind))
     }
 
     /** A call turned on its camera: speaker becomes the fallback for hot-unplug. */
@@ -370,8 +482,9 @@ object AudioRouter {
         wanted = AudioRoute.EARPIECE
         scoUp = false
         btCommitted = false
-        btWatchdog?.let { main.removeCallbacks(it) }
-        btWatchdog = null
+        settle?.let { main.removeCallbacks(it) }
+        settle = null
+        settleUntil = 0L
         unwatch()
         val a = manager(ctx)
         if (Build.VERSION.SDK_INT >= 31) runCatching { a.clearCommunicationDevice() }

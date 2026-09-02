@@ -95,10 +95,49 @@ one tap advances `AudioRouter.next()` over the routes that physically exist.
 `apply()` returns the route that actually took effect, so the UI can never claim
 a route the framework refused.
 
+## Contract 7 — dialling with a headset already on must move by itself
+
+Two ordering bugs made that fail, and both look identical to the user ("I have to
+tap the audio button"):
+
+1. `begin()` used to run `apply()` — which opens SCO — and only register the SCO
+   state receiver afterwards. When the headset was connected before the call, no
+   broadcast arrives afterwards either, so nothing ever re-committed the route.
+   The listeners now come first.
+2. Devices were picked from `getDevices(GET_DEVICES_OUTPUTS)`, but from API 31
+   `setCommunicationDevice()` only accepts what
+   `getAvailableCommunicationDevices()` returns. Selecting the A2DP entry threw,
+   `runCatching` swallowed it, and the call stayed on the loudspeaker while SCO
+   came up in the background — which is the "Bluetooth AND speaker for a moment,
+   then it sorted itself out" report. Both lists are pooled in `candidates()`.
+
+On top of that the router no longer *assumes* a route took: `settled()` asks the
+framework (committed communication device on 31+, the speaker/SCO flag pair
+below it), and `armSettle()` retries every 250 ms for 4 s — enough for SCO to
+come up — before it concludes the device cannot carry calls at all.
+
+## Contract 8 — two outputs at once is made impossible, not discouraged
+
+`enforceExclusive()` runs after every route change, on every device add/remove,
+and once a second from the call's poll loop:
+
+- wanted output is a headset but the framework has not committed it → speaker off,
+  SCO (re)asked for, commit retried;
+- wanted output is the phone → SCO is closed and a committed headset is replaced,
+  because an open SCO link keeps playing in the buds whatever else is committed;
+- the state is already consistent → nothing is written, so the sweep cannot fight
+  the user or the system.
+
+Tones are covered by the same idea: `CallSounds.retuneTones()` is called on every
+route change, and moves a still-playing ringback onto the stream the call is on
+(the alarm-stream volume lift is likewise only done when the tone is actually on
+the alarm stream).
+
 ## Regression guard
 
 `test/cases/14-audio-routing-contract.mjs` asserts each contract against the
-sources (no Android SDK in CI, so it checks the code, not a device): every
+sources (including the ordering inside `begin()`, which no test on a device would
+catch on time) (no Android SDK in CI, so it checks the code, not a device): every
 device type present, the permission in the manifest *and* requested at runtime,
 the SCO receiver registered, no call-kind gate on hot-plug, the tone pinning,
 and a route button on all three call surfaces.

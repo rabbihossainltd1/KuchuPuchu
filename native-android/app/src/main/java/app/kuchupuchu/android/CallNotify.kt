@@ -37,6 +37,8 @@ private const val CH_FG = "kp-call-fg"
 object CallSounds {
     private var ring: MediaPlayer? = null
     private var ringback: MediaPlayer? = null
+    /** Which stream the live ringback rides, so a route change can move it. */
+    private var ringbackUsage = 0
     private var liftedFrom = -1
 
     /**
@@ -97,22 +99,28 @@ object CallSounds {
     @Synchronized
     fun startRingback(ctx: Context) {
         if (ringback != null || ring != null) return
+        val usage = toneUsage(ctx)
         val attrs = android.media.AudioAttributes.Builder()
             .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            .setUsage(toneUsage(ctx))
+            .setUsage(usage)
             // Ringback rides the ALARM stream (the old NOTIFICATION_RINGTONE usage
             // was muted by silent mode, so the caller sat in total silence while
             // "Ringing…" showed — a real dialer is never silent for the caller),
-            // EXCEPT once the call has a headset route: see toneUsage().
+            // EXCEPT while the call has a headset route, where it rides the
+            // communication stream so the tone and the call are the same place:
+            // see toneUsage().
             .build()
         val player =
             runCatching { MediaPlayer.create(ctx.applicationContext, R.raw.kp_ring, attrs, 1) }.getOrNull()
                 ?: return
         player.isLooping = true
         runCatching { player.setVolume(0.62f, 0.62f) }
-        liftAlarmVolume(ctx.applicationContext)
+        // Only the alarm stream needs borrowing the user's alarm volume; the
+        // communication stream is already at call level.
+        if (usage == android.media.AudioAttributes.USAGE_ALARM) liftAlarmVolume(ctx.applicationContext)
         runCatching { player.start() }
         ringback = player
+        ringbackUsage = usage
     }
 
     @Synchronized
@@ -188,6 +196,24 @@ object CallSounds {
         if (runCatching { AudioRouter.toneFollowsCallRoute(ctx.applicationContext) }.getOrDefault(false))
             android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION
         else android.media.AudioAttributes.USAGE_ALARM
+
+    /**
+     * Move the caller's ringback when the call's audio route moves.
+     *
+     * This is the "never in two places at once" guard for tones: tapping the
+     * audio button during "Ringing…" used to leave the ringback on the alarm
+     * stream — i.e. on the phone speaker — next to a call that had just moved to
+     * the buds. The incoming ring needs nothing here: while the phone is still
+     * ringing there is no call route to follow, so it stays on the alarm stream
+     * and is loud through silent mode either way.
+     */
+    @Synchronized
+    fun retuneTones(ctx: Context) {
+        if (ringback == null) return
+        if (ringbackUsage == toneUsage(ctx)) return
+        stopRingback()
+        startRingback(ctx)
+    }
 
     @Synchronized
     fun vibrate(ctx: Context, pattern: LongArray) {

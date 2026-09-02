@@ -116,7 +116,7 @@ function main() {
   has(router, "CALL_BT_TYPES", "call-capable Bluetooth profiles listed separately from A2DP");
   // Media-only A2DP has to be caught, or the button claims a headset that the
   // call never reached.
-  has(router, "armScoWatchdog", "SCO gets a grace period before the route is believed");
+  has(router, "armSettle", "SCO gets a bounded retry window before the route is believed");
   has(router, "TYPE_BLE_EARPHONE", "LE Audio earphones count as call-capable Bluetooth");
   has(router, "onNotice", "the fallback is announced instead of silently swallowed");
   has(engine, "AudioRouter.onNotice", "the engine shows that notice to the user");
@@ -140,7 +140,7 @@ function main() {
   // AudioAttributes.setPreferredDevice nor MediaPlayer.setDevice exists on this
   // compileSdk (CI proved both), and USAGE_VOICE_COMMUNICATION is the lever that
   // actually obeys setCommunicationDevice.
-  const pinned = (notify.match(/setUsage\(toneUsage\(ctx\)\)/g) || []).length;
+  const pinned = (notify.match(/setUsage\((toneUsage\(ctx\)|usage)\)/g) || []).length;
   check(
     "ring and ringback both ask the router which stream to ride",
     pinned >= 2,
@@ -176,11 +176,61 @@ function main() {
   has(router, "fun next(", "router owns the cycle order");
   has(router, "fun label(", "label comes from the router (device name when known)");
 
+  // Second-round contract, from the owner's retest: dialling with buds already
+  // connected had to be moved to Bluetooth by hand, and for a moment the ring
+  // and the call played in two places. Both were ordering/agreement bugs:
+  const begin = router.slice(
+    router.indexOf("fun begin(ctx"),
+    router.indexOf("A call turned on its camera"),
+  );
+  check(
+    "begin() registers the SCO/device listeners BEFORE it opens SCO",
+    begin.includes("watchSco(ctx)") &&
+      begin.indexOf("watchSco(ctx)") < begin.indexOf("apply(ctx, defaultRoute"),
+    "SCO's CONNECTED broadcast lands on the floor if the receiver comes later",
+  );
+  has(
+    router,
+    "private fun routable",
+    "the communication-device list is read, not just the output list",
+  );
+  // Pinned per call site: `candidates` also appears in available(), so a test on
+  // the name alone passes even when deviceFor went back to the output list (the
+  // bug that made setCommunicationDevice throw at call start).
+  const deviceFor = router.slice(
+    router.indexOf("fun deviceFor("),
+    router.indexOf("private fun pick("),
+  );
+  check(
+    "deviceFor() picks from outputs + communication devices",
+    deviceFor.includes("candidates(ctx)") && !deviceFor.includes("= outputs(ctx)"),
+    "deviceFor body must use candidates()",
+  );
+  has(router, "private fun settled", "the router asks the framework instead of assuming it worked");
+  has(router, "armSettle", "a route that is not up yet is retried on a bounded window");
+  has(router, "fun enforceExclusive", "a runtime guard keeps the call on exactly one output");
+  has(
+    router,
+    "communicationDevice",
+    "the guard compares against AudioManager.getCommunicationDevice",
+  );
+  lacks(router, "armScoWatchdog", "the one-shot watchdog that trusted the broadcast is gone");
+  // The tone half of "both places at once".
+  has(notify, "fun retuneTones(ctx: Context)", "the tone retuning exists");
+  has(engine, "CallSounds.retuneTones(app)", "and the engine calls it on every route change");
+  has(notify, "ringbackUsage", "the player remembers which stream it rides");
+  has(
+    notify,
+    "USAGE_ALARM) liftAlarmVolume",
+    "the alarm-volume lift only happens for the alarm stream",
+  );
+
   // CallEngine must delegate, not re-implement: duplicated routing is how the
   // two halves disagreed before.
   has(engine, "AudioRouter.begin(", "call start asks the router for a route");
   has(engine, "AudioRouter.end(", "teardown releases the router");
   has(engine, "AudioRouter.apply(", "route changes go through the router");
+  has(engine, "AudioRouter.enforceExclusive(", "the call loop sweeps the exclusive-output guard");
   lacks(
     engine,
     "getDevices(AudioManager.GET_DEVICES_OUTPUTS)",
