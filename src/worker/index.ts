@@ -382,6 +382,14 @@ async function ensureSchema(db: D1Database) {
     // "X is typing" pings: one row per (conversation, user), overwritten on
     // every keystroke batch and expired by age on read (no cleanup job).
     `CREATE TABLE IF NOT EXISTS typing (conv_id TEXT NOT NULL, user_id TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (conv_id, user_id))`,
+    // §52 observability. ONE row per (day, metric) — never one row per event, and
+    // one row per source table remembering where the rollup stopped. See
+    // rollupMetrics() for why this shape is the only one D1's free tier survives.
+    `CREATE TABLE IF NOT EXISTS metrics_daily (
+      day TEXT NOT NULL, key TEXT NOT NULL, value REAL NOT NULL,
+      PRIMARY KEY (day, key)
+    ) WITHOUT ROWID`,
+    `CREATE TABLE IF NOT EXISTS metrics_wm (source TEXT PRIMARY KEY, hi INTEGER NOT NULL) WITHOUT ROWID`,
     `CREATE INDEX IF NOT EXISTS idx_members_user ON members(user_id)`,
     `CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conv_id, created_at)`,
     `CREATE INDEX IF NOT EXISTS idx_messages_media ON messages(media)`,
@@ -1049,6 +1057,186 @@ async function pushToUser(
  * on a one-minute cron, so the call flips to MISSED and the missed-call push
  * fires without any client poll. Returns how many calls it reaped.
  */
+/* ---------- §52: observability that fits a D1 budget ---------- */
+
+/**
+ * The metrics the architecture doc asks for (§52: message delivery, call setup
+ * success/failure, reconnects, network-error and push diagnostics) as **daily
+ * rollups**, not an event log.
+ *
+ * The shape is a quota decision, not a taste one: this project already lost a day to
+ * D1 row reads, and a `call_events`/`push_events` table looks free at write time and
+ * then bills on every read ("how many calls failed yesterday?" = scan). So each
+ * source keeps a rowid watermark, a run reads only the rows appended since the last
+ * run (a `rowid > lo AND rowid <= hi` range — a bounded scan of *new* rows, never of
+ * the table), and the day's counters are summed into one row per (day, key).
+ *
+ * Watermark and counters move in a single `db.batch()`, which D1 runs as one
+ * transaction: a crash in the middle cannot leave a day double-counted or a window
+ * skipped. A first-ever run sets the watermarks to today's max rowid and counts
+ * nothing — no backfill scan, and no pretending history we did not record.
+ */
+const METRIC_SOURCES: {
+  source: string;
+  table: string;
+  /** Aggregates over the new-row window, bucketed by the day each row belongs to. */
+  sql: string;
+  /** [metric key, column] — one SQL aggregate per metric, so there is nothing to drift. */
+  metrics: [string, string][];
+}[] = [
+  {
+    source: "messages",
+    table: "messages",
+    sql: `SELECT substr(created_at, 1, 10) AS day,
+                  COUNT(*) AS sent,
+                  SUM(CASE WHEN kind = 'TEXT' THEN 1 ELSE 0 END) AS text_n,
+                  SUM(CASE WHEN kind <> 'TEXT' THEN 1 ELSE 0 END) AS media_n
+             FROM messages WHERE rowid > ? AND rowid <= ? GROUP BY day`,
+    metrics: [
+      ["msg.sent", "sent"],
+      ["msg.text", "text_n"],
+      ["msg.media", "media_n"],
+    ],
+  },
+  {
+    source: "calls",
+    table: "calls",
+    sql: `SELECT substr(created_at, 1, 10) AS day,
+                  COUNT(*) AS attempts,
+                  SUM(CASE WHEN started_at IS NOT NULL THEN 1 ELSE 0 END) AS connected,
+                  SUM(CASE WHEN status = 'MISSED' THEN 1 ELSE 0 END) AS missed,
+                  SUM(CASE WHEN status = 'DECLINED' THEN 1 ELSE 0 END) AS declined,
+                  SUM(CASE WHEN reoffer_sdp IS NOT NULL THEN 1 ELSE 0 END) AS reconnected,
+                  SUM(CASE WHEN started_at IS NOT NULL THEN
+                        COALESCE(strftime('%s', started_at) - strftime('%s', created_at), 0)
+                      ELSE 0 END) AS setup_s,
+                  SUM(CASE WHEN started_at IS NOT NULL AND ended_at IS NOT NULL THEN
+                        COALESCE(strftime('%s', ended_at) - strftime('%s', started_at), 0)
+                      ELSE 0 END) AS talk_s
+             FROM calls WHERE rowid > ? AND rowid <= ? GROUP BY day`,
+    metrics: [
+      ["call.attempts", "attempts"],
+      ["call.connected", "connected"],
+      ["call.missed", "missed"],
+      ["call.declined", "declined"],
+      ["call.reconnected", "reconnected"],
+      ["call.setup_s", "setup_s"],
+      ["call.talk_s", "talk_s"],
+    ],
+  },
+  {
+    source: "error_log",
+    table: "error_log",
+    sql: `SELECT substr(created_at, 1, 10) AS day,
+                  COUNT(*) AS rows_n,
+                  SUM(CASE WHEN substr(stack, 1, 8) = 'fcm_diag' THEN 1 ELSE 0 END) AS fcm,
+                  SUM(CASE WHEN substr(stack, 1, 6) = 'CLIENT' THEN 1 ELSE 0 END) AS client,
+                  SUM(CASE WHEN substr(stack, 1, 8) <> 'fcm_diag' AND substr(stack, 1, 6) <> 'CLIENT' THEN 1 ELSE 0 END) AS worker
+             FROM error_log WHERE rowid > ? AND rowid <= ? GROUP BY day`,
+    metrics: [
+      ["err.rows", "rows_n"],
+      ["err.push_diag", "fcm"],
+      ["err.client", "client"],
+      ["err.worker", "worker"],
+    ],
+  },
+];
+
+/**
+ * Rollups are hourly, not per cron tick: the cron that prunes `error_log` runs every
+ * minute (§ stale-RINGING reaping needs that), and metrics do not — an hourly gate
+ * costs 4 reads when nothing happened and ~8 + one batch when it did.
+ */
+export function shouldRollupMetrics(now: Date): boolean {
+  return now.getUTCMinutes() === 0;
+}
+
+/**
+ * @returns the number of (day, key) rows touched — 0 on a quiet hour.
+ */
+export async function rollupMetrics(db: D1Database, now = new Date()): Promise<number> {
+  const day = now.toISOString().slice(0, 10);
+  const writes: D1PreparedStatement[] = [];
+  let touched = 0;
+
+  for (const src of METRIC_SOURCES) {
+    // One statement answers "where did we stop" and "how far can we go" for a table.
+    const win = await db
+      .prepare(
+        `SELECT (SELECT hi FROM metrics_wm WHERE source = ?) AS lo,
+                (SELECT COALESCE(MAX(rowid), 0) FROM ${src.table}) AS hi`,
+      )
+      .bind(src.source)
+      .first<{ lo: number | null; hi: number }>();
+    const hi = win?.hi ?? 0;
+    const lo = win?.lo;
+    if (lo === null || lo === undefined) {
+      // First run: start counting from now, do not scan history.
+      writes.push(
+        db
+          .prepare(
+            "INSERT INTO metrics_wm (source, hi) VALUES (?, ?) ON CONFLICT(source) DO UPDATE SET hi = excluded.hi",
+          )
+          .bind(src.source, hi),
+      );
+      continue;
+    }
+    if (hi <= lo) continue;
+    const rows = await db
+      .prepare(src.sql)
+      .bind(lo, hi)
+      .all<{ day: string } & Record<string, number>>();
+    for (const r of rows.results ?? []) {
+      for (const [key, col] of src.metrics) {
+        const v = Number(r[col] ?? 0);
+        if (!Number.isFinite(v) || v === 0) continue;
+        touched++;
+        writes.push(
+          db
+            .prepare(
+              "INSERT INTO metrics_daily (day, key, value) VALUES (?, ?, ?) ON CONFLICT(day, key) DO UPDATE SET value = value + excluded.value",
+            )
+            .bind(r.day ?? day, key, v),
+        );
+      }
+    }
+    writes.push(
+      db
+        .prepare(
+          "INSERT INTO metrics_wm (source, hi) VALUES (?, ?) ON CONFLICT(source) DO UPDATE SET hi = excluded.hi",
+        )
+        .bind(src.source, hi),
+    );
+  }
+
+  // A gauge, not a counter: how many accounts have a live push target right now.
+  // `devices` is small by construction (the same cron prunes it at 60 days), so this
+  // is the one number worth reading on the dot rather than deriving from a window.
+  const active = await db
+    .prepare("SELECT COUNT(DISTINCT user_id) AS users FROM devices WHERE updated_at >= ?")
+    .bind(new Date(now.getTime() - 864e5).toISOString())
+    .first<{ users: number }>();
+  touched++;
+  writes.push(
+    db
+      .prepare(
+        "INSERT INTO metrics_daily (day, key, value) VALUES (?, ?, ?) ON CONFLICT(day, key) DO UPDATE SET value = excluded.value",
+      )
+      .bind(day, "dev.active24h", active?.users ?? 0),
+  );
+
+  // Metrics are not an archive: 90 days covers the longest debugging window this
+  // project has needed, and keeps the table's row count flat forever.
+  writes.push(
+    db
+      .prepare("DELETE FROM metrics_daily WHERE day < ?")
+      .bind(new Date(now.getTime() - 90 * 864e5).toISOString().slice(0, 10)),
+  );
+
+  await db.batch(writes);
+  return touched;
+}
+
 async function reapStaleCalls(env: Env, db: D1Database, ctx: ExecutionContext): Promise<number> {
   const cutoff = new Date(Date.now() - 60_000).toISOString();
   const stale = await all<{ id: string; caller_id: string; callee_id: string; kind: string }>(
@@ -1310,12 +1498,27 @@ export default {
       const devs = await env.DB.prepare("DELETE FROM devices WHERE updated_at < ?")
         .bind(devCutoff)
         .run();
+      // §52 daily rollups, hourly (the gate is a function so it can be tested
+      // without waiting for an hour). Its own failure must not stop the pruning above
+      // or vice versa, so it is measured inside its own try.
+      let metrics = 0;
+      if (shouldRollupMetrics(new Date())) {
+        try {
+          metrics = await rollupMetrics(env.DB);
+        } catch (mErr) {
+          console.error(
+            "cron_metrics_error",
+            JSON.stringify({ err: mErr instanceof Error ? mErr.message : String(mErr) }),
+          );
+        }
+      }
       console.log(
         "cron_reap",
         JSON.stringify({
           reaped,
           pruned: pruned?.meta?.changes ?? 0,
           devices: devs?.meta?.changes ?? 0,
+          metrics,
         }),
       );
     } catch (err) {
