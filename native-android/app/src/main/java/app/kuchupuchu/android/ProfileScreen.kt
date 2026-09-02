@@ -67,7 +67,11 @@ fun ProfileScreen(nav: NavController, userId: String) {
     // refreshes. First open used to sit on "Loading…" like a web page.
     var user by remember { mutableStateOf(profileSnapshot(userId)) }
     var error by remember { mutableStateOf("") }
-    var blocked by remember { mutableStateOf(false) }
+    // The API answers `blocked` on the profile now (it has to, so the profile can
+    // be shown at all to someone who blocked this user). Starting from `false`
+    // meant an already-blocked contact showed "Block"; tapping it POSTed a second
+    // block and the UI said "blocked" while the server said nothing changed.
+    var blocked by remember { mutableStateOf(user?.optBoolean("blocked") == true) }
 
     LaunchedEffect(userId) {
         runCatching {
@@ -76,6 +80,10 @@ fun ProfileScreen(nav: NavController, userId: String) {
             error = ""
             val fresh = withContext(Dispatchers.IO) { Api.get("/api/users/$userId", true) }
             user = fresh.optJSONObject("user") ?: user
+        }.onSuccess {
+            // Re-read from the row we actually ended up showing, so a stale cache
+            // can never disagree with the button.
+            user?.takeIf { it.has("blocked") }?.let { blocked = it.optBoolean("blocked") }
         }.onFailure {
             if (user == null) error = it.message ?: "Could not load profile."
         }
@@ -244,11 +252,15 @@ fun ProfileScreen(nav: NavController, userId: String) {
                     onClick = {
                         scope.launch {
                             runCatching {
-                                withContext(Dispatchers.IO) {
+                                val res = withContext(Dispatchers.IO) {
                                     if (blocked) Api.delete("/api/blocks/$userId")
                                     else Api.post("/api/blocks", JSONObject().put("userId", userId))
                                 }
-                                blocked = !blocked
+                                // Flip on the server's answer only: these calls
+                                // return an error body (403/429) instead of
+                                // throwing, and the old code marked the user blocked
+                                // even when the write was refused.
+                                if (!res.has("error")) blocked = !blocked
                             }
                         }
                     },
@@ -335,8 +347,6 @@ private fun ProfilePhotoDialog(url: String, name: String, onClose: () -> Unit) {
                             runCatching {
                                 if (url.startsWith("data:")) {
                                     android.util.Base64.decode(url.substringAfter(","), android.util.Base64.DEFAULT)
-                                } else if (url.startsWith("http")) {
-                                    java.net.URL(url).openStream().use { it.readBytes() }
                                 } else Api.download(url)
                             }.getOrNull()
                         }

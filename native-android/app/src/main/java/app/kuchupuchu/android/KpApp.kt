@@ -36,8 +36,11 @@ fun KpApp() {
     LaunchedEffect(authed) {
         MainActivity.pendingChat.collect { pending ->
             if (authed && !pending.isNullOrBlank()) {
-                MainActivity.pendingChat.value = null
-                nav.navigate("chat/$pending") { launchSingleTop = true }
+                // Clear only once the route actually took. A failed navigate used
+                // to eat the pending id, so the card tap did nothing at all and
+                // the target was gone on the next composition.
+                runCatching { nav.navigate("chat/$pending") { launchSingleTop = true } }
+                    .onSuccess { MainActivity.pendingChat.value = null }
             }
         }
     }

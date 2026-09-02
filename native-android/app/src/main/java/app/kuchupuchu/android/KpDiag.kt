@@ -24,7 +24,11 @@ object KpDiag {
     private const val KEY = "push_log"
     private const val MAX = 8
 
-    fun log(ctx: Context, line: String) {
+    /** Read-modify-write of one prefs string: two push paths logging in the same
+     *  instant used to lose a line — the exact evidence this file exists to keep. */
+    private val logLock = Any()
+
+    fun log(ctx: Context, line: String) = synchronized(logLock) {
         runCatching {
             val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             val stamp = java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date())

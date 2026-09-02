@@ -58,6 +58,7 @@ fun NewChatScreen(nav: NavController) {
     var query by remember { mutableStateOf("") }
     val users = remember { mutableStateListOf<JSONObject>() }
     var searching by remember { mutableStateOf(false) }
+    var searchError by remember { mutableStateOf("") }
 
     LaunchedEffect(query) {
         if (query.trim().length < 2) {
@@ -66,6 +67,7 @@ fun NewChatScreen(nav: NavController) {
         }
         delay(250)
         searching = true
+        searchError = ""
         try {
             val data =
                 withContext(Dispatchers.IO) {
@@ -73,7 +75,15 @@ fun NewChatScreen(nav: NavController) {
                 }
             users.clear()
             users.addAll(data.arr("users").objects())
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // Typing the next character cancels this search. Catching it as an
+            // "error" made the cancel path run the `finally` of a request that
+            // was never allowed to finish — and, worse, a real failure looked
+            // identical to a cancelled one, so a dead network just showed
+            // "No one found", which reads like "this person does not exist".
+            throw e
         } catch (_: Exception) {
+            searchError = "Search failed — check your connection."
         } finally {
             searching = false
         }

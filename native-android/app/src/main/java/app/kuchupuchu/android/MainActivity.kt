@@ -19,6 +19,12 @@ class MainActivity : ComponentActivity() {
 
     private var shareCb: ((Int, Intent?) -> Unit)? = null
 
+    /** Two screen-share requests in flight used to overwrite each other's
+     *  callback, so the FIRST caller's closure ran with the SECOND request's
+     *  result — a granted projection handed to the wrong call, and a declined one
+     *  reported as a failure to the other. Each request now owns a generation. */
+    private var shareGen = 0L
+
     private val ask =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
 
@@ -249,7 +255,8 @@ class MainActivity : ComponentActivity() {
 
     /** Screen-share permission flow (video call screens). */
     fun askShare(cb: (Int, Intent?) -> Unit) {
-        shareCb = cb
+        val gen = ++shareGen
+        shareCb = { code, data -> if (gen == shareGen) cb(code, data) }
         val mgr = getSystemService(MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
         shareAsk.launch(mgr.createScreenCaptureIntent())
     }

@@ -189,6 +189,17 @@ object KpPush {
  */
 class KpPushService : FirebaseMessagingService() {
 
+    /** Capped partial wake lock: see onMessageReceived. Never held longer than 6s. */
+    private val wakeLock: android.os.PowerManager.WakeLock by lazy {
+        (getSystemService(Context.POWER_SERVICE) as android.os.PowerManager)
+            .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "kp:fcm")
+            .apply { setReferenceCounted(false) }
+    }
+
+    private fun wakeFor() = runCatching {
+        if (!wakeLock.isHeld) wakeLock.acquire(6_000L)
+    }
+
     override fun onMessageReceived(message: RemoteMessage) {
         val data = message.data
         // PRIMARY witness: this runs ONLY when the process is handed the FCM
@@ -196,6 +207,13 @@ class KpPushService : FirebaseMessagingService() {
         // no such line in the app log, FCM/OEM never delivered it to the app —
         // that is the launcher's freeze/kill, not app code.
         KpDiag.log(this, "FCM data received type=${data["type"]}")
+        // onMessageReceived returns as soon as it hands off, and the OS is then
+        // free to freeze the process — mid-network-call, in the one background
+        // case this code exists for. Every handler here is dispatched onto a
+        // thread, so the lock is taken for a capped window instead of being
+        // released by the caller: 6 seconds covers the /calls/active revalidate
+        // and the card post, and the timeout means no code path can leak a hold.
+        wakeFor()
         when (data["type"]) {
             "call" -> handleCall(data)
             "call_answer" -> handleCallAnswer(data)
@@ -329,7 +347,11 @@ class KpPushService : FirebaseMessagingService() {
                 )
             }
         }.start()
-        val inChat = Store.foreground && Store.route == "chat/$convoId"
+        // A query/arg on the route (chat/<id>?media=1 style) used to defeat the
+        // exact match, so a notification card appeared over the OPEN chat.
+        // Boundary-checked startsWith — a bare startsWith would also suppress on
+        // chat/123 while the user reads chat/12.
+        val inChat = Store.foreground && (Store.route == "chat/$convoId" || Store.route.startsWith("chat/$convoId?"))
         KpDiag.log(
             this,
             "msg ${convoId.take(8)} fg=${Store.foreground} route=${Store.route.take(22)} muted=$muted inChat=$inChat -> ${if (Store.foreground) "SOUND_ONLY (no card)" else "RICH_CARD"}",

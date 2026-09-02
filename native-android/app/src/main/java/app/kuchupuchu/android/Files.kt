@@ -17,12 +17,43 @@ import java.io.File
 /** File helpers: sharing temp files out, downscaling picked photos. */
 object FilesUtil {
 
-    /** Copies bytes into cacheDir and returns a shareable content Uri. */
+    /**
+     * Copies bytes into cacheDir and returns a shareable content Uri.
+     *
+     * The name used to be the only discriminator, so sharing `photo.jpg` twice —
+     * or sharing a photo while the receiving app still has the FIRST `photo.jpg`
+     * open — overwrote the same file out from under an open file descriptor and
+     * the viewer showed the second file's contents (or a half-written read).
+     * Each hand-off now gets its own file, and the pile is swept on the way.
+     */
     fun cacheFile(ctx: Context, name: String, bytes: ByteArray, mime: String): Uri {
         val safe = name.replace(Regex("[^A-Za-z0-9._ -]"), "_").ifBlank { "file" }
-        val f = File(ctx.cacheDir, "shared_$safe")
+        val dir = ctx.cacheDir
+        runCatching {
+            // Old hand-offs are dead weight: the receiving app copied the bytes
+            // already. Sweep files older than an hour so a long session cannot
+            // grow cacheDir without limit.
+            val cutoff = System.currentTimeMillis() - 3_600_000L
+            dir.listFiles()?.forEach { old ->
+                if (old.name.startsWith("shared_") && old.lastModified() < cutoff) runCatching { old.delete() }
+            }
+        }
+        val f = File(dir, "shared_${System.currentTimeMillis()}_${fingerprint(bytes)}_$safe")
         f.writeBytes(bytes)
         return FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)
+    }
+
+    /** A few hex chars, enough that two shares of the same file name never land
+     *  on the same path while the first one is still open elsewhere. */
+    private fun fingerprint(bytes: ByteArray): String {
+        var h = bytes.size
+        val step = maxOf(1, bytes.size / 64)
+        var i = 0
+        while (i < bytes.size) {
+            h = h * 31 + bytes[i].toInt()
+            i += step
+        }
+        return Integer.toHexString(h)
     }
 
     /** Opens a downloaded file with the system viewer. */
@@ -76,24 +107,61 @@ object FilesUtil {
     /** Copies a content Uri into MediaStore Downloads (no viewer needed). */
     private fun saveToDownloads(ctx: Context, name: String, uri: android.net.Uri) {
         val safe = name.ifBlank { "kuchupuchu_${System.currentTimeMillis()}" }
+        if (android.os.Build.VERSION.SDK_INT < 29) {
+            // MediaStore.Downloads (and IS_PENDING) only exist on API 29+. The
+            // reference was to a missing class on 7-9, i.e. "Save to Downloads"
+            // threw instead of saving. The app-specific external directory needs
+            // no runtime permission there and is visible to file managers.
+            runCatching {
+                val dir = File(ctx.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "KuchuPuchu")
+                if (!dir.exists()) dir.mkdirs()
+                val dest = File(dir, safe)
+                ctx.contentResolver.openInputStream(uri)?.use { input ->
+                    dest.outputStream().use { out -> input.copyTo(out, 64 * 1024) }
+                } ?: return
+                android.widget.Toast.makeText(
+                    ctx,
+                    "Saved to ${dest.absolutePath}",
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
+            }
+            return
+        }
         val values = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, safe)
-            put(MediaStore.Downloads.MIME_TYPE, "*/*")
-            if (android.os.Build.VERSION.SDK_INT >= 29) put(MediaStore.Downloads.IS_PENDING, 1)
+            // "*/*" is not a mime type: a file manager that trusts it renders the
+            // row as an unknown blob and "Open with" finds no handler.
+            put(MediaStore.Downloads.MIME_TYPE, mimeFor(safe, ""))
+            put(MediaStore.Downloads.IS_PENDING, 1)
         }
         val target =
             ctx.contentResolver.insert(
                 MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
                 values,
             ) ?: return
-        ctx.contentResolver.openInputStream(uri)?.use { input ->
-            ctx.contentResolver.openOutputStream(target)?.use { output -> input.copyTo(output, 64 * 1024) }
+        val input = ctx.contentResolver.openInputStream(uri)
+        if (input == null) {
+            // Leaving the pending row behind used to put a 0-byte file in
+            // Downloads for a copy that never happened.
+            runCatching { ctx.contentResolver.delete(target, null) }
+            return
         }
-        if (android.os.Build.VERSION.SDK_INT >= 29) {
-            values.clear()
+        val copied =
+            runCatching {
+                input.use { src ->
+                    ctx.contentResolver.openOutputStream(target)?.use { out -> src.copyTo(out, 64 * 1024) }
+                        ?: 0L
+                }
+            }.getOrDefault(0L)
+        values.clear()
+        if (copied <= 0L) {
             values.put(MediaStore.Downloads.IS_PENDING, 0)
-            ctx.contentResolver.update(target, values, null)
+            runCatching { ctx.contentResolver.delete(target, null) }
+            android.widget.Toast.makeText(ctx, "Could not save that file.", android.widget.Toast.LENGTH_SHORT).show()
+            return
         }
+        values.put(MediaStore.Downloads.IS_PENDING, 0)
+        ctx.contentResolver.update(target, values, null)
     }
 
     /**
@@ -152,7 +220,23 @@ object FilesUtil {
         }
         if (bmp == null) {
             val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
-            bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            // Reading a 12 MP camera JPEG straight into a Bitmap allocates ~48 MB
+            // of Java heap on the spot; on a low-RAM phone under memory pressure
+            // the OOM killed the picker instead of downscaling (and ImageDecoder
+            // only covers API 28+, so this path is the ONLY path on older
+            // devices). Read the header first, then sample down to what we need.
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            var sample = 1
+            if (bounds.outWidth > 0 && bounds.outHeight > 0) {
+                while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxSide) sample *= 2
+            }
+            bmp = BitmapFactory.decodeByteArray(
+                bytes,
+                0,
+                bytes.size,
+                BitmapFactory.Options().apply { inSampleSize = sample },
+            )
         }
         var picture = bmp ?: return null
         if (picture.config != Bitmap.Config.ARGB_8888) {
@@ -210,16 +294,10 @@ object FilesUtil {
         var mime = ctx.contentResolver.getType(uri) ?: ""
         if (mime.isBlank()) {
             val name = uri.lastPathSegment ?: "file"
-            mime =
-                when (name.substringAfterLast('.', "").lowercase()) {
-                    "pdf" -> "application/pdf"
-                    "mp3", "m4a", "aac", "wav", "ogg" -> "audio/mpeg"
-                    "mp4", "mov", "mkv" -> "video/mp4"
-                    "jpg", "jpeg", "png", "webp", "gif" -> "image/*"
-                    "txt" -> "text/plain"
-                    "zip" -> "application/zip"
-                    else -> "application/octet-stream"
-                }
+            // The hand-rolled table below called every sound file audio/mpeg and
+            // every picture "image/*" (not a valid mime type — the receiver's
+            // gallery then refuses it). mimeFor() already maps all of these.
+            mime = mimeFor(name, "")
         }
         mime to bytes
     }.getOrNull()
