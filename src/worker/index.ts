@@ -2449,17 +2449,31 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         : "AND created_at >= ?"
       : "";
     const liveArgs = expiry ? (disappearSince ? [expiry, disappearSince] : [expiry]) : [];
-    const before = url.searchParams.get("before");
+    // §39 cursor: `created_at` alone is ambiguous (ms resolution), so the client
+    // pages back with (createdAt, rowid) and `PAGE + 1` rows are read to learn
+    // whether anything older exists. A COUNT(*) probe would cost the same read on
+    // the hottest route in the app, and a page-full test converges anyway.
+    const beforeRaw = url.searchParams.get("before");
+    // A cursor the client made up (or that survived a code change) must not be
+    // compared as TEXT: `created_at < 'not-a-date'` is true for every real row, so
+    // a garbage cursor used to silently return the NEWEST page and the client
+    // would re-add rows it already had. Reject it; the app resets paging on a 400.
+    const before =
+      beforeRaw && beforeRaw.length <= 40 && Number.isFinite(Date.parse(beforeRaw))
+        ? beforeRaw
+        : null;
+    if (beforeRaw && before === null) fail(400, "Malformed pagination cursor.", "BAD_CURSOR");
     // created_at is millisecond-resolution text, so several messages routinely
     // share one value. Without a rowid tiebreaker both the ORDER BY and the
     // `created_at < ?` cursor were ambiguous and paging back silently dropped
     // every message that shared the boundary timestamp.
+    const PAGE = 50;
     const rows = before
-      ? await all<MsgRow>(
+      ? await all<MsgRow & { kp_rowid?: number }>(
           db,
-          `SELECT * FROM messages WHERE conv_id = ? ${sinceClause} ${liveClause}
+          `SELECT *, rowid AS kp_rowid FROM messages WHERE conv_id = ? ${sinceClause} ${liveClause}
              AND (created_at < ? OR (created_at = ? AND rowid < ?))
-           ORDER BY created_at DESC, rowid DESC LIMIT 50`,
+           ORDER BY created_at DESC, rowid DESC LIMIT ${PAGE + 1}`,
           convId,
           ...sinceArgs,
           ...liveArgs,
@@ -2467,14 +2481,20 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           before,
           Number(url.searchParams.get("beforeRowid") || 0) || Number.MAX_SAFE_INTEGER,
         )
-      : await all<MsgRow>(
+      : await all<MsgRow & { kp_rowid?: number }>(
           db,
-          `SELECT * FROM messages WHERE conv_id = ? ${sinceClause} ${liveClause}
-           ORDER BY created_at DESC, rowid DESC LIMIT 50`,
+          `SELECT *, rowid AS kp_rowid FROM messages WHERE conv_id = ? ${sinceClause} ${liveClause}
+           ORDER BY created_at DESC, rowid DESC LIMIT ${PAGE + 1}`,
           convId,
           ...sinceArgs,
           ...liveArgs,
         );
+    const hasMore = rows.length > PAGE;
+    if (hasMore) rows.pop();
+    // Captured NOW, while `rows` is still DESC: `items` below is built with
+    // rows.reverse(), which mutates the array in place — reading rows[last] after
+    // that hands back the NEWEST row, i.e. a cursor that pages forward forever.
+    const oldestRow = rows[rows.length - 1];
     // Sender names in ONE round trip (chunked IN), not one SELECT per distinct
     // sender. A 50-message group page used to issue up to 50 extra D1 round
     // trips — every one of them edge→primary latency on the caller.
@@ -2566,7 +2586,19 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     );
     const clientMarker = url.searchParams.get("marker");
     if (clientMarker && clientMarker === marker) return json({ marker, unchanged: true });
-    return json({ items, readAt: readAt ?? null, typingAt, marker });
+    return json({
+      items,
+      readAt: readAt ?? null,
+      typingAt,
+      marker,
+      // The next cursor back. `kp_rowid` stays here, deliberately NOT inside the
+      // items: an internal rowid has no business in a message payload (the client
+      // has no use for it, and it would advertise insertion order of every row).
+      oldest: oldestRow
+        ? { at: oldestRow.created_at, rowid: Number(oldestRow.kp_rowid || 0) }
+        : null,
+      hasMore,
+    });
   }
 
   if (msgMatch && method === "POST") {

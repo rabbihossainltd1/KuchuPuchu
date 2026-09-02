@@ -92,6 +92,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -147,6 +148,9 @@ private class MsgPage(
     val topId: String,
     val readAt: String?,
     val typingAt: Long,
+    /** §39: the cursor for one page back, and whether anything older exists. */
+    val oldest: JSONObject?,
+    val hasMore: Boolean,
 )
 
 /**
@@ -165,6 +169,13 @@ fun ChatScreen(nav: NavController, convId: String) {
     val msgs = remember { mutableStateListOf<JSONObject>() }
     val pending = remember { mutableStateListOf<JSONObject>() }
     var input by remember { mutableStateOf("") }
+    // §39 paging state. `olderIds` is what lets the rebuild above keep what the
+    // user already scrolled back to; the cursor is the (createdAt,rowid) pair the
+    // server handed with the page it replaced.
+    val olderIds = remember { mutableStateListOf<String>() }
+    var olderCursor by remember { mutableStateOf<JSONObject?>(null) }
+    var hasMoreOlder by remember { mutableStateOf(false) }
+    val loadingOlder = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
     var lastTypingPing by remember { mutableStateOf(0L) }
     var showAttach by remember { mutableStateOf(false) }
     var showStickers by remember { mutableStateOf(false) }
@@ -297,6 +308,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                                         }
                                         .getOrNull()
                                         ?: 0L),
+                                oldest = data.optJSONObject("oldest"),
+                                hasMore = data.optBoolean("hasMore"),
                             )
                         }
                     }
@@ -308,7 +321,19 @@ fun ChatScreen(nav: NavController, convId: String) {
                 parsed.readAt?.let { otherReadAt = it }
                 if (parsed.typingAt > 0) otherTypingAt = parsed.typingAt
                 val newTop = parsed.topId
-                ScreenStore.setMsgs(convId, fresh)
+                // §39: rows the user paged back to are not in the newest window, so
+                // a plain rebuild would drop them on the next tick — scroll back two
+                // pages, receive one message, watch the chat jump. They are carried
+                // over (minus anything the window now contains, so no duplicates).
+                val carried =
+                    if (olderIds.isEmpty()) emptyList()
+                    else {
+                        val newest = fresh.mapTo(HashSet()) { it.optString("id") }
+                        msgs.filter { it.optString("id") in olderIds && it.optString("id") !in newest }
+                    }
+                if (olderIds.isEmpty()) olderCursor = parsed.oldest
+                hasMoreOlder = parsed.hasMore
+                ScreenStore.setMsgs(convId, carried + fresh)
                 paintFromStore()
                 if (pending.isNotEmpty()) {
                     pending.removeAll { p ->
@@ -362,6 +387,10 @@ fun ChatScreen(nav: NavController, convId: String) {
     /* instant paint + first refresh */
     LaunchedEffect(convId) {
         Store.route = "chat/$convId"
+        // A new chat is a new history window: paging state must not leak across.
+        olderIds.clear()
+        olderCursor = null
+        hasMoreOlder = false
         paintFromStore()
         // §20: the draft comes back with the chat — but only into an empty
         // composer, so returning from a media picker never overwrites live typing.
@@ -530,6 +559,61 @@ fun ChatScreen(nav: NavController, convId: String) {
         pending.find { it.optString("clientId") == clientId }
             ?.put("failed", true)
             ?.put("failedAt", System.currentTimeMillis())
+    }
+
+    /**
+     * §39 "load older": one page back through the (created_at,rowid) cursor.
+     *
+     * Deliberately NOT Api.get(): a page would be written into the disk cache under
+     * its own key, so scrolling back through a busy chat would leave dozens of
+     * 50-message JSON files behind for no benefit — the merged list already lives in
+     * ScreenStore, which is what paints offline.
+     */
+    fun loadOlder() {
+        val cur = olderCursor ?: return
+        if (!hasMoreOlder) return
+        if (!loadingOlder.compareAndSet(false, true)) return
+        scope.launch {
+            try {
+                val data = withContext(Dispatchers.IO) {
+                    Api.request(
+                        "/api/conversations/$convId/messages?before=" +
+                            java.net.URLEncoder.encode(cur.optString("at"), "UTF-8") +
+                            "&beforeRowid=" + cur.optLong("rowid"),
+                        "GET",
+                        null,
+                    )
+                }
+                val page = data.arr("items").objects()
+                val have = msgs.mapTo(HashSet()) { it.optString("id") }
+                val freshOld =
+                    page.filter {
+                        it.optString("id") !in have && it.optString("id") !in ScreenStore.hiddenMsgIds
+                    }
+                if (freshOld.isNotEmpty()) {
+                    olderIds.addAll(freshOld.map { it.optString("id") })
+                    ScreenStore.setMsgs(convId, freshOld + msgs.toList())
+                    paintFromStore()
+                    // The list grew at the TOP by N rows; without this the viewport
+                    // keeps the same index and the user is thrown N rows down.
+                    listState.scrollToItem(freshOld.size)
+                }
+                hasMoreOlder = data.optBoolean("hasMore")
+                data.optJSONObject("oldest")?.let { olderCursor = it }
+            } catch (_: Exception) {
+                // A failed page keeps hasMoreOlder true: the next scroll-up tries
+                // again. Swallowing it is right — the visible history is unaffected.
+            } finally {
+                loadingOlder.set(false)
+            }
+        }
+    }
+
+    // Trigger: the user is at the top AND still dragging. Without the scroll flag
+    // a settled list at index 0 would re-fire this on every recomposition.
+    LaunchedEffect(convId) {
+        snapshotFlow { listState.firstVisibleItemIndex to listState.isScrollInProgress }
+            .collect { (idx, scrolling) -> if (idx == 0 && scrolling) loadOlder() }
     }
 
     fun sendText(body: String, kind: String = "TEXT") {

@@ -385,6 +385,63 @@ has(list, "Api.PollCadence.failed()", "…and a bad one starts it");
   }
 }
 
+// ── §39 paging back through history (client side of the cursor) ───────────────
+{
+  const chat = kt("ChatScreen.kt");
+  const mp = chat.slice(
+    chat.indexOf("private class MsgPage("),
+    chat.indexOf("private class MsgPage(") + 420,
+  );
+  check(
+    "the page parser keeps the cursor and the end-of-history flag",
+    mp.includes("val oldest: JSONObject?") && mp.includes("val hasMore: Boolean"),
+    mp.slice(0, 60),
+  );
+  check(
+    "paging state is per-open-chat and reset when the chat changes",
+    chat.includes("val olderIds = remember { mutableStateListOf<String>() }") &&
+      chat.includes("olderIds.clear()") &&
+      chat.includes("hasMoreOlder = false"),
+  );
+  const lo = chat.slice(chat.indexOf("fun loadOlder()"), chat.indexOf("fun loadOlder()") + 1900);
+  check(
+    "loadOlder exists and is called from the scroll, not a timer",
+    lo.length > 200 && chat.includes("if (idx == 0 && scrolling) loadOlder()"),
+  );
+  check(
+    "…it refuses to run when there is nothing older or a page is in flight",
+    lo.includes("if (!hasMoreOlder) return") &&
+      lo.includes("loadingOlder.compareAndSet(false, true)"),
+    lo.slice(0, 60),
+  );
+  check(
+    "…pages with BOTH halves of the cursor (created_at alone is ambiguous)",
+    lo.includes("?before=") && lo.includes("&beforeRowid="),
+  );
+  check(
+    "…never through the cache getter, so a long scroll writes no page files to disk",
+    lo.includes("Api.request(") && !lo.includes("Api.get("),
+  );
+  check(
+    "…dedupes against what is already on screen and against hidden rows",
+    lo.includes('it.optString("id") !in have') && lo.includes("ScreenStore.hiddenMsgIds"),
+  );
+  check(
+    "…and pins the viewport to the row the user was looking at",
+    lo.includes("listState.scrollToItem(freshOld.size)"),
+  );
+  check(
+    "the refresh rebuild carries paged rows instead of yanking them out",
+    /val carried =[\s\S]{0,900}ScreenStore\.setMsgs\(convId, carried \+ fresh\)/.test(chat),
+  );
+  check(
+    "the scroll trigger only fires while the user is actually dragging",
+    chat.includes(
+      "snapshotFlow { listState.firstVisibleItemIndex to listState.isScrollInProgress }",
+    ),
+  );
+}
+
 process.stdout.write(lines.join("\n") + "\n");
 const broken = lines.filter((l) => l.startsWith("  BROKEN")).length;
 process.exit(broken ? 1 : 0);
