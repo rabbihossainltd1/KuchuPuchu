@@ -210,13 +210,20 @@ object Api {
         }
     }
 
-    private fun executeJson(req: Request): JSONObject {
+    private fun executeJson(req: Request, allowRefresh: Boolean = true): JSONObject {
         http.newCall(req).execute().use { resp ->
             noteBackpressure(resp)
             val text = resp.body?.string().orEmpty()
             val json = if (text.isBlank()) JSONObject() else JSONObject(text)
             if (!resp.isSuccessful) {
                 val msg = json.optJSONObject("error")?.optString("message") ?: "Request failed."
+                // §37: a 401 gets ONE silent refresh and then ONE retry of the same
+                // request. `allowRefresh` is false on that retry, so the exchange
+                // cannot loop, and refreshSession() is single-flight, so a screen
+                // that fires five parallel requests does not send five refreshes.
+                if (resp.code == 401 && allowRefresh && refreshSession()) {
+                    return executeJson(req, allowRefresh = false)
+                }
                 // An expired/revoked session used to surface as empty screens with
                 // no way out. Flip the auth gate so the login screen comes back.
                 if (resp.code == 401 && !token.isNullOrBlank()) {
@@ -229,6 +236,44 @@ object Api {
                 throw ApiException(resp.code, msg)
             }
             return json
+        }
+    }
+
+    /**
+     * §37: ask the API to slide this session's expiry. Returns true only on a 2xx —
+     * a failed refresh is the caller's cue to sign out, never a reason to retry.
+     *
+     * Deliberately dumb about the token itself: the server extends the row this token
+     * already points at (no rotation), because a rotated token would have to be
+     * persisted from a background thread and every in-flight request would then be
+     * authenticated by a value that just stopped working. Nothing here is stored, so
+     * there is nothing to get out of sync.
+     *
+     * `lastRefreshTry` is the loop break for the *other* direction — a session that is
+     * really gone gets one attempt per minute instead of one per failed request.
+     */
+    @Volatile private var lastRefreshTry = 0L
+    private val refreshing = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    fun refreshSession(): Boolean {
+        if (token.isNullOrBlank()) return false
+        if (System.currentTimeMillis() - lastRefreshTry < 60_000) return false
+        if (!refreshing.compareAndSet(false, true)) return false
+        lastRefreshTry = System.currentTimeMillis()
+        return try {
+            val req =
+                Request.Builder()
+                    .url("$BASE/api/auth/refresh")
+                    .post(ByteArray(0).toRequestBody(JSON))
+                    .build()
+            http.newCall(req).execute().use { resp ->
+                noteBackpressure(resp)
+                resp.isSuccessful
+            }
+        } catch (e: Exception) {
+            false
+        } finally {
+            refreshing.set(false)
         }
     }
 

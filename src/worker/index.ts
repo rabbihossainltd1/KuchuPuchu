@@ -528,9 +528,14 @@ function userSelf(row: UserRow, online = false) {
   return { ...userFrom(row, online), email: row.email };
 }
 
-async function requireUser(db: D1Database, request: Request) {
+/** The bearer token, or "". Three routes need it; only one place parses it. */
+function bearerToken(request: Request): string {
   const header = request.headers.get("authorization") ?? "";
-  const token = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
+  return header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
+}
+
+async function requireUser(db: D1Database, request: Request) {
+  const token = bearerToken(request);
   if (!token) fail(401, "Sign in first.", "UNAUTHENTICATED");
   const hash = await sha256Hex(token);
   // Session + user in ONE statement. The two separate SELECTs used to sit on
@@ -1719,8 +1724,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   }
 
   if (path === "/api/auth/logout" && method === "POST") {
-    const header = request.headers.get("authorization") ?? "";
-    const token = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
+    const token = bearerToken(request);
     if (token) {
       const hash = await sha256Hex(token);
       // The session and the push handle die together — and ONLY this device's row.
@@ -1754,6 +1758,29 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   const me = await requireUser(db, request);
   const uid = me.id;
+
+  // §37 token refresh, in the only shape that is safe with a single opaque bearer:
+  // an **active** session slides its own expiry. Not "hand back an expired token and
+  // get a new one" — that makes the 90-day expiry advisory and turns any stolen,
+  // long-dead token into a permanent one. It sits inside the authenticated section on
+  // purpose: `requireUser` has already decided whether this session may exist, so a
+  // dead one cannot reach the UPDATE no matter what this route does.
+  if (path === "/api/auth/refresh" && method === "POST") {
+    rateLimit(`refresh:${uid}`, 10, 6);
+    const left = Date.parse(me.session_expires_at) - Date.now();
+    // The write is the expensive part, so it happens only near the edge: a client that
+    // foregrounds 40 times a day must not pay 40 D1 writes for a 90-day clock.
+    if (left > SESSION_TTL_MS / 2)
+      return json({ ok: true, expiresAt: me.session_expires_at, extended: false });
+    const until = new Date(Date.now() + SESSION_TTL_MS).toISOString();
+    await run(
+      db,
+      "UPDATE sessions SET expires_at = ? WHERE token_hash = ?",
+      until,
+      await sha256Hex(bearerToken(request)),
+    );
+    return json({ ok: true, expiresAt: until, extended: true });
+  }
 
   /* ---------- realtime WebSocket upgrades (ChatRoom fan-out) ---------- */
 

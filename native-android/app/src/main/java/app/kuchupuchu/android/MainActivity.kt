@@ -231,6 +231,10 @@ class MainActivity : ComponentActivity() {
         KpPush.boot(this)
         super.onResume()
         Store.foreground = true
+        // §37: an app that is being used should not expire. Off the main thread (this
+        // is a network call), once per foreground, and the server only writes when the
+        // expiry is actually near — so this costs a request, not a D1 row.
+        Thread { runCatching { Api.refreshSession() } }.start()
         // Returning to the app triggers an instant re-sync of the open screens
         // (they observe ScreenStore.poke) — no waiting for the next poll.
         ScreenStore.pokeInbox()
