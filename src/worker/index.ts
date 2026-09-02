@@ -242,7 +242,22 @@ function rateLimit(key: string, capacity: number, refillPerMinute: number) {
   }
   bucket.tokens -= 1;
   rateBuckets.set(key, bucket);
-  if (rateBuckets.size > 5_000) rateBuckets.clear();
+  // The map has to stay bounded, but `clear()` was an attack on the limiter
+  // itself: anyone could flood 5000 synthetic keys (the key is the client IP,
+  // spoofable per-request through the header fallback) and wipe every real
+  // bucket, resetting all brute-force counters at will. Purge stale entries
+  // first, then evict the oldest ones — a full reset is never reachable.
+  if (rateBuckets.size > 5_000) {
+    const stamp = Date.now();
+    for (const [k, b] of rateBuckets) {
+      if (stamp - b.stamp > 10 * 60_000) rateBuckets.delete(k);
+    }
+    while (rateBuckets.size > 4_000) {
+      const oldest = rateBuckets.keys().next();
+      if (oldest.done) break;
+      rateBuckets.delete(oldest.value as string);
+    }
+  }
 }
 
 /** Best-effort client key for rate limiting (CF-Connecting-IP on Cloudflare). */
@@ -1221,7 +1236,15 @@ export default {
   ): Promise<void> {
     try {
       const reaped = await reapStaleCalls(env, env.DB, ctx);
-      console.log("cron_reap", JSON.stringify({ reaped }));
+      // `error_log` is append-only from two places (the catch-all below and
+      // /api/debug/clientlog) and used to never shrink, so the table that exists
+      // to diagnose a bad day became a slow leak on the free tier's row reads.
+      // Seven days is far longer than any of our debugging windows.
+      const cutoff = new Date(Date.now() - 7 * 864e5).toISOString();
+      const pruned = await env.DB.prepare("DELETE FROM error_log WHERE created_at < ?")
+        .bind(cutoff)
+        .run();
+      console.log("cron_reap", JSON.stringify({ reaped, pruned: pruned?.meta?.changes ?? 0 }));
     } catch (err) {
       console.error(
         "cron_reap_error",
@@ -1574,6 +1597,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       "SELECT avatar_url, avatar_version FROM users WHERE id = ?",
       avatarMatch[1]!,
     );
+    // The profile route scrubs the blob when blocked; this is the same blob, so
+    // it has to refuse too — otherwise the guard is one URL away.
+    if (await blockedBetween(db, uid, avatarMatch[1]!)) fail(404, "Not found.", "NOT_FOUND");
     const version = row?.avatar_version ?? 0;
     const etag = `"av-${avatarMatch[1]!.slice(0, 8)}-v${version}"`;
     if (request.headers.get("if-none-match") === etag) {
@@ -1612,7 +1638,30 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   if (userMatch && method === "GET") {
     const row = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", userMatch[1]!);
     if (!row) fail(404, "User not found.");
-    return json({ user: userFrom(row, onlineNow(row)) });
+    // Blocked in either direction used to hand the full profile — including the
+    // 200 KB avatar data-URI — across the wall, while the username route already
+    // refused. A hard 403 here would be worse though: this screen is the only
+    // place Unblock exists, so 403-ing it would trap someone in their own block
+    // list. So: the identity stays (that is what a blocked list needs to show),
+    // everything private stops at the wall, and `blocked` is finally a server
+    // answer instead of a client guess — which is what made the button read
+    // "Block" for users already blocked, and re-POST on tap.
+    if (await blockedBetween(db, uid, row.id)) {
+      return json({
+        user: {
+          id: row.id,
+          username: row.username,
+          displayName: row.display_name,
+          about: null,
+          online: false,
+          lastActiveAt: null,
+          avatarUrl: null,
+          avatarRef: null,
+          blocked: true,
+        },
+      });
+    }
+    return json({ user: { ...userFrom(row, onlineNow(row)), blocked: false } });
   }
 
   // Profile lookups embedded by the search/chats screens were full
@@ -1656,6 +1705,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   if (path === "/api/conversations" && method === "POST") {
     const other = String(body.userId || "");
     if (!other || other === uid) fail(400, "Bad user.");
+    // The group route checks this; the 1:1 one did not, so a made-up id
+    // minted a conversation plus a member row that no one can ever read — and
+    // `userFrom(null)` downstream is exactly the kind of ghost that shows up as
+    // an empty chat card forever.
+    if (!(await one<{ id: string }>(db, "SELECT id FROM users WHERE id = ?", other)))
+      fail(404, "User not found.");
     if (await blockedBetween(db, uid, other)) fail(403, "You can't reach this user.", "BLOCKED");
     const convId = pairId(uid, other);
     if (!(await one(db, "SELECT id FROM conversations WHERE id = ?", convId))) {
@@ -2104,6 +2159,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   // "kichui hoi na" becomes exact evidence instead of a guess.
   if (path === "/api/debug/clientlog" && method === "POST") {
     // Already inside the authenticated section: `uid` is the caller.
+    // Every 500 in the API inserts a row here too, so an unthrottled client log
+    // was an unbounded write primitive — one logged-in account could grow
+    // `error_log` as fast as it could loop.
+    rateLimit(`clog:${uid}`, 30, 10);
     const stage = String(body.stage || "").slice(0, 60);
     const detail = String(body.detail || "").slice(0, 500);
     if (stage) {
@@ -2267,6 +2326,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         deliveredAt,
         ...inboxIds,
       );
+      // The rows were read BEFORE that UPDATE, so the in-memory page still says
+      // `deliveredAt: null` while the database now says otherwise. The freshness
+      // marker below is hashed from this same page — so the marker handed to the
+      // client was the pre-delivery one, and the very next poll (the common case,
+      // right after a message arrives) could never answer `unchanged`: a full
+      // refetch of 50 messages plus the delivery UPDATE, every time, for every
+      // chat. Reflect the write here so the marker describes what was served.
+      for (const item of items) {
+        if (inboxIds.includes(String(item.id))) item.deliveredAt = deliveredAt;
+      }
       // An offline recipient has just pulled these messages. Notify every
       // affected sender immediately; otherwise a sender whose room socket is
       // healthy never polls and their tick remains stuck on "sent".
@@ -2579,7 +2648,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (msg.kind !== "TEXT") fail(400, "Only text messages can be edited.");
     if (Date.now() - Date.parse(msg.created_at) > 60_000)
       fail(400, "You can no longer edit this message.");
-    const text = String(body.body ?? "").slice(0, 4000);
+    const text = String(body.body ?? "").slice(0, MESSAGE_MAX_LENGTH);
     if (!text.trim()) fail(400, "Message can't be empty.");
     const meta = parseJson<Record<string, unknown>>(msg.meta_json, {});
     meta.edited = true;
@@ -2591,6 +2660,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       msg.id,
     );
     const fresh = (await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", msg.id))!;
+    // An edit used to rewrite only the message row: the chat list kept showing
+    // the pre-edit text forever (its preview is a denormalised column), and the
+    // other side's open chat only caught up on its next poll.
+    await syncPreviewAfterEdit(db, msg, text);
+    ctx.waitUntil(afterMessageChanged(env, db, msg.conv_id, msgFrom(fresh)));
     return json({ message: msgFrom(fresh) });
   }
   if (msgDeleteMatch && method === "DELETE") {
@@ -2602,6 +2676,13 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       "UPDATE messages SET body = NULL, media = NULL, meta_json = NULL, kind = 'DELETED' WHERE id = ?",
       row.id,
     );
+    await syncPreviewAfterDelete(db, row);
+    // Reuse the frame the client already knows how to paint: a "message" event
+    // carrying the full row replaces the bubble by id (see ChatScreen's fast
+    // paint), so a deleted message disappears on the other devices without a new
+    // event type to teach the app about.
+    const afterDelete = await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", row.id);
+    if (afterDelete) ctx.waitUntil(afterMessageChanged(env, db, row.conv_id, msgFrom(afterDelete)));
     return json({ ok: true });
   }
 
@@ -2752,85 +2833,85 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         run(db, "DELETE FROM statuses WHERE expires_at < ?", nowIso()).then(() => undefined),
       );
     }
-    const contactRows = await all<{ conv_id: string }>(
-      db,
-      "SELECT conv_id FROM members WHERE user_id = ?",
-      uid,
-    );
-    const contactIds = new Set<string>();
-    for (const row of contactRows) {
-      for (const member of await membersOf(db, row.conv_id)) {
-        if (member.user_id !== uid) contactIds.add(member.user_id);
-      }
-    }
+    // ONE statement per concern, for every contact at once.
+    //
+    // This handler used to run `membersOf()` for every conversation the caller is
+    // in, then three more statements (statuses, user, status_views) for every
+    // contact. At 75 conversations / 162 users that is several HUNDRED D1
+    // statements per status poll — and the status bar polls. That is what
+    // exhausted the account's free-tier daily row-read limit on 2026-09-01 and
+    // made every endpoint answer "Something went wrong." for the last hour of the
+    // UTC day; the queries were never slow, they were just enormous in number.
+    // The response shape is byte-for-byte what it was, so no client changes.
+    const now = nowIso();
     const out: Array<Record<string, unknown>> = [];
     const mine = await all<StatusRow>(
       db,
       "SELECT * FROM statuses WHERE user_id = ? ORDER BY created_at ASC",
       uid,
     );
+    const others = await all<StatusRow>(
+      db,
+      `SELECT s.* FROM statuses s
+        WHERE s.expires_at > ?
+          AND s.user_id IN (
+            SELECT m2.user_id FROM members m1
+              JOIN members m2 ON m2.conv_id = m1.conv_id
+             WHERE m1.user_id = ? AND m2.user_id <> ?
+          )
+        ORDER BY s.user_id, s.created_at ASC`,
+      now,
+      uid,
+      uid,
+    );
+    // Every view row for every live status, in one go. The primary key is
+    // (status_id, viewer_id), so the per-contact `WHERE viewer_id = ?` scan that
+    // used to repeat for each contact is gone.
+    const views = await all<{ status_id: string; viewer_id: string }>(
+      db,
+      `SELECT status_id, viewer_id FROM status_views
+        WHERE status_id IN (SELECT id FROM statuses WHERE expires_at > ? OR user_id = ?)`,
+      now,
+      uid,
+    );
+    const viewersByStatus = new Map<string, number>();
+    const iViewed = new Set<string>();
+    for (const view of views) {
+      if (view.viewer_id === uid) iViewed.add(view.status_id);
+      viewersByStatus.set(view.status_id, (viewersByStatus.get(view.status_id) ?? 0) + 1);
+    }
+    const shape = (row: StatusRow) => ({
+      id: row.id,
+      kind: row.kind,
+      text: row.text,
+      bgStyle: row.bg_style,
+      hasMedia: !!row.media,
+      seconds: parseJson<{ seconds?: number }>(row.meta_json, {}).seconds ?? 0,
+      createdAt: row.created_at,
+      expiresAt: row.expires_at,
+    });
     if (mine.length) {
-      const views = await all<{ status_id: string; viewer_id: string; viewed_at: string }>(
-        db,
-        "SELECT status_id, viewer_id, viewed_at FROM status_views WHERE status_id IN (SELECT id FROM statuses WHERE user_id = ?)",
-        uid,
-      );
-      const viewersByStatus = new Map<string, string[]>();
-      for (const view of views) {
-        const list = viewersByStatus.get(view.status_id) ?? [];
-        list.push(view.viewer_id);
-        viewersByStatus.set(view.status_id, list);
-      }
       out.push({
         user: userFrom(me, true),
         mine: true,
-        statuses: mine.map((row) => ({
-          id: row.id,
-          kind: row.kind,
-          text: row.text,
-          bgStyle: row.bg_style,
-          hasMedia: !!row.media,
-          seconds: parseJson<{ seconds?: number }>(row.meta_json, {}).seconds ?? 0,
-          createdAt: row.created_at,
-          expiresAt: row.expires_at,
-          viewers: (viewersByStatus.get(row.id) ?? []).length,
-        })),
+        statuses: mine.map((row) => ({ ...shape(row), viewers: viewersByStatus.get(row.id) ?? 0 })),
       });
     }
-    for (const contactId of contactIds) {
-      const rows = await all<StatusRow>(
-        db,
-        "SELECT * FROM statuses WHERE user_id = ? AND expires_at > ? ORDER BY created_at ASC",
-        contactId,
-        nowIso(),
-      );
-      if (!rows.length) continue;
-      const userRow = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", contactId);
+    const byContact = new Map<string, StatusRow[]>();
+    for (const row of others) {
+      const list = byContact.get(row.user_id) ?? [];
+      list.push(row);
+      byContact.set(row.user_id, list);
+    }
+    const users = await usersById(db, [...byContact.keys()]);
+    for (const [contactId, rows] of byContact) {
+      const userRow = users.get(contactId);
       if (!userRow) continue;
-      const viewed = new Set(
-        (
-          await all<{ status_id: string }>(
-            db,
-            "SELECT status_id FROM status_views WHERE viewer_id = ? AND status_id IN (SELECT id FROM statuses WHERE user_id = ?)",
-            uid,
-            contactId,
-          )
-        ).map((r) => r.status_id),
-      );
       out.push({
         user: userFrom(userRow, onlineNow(userRow)),
         mine: false,
-        allViewed: rows.every((r) => viewed.has(r.id)),
-        statuses: rows.map((row) => ({
-          id: row.id,
-          kind: row.kind,
-          text: row.text,
-          bgStyle: row.bg_style,
-          hasMedia: !!row.media,
-          seconds: parseJson<{ seconds?: number }>(row.meta_json, {}).seconds ?? 0,
-          createdAt: row.created_at,
-          expiresAt: row.expires_at,
-        })),
+        allViewed: rows.every((r) => iViewed.has(r.id)),
+        statuses: rows.map(shape),
       });
     }
     return json({ items: out });
@@ -2918,6 +2999,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const other = String(body.userId || "");
     const kind = body.kind === "VIDEO" ? "VIDEO" : "AUDIO";
     if (!other || other === uid) fail(400, "Bad user.");
+    if (!(await one<{ id: string }>(db, "SELECT id FROM users WHERE id = ?", other)))
+      fail(404, "User not found.");
     if (await blockedBetween(db, uid, other)) fail(403, "You can't call this user.", "BLOCKED");
     const convId = pairId(uid, other);
     if (!(await one(db, "SELECT id FROM conversations WHERE id = ?", convId))) {
@@ -3568,7 +3651,11 @@ function hashSig(input: string): string {
     h ^= input.charCodeAt(i);
     h = Math.imul(h, 0x01000193);
   }
-  return (h >>> 0).toString(36);
+  // The 32-bit digest alone was a real (if rare) way to make a poll answer
+  // `unchanged: true` after a genuine edit: two different payloads could hash
+  // identically. Length is free to include and cannot collide with a different
+  // payload of a different size, which covers the realistic case.
+  return `${(h >>> 0).toString(36)}.${input.length.toString(36)}`;
 }
 
 function watermarkFor(hidden: HiddenMap, uid: string): Watermark | null {
@@ -3614,6 +3701,57 @@ function chunked<T>(items: T[], size = 44): T[][] {
 }
 
 /** Every user referenced by a set of member rows, in one pass. */
+/** Only the newest row owns the chat-list preview, so a guarded rewrite here
+ *  can never clobber a message that arrived after the one being edited. */
+async function syncPreviewAfterEdit(db: D1Database, msg: MsgRow, body: string) {
+  const conv = await one<{ last_message_at: string | null }>(
+    db,
+    "SELECT last_message_at FROM conversations WHERE id = ?",
+    msg.conv_id,
+  );
+  if (!conv || conv.last_message_at !== msg.created_at) return;
+  await run(
+    db,
+    "UPDATE conversations SET last_message = ? WHERE id = ?",
+    // The NEW text — the caller still holds the pre-edit row, so reading
+    // `msg.body` here would rewrite the preview with exactly what was there.
+    body.slice(0, 120),
+    msg.conv_id,
+  );
+}
+
+async function syncPreviewAfterDelete(db: D1Database, row: MsgRow) {
+  const conv = await one<{ last_message_at: string | null }>(
+    db,
+    "SELECT last_message_at FROM conversations WHERE id = ?",
+    row.conv_id,
+  );
+  if (!conv || conv.last_message_at !== row.created_at) return;
+  await run(
+    db,
+    "UPDATE conversations SET last_message = ? WHERE id = ?",
+    "Message deleted",
+    row.conv_id,
+  );
+}
+
+/** Edit/delete fan-out: the room for the open chat, `user:<id>` for everyone's
+ *  chat LIST (a client on the list screen is not joined to any chat room, so a
+ *  room broadcast alone leaves the stale preview until the next foreground). */
+async function afterMessageChanged(env: Env, db: D1Database, convId: string, message: unknown) {
+  await broadcastRoomEvent(env, convId, { type: "message", conversationId: convId, message });
+  try {
+    for (const m of await membersOf(db, convId)) {
+      const id = (m as { user_id: string }).user_id;
+      if (id !== String((message as { senderId?: string })?.senderId ?? "")) {
+        await broadcastRoomEvent(env, `user:${id}`, { type: "conv", conversationId: convId });
+      }
+    }
+  } catch {
+    // list poke is best-effort: the poll path still catches up
+  }
+}
+
 async function usersById(db: D1Database, userIds: string[]) {
   const map = new Map<string, UserRow>();
   for (const group of chunked([...new Set(userIds.filter(Boolean))])) {
