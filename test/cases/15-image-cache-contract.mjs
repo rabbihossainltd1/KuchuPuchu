@@ -55,7 +55,15 @@ const profile = kt("ProfileScreen.kt");
 has(ui, "private var dir: java.io.File? = null", "Bitmaps keeps a disk directory");
 has(ui, 'ctx.filesDir, "kp-bitmaps"', "the bitmap cache lives in filesDir, not cacheDir");
 has(ui, "fun init(ctx: android.content.Context)", "it is initialised once per process");
-has(cache, "Bitmaps.init(ctx)", "and from the same place the JSON cache is");
+has(cache, "Bitmaps.init(app)", "and from the same place the JSON cache is");
+has(cache, 'name = "kp-cache-load"', "the cold-start reads run on their own thread");
+has(cache, "ImageRatios.init(app)", "the ratio file is read there too");
+has(cache, "AvatarRefs.warm(app)", "and the avatar refs are warmed before any row composes");
+check(
+  "Cache.init does not parse the cache on the caller's thread",
+  cache.indexOf("loadDisk()") > cache.indexOf("Thread {"),
+  "loadDisk must sit inside the background block",
+);
 has(ui, "DISK_CAP", "with a size cap we enforce ourselves");
 has(ui, "private fun trim()", "and oldest-first eviction");
 has(ui, "private fun store(url: String, bmp: Bitmap)", "what we drew is what gets stored");
@@ -131,6 +139,22 @@ has(
   profile,
   'Api.get("/api/users/$userId", true)',
   "and a forced refresh still runs, so nothing goes stale",
+);
+
+// The scroll-lag half: layout must stop snapping, and no disk read may happen
+// where a row composes.
+const chat = kt("ChatScreen.kt");
+has(chat, 'File(ctx.filesDir, "kp-ratios.json")', "ratios are persisted, not just remembered");
+has(chat, "removeEldestEntry", "with a cap, so the file cannot grow forever");
+has(chat, "if (!loaded) return", "a save never clobbers history that has not been read yet");
+has(chat, 'm.optInt("mediaW")', "the bubble seeds its box from the message payload");
+has(chat, "ImageRatios.put(url, it)", "and files that ratio under the url");
+has(chat, "inJustDecodeBounds = true", "the sender measures with a header-only decode");
+const getBody = ui.slice(ui.indexOf("fun get(ctx:"), ui.indexOf("fun put(ctx:"));
+check(
+  "reading an avatar ref during composition touches memory only",
+  !getBody.includes("getSharedPreferences") && !getBody.includes("prefs("),
+  getBody.slice(0, 70).replace("\n", " "),
 );
 
 process.stdout.write(lines.join("\n") + "\n");

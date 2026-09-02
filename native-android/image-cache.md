@@ -56,9 +56,47 @@ with `respectCacheHeaders(false)` — a `max-age` that has expired must not cost
 round trip on every open for something that cannot have changed. Invalidation is
 by key, so no explicit busting is needed anywhere.
 
+## Contract 5 — a photo bubble is laid out at its real size on frame one
+
+The other half of the report was not about bytes at all but about layout:
+"first scroll laggy, second scroll smooth". A `LazyColumn` row that changes height
+while it is on screen re-lays-out every row after it — and after a cold start that
+happened for EVERY photo, because the ratio lived only in a process-wide
+`HashMap` (`ImageRatios`) and in a decoded image the app had not decoded yet.
+
+Three things make the snap impossible rather than rarer:
+
+1. **The payload carries the size.** The sender already bounds-decodes the JPEG
+   before sending it (`inJustDecodeBounds`, ~0.1 ms, on the IO pass it was already
+   doing), and posts `meta.w/h`. The worker clamps the pair (1..20000, both
+   required, `kind` must be IMAGE/FILE with media) and stores it in
+   `meta_json`; `msgFrom` echoes `mediaW`/`mediaH` on every read, so the
+   recipient, the list endpoint, the realtime broadcast and a retried
+   (idempotent) send all agree. Nothing fetched yet, exact box already.
+2. **The ratio map is persisted** (`filesDir/kp-ratios.json`, access-ordered and
+   capped at 8000 entries, written off the main thread in 1.2 s coalesced
+   batches). Scrolling back through a chat on the same device therefore never
+   re-snaps either — and it never clobbers history: a save is refused until the
+   file has actually been read, and puts that landed in that window are flushed
+   right after.
+3. **Every cold-start read is off the UI thread.** `Cache.init` runs from
+   `Activity.onCreate`, i.e. directly in front of the first frame, and it used to
+   `loadDisk()` (parse every cached conversation and message page), `Bitmaps.init`,
+   `ImageRatios.init` and — for avatars — deserialize a prefs file **per row**
+   inside composition. Now those four run on one MIN_PRIORITY thread and the
+   avatar refs are served from a concurrent map, so a row that composes before the
+   warm-up finishes simply misses the cache and fetches; it never blocks.
+
+Deliberately NOT done: shrinking the Coil request from `size(720)`. The bubble is
+225 dp wide with a 280 dp height cap, which is already ~700–780 px on the densities
+this app targets, so a smaller request would trade the reported lag (which is
+layout, not decode) for visibly soft photos. Decoding happens off the main thread;
+what hurt was the resize, and that is fixed above.
+
 ## Regression guard
 
-`test/cases/15-image-cache-contract.mjs` pins all four rules against the sources
+`test/cases/15-image-cache-contract.mjs` pins rules 1-4 and the app half of 5
+against the sources
 (the files are read, not simulated, because CI has no Android SDK): the two
 tiers' locations and caps, the size-guarded inline paint path, the scoped
 `filesDir`-only check on Coil's `.directory(...)`, the profile read order

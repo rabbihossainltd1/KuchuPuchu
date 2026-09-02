@@ -559,14 +559,38 @@ fun ChatScreen(nav: NavController, convId: String) {
         )
         scope.launch {
             listState.animateScrollToItem(msgs.size + pending.size - 1)
+            var shotW = 0
+            var shotH = 0
             val jpeg = withContext(Dispatchers.IO) {
                 val b64 = dataUrl.substringAfter(",", "")
-                runCatching { android.util.Base64.decode(b64, android.util.Base64.DEFAULT) }.getOrNull()
+                val bytes =
+                    runCatching { android.util.Base64.decode(b64, android.util.Base64.DEFAULT) }.getOrNull()
+                // Header-only read of the bytes we are about to send: this is what
+                // the receiver needs to lay the bubble out at the photo's real
+                // aspect ratio on its first frame (see mediaW/mediaH in the
+                // worker's message shape). ~0.1 ms, and we are already on IO.
+                if (bytes != null && bytes.isNotEmpty()) {
+                    runCatching {
+                        val opts =
+                            android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+                        shotW = opts.outWidth
+                        shotH = opts.outHeight
+                    }
+                }
+                bytes
             }
             if (jpeg == null || jpeg.isEmpty()) {
                 error = "Could not read that photo."
                 pending.find { it.optString("clientId") == clientId }?.put("failed", true)
                 return@launch
+            }
+            // Our own bubble must not jump either: the true size is already known
+            // before the first frame, so the pending row and the ratio cache both
+            // get it here rather than waiting for a decode during composition.
+            if (shotW > 0 && shotH > 0) {
+                pending.find { it.optString("clientId") == clientId }?.put("mediaW", shotW)?.put("mediaH", shotH)
+                ImageRatios.put(dataUrl, shotW.toFloat() / shotH.toFloat())
             }
             try {
                 val up = withContext(Dispatchers.IO) {
@@ -583,6 +607,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         .put("fileType", "image/jpeg")
                         .put("fileSize", jpeg.size)
                         .put("clientId", clientId)
+                if (shotW > 0 && shotH > 0) payload.put("meta", JSONObject().put("w", shotW).put("h", shotH))
                 // The server is idempotent by clientId, so one automatic
                 // retry after a dropped response/timeout is SAFE — it returns
                 // the same message instead of failing the photo.
@@ -601,6 +626,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         "data:image/jpeg;base64," + android.util.Base64.encodeToString(jpeg, android.util.Base64.NO_WRAP)
                     } else dataUrl
                     val payload = JSONObject().put("kind", "IMAGE").put("imageData", small).put("clientId", clientId)
+                    if (shotW > 0 && shotH > 0) payload.put("meta", JSONObject().put("w", shotW).put("h", shotH))
                     withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
                     UploadProgress.done(clientId)
                     KpSounds.send(ctx)
@@ -1822,8 +1848,57 @@ private fun HeaderCallBtn(onClick: () -> Unit, icon: @Composable () -> Unit) {
  * off-screen items and their remember{} state; without this cache a scrolled
  * photo returned to the placeholder size and "jumped" on the way back.
  */
-private object ImageRatios {
-    private val map = HashMap<String, Float>()
+/**
+ * url → the photo's aspect ratio: in memory AND on disk.
+ *
+ * The map has to outlive two things. A LazyColumn disposes off-screen items, so a
+ * `remember` alone threw the ratio away on every scroll-out and the bubble snapped
+ * back to the placeholder size while flinging ("images jump while scrolling").
+ * And an in-memory-only map died with the process, so the FIRST scroll after a
+ * cold start re-snapped every photo — each snap a re-layout of the whole visible
+ * list. That is a large part of "first scroll laggy, second one smooth".
+ *
+ * Ratios are a few bytes per url, immutable per url, and worthless to lose, so
+ * they are persisted (capped, access-ordered, written off the main thread in
+ * coalesced batches).
+ */
+internal object ImageRatios {
+    private const val MAX = 8000
+    private val map = object : LinkedHashMap<String, Float>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Float>) = size > MAX
+    }
+    private var file: java.io.File? = null
+
+    /** Until the file has been read, a save would CLOBBER history with a partial map. */
+    @Volatile private var loaded = false
+
+    /** Puts that landed before the read finished still have to reach the file. */
+    @Volatile private var missedSave = false
+    private var scheduled = false
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /** Called off the main thread (see Cache.init) — it reads and writes files. */
+    fun init(ctx: android.content.Context) {
+        val f = java.io.File(ctx.filesDir, "kp-ratios.json")
+        file = f
+        if (loaded) return
+        runCatching {
+            if (f.exists()) {
+                val o = JSONObject(f.readText())
+                val keys = o.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    val v = o.optDouble(k, 0.0)
+                    if (v > 0.0) map[k] = v.toFloat()
+                }
+            }
+        }
+        loaded = true
+        if (missedSave) {
+            missedSave = false
+            scheduleSave()
+        }
+    }
 
     fun get(url: String?): Float {
         if (url == null) return 0f
@@ -1831,8 +1906,40 @@ private object ImageRatios {
     }
 
     fun put(url: String?, ratio: Float): Float {
-        if (url != null && ratio > 0f) synchronized(map) { map[url] = ratio }
+        if (url == null || ratio <= 0f || ratio.isNaN() || ratio.isInfinite()) return ratio
+        synchronized(map) { map[url] = ratio }
+        if (!loaded) missedSave = true else scheduleSave()
         return ratio
+    }
+
+    /** Many rows entering view at once produce ONE write, off the UI thread. */
+    private fun scheduleSave() {
+        if (!loaded) return
+        synchronized(map) {
+            if (scheduled) return
+            scheduled = true
+        }
+        main.postDelayed({
+            val snapshot = synchronized(map) {
+                scheduled = false
+                HashMap(map)
+            }
+            val f = file ?: return@postDelayed
+            Thread {
+                runCatching {
+                    val o = JSONObject()
+                    snapshot.forEach { (k, v) -> o.put(k, v.toDouble()) }
+                    val tmp = java.io.File(f.parentFile, f.name + ".tmp")
+                    java.io.FileOutputStream(tmp).use { it.write(o.toString().toByteArray()) }
+                    if (!tmp.renameTo(f)) runCatching { tmp.delete() }
+                }
+            }
+                .apply {
+                    isDaemon = true
+                    priority = Thread.MIN_PRIORITY
+                    start()
+                }
+        }, 1200)
     }
 }
 
@@ -2292,7 +2399,22 @@ private fun ImageBubble(m: JSONObject, mine: Boolean) {
     // keyed by URL: a LazyColumn disposes off-screen items, so a remember()
     // here was thrown away on every scroll-out and the bubble snapped back to
     // the placeholder size while flinging ("images jump while scrolling").
-    var ratio by remember(url) { mutableStateOf(ImageRatios.get(url)) }
+    // Frame one, not frame ten: a fresh message carries the photo's dimensions
+    // (mediaW/mediaH), so even a photo that has never been seen on this device
+    // gets its true box before any byte is fetched. Discovering the ratio from a
+    // decode is what previously resized the row mid-scroll.
+    val fromPayload = run {
+        val pw = m.optInt("mediaW")
+        val ph = m.optInt("mediaH")
+        if (pw > 0 && ph > 0) pw.toFloat() / ph.toFloat() else 0f
+    }
+    var ratio by remember(url) {
+        mutableStateOf(
+            ImageRatios.get(url).takeIf { it > 0f }
+                ?: fromPayload.takeIf { it > 0f }?.let { ImageRatios.put(url, it) }
+                ?: 0f,
+        )
+    }
     val dataBmp = if (url?.startsWith("data:") == true) rememberBitmap(url) else null
     Box(
         Modifier

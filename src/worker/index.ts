@@ -2388,6 +2388,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     }
     const mid = id();
     const incomingMeta = (body.meta as Record<string, unknown> | undefined) ?? {};
+    const dims = imageDims(kind, imageData ?? fileKey, incomingMeta);
     const metaObj: Record<string, unknown> = {
       ...(kind === "FILE" && fileKey
         ? {
@@ -2398,6 +2399,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             seconds: Math.max(0, Math.min(600, Number(incomingMeta.seconds || 0))),
           }
         : {}),
+      ...(Object.keys(dims).length ? dims : {}),
     };
     if (clientId) metaObj.clientId = clientId;
     const meta = Object.keys(metaObj).length ? JSON.stringify(metaObj) : null;
@@ -3383,6 +3385,34 @@ type MsgRow = {
   delivered_at?: string | null;
 };
 
+/**
+ * Pixel size of an uploaded image, as told by the sender.
+ *
+ * Why it exists: the chat bubble must be laid out at the photo's real aspect
+ * ratio on its FIRST frame. Without it the bubble starts at the generic
+ * placeholder size and snaps when the pixels arrive — and that resize cascades
+ * layout through the whole LazyColumn exactly while the user is doing their first
+ * scroll after a cold start (the "first scroll lags, the second one is smooth"
+ * report). The ratio is 8 bytes of metadata that removes a re-layout storm.
+ *
+ * It is display metadata from an untrusted client, so both numbers are clamped
+ * and the pair is dropped unless it is usable — a bad value must never be able to
+ * blow up a layout.
+ */
+function imageDims(
+  kind: string,
+  hasMedia: unknown,
+  meta: Record<string, unknown>,
+): { w: number; h: number } | Record<string, never> {
+  if (kind !== "IMAGE" && kind !== "FILE") return {};
+  if (!hasMedia) return {};
+  const w = Math.floor(Number(meta.w));
+  const h = Math.floor(Number(meta.h));
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w < 1 || h < 1 || w > 20000 || h > 20000)
+    return {};
+  return { w, h };
+}
+
 function msgFrom(row: MsgRow) {
   const meta = parseJson<{
     name?: string;
@@ -3392,6 +3422,8 @@ function msgFrom(row: MsgRow) {
     voice?: boolean;
     seconds?: number;
     edited?: boolean;
+    w?: number;
+    h?: number;
   }>(row.meta_json, {});
   const imageFile = row.kind === "FILE" && String(meta.type || "").startsWith("image/");
   return {
@@ -3401,6 +3433,11 @@ function msgFrom(row: MsgRow) {
     body: row.body,
     hasImage: (row.kind === "IMAGE" && !!row.media) || imageFile,
     mediaUrl: row.kind === "IMAGE" && row.media ? `/api/messages/${row.id}/media` : undefined,
+    // Set only when the sender supplied usable dimensions (see imageDims). The
+    // client seeds its ratio cache from these, so even the very first view of a
+    // photo on a brand-new device reserves the right box.
+    mediaW: meta.w,
+    mediaH: meta.h,
     fileKey: row.kind === "FILE" ? row.media : undefined,
     fileName: meta.name,
     fileType: meta.type,

@@ -14,11 +14,30 @@ object Cache {
     private var dir: File? = null
 
     fun init(ctx: Context) {
-        dir = File(ctx.filesDir, "kp-cache").also { it.mkdirs() }
-        loadDisk()
-        // Same idea for pixels: the JSON is worthless on screen if the avatar it
-        // names still has to be fetched and decoded.
-        Bitmaps.init(ctx)
+        val app = ctx.applicationContext
+        dir = File(app.filesDir, "kp-cache").also { it.mkdirs() }
+        // None of this on the calling thread. Every one of these reads a file, and
+        // init runs from Activity.onCreate — i.e. directly in front of the first
+        // frame. Parsing every cached conversation there is the other half of
+        // "the first scroll after opening the app is laggy": the UI thread was
+        // busy deserialising JSON while the list was trying to compose.
+        // Everything below is a cache, so a miss only means "fetch again".
+        Thread {
+            runCatching { loadDisk() }
+            // Same idea for pixels: the JSON is worthless on screen if the avatar
+            // it names still has to be fetched and decoded.
+            runCatching { Bitmaps.init(app) }
+            runCatching { ImageRatios.init(app) }
+            // The avatar ref → data-URI map is read by every row that composes;
+            // warming it here means no composition ever touches the prefs file.
+            runCatching { AvatarRefs.warm(app) }
+        }
+            .apply {
+                name = "kp-cache-load"
+                isDaemon = true
+                priority = Thread.MIN_PRIORITY
+                start()
+            }
     }
 
     fun ttl(path: String): Long =
@@ -75,6 +94,7 @@ object Cache {
         runCatching { File(folder, name).writeText(JSONObject().put("p", path).put("d", data).toString()) }
     }
 
+    @Synchronized
     private fun loadDisk() {
         val folder = dir ?: return
         folder.listFiles()?.forEach { f ->

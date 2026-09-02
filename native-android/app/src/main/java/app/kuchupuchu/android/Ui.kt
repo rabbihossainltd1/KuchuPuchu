@@ -224,11 +224,54 @@ fun rememberBitmap(url: String?): ImageBitmap? {
  */
 private const val AVATAR_PREFS = "kp_avatars"
 
-private val avatarRefCache = object {
-    fun get(ctx: android.content.Context, ref: String): String? =
-        runCatching { ctx.getSharedPreferences(AVATAR_PREFS, 0).getString(ref, null) }.getOrNull()
-    fun put(ctx: android.content.Context, ref: String, url: String) =
-        runCatching { ctx.getSharedPreferences(AVATAR_PREFS, 0).edit().putString(ref, url).apply() }.getOrNull()
+/**
+ * avatarRef → data-URI, served from MEMORY.
+ *
+ * The values still live in SharedPreferences (that is what makes a photo survive
+ * a restart), but they must not be READ from there during composition:
+ * `getSharedPreferences` deserialises the whole file on first touch and every row
+ * entering the viewport asked it for its own key — a main-thread disk read per
+ * avatar, right in the middle of the first scroll after a cold start. The file is
+ * now slurped once, off the main thread, and rows read a concurrent map.
+ */
+internal object AvatarRefs {
+    private val mem = java.util.concurrent.ConcurrentHashMap<String, String>()
+    @Volatile private var loaded = false
+    @Volatile private var loading = false
+
+    private fun prefs(ctx: android.content.Context) = ctx.getSharedPreferences(AVATAR_PREFS, 0)
+
+    fun warm(ctx: android.content.Context) {
+        if (loaded || loading) return
+        loading = true
+        val app = ctx.applicationContext
+        Thread {
+            runCatching {
+                prefs(app).all.forEach { (k, v) ->
+                    if (v is String && v.isNotEmpty()) mem[k] = v
+                }
+            }
+            loaded = true
+            loading = false
+        }
+            .apply {
+                isDaemon = true
+                priority = Thread.MIN_PRIORITY
+                start()
+            }
+    }
+
+    fun get(ctx: android.content.Context, ref: String): String? {
+        // Self-healing for the rare "first frame before the warm read finished"
+        // race: a miss costs one fetch, never a wrong picture.
+        if (!loaded && !loading) warm(ctx)
+        return mem[ref]
+    }
+
+    fun put(ctx: android.content.Context, ref: String, url: String) {
+        mem[ref] = url
+        runCatching { prefs(ctx).edit().putString(ref, url).apply() }
+    }
 }
 
 /**
@@ -260,7 +303,7 @@ private fun rememberAvatarUrl(url: String?, avatarRef: String?): String? {
     val ctx = LocalContext.current
     // The persistent per-version cache wins, so a contact's photo survives an app
     // restart and a light row resolves to the bytes fetched for the FULL shape.
-    val state = remember(ref) { mutableStateOf(avatarRefCache.get(ctx, ref) ?: inline) }
+    val state = remember(ref) { mutableStateOf(AvatarRefs.get(ctx, ref) ?: inline) }
     LaunchedEffect(ref) {
         val have = state.value
         if (have != null) {
@@ -270,8 +313,8 @@ private fun rememberAvatarUrl(url: String?, avatarRef: String?): String? {
             // and re-fetching. That is the "profile loads over and over" fix.
             // Only the immutable data-URI belongs in the persistent cache — an
             // http URL may carry an expiring query and must not be pinned.
-            if (have.startsWith("data:") && avatarRefCache.get(ctx, ref) == null) {
-                avatarRefCache.put(ctx, ref, have)
+            if (have.startsWith("data:") && AvatarRefs.get(ctx, ref) == null) {
+                AvatarRefs.put(ctx, ref, have)
             }
             return@LaunchedEffect
         }
@@ -284,7 +327,7 @@ private fun rememberAvatarUrl(url: String?, avatarRef: String?): String? {
                 }.getOrNull()
             }
         if (fetched != null) {
-            avatarRefCache.put(ctx, ref, fetched)
+            AvatarRefs.put(ctx, ref, fetched)
             state.value = fetched
         }
     }
