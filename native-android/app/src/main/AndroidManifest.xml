@@ -35,6 +35,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <!-- §31 self-managed calling: lets this app report and control ITS OWN VoIP calls
+         through android.telecom (a headset's call button, a watch, the platform's
+         one-call-at-a-time rules for emergency and GSM calls) without becoming the
+         device's dialer. Normal protection level: granted at install time, no runtime
+         prompt, and it grants no access to anything but this app's own calls. -->
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <!-- Android 11+ package visibility: without this the system hides every
@@ -100,6 +106,19 @@
             android:name=".CallService"
             android:exported="false"
             android:foregroundServiceType="microphone|camera|mediaProjection" />
+        <!-- §31: what android.telecom binds to mirror the live call (KpTelecom /
+             KpCallConnection). exported=true is unavoidable — the caller is the system —
+             and BIND_TELECOM_CONNECTION_SERVICE is what keeps it to the platform's Telecom
+             process alone. The app's own call UI stays authoritative: a self-managed
+             account is explicitly the mode where the platform shows no in-call UI. -->
+        <service
+            android:name=".KpConnectionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_TELECOM_CONNECTION_SERVICE">
+            <intent-filter>
+                <action android:name="android.telecom.ConnectionService" />
+            </intent-filter>
+        </service>
         <receiver
             android:name=".KpNotifActionReceiver"
             android:exported="false">

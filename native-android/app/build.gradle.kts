@@ -1,3 +1,8 @@
+// Imported, not spelled out: inside a Gradle Kotlin DSL script `java` is the JavaPlugin
+// extension accessor, so `java.util.Base64` parses as `project.java.util` and the script
+// fails to compile with "Unresolved reference: util". (This is what CI caught.)
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -18,7 +23,7 @@ val kpKeystoreB64: String? = System.getenv("KP_KEYSTORE_B64")?.takeIf { it.isNot
 val kpReleaseKeystore: File? = kpKeystoreB64?.let { b64 ->
     val out = layout.buildDirectory.file("keystores/kp-release.keystore").get().asFile
     out.parentFile.mkdirs()
-    out.writeBytes(java.util.Base64.getMimeDecoder().decode(b64))
+    out.writeBytes(Base64.getMimeDecoder().decode(b64))
     out
 }
 
@@ -35,8 +40,8 @@ android {
         applicationId = "app.kuchupuchu.android"
         minSdk = 24
         targetSdk = 35
-        versionCode = 69
-        versionName = "3.8.23"
+        versionCode = 70
+        versionName = "3.8.24"
     }
     signingConfigs {
         getByName("debug") {

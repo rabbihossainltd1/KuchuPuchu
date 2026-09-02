@@ -214,6 +214,18 @@ class CallEngine(private val app: Application) {
         if (active?.id == callId) scope.launch { runCatching { tick() } }
     }
 
+    /**
+     * The single place a call state change is announced. The Compose screens and the §31
+     * Telecom mirror hang off the same call, which is the point: a `Connection` that lags
+     * the UI is worse than none (a headset button would then act on a stale row), and
+     * wiring the mirror at each of the ~11 sites it was previously needed at is how such
+     * a lag is born. Never throws — a mirror failure must not end a working call.
+     */
+    private fun publishChange() {
+        onChange?.invoke(active)
+        runCatching { KpTelecom.syncNow(app) }
+    }
+
     fun notify(message: String) {
         toast = message
         scope.launch {
@@ -238,13 +250,17 @@ class CallEngine(private val app: Application) {
                 // keeps ringing out loud beside a call that just went to the
                 // headset.
                 CallSounds.retuneTones(app)
-                onChange?.invoke(active)
+                publishChange()
             }
         }
     }
 
     fun start(ctx: Context) {
         CallNotify.ensure(ctx)
+        // §31: registering the self-managed calling account is cheap and idempotent, and
+        // doing it here means it happens once per process, after the user is signed in,
+        // rather than on the first ring when there is no time to spare.
+        runCatching { KpTelecom.ensureAccount(app) }
         loadIceConfig()
         // PeerConnectionFactory.initialize + factory creation used to happen
         // inside the first startCall()/answer() — 100-200ms of it landed on
@@ -368,7 +384,7 @@ class CallEngine(private val app: Application) {
     fun selectAudioRoute(route: AudioRoute) {
         audioRoute = route
         applyAudio()
-        onChange?.invoke(active)
+        publishChange()
     }
 
     /**
@@ -590,7 +606,7 @@ class CallEngine(private val app: Application) {
             try {
                 val streamOk = withContext(Dispatchers.IO) { capture(kind == "VIDEO") }
                 if (!streamOk || left.get()) return@launch
-                onChange?.invoke(active)
+                publishChange()
                 val peer = newPc()
                 val offer = peer.createOfferAwait(sdpConstraints())
                 peer.setLocalDescriptionAwait(offer)
@@ -727,7 +743,7 @@ class CallEngine(private val app: Application) {
                         // not be connected yet. Keep the UI on Connecting
                         // until ICE explicitly reports CONNECTED/COMPLETED.
                         active = active?.copy(startedAt = ms, connecting = true)
-                        onChange?.invoke(active)
+                        publishChange()
                     }
                 }
                 pullIce(rec.id)
@@ -786,14 +802,14 @@ class CallEngine(private val app: Application) {
         muted = !muted
         onHold = false
         audioTrack?.setEnabled(!muted)
-        onChange?.invoke(active)
+        publishChange()
     }
 
     fun toggleHold() {
         onHold = !onHold
         if (onHold) muted = false
         audioTrack?.setEnabled(!(onHold || muted))
-        onChange?.invoke(active)
+        publishChange()
     }
 
     fun toggleSpeaker() {
@@ -831,7 +847,7 @@ class CallEngine(private val app: Application) {
             active = active?.copy(kind = "VIDEO")
             markVideoRoute()
         }
-        onChange?.invoke(active)
+        publishChange()
     }
 
     fun toggleShare() {
@@ -938,7 +954,7 @@ class CallEngine(private val app: Application) {
             localView?.setMirror(currentFacingFront)
             localView?.let { runCatching { track.addSink(it) } }
         }
-        onChange?.invoke(active)
+        publishChange()
     }
 
     fun attachLocal(view: SurfaceViewRenderer) {
@@ -1035,6 +1051,10 @@ class CallEngine(private val app: Application) {
         clearIncomingSuppression()
         Handler(Looper.getMainLooper()).post { MainActivity.current?.restoreChrome() }
         active = null
+        // Publishing here as well (not only from the callers that reach hangupLocal by
+        // accident) is what guarantees the §31 mirror cannot outlive the call: the poll
+        // path drops a row that ENDED on the server without going through hangup().
+        publishChange()
     }
 
     /**
@@ -1271,7 +1291,7 @@ class CallEngine(private val app: Application) {
                                         if (cur.startedAt > 0L) cur.startedAt
                                         else System.currentTimeMillis(),
                                 )
-                                onChange?.invoke(active)
+                                publishChange()
                                 // The far side may have swapped a track in via
                                 // setTrack() (screen share on a voice call),
                                 // which never re-fires onAddTrack — re-detect.
@@ -1419,7 +1439,7 @@ override fun onRenegotiationNeeded() {
                 // screen and the other the voice screen for the same call.
                 if (active?.kind != "VIDEO") {
                     active = active?.copy(kind = "VIDEO")
-                    onChange?.invoke(active)
+                    publishChange()
                     // TRUE audio→video conversion: the other side just turned
                     // their camera on — join with OURS too, otherwise they sit
                     // on "Waiting for video…" forever ("stuck" bug). They can
@@ -1430,7 +1450,7 @@ override fun onRenegotiationNeeded() {
                         toggleCamera()
                     }
                 } else {
-                    onChange?.invoke(active)
+                    publishChange()
                 }
             }
         }
