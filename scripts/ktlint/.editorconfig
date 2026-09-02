@@ -1,0 +1,13 @@
+root = true
+
+# Only import hygiene is gated here, on purpose. ktlint's formatting rules would
+# reflow 17k lines of hand-tuned Compose layout (and the style is not the bug class
+# this project has); unused imports and wildcard imports are: an unused `import
+# androidx...` is a sign of a half-reverted change, and a wildcard import silently
+# pulls extension functions into scope, which is how `size` resolves to the wrong
+# receiver during a refactor.
+[**.{kt,kts}]
+ktlint_standard = disabled
+ktlint_standard_no-wildcard-imports = enabled
+ktlint_standard_no-unused-imports = enabled
+ktlint_standard_redundant-alt = disabled

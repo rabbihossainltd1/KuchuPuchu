@@ -24,7 +24,6 @@ import java.util.concurrent.CopyOnWriteArrayList
 import okio.BufferedSink
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.IOException
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 

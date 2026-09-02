@@ -38,7 +38,6 @@ import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.RemoveRedEye
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.foundation.Image
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu

@@ -51,7 +51,17 @@ android {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
         jniLibs.pickFirsts += listOf("**/libc++_shared.so", "**/libjingle_peerconnection_so.so")
     }
-    lint { abortOnError = false }
+    lint {
+        // §50: a lint error has to fail CI. Before this, every lint finding was
+        // printed and the job stayed green — the gate existed on paper only.
+        // Warnings stay warnings (Compose reports a steady stream of
+        // "experimental API" notes), and the release lint pass is skipped because
+        // CI builds assembleRelease, which is the check that matters there.
+        abortOnError = true
+        warningsAsErrors = false
+        checkReleaseBuilds = false
+        textReport = true
+    }
 }
 
 dependencies {

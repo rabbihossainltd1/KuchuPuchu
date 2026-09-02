@@ -1,6 +1,5 @@
 package app.kuchupuchu.android
 
-import android.media.MediaPlayer
 import android.net.Uri
 import android.widget.VideoView
 import androidx.compose.animation.AnimatedVisibility
@@ -19,7 +18,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 
 /** TEMPORARILY off while diagnosing push/action behaviour on-device. */

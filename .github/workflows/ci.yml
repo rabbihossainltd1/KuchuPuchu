@@ -30,6 +30,15 @@ jobs:
         run: npm run format:check
       - name: Secret scan
         run: npm run security:secrets
+      # §50's rungs that Gradle does not cover: manifest contract (exported,
+      # foregroundServiceType, permission justification), resource existence and
+      # naming, dependency pinning, and the lint gate itself.
+      - name: Android validation
+        run: npm run validate:android
+      # Pinned + checksum-pinned (see scripts/ktlint-check.sh): a style gate that
+      # downloads `latest` is how a green main branch starts failing by itself.
+      - name: Kotlin import hygiene
+        run: ./scripts/ktlint-check.sh
 
   apk:
     runs-on: ubuntu-22.04
@@ -46,6 +55,14 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace \
+            -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
+      # §50 asks for the release build too, not just debug: R8 + resource shrinking
+      # is where missing keep rules and reflective lookups surface, and until now
+      # nothing ever ran it.
+      - name: Build release APK (minify + shrink)
+        working-directory: native-android
+        run: |
+          ./gradlew assembleRelease --no-daemon --stacktrace \
             -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
       - name: Upload APK
         uses: actions/upload-artifact@v4
