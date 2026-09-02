@@ -68,21 +68,38 @@ object KpTelecom {
     private var accountReady = false
 
     /** Called once from [CallEngine.start]: registers the self-managed account so a call
-     * can be added later. Idempotent, and a no-op below API 26. */
+     * can be added later. Idempotent, and a no-op below API 26.
+     *
+     * The shape here (thin entry point + `@RequiresApi` worker) is lint's, not taste:
+     * [CallEngine.publishChange] runs on every Android version the app supports, and lint
+     * only accepts the `SDK_INT` guard where the API call is *not* behind an inline-lambda
+     * boundary — wrapped in `runCatching`, the guard stopped counting and `lintDebug`
+     * failed the build with five NewApi errors. `warningsAsErrors = false` is what makes
+     * that gate meaningful rather than ignorable.
+     */
     fun ensureAccount(app: android.app.Application) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        runCatching { ensureAccountO(app) }
+    }
+
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.O)
+    private fun ensureAccountO(app: android.app.Application) {
         context = app
         if (accountReady) return
-        runCatching {
-            val tm = telecom(app) ?: return
-            val handle = handle(app)
-            // Already registered by an earlier run (the account survives reboot and
-            // process death), so nothing to do — re-registering is not harmless: it
-            // replaces the handle the system may be using for a live call.
-            if (tm.getPhoneAccount(handle) != null) {
-                accountReady = true
-                return
-            }
+        val tm = telecom(app) ?: return
+        val handle = handle(app)
+        // Already registered by an earlier run (the account survives reboot and
+        // process death), so nothing to do — re-registering is not harmless: it
+        // replaces the handle the system may be using for a live call.
+        if (tm.getPhoneAccount(handle) != null) {
+            accountReady = true
+            return
+        }
+        // `MANAGE_OWN_CALLS` is a normal (install-time) permission, so there is no
+        // runtime request to write; the framework still checks it and throws
+        // SecurityException if the install somehow lacks it, which is handled here
+        // rather than swallowed so the bridge simply stays off.
+        try {
             tm.registerPhoneAccount(
                 PhoneAccount
                     .Builder(handle, TelecomPolicy.ACCOUNT_LABEL)
@@ -91,49 +108,55 @@ object KpTelecom {
                     .build(),
             )
             accountReady = true
+        } catch (e: SecurityException) {
+            accountReady = false
         }
     }
 
     /**
      * Mirror the engine's current call. Called from [CallEngine.publishChange] on every
-     * state change the UI itself sees, which is what keeps the two from diverging.
+     * state change the UI itself sees, which is what keeps the two from diverging. A
+     * failure here can only ever leave the call unmirrored — never break it.
      */
     fun syncNow(app: android.app.Application) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        runCatching { syncO(app) }
+    }
+
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.O)
+    private fun syncO(app: android.app.Application) {
         context = app
-        runCatching {
-            val engine = CallEngine.instance
-            val call = engine?.active
-            val state =
-                if (call == null) {
-                    KpTelecomState.DISCONNECTED
-                } else {
-                    TelecomPolicy.stateFor(call.status, engine?.onHold == true)
-                }
-            when (
-                TelecomPolicy.planFor(
-                    liveId = live?.callId,
-                    registeringId = registeringId,
-                    registeringAtMs = registeringAtMs,
-                    nowMs = android.os.SystemClock.elapsedRealtime(),
-                    callId = call?.id ?: "",
-                    state = state,
-                )
-            ) {
-                // RELEASE covers three things at once: the call ended, a different call
-                // row took over, and a registration that never came back. In the latter
-                // two there is a live call to mirror, so the same tick re-requests it
-                // instead of waiting for a state change that may never arrive.
-                KpTelecomPlan.RELEASE -> {
-                    release(call)
-                    if (call != null && state != KpTelecomState.DISCONNECTED) request(app, call)
-                }
-                KpTelecomPlan.WAIT -> Unit
-                KpTelecomPlan.UPDATE -> if (call != null) {
-                    live?.apply(call, engine?.onHold == true)
-                }
-                KpTelecomPlan.REQUEST -> if (call != null) request(app, call)
+        val engine = CallEngine.instance
+        val call = engine?.active
+        val state =
+            if (call == null) {
+                KpTelecomState.DISCONNECTED
+            } else {
+                TelecomPolicy.stateFor(call.status, engine?.onHold == true)
             }
+        when (
+            TelecomPolicy.planFor(
+                liveId = live?.callId,
+                registeringId = registeringId,
+                registeringAtMs = registeringAtMs,
+                nowMs = android.os.SystemClock.elapsedRealtime(),
+                callId = call?.id ?: "",
+                state = state,
+            )
+        ) {
+            // RELEASE covers three things at once: the call ended, a different call
+            // row took over, and a registration that never came back. In the latter
+            // two there is a live call to mirror, so the same tick re-requests it
+            // instead of waiting for a state change that may never arrive.
+            KpTelecomPlan.RELEASE -> {
+                release(call)
+                if (call != null && state != KpTelecomState.DISCONNECTED) request(app, call)
+            }
+            KpTelecomPlan.WAIT -> Unit
+            KpTelecomPlan.UPDATE -> if (call != null) {
+                live?.apply(call, engine?.onHold == true)
+            }
+            KpTelecomPlan.REQUEST -> if (call != null) request(app, call)
         }
     }
 
@@ -219,12 +242,18 @@ object KpTelecom {
                     putParcelable(TelecomManager.EXTRA_INCOMING_CALL_ADDRESS, uriFor(call.id))
                 }
             }
-        if (call.incoming) {
-            tm.addNewIncomingCall(handle, extras)
-        } else {
-            // Outgoing: the row already exists and the offer is already in flight, so this
-            // is a report, not a dial — the framework binds back to us with this request.
-            tm.placeCall(uriFor(call.id), extras)
+        // Permission-checked by the framework (see ensureAccountO): handle the throw
+        // where it happens, so a refusal costs the mirror and nothing else.
+        try {
+            if (call.incoming) {
+                tm.addNewIncomingCall(handle, extras)
+            } else {
+                // Outgoing: the row already exists and the offer is already in flight, so
+                // this is a report, not a dial — the framework binds back to us with it.
+                tm.placeCall(uriFor(call.id), extras)
+            }
+        } catch (e: SecurityException) {
+            onFailed()
         }
     }
 }

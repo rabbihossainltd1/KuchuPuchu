@@ -136,10 +136,22 @@ check(
   (conn.match(/runCatching \{ engine\./g) ?? []).length >= 4,
 );
 check(
-  "show-incoming-call-ui reuses our own activity, no new screen",
-  /onShowIncomingCallUi[\s\S]{0,400}startActivity\([\s\S]{0,160}MainActivity::class\.java/.test(
-    conn,
-  ),
+  "show-incoming-call-ui uses the verified notification, never a raw startActivity (Android 14 refuses non-activity contexts)",
+  /onShowIncomingCallUi[\s\S]{0,400}CallNotify\.incoming\(ctx/.test(conn) &&
+    !conn.includes("startActivity") &&
+    !manifest.includes("SYSTEM_ALERT_WINDOW"),
+);
+check(
+  "lint's API guard sits where lint can see it: thin entry point + @RequiresApi worker",
+  (telecom.match(/androidx\.annotation\.RequiresApi/g) ?? []).length >= 2 &&
+    telecom.includes(
+      "fun syncNow(app: android.app.Application) { if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return runCatching { syncO(app) } }",
+    ) &&
+    telecom.includes("private fun syncO(app: android.app.Application)"),
+);
+check(
+  "permission-checked framework calls handle SecurityException at the call",
+  (telecom.match(/catch \(e: SecurityException\)/g) ?? []).length >= 2,
 );
 check(
   "state is pushed forward only once per transition",

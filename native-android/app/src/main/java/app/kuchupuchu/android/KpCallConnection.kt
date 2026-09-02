@@ -114,15 +114,15 @@ class KpCallConnection(
      */
     override fun onShowIncomingCallUi() {
         val ctx = KpTelecom.context ?: return
-        runCatching {
-            ctx.startActivity(
-                android.content.Intent(ctx, MainActivity::class.java)
-                    .addFlags(
-                        android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                            android.content.Intent.FLAG_ACTIVITY_NEW_TASK,
-                    ),
-            )
-        }
+        val call = CallEngine.instance?.active ?: return
+        // Not `startActivity`: on Android 14 a non-activity context is refused outright
+        // unless it holds SYSTEM_ALERT_WINDOWS, and adding that permission to silence a
+        // lint error would be the wrong trade. The ringing path already owns the correct
+        // mechanism — our own incoming-call notification, whose full-screen intent brings
+        // the existing IncomingCallScreen forward and which no-ops when the app is
+        // already in front. Self-managed means the app owns the UI, so "show the UI" is
+        // delegated to the one place that knows how this app shows it.
+        runCatching { CallNotify.incoming(ctx, call.otherName, call.kind == "VIDEO", call.id) }
     }
 
     /**
