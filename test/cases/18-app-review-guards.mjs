@@ -178,6 +178,105 @@ check(
 has(list, "Api.PollCadence.succeeded()", "a good poll clears the penalty");
 has(list, "Api.PollCadence.failed()", "…and a bad one starts it");
 
+// ── Phase 2 §11/§40: the outgoing queue must heal itself, not wait for a chat ──
+{
+  const cache = kt("Cache.kt");
+  const flStart = cache.indexOf("suspend fun flushNow");
+  const flush = cache.slice(flStart, flStart + 2600);
+  check("the outbox owns a real retry state per item", flStart > 0, `index=${flStart}`);
+  has(cache, '.put("attempts", 0)', "fresh items start with an attempt counter");
+  has(cache, '.put("nextAt", 0L)', "…a next-retry deadline…");
+  has(
+    cache,
+    'item.put("lastErr", err.take(180))',
+    "…and the reason it last failed, for scheduled recovery",
+  );
+  has(
+    cache,
+    "backoffMs[minOf(n - 1, backoffMs.size - 1)]",
+    "backoff is read from the table by attempt count",
+  );
+  has(cache, "MAX_AUTO", "there is an automatic-retry ceiling");
+  has(
+    cache,
+    "Long.MAX_VALUE / 4",
+    "past the ceiling the item WAITS for a trigger — it is not deleted",
+  );
+  check(
+    "a deferred item does not block the ones behind it (old code did `break`)",
+    flush.includes('if (!force && item.optLong("nextAt") > System.currentTimeMillis()) continue'),
+    flush.slice(0, 80),
+  );
+  check(
+    "…and it still stops walking the queue when the path itself is dead",
+    /bump\(clientId, e\.message \?: "network"\)[\s\S]{0,320}?break/.test(flush),
+  );
+  has(cache, "if (Api.inCooldown()) return", "the queue respects the server's Retry-After");
+  has(cache, "if (flushing) return", "two coroutines can still not post the same item twice");
+  has(
+    cache,
+    "catch (e: kotlinx.coroutines.CancellationException)",
+    "a cancelled kick rethrows instead of faking a send",
+  );
+  has(
+    cache,
+    '.put("clientId", clientId)',
+    "queued payloads keep the idempotency key the server dedupes on",
+  );
+  check(
+    "a permanently refused send is reported, not left spinning",
+    cache.includes("markDropped(clientId)") &&
+      /status in 400\.\.499 && status != 408 && status != 429/.test(cache),
+  );
+  has(
+    cache,
+    "${f.name}.tmp",
+    "the queue file is replaced atomically (a kill mid-write must not eat it)",
+  );
+  has(
+    cache,
+    "if (sent > 0) ScreenStore.pokeInbox()",
+    "a healed send repaints the open chat immediately",
+  );
+
+  // Triggers: the whole point of the change — flush had exactly one call site.
+  has(cache, "fun start(ctx: Context)", "startup arms the queue");
+  has(cache, "watchNetwork(ctx)", "…by registering for connectivity…");
+  has(cache, "mgr.registerNetworkCallback(req, cb)", "…through the documented callback…");
+  has(cache, "override fun onAvailable(network: Network)", "…on the available event…");
+  const onAv = cache.slice(
+    cache.indexOf("override fun onAvailable(network: Network)"),
+    cache.indexOf("override fun onAvailable(network: Network)") + 320,
+  );
+  check(
+    "…which force-flushes (backoff must not outlive an outage)",
+    onAv.includes("kick(400, force = true)"),
+    onAv.slice(0, 60),
+  );
+  has(
+    cache,
+    "kick(backoffMs[0])",
+    "the send that just failed is followed by one short-delay retry",
+  );
+  has(kt("MainActivity.kt"), "Outbox.start(this)", "the app actually starts it");
+  const onOpen = kt("Api.kt");
+  const oaStart = onOpen.indexOf("override fun onOpen(webSocket: WebSocket, response: Response)");
+  check(
+    "a socket reconnect (proof the network is back) kicks the queue too",
+    onOpen.slice(oaStart, oaStart + 500).includes("Outbox.kick(300, force = true)"),
+  );
+
+  const chat = kt("ChatScreen.kt");
+  check(
+    "the chat force-flushes on open and no longer calls the old fire-and-forget flush",
+    chat.includes("Outbox.flushNow(force = true)") && !chat.includes("Outbox.flush()"),
+  );
+  check(
+    "…and marks queue-refused bubbles failed so they stop pretending to send",
+    /val refused = Outbox\.droppedIds\(\)[\s\S]{0,400}put\("failed", true\)/.test(chat),
+  );
+}
+
 process.stdout.write(lines.join("\n") + "\n");
 const broken = lines.filter((l) => l.startsWith("  BROKEN")).length;
 process.exit(broken ? 1 : 0);

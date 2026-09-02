@@ -374,6 +374,9 @@ object KpSocket {
                     c.attempts = 0
                     c.live.value = true
                     startHeartbeat(c, webSocket)
+                    // Proven-reachable network, right now: the cheapest possible
+                    // signal that anything sitting in the outbox should go out.
+                    Outbox.kick(300, force = true)
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {

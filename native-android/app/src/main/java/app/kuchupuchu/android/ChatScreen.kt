@@ -315,6 +315,16 @@ fun ChatScreen(nav: NavController, convId: String) {
                         val cid = p.optString("clientId").ifBlank { "" }
                         cid.isNotBlank() && fresh.any { it.optString("clientId") == cid }
                     }
+                    // A queued send the server refused for good (banned word,
+                    // removed from the chat, over the length limit) never comes
+                    // back as a server row, so without this the bubble sits on
+                    // "sending" for the rest of the session.
+                    val refused = Outbox.droppedIds()
+                    if (refused.isNotEmpty()) {
+                        pending
+                            .filter { it.optString("clientId") in refused && !it.optBoolean("failed") }
+                            .forEach { it.put("failed", true).put("failedAt", System.currentTimeMillis()) }
+                    }
                     // Failed sends keep their bubble long enough for the error to
                     // be read, then clear instead of spinning forever.
                     pending.removeAll {
@@ -354,7 +364,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
         refreshMeta()
         refreshMessages(forceScroll = true, markRead = true)
-        runCatching { Outbox.flush() }
+        runCatching { Outbox.flushNow(force = true) }
     }
 
     /* single stable background refresh loop while this chat is open */

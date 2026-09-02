@@ -1,6 +1,17 @@
 package app.kuchupuchu.android
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -108,73 +119,229 @@ object Cache {
     }
 }
 
-/** Outgoing messages waiting for a network. Flushed when a request succeeds. */
+/**
+ * Outgoing messages waiting for a network.
+ *
+ * What this replaces: one `flush()` call site (only when the user opened that exact
+ * chat), no per-item state, and a `break` that let one permanently-rejected item
+ * block everyone behind it. A message queued in a metro tunnel therefore waited for
+ * the user to walk out and re-enter the conversation — "amar message ta jayni" —
+ * and an over-length body re-failed on every chat open forever.
+ *
+ * Now, per the architecture doc (§11 offline queue, §40 crash recovery item 4):
+ * every item carries `attempts` / `nextAt` / `lastErr`; a failure defers THAT item
+ * with backoff instead of freezing the queue; after MAX_AUTO automatic attempts the
+ * item waits for an explicit trigger (scheduled recovery) and is never deleted; and
+ * a request the server rejected for a reason retrying cannot fix is dropped AND
+ * reported through [droppedIds] so the sender's bubble shows "failed" instead of
+ * pretending to send forever.
+ *
+ * Retry triggers: network available, socket open, app start, opening the chat.
+ * Server-side idempotency by `clientId` (indexed, and asserted in
+ * test/cases/16-media-ratio-payload.mjs) is what makes resending a timed-out item
+ * safe — that is the only reason a queue like this cannot duplicate messages.
+ */
 object Outbox {
     private val items = ArrayList<JSONObject>()
     private var file: File? = null
-    @Volatile var flushing = false
+
+    @Volatile
+    var flushing = false
+        private set
     private val flushLock = Any()
+    private val dropped = LinkedHashSet<String>()
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var kickJob: Job? = null
+    private var netCb: ConnectivityManager.NetworkCallback? = null
+
+    /** How long one message waits after each failed attempt (1.5s → 5min). */
+    private val backoffMs = longArrayOf(1_500L, 4_000L, 12_000L, 30_000L, 60_000L, 180_000L, 300_000L)
+
+    /** Beyond this many automatic attempts only an explicit trigger retries it. */
+    private const val MAX_AUTO = 12
 
     fun init(ctx: Context) {
-        file = File(ctx.filesDir, "kp-outbox.json")
+        file = File(ctx.applicationContext.filesDir, "kp-outbox.json")
         runCatching {
             val raw = file?.takeIf { it.exists() }?.readText() ?: return
             val arr = JSONArray(raw)
-            items.clear()
-            for (i in 0 until arr.length()) items.add(arr.getJSONObject(i))
+            val loaded = ArrayList<JSONObject>()
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val body = o.optJSONObject("body") ?: continue
+                if (o.optString("convId").isBlank() || o.optString("clientId").isBlank()) continue
+                // A deadline in the past is "now"; a device restart must never
+                // leave a queued message parked behind an old backoff value.
+                if (o.optLong("nextAt") in 1 until System.currentTimeMillis()) o.put("nextAt", 0L)
+                o.put("body", body)
+                loaded.add(o)
+            }
+            synchronized(this) {
+                items.clear()
+                items.addAll(loaded)
+            }
         }
     }
 
+    /** Called once at startup: re-arm the retry clock for whatever is queued. */
+    fun start(ctx: Context) {
+        watchNetwork(ctx)
+        kick(800, force = true)
+    }
+
+    @Synchronized
+    fun count(): Int = items.size
+
+    /** ClientIds the server refused permanently — the chat marks those bubbles failed. */
+    @Synchronized
+    fun droppedIds(): Set<String> = dropped.toSet()
+
     @Synchronized
     fun add(convId: String, clientId: String, body: JSONObject) {
-        items.add(JSONObject().put("convId", convId).put("clientId", clientId).put("body", body))
+        items.removeAll { it.optString("clientId") == clientId }
+        items.add(
+            JSONObject()
+                .put("convId", convId)
+                .put("clientId", clientId)
+                .put("body", body)
+                .put("attempts", 0)
+                .put("nextAt", 0L)
+                .put("addedAt", System.currentTimeMillis()),
+        )
+        dropped.remove(clientId)
         save()
+        // The send that just failed was the "immediate" attempt; the queue's own
+        // first retry is a short delay later, then backoff. A one-off network blip
+        // therefore heals by itself instead of waiting for the chat to reopen.
+        kick(backoffMs[0])
     }
 
     @Synchronized
     fun remove(clientId: String) {
+        if (clientId.isBlank()) return
         items.removeAll { it.optString("clientId") == clientId }
         save()
     }
 
     @Synchronized
-    fun snapshot(): List<JSONObject> = items.map { JSONObject(it.toString()) }
-
-    private fun save() {
-        val arr = JSONArray()
-        items.forEach { arr.put(it) }
-        runCatching { file?.writeText(arr.toString()) }
+    private fun bump(clientId: String, err: String) {
+        val item = items.firstOrNull { it.optString("clientId") == clientId } ?: return
+        val n = item.optInt("attempts") + 1
+        item.put("attempts", n)
+        item.put("lastErr", err.take(180))
+        item.put("lastErrAt", System.currentTimeMillis())
+        val wait = if (n >= MAX_AUTO) Long.MAX_VALUE / 4 else backoffMs[minOf(n - 1, backoffMs.size - 1)]
+        item.put("nextAt", System.currentTimeMillis() + wait)
+        save()
     }
 
-    suspend fun flush() {
-        // A bare check-then-set on a @Volatile let two coroutines in at once and
-        // post the same queued message twice.
+    @Synchronized
+    private fun markDropped(clientId: String) {
+        if (clientId.isBlank()) return
+        dropped.add(clientId)
+        while (dropped.size > 64) dropped.remove(dropped.iterator().next())
+    }
+
+    @Synchronized
+    private fun snapshot(): List<JSONObject> = items.map { JSONObject(it.toString()) }
+
+    /** Debounced, non-suspending entry point for socket / connectivity / startup. */
+    fun kick(delayMs: Long = 250, force: Boolean = false) {
+        kickJob?.cancel()
+        kickJob = scope.launch {
+            delay(delayMs)
+            runCatching { flushNow(force) }
+        }
+    }
+
+    suspend fun flushNow(force: Boolean = false) {
+        // Two coroutines in here used to post the same queued message twice.
         synchronized(flushLock) {
             if (flushing) return
             flushing = true
         }
+        var sent = 0
         try {
+            // The API told us "not yet" (429/503 + Retry-After). Pushing the queue
+            // at it anyway spends the cooldown we just agreed to — and the queue is
+            // the one place a client can be patient, since nothing is waiting on it.
+            if (Api.inCooldown()) return
             for (item in snapshot()) {
                 val convId = item.optString("convId")
                 val clientId = item.optString("clientId")
-                val body = item.optJSONObject("body")
-                if (body == null) {
-                    remove(clientId)
+                if (item.optJSONObject("body") == null || convId.isBlank() || clientId.isBlank()) {
+                    purgeInvalid(clientId)
                     continue
                 }
+                if (!force && item.optLong("nextAt") > System.currentTimeMillis()) continue
                 try {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        Api.post("/api/conversations/$convId/messages", body)
-                    }
+                    val body = item.optJSONObject("body")!!
+                    withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", body) }
                     remove(clientId)
+                    sent++
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
                 } catch (e: Exception) {
-                    // A 4xx will never succeed on retry, so drop that item rather
-                    // than blocking the rest of the queue behind it forever.
-                    if (e is ApiException && e.status in 400..499) remove(clientId) else break
+                    val status = (e as? ApiException)?.status ?: 0
+                    if (status in 400..499 && status != 408 && status != 429) {
+                        markDropped(clientId)
+                        remove(clientId)
+                        continue
+                    }
+                    bump(clientId, e.message ?: "network")
+                    // Anything behind this would fail down the same dead path: stop
+                    // for now and let the backoff / network callback reschedule.
+                    break
                 }
             }
         } finally {
             flushing = false
+        }
+        // The open chat reconciles its optimistic bubble against the server row on
+        // a poke; without this the user waits for the next poll tick to see a
+        // queued message turn into a sent one.
+        if (sent > 0) ScreenStore.pokeInbox()
+    }
+
+    @Synchronized
+    private fun purgeInvalid(clientId: String) {
+        items.removeAll { it.optString("clientId") == clientId || it.optJSONObject("body") == null }
+        save()
+    }
+
+    private fun watchNetwork(ctx: Context) {
+        if (netCb != null) return
+        val mgr = ctx.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE)
+            as? ConnectivityManager ?: return
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                // The radio just came back: whatever is queued has waited long
+                // enough, and a 5s outage must not turn into "message stuck until
+                // the user opens that chat".
+                kick(400, force = true)
+            }
+        }
+        runCatching {
+            val req = NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build()
+            mgr.registerNetworkCallback(req, cb)
+            netCb = cb
+        }
+    }
+
+    private fun save() {
+        val arr = JSONArray()
+        items.forEach { arr.put(it) }
+        val f = file ?: return
+        runCatching {
+            val tmp = File(f.parentFile, "${f.name}.tmp")
+            tmp.writeText(arr.toString())
+            if (!tmp.renameTo(f)) {
+                f.writeText(arr.toString())
+                tmp.delete()
+            }
         }
     }
 }

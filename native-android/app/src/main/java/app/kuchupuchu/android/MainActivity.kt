@@ -106,6 +106,9 @@ class MainActivity : ComponentActivity() {
             start()
         }
         Store.init(this)
+        // The retry clock must run for the whole process, not just while a chat
+        // is open: queued sends are the one thing the user cannot see working.
+        Outbox.start(this)
         Store.authed.value = !Api.token.isNullOrBlank() && Store.me != null
         KpNotify.ensureChannels(this)
 
