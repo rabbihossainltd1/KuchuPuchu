@@ -43,6 +43,14 @@ jobs:
   apk:
     runs-on: ubuntu-22.04
     timeout-minutes: 40
+    # §51 signing: the release key lives here and nowhere else in the tree. Gradle reads
+    # exactly these four names; a run without them (fork, no access) falls back to debug
+    # signing and the certificate step prints a warning instead of failing.
+    env:
+      KP_KEYSTORE_B64: ${{ secrets.KP_KEYSTORE_B64 }}
+      KP_STORE_PASSWORD: ${{ secrets.KP_STORE_PASSWORD }}
+      KP_KEY_ALIAS: ${{ secrets.KP_KEY_ALIAS }}
+      KP_KEY_PASSWORD: ${{ secrets.KP_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -80,6 +88,39 @@ jobs:
         run: |
           ./gradlew assembleRelease --no-daemon --stacktrace \
             -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
+      # §51 says the release key is the developer's own; a build that silently ships
+      # debug-signed "release" artifacts is how an update-hijack survives an audit. So
+      # the certificate is read out of the finished APK and compared, and if the signing
+      # secret is configured but the APK is not signed by it, CI stops.
+      - name: Verify the release APK's signing certificate
+        env:
+          KP_RELEASE_SHA256: 87faab2d49c660f87ddb1543551c3ce2b2534763404a2671399e9a1847a9c787
+          KP_DEBUG_SHA256: 39190b0f38787493081c999b036e7c65fc7a4ab65d807e4dcdc25285541ecd2e
+        run: |
+          APK=native-android/app/build/outputs/apk/release/app-release.apk
+          SIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | tail -1)
+          [ -n "$SIGNER" ] || { echo "::warning::apksigner not found, skipping signature check"; exit 0; }
+          DIGEST=$("$SIGNER" verify --print-certs "$APK" | sed -n 's/.*certificate SHA-256 digest: //p' | tr -d ':')
+          echo "release APK certificate digest: $DIGEST"
+          if [ -z "${KP_KEYSTORE_B64:-}" ]; then
+            echo "::warning::KP_KEYSTORE_B64 is not configured — this release APK is debug-signed and must not be distributed."
+            exit 0
+          fi
+          if [ "$DIGEST" = "$KP_DEBUG_SHA256" ]; then
+            echo "::error::release APK is signed with the debug key although KP_KEYSTORE_B64 is set."
+            exit 1
+          fi
+          if [ "$DIGEST" != "$KP_RELEASE_SHA256" ]; then
+            echo "::error::release APK certificate ($DIGEST) is not the expected release key."
+            exit 1
+          fi
+          echo "OK: signed with the release key."
+      - name: Upload release APK (signed)
+        uses: actions/upload-artifact@v4
+        with:
+          name: kuchupuchu-apk-release
+          path: native-android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:

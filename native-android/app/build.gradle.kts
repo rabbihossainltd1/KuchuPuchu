@@ -3,6 +3,25 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// §51 / Play policy: `release` must not be signed with the repository's debug key —
+// that key is in git, so anyone with read access could publish an update that every
+// installed phone accepts as coming from this developer. The real signing key lives in
+// GitHub Actions secrets (Settings → Secrets and variables → Actions → KP_KEYSTORE_*),
+// base64'd, because a keystore that can be committed is a keystore that will be.
+//
+// Absent secrets (`KP_KEYSTORE_B64` unset: a fork, a fresh clone, a laptop) the release
+// build still signs with the debug key — the build must not become unbuildable for
+// somebody who has no business holding the signing key. That fallback is loud: the apk
+// job prints it, and when the secret IS configured the same job fails the build unless
+// the APK's certificate digest is the release one.
+val kpKeystoreB64: String? = System.getenv("KP_KEYSTORE_B64")?.takeIf { it.isNotBlank() }
+val kpReleaseKeystore: File? = kpKeystoreB64?.let { b64 ->
+    val out = layout.buildDirectory.file("keystores/kp-release.keystore").get().asFile
+    out.parentFile.mkdirs()
+    out.writeBytes(java.util.Base64.getMimeDecoder().decode(b64))
+    out
+}
+
 android {
     namespace = "app.kuchupuchu.android"
     compileSdk = 35
@@ -26,18 +45,33 @@ android {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
+        kpReleaseKeystore?.let { store ->
+            create("release") {
+                storeFile = store
+                // PKCS12 cannot hold a key password that differs from the store
+                // password, so both secrets intentionally carry the same value.
+                storePassword = System.getenv("KP_STORE_PASSWORD")
+                keyAlias = System.getenv("KP_KEY_ALIAS")
+                keyPassword = System.getenv("KP_KEY_PASSWORD")
+                // minSdk 24 would let AGP drop the JAR signature; keeping v1 on means
+                // any tool on a phone (or `keytool -printcert -jarfile`) can read the
+                // certificate without needing the SDK's apksigner.
+                enableV1Signing = true
+                enableV2Signing = true
+            }
+        }
     }
     buildTypes {
         release {
-            // Optimized, installable release APK — signed with the repo's
-            // debug key so it installs directly (personal distribution).
+            // Optimized, installable release APK. Signed with the release key when CI
+            // has it, with the debug key otherwise (see kpReleaseKeystore above).
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {
