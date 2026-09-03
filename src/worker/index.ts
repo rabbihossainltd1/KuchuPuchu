@@ -3449,6 +3449,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   if (path === "/api/blocks" && method === "POST") {
     const target = String(body.userId || "");
     if (!target || target === uid) fail(400, "Bad user.");
+    // The system accounts can't be blocked — they deliver security notices.
+    if (target === OFFICIAL_BOT_ID || target === AI_BOT_ID)
+      fail(403, "You can't block an official account.", "BOT_ACCOUNT");
     await run(
       db,
       "INSERT OR IGNORE INTO blocks (owner_id, target_id, created_at) VALUES (?, ?, ?)",
@@ -4844,6 +4847,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (!other || other === uid) fail(400, "Bad user.");
     if (!(await one<{ id: string }>(db, "SELECT id FROM users WHERE id = ?", other)))
       fail(404, "User not found.");
+    // System accounts are not callable (owner rule — the app hides the
+    // buttons; the API refuses on principle).
+    if (other === OFFICIAL_BOT_ID || other === AI_BOT_ID)
+      fail(403, "This account can't be called.", "BOT_ACCOUNT");
     if (await blockedBetween(db, uid, other)) fail(403, "You can't call this user.", "BLOCKED");
     const convId = pairId(uid, other);
     if (!(await one(db, "SELECT id FROM conversations WHERE id = ?", convId))) {

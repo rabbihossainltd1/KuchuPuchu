@@ -827,7 +827,11 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
                     color = Ink,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
+                    // fill=false: the text takes at most its share but only as
+                    // much as it needs, so the verified tick sits immediately
+                    // after the name (WhatsApp-style) instead of being pushed
+                    // out toward the timestamp.
+                    modifier = Modifier.weight(1f, fill = false),
                 )
                 if (!isGroup && other?.optBoolean("verified") == true) {
                     Spacer(Modifier.width(5.dp))

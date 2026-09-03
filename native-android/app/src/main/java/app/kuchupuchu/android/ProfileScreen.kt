@@ -166,6 +166,7 @@ fun ProfileScreen(nav: NavController, userId: String) {
                 Text(about, fontSize = 13.5.sp, color = Ink, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             }
         }
+        if (!isKpBot(userId)) {
         Row(
             Modifier
                 .fillMaxWidth()
@@ -259,9 +260,13 @@ fun ProfileScreen(nav: NavController, userId: String) {
                 }
             }
             Spacer(Modifier.height(10.dp))
+        }
+        }
+        if (!isKpBot(userId)) {
             androidx.compose.foundation.layout.Box(
                 Modifier
                     .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
                     .clip(RoundedCornerShape(14.dp))
                     .background(Card)
                     .padding(4.dp),

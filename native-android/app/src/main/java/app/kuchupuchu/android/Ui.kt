@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -694,19 +693,46 @@ fun statusStampShort(iso: String): String {
     }
 }
 
-/** Blue verified tick (official accounts + owner). Self-contained so every
- *  screen renders the identical badge next to a name. */
+/** The two system accounts: official notifications + the AI helper. They
+ *  carry no call buttons, no block option, and their chat headers keep the
+ *  full display name. */
+fun isKpBot(id: String?): Boolean = id == "kp_official_bot" || id == "kp_ai_bot"
+
+/** Blue verified seal (starburst + check) drawn on Canvas: a vector glyph at
+ *  14dp rendered soft on several devices, a Canvas path stays crisp at every
+ *  density — same shape as the standard verified badge. */
 @Composable
-fun VerifiedBadge(size: Dp = 14.dp) {
-    Box(
-        Modifier.size(size).clip(CircleShape).background(Color(0xFF1D9BF0)),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            Icons.Filled.Check,
-            contentDescription = "Verified",
-            tint = Color.White,
-            modifier = Modifier.size(size * 0.64f),
+fun VerifiedBadge(size: Dp = 16.dp) {
+    val badgeSize = size
+    androidx.compose.foundation.Canvas(Modifier.size(badgeSize)) {
+        val r = this.size.minDimension / 2f
+        val c = center
+        val path = androidx.compose.ui.graphics.Path()
+        val steps = 24 // 12 scallops, like the classic verified seal
+        for (i in 0 until steps) {
+            val ang = (i * 2.0 * Math.PI / steps).toFloat()
+            val rad = if (i % 2 == 0) r else r * 0.84f
+            val x = c.x + rad * kotlin.math.cos(ang)
+            val y = c.y + rad * kotlin.math.sin(ang)
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        path.close()
+        drawPath(path, Color(0xFF1D9BF0))
+        val w = r * 0.34f
+        val cap = androidx.compose.ui.graphics.StrokeCap.Round
+        drawLine(
+            Color.White,
+            androidx.compose.ui.geometry.Offset(c.x - r * 0.40f, c.y + r * 0.04f),
+            androidx.compose.ui.geometry.Offset(c.x - r * 0.10f, c.y + r * 0.32f),
+            strokeWidth = w,
+            cap = cap,
+        )
+        drawLine(
+            Color.White,
+            androidx.compose.ui.geometry.Offset(c.x - r * 0.10f, c.y + r * 0.32f),
+            androidx.compose.ui.geometry.Offset(c.x + r * 0.44f, c.y - r * 0.28f),
+            strokeWidth = w,
+            cap = cap,
         )
     }
 }

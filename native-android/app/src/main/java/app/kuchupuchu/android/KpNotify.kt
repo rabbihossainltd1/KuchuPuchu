@@ -102,6 +102,24 @@ object KpNotify {
     // areNotificationsEnabled() first (reporting why nothing appeared, which is the
     // part a user can act on). Annotating instead of adding a checkSelfPermission()
     // per call keeps that one gate in one place.
+    /** The bundled brand logo as a CIRCULAR bitmap — the notification large
+     *  icon, so bot/system messages show the same round avatar the app does. */
+    private fun roundLogo(ctx: Context): android.graphics.Bitmap {
+        val size = 256
+        val src = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+        val dr = androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.icon_gold)
+        if (dr != null) {
+            dr.setBounds(0, 0, size, size)
+            dr.draw(android.graphics.Canvas(src))
+        }
+        val round = androidx.core.graphics.drawable.RoundedBitmapDrawableFactory.create(ctx.resources, src)
+        round.isCircular = true
+        val out = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+        round.setBounds(0, 0, size, size)
+        round.draw(android.graphics.Canvas(out))
+        return out
+    }
+
     @SuppressLint("MissingPermission")
     fun message(
         ctx: Context,
@@ -173,6 +191,10 @@ object KpNotify {
         val n =
             NotificationCompat.Builder(ctx, if (muted) SILENT_CHANNEL else CHAT_CHANNEL)
                 .setSmallIcon(R.mipmap.ic_stat_kp)
+                // Round brand logo as the large icon: without it the shade
+                // showed the bare square status glyph next to bot messages,
+                // which read as "the AI's photo is a square" (owner report).
+                .setLargeIcon(roundLogo(ctx))
                 .setContentTitle(from)
                 .setContentText(body)
                 .setAutoCancel(true)
@@ -197,6 +219,7 @@ object KpNotify {
         val summary =
             NotificationCompat.Builder(ctx, CHAT_CHANNEL)
                 .setSmallIcon(R.mipmap.ic_stat_kp)
+                .setLargeIcon(roundLogo(ctx))
                 .setContentTitle("KuchuPuchu")
                 .setGroup(GROUP)
                 .setGroupSummary(true)
