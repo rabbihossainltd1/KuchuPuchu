@@ -842,6 +842,10 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
                         Spacer(Modifier.width(5.dp))
                         VerifiedBadge()
                     }
+                    if (!isGroup && other?.optBoolean("moderator") == true) {
+                        Spacer(Modifier.width(5.dp))
+                        ModeratorBadge()
+                    }
                 }
                 if (muted) {
                     Spacer(Modifier.width(6.dp))

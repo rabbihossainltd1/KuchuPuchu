@@ -335,6 +335,49 @@ const convBetween = (db, a, b) =>
   check("lookup: garbage number rejected", bad.status === 400, bad.status);
 }
 
+// ---- 7. moderator badge (@fsleader): flag flows through every user shape ----
+{
+  const k = await mk();
+  const a = await k.reg("fsleader@x.com", "fsleader");
+  const b = await k.reg("plain@x.com", "plain");
+  const before = await k.call("GET", "/api/users?q=fsleader", undefined, b.token);
+  check(
+    "moderator defaults to false",
+    before.json.users?.[0]?.moderator === false,
+    JSON.stringify(before.json.users?.[0]?.moderator),
+  );
+  // The owner action: flag the account.
+  k.db._db.prepare("UPDATE users SET moderator = 1 WHERE id = ?").run(a.user.id);
+  const after = await k.call("GET", "/api/users?q=fsleader", undefined, b.token);
+  check(
+    "discovery marks the moderator",
+    after.json.users?.[0]?.moderator === true,
+    JSON.stringify(after.json.users?.[0]?.moderator),
+  );
+  check(
+    "the moderator badge is independent of verified",
+    after.json.users?.[0]?.verified === false,
+    JSON.stringify(after.json.users?.[0]?.verified),
+  );
+  // The chat-list shape (light userFrom) must carry it too — that is where
+  // the Android row renders the badge.
+  const conv = await k.call("POST", "/api/conversations", { userId: a.user.id }, b.token);
+  const list = await k.call("GET", "/api/conversations", undefined, b.token);
+  const row = (list.json.items || []).find((c) => c.id === conv.json.conversation?.id);
+  check(
+    "chat list carries the moderator badge on the other user",
+    row?.other?.moderator === true,
+    JSON.stringify(row?.other?.moderator),
+  );
+  const rowB = await k.call("GET", "/api/conversations", undefined, a.token);
+  const otherSide = (rowB.json.items || []).find((c) => c.id === conv.json.conversation?.id);
+  check(
+    "the OTHER side of the chat is not a moderator",
+    otherSide?.other?.moderator === false,
+    JSON.stringify(otherSide?.other?.moderator),
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`bots-verified: ${lines.length - broken} ok / ${broken} broken`);

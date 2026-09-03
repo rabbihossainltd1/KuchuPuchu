@@ -157,6 +157,10 @@ fun ProfileScreen(nav: NavController, userId: String) {
                     Spacer(Modifier.width(6.dp))
                     VerifiedBadge(16.dp)
                 }
+                if (u.optBoolean("moderator")) {
+                    Spacer(Modifier.width(6.dp))
+                    ModeratorBadge(16.dp)
+                }
             }
             val uname = u.optText("username")
             if (uname.isNotBlank()) Text("@$uname", fontSize = 13.5.sp, color = Muted)

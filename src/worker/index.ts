@@ -1129,7 +1129,8 @@ async function ensureSchema(db: D1Database) {
       about TEXT, created_at TEXT NOT NULL, last_active_at TEXT NOT NULL,
       phone_e164 TEXT, phone_verified_at TEXT, phone_verification_method TEXT,
       google_subject TEXT, google_email TEXT, auth_status TEXT NOT NULL DEFAULT 'ACTIVE',
-      verified INTEGER
+      verified INTEGER,
+      moderator INTEGER
     )`,
     `CREATE TABLE IF NOT EXISTS sessions (
       token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires_at TEXT NOT NULL,
@@ -1294,6 +1295,9 @@ async function ensureSchema(db: D1Database) {
   // Verified badge (owner decision): official notification account,
   // KuchuPuchu AI and the owner account carry a tick; everyone else 0.
   await runCatchingSql(db, `ALTER TABLE users ADD COLUMN verified INTEGER`);
+  // Moderator badge (owner round 2026-09-04): @fsleader carries the crossed-
+  // tools badge; independent of verified so the two never collide.
+  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN moderator INTEGER`);
   await runCatchingSql(db, `ALTER TABLE sessions ADD COLUMN device_id TEXT`);
   await runCatchingSql(db, `ALTER TABLE login_requests ADD COLUMN new_device_name TEXT`);
   // Uniqueness the legacy schema cannot express: one phone → one account,
@@ -1379,6 +1383,7 @@ type UserRow = {
   google_email: string | null;
   auth_status: string;
   verified: number | null;
+  moderator: number | null;
 };
 
 /**
@@ -1402,6 +1407,7 @@ function userFrom(row: UserRow, online = false, light = false) {
     online,
     lastActiveAt: row.last_active_at,
     verified: !!row.verified,
+    moderator: !!row.moderator,
   };
   if (light) {
     return {
