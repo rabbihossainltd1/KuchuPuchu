@@ -208,7 +208,13 @@ object KpNotify {
                 .setGroup(GROUP)
                 .setWhen(System.currentTimeMillis())
                 .setContentIntent(chatTap(ctx, convoId))
-                .addAction(replyAction)
+                // The official notification account is one-way (owner rule):
+                // its pair conversation id embeds "kp_official_bot", and for
+                // those cards the Reply quick-action is omitted — it would
+                // only bounce off the API's NO_REPLIES refusal.
+                .apply {
+                    if (!convoId.contains("kp_official_bot")) addAction(replyAction)
+                }
                 .addAction(likeAction)
                 .addAction(readAction)
                 // Muted: no heads-up, no sound — channel is silent anyway,
