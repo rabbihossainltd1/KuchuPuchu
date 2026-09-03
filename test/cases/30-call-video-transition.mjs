@@ -84,6 +84,17 @@ const screenFlat = flat(screen);
       flat(eng),
     ),
   );
+  const shareToggle = bodyOf(eng, "fun toggleShare()");
+  check(
+    "sharing on a VOICE call is allowed (the guard is 'a call exists', not 'a video call exists')",
+    /if \(active == null \|\| pc == null\) \{ notify\("Start a call first/.test(flat(shareToggle)),
+  );
+  check(
+    "and the voice screen still exposes both conversion buttons",
+    /"Video",\s*active = call\.kind == "VIDEO" && !engine\.cameraOff,[\s\S]{0,600}?\{ engine\.toggleCamera\(\) \}/.test(
+      flat(ui),
+    ) && /if \(engine\.sharing\) "Stop share" else "Share screen"/.test(ui),
+  );
   check(
     "cameraOff / sharing stay Compose state, so the screen can follow them",
     /var cameraOff by mutableStateOf\(false\)/.test(eng) &&

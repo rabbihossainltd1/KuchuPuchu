@@ -866,7 +866,13 @@ class CallEngine(private val app: Application) {
 
     fun toggleShare() {
         if (active == null || pc == null) {
-            notify("Start a video call first to share your screen.")
+            // A call and a connected peer are all that is needed: startShare()
+            // swaps its track into the sendrecv video transceiver that every
+            // call — voice included — already negotiated, so sharing on a voice
+            // call IS the way that call becomes a video call. The old message
+            // ("start a video call first") refused exactly the request the user
+            // reported: "voice call e screen share start korle convert hoy na".
+            notify("Start a call first to share your screen.")
             return
         }
         if (sharing) {
