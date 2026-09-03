@@ -151,9 +151,7 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
         setContent {
             KpTheme {
-                SplashGate {
-                    KpApp()
-                }
+                KpApp()
             }
         }
     }
