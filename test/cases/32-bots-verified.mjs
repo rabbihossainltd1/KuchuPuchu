@@ -392,7 +392,18 @@ const convBetween = (db, a, b) =>
       { kind: "TEXT", body, clientId: `c-own-${Math.random()}` },
       a.token,
     );
+  // A user row carrying the owner username → the card must embed that id so
+  // the app's Message button can open the direct chat.
+  k.db._db.prepare("UPDATE users SET username = 'rabbihossainltd' WHERE id = ?").run(a.user.id);
   await send("owner ke? ke banaiyechhe ei app?");
+  const cardMeta = k.db._db
+    .prepare("SELECT meta_json FROM messages WHERE conv_id = ? AND kind = 'OWNER_CARD'")
+    .get(conv.id);
+  check(
+    "card meta carries the owner's userId for the Message button",
+    !!cardMeta?.meta_json && JSON.parse(cardMeta.meta_json).ownerUserId === a.user.id,
+    JSON.stringify(cardMeta?.meta_json),
+  );
   const cards = () =>
     k.db._db
       .prepare("SELECT COUNT(*) n FROM messages WHERE conv_id = ? AND kind = 'OWNER_CARD'")
@@ -451,6 +462,10 @@ const convBetween = (db, a, b) =>
       src.includes("TikTok @Rabbihossainltd"),
   );
   check("pure-Bengali-script rule present", src.includes("pure Bengali"));
+  check(
+    "owner name always in English letters (never transliterated)",
+    src.includes("transliterate his name into Bengali script"),
+  );
   check("the retired Banglish-spelling rule is gone", !src.includes("kemon achen"));
 }
 

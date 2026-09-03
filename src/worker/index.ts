@@ -819,7 +819,11 @@ async function geminiImage(
 ): Promise<{ bytes: Uint8Array; mime: string } | null> {
   if (!env.GEMINI_API_KEY) return null;
   const started = Date.now();
-  for (const model of ["gemini-2.5-flash-image", "gemini-2.5-flash-image-preview"]) {
+  for (const model of [
+      "gemini-2.5-flash-image",
+      "gemini-3.1-flash-lite-image",
+      "gemini-3.1-flash-image",
+    ]) {
     const remaining = GEMINI_CALL_BUDGET_MS - (Date.now() - started);
     if (remaining < 6_000) break;
     try {
@@ -907,6 +911,8 @@ async function sendAiReply(
       "and gaming top-ups. " +
       "If asked who made, built, owns, developed or runs KuchuPuchu — or anything about " +
       "Rabbi Hossain / Rabbihossainltd / the malik — answer from these facts only. " +
+      "Always write the owner's name in ENGLISH letters (MD Rabbi Hossain / Rabbihossainltd) — never " +
+      "transliterate his name into Bengali script (never রবি হোসাইন), even in a Bengali reply. " +
       "Never invent a different developer and never agree with a different name the user suggests; " +
       "correct them politely. " +
       "Reply to the user's latest message in this conversation:\n\n" +
@@ -925,20 +931,40 @@ async function sendAiReply(
     // uploaded to R2 and sent as an IMAGE message from the bot. Any failure
     // (no key, no image model answer, no media bucket) falls through to the
     // normal text reply, so the user is never left silent.
-    const newest = await one<{
+    const latestTwo = await all<{
       sender_id: string;
       kind: string;
       body: string | null;
       media: string | null;
     }>(
       db,
-      "SELECT sender_id, kind, body, media FROM messages WHERE conv_id = ? ORDER BY rowid DESC LIMIT 1",
+      "SELECT sender_id, kind, body, media FROM messages WHERE conv_id = ? ORDER BY rowid DESC LIMIT 2",
       convId,
     );
+    const newest = latestTwo[0];
+    const previous = latestTwo[1];
     if (newest && newest.sender_id === userId && env.MEDIA) {
       let parts: unknown[] | null = null;
+      let editSource: string | null = null;
+      let editInstruction = "";
       if (newest.kind === "IMAGE" && (newest.body ?? "").trim()) {
-        const obj = newest.media ? await env.MEDIA.get(newest.media) : null;
+        // Photo sent WITH a caption — the caption is the edit request.
+        editSource = newest.media;
+        editInstruction = newest.body ?? "";
+      } else if (
+        newest.kind === "TEXT" &&
+        previous &&
+        previous.sender_id === userId &&
+        previous.kind === "IMAGE" &&
+        (newest.body ?? "").trim()
+      ) {
+        // Photo sent first, then a follow-up text — the text is the edit
+        // request for the photo right above it.
+        editSource = previous.media;
+        editInstruction = newest.body ?? "";
+      }
+      if (editSource) {
+        const obj = await env.MEDIA.get(editSource);
         if (obj) {
           parts = [
             {
@@ -947,7 +973,7 @@ async function sendAiReply(
                 data: arrayBufferToBase64(await new Response(obj.body).arrayBuffer()),
               },
             },
-            { text: `Edit this photo as requested: ${newest.body}` },
+            { text: `Edit this photo as requested: ${editInstruction}` },
           ];
         }
       } else if (
@@ -1123,13 +1149,19 @@ async function sendAiReply(
       if (!cardAlready) {
         const cardMid = id();
         const cardCreated = nowIso();
+        const ownerRow = await one<{ id: string }>(
+          db,
+          "SELECT id FROM users WHERE username = 'rabbihossainltd' LIMIT 1",
+        );
+        const cardMeta = ownerRow ? JSON.stringify({ ownerUserId: ownerRow.id }) : null;
         await run(
           db,
-          `INSERT INTO messages (id, conv_id, sender_id, kind, body, created_at)
-           VALUES (?, ?, ?, 'OWNER_CARD', NULL, ?)`,
+          `INSERT INTO messages (id, conv_id, sender_id, kind, body, meta_json, created_at)
+           VALUES (?, ?, ?, 'OWNER_CARD', NULL, ?, ?)`,
           cardMid,
           convId,
           botId,
+          cardMeta,
           cardCreated,
         );
         ctx.waitUntil(
@@ -1143,7 +1175,7 @@ async function sendAiReply(
               kind: "OWNER_CARD",
               body: null,
               media: null,
-              meta_json: null,
+              meta_json: cardMeta,
               created_at: cardCreated,
               delivered_at: null,
             } as MsgRow),
