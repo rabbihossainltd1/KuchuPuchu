@@ -5,7 +5,6 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
-import androidx.credentials.exceptions.GetCredentialNoCredentialException
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
@@ -41,7 +40,6 @@ object GoogleAuth {
     private sealed class Attempt {
         data class Ok(val credential: androidx.credentials.Credential) : Attempt()
         object Cancelled : Attempt()
-        object NoAccounts : Attempt()
         data class Failed(val error: GetCredentialException) : Attempt()
     }
 
@@ -68,9 +66,10 @@ object GoogleAuth {
      *  2. If that surface returns something unusable (a credential with a
      *     blank token — a known transient Play-services hiccup), the sheet is
      *     relaunched ONCE instead of dead-ending.
-     *  3. NoCredentialException = the device genuinely has zero Google
-     *     accounts. Only then does GetSignInWithGoogleOption run, because a
-     *     browser sign-in is the only remaining path for such a device.
+     *  3. If the native surface cannot produce a sheet at all (a device with
+     *     zero Google accounts, or a transient Play-services error),
+     *     GetSignInWithGoogleOption runs ONCE as the last resort — that is
+     *     the only case where a browser sign-in is legitimately the path.
      *  4. Cancellation is always null; every other failure carries a message
      *     the login screen can show as-is.
      *
@@ -102,8 +101,6 @@ object GoogleAuth {
                 )
             } catch (cancellation: GetCredentialCancellationException) {
                 Attempt.Cancelled
-            } catch (noAccounts: GetCredentialNoCredentialException) {
-                Attempt.NoAccounts
             } catch (e: GetCredentialException) {
                 Attempt.Failed(e)
             }
@@ -111,36 +108,35 @@ object GoogleAuth {
         // Primary + one relaunch: a blank-token credential from a healthy
         // sheet is transient; a dead end is not acceptable on the auth path.
         val noTokenMsg = "Google sign-in didn't return a token. Please try again."
+        var webEligible = false
         when (val first = attempt(nativeOption())) {
             is Attempt.Cancelled -> return null
+            is Attempt.Failed -> webEligible = true
             is Attempt.Ok -> {
                 val token = tokenOf(first.credential)
                 if (token.isNotBlank()) return token
-                return when (val second = attempt(nativeOption())) {
-                    is Attempt.Cancelled -> null
-                    is Attempt.Ok -> tokenOf(second.credential).ifBlank { throw IllegalStateException(noTokenMsg) }
-                    is Attempt.NoAccounts, is Attempt.Failed -> throw IllegalStateException(noTokenMsg)
+                when (val second = attempt(nativeOption())) {
+                    is Attempt.Cancelled -> return null
+                    is Attempt.Ok -> return tokenOf(second.credential).ifBlank {
+                        throw IllegalStateException(noTokenMsg)
+                    }
+                    is Attempt.Failed -> webEligible = true
                 }
             }
-            is Attempt.Failed -> {
-                throw IllegalStateException(
-                    "Google sign-in couldn't start. Make sure a Google account is signed in on " +
-                        "this phone and Google Play services is up to date, then try again.",
-                    first.error,
-                )
-            }
-            is Attempt.NoAccounts -> Unit
         }
 
-        // NoAccounts: zero Google accounts on the device — the web sign-in is
-        // the only path left on such a device.
+        // Last resort: the native surface could not produce a usable sheet —
+        // typically a device with zero Google accounts, where the browser
+        // sign-in is genuinely the only path. Runs at most once.
+        if (!webEligible) return null
         return when (val web = attempt(GetSignInWithGoogleOption.Builder(clientId).build())) {
             is Attempt.Cancelled -> null
             is Attempt.Ok -> tokenOf(web.credential).ifBlank { throw IllegalStateException(noTokenMsg) }
-            is Attempt.NoAccounts, is Attempt.Failed ->
+            is Attempt.Failed ->
                 throw IllegalStateException(
                     "Google sign-in couldn't start. Make sure a Google account is signed in on " +
                         "this phone and Google Play services is up to date, then try again.",
+                    web.error,
                 )
         }
     }
