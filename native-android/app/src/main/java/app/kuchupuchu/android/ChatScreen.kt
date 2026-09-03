@@ -4,6 +4,7 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -184,6 +185,12 @@ fun ChatScreen(nav: NavController, convId: String) {
     var otherReadAt by remember { mutableStateOf<String?>(null) }
     // "typing…" lives 6s per ping, refreshed on the messages poll.
     var otherTypingAt by remember { mutableStateOf(0L) }
+    // Word-by-word reveal for a freshly-arrived KuchuPuchu AI reply (owner
+    // round 2026-09-04). Only messages CREATED after this screen opened are
+    // animated, so conversation history never re-types itself on open.
+    val chatOpenedAtMs = remember { System.currentTimeMillis() }
+    var aiRevealId by remember { mutableStateOf<String?>(null) }
+    var aiRevealChars by remember { mutableStateOf(0) }
     val listState = rememberLazyListState()
     val player = remember { VoicePlayer() }
     var lastTopId by remember { mutableStateOf("") }
@@ -1125,7 +1132,52 @@ fun ChatScreen(nav: NavController, convId: String) {
             typingLeaseActive = false
         }
     }
-    val typingNow = typingLeaseActive
+    // KuchuPuchu AI typing (owner round 2026-09-04): the bot ALWAYS answers
+    // the user's latest message (server-guaranteed, with a fallback reply),
+    // so "the newest thing in the thread is MY message and it didn't fail"
+    // is exactly "the AI is generating right now" — an in-thread typing
+    // bubble plus the header label, until the reply lands.
+    val isAiChat = !isGroup && otherUserId == "kp_ai_bot"
+    val lastInThread = pending.lastOrNull() ?: msgs.lastOrNull()
+    val aiTyping =
+        isAiChat &&
+            lastInThread != null &&
+            !lastInThread.optBoolean("failed", false) &&
+            lastInThread.optString("senderId") == Store.myId()
+    val typingNow = typingLeaseActive || aiTyping
+
+    // A brand-new AI reply (created after open) types itself out word by word.
+    LaunchedEffect(msgs.size) {
+        val last = msgs.lastOrNull() ?: return@LaunchedEffect
+        if (!convId.endsWith("_kp_ai_bot")) return@LaunchedEffect
+        if (last.optString("senderId") != "kp_ai_bot" || last.optString("kind") != "TEXT") return@LaunchedEffect
+        val mid = last.optString("id")
+        if (mid == aiRevealId) return@LaunchedEffect
+        val created =
+            runCatching { java.time.Instant.parse(last.optString("createdAt")).toEpochMilli() }.getOrDefault(0L)
+        if (created < chatOpenedAtMs) return@LaunchedEffect
+        aiRevealChars = 0
+        aiRevealId = mid
+    }
+
+    LaunchedEffect(aiRevealId) {
+        val revealMid = aiRevealId ?: return@LaunchedEffect
+        val body = msgs.lastOrNull { it.optString("id") == revealMid }?.optText("body").orEmpty()
+        var pos = 0
+        while (pos < body.length) {
+            delay(if (body.length > 240) 30L else 45L)
+            pos = body.indexOf(' ', pos + 1).takeIf { it >= 0 } ?: body.length
+            aiRevealChars = pos
+            // Stay pinned to the newest line while the reply types itself —
+            // unless the user scrolled up to read (their scroll wins).
+            val info = listState.layoutInfo
+            val nearBottom =
+                info.visibleItemsInfo.lastOrNull()?.index?.let { it >= info.totalItemsCount - 2 } == true
+            if (nearBottom) listState.scrollToItem(info.totalItemsCount - 1)
+        }
+        delay(250)
+        aiRevealId = null
+    }
     val other = c?.optJSONObject("other")
     Column(
         Modifier
@@ -1236,9 +1288,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                 }
                 Text(
                     when {
+                        typingNow -> "typing..."
                         isGroup -> "${c?.arr("members")?.length() ?: 0} members"
                         botChat -> "Official account"
-                        typingNow -> "typing..."
                         online -> "online"
                         else -> otherLastSeen(other?.optText("lastActiveAt"))
                     },
@@ -1408,6 +1460,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 }
                             },
                             onOpenImage = { msg -> viewerMsg = msg },
+                            revealChars = if (m.optString("id") == aiRevealId) aiRevealChars else null,
                         )
                     }
                 }
@@ -1419,6 +1472,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                     key = { it.optString("clientId").ifBlank { it.optString("id") } },
                 ) { m ->
                     MessageRow(m, isGroup, Store.myId(), otherReadAt, player, pendingEcho = true)
+                }
+                if (aiTyping) {
+                    item(key = "ai-typing-bubble") { AiTypingBubble() }
                 }
                 if (uploading > 0) {
                     item {
@@ -2441,6 +2497,7 @@ private fun MessageRow(
     selectedIds: List<String> = emptyList(),
     onToggleSelect: (JSONObject) -> Unit = {},
     onOpenImage: (JSONObject) -> Unit = {},
+    revealChars: Int? = null,
 ) {
     val mine = m.optString("senderId") == myId
     val kind = m.optString("kind")
@@ -2533,11 +2590,20 @@ private fun MessageRow(
                             fontStyle = FontStyle.Italic,
                             color = Color(0xFF4A463F),
                         )
-                        else -> Text(
-                            m.optText("body") + if (m.optBoolean("edited")) "  (edited)" else "",
-                            fontSize = 14.5.sp,
-                            color = Ink,
-                        )
+                        else -> {
+                            val full = m.optText("body") + if (m.optBoolean("edited")) "  (edited)" else ""
+                            if (revealChars != null && revealChars < full.length) {
+                                // The AI reply is still typing itself out —
+                                // reveal up to the current word + a caret.
+                                Text(
+                                    full.take(revealChars) + " ▍",
+                                    fontSize = 14.5.sp,
+                                    color = Ink,
+                                )
+                            } else {
+                                Text(full, fontSize = 14.5.sp, color = Ink)
+                            }
+                        }
                     }
                 }
                 Row(
@@ -3214,6 +3280,45 @@ private fun CallLogBubble(m: JSONObject, mine: Boolean, pendingEcho: Boolean) {
             }
             Spacer(Modifier.width(12.dp))
             Text(msgStamp(m.optString("createdAt")), fontSize = 10.sp, color = if (mine) Color(0xD9FFFFFF) else Muted)
+        }
+    }
+}
+
+/**
+ * In-thread "KuchuPuchu AI is typing" bubble (owner round 2026-09-04): three
+ * dots stepping gold while the reply is being generated, WhatsApp-style.
+ */
+@Composable
+private fun AiTypingBubble() {
+    val phase by rememberInfiniteTransition(label = "ai-typing").animateFloat(
+        initialValue = 0f,
+        targetValue = 3f,
+        animationSpec = infiniteRepeatable(tween(850, easing = LinearEasing), RepeatMode.Restart),
+        label = "phase",
+    )
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp),
+        horizontalArrangement = Arrangement.Start,
+    ) {
+        Box(
+            Modifier
+                .widthIn(min = 64.dp)
+                .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 5.dp, bottomEnd = 16.dp))
+                .background(Brush.linearGradient(listOf(Card, Card)))
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                repeat(3) { i ->
+                    Box(
+                        Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(if (phase.toInt() == i) GoldDeep else Color(0xFFD6D3D1)),
+                    )
+                }
+            }
         }
     }
 }

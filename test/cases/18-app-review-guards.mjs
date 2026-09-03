@@ -106,6 +106,28 @@ check(
   "a clientlog POST survived somewhere",
 );
 
+// ── Google sign-in shape (owner round 2026-09-04): native sheet first ───────
+const ga = kt("GoogleAuth.kt");
+const idTokenBody = ga.slice(ga.indexOf("suspend fun idToken"));
+has(ga, "setFilterByAuthorizedAccounts(false)", "the native sheet always lists every device account");
+check(
+  "the native Google sheet runs FIRST; web sign-in only as the last resort",
+  idTokenBody.indexOf("GetGoogleIdOption.Builder()") >= 0 &&
+    idTokenBody.indexOf("GetGoogleIdOption.Builder()") < idTokenBody.indexOf("GetSignInWithGoogleOption.Builder"),
+  "",
+);
+check(
+  "a blank-token credential relaunches the sheet instead of dead-ending",
+  idTokenBody.split("attempt(nativeOption())").length >= 3, // 2 call sites + the definition
+  "",
+);
+lacks(ga, "Google returned no ID token", "the cryptic dead-end error is gone");
+has(
+  ga,
+  "Google sign-in didn't return a token. Please try again.",
+  "token failures are retryable with a clear message",
+);
+
 // ── KpApp: a failed navigation must not eat the pending chat ────────────────
 has(
   app,
