@@ -651,8 +651,8 @@ fun statusStamp(iso: String): String {
     } catch (e: Exception) {
         return ""
     }
-    val now = java.time.ZonedDateTime.now()
-    val z = t.atZone(java.time.ZoneId.systemDefault())
+    val now = dhakaNow()
+    val z = atDhaka(t)
     return when {
         z.toLocalDate() == now.toLocalDate() ->
             "Today at ${String.format("%d:%02d %s", (z.hour % 12f).toInt().let { if (it == 0) 12 else it }, z.minute, if (z.hour >= 12) "PM" else "AM")}"

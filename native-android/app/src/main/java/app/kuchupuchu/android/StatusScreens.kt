@@ -426,7 +426,7 @@ fun StatusComposer(onDone: () -> Unit) {
                 horizontalArrangement = Arrangement.End,
             ) {
                 GoldBtn(
-                    if (busy) "…" else "Post status",
+                    "Post status",
                     enabled = text.isNotBlank() && !busy,
                 ) {
                     busy = true

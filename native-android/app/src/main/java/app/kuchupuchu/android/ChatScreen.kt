@@ -1232,6 +1232,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 Text(
                     when {
                         isGroup -> "${c?.arr("members")?.length() ?: 0} members"
+                        botChat -> "Official account"
                         typingNow -> "typing..."
                         online -> "online"
                         else -> otherLastSeen(other?.optText("lastActiveAt"))
@@ -2076,12 +2077,13 @@ internal object ImageRatios {
     }
 }
 
-/** Just the time — "3:17 am" today, "yesterday 11:10 pm", then "12 Aug". */
+/** Just the time — "3:17 am" today, "yesterday 11:10 pm", then "12 Aug" —
+ *  always in Bangladesh Standard Time (owner rule). */
 private fun otherLastSeen(iso: String?): String {
     if (iso.isNullOrBlank()) return " "
     val t = runCatching { java.time.Instant.parse(iso) }.getOrNull() ?: return " "
-    val z = t.atZone(java.time.ZoneId.systemDefault())
-    val now = java.time.ZonedDateTime.now()
+    val z = atDhaka(t)
+    val now = dhakaNow()
     val h12 = z.hour % 12; val hh = if (h12 == 0) 12 else h12
     val ampm = if (z.hour < 12) "am" else "pm"
     val time = "$hh:%02d $ampm".format(z.minute)
@@ -2309,7 +2311,17 @@ private fun LoginApprovalMessage(m: JSONObject) {
     var status by remember(m.optString("id")) { mutableStateOf(meta.optString("status", "PENDING")) }
     var busy by remember(m.optString("id")) { mutableStateOf(false) }
     val device = meta.optString("deviceName").takeIf { it.isNotBlank() } ?: "Another device"
-    val time = m.optText("createdAt").take(16).replace("T", " ")
+    // Attempt time in Bangladesh Standard Time (owner rule) — the raw UTC
+    // string it replaced read as gibberish to everyone.
+    val time = runCatching {
+        val z = atDhaka(java.time.Instant.parse(m.optText("createdAt")))
+        String.format(
+            "%d:%02d %s",
+            (z.hour % 12).let { if (it == 0) 12 else it },
+            z.minute,
+            if (z.hour >= 12) "PM" else "AM",
+        )
+    }.getOrDefault("")
     Column(
         Modifier
             .fillMaxWidth()
@@ -2335,7 +2347,7 @@ private fun LoginApprovalMessage(m: JSONObject) {
             Spacer(Modifier.width(8.dp))
             Column {
                 Text("KuchuPuchu · Security", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = GoldDeep)
-                Text(time + " UTC", fontSize = 10.sp, color = Muted, maxLines = 1)
+                Text(time + " · Bangladesh time", fontSize = 10.sp, color = Muted, maxLines = 1)
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -2375,7 +2387,7 @@ private fun LoginApprovalMessage(m: JSONObject) {
                     colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Gold, contentColor = Color.White),
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text(if (busy) "…" else "Accept", maxLines = 1, fontWeight = FontWeight.SemiBold)
+                    Text("Accept", maxLines = 1, fontWeight = FontWeight.SemiBold)
                 }
                 Spacer(Modifier.width(8.dp))
                 androidx.compose.material3.Button(
@@ -3010,7 +3022,7 @@ private fun compactFileName(name: String, headKeep: Int = 10, tailDots: Int = 4)
 private fun msgStamp(iso: String): String {
     if (iso.isBlank()) return ""
     return try {
-        val z = java.time.Instant.parse(iso).atZone(java.time.ZoneId.systemDefault())
+        val z = atDhaka(java.time.Instant.parse(iso))
         String.format("%02d:%02d", z.hour, z.minute)
     } catch (e: Exception) {
         ""

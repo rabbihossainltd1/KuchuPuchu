@@ -265,6 +265,34 @@ const convBetween = (db, a, b) =>
     c2.status === 403 && c2.json.error?.code === "BOT_ACCOUNT",
     `${c2.status} ${c2.json.error?.code}`,
   );
+
+  // bots stay out of groups (owner rule)
+  const b2 = await k.reg("grp@x.com", "grp");
+  const g1 = await k.call(
+    "POST",
+    "/api/conversations/group",
+    { title: "Bots", memberIds: ["kp_ai_bot"] },
+    a.token,
+  );
+  check("a bot-only group is refused", g1.status === 400, g1.status);
+  const g2 = await k.call(
+    "POST",
+    "/api/conversations/group",
+    { title: "G", memberIds: [b2.user.id] },
+    a.token,
+  );
+  const gid = g2.json.conversation?.id;
+  const add = await k.call(
+    "POST",
+    `/api/conversations/${gid}/members`,
+    { userId: "kp_official_bot" },
+    a.token,
+  );
+  check(
+    "adding a bot to a group is refused",
+    add.status === 400 && add.json.error?.code === "BOT_ACCOUNT",
+    `${add.status} ${add.json.error?.code}`,
+  );
 }
 
 // ---- 5. welcome survives the full e2e shape the app polls ----

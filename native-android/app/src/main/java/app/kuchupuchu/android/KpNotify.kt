@@ -103,8 +103,14 @@ object KpNotify {
     // part a user can act on). Annotating instead of adding a checkSelfPermission()
     // per call keeps that one gate in one place.
     /** The bundled brand logo as a CIRCULAR bitmap — the notification large
-     *  icon, so bot/system messages show the same round avatar the app does. */
+     *  icon, so bot/system messages show the same round avatar the app does.
+     *  Built once and cached: this fires per message notification, and the
+     *  per-call 2×256×256 allocations added up on chatty days. */
+    private var roundLogoCache: android.graphics.Bitmap? = null
+
+    @Synchronized
     private fun roundLogo(ctx: Context): android.graphics.Bitmap {
+        roundLogoCache?.let { return it }
         val size = 256
         val src = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
         val dr = androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.icon_gold)
@@ -117,6 +123,7 @@ object KpNotify {
         val out = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
         round.setBounds(0, 0, size, size)
         round.draw(android.graphics.Canvas(out))
+        roundLogoCache = out
         return out
     }
 
