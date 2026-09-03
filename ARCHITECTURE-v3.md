@@ -10,7 +10,7 @@
 4. Search (chats, messages, contacts)
 5. **24h Status/Stories** (photo/video/text)
 6. **File send** (R2: photo, video, audio, doc — size cap)
-7. Login: email + password
+7. Login: OTP-less phone auth (v3.9 — email/password removed, dekho PHONE_AUTH_PLAN.md)
 8. Discovery: username / QR / invite link (kono contacts permission nai)
 9. Push notification: FCM (Messenger mode — no permanent notification)
 

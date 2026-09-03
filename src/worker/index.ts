@@ -6,8 +6,11 @@
 
 import {
   BIO_MAX_LENGTH,
+  LOGIN_REQUEST_TTL_MS,
   MESSAGE_MAX_LENGTH,
   ONLINE_WINDOW_MS,
+  PENDING_SIGNUP_TTL_MS,
+  RECOVERY_REQUEST_TTL_MS,
   SESSION_TTL_MS,
 } from "../shared/constants.js";
 
@@ -41,6 +44,14 @@ export type Env = {
    *  path — every broadcast call guards on presence and no-ops without it. */
   CHAT_ROOM?: DurableObjectNamespace;
   CALL_SIGNAL?: DurableObjectNamespace;
+  /** Phone-auth Google binding: the OAuth 2.0 Web Client ID from the Firebase
+   *  console (Authentication → Sign-in method → Google). The Android client
+   *  gets it from /api/config/firebase and Credential Manager mints ID tokens
+   *  with `aud` = this value; the worker rejects any token whose `aud` differs.
+   *  Unset ⇒ google/bind and recovery answer 503 — fail-closed on purpose: a
+   *  misconfigured deploy must break login loudly, never silently skip the
+   *  audience check. */
+  GOOGLE_WEB_CLIENT_ID?: string;
 };
 
 type Json = Record<string, unknown>;
@@ -90,41 +101,10 @@ async function sha256Hex(value: string) {
   return bytesToHex(new Uint8Array(hash));
 }
 
-async function hashPassword(password: string) {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(password),
-    "PBKDF2",
-    false,
-    ["deriveBits"],
-  );
-  const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", hash: "SHA-256", salt, iterations: 100000 },
-    key,
-    256,
-  );
-  return `${bytesToHex(salt)}:${bytesToHex(new Uint8Array(bits))}`;
-}
-
-async function verifyPassword(password: string, stored: string) {
-  const [saltHex, hashHex] = stored.split(":");
-  if (!saltHex || !hashHex) return false;
-  const salt = new Uint8Array(saltHex.match(/.{2}/g)!.map((h) => parseInt(h, 16)));
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(password),
-    "PBKDF2",
-    false,
-    ["deriveBits"],
-  );
-  const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", hash: "SHA-256", salt, iterations: 100000 },
-    key,
-    256,
-  );
-  return timingSafeEqualHex(bytesToHex(new Uint8Array(bits)), hashHex);
-}
+// Password hashing (PBKDF2) was removed together with the email/password auth
+// system: phone auth has no password to store or verify. The `password_hash`
+// column stays in the database for the legacy rows that still carry one; no
+// route reads it anymore.
 
 /** Length-independent, branch-free comparison — avoids leaking hash bytes by timing. */
 function timingSafeEqualHex(a: string, b: string) {
@@ -132,6 +112,215 @@ function timingSafeEqualHex(a: string, b: string) {
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
+}
+
+/* ---------------- phone auth (OTP-less) ----------------
+ *
+ * Replaces the old email/password system. See PHONE_AUTH_PLAN.md for the
+ * full mapping of PHONE_AUTH_COMPLETE_SPEC.md onto this repo. In short:
+ *
+ *  - The client normalizes to E.164 and checks the number against the ones
+ *    the active SIMs expose (SubscriptionManager/TelephonyManager), then
+ *    reports MATCH / MISMATCH / UNAVAILABLE / NO_SIM / PERMISSION_DENIED.
+ *  - MISMATCH (a real, exposed, different number) is always blocked.
+ *  - UNAVAILABLE / NO_SIM / PERMISSION_DENIED are allowed through as
+ *    DEVICE_ONLY attestation — a deliberate product decision: most BD
+ *    carriers never expose the SIM number, so a strict block would lock out
+ *    the majority of real users. The new-device approval flow (old device
+ *    must Accept) and the MISMATCH block are what keep this safe.
+ *  - One account = one ACTIVE device; transfers are atomic D1 batches.
+ *  - Every account binds a Google identity (server-verified ID token) for
+ *    lost-device recovery; one Google subject maps to one account.
+ */
+
+/** Placeholder domain for phone-only accounts. The `users.email` column is
+ *  NOT NULL UNIQUE from the legacy schema, so phone signups park a synthetic
+ *  address there. It is never exposed to clients (see userSelf) and is
+ *  rewritten on phone change to keep the UNIQUE constraint consistent. */
+const PHONE_EMAIL_SUFFIX = "@phone.kuchupuchu.invalid";
+const phoneEmail = (e164: string) => `${e164}${PHONE_EMAIL_SUFFIX}`;
+
+/**
+ * E.164 normalization, BD-first. Accepts 01XXXXXXXXX / 8801XXXXXXXXX /
+ * +8801XXXXXXXXX (and generic international numbers with a leading +).
+ * The client normalizes too (PhoneVerifier.kt) — both sides MUST agree,
+ * and the server can never trust a client claim of "already normalized".
+ */
+function normalizePhone(raw: unknown): string {
+  const trimmed = String(raw ?? "").trim();
+  if (!trimmed) fail(400, "Enter your phone number.");
+  const digits = trimmed.replace(/[\s\-().]/g, "").replace(/[^0-9+]/g, "");
+  const hasPlus = digits.startsWith("+");
+  let d = digits.replace(/\+/g, "");
+  if (!d) fail(400, "Enter your phone number.");
+  if (!hasPlus) {
+    // Local form: default region BD. 8801… → 01…, then require a BD mobile.
+    if (d.startsWith("880")) d = d.slice(3);
+    if (!d.startsWith("0")) d = `0${d}`;
+    if (!/^01[3-9]\d{8}$/.test(d))
+      fail(400, "Enter a valid Bangladeshi mobile number, e.g. 01712345678.");
+    return `+880${d.slice(1)}`;
+  }
+  if (d.startsWith("880")) {
+    if (!/^8801[3-9]\d{8}$/.test(d))
+      fail(400, "Enter a valid Bangladeshi mobile number, e.g. +8801712345678.");
+    return `+${d}`;
+  }
+  if (!/^\d{8,15}$/.test(d))
+    fail(400, "Enter a valid phone number with the country code, e.g. +8801712345678.");
+  return `+${d}`;
+}
+
+/** The SIM results the client may report. Anything else is a bad request. */
+const SIM_RESULTS = ["MATCH", "MISMATCH", "UNAVAILABLE", "NO_SIM", "PERMISSION_DENIED"] as const;
+type SimResult = (typeof SIM_RESULTS)[number];
+
+function parseSimResult(raw: unknown): SimResult {
+  const v = String(raw ?? "")
+    .trim()
+    .toUpperCase();
+  if (!(SIM_RESULTS as readonly string[]).includes(v)) fail(400, "Bad phone verification result.");
+  return v as SimResult;
+}
+
+function parseDeviceId(raw: unknown): string {
+  const v = String(raw ?? "")
+    .trim()
+    .slice(0, 64);
+  if (!v) fail(400, "Missing device id.");
+  return v;
+}
+
+/**
+ * Server-side Google ID token verification without any service account key:
+ * Google's tokeninfo endpoint validates the signature, and THIS function owns
+ * the trust decisions — audience, issuer, expiry. Credential Manager mints the
+ * token with `aud` = the Web Client ID, so a token minted for any OTHER app
+ * fails the aud check. When GOOGLE_WEB_CLIENT_ID is unset the whole route is
+ * 503 — fail closed, never "verify without an audience".
+ */
+async function verifyGoogleIdToken(env: Env, rawToken: unknown) {
+  if (!env.GOOGLE_WEB_CLIENT_ID)
+    fail(503, "Google sign-in is not configured on the server.", "GOOGLE_NOT_CONFIGURED");
+  const token = String(rawToken ?? "").trim();
+  if (!token || token.length > 4096)
+    fail(401, "Google sign-in failed. Please try again.", "GOOGLE_TOKEN_INVALID");
+  let info: Record<string, unknown> | null = null;
+  try {
+    const res = await fetch(
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(token)}`,
+    );
+    if (res.status === 200) info = (await res.json()) as Record<string, unknown>;
+  } catch {
+    /* network trouble is indistinguishable from a bad token here — reject */
+  }
+  if (!info) fail(401, "Google sign-in failed. Please try again.", "GOOGLE_TOKEN_INVALID");
+  const aud = String(info.aud ?? "");
+  const iss = String(info.iss ?? "");
+  const sub = String(info.sub ?? "");
+  const exp = Number(info.exp ?? 0);
+  if (aud !== env.GOOGLE_WEB_CLIENT_ID)
+    fail(401, "Google sign-in failed. Please try again.", "GOOGLE_TOKEN_INVALID");
+  if (iss !== "accounts.google.com" && iss !== "https://accounts.google.com")
+    fail(401, "Google sign-in failed. Please try again.", "GOOGLE_TOKEN_INVALID");
+  if (!sub || exp * 1000 < Date.now() - 60_000)
+    fail(401, "Google sign-in failed. Please try again.", "GOOGLE_TOKEN_INVALID");
+  const email = String(info.email ?? "");
+  const verified = info.email_verified === true || info.email_verified === "true";
+  return { sub, email: verified ? email : "" };
+}
+
+/** Opaque session token + its INSERT statement, pre-hashed so callers can
+ *  drop it into an atomic db.batch() alongside the rest of a transfer. */
+async function sessionStmt(
+  db: D1Database,
+  userId: string,
+  deviceId: string,
+): Promise<{ token: string; stmt: D1PreparedStatement }> {
+  const token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
+  const stmt = db
+    .prepare(
+      `INSERT INTO sessions (token_hash, user_id, expires_at, created_at, device_id)
+       VALUES (?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      await sha256Hex(token),
+      userId,
+      new Date(Date.now() + SESSION_TTL_MS).toISOString(),
+      nowIso(),
+      deviceId,
+    );
+  return { token, stmt };
+}
+
+/** The device-transfer half every "activate a new device" path shares:
+ *  kill the user's other sessions, revoke any ACTIVE device row, activate
+ *  this install, and drop the OLD install's FCM push rows so a transferred
+ *  -away phone stops lighting up. Callers put these in ONE batch with the
+ *  request-state UPDATE that authorises the transfer — that is what makes
+ *  the swap atomic (§15/§18). */
+function deviceTransferStmts(
+  db: D1Database,
+  userId: string,
+  deviceId: string,
+  deviceName: string | null,
+): D1PreparedStatement[] {
+  const at = nowIso();
+  return [
+    db.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId),
+    db
+      .prepare(
+        `UPDATE auth_devices SET status = 'REVOKED', revoked_at = ?
+          WHERE user_id = ? AND status = 'ACTIVE'`,
+      )
+      .bind(at, userId),
+    db
+      .prepare(
+        `INSERT INTO auth_devices
+           (id, user_id, device_id, device_name, status, created_at, last_seen_at)
+         VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?)
+         ON CONFLICT (user_id, device_id) DO UPDATE SET
+           status = 'ACTIVE', revoked_at = NULL,
+           device_name = COALESCE(excluded.device_name, auth_devices.device_name),
+           last_seen_at = excluded.last_seen_at`,
+      )
+      .bind(id(), userId, deviceId, deviceName, at, at),
+    // Old install's push handles die with the transfer. Rows with a NULL
+    // device_id predate per-install identity; they cannot be proven to belong
+    // to the surviving install, so they go too.
+    db
+      .prepare(`DELETE FROM devices WHERE user_id = ? AND (device_id IS NULL OR device_id != ?)`)
+      .bind(userId, deviceId),
+  ];
+}
+
+/** Best-effort audit trail (§11 audit_logs). Never blocks a login. */
+async function audit(
+  db: D1Database,
+  event: string,
+  userId: string | null,
+  deviceId: string | null,
+  meta: Record<string, unknown> = {},
+) {
+  try {
+    await run(
+      db,
+      `INSERT INTO auth_audit (id, user_id, device_id, event, meta, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      id(),
+      userId,
+      deviceId,
+      event,
+      JSON.stringify(meta).slice(0, 1000),
+      nowIso(),
+    );
+  } catch {
+    /* audit must never take a login down */
+  }
+}
+
+/** Masked phone for logs (§29): never print a full number in tail/console. */
+function maskPhone(e164: string) {
+  return e164.length <= 5 ? "***" : `${e164.slice(0, 5)}***${e164.slice(-2)}`;
 }
 
 async function all<T>(db: D1Database, sql: string, ...binds: unknown[]) {
@@ -324,6 +513,18 @@ async function sweepSessions(db: D1Database) {
   if (Date.now() < nextSessionSweep) return;
   nextSessionSweep = Date.now() + 3_600_000;
   await run(db, "DELETE FROM sessions WHERE expires_at < ?", nowIso());
+  // Phone auth: abandoned PENDING signups (google never bound, device never
+  // registered) squat the phone number after 24h — sweep them so the real
+  // owner can start fresh. A PENDING row has no conversations/messages (it
+  // never held a session), so only its device rows need to go with it.
+  const cutoff = new Date(Date.now() - PENDING_SIGNUP_TTL_MS).toISOString();
+  await run(
+    db,
+    `DELETE FROM auth_devices WHERE user_id IN
+       (SELECT id FROM users WHERE auth_status = 'PENDING' AND created_at < ?)`,
+    cutoff,
+  );
+  await run(db, `DELETE FROM users WHERE auth_status = 'PENDING' AND created_at < ?`, cutoff);
 }
 
 /**
@@ -340,9 +541,37 @@ async function ensureSchema(db: D1Database) {
     `CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
       username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL, avatar_url TEXT,
-      about TEXT, created_at TEXT NOT NULL, last_active_at TEXT NOT NULL
+      about TEXT, created_at TEXT NOT NULL, last_active_at TEXT NOT NULL,
+      phone_e164 TEXT, phone_verified_at TEXT, phone_verification_method TEXT,
+      google_subject TEXT, google_email TEXT, auth_status TEXT NOT NULL DEFAULT 'ACTIVE'
     )`,
-    `CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS sessions (
+      token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL, device_id TEXT
+    )`,
+    // Phone auth §11: the authoritative device registry. `devices` below is
+    // the FCM push registry (auth-agnostic); auth_devices is who may be
+    // signed in. UNIQUE (user_id, device_id): one row per install per account.
+    `CREATE TABLE IF NOT EXISTS auth_devices (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, device_id TEXT NOT NULL,
+      device_name TEXT, status TEXT NOT NULL DEFAULT 'PENDING',
+      created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, revoked_at TEXT,
+      UNIQUE (user_id, device_id)
+    )`,
+    `CREATE TABLE IF NOT EXISTS login_requests (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, new_device_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'PENDING',
+      created_at TEXT NOT NULL, expires_at TEXT NOT NULL, resolved_at TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS recovery_requests (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, new_device_id TEXT NOT NULL,
+      google_subject TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'PENDING',
+      created_at TEXT NOT NULL, expires_at TEXT NOT NULL, completed_at TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS auth_audit (
+      id TEXT PRIMARY KEY, user_id TEXT, device_id TEXT, event TEXT NOT NULL,
+      meta TEXT, created_at TEXT NOT NULL
+    )`,
     `CREATE TABLE IF NOT EXISTS devices (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, updated_at TEXT NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS blocks (owner_id TEXT NOT NULL, target_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (owner_id, target_id))`,
     `CREATE TABLE IF NOT EXISTS conversations (
@@ -464,6 +693,48 @@ async function ensureSchema(db: D1Database) {
     db,
     `CREATE INDEX IF NOT EXISTS idx_messages_dedupe ON messages(conv_id, sender_id, client_id)`,
   );
+  // Phone auth (email/password removal): columns for the OTP-less system.
+  // Legacy users default to auth_status ACTIVE — they are working accounts;
+  // only phone signups start PENDING and flip ACTIVE at Google binding.
+  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN phone_e164 TEXT`);
+  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN phone_verified_at TEXT`);
+  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN phone_verification_method TEXT`);
+  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN google_subject TEXT`);
+  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN google_email TEXT`);
+  await runCatchingSql(
+    db,
+    `ALTER TABLE users ADD COLUMN auth_status TEXT NOT NULL DEFAULT 'ACTIVE'`,
+  );
+  await runCatchingSql(db, `ALTER TABLE sessions ADD COLUMN device_id TEXT`);
+  // Uniqueness the legacy schema cannot express: one phone → one account,
+  // one Google subject → one account (§9/§22). Partial indexes so legacy
+  // NULL rows never collide; fresh DBs got these constraints in the CREATE,
+  // migrated DBs get them here. Outside the batch like the other index
+  // builds above.
+  await runCatchingSql(
+    db,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone ON users(phone_e164) WHERE phone_e164 IS NOT NULL`,
+  );
+  await runCatchingSql(
+    db,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_gsub ON users(google_subject) WHERE google_subject IS NOT NULL`,
+  );
+  await runCatchingSql(
+    db,
+    `CREATE INDEX IF NOT EXISTS idx_authdevices_user ON auth_devices(user_id, status)`,
+  );
+  await runCatchingSql(
+    db,
+    `CREATE INDEX IF NOT EXISTS idx_loginreq_user ON login_requests(user_id, status)`,
+  );
+  await runCatchingSql(
+    db,
+    `CREATE INDEX IF NOT EXISTS idx_recoveryreq_user ON recovery_requests(user_id, status)`,
+  );
+  await runCatchingSql(
+    db,
+    `CREATE INDEX IF NOT EXISTS idx_users_pending_gc ON users(created_at) WHERE auth_status = 'PENDING'`,
+  );
   // One-time backfill: legacy rows carry clientId only inside meta_json.
   // After this, every row has the column (future INSERTs always set it), so
   // the WHERE matches nothing and this stays a cheap no-op on later boots.
@@ -511,6 +782,12 @@ type UserRow = {
   created_at: string;
   last_active_at: string;
   avatar_version: number | null;
+  phone_e164: string | null;
+  phone_verified_at: string | null;
+  phone_verification_method: string | null;
+  google_subject: string | null;
+  google_email: string | null;
+  auth_status: string;
 };
 
 /**
@@ -555,9 +832,20 @@ function userFrom(row: UserRow, online = false, light = false) {
   };
 }
 
-/** Full shape, only ever returned for the signed-in user themself. */
+/** Full shape, only ever returned for the signed-in user themself. Phone
+ *  accounts carry no real address — their `users.email` is a placeholder
+ *  (see phoneEmail), which must never leak to the client; they see `phone`
+ *  instead. Legacy email accounts keep their real address until they sign
+ *  in with a phone and migrate. */
 function userSelf(row: UserRow, online = false) {
-  return { ...userFrom(row, online), email: row.email };
+  const legacyEmail = row.email && !row.email.endsWith(PHONE_EMAIL_SUFFIX) ? row.email : null;
+  return {
+    ...userFrom(row, online),
+    email: legacyEmail,
+    phone: row.phone_e164,
+    googleEmail: row.google_email,
+    googleLinked: !!row.google_subject,
+  };
 }
 
 /** The bearer token, or "". Three routes need it; only one place parses it. */
@@ -1768,7 +2056,14 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   }
 
   if (path === "/api/config/firebase" && method === "GET") {
-    return json({ firebase: fcmPublicConfig(env) });
+    // googleWebClientId: for Credential Manager's GetGoogleIdOption on the
+    // login screen (phone-auth Google binding). Null when the worker has no
+    // GOOGLE_WEB_CLIENT_ID secret — the app then shows a clear "not
+    // configured" error instead of a broken Google button.
+    return json({
+      firebase: fcmPublicConfig(env),
+      googleWebClientId: env.GOOGLE_WEB_CLIENT_ID || null,
+    });
   }
 
   // Optional TURN relay config for the dialer. The app falls back to its
@@ -1835,77 +2130,412 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     });
   }
 
-  if (path === "/api/auth/register" && method === "POST") {
-    rateLimit(`reg:${clientIp(request)}`, 10, 5);
-    const email = String(body.email || "")
-      .trim()
-      .toLowerCase();
-    const password = String(body.password || "");
-    const displayName = String(body.displayName || "").trim() || email.split("@")[0] || "User";
-    if (!email || !email.includes("@")) fail(400, "Enter a valid email.");
-    if (password.length < 6) fail(400, "Password needs at least 6 characters.");
-    if (await one(db, "SELECT id FROM users WHERE email = ?", email))
-      fail(400, "That email is already in use.");
-    // One random suffix used to be the whole strategy; if that suffix was also
-    // taken the INSERT hit the UNIQUE index and the signup 500'd.
-    const baseUsername = slugFrom(String(body.username || displayName));
-    let username = baseUsername;
-    for (let attempt = 0; attempt < 8; attempt++) {
-      if (!(await one(db, "SELECT id FROM users WHERE username = ?", username))) break;
-      username = `${baseUsername}_${Math.floor(Math.random() * 1_000_000)}`;
+  /* ---------- phone auth (OTP-less) ----------
+   *
+   * One screen, one number, no OTP (see PHONE_AUTH_PLAN.md). All of these are
+   * public except approve/decline/change: the client's SIM check is a signal,
+   * the decisions below are the server's. Every state-changing path runs as
+   * ONE atomic D1 batch so a half-completed device transfer cannot exist.
+   */
+
+  if (path === "/api/auth/verify-phone" && method === "POST") {
+    rateLimit(`pv:${clientIp(request)}`, 15, 10);
+    const phone = normalizePhone(body.phone);
+    const sim = parseSimResult(body.sim);
+    const deviceId = parseDeviceId(body.deviceId);
+    const deviceName =
+      String(body.deviceName || "")
+        .trim()
+        .slice(0, 64) || null;
+    if (sim === "MISMATCH") {
+      // A real, exposed, DIFFERENT number: the strongest negative signal the
+      // platform can give without an OTP. Always blocked, never graceful.
+      await audit(db, "PHONE_MISMATCH", null, deviceId, { phone: maskPhone(phone) });
+      fail(403, "The number doesn't match the SIM detected on this device.", "PHONE_MISMATCH");
     }
-    if (await one(db, "SELECT id FROM users WHERE username = ?", username)) {
-      username = `${baseUsername}_${id().slice(0, 8)}`;
+    const attestMethod = sim === "MATCH" ? "SIM_MATCH" : "DEVICE_ONLY";
+    const verifiedAt = sim === "MATCH" ? nowIso() : null;
+
+    let user = await one<UserRow>(db, "SELECT * FROM users WHERE phone_e164 = ?", phone);
+
+    // Pending-signup takeover: an abandoned PENDING claim (google never
+    // bound) loses to a fresh claim that carries SIM proof. Without this, a
+    // device-only squatter could hold a number hostage for 24h.
+    if (
+      user &&
+      user.auth_status === "PENDING" &&
+      !user.google_subject &&
+      attestMethod === "SIM_MATCH"
+    ) {
+      await run(db, "DELETE FROM auth_devices WHERE user_id = ?", user.id);
+      await run(db, "DELETE FROM users WHERE id = ?", user.id);
+      user = null;
     }
-    const userId = id();
-    const created = nowIso();
-    await run(
+
+    if (!user) {
+      // New number → PENDING account. Nothing is usable yet: no session, no
+      // google binding, auth_status stays PENDING until /google/bind.
+      const userId = id();
+      const created = nowIso();
+      const base = slugFrom(`user${userId.slice(0, 6)}`);
+      let username = base;
+      for (let attempt = 0; attempt < 8; attempt++) {
+        if (!(await one(db, "SELECT id FROM users WHERE username = ?", username))) break;
+        username = `${base}_${Math.floor(Math.random() * 1_000_000)}`;
+      }
+      if (await one(db, "SELECT id FROM users WHERE username = ?", username))
+        username = `${base}_${userId.slice(0, 8)}`;
+      await run(
+        db,
+        `INSERT INTO users
+           (id, email, password_hash, username, display_name, avatar_url, about,
+            created_at, last_active_at, phone_e164, phone_verified_at,
+            phone_verification_method, auth_status)
+         VALUES (?, ?, '', ?, ?, NULL, NULL, ?, ?, ?, ?, ?, 'PENDING')`,
+        userId,
+        phoneEmail(phone),
+        username,
+        "KuchuPuchu user",
+        created,
+        created,
+        phone,
+        verifiedAt,
+        attestMethod,
+      );
+      await audit(db, "PHONE_SIGNUP_STARTED", userId, deviceId, {
+        phone: maskPhone(phone),
+        method: attestMethod,
+      });
+      return json({ status: "ACCOUNT_CREATED", phone, method: attestMethod }, 201);
+    }
+
+    if (user.auth_status === "PENDING")
+      // Signup started earlier (maybe on this install) and never finished.
+      return json({ status: "BIND_REQUIRED", phone, method: attestMethod });
+
+    // ---- existing ACTIVE account ----
+    if (user.auth_status !== "ACTIVE") fail(403, "This account is not available.", "ACCOUNT_STATE");
+
+    const activeDevice = await one<{ device_id: string }>(
       db,
-      "INSERT INTO users (id, email, password_hash, username, display_name, avatar_url, about, created_at, last_active_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?)",
-      userId,
-      email,
-      await hashPassword(password),
-      username,
-      displayName,
-      created,
-      created,
+      `SELECT device_id FROM auth_devices WHERE user_id = ? AND status = 'ACTIVE'`,
+      user.id,
     );
-    const token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
-    await run(
-      db,
-      "INSERT INTO sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
-      await sha256Hex(token),
-      userId,
-      new Date(Date.now() + SESSION_TTL_MS).toISOString(),
-      created,
+
+    if (!activeDevice || activeDevice.device_id === deviceId) {
+      // Same install (or no active device anywhere — e.g. after logout):
+      // restore/create the session directly (§13/§24).
+      const { token, stmt } = await sessionStmt(db, user.id, deviceId);
+      await db.batch([
+        ...deviceTransferStmts(db, user.id, deviceId, deviceName),
+        db.prepare("UPDATE users SET last_active_at = ? WHERE id = ?").bind(nowIso(), user.id),
+        stmt,
+      ]);
+      ctx.waitUntil(sweepSessions(db));
+      await audit(db, "LOGIN", user.id, deviceId, {
+        phone: maskPhone(phone),
+        method: attestMethod,
+      });
+      return json({ status: "SESSION", token, user: userSelf(user, true) });
+    }
+
+    // ---- different device: the current device must approve (§14) ----
+    const requestId = id();
+    const expiresAt = new Date(Date.now() + LOGIN_REQUEST_TTL_MS).toISOString();
+    await db.batch([
+      db
+        .prepare(
+          `UPDATE login_requests SET status = 'CANCELLED', resolved_at = ?
+            WHERE user_id = ? AND status = 'PENDING'`,
+        )
+        .bind(nowIso(), user.id),
+      db
+        .prepare(
+          `INSERT INTO login_requests
+             (id, user_id, new_device_id, status, created_at, expires_at)
+           VALUES (?, ?, ?, 'PENDING', ?, ?)`,
+        )
+        // NOTE: binds `requestId`, the SAME id the response returns — the
+        // polling device only ever learns this one.
+        .bind(requestId, user.id, deviceId, nowIso(), expiresAt),
+    ]);
+    await audit(db, "LOGIN_REQUESTED", user.id, deviceId, { phone: maskPhone(phone) });
+    // KuchuPuchu push to the CURRENT device; the new device polls — FCM is
+    // only the doorbell, never the decision (§19).
+    ctx.waitUntil(
+      pushToUser(
+        env,
+        db,
+        user.id,
+        { type: "login_request", requestId, deviceId, deviceName: deviceName ?? "" },
+        {
+          title: "New login attempt",
+          body: `${deviceName || "Another device"} is trying to sign in to KuchuPuchu.`,
+          channel: "kp_messages_v2",
+        },
+      ),
     );
-    ctx.waitUntil(sweepSessions(db));
-    const row = (await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", userId))!;
-    return json({ token, user: userSelf(row, true) }, 201);
+    return json({ status: "APPROVAL_REQUIRED", requestId, expiresAt, phone });
   }
 
-  if (path === "/api/auth/login" && method === "POST") {
-    rateLimit(`login:${clientIp(request)}`, 15, 10);
-    const email = String(body.email || "")
-      .trim()
-      .toLowerCase();
-    const password = String(body.password || "");
-    const row = await one<UserRow>(db, "SELECT * FROM users WHERE email = ?", email);
-    if (!row || !(await verifyPassword(password, row.password_hash))) {
-      fail(401, "Wrong email or password.");
+  if (path === "/api/auth/google/bind" && method === "POST") {
+    rateLimit(`gb:${clientIp(request)}`, 10, 5);
+    const phone = normalizePhone(body.phone);
+    const deviceId = parseDeviceId(body.deviceId);
+    const displayName =
+      String(body.displayName || "")
+        .trim()
+        .slice(0, 40) || null;
+    const google = await verifyGoogleIdToken(env, body.idToken);
+
+    const pending = await one<UserRow>(db, "SELECT * FROM users WHERE phone_e164 = ?", phone);
+    if (!pending || pending.auth_status !== "PENDING")
+      fail(400, "Start with your phone number first.", "NO_PENDING_SIGNUP");
+
+    // One Google subject ↔ one account (§9), enforced by a unique index and
+    // checked here for a friendly message.
+    if (
+      await one(
+        db,
+        "SELECT id FROM users WHERE google_subject = ? AND id != ?",
+        google.sub,
+        pending.id,
+      )
+    )
+      fail(
+        409,
+        "This Google account is already linked to another KuchuPuchu account.",
+        "GOOGLE_TAKEN",
+      );
+
+    // Legacy migration: an email/password account whose email IS this verified
+    // Google email keeps its chats — the phone binds onto THAT account and the
+    // empty pending row goes away. Only when the legacy account has no phone
+    // yet (a re-bind with a different number must not silently hijack it).
+    const legacy =
+      google.email && !pending.google_subject
+        ? await one<UserRow>(
+            db,
+            `SELECT * FROM users WHERE email = ? AND google_subject IS NULL
+              AND auth_status = 'ACTIVE' AND phone_e164 IS NULL`,
+            google.email,
+          )
+        : null;
+
+    const target = legacy ?? pending;
+    // The pending row carries a random username (nothing human was known at
+    // verify-phone time); a display name at bind time is the first chance to
+    // give the account a real one. Legacy keeps its own.
+    let newUsername: string | null = null;
+    if (!legacy && displayName) {
+      const base = slugFrom(displayName);
+      newUsername = base;
+      for (let attempt = 0; attempt < 8; attempt++) {
+        if (
+          !(await one(
+            db,
+            "SELECT id FROM users WHERE username = ? AND id != ?",
+            newUsername,
+            pending.id,
+          ))
+        )
+          break;
+        newUsername = `${base}_${Math.floor(Math.random() * 1_000_000)}`;
+      }
     }
-    const token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
+    const { token, stmt } = await sessionStmt(db, target.id, deviceId);
+    await db.batch([
+      // Migration order matters: the pending row still OWNS phone_e164, and
+      // SQLite enforces the UNIQUE index per statement — the legacy UPDATE
+      // can only claim the number after the pending row is gone.
+      ...(legacy
+        ? [
+            db.prepare("DELETE FROM auth_devices WHERE user_id = ?").bind(pending.id),
+            db.prepare("DELETE FROM users WHERE id = ?").bind(pending.id),
+          ]
+        : []),
+      db
+        .prepare(
+          `UPDATE users SET phone_e164 = ?, google_subject = ?, google_email = ?,
+             auth_status = 'ACTIVE',
+             display_name = COALESCE(?, display_name),
+             username = COALESCE(?, username),
+             phone_verified_at = COALESCE(phone_verified_at, ?),
+             phone_verification_method = COALESCE(?, phone_verification_method)
+           WHERE id = ?`,
+        )
+        .bind(
+          phone,
+          google.sub,
+          google.email || null,
+          displayName,
+          newUsername,
+          pending.phone_verified_at,
+          pending.phone_verification_method,
+          target.id,
+        ),
+      ...deviceTransferStmts(db, target.id, deviceId, displayName ?? "Android"),
+      stmt,
+    ]);
+    ctx.waitUntil(sweepSessions(db));
+    await audit(db, "GOOGLE_BOUND", target.id, deviceId, { legacy: !!legacy });
+    await audit(db, "DEVICE_REGISTERED", target.id, deviceId, {});
+    const row = (await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", target.id))!;
+    return json({ status: "SESSION", token, user: userSelf(row, true) });
+  }
+
+  if (path === "/api/auth/login/poll" && method === "POST") {
+    // The waiting NEW device polls. Knowledge of the unguessable requestId +
+    // the matching deviceId is the capability; the session is minted here,
+    // exactly once, when the old device has approved.
+    rateLimit(`lp:${clientIp(request)}`, 120, 60);
+    const requestId = String(body.requestId || "")
+      .trim()
+      .slice(0, 64);
+    const deviceId = parseDeviceId(body.deviceId);
+    if (!requestId) fail(400, "Missing request id.");
+    const row = await one<{
+      id: string;
+      user_id: string;
+      new_device_id: string;
+      status: string;
+      expires_at: string;
+    }>(db, "SELECT * FROM login_requests WHERE id = ?", requestId);
+    if (!row || row.new_device_id !== deviceId) return json({ status: "UNKNOWN" });
+
+    if (row.status === "PENDING") {
+      if (Date.parse(row.expires_at) < Date.now()) {
+        // Lazy expiry: never auto-approve after timeout (§17).
+        await run(
+          db,
+          `UPDATE login_requests SET status = 'EXPIRED', resolved_at = ?
+            WHERE id = ? AND status = 'PENDING'`,
+          nowIso(),
+          requestId,
+        );
+        return json({ status: "EXPIRED" });
+      }
+      return json({ status: "PENDING", expiresAt: row.expires_at });
+    }
+    if (row.status === "APPROVED") {
+      const user = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row.user_id);
+      if (!user || user.auth_status !== "ACTIVE") return json({ status: "DECLINED" });
+      const { token, stmt } = await sessionStmt(db, user.id, deviceId);
+      const claimed = (await db.batch([
+        db
+          .prepare(
+            `UPDATE login_requests SET status = 'CLAIMED', resolved_at = ?
+              WHERE id = ? AND status = 'APPROVED'`,
+          )
+          .bind(nowIso(), requestId),
+        // approve() already ran the transfer; re-running is idempotent and
+        // keeps the batch self-healing if approve crashed mid-way.
+        ...deviceTransferStmts(db, user.id, deviceId, null),
+        stmt,
+      ])) as { meta: { changes: number } }[];
+      if (!claimed[0]?.meta.changes) return json({ status: "UNKNOWN" });
+      await audit(db, "LOGIN_CLAIMED", user.id, deviceId, {});
+      return json({ status: "SESSION", token, user: userSelf(user, true) });
+    }
+    // DECLINED | CANCELLED | EXPIRED | CLAIMED (claimed = someone else
+    // finished this request; treat as unknown rather than an error)
+    return json({ status: row.status === "CLAIMED" ? "UNKNOWN" : row.status });
+  }
+
+  if (path === "/api/auth/login/cancel" && method === "POST") {
+    rateLimit(`lc:${clientIp(request)}`, 15, 10);
+    const requestId = String(body.requestId || "")
+      .trim()
+      .slice(0, 64);
+    const deviceId = parseDeviceId(body.deviceId);
+    if (!requestId) fail(400, "Missing request id.");
     await run(
       db,
-      "INSERT INTO sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
-      await sha256Hex(token),
-      row.id,
-      new Date(Date.now() + SESSION_TTL_MS).toISOString(),
+      `UPDATE login_requests SET status = 'CANCELLED', resolved_at = ?
+        WHERE id = ? AND new_device_id = ? AND status = 'PENDING'`,
       nowIso(),
+      requestId,
+      deviceId,
     );
-    ctx.waitUntil(sweepSessions(db));
-    await run(db, "UPDATE users SET last_active_at = ? WHERE id = ?", nowIso(), row.id);
-    return json({ token, user: userSelf(row, true) });
+    return json({ ok: true });
+  }
+
+  if (path === "/api/auth/recovery/start" && method === "POST") {
+    // §21: the old device is gone, so the ONLY acceptable proof is the Google
+    // identity bound to the account. The entered phone just finds the account.
+    rateLimit(`rs:${clientIp(request)}`, 5, 2);
+    const phone = normalizePhone(body.phone);
+    rateLimit(`rsp:${phone}`, 5, 2);
+    const user = await one<UserRow>(db, "SELECT * FROM users WHERE phone_e164 = ?", phone);
+    if (!user || user.auth_status !== "ACTIVE" || !user.google_subject)
+      fail(404, "No recoverable account was found for that number.", "NO_RECOVERY_TARGET");
+    const google = await verifyGoogleIdToken(env, body.idToken);
+    if (google.sub !== user.google_subject) {
+      // Any Gmail is not enough — only the previously bound subject (§22).
+      await audit(db, "RECOVERY_DENIED", user.id, null, { phone: maskPhone(phone) });
+      fail(401, "This Google account isn't linked to that number.", "GOOGLE_MISMATCH");
+    }
+    const requestId = id();
+    const expiresAt = new Date(Date.now() + RECOVERY_REQUEST_TTL_MS).toISOString();
+    await db.batch([
+      db
+        .prepare(
+          `UPDATE recovery_requests SET status = 'EXPIRED', completed_at = ?
+            WHERE user_id = ? AND status = 'PENDING'`,
+        )
+        .bind(nowIso(), user.id),
+      db
+        .prepare(
+          `INSERT INTO recovery_requests
+             (id, user_id, new_device_id, google_subject, status, created_at, expires_at)
+           VALUES (?, ?, ?, ?, 'PENDING', ?, ?)`,
+        )
+        // Binds `requestId` — the SAME id the response returns.
+        .bind(requestId, user.id, parseDeviceId(body.deviceId), google.sub, nowIso(), expiresAt),
+    ]);
+    await audit(db, "RECOVERY_STARTED", user.id, String(body.deviceId || ""), {});
+    return json({ requestId, expiresAt });
+  }
+
+  if (path === "/api/auth/recovery/complete" && method === "POST") {
+    rateLimit(`rc:${clientIp(request)}`, 10, 5);
+    const requestId = String(body.requestId || "")
+      .trim()
+      .slice(0, 64);
+    const deviceId = parseDeviceId(body.deviceId);
+    if (!requestId) fail(400, "Missing request id.");
+    const row = await one<{
+      id: string;
+      user_id: string;
+      new_device_id: string;
+      google_subject: string;
+      status: string;
+      expires_at: string;
+    }>(db, "SELECT * FROM recovery_requests WHERE id = ?", requestId);
+    if (!row || row.new_device_id !== deviceId || row.status !== "PENDING")
+      fail(404, "This recovery request is no longer valid.", "RECOVERY_INVALID");
+    if (Date.parse(row.expires_at) < Date.now())
+      fail(410, "The recovery request expired. Please start again.", "RECOVERY_EXPIRED");
+    const user = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row.user_id);
+    if (!user || user.google_subject !== row.google_subject)
+      fail(404, "This recovery request is no longer valid.", "RECOVERY_INVALID");
+    // Single-use claim + full device transfer + session, in ONE atomic batch
+    // (§15/§22): the old device and its session die here.
+    const { token, stmt } = await sessionStmt(db, user.id, deviceId);
+    const done = (await db.batch([
+      db
+        .prepare(
+          `UPDATE recovery_requests SET status = 'COMPLETED', completed_at = ?
+            WHERE id = ? AND status = 'PENDING' AND expires_at > ?`,
+        )
+        .bind(nowIso(), requestId, nowIso()),
+      ...deviceTransferStmts(db, user.id, deviceId, null),
+      stmt,
+    ])) as { meta: { changes: number } }[];
+    if (!done[0]?.meta.changes)
+      fail(409, "This recovery request was already used.", "RECOVERY_USED");
+    await audit(db, "RECOVERY_COMPLETED", user.id, deviceId, {});
+    return json({ token, user: userSelf(user, true) });
   }
 
   if (path === "/api/auth/logout" && method === "POST") {
@@ -1928,13 +2558,25 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         hash,
       );
       await run(db, "DELETE FROM sessions WHERE token_hash = ?", hash);
-      if (deviceId && owner)
+      if (deviceId && owner) {
         await run(
           db,
           "DELETE FROM devices WHERE user_id = ? AND device_id = ?",
           owner.user_id,
           deviceId,
         );
+        // §24: logging out also releases the device slot, so the next login on
+        // this install (or any other) is a plain same-device/no-device login
+        // instead of asking a device that is no longer there to approve.
+        await run(
+          db,
+          `UPDATE auth_devices SET status = 'REVOKED', revoked_at = ?
+            WHERE user_id = ? AND device_id = ? AND status = 'ACTIVE'`,
+          nowIso(),
+          owner.user_id,
+          deviceId,
+        );
+      }
     }
     return json({ ok: true });
   }
@@ -1965,6 +2607,99 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       await sha256Hex(bearerToken(request)),
     );
     return json({ ok: true, expiresAt: until, extended: true });
+  }
+
+  /* ---------- phone auth: current-device approval + phone change ---------- */
+
+  if (path === "/api/auth/login/approve" && method === "POST") {
+    // Called by the OLD (currently active) device. One atomic batch: the
+    // request flips APPROVED exactly once, the old session + device die, the
+    // new install becomes the ACTIVE device (§15). The session itself is
+    // minted by the new device's /login/poll claim, which is the only place
+    // the token ever exists in the clear for that device.
+    rateLimit(`la:${uid}`, 15, 10);
+    const requestId = String(body.id || body.requestId || "")
+      .trim()
+      .slice(0, 64);
+    if (!requestId) fail(400, "Missing request id.");
+    const row = await one<{
+      user_id: string;
+      new_device_id: string;
+      status: string;
+      expires_at: string;
+    }>(db, "SELECT * FROM login_requests WHERE id = ?", requestId);
+    if (!row || row.user_id !== uid) fail(404, "Login request not found.", "REQUEST_NOT_FOUND");
+    const claimed = (await db.batch([
+      db
+        .prepare(
+          `UPDATE login_requests SET status = 'APPROVED', resolved_at = ?
+            WHERE id = ? AND status = 'PENDING' AND expires_at > ?`,
+        )
+        .bind(nowIso(), requestId, nowIso()),
+      ...deviceTransferStmts(db, uid, row.new_device_id, null),
+    ])) as { meta: { changes: number } }[];
+    if (!claimed[0]?.meta.changes) {
+      if (row.status === "PENDING")
+        fail(
+          410,
+          "The login request expired. Please try again from the other device.",
+          "REQUEST_EXPIRED",
+        );
+      fail(409, "The login request was already handled.", "REQUEST_NOT_PENDING");
+    }
+    await audit(db, "LOGIN_APPROVED", uid, row.new_device_id, {});
+    return json({ ok: true });
+  }
+
+  if (path === "/api/auth/login/decline" && method === "POST") {
+    rateLimit(`ld:${uid}`, 15, 10);
+    const requestId = String(body.id || body.requestId || "")
+      .trim()
+      .slice(0, 64);
+    if (!requestId) fail(400, "Missing request id.");
+    const declined = await run(
+      db,
+      `UPDATE login_requests SET status = 'DECLINED', resolved_at = ?
+        WHERE id = ? AND user_id = ? AND status = 'PENDING'`,
+      nowIso(),
+      requestId,
+      uid,
+    );
+    if (!declined) fail(409, "The login request was already handled.", "REQUEST_NOT_PENDING");
+    await audit(db, "LOGIN_DECLINED", uid, null, {});
+    return json({ ok: true });
+  }
+
+  if (path === "/api/auth/phone/change" && method === "POST") {
+    // §23. Strict here on purpose: a number change re-points the account's
+    // login identity, so the grace policy does NOT apply — the new number
+    // must literally be present on this device's SIM (MATCH), or no change.
+    rateLimit(`pc:${uid}`, 5, 2);
+    const phone = normalizePhone(body.phone);
+    const sim = parseSimResult(body.sim);
+    if (sim !== "MATCH")
+      fail(
+        400,
+        "We couldn't verify the new number on this device's SIM, so the number wasn't changed.",
+        "MATCH_REQUIRED",
+      );
+    if (await one(db, "SELECT id FROM users WHERE phone_e164 = ? AND id != ?", phone, uid))
+      fail(409, "That number is already linked to another account.", "PHONE_TAKEN");
+    await run(
+      db,
+      `UPDATE users SET phone_e164 = ?, phone_verification_method = 'SIM_MATCH',
+         phone_verified_at = ?,
+         email = CASE WHEN email LIKE ? THEN ? ELSE email END
+       WHERE id = ?`,
+      phone,
+      nowIso(),
+      `%${PHONE_EMAIL_SUFFIX}`,
+      phoneEmail(phone),
+      uid,
+    );
+    await audit(db, "PHONE_CHANGED", uid, null, { phone: maskPhone(phone) });
+    const row = (await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", uid))!;
+    return json({ user: userSelf(row, true) });
   }
 
   /* ---------- realtime WebSocket upgrades (ChatRoom fan-out) ---------- */

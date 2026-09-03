@@ -40,8 +40,8 @@ android {
         applicationId = "app.kuchupuchu.android"
         minSdk = 24
         targetSdk = 35
-        versionCode = 75
-        versionName = "3.8.29"
+        versionCode = 76
+        versionName = "3.9.0"
     }
     signingConfigs {
         getByName("debug") {
@@ -138,6 +138,12 @@ dependencies {
     // from the worker's /api/config/firebase — no google-services.json needed
     // in the build, so the app works fine before FCM is set up.
     implementation("com.google.firebase:firebase-messaging:24.1.0")
+    // Phone auth: Credential Manager + Google ID token (binding & recovery).
+    // No google-services.json — the web client id comes from the worker's
+    // /api/config/firebase at runtime (same pattern as Firebase init above).
+    implementation("androidx.credentials:credentials:1.3.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

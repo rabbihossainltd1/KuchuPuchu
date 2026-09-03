@@ -50,6 +50,9 @@ const PERMISSION_EVIDENCE: Record<string, RegExp> = {
   "android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION": /mediaProjection/,
   "android.permission.MANAGE_OWN_CALLS": /ConnectionService/,
   "android.permission.READ_CALL_LOG": /CallLog|PhoneAccountHandle/,
+  // Phone auth (OTP-less): SubscriptionManager.activeSubscriptionInfoList is
+  // what reads the SIM-exposed numbers for the verify step (PhoneVerifier.kt).
+  "android.permission.READ_PHONE_STATE": /SubscriptionManager|READ_PHONE_STATE/,
 };
 
 /** Service types and the permission each one requires (Android 14 rule). */

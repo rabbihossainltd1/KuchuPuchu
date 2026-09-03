@@ -4,6 +4,9 @@
 // run repeats.
 
 import { makeD1, makeR2, makeCtx } from "../d1shim.mjs";
+import { makeReg, installGoogleStub, phoneFrom, fakeIdToken } from "../helpers/phoneauth.mjs";
+
+installGoogleStub();
 
 const WORKER = new URL("../../src/worker/index.ts", import.meta.url).href;
 let n = 0;
@@ -17,13 +20,13 @@ const check = (name, cond, detail) =>
 
 async function mk() {
   const mod = await fresh();
-  const env = { DB: makeD1(), MEDIA: makeR2() };
+  const env = { DB: makeD1(), MEDIA: makeR2(), GOOGLE_WEB_CLIENT_ID: "kp-test-web-client" };
   const ctx = makeCtx();
   let ipSeq = 0;
   const call = async (method, path, body, token) => {
     const headers = { "content-type": "application/json" };
     if (token) headers.authorization = `Bearer ${token}`;
-    if (path.startsWith("/api/auth/register"))
+    if (path.startsWith("/api/auth/"))
       headers["cf-connecting-ip"] = `203.9.${(ipSeq >> 8) & 255}.${(ipSeq++ % 250) + 1}`;
     const init = { method, headers };
     if (body !== undefined) init.body = JSON.stringify(body);
@@ -39,13 +42,20 @@ async function mk() {
     return { status: res.status, j };
   };
   const reg = async (tag) => {
-    const r = await call("POST", "/api/auth/register", {
-      email: `${tag}@x.com`,
-      password: "secret123",
-      username: tag,
+    const phone = phoneFrom(`${tag}@x.com`);
+    await call("POST", "/api/auth/verify-phone", {
+      phone,
+      sim: "MATCH",
+      deviceId: `dev-${tag}`,
+    });
+    const r = await call("POST", "/api/auth/google/bind", {
+      phone,
+      idToken: fakeIdToken(`g-${tag}`, `${tag}@x.com`),
+      deviceId: `dev-${tag}`,
       displayName: tag,
     });
-    if (!r.j.user) throw new Error(`register ${tag} failed: ${JSON.stringify(r.j).slice(0, 200)}`);
+    if (!r.j.user)
+      throw new Error(`REGISTER ${tag} -> ${r.status} ${JSON.stringify(r.j).slice(0, 200)}`);
     return { id: r.j.user.id, token: r.j.token };
   };
   return { mod, env, ctx, call, reg, db: env.DB };

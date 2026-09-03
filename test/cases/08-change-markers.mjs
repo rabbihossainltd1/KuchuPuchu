@@ -1,4 +1,7 @@
 import { makeD1, makeR2, makeCtx } from "../d1shim.mjs";
+import { makeReg, installGoogleStub } from "../helpers/phoneauth.mjs";
+
+installGoogleStub();
 
 const WORKER = new URL("../../src/worker/index.ts", import.meta.url).href;
 
@@ -13,10 +16,13 @@ async function mk() {
   const worker = await freshWorker();
   const db = makeD1();
   const media = makeR2();
-  const env = { DB: db, MEDIA: media };
+  const env = { DB: db, MEDIA: media, GOOGLE_WEB_CLIENT_ID: "kp-test-web-client" };
   const ctx = makeCtx();
+  let ipSeq = 0;
   const call = async (method, path, body, token) => {
     const headers = { "content-type": "application/json" };
+    if (path.startsWith("/api/auth/"))
+      headers["cf-connecting-ip"] = `198.51.${Math.floor(ipSeq / 250)}.${(ipSeq++ % 250) + 1}`;
     if (token) headers.authorization = `Bearer ${token}`;
     const init = { method, headers };
     if (body !== undefined && method !== "GET") init.body = JSON.stringify(body);
@@ -31,16 +37,7 @@ async function mk() {
     }
     return { status: res.status, json: j };
   };
-  const reg = async (e, u) => {
-    const r = await call("POST", "/api/auth/register", {
-      email: e,
-      password: "secret123",
-      username: u,
-      displayName: u,
-    });
-    if (!r.json.user) throw new Error(`register ${u} -> ${r.status} ${JSON.stringify(r.json)}`);
-    return r.json;
-  };
+  const reg = makeReg(call);
   return { db, call, reg };
 }
 

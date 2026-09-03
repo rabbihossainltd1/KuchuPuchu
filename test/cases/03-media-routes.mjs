@@ -8,6 +8,9 @@
 // Both media routes now share storedMediaResponse(). OK / BROKEN per line.
 
 import { makeD1, makeR2, makeCtx } from "../d1shim.mjs";
+import { makeReg, installGoogleStub } from "../helpers/phoneauth.mjs";
+
+installGoogleStub();
 
 const WORKER = new URL("../../src/worker/index.ts", import.meta.url).href;
 
@@ -21,10 +24,13 @@ const check = (name, cond, detail) =>
 async function mk() {
   const worker = await freshWorker();
   const db = makeD1();
-  const env = { DB: db, MEDIA: makeR2() };
+  const env = { DB: db, MEDIA: makeR2(), GOOGLE_WEB_CLIENT_ID: "kp-test-web-client" };
   const ctx = makeCtx();
+  let ipSeq = 0;
   const call = async (method, path, body, token, raw) => {
     const headers = { "content-type": "application/json" };
+    if (path.startsWith("/api/auth/"))
+      headers["cf-connecting-ip"] = `198.51.${Math.floor(ipSeq / 250)}.${(ipSeq++ % 250) + 1}`;
     if (token) headers.authorization = `Bearer ${token}`;
     let init = { method, headers };
     if (raw) {
@@ -42,15 +48,7 @@ async function mk() {
     }
     return { status: res.status, json: j, headers: res.headers, body: buf };
   };
-  const reg = async (e, u) =>
-    (
-      await call("POST", "/api/auth/register", {
-        email: e,
-        password: "secret123",
-        username: u,
-        displayName: u,
-      })
-    ).json;
+  const reg = makeReg(call);
   return { db, call, reg };
 }
 

@@ -419,6 +419,87 @@ object KpNotify {
     fun cancelAll(ctx: Context) {
         NotificationManagerCompat.from(ctx).cancelAll()
     }
+
+    /** Phone auth §14: the new-device login approval card, with Accept /
+     *  Decline actions that hit the worker directly from the notification —
+     *  no app open needed. One fixed id: a newer request replaces the older
+     *  card (verify-phone already CANCELLED the prior PENDING server-side).
+     *  FCM is only the doorbell; the worker decides (§19). */
+    const val LOGIN_CARD_ID = 910_246
+
+    @SuppressLint("MissingPermission")
+    fun loginRequest(ctx: Context, requestId: String, deviceName: String?) {
+        ensureChannels(ctx)
+        val nm = NotificationManagerCompat.from(ctx)
+        if (!nm.areNotificationsEnabled()) return
+        val acceptPending =
+            PendingIntent.getBroadcast(
+                ctx,
+                requestId.hashCode() * 4 + 2,
+                Intent(ctx, KpLoginApprovalReceiver::class.java)
+                    .setAction(KpLoginApprovalReceiver.ACTION_APPROVE)
+                    .putExtra("requestId", requestId),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        val declinePending =
+            PendingIntent.getBroadcast(
+                ctx,
+                requestId.hashCode() * 4 + 3,
+                Intent(ctx, KpLoginApprovalReceiver::class.java)
+                    .setAction(KpLoginApprovalReceiver.ACTION_DECLINE)
+                    .putExtra("requestId", requestId),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        nm.notify(
+            LOGIN_CARD_ID,
+            NotificationCompat.Builder(ctx, CHAT_CHANNEL)
+                .setSmallIcon(R.mipmap.ic_stat_kp)
+                .setContentTitle("New login attempt")
+                .setContentText(
+                    "${deviceName?.takeIf { it.isNotBlank() } ?: "Another device"} wants to sign in to KuchuPuchu.",
+                )
+                .setStyle(
+                    NotificationCompat.BigTextStyle()
+                        .bigText(
+                            "${deviceName?.takeIf { it.isNotBlank() } ?: "Another device"} wants to sign in " +
+                                "to KuchuPuchu with your number. Accept korte chaile Accept chapun.",
+                        ),
+                )
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                .setAutoCancel(true)
+                .addAction(NotificationCompat.Action.Builder(0, "Accept", acceptPending).build())
+                .addAction(NotificationCompat.Action.Builder(0, "Decline", declinePending).build())
+                .build(),
+        )
+    }
+}
+
+/** Phone auth §14: Accept / Decline from the login-approval card. Authenticated
+ *  with THIS device's session token — only the currently active device can
+ *  answer, which is exactly the trust model of the flow. */
+class KpLoginApprovalReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(ctx: Context, intent: Intent) {
+        val requestId = intent.getStringExtra("requestId") ?: return
+        val approve = intent.action == ACTION_APPROVE
+        NotificationManagerCompat.from(ctx).cancel(KpNotify.LOGIN_CARD_ID)
+        Api.loadToken(ctx)
+        val pending = goAsync()
+        Thread {
+            runCatching {
+                Api.post(
+                    if (approve) "/api/auth/login/approve" else "/api/auth/login/decline",
+                    org.json.JSONObject().put("id", requestId),
+                )
+            }
+            pending.finish()
+        }.start()
+    }
+
+    companion object {
+        const val ACTION_APPROVE = "app.kuchupuchu.android.LOGIN_APPROVE"
+        const val ACTION_DECLINE = "app.kuchupuchu.android.LOGIN_DECLINE"
+    }
 }
 
 /** Handles Reply / Like / Mark-as-read straight from the message notification. */
