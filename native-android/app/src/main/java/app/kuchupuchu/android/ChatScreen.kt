@@ -50,6 +50,8 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
@@ -108,6 +110,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -1274,6 +1277,8 @@ fun ChatScreen(nav: NavController, convId: String) {
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Owner round 2026-09-04: the name sits a touch lower in
+                    // the header for every account.
                     Text(
                         title,
                         fontSize = 16.sp,
@@ -1281,6 +1286,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         color = Ink,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 3.dp),
                     )
                     if (verified) {
                         Spacer(Modifier.width(5.dp))
@@ -2530,6 +2536,12 @@ private fun MessageRow(
         CallLogBubble(m, mine, pendingEcho)
         return
     }
+    // The owner profile card (dropped in by the worker right after the AI
+    // answers an owner-identity question): tappable socials/email/website.
+    if (kind == "OWNER_CARD") {
+        OwnerCardBubble()
+        return
+    }
     // Photos skip the chat bubble entirely: the image IS the bubble, with the
     // timestamp and ticks overlaid on the photo (WhatsApp-style). FILE-kind
     // image uploads (picked as documents) get the same treatment.
@@ -2545,9 +2557,15 @@ private fun MessageRow(
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
         Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
+            // Owner round 2026-09-04: long bodies used to flatten at 280dp.
+            // The bubble now stretches with the screen (82% of it, floored at
+            // the old 280 and capped at 420 for tablets) so the right side
+            // uses as much room as there actually is.
+            val bubbleMax =
+                maxOf(280.dp, minOf(420.dp, (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp * 0.82f).dp))
             Box(
                 Modifier
-                    .widthIn(min = 72.dp, max = 280.dp)
+                    .widthIn(min = 72.dp, max = bubbleMax)
                     .wrapContentWidth()
                     .clip(
                         RoundedCornerShape(
@@ -3325,5 +3343,118 @@ private fun AiTypingBubble() {
                 }
             }
         }
+    }
+}
+
+/**
+ * Owner profile card (owner round 2026-09-04): shown in the KuchuPuchu AI
+ * chat under the answer to any owner/developer/malik question. Every icon
+ * deep-links out — Facebook/Instagram/Telegram/TikTok open the app (via the
+ * standard profile URLs; Android routes to the installed app, browser as the
+ * fallback), the mail icon opens the mail client, the globe opens the site.
+ */
+@Composable
+private fun OwnerCardBubble() {
+    val ctx = LocalContext.current
+    fun open(url: String) {
+        runCatching {
+            ctx.startActivity(
+                android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)),
+            )
+        }
+    }
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.Start,
+    ) {
+        Column(
+            Modifier
+                .widthIn(min = 210.dp, max = 300.dp)
+                .clip(
+                    RoundedCornerShape(
+                        topStart = 16.dp,
+                        topEnd = 16.dp,
+                        bottomStart = 5.dp,
+                        bottomEnd = 16.dp,
+                    ),
+                )
+                .background(Brush.linearGradient(listOf(Card, Card)))
+                .padding(14.dp)
+                .padding(top = 2.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                KpAvatar("Rabbi Hossain", null, 46.dp, ring = false)
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    Text("Rabbi Hossain", fontSize = 15.5.sp, fontWeight = FontWeight.Bold, color = Ink)
+                    Text(
+                        "Founder & Developer of KuchuPuchu",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = GoldDeep,
+                    )
+                }
+            }
+            Spacer(Modifier.height(7.dp))
+            Text("Kaliganj, Jhenaidah, Khulna, Bangladesh", fontSize = 11.sp, color = Muted)
+            Spacer(Modifier.height(11.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OwnerCardIcon(onClick = { open("https://facebook.com/Rabbihossainltd") }) {
+                    Icon(
+                        painterResource(R.drawable.ic_brand_facebook),
+                        contentDescription = "Facebook",
+                        tint = Color.Unspecified,
+                        modifier = Modifier.size(19.dp),
+                    )
+                }
+                OwnerCardIcon(onClick = { open("https://instagram.com/Rabbihossainltd1") }) {
+                    Icon(
+                        painterResource(R.drawable.ic_brand_instagram),
+                        contentDescription = "Instagram",
+                        tint = Color.Unspecified,
+                        modifier = Modifier.size(19.dp),
+                    )
+                }
+                OwnerCardIcon(onClick = { open("https://t.me/Rabbihossainltd0") }) {
+                    Icon(
+                        painterResource(R.drawable.ic_brand_telegram),
+                        contentDescription = "Telegram",
+                        tint = Color.Unspecified,
+                        modifier = Modifier.size(19.dp),
+                    )
+                }
+                OwnerCardIcon(onClick = { open("https://tiktok.com/@Rabbihossainltd") }) {
+                    Icon(
+                        painterResource(R.drawable.ic_brand_tiktok),
+                        contentDescription = "TikTok",
+                        tint = Color.Unspecified,
+                        modifier = Modifier.size(19.dp),
+                    )
+                }
+                OwnerCardIcon(onClick = { open("mailto:info@rabbihossainltd.online") }) {
+                    Icon(Icons.Filled.Email, contentDescription = "Email", tint = GoldDeep, modifier = Modifier.size(19.dp))
+                }
+                OwnerCardIcon(onClick = { open("https://rabbihossainltd.online") }) {
+                    Icon(Icons.Filled.Language, contentDescription = "Website", tint = GoldDeep, modifier = Modifier.size(19.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OwnerCardIcon(onClick: () -> Unit, icon: @Composable () -> Unit) {
+    Box(
+        Modifier
+            .size(37.dp)
+            .clip(CircleShape)
+            .background(GoldSoft)
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        icon()
     }
 }

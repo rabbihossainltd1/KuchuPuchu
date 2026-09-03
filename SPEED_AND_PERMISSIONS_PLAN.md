@@ -136,3 +136,27 @@ calls. App renders ModeratorBadge() beside the name in the chat-list
 row, chat header and profile screen (same spots as the verified tick).
 Live DBs migrated (APAC flagged fsleader; old WNAM altered too so the
 one-line rollback stays safe). 5 new live-worker assertions; 894 total.
+
+## Owner identity + AI upgrade round — v3.9.20 / 96 (2026-09-04)
+
+1. **AI persona rebuilt from the owner's full details + website**: MD Rabbi
+   Hossain (Rabbihossainltd, @rabbihossainltd verified), email
+   info@rabbihossainltd.online, site rabbihossainltd.online, Kaliganj
+   Jhenaidah Khulna BD, FB @Rabbihossainltd / IG @Rabbihossainltd1 / TG
+   @Rabbihossainltd0 / TikTok @Rabbihossainltd, RabbiHossainLTD services
+   (websites, security audits, branding, Meta verification, cards, gaming
+   top-ups). Any owner/developer/malik/Rabbi Hossain/Rabbihossainltd
+   question answers from these facts; wrong suggested names are corrected.
+2. **Owner profile card in the AI chat**: an owner-intent question also drops
+   a tappable card (kind OWNER_CARD, deduped per 10-message window) with
+   brand icons — FB/IG/TG/TikTok open the app via profile URLs, mail icon →
+   mail client, globe → website.
+3. **AI now replies in pure Bengali script** to Bengali/Banglish messages —
+   never Banglish (Latin) again. English stays English.
+4. **AI photo create + edit**: a photo+caption message = edit request; a
+   "photo banao/draw/make" text = generation. Gemini image model → R2 →
+   IMAGE message from the bot; any failure falls back to the text reply.
+5. **Chat bubbles stretch right**: max width 280dp → 82% of screen width
+   (280 floor, 420 cap) — long bodies no longer flatten.
+6. **Header name sits a touch lower** for every account.
+Suite: 32/32, 905 assertions (+11).

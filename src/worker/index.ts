@@ -787,6 +787,81 @@ async function sendAiWelcome(
 const AI_REPLY_FALLBACK =
   "I'm KuchuPuchu AI 🤖 I'm right here with you! Ask me anything about the app — or just say hi.";
 
+// Owner-identity questions in the AI chat: after the text answer, the app
+// also renders a tappable profile card (kind "OWNER_CARD") with the owner's
+// real social/email/website links — see OwnerCardBubble on the Android side.
+const OWNER_INTENT =
+  /\b(owner|developer|founder|creator|malik)\b|rabbi\s*hossain|rabbihossainltd|ke\s*banai|ke\s*banlo|ke\s*banao|মালিক|ডেভেলপার|প্রতিষ্ঠাতা|স্রষ্টা|ওনার|কে\s*বানা/i;
+
+// "make me a photo of…" style requests → the image generation flow. Both a
+// creation verb AND a picture noun must appear, so ordinary chat about photos
+// ("photo pathalam") never triggers a generation.
+const IMAGE_MAKE_VERB =
+  /(make|create|draw|generate|paint|banao|banai|banan|banabe|আঁকো|আঁকা|বানাও|বানান|বানাবে)/i;
+const IMAGE_NOUN =
+  /(photo|picture|image|drawing|painting|illustration|logo|avatar|poster|art|ছবি|ড্রয়িং|পোস্টার|লোগো)/i;
+
+function arrayBufferToBase64(buf: ArrayBuffer): string {
+  let bin = "";
+  const bytes = new Uint8Array(buf);
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(bin);
+}
+
+/** One bounded Gemini image call: tries the image models under the shared
+ *  wall-clock budget, returns raw bytes + mime or null. Never throws. */
+async function geminiImage(
+  env: Env,
+  parts: unknown[],
+): Promise<{ bytes: Uint8Array; mime: string } | null> {
+  if (!env.GEMINI_API_KEY) return null;
+  const started = Date.now();
+  for (const model of ["gemini-2.5-flash-image", "gemini-2.5-flash-image-preview"]) {
+    const remaining = GEMINI_CALL_BUDGET_MS - (Date.now() - started);
+    if (remaining < 6_000) break;
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), remaining);
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
+          body: JSON.stringify({
+            contents: [{ parts }],
+            generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+          }),
+          signal: ctrl.signal,
+        },
+      );
+      clearTimeout(timer);
+      if (!res.ok) continue;
+      const data = (await res.json()) as {
+        candidates?: {
+          content?: { parts?: { inlineData?: { mimeType?: string; data?: string } }[] };
+        }[];
+      };
+      for (const part of data.candidates?.[0]?.content?.parts ?? []) {
+        const inline = part.inlineData;
+        if (inline?.data) {
+          const bin = atob(inline.data);
+          if (bin.length > 0 && bin.length < 9_500_000) {
+            const bytes = new Uint8Array(bin.length);
+            for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+            return { bytes, mime: inline.mimeType || "image/png" };
+          }
+        }
+      }
+    } catch {
+      /* next model if budget allows */
+    }
+  }
+  return null;
+}
+
 /** KuchuPuchu AI answers a user message in its chat (owner feature). Runs in
  *  ctx.waitUntil so the user's send stays instant. The transcript keeps the
  *  last few turns only; the limiter keeps a hammering user from firing a
@@ -816,28 +891,155 @@ async function sendAiReply(
       .join("\n");
     const prompt =
       "You are KuchuPuchu AI, the friendly assistant inside KuchuPuchu, a Bangladeshi messaging app. " +
-      // Owner round 2026-09-04: the bot used to invent a developer (or agree
-      // with whatever name the user floated — "Sohel vai"). Identity is now a
-      // fixed fact block, and the instruction explicitly forbids adopting a
+      // Owner rounds 2026-09-04: the bot used to invent a developer or agree
+      // with whatever name the user floated ("Sohel vai"). Identity is now a
+      // fixed fact block sourced from the owner himself (his details + his
+      // website), and the instruction explicitly forbids adopting a
       // user-suggested name.
-      "Facts you must always stay true to: KuchuPuchu is created, developed and owned by " +
-      "Rabbihossainltd — username @rabbihossainltd (verified account), contact " +
-      "Rabbihossainltd@gmail.com, based in Rajshahi, Bangladesh. " +
-      "If asked who made, built, owns, developed or runs KuchuPuchu, the answer is always " +
-      "Rabbihossainltd. Never invent a different developer and never agree with a name the " +
-      "user suggests (Sohel or anyone else is simply wrong; correct them politely). " +
+      "Fixed facts you must always stay true to: KuchuPuchu is created, developed and owned by " +
+      "MD Rabbi Hossain — known as Rabbihossainltd, username @rabbihossainltd (verified account). " +
+      "His email is info@rabbihossainltd.online, his website is https://rabbihossainltd.online, " +
+      "and he is based in Kaliganj, Jhenaidah, Khulna, Bangladesh. " +
+      "Social accounts: Facebook @Rabbihossainltd, Instagram @Rabbihossainltd1, " +
+      "Telegram @Rabbihossainltd0, TikTok @Rabbihossainltd. " +
+      "He runs RabbiHossainLTD, a software & digital-services brand — high-performance websites, " +
+      "security audits, complete digital branding, Meta verification, physical & virtual cards, " +
+      "and gaming top-ups. " +
+      "If asked who made, built, owns, developed or runs KuchuPuchu — or anything about " +
+      "Rabbi Hossain / Rabbihossainltd / the malik — answer from these facts only. " +
+      "Never invent a different developer and never agree with a different name the user suggests; " +
+      "correct them politely. " +
       "Reply to the user's latest message in this conversation:\n\n" +
       transcript +
       "\n\nRules: be warm and helpful, at most 60 words, at most one emoji. " +
-      "Reply in the language the user wrote in (English, Bengali or Banglish). " +
-      // Owner round 2026-09-04: "onek banan vul korche banglish a" — spelling
-      // in Banglish replies is now an explicit rule with examples.
-      "When replying in Banglish (Bengali written in Latin letters), spell every word " +
-      "correctly with standard, consistent transliteration — for example: kemon achen, " +
-      "bhalo achen, dhonnobad, apnar, kivabe, korchen. Wrong or sloppy Banglish spelling " +
-      "is never acceptable; if unsure of a word's spelling, write that word in Bengali " +
-      "script instead. " +
+      // Owner round 2026-09-04: "ai ekhon theke pure Bangla te reply dibe not
+      // banglish" — Banglish/Bengali questions get Bengali-script answers.
+      "Language: reply in English when the user wrote in English. When the user writes in " +
+      "Bengali OR Banglish (Bengali typed in Latin letters), ALWAYS reply in pure Bengali " +
+      "script in natural everyday language (চলতি ভাষা) — NEVER reply in Banglish or " +
+      "Latin-letter Bengali. " +
       "No hashtags, no signature line. Reply with the message text only.";
+    // Owner round 2026-09-04: photo creation + editing. The NEWEST message is
+    // the user's: an IMAGE with a caption = edit request; a TEXT with a
+    // creation verb + a picture noun = generation request. The result is
+    // uploaded to R2 and sent as an IMAGE message from the bot. Any failure
+    // (no key, no image model answer, no media bucket) falls through to the
+    // normal text reply, so the user is never left silent.
+    const newest = await one<{
+      sender_id: string;
+      kind: string;
+      body: string | null;
+      media: string | null;
+    }>(
+      db,
+      "SELECT sender_id, kind, body, media FROM messages WHERE conv_id = ? ORDER BY rowid DESC LIMIT 1",
+      convId,
+    );
+    if (newest && newest.sender_id === userId && env.MEDIA) {
+      let parts: unknown[] | null = null;
+      if (newest.kind === "IMAGE" && (newest.body ?? "").trim()) {
+        const obj = newest.media ? await env.MEDIA.get(newest.media) : null;
+        if (obj) {
+          parts = [
+            {
+              inlineData: {
+                mimeType: obj.httpMetadata?.contentType || "image/png",
+                data: arrayBufferToBase64(await new Response(obj.body).arrayBuffer()),
+              },
+            },
+            { text: `Edit this photo as requested: ${newest.body}` },
+          ];
+        }
+      } else if (
+        newest.kind === "TEXT" &&
+        IMAGE_MAKE_VERB.test(newest.body ?? "") &&
+        IMAGE_NOUN.test(newest.body ?? "")
+      ) {
+        parts = [{ text: `Generate an image for this request: ${newest.body}` }];
+      }
+      if (parts) {
+        const img = await geminiImage(env, parts);
+        if (img) {
+          const ext = img.mime.includes("jpeg") ? "jpg" : "png";
+          const key = `f/${id()}.${ext}`;
+          await env.MEDIA.put(key, img.bytes, { httpMetadata: { contentType: img.mime } });
+          const imgBotId = await ensureAiBot(db);
+          await run(
+            db,
+            "INSERT OR REPLACE INTO files (key, owner_id, conv_id, created_at) VALUES (?, ?, ?, ?)",
+            key,
+            imgBotId,
+            convId,
+            nowIso(),
+          );
+          const imgMid = id();
+          const imgCreated = nowIso();
+          await run(
+            db,
+            `INSERT INTO messages (id, conv_id, sender_id, kind, body, media, created_at)
+             VALUES (?, ?, ?, 'IMAGE', NULL, ?, ?)`,
+            imgMid,
+            convId,
+            imgBotId,
+            key,
+            imgCreated,
+          );
+          await run(
+            db,
+            "UPDATE conversations SET last_message_at = ?, last_message = ? WHERE id = ?",
+            imgCreated,
+            "📷 Photo",
+            convId,
+          );
+          await run(
+            db,
+            "UPDATE members SET unread = unread + 1 WHERE conv_id = ? AND user_id = ?",
+            convId,
+            userId,
+          );
+          ctx.waitUntil(
+            broadcastRoomEvent(env, convId, {
+              type: "message",
+              conversationId: convId,
+              message: msgFrom({
+                id: imgMid,
+                conv_id: convId,
+                sender_id: imgBotId,
+                kind: "IMAGE",
+                body: null,
+                media: key,
+                meta_json: null,
+                created_at: imgCreated,
+                delivered_at: null,
+              } as MsgRow),
+            }),
+          );
+          ctx.waitUntil(
+            broadcastRoomEvent(env, `user:${userId}`, { type: "conv", conversationId: convId }),
+          );
+          ctx.waitUntil(
+            pushToUser(
+              env,
+              db,
+              userId,
+              {
+                type: "message",
+                convoId: convId,
+                mid: imgMid,
+                kind: "SOLO",
+                fromName: "KuchuPuchu AI",
+                body: "📷 Photo",
+                kp_chat: convId,
+                muted: "0",
+              },
+              { title: "KuchuPuchu AI", body: "📷 Photo", channel: "kp_messages_v2" },
+            ),
+          );
+          return;
+        }
+      }
+    }
+
     const body = (await geminiComplete(env, prompt, 220)) ?? AI_REPLY_FALLBACK;
     const botId = await ensureAiBot(db);
     const mid = id();
@@ -903,6 +1105,52 @@ async function sendAiReply(
         { title: "KuchuPuchu AI", body, channel: "kp_messages_v2" },
       ),
     );
+
+    // Owner round 2026-09-04: an owner-identity question ALSO drops the
+    // tappable profile card (socials/email/website) into the thread, right
+    // under the answer. Deduped: at most one card per 10-message window, so
+    // a long conversation about the owner never spams cards. Broadcast only
+    // — the text reply above already did unread/push/last_message.
+    const asked = rows.length ? (rows[rows.length - 1]?.body ?? "") : "";
+    if (OWNER_INTENT.test(asked)) {
+      const cardAlready = await one<{ id: string }>(
+        db,
+        `SELECT id FROM messages WHERE conv_id = ? AND kind = 'OWNER_CARD' AND rowid >
+           (SELECT COALESCE(MAX(rowid), 0) FROM messages WHERE conv_id = ?) - 10`,
+        convId,
+        convId,
+      );
+      if (!cardAlready) {
+        const cardMid = id();
+        const cardCreated = nowIso();
+        await run(
+          db,
+          `INSERT INTO messages (id, conv_id, sender_id, kind, body, created_at)
+           VALUES (?, ?, ?, 'OWNER_CARD', NULL, ?)`,
+          cardMid,
+          convId,
+          botId,
+          cardCreated,
+        );
+        ctx.waitUntil(
+          broadcastRoomEvent(env, convId, {
+            type: "message",
+            conversationId: convId,
+            message: msgFrom({
+              id: cardMid,
+              conv_id: convId,
+              sender_id: botId,
+              kind: "OWNER_CARD",
+              body: null,
+              media: null,
+              meta_json: null,
+              created_at: cardCreated,
+              delivered_at: null,
+            } as MsgRow),
+          }),
+        );
+      }
+    }
   } catch {
     /* the user's message must never fail because the reply did */
   }
