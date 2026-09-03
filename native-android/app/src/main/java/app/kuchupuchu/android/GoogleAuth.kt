@@ -71,9 +71,7 @@ object GoogleAuth {
                     manager.getCredential(
                         ctx,
                         GetCredentialRequest.Builder()
-                            .addCredentialOption(
-                                GetSignInWithGoogleOption.Builder().setServerClientId(clientId).build(),
-                            )
+                            .addCredentialOption(GetSignInWithGoogleOption.Builder(clientId).build())
                             .build(),
                     )
                 } catch (cancellation: GetCredentialCancellationException) {
