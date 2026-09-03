@@ -66,7 +66,11 @@ check(
 );
 has(ui, "DISK_CAP", "with a size cap we enforce ourselves");
 has(ui, "private fun trim()", "and oldest-first eviction");
-has(ui, "private fun store(url: String, bmp: Bitmap)", "what we drew is what gets stored");
+has(
+  ui,
+  "private fun store(url: String, bytes: ByteArray)",
+  "the source bytes are what gets stored, so a 40dp row and a full-screen viewer each decode that one file at their own cost",
+);
 has(ui, 'f.name + ".tmp"', "writes are staged then renamed (no half file painted)");
 has(
   ui,
@@ -77,10 +81,10 @@ has(
 // 2. a cold start paints from that tier instead of showing a loader.
 has(
   ui,
-  "val state = remember(url) { mutableStateOf(Bitmaps.paint(url)?.asImageBitmap()) }",
-  "rows seed from the cache synchronously",
+  "val state = remember(url, maxSidePx) { mutableStateOf(Bitmaps.paint(url, maxSidePx)?.asImageBitmap()) }",
+  "rows seed from the cache synchronously, at the size the row draws at",
 );
-has(ui, "fun paint(url: String?): Bitmap?", "the inline path exists");
+has(ui, "fun paint(url: String?, maxSide: Int = FULL): Bitmap?", "the inline path exists");
 has(ui, "inJustDecodeBounds = true", "and it checks the size before decoding inline");
 has(ui, "INLINE_PAINT_MAX_PIXELS", "so a full-size photo can never be decoded during composition");
 has(ui, "INLINE_PAINT_MAX_BYTES", "with a byte ceiling as well");

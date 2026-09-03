@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -50,6 +51,28 @@ import androidx.compose.ui.unit.sp
  * Shared image helpers. Avatars are data-URLs the worker stores inline, so
  * decoding them once into a memory map is cheap and offline-friendly.
  */
+/**
+ * `inSampleSize` for a source of `srcW`x`srcH` that will be drawn no bigger than
+ * `maxSide`: the smallest power of two that brings the long side down to `maxSide`
+ * or below. Powers of two are what `BitmapFactory` implements, and halving only while
+ * the *result* still fits means the decoded side is always in `[maxSide, 2*maxSide)`
+ * — crisp at 1:1 device pixels, never the quarter-size blur an over-eager
+ * `ceil` would give. `maxSide <= 0` (a caller that does not care) samples nothing.
+ *
+ * Top level, not a member of `Bitmaps`, so it is unit-testable on the JVM: the object's
+ * `LruCache` field cannot be constructed under the mockable `android.jar`.
+ */
+internal fun bitmapSampleSize(srcW: Int, srcH: Int, maxSide: Int): Int {
+    if (srcW <= 0 || srcH <= 0 || maxSide <= 0) return 1
+    var sample = 1
+    var side = maxOf(srcW, srcH)
+    while (side / 2 >= maxSide) {
+        sample *= 2
+        side /= 2
+    }
+    return sample
+}
+
 object Bitmaps {
     // Byte-budgeted LRU (KB units). The old map dumped ALL ~60 avatars at
     // once when full — a re-decode storm that hit mid-scroll exactly when the
@@ -93,8 +116,20 @@ object Bitmaps {
             .digest(url.toByteArray())
             .joinToString("") { "%02x".format(it) }
 
+    /**
+     * The largest side a decode is asked to produce when the caller does not care
+     * (a viewer, a preview). Anything drawn from a data-URI at list size passes a
+     * real target instead — see [bitmapSampleSize].
+     */
+    const val FULL = 1080
+
+    /** Memory-cache key: the same bytes drawn at two sizes are two different bitmaps. */
+    private fun memKey(url: String, maxSide: Int): String =
+        if (maxSide >= FULL) url else "$url@$maxSide"
+
     /** Cache hit only, never decodes: lets a row that re-enters a list paint on frame one. */
-    fun peek(url: String?): Bitmap? = if (url.isNullOrBlank()) null else mem.get(url)
+    fun peek(url: String?, maxSide: Int = FULL): Bitmap? =
+        if (url.isNullOrBlank()) null else mem.get(memKey(url, maxSide))
 
     /**
      * Hit the memory cache, then a SMALL disk entry, decoded inline.
@@ -104,9 +139,10 @@ object Bitmaps {
      * immediately instead of showing "loading". Anything bigger stays on the
      * async path below so a full-size photo can never jank a frame.
      */
-    fun paint(url: String?): Bitmap? {
+    fun paint(url: String?, maxSide: Int = FULL): Bitmap? {
         if (url.isNullOrBlank()) return null
-        mem.get(url)?.let { return it }
+        val key = memKey(url, maxSide)
+        mem.get(key)?.let { return it }
         val f = fileFor(url) ?: return null
         if (!f.exists() || f.length() > INLINE_PAINT_MAX_BYTES) return null
         // Header read only (no pixel work) to decide whether decoding inline is
@@ -115,40 +151,56 @@ object Bitmaps {
         runCatching { BitmapFactory.decodeFile(f.absolutePath, bounds) }
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
         if (bounds.outWidth.toLong() * bounds.outHeight > INLINE_PAINT_MAX_PIXELS) return null
-        val bmp = runCatching { BitmapFactory.decodeFile(f.absolutePath) }.getOrNull() ?: return null
-        mem.put(url, bmp)
+        val opts =
+            BitmapFactory.Options().apply { inSampleSize = bitmapSampleSize(bounds.outWidth, bounds.outHeight, maxSide) }
+        val bmp = runCatching { BitmapFactory.decodeFile(f.absolutePath, opts) }.getOrNull() ?: return null
+        mem.put(key, bmp)
         return bmp
     }
 
-    fun load(url: String?): Bitmap? {
+    fun load(url: String?, maxSide: Int = FULL): Bitmap? {
         if (url.isNullOrBlank()) return null
-        mem.get(url)?.let { return it }
+        val key = memKey(url, maxSide)
+        mem.get(key)?.let { return it }
         val f = fileFor(url)
         if (f != null && f.exists()) {
-            val fromDisk = runCatching { BitmapFactory.decodeFile(f.absolutePath) }.getOrNull()
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            runCatching { BitmapFactory.decodeFile(f.absolutePath, bounds) }
+            val opts =
+                BitmapFactory.Options().apply {
+                    inSampleSize = bitmapSampleSize(bounds.outWidth, bounds.outHeight, maxSide)
+                }
+            val fromDisk = runCatching { BitmapFactory.decodeFile(f.absolutePath, opts) }.getOrNull()
             if (fromDisk != null) {
-                mem.put(url, fromDisk)
+                mem.put(key, fromDisk)
                 return fromDisk
             }
             runCatching { f.delete() } // unreadable entry: re-fetch rather than stay blank
         }
-        val bmp = decode(url) ?: return null
-        mem.put(url, bmp)
-        store(url, bmp)
+        val bytes = sourceBytes(url) ?: return null
+        val bmp = decodeBytes(bytes, maxSide) ?: return null
+        mem.put(key, bmp)
+        store(url, bytes)
         return bmp
     }
 
-    /** Write what we actually drew (already downsampled), atomically. */
-    private fun store(url: String, bmp: Bitmap) {
+    /**
+     * The disk tier holds the source bytes, verbatim.
+     *
+     * It used to hold a re-encode of the bitmap we had just decoded — a PNG/JPEG
+     * compress of a 512x512 avatar costs more than the decode that produced it, and
+     * it was paid once per row on the very first pass through a list (the "first
+     * scroll is laggy, the second is smooth" report). The bytes are already a
+     * compressed image, they are smaller than what we used to write, and keeping
+     * them lossless lets the same file serve a 40dp row and a full-screen viewer at
+     * their own sizes instead of whatever size happened to be drawn first.
+     */
+    private fun store(url: String, bytes: ByteArray) {
         val f = fileFor(url) ?: return
         if (f.exists()) return
         runCatching {
             val tmp = java.io.File(f.parentFile, f.name + ".tmp")
-            java.io.FileOutputStream(tmp).use { out ->
-                val fmt =
-                    if (bmp.hasAlpha()) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
-                bmp.compress(fmt, 92, out)
-            }
+            java.io.FileOutputStream(tmp).use { it.write(bytes) }
             if (!tmp.renameTo(f)) runCatching { tmp.delete() }
             trim()
         }
@@ -168,45 +220,47 @@ object Bitmaps {
         }
     }
 
-    private fun decode(url: String): Bitmap? = runCatching {
-        val bytes =
-            when {
-                url.startsWith("data:") -> {
-                    val b64 = url.substringAfter(",", "")
-                    if (b64.isBlank()) return null
-                    Base64.decode(b64, Base64.DEFAULT)
-                }
-                url.startsWith("http") || url.startsWith("/") -> Api.download(url)
-                else -> return null
+    private fun sourceBytes(url: String): ByteArray? = runCatching {
+        when {
+            url.startsWith("data:") -> {
+                val b64 = url.substringAfter(",", "")
+                if (b64.isBlank()) null else Base64.decode(b64, Base64.DEFAULT)
             }
-        // Bounds-decode then sample: a 4000x3000 data-URI photo is ~48MB
-        // decoded whole — that transient spike OOM-crashed heavy chats even
-        // with a bounded cache. Avatars/bubbles never draw beyond ~1080px.
+            url.startsWith("http") || url.startsWith("/") -> Api.download(url)
+            else -> null
+        }
+    }.getOrNull()
+
+    /**
+     * Bounds-decode then sample: a 4000x3000 data-URI photo is ~48MB decoded whole —
+     * that transient spike OOM-crashed heavy chats even with a bounded cache. The
+     * ceiling is now the caller's, so a 40dp avatar row stops paying for 512x512
+     * (a quarter of the pixels at `maxSide` 256, a sixteenth of the memory).
+     */
+    private fun decodeBytes(bytes: ByteArray, maxSide: Int): Bitmap? = runCatching {
+        if (bytes.isEmpty()) return@runCatching null
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-        var sample = 1
-        var side = maxOf(bounds.outWidth, bounds.outHeight)
-        while (side / 2 >= 1080) {
-            sample *= 2
-            side /= 2
-        }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
+        val opts =
+            BitmapFactory.Options().apply { inSampleSize = bitmapSampleSize(bounds.outWidth, bounds.outHeight, maxSide) }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
     }.getOrNull()
 }
 
 @Composable
-fun rememberBitmap(url: String?): ImageBitmap? {
+fun rememberBitmap(url: String?, maxSidePx: Int = Bitmaps.FULL): ImageBitmap? {
     // Seed synchronously from the cache — memory first, then a small disk entry.
     // Starting at null meant every row that re-entered composition (scroll-back,
     // reopen after the app was killed, a chat-list poll) painted the placeholder
     // for a frame and then the photo — that flash is what read as "the profile
     // keeps loading again", and it is also why a photo looked uncached after a
     // cold start even though the bytes were on the phone.
-    val state = remember(url) { mutableStateOf(Bitmaps.paint(url)?.asImageBitmap()) }
-    LaunchedEffect(url) {
+    val state = remember(url, maxSidePx) { mutableStateOf(Bitmaps.paint(url, maxSidePx)?.asImageBitmap()) }
+    LaunchedEffect(url, maxSidePx) {
         if (url.isNullOrBlank()) return@LaunchedEffect
         if (state.value != null) return@LaunchedEffect
-        val bmp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Bitmaps.load(url) }
+        val bmp =
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Bitmaps.load(url, maxSidePx) }
         state.value = bmp?.asImageBitmap()
     }
     return state.value
@@ -355,7 +409,12 @@ fun KpAvatar(
     val inner = size - if (ring) ringWidth * 2 else 0.dp
     val resolved = rememberAvatarUrl(url, avatarRef)
     val dataUrl = resolved?.startsWith("data:") == true
-    val bmp = if (dataUrl) rememberBitmap(resolved) else null
+    // Decode for the box it is drawn in. An 88dp avatar on a 3x screen needs ~264px;
+    // without this every row in a list paid for the source's full 512x512 (and 1MB of
+    // bitmap) on the first pass, which is what made that first scroll jank while the
+    // second one — a memory-cache hit — was smooth.
+    val px = (inner.value * LocalDensity.current.density).toInt().coerceAtLeast(64)
+    val bmp = if (dataUrl) rememberBitmap(resolved, px) else null
     Box(Modifier.size(size), contentAlignment = Alignment.Center) {
         if (ring) {
             Box(
