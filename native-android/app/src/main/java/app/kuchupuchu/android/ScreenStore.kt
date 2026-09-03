@@ -219,9 +219,14 @@ object ScreenStore {
     private val msgs = HashMap<String, MutableList<JSONObject>>()
     val msgsVersion = mutableStateOf(0)
 
-    /** Last-known conversation detail per chat — reopening a chat paints the
-     *  name/avatar instantly instead of flashing "…" then loading. */
-    private val convDetail = HashMap<String, JSONObject>()
+    /**
+     * Last-known conversation detail per chat — reopening a chat paints the
+     * name/avatar instantly instead of flashing "…" then loading. Insertion
+     * ordered + capped: it is persisted in the snapshot below, so it must not
+     * grow forever across years of chats (60 chats is more than anyone
+     * reopens between restarts; older ones just re-fetch once).
+     */
+    private val convDetail = LinkedHashMap<String, JSONObject>()
     val convDetailVersion = mutableStateOf(0)
 
     fun hydrate(ctx: Context) {
@@ -241,6 +246,11 @@ object ScreenStore {
             val msgsObj = o.optJSONObject("msgs") ?: JSONObject()
             msgsObj.keys().forEach { k ->
                 msgs[k] = msgsObj.arr(k).objects().toMutableList()
+            }
+            // Chat headers survive a restart too — every chat the user had
+            // open paints its title/avatar instantly on the first frame.
+            o.optJSONObject("convDetails")?.let { d ->
+                d.keys().forEach { k -> d.optJSONObject(k)?.let { convDetail[k] = it } }
             }
         }
     }
@@ -271,11 +281,13 @@ object ScreenStore {
         val convArr = JSONArray(); convs.toList().forEach { convArr.put(it) }
         val callArr = JSONArray(); calls.toList().forEach { callArr.put(it) }
         val stArr = JSONArray(); statuses.toList().forEach { stArr.put(it) }
+        val detObj = JSONObject(); convDetail.forEach { (k, v) -> detObj.put(k, v) }
         return JSONObject()
             .put("convs", convArr)
             .put("calls", callArr)
             .put("statuses", stArr)
             .put("msgs", msgsObj)
+            .put("convDetails", detObj)
     }
 
     private fun persist() {
@@ -315,7 +327,9 @@ object ScreenStore {
     @Synchronized
     fun setConvDetail(convId: String, conv: JSONObject?) {
         if (conv == null) return
+        convDetail.remove(convId)
         convDetail[convId] = conv
+        while (convDetail.size > 60) convDetail.remove(convDetail.keys.first())
         convDetailVersion.value++
     }
 

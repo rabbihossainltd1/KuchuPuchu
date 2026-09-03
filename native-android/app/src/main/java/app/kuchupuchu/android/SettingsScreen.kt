@@ -74,12 +74,6 @@ fun SettingsScreen(nav: NavController) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var confirmLogout by remember { mutableStateOf(false) }
-    // Push-log dialog state. Must live at the composable's top level: the row
-    // that opens it is inside the list Column, the dialog itself is a sibling
-    // of that Column, and a `remember` declared in the inner scope is not
-    // visible from there (this is what broke the first build).
-    var diag by remember { mutableStateOf<List<String>>(emptyList()) }
-    var showDiag by remember { mutableStateOf(false) }
     // Phone-auth: change-number dialog state.
     var showChangePhone by remember { mutableStateOf(false) }
     var changePhone by remember { mutableStateOf("") }
@@ -262,44 +256,6 @@ fun SettingsScreen(nav: NavController) {
                 changePhoneError = ""
                 showChangePhone = true
             }
-            // Live OEM sleep-state readout: this row is how a user (and a bug
-            // report) tells "the app is broken" apart from "the ROM froze the
-            // app", which used to look identical from the outside.
-            var bgRestricted by remember { mutableStateOf(KpSetup.needsSetup(ctx)) }
-            var bgStatus by remember { mutableStateOf(KpSetup.statusText(ctx)) }
-            LaunchedEffect(Unit) {
-                bgRestricted = KpSetup.needsSetup(ctx)
-                bgStatus = KpSetup.statusText(ctx)
-            }
-            SettingRow(
-                Icons.Filled.Info,
-                "Background notifications",
-                if (bgRestricted) "$bgStatus — tap to fix" else bgStatus,
-            ) {
-                // openFixIt already falls back (autostart -> exemption dialog ->
-                // app info), so there is nothing to inspect here.
-                KpSetup.openFixIt(ctx)
-                bgRestricted = KpSetup.needsSetup(ctx)
-                bgStatus = KpSetup.statusText(ctx)
-            }
-            // The device's own witness, for exactly the report "background e
-            // message ashe na": the server can never answer it (FCM says 200
-            // whether or not the phone delivered), so the app keeps its own log
-            // of every push that reached onMessageReceived. Entry for that
-            // minute => our bug. Empty => FCM/OEM never handed it over.
-            // The on-device witness for every push/call/background notification
-            // decision. Shows "did the app GET the push, and WHAT branch did it
-            // take (sound-only / rich card / fullscreen call / missed call)".
-            // This is what proves whether a fix that "should" work actually ran.
-            SettingRow(
-                Icons.Filled.Info,
-                "App log (this device)",
-                if (diag.isEmpty()) "tap: verify push/call decisions" 
-                else "${diag.size} entries — latest ${diag.first().take(30)}",
-            ) {
-                diag = KpDiag.recent(ctx)
-                showDiag = true
-            }
             // Which build am I running? This row ends the "ami ki notun APK
             // install korsi?" confusion — bug reports can quote it directly.
             SettingRow(
@@ -311,51 +267,6 @@ fun SettingsScreen(nav: NavController) {
                 }.getOrDefault("?"),
                 clickable = false,
             ) {}
-        }
-
-        if (showDiag) {
-            AlertDialog(
-                onDismissRequest = { showDiag = false },
-                title = { Text("App log — this device", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink) },
-                text = {
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .height(280.dp)
-                            .verticalScroll(rememberScrollState()),
-                    ) {
-                        if (diag.isEmpty()) {
-                            Text(
-                                "Nothing has reached the app since install/clear. If a message was sent in that " +
-                                    "window, FCM never delivered it to the process — that is the launcher's kill, " +
-                                    "not app code: turn on auto-launch (Background notifications row above).",
-                                fontSize = 12.sp,
-                                color = Muted,
-                            )
-                        }
-                        Text(
-                            "⚡ FCM data received …  -> the app GOT the push (our bug if nothing shows)\n" +
-                                "💬 msg … SOUND_ONLY / RICH_CARD  -> foreground sound-only, or background rich card\n" +
-                                "📞 call … FULLSCREEN / engine polling  -> how a ring was surfaced\n" +
-                                "📵 missed_call … no entry  -> the missed push never landed (OEM kill)",
-                            fontSize = 11.sp,
-                            color = Muted,
-                            modifier = Modifier.padding(bottom = 8.dp),
-                        )
-                        diag.forEach { line ->
-                            Text(line, fontSize = 12.sp, color = Ink, modifier = Modifier.padding(vertical = 3.dp))
-                        }
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        KpDiag.clear(ctx)
-                        diag = emptyList()
-                        showDiag = false
-                    }) { Text("Clear", color = Red, fontWeight = FontWeight.SemiBold) }
-                },
-                dismissButton = { TextButton(onClick = { showDiag = false }) { Text("Close", color = Muted) } },
-            )
         }
 
         if (error.isNotBlank()) {

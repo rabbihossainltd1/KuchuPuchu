@@ -638,7 +638,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
             } catch (e: Exception) {
                 android.widget.Toast.makeText(
                     ctx,
-                    "Reply patha jayni — abar try koro",
+                    "Could not send the reply. Please try again.",
                     android.widget.Toast.LENGTH_SHORT,
                 ).show()
             }

@@ -227,7 +227,9 @@ private fun CallRow(call: JSONObject, onOpenChat: () -> Unit) {
                     .border(1.dp, Color(0x24000000), CircleShape)
                     .clickable {
                         haptics.tap()
-                        CallEngine.instance?.startCall(otherId, if (video) "VIDEO" else "AUDIO", name, avatar ?: "")
+                        gateMicCamera(video = video) {
+                            CallEngine.instance?.startCall(otherId, if (video) "VIDEO" else "AUDIO", name, avatar ?: "")
+                        }
                     },
                 contentAlignment = Alignment.Center,
             ) {

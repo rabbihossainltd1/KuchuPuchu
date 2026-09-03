@@ -39,18 +39,27 @@ object Drafts {
 
     fun init(ctx: Context) {
         file = File(ctx.applicationContext.filesDir, "kp-drafts.json")
-        runCatching {
-            val f = file ?: return
-            if (!f.exists()) return
-            val o = JSONObject(f.readText())
-            val keys = o.keys()
-            synchronized(this) {
-                while (keys.hasNext()) {
-                    val k = keys.next()
-                    val v = o.optString(k)
-                    if (k.isNotBlank() && v.isNotBlank()) map[k] = v
+        // Same cold-start rule as the outbox: file now, parse off the main
+        // thread (init runs in Activity.onCreate, in front of the first frame).
+        Thread {
+            runCatching {
+                val f = file ?: return@Thread
+                if (!f.exists()) return@Thread
+                val o = JSONObject(f.readText())
+                val keys = o.keys()
+                synchronized(this) {
+                    while (keys.hasNext()) {
+                        val k = keys.next()
+                        val v = o.optString(k)
+                        if (k.isNotBlank() && v.isNotBlank()) map[k] = v
+                    }
                 }
             }
+        }.apply {
+            name = "kp-drafts-load"
+            isDaemon = true
+            priority = Thread.MIN_PRIORITY
+            start()
         }
     }
 

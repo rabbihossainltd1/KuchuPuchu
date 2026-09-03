@@ -28,8 +28,13 @@ new_sqlite_classes = ["ChatRoom", "CallSignal"]
 
 [[d1_databases]]
 binding = "DB"
-database_name = "kuchupuchu-v3"
-database_id = "dbb7ce3a-332d-4330-b90a-c5d4c11a47e2"
+database_name = "kuchupuchu-v3-apac"
+# 2026-09-04: migrated off kuchupuchu-v3 (dbb7ce3a…, primary WNAM) — every
+# query from a BD user paid a trans-Pacific RTT, which was the structural
+# slowness behind slow opens/search/polls. Primary is now Singapore (APAC)
+# with read replication auto (reads served from the replica nearest each
+# user). The old database is kept untouched = one-line rollback.
+database_id = "28f6c033-4334-4fc0-ba1c-441ab42cf9a0"
 
 # §52: the hourly cron probes this origin's /api/health to record backend latency
 # (worker + D1 round trip). Unset means the probe reports `lat.err` instead of guessing.

@@ -28,20 +28,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.border
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Circle
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Unarchive
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -50,7 +46,6 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -99,12 +94,6 @@ fun ChatListScreen(nav: NavController) {
     // tab instead of jumping to Chats every time.
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val haptics = rememberHaptics()
-
-    // OEM survival nudge (MIUI/HyperOS, ColorOS/Realme/OnePlus, One UI
-    // background restrictions): re-checked on every list sync, so the banner
-    // disappears by itself the moment the device stops restricting us.
-    var oemNudgeHidden by remember { mutableStateOf(false) }
-    val oemSetupNeeded = remember(convs) { KpSetup.needsSetup(ctx) }
 
     // FOUR things can ask for the same list at the same instant: the socket
     // "hello" on connect, the socket "conv" poke, the push path bumping
@@ -265,51 +254,6 @@ fun ChatListScreen(nav: NavController) {
                     .height(1.dp)
                     .background(Line),
             )
-
-            /* ---------- OEM restriction banner (owner round) ----------
-             * The switches that fix this (MIUI auto-launch, ColorOS
-             * Auto-launch, battery exemption) live pages deep in each brand's
-             * settings; KpSetup deep-links to the right one. Shown only while
-             * the device is genuinely restricting us — see the KpSetup header
-             * for why this cannot be flipped programmatically. */
-            if (oemSetupNeeded && !oemNudgeHidden) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFFFFFBEB))
-                        .border(BorderStroke(1.dp, Color(0x33F59E0B)), RoundedCornerShape(14.dp))
-                        .clickable { KpSetup.openFixIt(ctx) }
-                        .padding(start = 12.dp, top = 6.dp, bottom = 6.dp, end = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        Icons.Filled.NotificationsActive,
-                        contentDescription = null,
-                        tint = GoldDeep,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "Messages and calls may be delayed on this phone",
-                        fontSize = 12.5.sp,
-                        color = Ink,
-                        maxLines = 2,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = { KpSetup.openFixIt(ctx) }) {
-                        Text("Fix", color = GoldDeep, fontWeight = FontWeight.Bold, maxLines = 1)
-                    }
-                    IconButton(
-                        onClick = { oemNudgeHidden = true },
-                        modifier = Modifier.size(30.dp),
-                    ) {
-                        Icon(Icons.Filled.Close, "Dismiss", tint = Muted, modifier = Modifier.size(16.dp))
-                    }
-                }
-                Spacer(Modifier.height(2.dp))
-            }
 
             /* ---------- tab bodies ---------- */
             when (tab) {

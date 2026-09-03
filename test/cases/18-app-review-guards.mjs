@@ -3,13 +3,28 @@
 // SHAPE of the fix at its call site — a name check alone would pass with the body
 // removed, so every rule here pins the code that has to be next to it.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const dir = fileURLToPath(
   new URL("../../native-android/app/src/main/java/app/kuchupuchu/android/", import.meta.url),
 );
 const kt = (f) => readFileSync(dir + f, "utf8").replace(/\r/g, "");
+const exists = (f) => {
+  try {
+    kt(f);
+    return true;
+  } catch {
+    return false;
+  }
+};
+const clientlogAnywhere = () => {
+  for (const f of readdirSync(dir)) {
+    if (!f.endsWith(".kt")) continue;
+    if (kt(f).includes("/api/debug/clientlog")) return f;
+  }
+  return null;
+};
 
 const lines = [];
 const check = (name, cond, detail) =>
@@ -20,7 +35,6 @@ const has = (src, needle, why) => check(why, src.includes(needle), `missing: ${n
 const lacks = (src, needle, why) => check(why, !src.includes(needle), `unexpected: ${needle}`);
 
 const files = kt("Files.kt");
-const diag = kt("KpDiag.kt");
 const app = kt("KpApp.kt");
 const push = kt("KpPush.kt");
 const profile = kt("ProfileScreen.kt");
@@ -80,12 +94,16 @@ check(
   readDoc.slice(0, 60),
 );
 
-// ── KpDiag: two threads must not lose a line ────────────────────────────────
-has(diag, "private val logLock = Any()", "the push log is a read-modify-write, so it is locked");
+// ── Owner rule (2026-09-04): no on-device log capture anywhere ─────────────
 check(
-  "the lock wraps the whole body",
-  diag.indexOf("fun log(ctx: Context, line: String) = synchronized(logLock)") > 0,
-  "",
+  "KpDiag.kt is gone (app-log system removed)",
+  !exists("KpDiag.kt"),
+  "KpDiag.kt still present",
+);
+check(
+  "no app code posts to /api/debug/clientlog",
+  !clientlogAnywhere(),
+  "a clientlog POST survived somewhere",
 );
 
 // ── KpApp: a failed navigation must not eat the pending chat ────────────────
