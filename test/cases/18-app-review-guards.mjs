@@ -109,11 +109,16 @@ check(
 // ── Google sign-in shape (owner round 2026-09-04): native sheet first ───────
 const ga = kt("GoogleAuth.kt");
 const idTokenBody = ga.slice(ga.indexOf("suspend fun idToken"));
-has(ga, "setFilterByAuthorizedAccounts(false)", "the native sheet always lists every device account");
+has(
+  ga,
+  "setFilterByAuthorizedAccounts(false)",
+  "the native sheet always lists every device account",
+);
 check(
   "the native Google sheet runs FIRST; web sign-in only as the last resort",
   idTokenBody.indexOf("GetGoogleIdOption.Builder()") >= 0 &&
-    idTokenBody.indexOf("GetGoogleIdOption.Builder()") < idTokenBody.indexOf("GetSignInWithGoogleOption.Builder"),
+    idTokenBody.indexOf("GetGoogleIdOption.Builder()") <
+      idTokenBody.indexOf("GetSignInWithGoogleOption.Builder"),
   "",
 );
 check(
