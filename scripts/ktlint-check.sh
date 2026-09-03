@@ -12,7 +12,7 @@ JAR="${TMPDIR:-/tmp}/ktlint-${VER}.jar"
 URL="https://repo1.maven.org/maven2/com/pinterest/ktlint/ktlint-cli/${VER}/ktlint-cli-${VER}-all.jar"
 
 if [ ! -f "$JAR" ] || [ "$(sha256sum "$JAR" | cut -d" " -f1)" != "$SHA" ]; then
-  curl -fsSL -o "$JAR" "$URL"
+  curl -fsSL --retry 6 --retry-all-errors --retry-delay 4 --connect-timeout 20 -o "$JAR" "$URL"
   echo "$SHA  $JAR" | sha256sum -c - >/dev/null
 fi
 

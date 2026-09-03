@@ -5,6 +5,7 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
+import androidx.credentials.exceptions.GetCredentialNoCredentialException
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
@@ -36,16 +37,42 @@ object GoogleAuth {
         id ?: throw NotConfiguredException()
     }
 
+    /** One Credential-Manager attempt, classified. */
+    private sealed class Attempt {
+        data class Ok(val credential: androidx.credentials.Credential) : Attempt()
+        object Cancelled : Attempt()
+        object NoAccounts : Attempt()
+        data class Failed(val error: GetCredentialException) : Attempt()
+    }
+
     /**
      * Runs the account picker and returns a fresh Google ID token.
-     * Null = the user cancelled. The "Sign in with Google" bottom sheet runs
-     * FIRST — it ALWAYS lists every Google account signed in on the device,
-     * which is what binding/recovery needs (owner report: the one-tap
-     * GetGoogleIdOption flow kept opening a "new account" sign-in instead of
-     * offering the existing one). When the sheet refuses (the classic
-     * "16: Cannot find a matching credential" Play-services hiccup right
-     * after SHA fingerprint changes), the one-tap option runs as the
-     * fallback — same serverClientId, same token shape.
+     * Null = the user cancelled.
+     *
+     * Owner report (2026-09-04, permanent fix): "Continue with Google" opened
+     * a NEW-account web login instead of the phone's account sheet on one
+     * device, and on another the flow died with "Google returned no id
+     * token". Root cause: the previous order led with the
+     * GetSignInWithGoogleOption button flow — on several OEM/Play-services
+     * combinations that option routes straight into the browser sign-in
+     * experience, whose returned credential is not always a
+     * GoogleIdTokenCredential (hence the "no ID token" dead end).
+     *
+     * The order is now the opposite and each layer is defensive:
+     *
+     *  1. GetGoogleIdOption with filterByAuthorizedAccounts = FALSE — this is
+     *     the NATIVE bottom sheet and it ALWAYS lists every Google account
+     *     signed in on this device, plus "Use another account". It never
+     *     opens a web login by itself. This is the owner rule: the phone's own
+     *     accounts, first, every time.
+     *  2. If that surface returns something unusable (a credential with a
+     *     blank token — a known transient Play-services hiccup), the sheet is
+     *     relaunched ONCE instead of dead-ending.
+     *  3. NoCredentialException = the device genuinely has zero Google
+     *     accounts. Only then does GetSignInWithGoogleOption run, because a
+     *     browser sign-in is the only remaining path for such a device.
+     *  4. Cancellation is always null; every other failure carries a message
+     *     the login screen can show as-is.
      *
      * MUST be called with the Activity context from the Main dispatcher —
      * Credential Manager shows system UI.
@@ -53,43 +80,77 @@ object GoogleAuth {
     suspend fun idToken(ctx: Context): String? {
         val clientId = webClientId()
         val manager = CredentialManager.create(ctx)
-        val sheet =
-            GetSignInWithGoogleOption.Builder(clientId).build()
-        val response =
+
+        fun nativeOption() =
+            GetGoogleIdOption.Builder()
+                .setServerClientId(clientId)
+                // The full account picker — every account on the device, not
+                // just previously-authorized ones. This single flag is what
+                // keeps the sheet from ever collapsing into "add a new
+                // account".
+                .setFilterByAuthorizedAccounts(false)
+                .setAutoSelectEnabled(false)
+                .build()
+
+        suspend fun attempt(option: androidx.credentials.CredentialOption): Attempt =
             try {
-                manager.getCredential(ctx, GetCredentialRequest.Builder().addCredentialOption(sheet).build())
-            } catch (cancellation: GetCredentialCancellationException) {
-                return null
-            } catch (_: GetCredentialException) {
-                // Sheet refused — the one-tap flow is a different Play-services
-                // code path and typically still works.
-                try {
-                    val oneTap =
-                        GetGoogleIdOption.Builder()
-                            .setServerClientId(clientId)
-                            // Show the full account picker, not just
-                            // previously-used accounts.
-                            .setFilterByAuthorizedAccounts(false)
-                            .build()
+                Attempt.Ok(
                     manager.getCredential(
                         ctx,
-                        GetCredentialRequest.Builder().addCredentialOption(oneTap).build(),
-                    )
-                } catch (cancellation: GetCredentialCancellationException) {
-                    return null
-                } catch (e: GetCredentialException) {
-                    throw IllegalStateException(
-                        "Google sign-in couldn't start. Make sure a Google account is signed in on " +
-                            "this phone and Google Play services is up to date, then try again.",
-                        e,
-                    )
+                        GetCredentialRequest.Builder().addCredentialOption(option).build(),
+                    ).credential,
+                )
+            } catch (cancellation: GetCredentialCancellationException) {
+                Attempt.Cancelled
+            } catch (noAccounts: GetCredentialNoCredentialException) {
+                Attempt.NoAccounts
+            } catch (e: GetCredentialException) {
+                Attempt.Failed(e)
+            }
+
+        // Primary + one relaunch: a blank-token credential from a healthy
+        // sheet is transient; a dead end is not acceptable on the auth path.
+        val noTokenMsg = "Google sign-in didn't return a token. Please try again."
+        when (val first = attempt(nativeOption())) {
+            is Attempt.Cancelled -> return null
+            is Attempt.Ok -> {
+                val token = tokenOf(first.credential)
+                if (token.isNotBlank()) return token
+                return when (val second = attempt(nativeOption())) {
+                    is Attempt.Cancelled -> null
+                    is Attempt.Ok -> tokenOf(second.credential).ifBlank { throw IllegalStateException(noTokenMsg) }
+                    is Attempt.NoAccounts, is Attempt.Failed -> throw IllegalStateException(noTokenMsg)
                 }
             }
-        val credential = response.credential
-        return if (credential is GoogleIdTokenCredential && credential.idToken.isNotBlank()) {
-            credential.idToken
-        } else {
-            throw IllegalStateException("Google returned no ID token")
+            is Attempt.Failed -> {
+                throw IllegalStateException(
+                    "Google sign-in couldn't start. Make sure a Google account is signed in on " +
+                        "this phone and Google Play services is up to date, then try again.",
+                    first.error,
+                )
+            }
+            is Attempt.NoAccounts -> Unit
+        }
+
+        // NoAccounts: zero Google accounts on the device — the web sign-in is
+        // the only path left on such a device.
+        return when (val web = attempt(GetSignInWithGoogleOption.Builder(clientId).build())) {
+            is Attempt.Cancelled -> null
+            is Attempt.Ok -> tokenOf(web.credential).ifBlank { throw IllegalStateException(noTokenMsg) }
+            is Attempt.NoAccounts, is Attempt.Failed ->
+                throw IllegalStateException(
+                    "Google sign-in couldn't start. Make sure a Google account is signed in on " +
+                        "this phone and Google Play services is up to date, then try again.",
+                )
         }
     }
+
+    /**
+     * Extracts the ID token from whatever the Credential Manager handed back.
+     * Only a real GoogleIdTokenCredential with a non-blank token counts —
+     * anything else (password credential, web-flow pseudo-credential) maps to
+     * "" so the caller can retry instead of dying with a cryptic error.
+     */
+    private fun tokenOf(c: androidx.credentials.Credential): String =
+        if (c is GoogleIdTokenCredential && c.idToken.isNotBlank()) c.idToken else ""
 }
