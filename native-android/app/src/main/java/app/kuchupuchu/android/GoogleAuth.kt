@@ -38,11 +38,14 @@ object GoogleAuth {
 
     /**
      * Runs the account picker and returns a fresh Google ID token.
-     * Null = the user cancelled. One-tap is tried first; when it answers
-     * "16: Cannot find a matching credential" (a Play-services cache/propagation
-     * hiccup right after new SHA fingerprints are registered — the documented
-     * workaround is the plain Sign-in-with-Google sheet, same serverClientId),
-     * that fallback runs automatically before giving up.
+     * Null = the user cancelled. The "Sign in with Google" bottom sheet runs
+     * FIRST — it ALWAYS lists every Google account signed in on the device,
+     * which is what binding/recovery needs (owner report: the one-tap
+     * GetGoogleIdOption flow kept opening a "new account" sign-in instead of
+     * offering the existing one). When the sheet refuses (the classic
+     * "16: Cannot find a matching credential" Play-services hiccup right
+     * after SHA fingerprint changes), the one-tap option runs as the
+     * fallback — same serverClientId, same token shape.
      *
      * MUST be called with the Activity context from the Main dispatcher —
      * Credential Manager shows system UI.
@@ -50,29 +53,27 @@ object GoogleAuth {
     suspend fun idToken(ctx: Context): String? {
         val clientId = webClientId()
         val manager = CredentialManager.create(ctx)
-        val oneTap =
-            GetGoogleIdOption.Builder()
-                .setServerClientId(clientId)
-                // Show the full account picker, not just previously-used
-                // accounts: binding a specific Gmail is the whole point.
-                .setFilterByAuthorizedAccounts(false)
-                .build()
+        val sheet =
+            GetSignInWithGoogleOption.Builder(clientId).build()
         val response =
             try {
-                manager.getCredential(ctx, GetCredentialRequest.Builder().addCredentialOption(oneTap).build())
+                manager.getCredential(ctx, GetCredentialRequest.Builder().addCredentialOption(sheet).build())
             } catch (cancellation: GetCredentialCancellationException) {
                 return null
             } catch (_: GetCredentialException) {
-                // One-tap refused (the classic "16: Cannot find a matching
-                // credential" right after SHA changes). The bottom-sheet
-                // "Sign in with Google" flow uses a different code path in
-                // Play services and typically still works.
+                // Sheet refused — the one-tap flow is a different Play-services
+                // code path and typically still works.
                 try {
+                    val oneTap =
+                        GetGoogleIdOption.Builder()
+                            .setServerClientId(clientId)
+                            // Show the full account picker, not just
+                            // previously-used accounts.
+                            .setFilterByAuthorizedAccounts(false)
+                            .build()
                     manager.getCredential(
                         ctx,
-                        GetCredentialRequest.Builder()
-                            .addCredentialOption(GetSignInWithGoogleOption.Builder(clientId).build())
-                            .build(),
+                        GetCredentialRequest.Builder().addCredentialOption(oneTap).build(),
                     )
                 } catch (cancellation: GetCredentialCancellationException) {
                     return null
