@@ -1,15 +1,16 @@
 package app.kuchupuchu.android
 
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathData
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.unit.dp
 
 /**
  * The official four-color Google "G" (48x48 viewport), drawn as an ImageVector
- * so the Continue-with-Google button needs no bundled asset. Path data is the
- * standard brand glyph (developers.google.com/identity).
+ * so the Continue-with-Google button needs no bundled asset. Path commands are
+ * the standard brand glyph (developers.google.com/identity), converted to
+ * PathBuilder calls (the s/smooth-curve segments pre-expanded by reflection).
  */
 val GoogleLogo: ImageVector by lazy {
     ImageVector.Builder(
@@ -19,33 +20,50 @@ val GoogleLogo: ImageVector by lazy {
         viewportWidth = 48f,
         viewportHeight = 48f,
     ).apply {
-        path(
-            fill = Color(0xFFEA4335),
-            pathData =
-                PathData(
-                    "M24,9.5c3.54,0 6.71,1.22 9.21,3.6l6.85,-6.85C35.9,2.38 30.47,0 24,0 14.62,0 6.51,5.38 2.56,13.22l7.98,6.19C12.43,13.72 17.74,9.5 24,9.5z",
-                ),
-        )
-        path(
-            fill = Color(0xFF4285F4),
-            pathData =
-                PathData(
-                    "M46.98,24.55c0,-1.57 -0.15,-3.09 -0.38,-4.55L24,20v9.02h12.94c-0.58,2.96 -2.26,5.48 -4.78,7.18l7.73,6c4.51,-4.18 7.09,-10.36 7.09,-17.65z",
-                ),
-        )
-        path(
-            fill = Color(0xFFFBBC05),
-            pathData =
-                PathData(
-                    "M10.53,28.59c-0.48,-1.45 -0.76,-2.99 -0.76,-4.59s0.27,-3.14 0.76,-4.59l-7.98,-6.19C0.92,16.46 0,20.12 0,24s0.92,7.54 2.56,10.78l7.97,-6.19z",
-                ),
-        )
-        path(
-            fill = Color(0xFF34A853),
-            pathData =
-                PathData(
-                    "M24,48c6.48,0 11.93,-2.13 15.89,-5.81l-7.73,-6c-2.15,1.45 -4.92,2.3 -8.16,2.3 -6.26,0 -11.57,-4.22 -13.47,-9.91l-7.98,6.19C6.51,42.62 14.62,48 24,48z",
-                ),
-        )
+        // Red — top arc to the left of the nose.
+        path(fill = SolidColor(Color(0xFFEA4335))) {
+            moveTo(24f, 9.5f)
+            curveToRelative(3.54f, 0f, 6.71f, 1.22f, 9.21f, 3.6f)
+            lineToRelative(6.85f, -6.85f)
+            curveTo(35.9f, 2.38f, 30.47f, 0f, 24f, 0f)
+            curveTo(14.62f, 0f, 6.51f, 5.38f, 2.56f, 13.22f)
+            lineToRelative(7.98f, 6.19f)
+            curveTo(12.43f, 13.72f, 17.74f, 9.5f, 24f, 9.5f)
+            close()
+        }
+        // Blue — right half + nose.
+        path(fill = SolidColor(Color(0xFF4285F4))) {
+            moveTo(46.98f, 24.55f)
+            curveToRelative(0f, -1.57f, -0.15f, -3.09f, -0.38f, -4.55f)
+            lineTo(24f, 20f)
+            lineToRelative(0f, 9.02f)
+            lineToRelative(12.94f, 0f)
+            curveToRelative(-0.58f, 2.96f, -2.26f, 5.48f, -4.78f, 7.18f)
+            lineToRelative(7.73f, 6f)
+            curveToRelative(4.51f, -4.18f, 7.09f, -10.36f, 7.09f, -17.65f)
+            close()
+        }
+        // Yellow — left tip.
+        path(fill = SolidColor(Color(0xFFFBBC05))) {
+            moveTo(10.53f, 28.59f)
+            curveToRelative(-0.48f, -1.45f, -0.76f, -2.99f, -0.76f, -4.59f)
+            curveToRelative(0f, 0f, 0.27f, -3.14f, 0.76f, -4.59f)
+            lineToRelative(-7.98f, -6.19f)
+            curveTo(0.92f, 16.46f, 0f, 20.12f, 0f, 24f)
+            curveToRelative(0f, 0f, 0.92f, 7.54f, 2.56f, 10.78f)
+            lineToRelative(7.97f, -6.19f)
+            close()
+        }
+        // Green — bottom arc.
+        path(fill = SolidColor(Color(0xFF34A853))) {
+            moveTo(24f, 48f)
+            curveToRelative(6.48f, 0f, 11.93f, -2.13f, 15.89f, -5.81f)
+            lineToRelative(-7.73f, -6f)
+            curveToRelative(-2.15f, 1.45f, -4.92f, 2.3f, -8.16f, 2.3f)
+            curveToRelative(-6.26f, 0f, -11.57f, -4.22f, -13.47f, -9.91f)
+            lineToRelative(-7.98f, 6.19f)
+            curveTo(6.51f, 42.62f, 14.62f, 48f, 24f, 48f)
+            close()
+        }
     }.build()
 }
