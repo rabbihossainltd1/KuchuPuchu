@@ -123,6 +123,7 @@ fun CreateGroupScreen(nav: NavController) {
             { title = it.take(50) },
             label = { Text("Group name") },
             singleLine = true,
+            shape = RoundedCornerShape(14.dp),
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp),
@@ -172,6 +173,7 @@ fun CreateGroupScreen(nav: NavController) {
             { query = it },
             label = { Text("Add members — search by name or username") },
             singleLine = true,
+            shape = RoundedCornerShape(14.dp),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
             modifier = Modifier
                 .fillMaxWidth()

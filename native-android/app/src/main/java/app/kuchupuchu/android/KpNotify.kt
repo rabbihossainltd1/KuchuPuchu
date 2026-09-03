@@ -462,7 +462,7 @@ object KpNotify {
                     NotificationCompat.BigTextStyle()
                         .bigText(
                             "${deviceName?.takeIf { it.isNotBlank() } ?: "Another device"} wants to sign in " +
-                                "to KuchuPuchu with your number. Accept korte chaile Accept chapun.",
+                                "to KuchuPuchu with your number. Tap Accept to approve it, or Decline to block it.",
                         ),
                 )
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
