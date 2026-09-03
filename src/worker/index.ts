@@ -820,10 +820,10 @@ async function geminiImage(
   if (!env.GEMINI_API_KEY) return null;
   const started = Date.now();
   for (const model of [
-      "gemini-2.5-flash-image",
-      "gemini-3.1-flash-lite-image",
-      "gemini-3.1-flash-image",
-    ]) {
+    "gemini-2.5-flash-image",
+    "gemini-3.1-flash-lite-image",
+    "gemini-3.1-flash-image",
+  ]) {
     const remaining = GEMINI_CALL_BUDGET_MS - (Date.now() - started);
     if (remaining < 6_000) break;
     try {
