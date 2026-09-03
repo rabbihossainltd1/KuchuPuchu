@@ -86,3 +86,21 @@ Version 92 / 3.9.16. Gates: suite, typecheck, ktlint, validate-android, brace
 balance. One PR (Android + wrangler.toml id swap). CI → merge → deploy worker →
 live verification (login, message, verified=3, latency re-measure) → deployed
 reset.
+
+## Follow-up round — v3.9.17 / 93 (2026-09-04)
+
+1. **Google flow permanent fix** (owner: "continue with Google dile new mail
+   login ashe, onno device e google returned no id token"). Root cause: the
+   flow LED with `GetSignInWithGoogleOption` — the button flow that on several
+   OEM/Play-services combos routes straight into the browser "new account"
+   sign-in, whose credential is not always a GoogleIdTokenCredential (the
+   "no ID token" dead end). New order: `GetGoogleIdOption` with
+   `filterByAuthorizedAccounts=false` FIRST (native sheet listing every device
+   account, every time), one automatic relaunch on a blank-token credential,
+   web sign-in ONLY when the device has zero Google accounts, defensive
+   token extraction with a retryable error instead of a cryptic crash.
+
+2. **CI flake fixed** — main's post-merge run failed because the ktlint jar
+   download from Maven Central hit a transient 429. `scripts/ktlint-check.sh`
+   now retries the download (--retry 6 --retry-all-errors) so a rate-limit
+   blip can never fail CI again.
