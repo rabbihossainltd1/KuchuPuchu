@@ -479,7 +479,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
                                 enabled = !busy,
                             ) { onContinue() }
                             TextButton(onClick = { stage = LoginStage.RECOVERY; error = "" }) {
-                                Text("Can't access my previous device?", color = GoldDeep)
+                                Text("Recover account", color = GoldDeep)
                             }
                         }
 
@@ -647,7 +647,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
                 }
 
                 LoginStage.RECOVERY -> {
-                    Text("Account recovery", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Ink)
+                    Text("Recover account", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Ink)
                     Spacer(Modifier.height(6.dp))
                     Text(
                         "Enter your phone number, then sign in with the Google account linked to it. Your account will move to this device.",
