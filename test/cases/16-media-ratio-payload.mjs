@@ -18,6 +18,9 @@
 // endpoint — is the part that cannot be eyeballed.
 
 import { makeD1, makeR2, makeCtx } from "../d1shim.mjs";
+import { makeReg, installGoogleStub } from "../helpers/phoneauth.mjs";
+
+installGoogleStub();
 
 const WORKER = new URL("../../src/worker/index.ts", import.meta.url).href;
 let n = 0;
@@ -31,7 +34,7 @@ const check = (name, cond, detail) =>
 
 async function mk() {
   const worker = await freshWorker();
-  const env = { DB: makeD1(), MEDIA: makeR2() };
+  const env = { DB: makeD1(), MEDIA: makeR2(), GOOGLE_WEB_CLIENT_ID: "kp-test-web-client" };
   const ctx = makeCtx();
   // Auth routes are rate limited per client IP (see case 13 for the same
   // pattern): a dozen registrations from one address returns 429 instead of a
@@ -41,7 +44,7 @@ async function mk() {
     const raw = body instanceof Uint8Array;
     const headers = { "content-type": raw ? "application/octet-stream" : "application/json" };
     if (token) headers.authorization = `Bearer ${token}`;
-    if (path.startsWith("/api/auth/register"))
+    if (path.startsWith("/api/auth/"))
       headers["cf-connecting-ip"] = `203.0.${Math.floor(ipSeq / 250)}.${(ipSeq++ % 250) + 1}`;
     const init = { method, headers };
     if (body !== undefined && method !== "GET") init.body = raw ? body : JSON.stringify(body);
@@ -56,35 +59,13 @@ async function mk() {
     }
     return { status: res.status, json: j, headers: res.headers };
   };
-  const reg = async (e, u) =>
-    (
-      await call("POST", "/api/auth/register", {
-        email: e,
-        password: "secret123",
-        username: u,
-        displayName: u,
-      })
-    ).json;
+  const reg = makeReg(call);
   return { env, ctx, call, reg };
 }
 
 async function twoUsers(h, tag) {
-  const A = await h
-    .call("POST", "/api/auth/register", {
-      email: `${tag}a@x.com`,
-      password: "secret123",
-      username: `${tag}a`,
-      displayName: `${tag}a`,
-    })
-    .then((r) => r.json);
-  const B = await h
-    .call("POST", "/api/auth/register", {
-      email: `${tag}b@x.com`,
-      password: "secret123",
-      username: `${tag}b`,
-      displayName: `${tag}b`,
-    })
-    .then((r) => r.json);
+  const A = await h.reg(`${tag}a@x.com`, `${tag}a`);
+  const B = await h.reg(`${tag}b@x.com`, `${tag}b`);
   if (!A.user || !B.user)
     throw new Error(`register failed for ${tag}: ${JSON.stringify(A).slice(0, 80)}`);
   const conv = await h.call("POST", "/api/conversations", { userId: B.user.id }, A.token);

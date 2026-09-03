@@ -7,6 +7,9 @@
 // enabled. It also wrote to the messages table on every poll.
 
 import { makeD1, makeR2, makeCtx } from "../d1shim.mjs";
+import { makeReg, installGoogleStub } from "../helpers/phoneauth.mjs";
+
+installGoogleStub();
 
 const WORKER = new URL("../../src/worker/index.ts", import.meta.url).href;
 
@@ -21,7 +24,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function mk() {
   const worker = await freshWorker();
   const db = makeD1();
-  const env = { DB: db, MEDIA: makeR2() };
+  const env = { DB: db, MEDIA: makeR2(), GOOGLE_WEB_CLIENT_ID: "kp-test-web-client" };
   const ctx = makeCtx();
   let ipSeq = 0;
   const call = async (method, path, body, token) => {
@@ -42,15 +45,7 @@ async function mk() {
     }
     return { status: res.status, json: j };
   };
-  const reg = async (e, u) =>
-    (
-      await call("POST", "/api/auth/register", {
-        email: e,
-        password: "secret123",
-        username: u,
-        displayName: u,
-      })
-    ).json;
+  const reg = makeReg(call);
   const solo = async (a, b) =>
     (await call("POST", "/api/conversations", { userId: b }, a.token)).json.conversation.id;
   const send = async (a, cid, body) =>

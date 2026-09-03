@@ -50,6 +50,15 @@ npm run deploy      # wrangler deploy
 npm run tail        # wrangler tail
 ```
 
+Phone auth needs one extra secret (Google binding/recovery):
+
+```bash
+npx wrangler secret put GOOGLE_WEB_CLIENT_ID   # Firebase console → Authentication → Google → Web client ID
+```
+
+Without it `/api/config/firebase` reports `googleWebClientId: null` and the
+Google bind/recovery endpoints answer 503 (fail-closed) — see `FIREBASE-SETUP.md`.
+
 Needs a Cloudflare API token with Workers Scripts Edit, D1 Edit, and R2 Edit. `wrangler.toml`
 already carries `account_id`, the D1 `database_id`, and the R2 binding.
 
@@ -77,13 +86,15 @@ Source is `native-android/app/src/main/java/app/kuchupuchu/android/`. The pieces
 | `ChatScreen.kt` | Chat UI, message sending, attachment handlers |
 | `CallEngine.kt` | WebRTC signalling and the call poll loop |
 | `CallNotify.kt` | Incoming-call heads-up and the ongoing-call foreground service |
-| `KpPush.kt` | FCM entry point |
+| `KpPush.kt` | FCM entry point (also shows the new-device login approval card) |
+| `PhoneVerifier.kt` | Phone auth: E.164 normalization + OTP-less SIM match |
+| `GoogleAuth.kt` | Phone auth: Credential Manager Google ID token (binding/recovery) |
 
 ## How the main features work
 
 | Area | How |
 | --- | --- |
-| Auth | Email/password on the worker; the session token is stored hashed and expires after 90 days |
+| Auth | OTP-less phone auth (`PHONE_AUTH_PLAN.md`): number → SIM check → session, mandatory Google binding on signup, new-device login needs Accept from the current device, Google recovery for lost devices; the session token is stored hashed and expires after 90 days |
 | Chat | Messages are polled; `GET /api/conversations/:id/messages` pages with a `created_at` + `rowid` cursor |
 | Media | Uploaded to R2 through `POST /api/files`, which records the owner and the conversation so `GET /api/files/:key` can authorise the download. Media is always served as a download with `nosniff` |
 | Statuses | 24h text, image, and video statuses. Video goes to R2 and is posted as `kind=VIDEO` with its duration |

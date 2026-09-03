@@ -2,6 +2,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Phone auth (OTP-less): SubscriptionManager.activeSubscriptionInfoList is
+         gated on READ_PHONE_STATE at runtime. A denial is not fatal — the
+         login flow reports PERMISSION_DENIED and the worker's grace path
+         (DEVICE_ONLY + old-device approval) still protects the account. -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -152,5 +157,14 @@
         <receiver
             android:name=".ReminderReceiver"
             android:exported="false" />
+        <!-- Phone auth §14: Accept/Decline buttons on the new-login card. -->
+        <receiver
+            android:name=".KpLoginApprovalReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="app.kuchupuchu.android.LOGIN_APPROVE" />
+                <action android:name="app.kuchupuchu.android.LOGIN_DECLINE" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

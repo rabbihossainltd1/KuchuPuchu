@@ -19,6 +19,9 @@
 
 import { generateKeyPairSync } from "node:crypto";
 import { makeD1, makeR2, makeCtx } from "../d1shim.mjs";
+import { makeReg, installGoogleStub } from "../helpers/phoneauth.mjs";
+
+installGoogleStub();
 
 const WORKER = new URL("../../src/worker/index.ts", import.meta.url).href;
 
@@ -42,14 +45,19 @@ async function main() {
   const worker = await freshWorker();
   const db = makeD1();
   const sent = []; // every FCM send body
-  const env = { DB: db, MEDIA: makeR2(), FCM_CREDENTIALS };
+  const env = {
+    DB: db,
+    MEDIA: makeR2(),
+    FCM_CREDENTIALS,
+    GOOGLE_WEB_CLIENT_ID: "kp-test-web-client",
+  };
 
   // Intercept the worker's external fetches only. The Durable-Object stubs are
   // reached through env.CHAT_ROOM/…, not global fetch, so they are untouched.
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
     const url = typeof input === "string" ? input : input.url;
-    if (url.includes("oauth2.googleapis.com/token")) {
+    if (url.includes("oauth2.googleapis.com/token") && !url.includes("tokeninfo")) {
       return new Response(JSON.stringify({ access_token: "fake-at", expires_in: 3600 }), {
         status: 200,
         headers: { "content-type": "application/json" },
@@ -70,7 +78,7 @@ async function main() {
     let ipSeq = 0;
     const call = async (method, path, body, token) => {
       const headers = { "content-type": "application/json" };
-      if (path.startsWith("/api/auth/register"))
+      if (path.startsWith("/api/auth/"))
         headers["cf-connecting-ip"] = `203.0.${Math.floor(ipSeq / 250)}.${(ipSeq++ % 250) + 1}`;
       if (token) headers.authorization = `Bearer ${token}`;
       const init = { method, headers };
@@ -86,16 +94,7 @@ async function main() {
       }
       return { status: res.status, json: j };
     };
-    const reg = async (e, u) => {
-      const r = await call("POST", "/api/auth/register", {
-        email: e,
-        password: "secret123",
-        username: u,
-        displayName: u,
-      });
-      if (!r.json.user) throw new Error(`register ${u} -> ${r.status} ${JSON.stringify(r.json)}`);
-      return r.json;
-    };
+    const reg = makeReg(call);
     const ageLastActive = (userId, minutes) => {
       const when = new Date(Date.now() - minutes * 60_000).toISOString();
       db._db.prepare("UPDATE users SET last_active_at = ? WHERE id = ?").run(when, userId);

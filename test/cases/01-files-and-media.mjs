@@ -1,4 +1,7 @@
 import { makeD1, makeR2, makeCtx } from "../d1shim.mjs";
+import { makeReg, installGoogleStub } from "../helpers/phoneauth.mjs";
+
+installGoogleStub();
 
 const WORKER = new URL("../../src/worker/index.ts", import.meta.url).href;
 
@@ -13,10 +16,13 @@ async function mk() {
   const worker = await freshWorker();
   const db = makeD1();
   const media = makeR2();
-  const env = { DB: db, MEDIA: media };
+  const env = { DB: db, MEDIA: media, GOOGLE_WEB_CLIENT_ID: "kp-test-web-client" };
   const ctx = makeCtx();
+  let ipSeq = 0;
   const call = async (method, path, body, token, raw) => {
     const headers = { "content-type": "application/json" };
+    if (path.startsWith("/api/auth/"))
+      headers["cf-connecting-ip"] = `198.51.${Math.floor(ipSeq / 250)}.${(ipSeq++ % 250) + 1}`;
     if (token) headers.authorization = `Bearer ${token}`;
     let init = { method, headers };
     if (raw) {
@@ -34,15 +40,7 @@ async function mk() {
     }
     return { status: res.status, json: j, headers: res.headers, text: t };
   };
-  const reg = async (e, u) =>
-    (
-      await call("POST", "/api/auth/register", {
-        email: e,
-        password: "secret123",
-        username: u,
-        displayName: u,
-      })
-    ).json;
+  const reg = makeReg(call);
   return { worker, db, media, env, ctx, call, reg };
 }
 

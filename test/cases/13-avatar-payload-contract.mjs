@@ -14,6 +14,9 @@
 // otherwise the app fires a pointless avatar request per row.
 
 import { makeD1, makeR2, makeCtx } from "../d1shim.mjs";
+import { makeReg, installGoogleStub } from "../helpers/phoneauth.mjs";
+
+installGoogleStub();
 
 const WORKER = new URL("../../src/worker/index.ts", import.meta.url).href;
 
@@ -31,13 +34,13 @@ const PNG_ALT =
 
 async function mk() {
   const worker = await freshWorker();
-  const env = { DB: makeD1(), MEDIA: makeR2() };
+  const env = { DB: makeD1(), MEDIA: makeR2(), GOOGLE_WEB_CLIENT_ID: "kp-test-web-client" };
   const ctx = makeCtx();
   let ipSeq = 0;
   const call = async (method, path, body, token, extraHeaders = {}) => {
     const headers = { "content-type": "application/json", ...extraHeaders };
     // Auth routes are rate limited per client IP; give each register its own.
-    if (path.startsWith("/api/auth/register"))
+    if (path.startsWith("/api/auth/"))
       headers["cf-connecting-ip"] = `203.0.${Math.floor(ipSeq / 250)}.${(ipSeq++ % 250) + 1}`;
     if (token) headers.authorization = `Bearer ${token}`;
     const init = { method, headers };
@@ -53,17 +56,7 @@ async function mk() {
     }
     return { status: res.status, json, headers: res.headers, text };
   };
-  const reg = async (email, username) => {
-    const r = await call("POST", "/api/auth/register", {
-      email,
-      password: "secret123",
-      username,
-      displayName: username,
-    });
-    if (!r.json.user)
-      throw new Error(`register ${username} -> ${r.status} ${JSON.stringify(r.json)}`);
-    return r.json;
-  };
+  const reg = makeReg(call);
   /** Open a 1:1 chat and leave one message so the row is in the list at all. */
   const openChat = async (me) => {
     const c = await call("POST", "/api/conversations", { userId: me.peerId }, me.token);

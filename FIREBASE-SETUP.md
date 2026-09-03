@@ -74,3 +74,62 @@ Ekhon phone e app khule dekhen:
 | Push chhere service mode e phire jete chan | Worker theke `FCM_CONFIG` secret delete korun (`npx wrangler secret delete FCM_CONFIG`) — app automatic service mode e phire jabe |
 
 **Note:** FCM na thakle app automatic bhabe aager system e cholbe (foreground service + silent notification) — kichu vangbe na. Migration 100% safe.
+
+
+---
+
+# 📱 Phone Auth Google Setup (v3.9 — REQUIRED for new sign-ups)
+
+Email/password login was removed (see `PHONE_AUTH_PLAN.md`). Every NEW account
+now binds a Gmail for recovery, and lost-device recovery uses it too. Ei setup
+ta chara **notun account create hobe na** (Google bind 503 dibe).
+
+## Step 1 — Google sign-in enable korun
+
+1. https://console.firebase.google.com → **KuchuPuchu** project
+2. **Build → Authentication → Get started** (age kore thakle skip)
+3. **Sign-in method** tab → **Google** → Enable → Save
+
+## Step 2 — Web Client ID copy korun
+
+1. Same Authentication page e **Sign-in method → Google** row te
+   **Web SDK configuration** section dekhben
+2. **Web client ID** ta copy korun (`.apps.googleusercontent.com` diye shesh)
+
+## Step 3 — Worker e secret din
+
+```bash
+npx wrangler secret put GOOGLE_WEB_CLIENT_ID
+# paste korun oi Web client ID ta, Enter
+npx wrangler deploy
+```
+
+## Verify
+
+```bash
+curl https://kuchupuchu-api.kuchupuchu.workers.dev/api/config/firebase
+# "googleWebClientId":"....apps.googleusercontent.com" asha uchit
+```
+
+App e: phone number diye Continue → notun hole **Continue with Google** button
+kaj korbe. Jodi "not set up" error ashe → Step 3 check korun.
+
+## Legacy account (email/password) owners
+
+Prothom bar phone diye login korar somoy **oi email er Gmail** diye Google
+sign-in korun — purano account-ta (chats soho) automatic migrate hoye jabe,
+phone bind hoye jabe. Onno Gmail dile notun alada account hobe.
+
+
+---
+
+## 🔄 v3.9 cutover notes (2026-09-03)
+
+- Firebase project switched to **kuchupuchuff2026** (old FCM config/credentials
+  replaced on the worker). App nimoy — it pulls the config from
+  `/api/config/firebase` at runtime, no APK-side change needed.
+- `GOOGLE_WEB_CLIENT_ID` secret set from this project's Web OAuth client
+  (client_type 3 in google-services.json).
+- **Fresh start:** all old accounts/chats/media/files were erased from D1 and
+  R2 — everyone signs up anew with a phone number. Legacy email-migration code
+  stays but has nothing to migrate against.

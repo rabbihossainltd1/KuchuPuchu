@@ -6,6 +6,9 @@
 // and that the no-binding path is unchanged REST.
 
 import { makeD1, makeR2, makeCtx } from "../d1shim.mjs";
+import { makeReg, installGoogleStub } from "../helpers/phoneauth.mjs";
+
+installGoogleStub();
 
 const WORKER = new URL("../../src/worker/index.ts", import.meta.url).href;
 
@@ -22,7 +25,7 @@ async function mk(withDo) {
   const callFrames = [];
   const chatFrames = [];
   const connects = [];
-  const env = { DB: db, MEDIA: makeR2() };
+  const env = { DB: db, MEDIA: makeR2(), GOOGLE_WEB_CLIENT_ID: "kp-test-web-client" };
   if (withDo) {
     // The worker may call fetch("url", init) OR fetch(new Request(...)) — the
     // real DO stub accepts both; normalise here so the fakes do too.
@@ -67,7 +70,7 @@ async function mk(withDo) {
   let ipSeq = 0;
   const call = async (method, path, body, token) => {
     const headers = { "content-type": "application/json" };
-    if (path.startsWith("/api/auth/register"))
+    if (path.startsWith("/api/auth/"))
       headers["cf-connecting-ip"] = `203.0.${Math.floor(ipSeq / 250)}.${(ipSeq++ % 250) + 1}`;
     if (token) headers.authorization = `Bearer ${token}`;
     const init = { method, headers };
@@ -83,16 +86,7 @@ async function mk(withDo) {
     }
     return { status: res.status, json: j };
   };
-  const reg = async (e, u) => {
-    const r = await call("POST", "/api/auth/register", {
-      email: e,
-      password: "secret123",
-      username: u,
-      displayName: u,
-    });
-    if (!r.json.user) throw new Error(`register ${u} -> ${r.status} ${JSON.stringify(r.json)}`);
-    return r.json;
-  };
+  const reg = makeReg(call);
   return { db, call, reg, callFrames, chatFrames, connects };
 }
 

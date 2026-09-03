@@ -26,9 +26,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.Badge
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Mail
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -80,6 +80,10 @@ fun SettingsScreen(nav: NavController) {
     // visible from there (this is what broke the first build).
     var diag by remember { mutableStateOf<List<String>>(emptyList()) }
     var showDiag by remember { mutableStateOf(false) }
+    // Phone-auth: change-number dialog state.
+    var showChangePhone by remember { mutableStateOf(false) }
+    var changePhone by remember { mutableStateOf("") }
+    var changePhoneError by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         runCatching {
@@ -246,7 +250,18 @@ fun SettingsScreen(nav: NavController) {
             SettingRow(Icons.Filled.Info, "About", me.value.optText("about").ifBlank { "Hey! I'm using KuchuPuchu" }) {
                 editField = "about"; editValue = me.value.optText("about")
             }
-            SettingRow(Icons.Filled.Mail, "Email", me.value.optText("email"), clickable = false) {}
+            // Phone auth: the login identity now. Change needs the new SIM
+            // literally present on this device (MATCH) — the worker rejects
+            // anything weaker for a number change (PHONE_AUTH_PLAN.md §5).
+            SettingRow(
+                Icons.Filled.Call,
+                "Phone number",
+                me.value.optText("phone").ifBlank { "not set" },
+            ) {
+                changePhone = ""
+                changePhoneError = ""
+                showChangePhone = true
+            }
             // Live OEM sleep-state readout: this row is how a user (and a bug
             // report) tells "the app is broken" apart from "the ROM froze the
             // app", which used to look identical from the outside.
@@ -428,12 +443,75 @@ fun SettingsScreen(nav: NavController) {
         )
     }
 
+    /* ---------- phone auth: change number ---------- */
+    if (showChangePhone) {
+        AlertDialog(
+            onDismissRequest = { showChangePhone = false },
+            title = { Text("Change phone number") },
+            text = {
+                Column {
+                    Text(
+                        "Notun number ta ei device er SIM e thakte hobe — automatic verify " +
+                            "korte parle e change hobe.",
+                        fontSize = 12.sp,
+                        color = Muted,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(changePhone, { changePhone = it; changePhoneError = "" }, singleLine = true)
+                    if (changePhoneError.isNotBlank()) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(changePhoneError, color = Red, fontSize = 12.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            busy = true
+                            changePhoneError = ""
+                            try {
+                                val e164 = PhoneVerifier.normalize(changePhone)
+                                if (e164 == null) {
+                                    changePhoneError = "Enter a valid number, e.g. 01712345678."
+                                } else {
+                                    val sim =
+                                        withContext(Dispatchers.IO) {
+                                            PhoneVerifier.verify(ctx, e164).wire()
+                                        }
+                                    val updated =
+                                        withContext(Dispatchers.IO) {
+                                            Api.post(
+                                                "/api/auth/phone/change",
+                                                JSONObject().put("phone", e164).put("sim", sim),
+                                            )
+                                        }
+                                    me.value = updated.optJSONObject("user") ?: me.value
+                                    Store.saveMe(me.value)
+                                    showChangePhone = false
+                                }
+                            } catch (e: Exception) {
+                                changePhoneError = e.message ?: "Could not change the number."
+                            } finally {
+                                busy = false
+                            }
+                        }
+                    },
+                    enabled = !busy && changePhone.isNotBlank(),
+                ) { Text("Change", color = GoldDeep, fontWeight = FontWeight.SemiBold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showChangePhone = false }) { Text("Cancel", color = Muted) }
+            },
+        )
+    }
+
     /* ---------- logout confirm ---------- */
     if (confirmLogout) {
         AlertDialog(
             onDismissRequest = { confirmLogout = false },
             title = { Text("Log out?") },
-            text = { Text("Apni abar email diye log in korte parben.") },
+            text = { Text("Apni abar phone number diye log in korte parben.") },
             confirmButton = {
                 TextButton(onClick = {
                     confirmLogout = false

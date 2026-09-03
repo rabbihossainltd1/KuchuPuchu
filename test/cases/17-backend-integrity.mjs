@@ -12,6 +12,9 @@
 
 import { readFile } from "node:fs/promises";
 import { makeD1, makeR2, makeCtx } from "../d1shim.mjs";
+import { makeReg, installGoogleStub } from "../helpers/phoneauth.mjs";
+
+installGoogleStub();
 import { MESSAGE_MAX_LENGTH } from "../../src/shared/constants.ts";
 
 const WORKER = new URL("../../src/worker/index.ts", import.meta.url).href;
@@ -26,7 +29,7 @@ const check = (name, cond, detail) =>
 
 async function mk() {
   const worker = await freshWorker();
-  const env = { DB: makeD1(), MEDIA: makeR2() };
+  const env = { DB: makeD1(), MEDIA: makeR2(), GOOGLE_WEB_CLIENT_ID: "kp-test-web-client" };
   const ctx = makeCtx();
   let ipSeq = 0;
   const call = async (method, path, body, token) => {
@@ -35,7 +38,7 @@ async function mk() {
     if (token) headers.authorization = `Bearer ${token}`;
     // Auth routes are rate limited per client IP, so give every registration its
     // own address unless the test is specifically about the limiter.
-    if (path.startsWith("/api/auth/register"))
+    if (path.startsWith("/api/auth/"))
       headers["cf-connecting-ip"] = `203.1.${(ipSeq >> 8) & 255}.${(ipSeq++ % 250) + 1}`;
     const init = { method, headers };
     if (body !== undefined && method !== "GET") init.body = raw ? body : JSON.stringify(body);
@@ -50,16 +53,11 @@ async function mk() {
     }
     return { status: res.status, json: j, headers: res.headers };
   };
+  const regByTag = makeReg(call);
   const reg = async (tag) => {
-    const r = await call("POST", "/api/auth/register", {
-      email: `${tag}@x.com`,
-      password: "secret123",
-      username: tag,
-      displayName: tag,
-    });
-    if (!r.json.user)
-      throw new Error(`register ${tag} failed: ${JSON.stringify(r.json).slice(0, 90)}`);
-    return r.json;
+    const r = await regByTag(`${tag}@x.com`, tag);
+    if (!r.user) throw new Error(`register ${tag} failed: ${JSON.stringify(r).slice(0, 90)}`);
+    return r;
   };
   const q = (sql, ...bind) => env.DB.prepare(sql).bind(...bind);
   // Statement trace: some bugs are not visible in the payload at all. The list

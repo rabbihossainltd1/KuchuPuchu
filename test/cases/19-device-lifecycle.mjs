@@ -8,6 +8,9 @@
 // worker kept pushing at a signed-out account.
 
 import { makeD1, makeR2, makeCtx } from "../d1shim.mjs";
+import { makeReg, installGoogleStub } from "../helpers/phoneauth.mjs";
+
+installGoogleStub();
 
 const WORKER = new URL("../../src/worker/index.ts", import.meta.url).href;
 let n = 0;
@@ -21,13 +24,13 @@ const check = (name, cond, detail) =>
 
 async function mk() {
   const worker = await freshWorker();
-  const env = { DB: makeD1(), MEDIA: makeR2() };
+  const env = { DB: makeD1(), MEDIA: makeR2(), GOOGLE_WEB_CLIENT_ID: "kp-test-web-client" };
   const ctx = makeCtx();
   let ipSeq = 0;
   const call = async (method, path, body, token) => {
     const headers = { "content-type": "application/json" };
     if (token) headers.authorization = `Bearer ${token}`;
-    if (path.startsWith("/api/auth/register"))
+    if (path.startsWith("/api/auth/"))
       headers["cf-connecting-ip"] = `203.9.${(ipSeq >> 8) & 255}.${(ipSeq++ % 250) + 1}`;
     const init = { method, headers };
     if (body !== undefined) init.body = JSON.stringify(body);
@@ -42,15 +45,11 @@ async function mk() {
     }
     return { status: res.status, json: j };
   };
+  const regByTag = makeReg(call);
   const reg = async (tag) => {
-    const r = await call("POST", "/api/auth/register", {
-      email: `${tag}@x.com`,
-      password: "secret123",
-      username: tag,
-      displayName: tag,
-    });
-    if (!r.json.user) throw new Error(`register ${tag} failed: ${JSON.stringify(r.json)}`);
-    return { user: r.json.user, token: r.json.token };
+    const r = await regByTag(`${tag}@x.com`, tag);
+    if (!r.user) throw new Error(`register ${tag} failed: ${JSON.stringify(r)}`);
+    return { user: r.user, token: r.token };
   };
   const q = (sql, ...bind) => env.DB.prepare(sql).bind(...bind);
   const devices = async (uid) =>
