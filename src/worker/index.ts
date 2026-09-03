@@ -628,20 +628,29 @@ const AI_WELCOME_FALLBACK =
 /** Model aliases tried in order: "-latest" floats with Google's rotations
  *  (specific versions get retired with a 404 — gemini-2.0-flash already
  *  has), and the lite alias covers the flagship being at capacity (503). */
-const GEMINI_WELCOME_MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest"] as const;
+const GEMINI_WELCOME_MODELS = ["gemini-flash-lite-latest", "gemini-flash-latest"] as const;
 
-/** One bounded Gemini completion: model aliases tried in order, hard timeout,
- *  any failure ⇒ null. Never throws — callers own the fallback text. */
+/** One bounded Gemini completion: model aliases tried in order under a
+ *  shared wall-clock budget, any failure ⇒ null. Never throws — callers
+ *  own the fallback text. Live measurements under load: the flagship can
+ *  sit ~17s before answering 503, a winning call can take ~19s, so the
+ *  per-call budget is generous and the lite alias (which answers under
+ *  load) goes FIRST. */
+const GEMINI_CALL_BUDGET_MS = 25_000;
+
 async function geminiComplete(
   env: Env,
   prompt: string,
   maxOutputTokens = 120,
 ): Promise<string | null> {
   if (!env.GEMINI_API_KEY) return null;
+  const started = Date.now();
   for (const model of GEMINI_WELCOME_MODELS) {
+    const remaining = GEMINI_CALL_BUDGET_MS - (Date.now() - started);
+    if (remaining < 4_000) break; // no point starting a call that can't finish
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 9000);
+      const timer = setTimeout(() => ctrl.abort(), remaining);
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
         {
@@ -666,7 +675,7 @@ async function geminiComplete(
         .slice(0, 600);
       if (text) return text;
     } catch {
-      /* next model, then the caller's fallback */
+      /* next model if budget allows, then the caller's fallback */
     }
   }
   return null;
