@@ -116,17 +116,28 @@ fun ProfileScreen(nav: NavController, userId: String) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             var viewerUrl by remember { mutableStateOf<String?>(null) }
+            // THE REFERENCE, NOT THE PAYLOAD FIELD. `/api/users/:id` light rows (the
+            // chat-list snapshot this screen paints from) carry `avatarUrl: null` and
+            // only an `avatarRef`; the bytes live in the per-version avatar cache.
+            // Reading `u.optText("avatarUrl")` here meant: nothing to show until the
+            // network answered, then a fresh 80KB data-URI decode — so an already
+            // downloaded photo reloaded on every app start, while offline it "stayed
+            // loaded" because the cached payload still had the old bytes.
+            val avatarRef = u.optIso("avatarRef")
+            val shownAvatar = rememberAvatarUrl(u.optText("avatarUrl").ifBlank { null }, avatarRef)
             Box {
                 KpAvatar(
                     u.optText("displayName").ifBlank { "?" },
-                    u.optText("avatarUrl").ifBlank { null },
+                    shownAvatar,
                     88.dp,
+                    avatarRef = avatarRef,
                 )
-                // Tapping the photo opens it full-screen (zoom + save).
+                // Tapping the photo opens it full-screen (zoom + save) — the resolved
+                // value, so the viewer works from the cache too.
                 Box(
                     Modifier
                         .matchParentSize()
-                        .clickable { u.optText("avatarUrl").takeIf { it.isNotBlank() }?.let { viewerUrl = it } },
+                        .clickable { shownAvatar?.takeIf { it.isNotBlank() }?.let { viewerUrl = it } },
                 )
             }
             viewerUrl?.let { url ->

@@ -293,8 +293,17 @@ private fun inlineAvatar(raw: String?): String? =
 /** `<userId>@v<version>` — the cache token the light endpoints send. */
 private fun avatarRefOf(raw: String?): String? = avatarValue(raw)?.takeIf { it.contains("@v") }
 
+/**
+ * Resolve what an avatar should actually render: the persistent per-version cache
+ * first, the payload's inline value second, and a single fetch to fill the gap.
+ *
+ * `internal`, not private, because a screen that shows the same picture twice (the
+ * 88dp profile circle and its full-screen viewer) must resolve once and share the
+ * answer — a call site that renders the raw payload field instead of this bypasses
+ * the cache, and that is what made the profile picture reload on every app start.
+ */
 @Composable
-private fun rememberAvatarUrl(url: String?, avatarRef: String?): String? {
+fun rememberAvatarUrl(url: String?, avatarRef: String?): String? {
     val inline = inlineAvatar(url)
     val ref = avatarRefOf(avatarRef)
     // No cache token (a group, or a full payload with no ref): render the inline
