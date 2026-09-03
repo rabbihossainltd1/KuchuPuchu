@@ -17,8 +17,8 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -80,8 +81,9 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /**
- * Phone auth (PHONE_AUTH_PLAN.md) — compact, single-line, one card in the
- * middle of the screen. No OTP, no email, no password.
+ * Phone auth (PHONE_AUTH_PLAN.md) — a real fullscreen page (no popup card):
+ * big brand header at the top, single-line controls below. No OTP, no
+ * email, no password.
  *
  * PHONE → VERIFYING → VERIFY_OK →
  *   same device   → DONE → home
@@ -464,35 +466,18 @@ fun LoginScreen(onAuthed: () -> Unit) {
             .background(Cream)
             .statusBarsPadding()
             .imePadding()
+            .navigationBarsPadding()
             .verticalScroll(scrollState)
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .padding(horizontal = 24.dp, vertical = 20.dp),
     ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .background(Card)
-                .padding(18.dp),
-        ) {
+        // Fullscreen page — no floating card: the content flows from the top
+        // of the screen under a big brand header.
+        Column(Modifier.fillMaxWidth()) {
             // Compact single-line header: small logo + name + subtitle.
             when (stage) {
                 LoginStage.PHONE, LoginStage.VERIFYING, LoginStage.VERIFY_OK -> {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Image(
-                            painterResource(R.drawable.icon_gold),
-                            contentDescription = "KuchuPuchu",
-                            modifier = Modifier.size(34.dp),
-                            contentScale = ContentScale.Fit,
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        Column {
-                            Text("KuchuPuchu", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1)
-                            Text("Sign in with your phone number", fontSize = 11.sp, color = Muted, maxLines = 1)
-                        }
-                    }
-                    Spacer(Modifier.height(14.dp))
+                    AuthHeader("KuchuPuchu", "Sign in with your phone number")
+                    Spacer(Modifier.height(32.dp))
 
                     when (stage) {
                         LoginStage.PHONE -> {
@@ -531,18 +516,8 @@ fun LoginScreen(onAuthed: () -> Unit) {
                 }
 
                 LoginStage.BIND -> {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Image(
-                            painterResource(R.drawable.icon_gold),
-                            contentDescription = "KuchuPuchu",
-                            modifier = Modifier.size(34.dp),
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        Column {
-                            Text("Bind your Gmail", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1)
-                            Text("For recovery if you lose this device", fontSize = 11.sp, color = Muted, maxLines = 1)
-                        }
-                    }
+                    AuthHeader("Bind your Gmail", "For recovery if you lose this device")
+                    Spacer(Modifier.height(28.dp))
                     if (deviceOnly) {
                         Spacer(Modifier.height(6.dp))
                         Text(
@@ -556,7 +531,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
                         Spacer(Modifier.height(6.dp))
                         Text(error, color = Red, fontSize = 12.sp, maxLines = 2)
                     }
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(24.dp))
                     GoogleButton(text = "Continue with Google", busy = busy, enabled = !busy) { bindGoogle() }
                     TextButton(onClick = { stage = LoginStage.PHONE; error = "" }) {
                         Text("Back", color = Muted, maxLines = 1)
@@ -564,17 +539,18 @@ fun LoginScreen(onAuthed: () -> Unit) {
                 }
 
                 LoginStage.PROFILE -> {
-                    Text("Set up your profile", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1)
-                    Spacer(Modifier.height(10.dp))
+                    AuthHeader("Set up your profile", "This is how friends will see you")
+                    Spacer(Modifier.height(28.dp))
                     Row(
                         Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Box(
                             Modifier
-                                .size(64.dp)
+                                .size(68.dp)
                                 .clip(CircleShape)
-                                .background(Cream)
+                                .background(Card)
+                                .border(1.dp, Muted.copy(alpha = 0.3f), CircleShape)
                                 .clickable {
                                     avatarPicker.launch(
                                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
@@ -658,11 +634,21 @@ fun LoginScreen(onAuthed: () -> Unit) {
                     GoldBtn("Continue", Modifier.fillMaxWidth(), enabled = !busy) { saveProfile() }
                 }
 
-                LoginStage.SAVING -> VerifyingPane("Setting up your profile")
+                LoginStage.SAVING -> {
+                    AuthHeader("KuchuPuchu", null)
+                    Spacer(Modifier.height(40.dp))
+                    VerifyingPane("Setting up your profile")
+                }
 
-                LoginStage.DONE -> SuccessPane("All set!")
+                LoginStage.DONE -> {
+                    AuthHeader("KuchuPuchu", null)
+                    Spacer(Modifier.height(40.dp))
+                    SuccessPane("All set!")
+                }
 
                 LoginStage.WAITING -> {
+                    AuthHeader("KuchuPuchu", null)
+                    Spacer(Modifier.height(40.dp))
                     if (!waitFailed) {
                         VerifyingPane(
                             "Waiting for approval",
@@ -672,7 +658,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
                         GoldBtn("Cancel", Modifier.fillMaxWidth(), enabled = true) { cancelApproval() }
                     } else {
                         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("Failed to verify", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1)
+                            Text("Failed to verify", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1)
                             Spacer(Modifier.height(4.dp))
                             Text(
                                 waitFailReason,
@@ -715,19 +701,8 @@ fun LoginScreen(onAuthed: () -> Unit) {
                 }
 
                 LoginStage.RECOVERY -> {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Image(
-                            painterResource(R.drawable.icon_gold),
-                            contentDescription = "KuchuPuchu",
-                            modifier = Modifier.size(34.dp),
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        Column {
-                            Text("Recover account", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1)
-                            Text("Sign in with the linked Google account", fontSize = 11.sp, color = Muted, maxLines = 1)
-                        }
-                    }
-                    Spacer(Modifier.height(12.dp))
+                    AuthHeader("Recover account", "Sign in with the linked Google account")
+                    Spacer(Modifier.height(28.dp))
                     OutlinedTextField(
                         phone,
                         { phone = it; error = "" },
@@ -787,11 +762,34 @@ private fun GoogleButton(text: String, busy: Boolean, enabled: Boolean, onClick:
     }
 }
 
-/** Compact pulsing-ring "working" pane. */
+/** Fullscreen auth header: big logo + stage title (+ optional subtitle). */
+@Composable
+private fun AuthHeader(title: String, subtitle: String?) {
+    Column(
+        Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Spacer(Modifier.height(8.dp))
+        Image(
+            painterResource(R.drawable.icon_gold),
+            contentDescription = "KuchuPuchu",
+            modifier = Modifier.size(76.dp),
+            contentScale = ContentScale.Fit,
+        )
+        Spacer(Modifier.height(16.dp))
+        Text(title, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1)
+        if (subtitle != null) {
+            Spacer(Modifier.height(4.dp))
+            Text(subtitle, fontSize = 13.sp, color = Muted, maxLines = 1)
+        }
+    }
+}
+
+/** Pulsing-ring "working" pane. */
 @Composable
 private fun VerifyingPane(title: String, subtitle: String? = null) {
     Column(
-        Modifier.fillMaxWidth().padding(vertical = 18.dp),
+        Modifier.fillMaxWidth().padding(vertical = 36.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         val pulse = rememberInfiniteTransition(label = "verify")
@@ -807,18 +805,18 @@ private fun VerifyingPane(title: String, subtitle: String? = null) {
             infiniteRepeatable(tween(1100, easing = FastOutSlowInEasing), RepeatMode.Restart),
             label = "alpha",
         )
-        Box(Modifier.size(64.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(84.dp), contentAlignment = Alignment.Center) {
             androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
                 val r = (size.minDimension / 2f) * ringScale
                 drawCircle(color = Gold.copy(alpha = ringAlpha), radius = r, style = Stroke(width = 4f))
             }
-            CircularProgressIndicator(color = Gold, strokeWidth = 2.5.dp, modifier = Modifier.size(30.dp))
+            CircularProgressIndicator(color = Gold, strokeWidth = 2.5.dp, modifier = Modifier.size(34.dp))
         }
-        Spacer(Modifier.height(10.dp))
-        Text(title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Ink, maxLines = 1)
+        Spacer(Modifier.height(12.dp))
+        Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Ink, maxLines = 1)
         if (subtitle != null) {
-            Spacer(Modifier.height(2.dp))
-            Text(subtitle, fontSize = 11.sp, color = Muted, textAlign = TextAlign.Center, maxLines = 2)
+            Spacer(Modifier.height(3.dp))
+            Text(subtitle, fontSize = 12.sp, color = Muted, textAlign = TextAlign.Center, maxLines = 2)
         }
     }
 }
@@ -827,7 +825,7 @@ private fun VerifyingPane(title: String, subtitle: String? = null) {
 @Composable
 private fun SuccessPane(title: String) {
     Column(
-        Modifier.fillMaxWidth().padding(vertical = 18.dp),
+        Modifier.fillMaxWidth().padding(vertical = 36.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         val circle = remember { Animatable(0f) }
@@ -836,7 +834,7 @@ private fun SuccessPane(title: String) {
             circle.animateTo(1f, tween(300))
             check.animateTo(1f, tween(340))
         }
-        Box(Modifier.size(64.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(84.dp), contentAlignment = Alignment.Center) {
             androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
                 val c = size.minDimension / 2f
                 drawCircle(color = Color(0xFF16A34A), radius = c * circle.value)
