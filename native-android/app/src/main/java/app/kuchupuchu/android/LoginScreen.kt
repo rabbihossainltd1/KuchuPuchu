@@ -888,7 +888,7 @@ private fun PhoneField(
             singleLine = true,
             shape = FieldShape,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = imeAction),
-            keyboardActions = KeyboardActions(onDone = onDone),
+            keyboardActions = KeyboardActions(onDone = { onDone() }),
             modifier = Modifier.weight(1f),
         )
     }
