@@ -104,3 +104,23 @@ reset.
    download from Maven Central hit a transient 429. `scripts/ktlint-check.sh`
    now retries the download (--retry 6 --retry-all-errors) so a rate-limit
    blip can never fail CI again.
+
+## AI + typing round — v3.9.18 / 94 (2026-09-04)
+
+1. **AI identity fixed** — the bot used to invent a developer or agree with
+   whatever name a user suggested ("Sohel vai"). The worker's reply prompt now
+   carries a fixed fact block: KuchuPuchu is created/developed/owned by
+   Rabbihossainltd (@rabbihossainltd, verified, Rabbihossainltd@gmail.com,
+   Rajshahi BD), and it must politely correct any other suggested name.
+2. **Banglish spelling rule** — explicit prompt rule with standard
+   transliteration examples (kemon achen, bhalo achen, dhonnobad, kivabe);
+   unsure of a word → write it in Bengali script instead.
+3. **AI typing indicator** — in-thread three-dot bubble + header "typing..."
+   while the newest message in the AI chat is the user's own (the bot always
+   replies, so that state == generating).
+4. **Word-by-word reply reveal** — a NEW AI reply (created after the chat
+   opened) types itself out with a caret ▍, 30–45ms per word, auto-pinned to
+   the bottom unless the user scrolled up. History never re-types on open.
+5. **Google-fix guard** — 5 new suite assertions pin the GoogleAuth shape:
+   filterByAuthorizedAccounts(false), native-first ordering, blank-token
+   relaunch, no "Google returned no ID token" dead-end, retryable message.
