@@ -796,8 +796,10 @@ const OWNER_INTENT =
 // "make me a photo of…" style requests → the image generation flow. Both a
 // creation verb AND a picture noun must appear, so ordinary chat about photos
 // ("photo pathalam") never triggers a generation.
-const IMAGE_MAKE_VERB = /(make|create|draw|generate|paint|banao|banai|banan|banabe|আঁকো|আঁকা|বানাও|বানান|বানাবে)/i;
-const IMAGE_NOUN = /(photo|picture|image|drawing|painting|illustration|logo|avatar|poster|art|ছবি|ড্রয়িং|পোস্টার|লোগো)/i;
+const IMAGE_MAKE_VERB =
+  /(make|create|draw|generate|paint|banao|banai|banan|banabe|আঁকো|আঁকা|বানাও|বানান|বানাবে)/i;
+const IMAGE_NOUN =
+  /(photo|picture|image|drawing|painting|illustration|logo|avatar|poster|art|ছবি|ড্রয়িং|পোস্টার|লোগো)/i;
 
 function arrayBufferToBase64(buf: ArrayBuffer): string {
   let bin = "";
