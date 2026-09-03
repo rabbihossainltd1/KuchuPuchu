@@ -62,6 +62,15 @@ fun initials(name: String): String {
     return (parts[0].take(1) + parts[1].take(1)).uppercase()
 }
 
+/** The app-wide clock: Bangladesh Standard Time (owner rule) — Asia/Dhaka,
+ *  UTC+6, no DST. Every user-visible timestamp formats in BST regardless of
+ *  the device's timezone setting. */
+val DHAKA: java.time.ZoneId = java.time.ZoneId.of("Asia/Dhaka")
+
+fun atDhaka(instant: java.time.Instant): java.time.ZonedDateTime = instant.atZone(DHAKA)
+
+fun dhakaNow(): java.time.ZonedDateTime = java.time.ZonedDateTime.now(DHAKA)
+
 /** Chat-list style timestamp: 14:05 / Yesterday / Mon / 12 Aug — always in
  *  Bangladesh Standard Time (owner rule): Asia/Dhaka, UTC+6, no DST, whatever
  *  the device's timezone happens to be. */
@@ -72,9 +81,8 @@ fun listStamp(iso: String): String {
     } catch (e: Exception) {
         return ""
     }
-    val dhaka = java.time.ZoneId.of("Asia/Dhaka")
-    val now = java.time.ZonedDateTime.now(dhaka)
-    val z = t.atZone(dhaka)
+    val now = dhakaNow()
+    val z = atDhaka(t)
     return when {
         z.toLocalDate() == now.toLocalDate() ->
             String.format("%02d:%02d", z.hour, z.minute)

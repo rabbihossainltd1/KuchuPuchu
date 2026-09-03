@@ -3691,6 +3691,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // blank members) and around people who had blocked the creator.
     const memberIds: string[] = [];
     for (const candidate of requested) {
+      // System accounts live in 1:1 chats only (owner rule): they deliver
+      // security notices / AI help, not group chatter.
+      if (candidate === OFFICIAL_BOT_ID || candidate === AI_BOT_ID) continue;
       if (!(await one(db, "SELECT id FROM users WHERE id = ?", candidate))) continue;
       if (await blockedBetween(db, uid, candidate)) continue;
       memberIds.push(candidate);
@@ -3939,6 +3942,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (!target) fail(400, "Bad user.");
     const targetUser = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", target);
     if (!targetUser) fail(404, "User not found.");
+    // System accounts live in 1:1 chats only (owner rule).
+    if (target === OFFICIAL_BOT_ID || target === AI_BOT_ID)
+      fail(400, "Official accounts can't be added to groups.", "BOT_ACCOUNT");
     if (await blockedBetween(db, uid, target)) fail(403, "You can't add this player.", "BLOCKED");
     await run(
       db,

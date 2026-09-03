@@ -591,6 +591,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
                                 onDone = {
                                     focusManager.clearFocus()
                                     keyboard?.hide()
+                                    onContinue()
                                 },
                             )
                             if (error.isNotBlank()) {
@@ -795,7 +796,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
                         country = country,
                         onPickCountry = { showCountries = true },
                         imeAction = ImeAction.Done,
-                        onDone = {},
+                        onDone = { checkRecoveryNumber() },
                     )
                     if (error.isNotBlank()) {
                         Spacer(Modifier.height(6.dp))

@@ -247,7 +247,7 @@ private fun groupByDay(calls: List<JSONObject>): List<Pair<String, List<JSONObje
     val out = LinkedHashMap<String, MutableList<JSONObject>>()
     for (c in calls) {
         val day =
-            runCatching { java.time.Instant.parse(c.optString("createdAt")).atZone(java.time.ZoneId.systemDefault()).toLocalDate() }
+            runCatching { java.time.Instant.parse(c.optString("createdAt")).atZone(DHAKA).toLocalDate() }
                 .getOrNull()
                 ?: today
         val label =
