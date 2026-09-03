@@ -510,8 +510,10 @@ fun InCallVideoScreen(call: CallUi) {
             // the chat below; the same gesture toggles the controls.
             .clickable { controlsVisible = !controlsVisible },
     ) {
-        /* Either feed can be promoted full-screen by tapping the PiP. */
-        VideoRenderer(engine, remote = !swapped)
+        /* Either feed can be promoted full-screen by tapping the PiP — but an
+         * off camera is never promotable, or the whole screen goes black and
+         * the opponent is left in the tile. */
+        VideoRenderer(engine, remote = !effSwap)
 
         if (!engine.hasRemote) {
             Column(
@@ -555,49 +557,70 @@ fun InCallVideoScreen(call: CallUi) {
 
         /* PiP self-view — draggable anywhere on the frame.
          *
-         * The old clamp used `size` from INSIDE the tile's own pointerInput,
-         * i.e. the tile's own 96x132dp box rather than the screen — so the
-         * reachable area was roughly 60x80dp next to the corner it was pinned
-         * to. That is the whole "freely move kora jai na" report. Offsets are
-         * now absolute coordinates inside the full-screen BoxWithConstraints,
-         * clamped to (parent - self), so the tile reaches every edge while
-         * staying fully visible. */
-        BoxWithConstraints(Modifier.fillMaxSize().zIndex(1f)) {
-            val dm = LocalDensity.current
-            val parentW = with(dm) { maxWidth.toPx() }
-            val parentH = with(dm) { maxHeight.toPx() }
-            val selfW = with(dm) { 96.dp.toPx() }
-            val selfH = with(dm) { 132.dp.toPx() }
-            val edge = with(dm) { 14.dp.toPx() }
-            val topLimit = with(dm) { 54.dp.toPx() }
-            val bottomLimit = with(dm) { 150.dp.toPx() }
-            LaunchedEffect(parentW, parentH) {
-                if (pipX < 0f) {
-                    pipX = (parentW - selfW - edge).coerceAtLeast(0f)
-                    pipY = (parentH - selfH - bottomLimit).coerceAtLeast(topLimit)
+         * Two separate complaints lived here:
+         *  - the reachable area. It is now the whole frame MINUS the strip that
+         *    would bury the tile, and that reservation is only made while the
+         *    strip is actually on screen. Tap the screen to hide the controls
+         *    and the corners the fixed 54dp/150dp margins used to forbid become
+         *    reachable, which is the "jekhane iccha othere nite pari na" part.
+         *  - a black rectangle that stayed parked over the call whenever the own
+         *    camera was off. The tile IS the self view, so when there is no self
+         *    feed there is nothing to draw: it is not composed at all, and it
+         *    returns by itself the moment the camera is on again (cameraOff is
+         *    mutableStateOf, so flipping it recomposes this branch). */
+        val localFeedUp = !engine.cameraOff
+        val effSwap = swapped && localFeedUp
+        if (localFeedUp) {
+            BoxWithConstraints(Modifier.fillMaxSize().zIndex(1f)) {
+                val dm = LocalDensity.current
+                val parentW = with(dm) { maxWidth.toPx() }
+                val parentH = with(dm) { maxHeight.toPx() }
+                val selfW = with(dm) { 96.dp.toPx() }
+                val selfH = with(dm) { 132.dp.toPx() }
+                val edge = with(dm) { 14.dp.toPx() }
+                // While the strip and the name row are visible the tile must not
+                // slide under them; hidden, the whole frame belongs to it.
+                val stripGap = with(dm) { if (controlsVisible) 150.dp.toPx() else edge }
+                val headGap = with(dm) { if (controlsVisible) 54.dp.toPx() else edge }
+                val minX = edge
+                val maxX = (parentW - selfW - edge).coerceAtLeast(minX)
+                val minY = headGap
+                val maxY = (parentH - selfH - stripGap).coerceAtLeast(minY)
+                LaunchedEffect(parentW, parentH, controlsVisible) {
+                    if (pipX < 0f) {
+                        pipX = maxX
+                        pipY = maxY
+                    }
+                    // Rotation, a resize, or the strip reappearing must not leave
+                    // the tile off-screen or unreachable under the controls.
+                    pipX = pipX.coerceIn(minX, maxX)
+                    pipY = pipY.coerceIn(minY, maxY)
                 }
-                // Rotation / a resize must not leave the tile off-screen.
-                pipX = pipX.coerceIn(0f, (parentW - selfW).coerceAtLeast(0f))
-                pipY = pipY.coerceIn(topLimit, (parentH - selfH).coerceAtLeast(topLimit))
-            }
-            Box(
-                Modifier
-                    .offset { IntOffset(pipX.roundToInt(), pipY.roundToInt()) }
+                Box(
+                    Modifier
+                        .offset { IntOffset(pipX.roundToInt(), pipY.roundToInt()) }
                     // One pointerInput for BOTH drag and tap-to-swap: layering a
                     // separate .clickable on the same box made two gesture
                     // detectors arbitrate every touch (the old drag lag). The
                     // first down is consumed too, so a tap no longer leaks
                     // through to the full-screen Box and flickers the controls.
-                    .pointerInput(parentW, parentH) {
+                    // Keyed on controlsVisible as well, because that is what the
+                    // captured limits below depend on.
+                    .pointerInput(parentW, parentH, controlsVisible) {
                         awaitEachGesture {
                             val down = awaitFirstDown().also { it.consume() }
                             var moved = false
                             drag(down.id) { change ->
                                 change.consume()
                                 val d = change.positionChange()
+                                pipX = (pipX + d.x).coerceIn(minX, maxX)
+                                pipY = (pipY + d.y).coerceIn(minY, maxY)
+                                // Any movement of the finger counts as a drag, but
+                                // the tile only counts as MOVED once the clamped
+                                // offset itself changed: pushing against an edge
+                                // used to end the tap path, so the tile "stuck"
+                                // under the strip and the swap stopped working.
                                 if (d.x != 0f || d.y != 0f) moved = true
-                                pipX = (pipX + d.x).coerceIn(0f, (parentW - selfW).coerceAtLeast(0f))
-                                pipY = (pipY + d.y).coerceIn(topLimit, (parentH - selfH).coerceAtLeast(topLimit))
                             }
                             // Tap the self-view and the two feeds swap places:
                             // own camera full-screen, opponent's video in the
@@ -609,8 +632,9 @@ fun InCallVideoScreen(call: CallUi) {
                     .clip(RoundedCornerShape(14.dp))
                     .background(Color(0xFF33302B))
                     .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(14.dp)),
-            ) {
-                VideoRenderer(engine, remote = swapped, fit = true, pip = true)
+                ) {
+                    VideoRenderer(engine, remote = effSwap, fit = true, pip = true)
+                }
             }
         }
 

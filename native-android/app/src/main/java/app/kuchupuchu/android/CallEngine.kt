@@ -823,6 +823,15 @@ class CallEngine(private val app: Application) {
         if (videoTrack == null) {
             scope.launch {
                 withContext(Dispatchers.IO) { runCatching { capture(true) } }
+                if (videoTrack == null) {
+                    // No capturer (permission denied, enumeration failed, the
+                    // surface is gone). capture() left cameraOff true; say so
+                    // instead of flipping the call to a VIDEO label with nothing
+                    // behind it — that is the "opponent kichu dekhe na" case.
+                    cameraOff = true
+                    notify("Camera couldn't start. Abar try koro.")
+                    return@launch
+                }
                 videoTrack?.let { track ->
                     val sender = pc?.senders?.find { it.track()?.kind() == "video" }
                         ?: // Voice call: reuse the always-present sendrecv video
@@ -838,6 +847,11 @@ class CallEngine(private val app: Application) {
                 // Audio→video conversion: speaker becomes the default (user
                 // rule), Bluetooth/wired headsets keep the audio.
                 markVideoRoute()
+                // Every other transition publishes and this one used not to: the
+                // call UI and §31's Telecom record kept the AUDIO shape after the
+                // tap, so the call "never converted" locally while the frames were
+                // already flowing to the peer.
+                publishChange()
             }
             return
         }
@@ -928,6 +942,10 @@ class CallEngine(private val app: Application) {
         localView?.let { runCatching { track.addSink(it) } }
         active = active?.copy(kind = "VIDEO")
         markVideoRoute()
+        // stopShare published and startShare did not, so a screen shared on a
+        // voice call left the other phone on its voice screen — no renderer, no
+        // path to the share at all — until an unrelated re-render saved it.
+        publishChange()
     }
 
     private fun stopShare() {
