@@ -3,6 +3,7 @@
 // avatar, the login-approval card carrying the attempt's origin (IP, place,
 // time), and the official notification account being strictly one-way.
 
+import { readFileSync } from "node:fs";
 import { makeD1, makeR2, makeCtx } from "../d1shim.mjs";
 import { makeReg, installGoogleStub, phoneFrom, fakeIdToken } from "../helpers/phoneauth.mjs";
 
@@ -376,6 +377,81 @@ const convBetween = (db, a, b) =>
     otherSide?.other?.moderator === false,
     JSON.stringify(otherSide?.other?.moderator),
   );
+}
+
+// ---- 8. owner identity: profile card, pure-Bangla rule, image fallback ----
+{
+  const k = await mk();
+  const a = await k.reg("ownerq@x.com", "ownerq");
+  await k.call("POST", "/api/ai/welcome", {}, a.token);
+  const conv = convBetween(k.db, "kp_ai_bot", a.user.id);
+  const send = (body) =>
+    k.call(
+      "POST",
+      `/api/conversations/${conv.id}/messages`,
+      { kind: "TEXT", body, clientId: `c-own-${Math.random()}` },
+      a.token,
+    );
+  await send("owner ke? ke banaiyechhe ei app?");
+  const cards = () =>
+    k.db._db
+      .prepare("SELECT COUNT(*) n FROM messages WHERE conv_id = ? AND kind = 'OWNER_CARD'")
+      .get(conv.id).n;
+  check("owner question drops the tappable profile card", cards() === 1, String(cards()));
+  const reply = k.db._db
+    .prepare(
+      "SELECT body FROM messages WHERE conv_id = ? AND sender_id = 'kp_ai_bot' AND kind = 'TEXT' ORDER BY rowid DESC",
+    )
+    .get(conv.id);
+  check("owner question still gets a text answer", !!reply?.body, JSON.stringify(reply?.body));
+  await send("ar developer ke tomader?");
+  check("card is deduped inside a 10-message window", cards() === 1, String(cards()));
+
+  // A fresh user asking a NORMAL question gets no card.
+  const b = await k.reg("normalq@x.com", "normalq");
+  await k.call("POST", "/api/ai/welcome", {}, b.token);
+  const convB = convBetween(k.db, "kp_ai_bot", b.user.id);
+  await k.call(
+    "POST",
+    `/api/conversations/${convB.id}/messages`,
+    { kind: "TEXT", body: "kemon acho?", clientId: "c-normal-1" },
+    b.token,
+  );
+  const cardsB = k.db._db
+    .prepare("SELECT COUNT(*) n FROM messages WHERE conv_id = ? AND kind = 'OWNER_CARD'")
+    .get(convB.id).n;
+  check("a normal question drops no card", cardsB === 0, String(cardsB));
+
+  // Photo-create intent without GEMINI_API_KEY: no IMAGE message, the text
+  // fallback still answers — the user is never left silent.
+  await send("amar ekta photo banao — a cat in space");
+  const botImages = k.db._db
+    .prepare(
+      "SELECT COUNT(*) n FROM messages WHERE conv_id = ? AND sender_id = 'kp_ai_bot' AND kind = 'IMAGE'",
+    )
+    .get(conv.id).n;
+  check("no image key → no IMAGE message from the bot", botImages === 0, String(botImages));
+  const lastBot = k.db._db
+    .prepare(
+      "SELECT body FROM messages WHERE conv_id = ? AND sender_id = 'kp_ai_bot' ORDER BY rowid DESC",
+    )
+    .get(conv.id);
+  check("photo request still gets a text answer", !!lastBot?.body, "");
+
+  // The persona itself (static source checks).
+  const src = readFileSync(new URL("../../src/worker/index.ts", import.meta.url), "utf8");
+  check("persona carries MD Rabbi Hossain", src.includes("MD Rabbi Hossain"));
+  check(
+    "persona carries the owner's email + website",
+    src.includes("info@rabbihossainltd.online") && src.includes("https://rabbihossainltd.online"),
+  );
+  check(
+    "persona carries all four social handles",
+    ["@Rabbihossainltd", "@Rabbihossainltd1", "@Rabbihossainltd0"].every((h) => src.includes(h)) &&
+      src.includes("TikTok @Rabbihossainltd"),
+  );
+  check("pure-Bengali-script rule present", src.includes("pure Bengali"));
+  check("the retired Banglish-spelling rule is gone", !src.includes("kemon achen"));
 }
 
 console.log(lines.join("\n"));
