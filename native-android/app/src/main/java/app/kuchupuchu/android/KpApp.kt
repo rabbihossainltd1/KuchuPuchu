@@ -25,6 +25,12 @@ fun KpApp() {
     val nav = rememberNavController()
     val authed by Store.authed
 
+    // Owner rule (2026-09-04): the ONLY launch-time permission asks are
+    // notification permission and the battery-optimization exemption dialog —
+    // both on the first signed-in open, once per install. Camera/mic are asked
+    // contextually at the feature that needs them (MainActivity.ensurePermissions).
+    if (authed) FirstRunPermissions()
+
     // Notification tap → open the conversation. Collect the FLOW instead of
     // reading a one-shot var: a tap while already signed in (singleTop
     // onNewIntent) emits here immediately, and on a cold start a tap that
@@ -81,6 +87,60 @@ fun KpApp() {
             }
             // Call screens float above everything while a call is live.
             CallGate()
+        }
+    }
+}
+
+/**
+ * First-open permission flow (once per install):
+ *   1. Notification permission (API 33+) — without it messages are silent.
+ *   2. Battery-optimization exemption — the single OEM-agnostic switch that
+ *      keeps background message/call delivery alive; asked via the system
+ *      dialog right after the notification prompt resolves.
+ *
+ * Denied or granted, it never asks again (a prefs flag). The exemption can
+ * still be re-granted later from Android Settings → Apps → Battery.
+ */
+@Composable
+private fun FirstRunPermissions() {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val notifLauncher =
+        androidx.activity.compose.rememberLauncherForActivityResult(
+            androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+        ) {
+            // Whatever the answer, move on to the battery dialog.
+            askBatteryExemption(ctx)
+        }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        val p = ctx.getSharedPreferences("kp", 0)
+        // Flag set BEFORE the prompts fire: a process death between the two
+        // dialogs must not replay them on the next open.
+        if (p.getBoolean("kp_first_perms_done", false)) return@LaunchedEffect
+        p.edit().putBoolean("kp_first_perms_done", true).apply()
+        val needNotif =
+            android.os.Build.VERSION.SDK_INT >= 33 &&
+                androidx.core.content.ContextCompat.checkSelfPermission(
+                    ctx,
+                    android.Manifest.permission.POST_NOTIFICATIONS,
+                ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (needNotif) {
+            notifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            askBatteryExemption(ctx)
+        }
+    }
+}
+
+private fun askBatteryExemption(ctx: android.content.Context) {
+    runCatching {
+        val pm = ctx.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+        if (!pm.isIgnoringBatteryOptimizations(ctx.packageName)) {
+            ctx.startActivity(
+                android.content.Intent(
+                    android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    android.net.Uri.parse("package:${ctx.packageName}"),
+                ),
+            )
         }
     }
 }

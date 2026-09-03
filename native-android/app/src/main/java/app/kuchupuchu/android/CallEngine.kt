@@ -169,9 +169,10 @@ class CallEngine(private val app: Application) {
     private var poll: Job? = null
     private val scope = CoroutineScope(
         SupervisorJob() + Dispatchers.Main.immediate +
-            CoroutineExceptionHandler { _, throwable ->
-                android.util.Log.e("KP_CRASH", "CallEngine uncaught", throwable)
-            }
+            // Owner rule (2026-09-04): no log capture anywhere in the app.
+            // The handler stays — swallowing silently is still better than a
+            // crash — it just no longer writes anywhere.
+            CoroutineExceptionHandler { _, _ -> }
     )
 
     // v3.7 realtime: the call's signalling socket + one shared event listener.

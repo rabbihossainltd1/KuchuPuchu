@@ -28,10 +28,6 @@ object KpPush {
         val cfg =
             runCatching { Api.get("/api/config/firebase", force = true).optJSONObject("firebase") }.getOrNull()
         if (cfg == null || cfg.optString("applicationId").isBlank()) {
-            // Breadcrumb for the FCM init path — an empty push log plus this is
-            // the on-device proof that Firebase was never configured (no token,
-            // so no FCM at all), versus a configured-but-OEM-killed process.
-            KpDiag.log(ctx, "fcm init FAILED (no firebase config from worker / offline) -> NO token, NO push")
 
             // Do NOT latch `enabled = false` any more. This route is public, so
             // the only ways it fails are transient (offline cold start, DNS/TLS
@@ -61,7 +57,6 @@ object KpPush {
             }.getOrDefault(false)
         enabled = ok
         decided = true
-        KpDiag.log(ctx, if (ok) "fcm init OK (FirebaseApp created)" else "fcm init FAILED (no FirebaseApp)")
         return ok
     }
 
@@ -147,7 +142,6 @@ object KpPush {
         runCatching {
             FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
                 if (token.isNotBlank()) {
-                    KpDiag.log(ctx, "fcm token received (${token.take(10)}…) -> register with worker")
                     post(ctx, token)
                 }
             }
@@ -231,11 +225,6 @@ class KpPushService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         val data = message.data
-        // PRIMARY witness: this runs ONLY when the process is handed the FCM
-        // data message. If a message was sent in the same minute but there is
-        // no such line in the app log, FCM/OEM never delivered it to the app —
-        // that is the launcher's freeze/kill, not app code.
-        KpDiag.log(this, "FCM data received type=${data["type"]}")
         // onMessageReceived returns as soon as it hands off, and the OS is then
         // free to freeze the process — mid-network-call, in the one background
         // case this code exists for. Every handler here is dispatched onto a
@@ -265,7 +254,6 @@ class KpPushService : FirebaseMessagingService() {
         // background (process alive), where the rich Call back / Message action
         // card is the desired behaviour.
         if (Store.foreground) {
-            KpDiag.log(this, "missed_call fg=true -> SKIP (ring UI already showed it)")
             return
         }
         // Retract the stuck "incoming / X is calling" card for THIS call before
@@ -275,7 +263,6 @@ class KpPushService : FirebaseMessagingService() {
         // Cancel any across-category call card + the fullscreen incoming (which
         // also stops the ring tone), then post the rich missed-call card
         // (Call back / Message).
-        KpDiag.log(this, "missed_call fg=false -> cancelIncoming + post MISSED card (Call-back/Message)")
         CallNotify.cancelIncoming(this)
         KpNotify.cancelSystemCallCards(this)
         KpNotify.missedCall(
@@ -295,10 +282,6 @@ class KpPushService : FirebaseMessagingService() {
     private fun handleCall(data: Map<String, String>) {
         val callId = data["callId"]
         val engine = CallEngine.instance
-        KpDiag.log(
-            this,
-            "call ${callId?.take(8)} fg=${Store.foreground} enginePolling=${engine?.polling} -> ${if (Store.foreground) "engine handles (nudge/poll)" else if (engine?.polling == true) "engine polling rings fullscreen" else "post FULLSCREEN"}",
-        )
         if (callId.isNullOrBlank()) return
         if (callId in CallEngine.ignoredCalls) return
         // Only skip the heads-up when the engine is actually alive and polling.
@@ -334,7 +317,6 @@ class KpPushService : FirebaseMessagingService() {
             // fullScreenIntent + Accept/Decline, so the system launches
             // KuchuPuchu fullscreen — the WhatsApp-style ring for a backgrounded
             // app. Drop any other call card first (no double card).
-            KpDiag.log(this, "call ${callId.take(8)} -> postCallNotify in= FULLSCREEN+Accept/Decline")
             KpNotify.cancelSystemCallCards(this)
             CallNotify.incoming(
                 this,
@@ -363,29 +345,11 @@ class KpPushService : FirebaseMessagingService() {
         // conversation (covers a push sent between the user tapping Mute and
         // the next list refresh — the flag the server saw was already stale).
         val muted = data["muted"] == "1" || ScreenStore.isMuted(convoId)
-        // Breadcrumb: proves a data-only push reached the process, and in
-        // which state (foreground / background / woken-from-dead) — the A/B
-        // push test depends on exactly this signal.
-        Thread {
-            runCatching {
-                Api.loadToken(this)
-                Api.post(
-                    "/api/debug/clientlog",
-                    org.json.JSONObject()
-                        .put("stage", "push")
-                        .put("detail", "data-msg fg=" + Store.foreground + " route=" + Store.route + " muted=" + muted + " from=" + data["fromName"]),
-                )
-            }
-        }.start()
         // A query/arg on the route (chat/<id>?media=1 style) used to defeat the
         // exact match, so a notification card appeared over the OPEN chat.
         // Boundary-checked startsWith — a bare startsWith would also suppress on
         // chat/123 while the user reads chat/12.
         val inChat = Store.foreground && (Store.route == "chat/$convoId" || Store.route.startsWith("chat/$convoId?"))
-        KpDiag.log(
-            this,
-            "msg ${convoId.take(8)} fg=${Store.foreground} route=${Store.route.take(22)} muted=$muted inChat=$inChat -> ${if (Store.foreground) "SOUND_ONLY (no card)" else "RICH_CARD"}",
-        )
         ScreenStore.pokeInbox()
         // Foreground rule (locked spec): a notification card is NEVER shown
         // while the app is on screen. In the open chat the WS "message"/"conv"

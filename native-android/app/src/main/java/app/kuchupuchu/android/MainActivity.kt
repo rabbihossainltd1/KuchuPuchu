@@ -1,8 +1,6 @@
 package app.kuchupuchu.android
 
-import android.Manifest
 import android.content.Intent
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -25,8 +23,40 @@ class MainActivity : ComponentActivity() {
      *  reported as a failure to the other. Each request now owns a generation. */
     private var shareGen = 0L
 
+    /**
+     * Contextual permission gate (owner rule 2026-09-04): permissions are asked
+     * at the moment the user enters the feature that needs them — camera when a
+     * camera feature opens, mic when a call/voice note starts — never in one
+     * bulk dialog at launch. The only first-open asks (notification + battery
+     * exemption) live in KpApp's FirstRunPermissions gate.
+     *
+     * The callback runs whether or not everything was granted — callers own
+     * the degraded behaviour (a video call without camera is a voice call; a
+     * denied mic surfaces the engine's own error message).
+     */
+    @Volatile
+    private var askCb: (() -> Unit)? = null
+
     private val ask =
-        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+            val cb = askCb
+            askCb = null
+            cb?.invoke()
+        }
+
+    /** Ask for `perms` (only the still-missing ones), then run [onProceed]. */
+    fun ensurePermissions(perms: List<String>, onProceed: () -> Unit) {
+        val missing =
+            perms.filter {
+                ContextCompat.checkSelfPermission(this, it) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            }
+        if (missing.isEmpty()) {
+            onProceed()
+            return
+        }
+        askCb = onProceed
+        ask.launch(missing.toTypedArray())
+    }
 
     private val shareAsk =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -36,19 +66,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Crash evidence trap: if the last session crashed, the exact cause
-        // surfaces as a toast (first line + top frames) so it can be
-        // screenshotted and fixed instead of a mystery "app crash kore".
-        val prevHandler = Thread.getDefaultUncaughtExceptionHandler()
-        Thread.setDefaultUncaughtExceptionHandler { t, e ->
-            runCatching {
-                java.io.File(filesDir, "kp_crash.txt").writeText(
-                    e.javaClass.name + ": " + (e.message ?: "") + "\n" +
-                        e.stackTrace.take(8).joinToString("\n") { it.toString() },
-                )
-            }
-            prevHandler?.uncaughtException(t, e)
-        }
         // Edge-to-edge on every API level, so the Compose-side insets are the
         // single source of truth. (targetSdk 35 forces this on Android 15+
         // anyway — setDecorFitsSystemWindows(true) and statusBarColor are
@@ -56,7 +73,6 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         current = this
         Api.loadToken(this)
-        reportPreviousCrash()
         Coil.setImageLoader(
             ImageLoader.Builder(applicationContext)
                 .okHttpClient { Api.http }
@@ -112,14 +128,6 @@ class MainActivity : ComponentActivity() {
         Store.authed.value = !Api.token.isNullOrBlank() && Store.me != null
         KpNotify.ensureChannels(this)
 
-        val need = mutableListOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
-        if (Build.VERSION.SDK_INT >= 33) need += Manifest.permission.POST_NOTIFICATIONS
-        val missing =
-            need.filter {
-                ContextCompat.checkSelfPermission(this, it) != android.content.pm.PackageManager.PERMISSION_GRANTED
-            }
-        if (missing.isNotEmpty()) ask.launch(missing.toTypedArray())
-
         // Push mode is live on the v3 worker: init Firebase + register the
         // device token. No always-on service, no permanent notification.
         // boot() owns the retries and loads the session itself — gating on
@@ -156,38 +164,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * Uploads the previous process' complete uncaught-exception report while
-     * the auth token is available. Keep the file until the worker accepts it:
-     * this makes the diagnostic reliable even with a short-lived crash loop.
-     */
-    private fun reportPreviousCrash() {
-        val file = java.io.File(filesDir, "kp_crash.txt")
-        val text = runCatching { if (file.exists()) file.readText() else "" }.getOrDefault("")
-        if (text.isBlank()) return
-
-        // The toast remains a quick visual signal, while clientlog preserves
-        // the complete message and stack (Android 12 truncates long toasts).
-        android.widget.Toast.makeText(
-            this,
-            "Previous crash captured; uploading diagnostics",
-            android.widget.Toast.LENGTH_LONG,
-        ).show()
-        Thread {
-            val uploaded =
-                runCatching {
-                    Api.post(
-                        "/api/debug/clientlog",
-                        org.json.JSONObject()
-                            .put("stage", "crash")
-                            .put("detail", text.take(12_000)),
-                    )
-                    true
-                }.getOrDefault(false)
-            if (uploaded) runCatching { file.delete() }
-        }.start()
-    }
-
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -207,14 +183,21 @@ class MainActivity : ComponentActivity() {
             }
         }
         intent.getStringExtra("kp_chat")?.let { pendingChat.value = it }
-        // Missed-call "Call back" action: start the call right away.
+        // Missed-call "Call back" action: start the call right away — with the
+        // same contextual mic/camera gate every other call entry point uses.
         intent.getStringExtra("kp_callback")?.let { otherId ->
             if (otherId.isNotBlank()) {
-                CallEngine.instance?.startCall(
-                    otherId,
-                    intent.getStringExtra("kp_callback_kind") ?: "AUDIO",
-                    intent.getStringExtra("kp_callback_name") ?: "KuchuPuchu",
-                )
+                val kind = intent.getStringExtra("kp_callback_kind") ?: "AUDIO"
+                val name = intent.getStringExtra("kp_callback_name") ?: "KuchuPuchu"
+                ensurePermissions(
+                    if (kind == "VIDEO") {
+                        listOf(android.Manifest.permission.RECORD_AUDIO, android.Manifest.permission.CAMERA)
+                    } else {
+                        listOf(android.Manifest.permission.RECORD_AUDIO)
+                    },
+                ) {
+                    CallEngine.instance?.startCall(otherId, kind, name)
+                }
             }
         }
         // Incoming-call notification tapped: the always-running engine's
@@ -281,4 +264,33 @@ class MainActivity : ComponentActivity() {
          */
         val pendingChat = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
     }
+}
+
+/**
+ * Contextual permission gate for the camera/mic feature entry points (owner
+ * rule 2026-09-04: never ask everything up front — ask when the user enters
+ * the feature). Grants are remembered by the OS, so the common case is a
+ * zero-dialog straight-through. Runs [then] even on denial — each caller
+ * already owns its degraded behaviour (video call without camera = voice,
+ * VoiceNote/engine surface their own error toast).
+ *
+ * Best-effort by design: with no live Activity host (process waking for a
+ * push-triggered call) the action proceeds exactly as it did before this
+ * gate existed.
+ */
+fun gateMicCamera(video: Boolean, then: () -> Unit) {
+    val activity = MainActivity.current ?: run { then(); return }
+    val perms =
+        if (video) {
+            listOf(android.Manifest.permission.RECORD_AUDIO, android.Manifest.permission.CAMERA)
+        } else {
+            listOf(android.Manifest.permission.RECORD_AUDIO)
+        }
+    activity.ensurePermissions(perms, then)
+}
+
+/** Camera-only variant (camera toggle on a live call, attach-sheet camera). */
+fun gateCamera(then: () -> Unit) {
+    val activity = MainActivity.current ?: run { then(); return }
+    activity.ensurePermissions(listOf(android.Manifest.permission.CAMERA), then)
 }

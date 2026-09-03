@@ -213,7 +213,11 @@ fun IncomingCallScreen(call: CallUi) {
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                CallCircle(Green, 70.dp, onClick = { engine.answer() }) {
+                CallCircle(Green, 70.dp, onClick = {
+                    // Mic (and camera on a video call) asked at the moment of
+                    // answering — the contextual-permission rule.
+                    gateMicCamera(video = call.kind == "VIDEO") { engine.answer() }
+                }) {
                     Icon(
                         if (call.kind == "VIDEO") Icons.Filled.Videocam else Icons.Filled.Call,
                         "Accept",
@@ -326,7 +330,7 @@ fun VoiceCallScreen(call: CallUi) {
                     "Video",
                     active = call.kind == "VIDEO" && !engine.cameraOff,
                     enabled = connected,
-                ) { engine.toggleCamera() }
+                ) { gateCamera { engine.toggleCamera() } }
             }
             Row(
                 Modifier.fillMaxWidth().padding(vertical = 10.dp),
@@ -469,7 +473,7 @@ fun OutgoingVideoScreen(call: CallUi) {
                 if (engine.cameraOff) Icons.Filled.VideocamOff else Icons.Filled.Videocam,
                 if (engine.cameraOff) "Camera on" else "Camera off",
                 active = engine.cameraOff,
-            ) { engine.toggleCamera() }
+            ) { gateCamera { engine.toggleCamera() } }
             StripAction(Icons.Filled.CallEnd, "Cancel", active = false, danger = true) { engine.hangup() }
         }
     }
@@ -667,7 +671,7 @@ fun InCallVideoScreen(call: CallUi) {
                 if (engine.cameraOff) Icons.Filled.VideocamOff else Icons.Filled.Videocam,
                 if (engine.cameraOff) "Camera on" else "Camera",
                 active = engine.cameraOff,
-            ) { engine.toggleCamera() }
+            ) { gateCamera { engine.toggleCamera() } }
             StripAction(Icons.Filled.ScreenShare, "Share", active = engine.sharing) { engine.toggleShare() }
             StripAction(Icons.Filled.CallEnd, "End", active = false, danger = true) { haptics.heavy(); engine.hangup() }
         }

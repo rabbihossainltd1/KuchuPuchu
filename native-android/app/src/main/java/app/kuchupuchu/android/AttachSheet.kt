@@ -367,13 +367,17 @@ fun AttachPanel(
                     gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                 },
                 AttachAction(Icons.Filled.CameraAlt, Color(0xFFF472B6), "Camera") {
-                    val f = java.io.File(ctx.cacheDir, "camera_${System.currentTimeMillis()}.jpg")
-                    cameraUri = androidx.core.content.FileProvider.getUriForFile(
-                        ctx,
-                        "${ctx.packageName}.fileprovider",
-                        f,
-                    )
-                    camera.launch(cameraUri!!)
+                    // Camera permission is asked HERE, entering the camera
+                    // feature — never in a launch-time bulk dialog.
+                    gateCamera {
+                        val f = java.io.File(ctx.cacheDir, "camera_${System.currentTimeMillis()}.jpg")
+                        cameraUri = androidx.core.content.FileProvider.getUriForFile(
+                            ctx,
+                            "${ctx.packageName}.fileprovider",
+                            f,
+                        )
+                        camera.launch(cameraUri!!)
+                    }
                 },
                 AttachAction(Icons.Filled.LocationOn, Color(0xFF34D399), "Location") {
                     if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
@@ -411,7 +415,7 @@ fun AttachPanel(
 
         if (!canRead) {
             Text(
-                "Gallery permission off — actions still kaj korbe; recent photos dekhte permission din.",
+                "Gallery permission is off — other actions still work. Allow it to see recent photos.",
                 color = Color(0x801C1917),
                 fontSize = 12.sp,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -512,7 +516,7 @@ fun AttachPanel(
 
         if (shown.isEmpty()) {
             Text(
-                if (foldersOpen) "This folder khali — onno folder try koro" else "No recent media",
+                if (foldersOpen) "This folder is empty — try another folder" else "No recent media",
                 color = Color(0x801C1917),
                 fontSize = 13.sp,
                 modifier = Modifier

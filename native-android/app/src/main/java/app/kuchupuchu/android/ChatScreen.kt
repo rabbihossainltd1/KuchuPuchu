@@ -737,7 +737,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     refreshMessages(forceScroll = true)
                 } catch (e2: Exception) {
                     UploadProgress.done(clientId)
-                    error = "Photo: " + ((e.message?.take(60) + " / ") ?: "") + (e2.message ?: "?") + "  Banner-e tap korle abar pathabe."
+                    error = "Photo: " + ((e.message?.take(60) + " / ") ?: "") + (e2.message ?: "?") + "  Tap the banner to try again."
                     pending.find { it.optString("clientId") == clientId }?.put("failed", true)
                 }
             }
@@ -921,11 +921,16 @@ fun ChatScreen(nav: NavController, convId: String) {
        slide left while holding = cancel ---- */
     fun startRecording() {
         if (VoiceNote.isRecording) return
-        if (VoiceNote.start(ctx)) {
-            recMs = 0
-            recording = true
-        } else {
-            error = "Mic is not available. Check the mic permission."
+        // Mic is asked HERE — at the feature — not at app launch (owner rule).
+        gateMicCamera(video = false) {
+            if (!VoiceNote.isRecording) {
+                if (VoiceNote.start(ctx)) {
+                    recMs = 0
+                    recording = true
+                } else {
+                    error = "Mic is not available. Check the mic permission."
+                }
+            }
         }
     }
 
@@ -1252,12 +1257,16 @@ fun ChatScreen(nav: NavController, convId: String) {
             if (!isGroup && c != null && !botChat) {
                 if (otherId.isNotBlank()) {
                     HeaderCallBtn(onClick = {
-                        CallEngine.instance?.startCall(otherId, "AUDIO", title, avatarUrl ?: "")
+                        gateMicCamera(video = false) {
+                            CallEngine.instance?.startCall(otherId, "AUDIO", title, avatarUrl ?: "")
+                        }
                     }) {
                         Icon(Icons.Filled.Call, "Voice call", tint = GoldDeep, modifier = Modifier.size(19.dp))
                     }
                     HeaderCallBtn(onClick = {
-                        CallEngine.instance?.startCall(otherId, "VIDEO", title, avatarUrl ?: "")
+                        gateMicCamera(video = true) {
+                            CallEngine.instance?.startCall(otherId, "VIDEO", title, avatarUrl ?: "")
+                        }
                     }) {
                         Icon(Icons.Filled.Videocam, "Video call", tint = GoldDeep, modifier = Modifier.size(21.dp))
                     }
@@ -2864,7 +2873,7 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendin
                 .width(200.dp) // fixed width so the bubble never grows/shrinks on tap
                 .clickable(enabled = !opening) {
                     if (!ready) {
-                        android.widget.Toast.makeText(ctx, "Ei file-er source nai — khub purano message", android.widget.Toast.LENGTH_SHORT).show()
+                        android.widget.Toast.makeText(ctx, "This file is no longer available.", android.widget.Toast.LENGTH_SHORT).show()
                         return@clickable
                     }
                     scope.launch {
@@ -2875,31 +2884,17 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendin
                             val safe = fileName.replace(Regex("[^A-Za-z0-9._ ()-]"), "_")
                             val dest = java.io.File(dir, System.currentTimeMillis().toString() + "_" + safe)
                             val ok = withContext(Dispatchers.IO) { Api.downloadToFile(fileKey, dest) }
-                            fun trace(stage: String, detail: String) {
-                                Thread {
-                                    runCatching {
-                                        Api.post(
-                                            "/api/debug/clientlog",
-                                            JSONObject().put("stage", "doc-" + stage).put("detail", fileName + " :: " + detail),
-                                        )
-                                    }
-                                }.start()
-                            }
-                            trace("dl", if (ok) "ok " + dest.length() + "b" else "server-refused")
                             if (ok) {
                                 if (isTextLike()) {
                                     val body = runCatching {
                                         dest.readText().take(60_000)
                                     }.getOrDefault("")
                                     withContext(Dispatchers.Main) { textDoc = body }
-                                    trace("view", "in-app-text " + body.length + "ch")
                                 } else {
-                                    val opened = FilesUtil.openFile(ctx, fileName, dest, FilesUtil.mimeFor(fileName, fileType))
-                                    trace("view", if (opened) "viewer-started" else "no-viewer")
+                                    FilesUtil.openFile(ctx, fileName, dest, FilesUtil.mimeFor(fileName, fileType))
                                 }
                             } else {
-                                trace("view", "dl-failed")
-                                android.widget.Toast.makeText(ctx, "Download korte parini — abar try koro", android.widget.Toast.LENGTH_SHORT).show()
+                                android.widget.Toast.makeText(ctx, "Could not download. Please try again.", android.widget.Toast.LENGTH_SHORT).show()
                                 dest.delete()
                             }
                         } catch (e: Exception) {
@@ -2992,7 +2987,7 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendin
             title = { Text(fileName, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Ink, maxLines = 2) },
             text = {
                 Text(
-                    body.ifBlank { "(khali file)" },
+                    body.ifBlank { "(empty file)" },
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                     fontSize = 12.5.sp,
                     color = Ink,

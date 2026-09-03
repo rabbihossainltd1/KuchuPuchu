@@ -182,7 +182,7 @@ fun SearchScreen(nav: NavController) {
                 EmptyState(
                     icon = Icons.Filled.Search,
                     title = "Search",
-                    note = "People, chat ba message khujun",
+                    note = "Find people, chats and messages",
                 )
             }
         } else if (searching && result == null) {
@@ -300,7 +300,7 @@ fun SearchScreen(nav: NavController) {
                 if (users.isEmpty() && chats.isEmpty() && allMessages.isEmpty()) {
                     item {
                         Text(
-                            "Kichu paoa jay nai “${query.trim()}” er jonno",
+                            "No results for “${query.trim()}”",
                             Modifier.fillMaxWidth().padding(24.dp),
                             fontSize = 14.sp,
                             color = Muted,

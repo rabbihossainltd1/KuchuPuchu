@@ -161,25 +161,36 @@ object Outbox {
     // (and so `waitMs` cannot be handed an attempt count it would index out of bounds).
 
     fun init(ctx: Context) {
+        // `file` synchronously (a queue() call in the first milliseconds must
+        // be able to persist), the READ off the main thread — init runs in
+        // Activity.onCreate, and parsing the queue JSON there is exactly the
+        // cold-start jank this round removes.
         file = File(ctx.applicationContext.filesDir, "kp-outbox.json")
-        runCatching {
-            val raw = file?.takeIf { it.exists() }?.readText() ?: return
-            val arr = JSONArray(raw)
-            val loaded = ArrayList<JSONObject>()
-            for (i in 0 until arr.length()) {
-                val o = arr.optJSONObject(i) ?: continue
-                val body = o.optJSONObject("body") ?: continue
-                if (o.optString("convId").isBlank() || o.optString("clientId").isBlank()) continue
-                // A deadline in the past is "now"; a device restart must never
-                // leave a queued message parked behind an old backoff value.
-                o.put("nextAt", OutboxPolicy.rearmOnLoad(o.optLong("nextAt"), System.currentTimeMillis()))
-                o.put("body", body)
-                loaded.add(o)
+        Thread {
+            runCatching {
+                val raw = file?.takeIf { it.exists() }?.readText() ?: return@Thread
+                val arr = JSONArray(raw)
+                val loaded = ArrayList<JSONObject>()
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    val body = o.optJSONObject("body") ?: continue
+                    if (o.optString("convId").isBlank() || o.optString("clientId").isBlank()) continue
+                    // A deadline in the past is "now"; a device restart must never
+                    // leave a queued message parked behind an old backoff value.
+                    o.put("nextAt", OutboxPolicy.rearmOnLoad(o.optLong("nextAt"), System.currentTimeMillis()))
+                    o.put("body", body)
+                    loaded.add(o)
+                }
+                synchronized(this) {
+                    items.clear()
+                    items.addAll(loaded)
+                }
             }
-            synchronized(this) {
-                items.clear()
-                items.addAll(loaded)
-            }
+        }.apply {
+            name = "kp-outbox-load"
+            isDaemon = true
+            priority = Thread.MIN_PRIORITY
+            start()
         }
     }
 

@@ -177,7 +177,9 @@ fun ProfileScreen(nav: NavController, userId: String) {
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                 ProfileHeaderCallBtn(onClick = {
                     haptics.tap()
-                    CallEngine.instance?.startCall(userId, "AUDIO", u.optText("displayName"), u.optText("avatarUrl"))
+                    gateMicCamera(video = false) {
+                        CallEngine.instance?.startCall(userId, "AUDIO", u.optText("displayName"), u.optText("avatarUrl"))
+                    }
                 }) {
                     Icon(Icons.Filled.Call, "Voice call", tint = GoldDeep, modifier = Modifier.size(25.dp))
                 }
@@ -185,7 +187,9 @@ fun ProfileScreen(nav: NavController, userId: String) {
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                 ProfileHeaderCallBtn(onClick = {
                     haptics.tap()
-                    CallEngine.instance?.startCall(userId, "VIDEO", u.optText("displayName"), u.optText("avatarUrl"))
+                    gateMicCamera(video = true) {
+                        CallEngine.instance?.startCall(userId, "VIDEO", u.optText("displayName"), u.optText("avatarUrl"))
+                    }
                 }) {
                     Icon(Icons.Filled.Videocam, "Video call", tint = GoldDeep, modifier = Modifier.size(27.dp))
                 }

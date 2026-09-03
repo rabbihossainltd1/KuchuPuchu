@@ -242,11 +242,6 @@ object KpNotify {
                 .build()
         val mgr = NotificationManagerCompat.from(ctx)
         if (!mgr.areNotificationsEnabled()) {
-            // This exact case was silently swallowed before, which is why
-            // "message notification jai na" was undiagnosable from the server
-            // side: the push HAD arrived, the user (or MIUI) had the channel
-            // muted, and nothing anywhere recorded it.
-            reportSkip(ctx, "blocked: system notifications disabled for app/channel")
             return
         }
         runCatching {
@@ -263,8 +258,6 @@ object KpNotify {
             val msgId = NotifyIds.messageCard(mid, convoId, System.nanoTime())
             mgr.notify(msgId, n)
             mgr.notify(GROUP.hashCode(), summary)
-        }.onFailure { e ->
-            reportSkip(ctx, "notify threw " + e.javaClass.simpleName + ": " + (e.message?.take(120) ?: ""))
         }
     }
 
@@ -298,23 +291,6 @@ object KpNotify {
                 .setSound(defaultSound())
                 .build()
         runCatching { NotificationManagerCompat.from(ctx).notify(callId.hashCode(), n) }
-    }
-
-    /**
-     * Fire-and-forget breadcrumb for the "why is there no card" cases. Never
-     * throws, never blocks: called straight from the push path, where anything
-     * that fails must not take the delivery down with it.
-     */
-    private fun reportSkip(ctx: Context, why: String) {
-        Thread {
-            runCatching {
-                Api.loadToken(ctx)
-                Api.post(
-                    "/api/debug/clientlog",
-                    org.json.JSONObject().put("stage", "notify").put("detail", why),
-                )
-            }
-        }.start()
     }
 
     private fun defaultSound(): Uri = android.provider.Settings.System.DEFAULT_NOTIFICATION_URI
