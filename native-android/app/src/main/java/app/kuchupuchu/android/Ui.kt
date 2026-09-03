@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -690,5 +691,22 @@ fun statusStampShort(iso: String): String {
             z.dayOfWeek.toString().take(3).let { d -> d[0] + d.substring(1).lowercase() }
         else ->
             "${z.dayOfMonth} ${z.month.toString().take(3).let { m -> m[0] + m.substring(1).lowercase() }}"
+    }
+}
+
+/** Blue verified tick (official accounts + owner). Self-contained so every
+ *  screen renders the identical badge next to a name. */
+@Composable
+fun VerifiedBadge(size: Dp = 14.dp) {
+    Box(
+        Modifier.size(size).clip(CircleShape).background(Color(0xFF1D9BF0)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.Filled.Check,
+            contentDescription = "Verified",
+            tint = Color.White,
+            modifier = Modifier.size(size * 0.64f),
+        )
     }
 }

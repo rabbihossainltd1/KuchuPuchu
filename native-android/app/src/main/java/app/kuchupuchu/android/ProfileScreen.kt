@@ -148,7 +148,16 @@ fun ProfileScreen(nav: NavController, userId: String) {
                 )
             }
             Spacer(Modifier.height(10.dp))
-            Text(u.optText("displayName").ifBlank { "—" }, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
+            Row(
+                Modifier.align(Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(u.optText("displayName").ifBlank { "—" }, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
+                if (u.optBoolean("verified")) {
+                    Spacer(Modifier.width(6.dp))
+                    VerifiedBadge(16.dp)
+                }
+            }
             val uname = u.optText("username")
             if (uname.isNotBlank()) Text("@$uname", fontSize = 13.5.sp, color = Muted)
             val about = u.optText("about")

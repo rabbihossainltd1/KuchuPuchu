@@ -113,6 +113,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -1097,6 +1098,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     // The ref is what makes the header paint without re-fetching: pass it too.
     val avatarRef = if (isGroup) null else c?.optJSONObject("other")?.optIso("avatarRef")
     val online = !isGroup && c?.optJSONObject("other")?.optBoolean("online") == true
+    val verified = !isGroup && c?.optJSONObject("other")?.optBoolean("verified") == true
+    // Official notification account: one-way (owner rule) — no composer.
+    val noReply = !isGroup && c?.optJSONObject("other")?.optString("id") == "kp_official_bot"
     // Recompose exactly when the six-second typing lease expires. Computing
     // directly from currentTimeMillis() left the label visible indefinitely
     // on an otherwise idle screen because time passing is not Compose state.
@@ -1204,14 +1208,20 @@ fun ChatScreen(nav: NavController, convId: String) {
             KpAvatar(title, avatarUrl, 40.dp, avatarRef = avatarRef)
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text(
-                    title,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Ink,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        title,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (verified) {
+                        Spacer(Modifier.width(5.dp))
+                        VerifiedBadge()
+                    }
+                }
                 Text(
                     when {
                         isGroup -> "${c?.arr("members")?.length() ?: 0} members"
@@ -1488,6 +1498,17 @@ fun ChatScreen(nav: NavController, convId: String) {
         )
 
         /* ---------------- composer (doubles as the recording bar) ---------------- */
+        if (noReply) {
+            // Official security account: replies are off (owner rule).
+            Text(
+                "This account doesn't accept replies",
+                fontSize = 12.sp,
+                color = Muted,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+            )
+        } else {
         Composer(
             input = input,
             onInput = { v ->
@@ -1541,6 +1562,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             gridSelCount = attachSel.size,
             onSendGrid = { sendAttachSelection() },
         )
+        }
 
         /* ---------------- inline panels — BELOW the message bar, WhatsApp
            style: the bar rides on top of the panel; the panel is NOT
@@ -2316,6 +2338,17 @@ private fun LoginApprovalMessage(m: JSONObject) {
             fontSize = 12.sp,
             color = Ink,
         )
+        // Full origin details (owner rule): where the attempt came from.
+        val ip = meta.optString("ip").takeIf { it.isNotBlank() && it != "unknown" }
+        val city = meta.optString("city").takeIf { it.isNotBlank() }
+        val country = meta.optString("country").takeIf { it.isNotBlank() }
+        val place = listOfNotNull(city, country).joinToString(", ")
+        if (place.isNotBlank()) {
+            Text("Location: $place", fontSize = 12.sp, color = Ink)
+        }
+        if (ip != null) {
+            Text("IP: $ip", fontSize = 12.sp, color = Ink)
+        }
         Spacer(Modifier.height(8.dp))
         if (status == "PENDING") {
             Row {
