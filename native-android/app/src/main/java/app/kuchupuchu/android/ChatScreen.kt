@@ -3441,7 +3441,7 @@ private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                OwnerCardIcon { open("https://facebook.com/Rabbihossainltd") } {
+                OwnerCardIcon(onClick = { open("https://facebook.com/Rabbihossainltd") }) {
                     Icon(
                         painterResource(R.drawable.ic_brand_facebook),
                         contentDescription = "Facebook",
@@ -3449,7 +3449,7 @@ private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
                         modifier = Modifier.size(15.dp),
                     )
                 }
-                OwnerCardIcon { open("https://instagram.com/Rabbihossainltd1") } {
+                OwnerCardIcon(onClick = { open("https://instagram.com/Rabbihossainltd1") }) {
                     Icon(
                         painterResource(R.drawable.ic_brand_instagram),
                         contentDescription = "Instagram",
@@ -3457,7 +3457,7 @@ private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
                         modifier = Modifier.size(15.dp),
                     )
                 }
-                OwnerCardIcon { open("https://t.me/Rabbihossainltd0") } {
+                OwnerCardIcon(onClick = { open("https://t.me/Rabbihossainltd0") }) {
                     Icon(
                         painterResource(R.drawable.ic_brand_telegram),
                         contentDescription = "Telegram",
@@ -3465,7 +3465,7 @@ private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
                         modifier = Modifier.size(15.dp),
                     )
                 }
-                OwnerCardIcon { open("https://tiktok.com/@Rabbihossainltd") } {
+                OwnerCardIcon(onClick = { open("https://tiktok.com/@Rabbihossainltd") }) {
                     Icon(
                         painterResource(R.drawable.ic_brand_tiktok),
                         contentDescription = "TikTok",
@@ -3473,14 +3473,14 @@ private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
                         modifier = Modifier.size(15.dp),
                     )
                 }
-                OwnerCardIcon { open("mailto:info@rabbihossainltd.online") } {
+                OwnerCardIcon(onClick = { open("mailto:info@rabbihossainltd.online") }) {
                     Icon(Icons.Filled.Email, contentDescription = "Email", tint = GoldDeep, modifier = Modifier.size(15.dp))
                 }
-                OwnerCardIcon { open("https://rabbihossainltd.online") } {
+                OwnerCardIcon(onClick = { open("https://rabbihossainltd.online") }) {
                     Icon(Icons.Filled.Language, contentDescription = "Website", tint = GoldDeep, modifier = Modifier.size(15.dp))
                 }
                 if (ownerId.isNotBlank()) {
-                    OwnerCardIcon(highlight = true) { onMessageOwner(ownerId) } {
+                    OwnerCardIcon(highlight = true, onClick = { onMessageOwner(ownerId) }) {
                         Icon(
                             Icons.AutoMirrored.Filled.Chat,
                             contentDescription = "Message",
