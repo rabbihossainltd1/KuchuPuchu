@@ -323,6 +323,220 @@ function maskPhone(e164: string) {
   return e164.length <= 5 ? "***" : `${e164.slice(0, 5)}***${e164.slice(-2)}`;
 }
 
+/** The official in-app account ("KuchuPuchu") that delivers login-approval
+ *  messages (§14, owner design): a real chat message with the device details
+ *  and Accept/Decline on it — not a system dialog and not a raw push. */
+const OFFICIAL_BOT_ID = "kp_official_bot";
+
+async function ensureOfficialBot(db: D1Database): Promise<string> {
+  const existing = await one<{ id: string }>(
+    db,
+    "SELECT id FROM users WHERE id = ?",
+    OFFICIAL_BOT_ID,
+  );
+  if (existing) return existing.id;
+  const created = nowIso();
+  // username `kuchupuchu` may already belong to a real user (usernames are
+  // first-come); fall back to a reserved one. Either way the DISPLAY name is
+  // what the app shows.
+  for (const username of ["kuchupuchu", "kuchupuchu_official"]) {
+    await run(
+      db,
+      `INSERT OR IGNORE INTO users
+         (id, email, password_hash, username, display_name, avatar_url, about,
+          created_at, last_active_at, auth_status)
+       VALUES (?, ?, '', ?, 'KuchuPuchu', NULL, 'Official account · login & security alerts', ?, ?, 'ACTIVE')`,
+      OFFICIAL_BOT_ID,
+      "official@kuchupuchu.invalid",
+      username,
+      created,
+      created,
+    );
+    const row = await one<{ id: string }>(db, "SELECT id FROM users WHERE id = ?", OFFICIAL_BOT_ID);
+    if (row) return row.id;
+  }
+  return OFFICIAL_BOT_ID;
+}
+
+/** 1:1 conversation between the bot and a user, created on first use. */
+async function officialBotConvId(db: D1Database, botId: string, userId: string) {
+  const convId = pairId(botId, userId);
+  if (!(await one(db, "SELECT id FROM conversations WHERE id = ?", convId))) {
+    const created = nowIso();
+    await run(
+      db,
+      "INSERT OR IGNORE INTO conversations (id, kind, created_at, hidden_json) VALUES (?, 'SOLO', ?, '{}')",
+      convId,
+      created,
+    );
+    await run(
+      db,
+      "INSERT OR IGNORE INTO members (conv_id, user_id, joined_at) VALUES (?, ?, ?)",
+      convId,
+      botId,
+      created,
+    );
+    await run(
+      db,
+      "INSERT OR IGNORE INTO members (conv_id, user_id, joined_at) VALUES (?, ?, ?)",
+      convId,
+      userId,
+      created,
+    );
+  } else {
+    // A deleted chat must resurface for the approval: drop the user's hide
+    // watermark exactly like POST /api/conversations does on re-open.
+    const hidden = parseJson<Record<string, unknown>>(await hiddenJson(db, convId), {});
+    if (hidden[userId] !== undefined) {
+      delete hidden[userId];
+      await run(
+        db,
+        "UPDATE conversations SET hidden_json = ? WHERE id = ?",
+        JSON.stringify(hidden),
+        convId,
+      );
+    }
+  }
+  return convId;
+}
+
+/** Drops the approval card message into the bot chat and pushes it through
+ *  the normal message pipeline, so the old device sees a chat notification
+ *  from "KuchuPuchu" whose tap opens the conversation with the buttons. */
+async function sendApprovalMessage(
+  env: Env,
+  db: D1Database,
+  ctx: ExecutionContext,
+  userId: string,
+  requestId: string,
+  deviceName: string | null,
+  expiresAt: string,
+) {
+  const botId = await ensureOfficialBot(db);
+  const convId = await officialBotConvId(db, botId, userId);
+  const mid = id();
+  const created = nowIso();
+  const label = deviceName?.trim() || "Another device";
+  const meta = { requestId, deviceName: label, expiresAt, status: "PENDING" };
+  await run(
+    db,
+    `INSERT INTO messages (id, conv_id, sender_id, kind, body, meta_json, created_at)
+     VALUES (?, ?, ?, 'LOGIN_APPROVAL', ?, ?, ?)`,
+    mid,
+    convId,
+    botId,
+    `New sign-in attempt on ${label}`,
+    JSON.stringify(meta),
+    created,
+  );
+  await run(
+    db,
+    "UPDATE conversations SET last_message_at = ?, last_message = ? WHERE id = ?",
+    created,
+    `New sign-in attempt on ${label}`,
+    convId,
+  );
+  await run(
+    db,
+    "UPDATE members SET unread = unread + 1 WHERE conv_id = ? AND user_id = ?",
+    convId,
+    userId,
+  );
+  const message = msgFrom({
+    id: mid,
+    conv_id: convId,
+    sender_id: botId,
+    kind: "LOGIN_APPROVAL",
+    body: `New sign-in attempt on ${label}`,
+    media: null,
+    meta_json: JSON.stringify(meta),
+    created_at: created,
+    delivered_at: null,
+  } as MsgRow);
+  ctx.waitUntil(
+    broadcastRoomEvent(env, convId, { type: "message", conversationId: convId, message }),
+  );
+  ctx.waitUntil(
+    broadcastRoomEvent(env, `user:${userId}`, { type: "conv", conversationId: convId }),
+  );
+  ctx.waitUntil(
+    pushToUser(
+      env,
+      db,
+      userId,
+      {
+        type: "message",
+        convoId: convId,
+        mid,
+        kind: "SOLO",
+        fromName: "KuchuPuchu",
+        body: `New sign-in attempt on ${label}. Tap to review it.`,
+        kp_chat: convId,
+        muted: "0",
+      },
+      {
+        title: "KuchuPuchu",
+        body: `New sign-in attempt on ${label}. Tap to review it.`,
+        channel: "kp_messages_v2",
+      },
+    ),
+  );
+}
+
+/** Flips the approval card's status and drops a short follow-up from the bot,
+ *  so the conversation reads as a dialogue: request → outcome. */
+async function resolveApprovalMessage(db: D1Database, requestId: string, status: string) {
+  try {
+    const row = await one<{ id: string; conv_id: string }>(
+      db,
+      `SELECT id, conv_id FROM messages
+        WHERE kind = 'LOGIN_APPROVAL' AND json_extract(meta_json, '$.requestId') = ?`,
+      requestId,
+    );
+    if (!row) return;
+    await run(
+      db,
+      `UPDATE messages SET meta_json = json_set(meta_json, '$.status', ?) WHERE id = ?`,
+      status,
+      row.id,
+    );
+    const botId = await ensureOfficialBot(db);
+    const text =
+      status === "APPROVED"
+        ? "✅ Login approved — the new device has been signed in."
+        : status === "DECLINED"
+          ? "⛔ Login request declined. No new device was signed in."
+          : "⏰ Login request expired without a response.";
+    const mid = id();
+    const created = nowIso();
+    await run(
+      db,
+      `INSERT INTO messages (id, conv_id, sender_id, kind, body, created_at)
+       VALUES (?, ?, ?, 'TEXT', ?, ?)`,
+      mid,
+      row.conv_id,
+      botId,
+      text,
+      created,
+    );
+    await run(
+      db,
+      "UPDATE conversations SET last_message_at = ?, last_message = ? WHERE id = ?",
+      created,
+      text,
+      row.conv_id,
+    );
+    await run(
+      db,
+      "UPDATE members SET unread = unread + 1 WHERE conv_id = ? AND user_id != ?",
+      row.conv_id,
+      botId,
+    );
+  } catch {
+    /* the approval decision itself must never fail because of the card */
+  }
+}
+
 async function all<T>(db: D1Database, sql: string, ...binds: unknown[]) {
   return (
     await db
@@ -2241,6 +2455,23 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     }
 
     // ---- different device: the current device must approve (§14) ----
+    // Is the old install even alive? The app re-registers its push handle on
+    // every start/boot; an account whose newest handle is weeks old (or that
+    // has none at all) almost certainly uninstalled the app — waiting a
+    // minute for an approval nobody can give is exactly the dead end the
+    // owner reported. Flag it so the client offers the Google path directly.
+    const pushRows = await all<{ last_seen_at: string | null }>(
+      db,
+      "SELECT last_seen_at FROM devices WHERE user_id = ?",
+      user.id,
+    );
+    const stamps = pushRows
+      .map((r) => (r.last_seen_at ? Date.parse(r.last_seen_at) : 0))
+      .filter((t) => t > 0);
+    const deviceGone =
+      pushRows.length === 0 ||
+      (stamps.length > 0 && Math.max(...stamps) < Date.now() - 14 * 86_400_000);
+
     const requestId = id();
     const expiresAt = new Date(Date.now() + LOGIN_REQUEST_TTL_MS).toISOString();
     await db.batch([
@@ -2261,22 +2492,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         .bind(requestId, user.id, deviceId, deviceName, nowIso(), expiresAt),
     ]);
     await audit(db, "LOGIN_REQUESTED", user.id, deviceId, { phone: maskPhone(phone) });
-    // KuchuPuchu push to the CURRENT device; the new device polls — FCM is
-    // only the doorbell, never the decision (§19).
-    ctx.waitUntil(
-      pushToUser(
-        env,
-        db,
-        user.id,
-        { type: "login_request", requestId, deviceId, deviceName: deviceName ?? "" },
-        {
-          title: "New login attempt",
-          body: `${deviceName || "Another device"} is trying to sign in to KuchuPuchu.`,
-          channel: "kp_messages_v2",
-        },
-      ),
-    );
-    return json({ status: "APPROVAL_REQUIRED", requestId, expiresAt, phone });
+    // The approval itself arrives as a chat message from the official
+    // "KuchuPuchu" account (owner design): normal message push, tap opens the
+    // conversation, Accept/Decline live on the message card. FCM stays a
+    // doorbell; the worker decides (§19).
+    ctx.waitUntil(sendApprovalMessage(env, db, ctx, user.id, requestId, deviceName, expiresAt));
+    return json({ status: "APPROVAL_REQUIRED", requestId, expiresAt, phone, deviceGone });
   }
 
   if (path === "/api/auth/google/bind" && method === "POST") {
@@ -2414,6 +2635,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           nowIso(),
           requestId,
         );
+        await resolveApprovalMessage(db, requestId, "EXPIRED");
         return json({ status: "EXPIRED" });
       }
       return json({ status: "PENDING", expiresAt: row.expires_at });
@@ -2648,40 +2870,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         );
       fail(409, "The login request was already handled.", "REQUEST_NOT_PENDING");
     }
+    await resolveApprovalMessage(db, requestId, "APPROVED");
     await audit(db, "LOGIN_APPROVED", uid, row.new_device_id, {});
     return json({ ok: true });
-  }
-
-  if (path === "/api/auth/login/pending" && method === "GET") {
-    // Phone auth §14, in-app half: the CURRENT device's app polls this while
-    // signed in, so an approval can be answered even if the push notification
-    // was dismissed, never delivered, or the app was opened by tapping it.
-    const row = await one<{
-      id: string;
-      new_device_id: string;
-      new_device_name: string | null;
-      created_at: string;
-      expires_at: string;
-    }>(
-      db,
-      `SELECT id, new_device_id, new_device_name, created_at, expires_at
-         FROM login_requests
-        WHERE user_id = ? AND status = 'PENDING' AND expires_at > ?
-        ORDER BY created_at DESC LIMIT 1`,
-      uid,
-      nowIso(),
-    );
-    return json({
-      request: row
-        ? {
-            id: row.id,
-            newDeviceId: row.new_device_id,
-            deviceName: row.new_device_name,
-            createdAt: row.created_at,
-            expiresAt: row.expires_at,
-          }
-        : null,
-    });
   }
 
   if (path === "/api/auth/login/decline" && method === "POST") {
@@ -2699,6 +2890,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       uid,
     );
     if (!declined) fail(409, "The login request was already handled.", "REQUEST_NOT_PENDING");
+    await resolveApprovalMessage(db, requestId, "DECLINED");
     await audit(db, "LOGIN_DECLINED", uid, null, {});
     return json({ ok: true });
   }

@@ -2266,6 +2266,108 @@ private fun convRowSnapshot(convId: String): JSONObject? {
 
 /* ------------------------------------------------------------------ */
 
+/**
+ * Phone auth §14 (owner design): new-device login approval arrives as a chat
+ * message from the official "KuchuPuchu" account — details + Accept/Decline
+ * live ON the message. The buttons call the same authenticated endpoints the
+ * worker gates; after answering, the card freezes to its outcome (which the
+ * worker also stamps into the message meta for other clients).
+ */
+@Composable
+private fun LoginApprovalMessage(m: JSONObject) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val meta = m.optJSONObject("meta") ?: JSONObject()
+    var status by remember(m.optString("id")) { mutableStateOf(meta.optString("status", "PENDING")) }
+    var busy by remember(m.optString("id")) { mutableStateOf(false) }
+    val device = meta.optString("deviceName").takeIf { it.isNotBlank() } ?: "Another device"
+    val time = m.optText("createdAt").take(16).replace("T", " ")
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xFFFFFBEB))
+            .border(
+                androidx.compose.foundation.BorderStroke(1.dp, Color(0x33F59E0B)),
+                RoundedCornerShape(14.dp),
+            )
+            .padding(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(26.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Gold),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("K", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            }
+            Spacer(Modifier.width(8.dp))
+            Column {
+                Text("KuchuPuchu · Security", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = GoldDeep)
+                Text(time + " UTC", fontSize = 10.sp, color = Muted, maxLines = 1)
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text("New sign-in attempt", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+        Text(
+            "Device: $device wants to sign in to your account with your phone number.",
+            fontSize = 12.sp,
+            color = Ink,
+        )
+        Spacer(Modifier.height(8.dp))
+        if (status == "PENDING") {
+            Row {
+                androidx.compose.material3.Button(
+                    onClick = {
+                        if (busy) return@Button
+                        busy = true
+                        Thread {
+                            val ok = runCatching {
+                                Api.post("/api/auth/login/approve", JSONObject().put("id", meta.optString("requestId")))
+                            }.isSuccess
+                            if (ok) status = "APPROVED" else busy = false
+                        }.start()
+                    },
+                    enabled = !busy,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Gold, contentColor = Color.White),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(if (busy) "…" else "Accept", maxLines = 1, fontWeight = FontWeight.SemiBold)
+                }
+                Spacer(Modifier.width(8.dp))
+                androidx.compose.material3.Button(
+                    onClick = {
+                        if (busy) return@Button
+                        busy = true
+                        Thread {
+                            val ok = runCatching {
+                                Api.post("/api/auth/login/decline", JSONObject().put("id", meta.optString("requestId")))
+                            }.isSuccess
+                            if (ok) status = "DECLINED" else busy = false
+                        }.start()
+                    },
+                    enabled = !busy,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Red),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Decline", maxLines = 1, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        } else {
+            val (label, color) = when (status) {
+                "APPROVED" -> "✅ Approved — new device signed in" to Color(0xFF16A34A)
+                "DECLINED" -> "⛔ Declined" to Red
+                else -> "⏰ Expired" to Muted
+            }
+            Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = color, maxLines = 1)
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MessageRow(
@@ -2284,6 +2386,10 @@ private fun MessageRow(
     val isSelected = m.optString("id") in selectedIds
     val haptics = rememberHaptics()
 
+    if (kind == "LOGIN_APPROVAL") {
+        LoginApprovalMessage(m)
+        return
+    }
     if (kind == "SYSTEM" && !isCallLog(m)) {
         Box(Modifier.fillMaxWidth().padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
             Box(

@@ -2,6 +2,7 @@ package app.kuchupuchu.android
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -54,8 +55,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
@@ -67,7 +68,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -78,16 +80,31 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /**
- * Phone auth screen (PHONE_AUTH_PLAN.md): ONE screen for login and signup,
- * no OTP, no email, no password.
+ * Phone auth (PHONE_AUTH_PLAN.md) — compact, single-line, one card in the
+ * middle of the screen. No OTP, no email, no password.
  *
- * PHONE → VERIFYING (animation) → VERIFY_OK (success animation) →
- *   existing account, same device  → DONE → home
- *   existing account, new device   → WAITING (old device approves) → home
- *   new number                     → BIND (Google) → PROFILE setup → DONE → home
- * lost device → "Can't access my previous device?" → Google recovery.
+ * PHONE → VERIFYING → VERIFY_OK →
+ *   same device   → DONE → home
+ *   other device  → WAITING (≤60s for the approval message on the old device;
+ *                   then "Failed to verify" + Try another way → Google. A late
+ *                   approval still signs in.) · deviceGone → Google directly.
+ *   new number    → BIND (Google) → PROFILE → DONE → home
+ * "Recover account" → Google recovery for a lost previous device.
  */
-private enum class LoginStage { PHONE, VERIFYING, VERIFY_OK, BIND, PROFILE, SAVING, DONE, WAITING, RECOVERY }
+private enum class LoginStage {
+    PHONE,
+    VERIFYING,
+    VERIFY_OK,
+    BIND,
+    PROFILE,
+    SAVING,
+    DONE,
+    WAITING,
+    RECOVERY,
+}
+
+/** How long to wait for the old device's answer before offering the way out. */
+private const val APPROVAL_WAIT_MS = 60_000L
 
 private val FieldShape = RoundedCornerShape(14.dp)
 
@@ -111,7 +128,14 @@ fun LoginScreen(onAuthed: () -> Unit) {
     var afterVerify by remember { mutableStateOf({}) } // () -> Unit
     val scrollState = rememberScrollState()
 
-    // ---- profile setup state ----
+    // waiting state
+    var waitStartedAt by remember { mutableStateOf(0L) }
+    var waitFailed by remember { mutableStateOf(false) }
+    var waitFailReason by remember { mutableStateOf("") }
+    var showAnotherWay by remember { mutableStateOf(false) }
+    var googlePressed by remember { mutableStateOf(false) }
+
+    // profile setup state
     var firstName by remember { mutableStateOf("") }
     var lastName by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
@@ -121,8 +145,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
 
     fun finish(data: JSONObject) {
         Api.saveToken(ctx, data.optString("token"))
-        val user = data.optJSONObject("user")
-        Store.saveMe(user ?: JSONObject())
+        Store.saveMe(data.optJSONObject("user") ?: JSONObject())
         onAuthed()
         val appCtx = ctx.applicationContext
         scope.launch(Dispatchers.IO) {
@@ -137,8 +160,9 @@ fun LoginScreen(onAuthed: () -> Unit) {
         stage = LoginStage.VERIFYING
         scope.launch {
             try {
-                val e164 = PhoneVerifier.normalize(phone)
-                    ?: throw IllegalStateException("Enter a valid phone number, e.g. 01712345678.")
+                val e164 =
+                    PhoneVerifier.normalize(phone)
+                        ?: throw IllegalStateException("Enter a valid phone number, e.g. 01712345678.")
                 val sim =
                     simOverride
                         ?: withContext(Dispatchers.IO) { PhoneVerifier.verify(ctx, e164).wire() }
@@ -168,6 +192,20 @@ fun LoginScreen(onAuthed: () -> Unit) {
                     }
                     "APPROVAL_REQUIRED" -> {
                         requestId = data.optString("requestId")
+                        waitStartedAt = System.currentTimeMillis()
+                        waitFailed = false
+                        waitFailReason = ""
+                        showAnotherWay = false
+                        googlePressed = false
+                        if (data.optBoolean("deviceGone")) {
+                            // The previous install is gone (uninstalled/no push
+                            // handle for weeks) — nobody can approve. Straight
+                            // to the Google way out (owner rule).
+                            waitFailed = true
+                            waitFailReason =
+                                "We couldn't reach your previous device. Verify with Google to sign in here."
+                            showAnotherWay = true
+                        }
                         afterVerify = { stage = LoginStage.WAITING }
                         stage = LoginStage.VERIFY_OK
                     }
@@ -201,8 +239,6 @@ fun LoginScreen(onAuthed: () -> Unit) {
         val granted =
             ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_PHONE_STATE) ==
                 PackageManager.PERMISSION_GRANTED
-        // A denial is not fatal — the flow reports PERMISSION_DENIED and the
-        // worker's grace path + device approval still protect the account.
         if (granted) startVerify()
         else permissionLauncher.launch(Manifest.permission.READ_PHONE_STATE)
     }
@@ -234,13 +270,12 @@ fun LoginScreen(onAuthed: () -> Unit) {
                         )
                     }
                 sessionPayload = data
-                if (isNewSignup) {
-                    // Suggest a username from the chosen display-name path later;
-                    // start clean here so the user types their own.
-                    stage = LoginStage.PROFILE
-                } else {
-                    stage = LoginStage.DONE
-                }
+                // The session exists from HERE — profile setup PATCHes /api/me
+                // next, so the token must be installed immediately (this was
+                // the "Sign in first." bug: the token only landed in finish()).
+                Api.saveToken(ctx, data.optString("token"))
+                Store.saveMe(data.optJSONObject("user") ?: JSONObject())
+                if (isNewSignup) stage = LoginStage.PROFILE else stage = LoginStage.DONE
             } catch (e: Exception) {
                 error = e.message ?: "Google account binding failed. Please try again."
             } finally {
@@ -258,7 +293,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
             return
         }
         if (username.isNotBlank() && !Regex("^[a-z0-9_]{3,20}$").matches(username.trim())) {
-            profileError = "Username: 3–20 characters — lowercase letters, numbers, underscore."
+            profileError = "Username: 3–20 characters — a-z, 0-9, _"
             return
         }
         busy = true
@@ -267,15 +302,18 @@ fun LoginScreen(onAuthed: () -> Unit) {
         scope.launch {
             try {
                 val body = JSONObject()
-                    .put("displayName", if (lastName.isBlank()) first else "$first ${lastName.trim()}")
+                    .put(
+                        "displayName",
+                        if (lastName.isBlank()) first else "$first ${lastName.trim()}",
+                    )
                     .put("about", about.trim())
                 if (username.isNotBlank()) body.put("username", username.trim().lowercase())
                 avatarDataUrl?.let { body.put("avatarUrl", it) }
                 val updated =
                     withContext(Dispatchers.IO) { Api.patch("/api/me", body).optJSONObject("user") }
-                updated?.let {
-                    Store.saveMe(it)
-                    sessionPayload?.put("user", it)
+                if (updated != null) {
+                    Store.saveMe(updated)
+                    sessionPayload?.put("user", updated)
                 }
                 stage = LoginStage.DONE
             } catch (e: Exception) {
@@ -346,12 +384,18 @@ fun LoginScreen(onAuthed: () -> Unit) {
             }
     }
 
-    // Poll loop for the approval wait (§14): FCM is only the doorbell on the
-    // OLD device; THIS device decides nothing — it polls the worker.
+    // Poll loop for the approval wait (§14). The OLD device answers from the
+    // official chat message; THIS device just polls the worker — and keeps
+    // polling past the 1-minute failure UI, because a LATE approval must
+    // still sign in (owner rule).
     LaunchedEffect(stage, requestId) {
         if (stage != LoginStage.WAITING || requestId.isBlank()) return@LaunchedEffect
+        val started = System.currentTimeMillis()
         while (true) {
-            delay(3000)
+            if (!waitFailed && System.currentTimeMillis() - started > APPROVAL_WAIT_MS) {
+                waitFailed = true
+                waitFailReason = "No response from your other device yet."
+            }
             try {
                 val data =
                     withContext(Dispatchers.IO) {
@@ -367,31 +411,34 @@ fun LoginScreen(onAuthed: () -> Unit) {
                         return@LaunchedEffect
                     }
                     "DECLINED" -> {
-                        stage = LoginStage.PHONE
-                        requestId = ""
-                        error = "The login was declined on the active device."
-                        return@LaunchedEffect
+                        waitFailed = true
+                        showAnotherWay = true
+                        waitFailReason = "The login was declined on the active device."
                     }
                     "EXPIRED", "UNKNOWN" -> {
-                        stage = LoginStage.PHONE
-                        requestId = ""
-                        error = "The login request expired. Please try again."
-                        return@LaunchedEffect
+                        waitFailed = true
+                        showAnotherWay = true
+                        waitFailReason = "The login request expired."
                     }
+                }
+                if (waitFailed && showAnotherWay && data.optString("status") != "PENDING") {
+                    // terminal state — stop polling
+                    return@LaunchedEffect
                 }
             } catch (_: Exception) {
                 // transient network blip — keep polling
             }
+            delay(3000)
         }
     }
 
     // Auto-advance from the success animation to whatever came next.
     LaunchedEffect(stage) {
         if (stage == LoginStage.VERIFY_OK) {
-            delay(1100)
+            delay(1000)
             afterVerify()
         } else if (stage == LoginStage.DONE) {
-            delay(1100)
+            delay(1000)
             sessionPayload?.let { finish(it) }
         }
     }
@@ -418,29 +465,34 @@ fun LoginScreen(onAuthed: () -> Unit) {
             .statusBarsPadding()
             .imePadding()
             .verticalScroll(scrollState)
-            .padding(24.dp),
+            .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Column(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(18.dp))
                 .background(Card)
-                .padding(22.dp),
+                .padding(18.dp),
         ) {
+            // Compact single-line header: small logo + name + subtitle.
             when (stage) {
                 LoginStage.PHONE, LoginStage.VERIFYING, LoginStage.VERIFY_OK -> {
-                    Image(
-                        painterResource(R.drawable.icon_gold),
-                        contentDescription = "KuchuPuchu",
-                        modifier = Modifier.size(58.dp),
-                        contentScale = ContentScale.Fit,
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Text("KuchuPuchu", fontSize = 27.sp, fontWeight = FontWeight.Bold, color = Ink)
-                    Text("Sign in with your phone number", fontSize = 14.sp, color = Muted)
-                    Spacer(Modifier.height(18.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Image(
+                            painterResource(R.drawable.icon_gold),
+                            contentDescription = "KuchuPuchu",
+                            modifier = Modifier.size(34.dp),
+                            contentScale = ContentScale.Fit,
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Column {
+                            Text("KuchuPuchu", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1)
+                            Text("Sign in with your phone number", fontSize = 11.sp, color = Muted, maxLines = 1)
+                        }
+                    }
+                    Spacer(Modifier.height(14.dp))
 
                     when (stage) {
                         LoginStage.PHONE -> {
@@ -448,19 +500,11 @@ fun LoginScreen(onAuthed: () -> Unit) {
                                 phone,
                                 { phone = it; error = "" },
                                 label = { Text("Phone number") },
-                                placeholder = {
-                                    Text(
-                                        "01712345678",
-                                        color = Muted.copy(alpha = 0.45f),
-                                    )
-                                },
+                                placeholder = { Text("01712345678", color = Muted.copy(alpha = 0.45f)) },
                                 singleLine = true,
                                 shape = FieldShape,
                                 keyboardOptions =
-                                    KeyboardOptions(
-                                        keyboardType = KeyboardType.Phone,
-                                        imeAction = ImeAction.Done,
-                                    ),
+                                    KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Done),
                                 keyboardActions =
                                     KeyboardActions(onDone = {
                                         focusManager.clearFocus()
@@ -469,17 +513,13 @@ fun LoginScreen(onAuthed: () -> Unit) {
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             if (error.isNotBlank()) {
-                                Spacer(Modifier.height(8.dp))
-                                Text(error, color = Red, fontSize = 13.sp)
+                                Spacer(Modifier.height(6.dp))
+                                Text(error, color = Red, fontSize = 12.sp, maxLines = 2)
                             }
-                            Spacer(Modifier.height(16.dp))
-                            GoldBtn(
-                                "Continue",
-                                Modifier.fillMaxWidth(),
-                                enabled = !busy,
-                            ) { onContinue() }
+                            Spacer(Modifier.height(10.dp))
+                            GoldBtn("Continue", Modifier.fillMaxWidth(), enabled = !busy) { onContinue() }
                             TextButton(onClick = { stage = LoginStage.RECOVERY; error = "" }) {
-                                Text("Recover account", color = GoldDeep)
+                                Text("Recover account", color = GoldDeep, maxLines = 1)
                             }
                         }
 
@@ -491,78 +531,80 @@ fun LoginScreen(onAuthed: () -> Unit) {
                 }
 
                 LoginStage.BIND -> {
-                    Text("Bind your Gmail", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Ink)
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        "Your account is created. Link a Google account so you can recover it if you lose this device.",
-                        fontSize = 13.sp,
-                        color = Muted,
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Image(
+                            painterResource(R.drawable.icon_gold),
+                            contentDescription = "KuchuPuchu",
+                            modifier = Modifier.size(34.dp),
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Column {
+                            Text("Bind your Gmail", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1)
+                            Text("For recovery if you lose this device", fontSize = 11.sp, color = Muted, maxLines = 1)
+                        }
+                    }
                     if (deviceOnly) {
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(6.dp))
                         Text(
                             "This number couldn't be verified automatically on this device.",
-                            fontSize = 12.sp,
-                            color = Muted.copy(alpha = 0.8f),
+                            fontSize = 11.sp,
+                            color = Muted,
+                            maxLines = 2,
                         )
                     }
                     if (error.isNotBlank()) {
-                        Spacer(Modifier.height(8.dp))
-                        Text(error, color = Red, fontSize = 13.sp)
+                        Spacer(Modifier.height(6.dp))
+                        Text(error, color = Red, fontSize = 12.sp, maxLines = 2)
                     }
-                    Spacer(Modifier.height(18.dp))
-                    GoogleButton(
-                        text = "Continue with Google",
-                        busy = busy,
-                        enabled = !busy,
-                    ) { bindGoogle() }
+                    Spacer(Modifier.height(12.dp))
+                    GoogleButton(text = "Continue with Google", busy = busy, enabled = !busy) { bindGoogle() }
                     TextButton(onClick = { stage = LoginStage.PHONE; error = "" }) {
-                        Text("Back", color = Muted)
+                        Text("Back", color = Muted, maxLines = 1)
                     }
                 }
 
                 LoginStage.PROFILE -> {
-                    Text("Set up your profile", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Ink)
-                    Spacer(Modifier.height(14.dp))
-                    // Profile photo
-                    Box(
-                        Modifier
-                            .size(88.dp)
-                            .clip(CircleShape)
-                            .background(Cream)
-                            .clickable {
-                                avatarPicker.launch(
-                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                                )
-                            },
-                        contentAlignment = Alignment.Center,
+                    Text("Set up your profile", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1)
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (avatarDataUrl != null) {
-                            coil.compose.AsyncImage(
-                                model = avatarDataUrl,
-                                contentDescription = "Profile photo",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop,
-                            )
-                            Box(
-                                Modifier
-                                    .fillMaxSize()
-                                    .background(Color(0x66000000)),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(Icons.Filled.CameraAlt, "Change photo", tint = Color.White, modifier = Modifier.size(22.dp))
+                        Box(
+                            Modifier
+                                .size(64.dp)
+                                .clip(CircleShape)
+                                .background(Cream)
+                                .clickable {
+                                    avatarPicker.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                                    )
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            val preview =
+                                remember(avatarDataUrl) { decodeDataUrlBitmap(avatarDataUrl) }
+                            if (preview != null) {
+                                Image(
+                                    bitmap = preview.asImageBitmap(),
+                                    contentDescription = "Profile photo",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop,
+                                )
+                                Box(Modifier.fillMaxSize().background(Color(0x55000000)), contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Filled.CameraAlt, "Change photo", tint = Color.White, modifier = Modifier.size(18.dp))
+                                }
+                            } else {
+                                Icon(Icons.Filled.AccountCircle, "Add photo", tint = Muted.copy(alpha = 0.6f), modifier = Modifier.size(34.dp))
                             }
-                        } else {
-                            Icon(
-                                Icons.Filled.AccountCircle,
-                                "Add photo",
-                                tint = Muted.copy(alpha = 0.6f),
-                                modifier = Modifier.size(46.dp),
-                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text("Add a photo (optional)", fontSize = 12.sp, color = Ink, maxLines = 1)
+                            Text("Tap the circle to choose", fontSize = 10.sp, color = Muted, maxLines = 1)
                         }
                     }
-                    Text("Tap to add a photo (optional)", fontSize = 12.sp, color = Muted)
-                    Spacer(Modifier.height(14.dp))
+                    Spacer(Modifier.height(10.dp))
                     Row(Modifier.fillMaxWidth()) {
                         OutlinedTextField(
                             firstName,
@@ -571,28 +613,22 @@ fun LoginScreen(onAuthed: () -> Unit) {
                             singleLine = true,
                             shape = FieldShape,
                             keyboardOptions =
-                                KeyboardOptions(
-                                    capitalization = KeyboardCapitalization.Words,
-                                    imeAction = ImeAction.Next,
-                                ),
+                                KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
                             modifier = Modifier.weight(1f),
                         )
-                        Spacer(Modifier.width(10.dp))
+                        Spacer(Modifier.width(8.dp))
                         OutlinedTextField(
                             lastName,
                             { lastName = it.take(25); profileError = "" },
-                            label = { Text("Last name (optional)") },
+                            label = { Text("Last name") },
                             singleLine = true,
                             shape = FieldShape,
                             keyboardOptions =
-                                KeyboardOptions(
-                                    capitalization = KeyboardCapitalization.Words,
-                                    imeAction = ImeAction.Next,
-                                ),
+                                KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
                             modifier = Modifier.weight(1f),
                         )
                     }
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         username,
                         { username = it.lowercase().take(20); profileError = "" },
@@ -600,16 +636,10 @@ fun LoginScreen(onAuthed: () -> Unit) {
                         placeholder = { Text("e.g. rabbi_ff", color = Muted.copy(alpha = 0.45f)) },
                         singleLine = true,
                         shape = FieldShape,
-                        keyboardOptions =
-                            KeyboardOptions(keyboardType = KeyboardType.Ascii, imeAction = ImeAction.Next),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, imeAction = ImeAction.Next),
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Text(
-                        "3–20 characters: lowercase letters, numbers, underscore. People can find you by this.",
-                        fontSize = 11.sp,
-                        color = Muted.copy(alpha = 0.8f),
-                    )
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         about,
                         { about = it.take(160); profileError = "" },
@@ -621,15 +651,11 @@ fun LoginScreen(onAuthed: () -> Unit) {
                         modifier = Modifier.fillMaxWidth(),
                     )
                     if (profileError.isNotBlank()) {
-                        Spacer(Modifier.height(8.dp))
-                        Text(profileError, color = Red, fontSize = 13.sp)
+                        Spacer(Modifier.height(6.dp))
+                        Text(profileError, color = Red, fontSize = 12.sp, maxLines = 2)
                     }
-                    Spacer(Modifier.height(16.dp))
-                    GoldBtn(
-                        if (busy) "Saving…" else "Save and continue",
-                        Modifier.fillMaxWidth(),
-                        enabled = !busy,
-                    ) { saveProfile() }
+                    Spacer(Modifier.height(12.dp))
+                    GoldBtn("Continue", Modifier.fillMaxWidth(), enabled = !busy) { saveProfile() }
                 }
 
                 LoginStage.SAVING -> VerifyingPane("Setting up your profile")
@@ -637,23 +663,70 @@ fun LoginScreen(onAuthed: () -> Unit) {
                 LoginStage.DONE -> SuccessPane("All set!")
 
                 LoginStage.WAITING -> {
-                    VerifyingPane("Waiting for approval", "Approve the login on your other device to continue here.")
-                    if (error.isNotBlank()) {
+                    if (!waitFailed) {
+                        VerifyingPane(
+                            "Waiting for approval",
+                            "Check KuchuPuchu's message on your other device.",
+                        )
                         Spacer(Modifier.height(8.dp))
-                        Text(error, color = Red, fontSize = 13.sp)
+                        GoldBtn("Cancel", Modifier.fillMaxWidth(), enabled = true) { cancelApproval() }
+                    } else {
+                        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("Failed to verify", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                waitFailReason,
+                                fontSize = 12.sp,
+                                color = Muted,
+                                textAlign = TextAlign.Center,
+                                maxLines = 3,
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            if (showAnotherWay) {
+                                if (waitFailReason.startsWith("We couldn't reach")) {
+                                    // The previous device is gone — Google is the
+                                    // primary path, not an alternative.
+                                    GoogleButton(text = "Verify with Google", busy = busy, enabled = !busy) { recoverWithGoogle() }
+                                    Spacer(Modifier.height(6.dp))
+                                    TextButton(onClick = { cancelApproval() }) { Text("Back", color = Muted, maxLines = 1) }
+                                } else {
+                                    if (busy) {
+                                        CircularProgressIndicator(color = Gold, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                                    } else if (!googlePressed) {
+                                        TextButton(onClick = { googlePressed = true }) {
+                                            Text("Try another way", color = GoldDeep, maxLines = 1)
+                                        }
+                                        TextButton(onClick = { cancelApproval() }) { Text("Try again", color = Muted, maxLines = 1) }
+                                    } else {
+                                        GoogleButton(text = "Verify with Google", busy = busy, enabled = !busy) { recoverWithGoogle() }
+                                        Spacer(Modifier.height(6.dp))
+                                        TextButton(onClick = { cancelApproval() }) { Text("Back", color = Muted, maxLines = 1) }
+                                    }
+                                }
+                            } else {
+                                GoldBtn("Try again", Modifier.fillMaxWidth(), enabled = true) { cancelApproval() }
+                            }
+                            if (error.isNotBlank()) {
+                                Spacer(Modifier.height(6.dp))
+                                Text(error, color = Red, fontSize = 12.sp, maxLines = 2, textAlign = TextAlign.Center)
+                            }
+                        }
                     }
-                    Spacer(Modifier.height(16.dp))
-                    GoldBtn("Cancel", Modifier.fillMaxWidth(), enabled = true) { cancelApproval() }
                 }
 
                 LoginStage.RECOVERY -> {
-                    Text("Recover account", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Ink)
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        "Enter your phone number, then sign in with the Google account linked to it. Your account will move to this device.",
-                        fontSize = 13.sp,
-                        color = Muted,
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Image(
+                            painterResource(R.drawable.icon_gold),
+                            contentDescription = "KuchuPuchu",
+                            modifier = Modifier.size(34.dp),
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Column {
+                            Text("Recover account", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1)
+                            Text("Sign in with the linked Google account", fontSize = 11.sp, color = Muted, maxLines = 1)
+                        }
+                    }
                     Spacer(Modifier.height(12.dp))
                     OutlinedTextField(
                         phone,
@@ -666,13 +739,13 @@ fun LoginScreen(onAuthed: () -> Unit) {
                         modifier = Modifier.fillMaxWidth(),
                     )
                     if (error.isNotBlank()) {
-                        Spacer(Modifier.height(8.dp))
-                        Text(error, color = Red, fontSize = 13.sp)
+                        Spacer(Modifier.height(6.dp))
+                        Text(error, color = Red, fontSize = 12.sp, maxLines = 2)
                     }
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(10.dp))
                     GoogleButton(text = "Continue with Google", busy = busy, enabled = !busy) { recoverWithGoogle() }
                     TextButton(onClick = { stage = LoginStage.PHONE; error = "" }) {
-                        Text("Back", color = Muted)
+                        Text("Back", color = Muted, maxLines = 1)
                     }
                 }
             }
@@ -680,8 +753,20 @@ fun LoginScreen(onAuthed: () -> Unit) {
     }
 }
 
-/** Button that never swaps its label for "…" — busy shows a small spinner
- *  INSIDE the button, next to the unchanged text. */
+/** data:image/...;base64 → Bitmap (Coil does not fetch data URIs — this was
+ *  the invisible profile-photo preview bug). */
+private fun decodeDataUrlBitmap(dataUrl: String?): android.graphics.Bitmap? {
+    if (dataUrl.isNullOrBlank()) return null
+    val comma = dataUrl.indexOf(',') 
+    if (!dataUrl.startsWith("data:image") || comma < 0) return null
+    return runCatching {
+        val bytes = android.util.Base64.decode(dataUrl.substring(comma + 1), android.util.Base64.DEFAULT)
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+    }.getOrNull()
+}
+
+/** Google button: logo + label on ONE line; busy shows a small in-button
+ *  spinner, the label never becomes "…". */
 @Composable
 private fun GoogleButton(text: String, busy: Boolean, enabled: Boolean, onClick: () -> Unit) {
     androidx.compose.material3.Button(
@@ -693,35 +778,26 @@ private fun GoogleButton(text: String, busy: Boolean, enabled: Boolean, onClick:
         border = androidx.compose.foundation.BorderStroke(1.dp, Muted.copy(alpha = 0.35f)),
     ) {
         if (busy) {
-            CircularProgressIndicator(
-                color = Gold,
-                strokeWidth = 2.dp,
-                modifier = Modifier.size(18.dp),
-            )
-            Spacer(Modifier.width(10.dp))
+            CircularProgressIndicator(color = Gold, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
         } else {
-            Image(
-                GoogleLogo,
-                contentDescription = "Google",
-                modifier = Modifier.size(20.dp),
-            )
-            Spacer(Modifier.width(10.dp))
+            Image(GoogleLogo, contentDescription = "Google", modifier = Modifier.size(18.dp))
         }
-        Text(text, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.width(8.dp))
+        Text(text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
-/** Pulsing gold rings + spinner — the "working on it" pane. */
+/** Compact pulsing-ring "working" pane. */
 @Composable
 private fun VerifyingPane(title: String, subtitle: String? = null) {
     Column(
-        Modifier.fillMaxWidth().padding(vertical = 26.dp),
+        Modifier.fillMaxWidth().padding(vertical = 18.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         val pulse = rememberInfiniteTransition(label = "verify")
         val ringScale by pulse.animateFloat(
             0.75f,
-            1.35f,
+            1.3f,
             infiniteRepeatable(tween(1100, easing = FastOutSlowInEasing), RepeatMode.Restart),
             label = "scale",
         )
@@ -731,37 +807,36 @@ private fun VerifyingPane(title: String, subtitle: String? = null) {
             infiniteRepeatable(tween(1100, easing = FastOutSlowInEasing), RepeatMode.Restart),
             label = "alpha",
         )
-        Box(Modifier.size(96.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(64.dp), contentAlignment = Alignment.Center) {
             androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
                 val r = (size.minDimension / 2f) * ringScale
-                drawCircle(color = Gold.copy(alpha = ringAlpha), radius = r, style = Stroke(width = 5f))
+                drawCircle(color = Gold.copy(alpha = ringAlpha), radius = r, style = Stroke(width = 4f))
             }
-            CircularProgressIndicator(color = Gold, strokeWidth = 3.dp, modifier = Modifier.size(44.dp))
+            CircularProgressIndicator(color = Gold, strokeWidth = 2.5.dp, modifier = Modifier.size(30.dp))
         }
-        Spacer(Modifier.height(16.dp))
-        Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+        Spacer(Modifier.height(10.dp))
+        Text(title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Ink, maxLines = 1)
         if (subtitle != null) {
-            Spacer(Modifier.height(4.dp))
-            Text(subtitle, fontSize = 13.sp, color = Muted, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            Spacer(Modifier.height(2.dp))
+            Text(subtitle, fontSize = 11.sp, color = Muted, textAlign = TextAlign.Center, maxLines = 2)
         }
     }
 }
 
-/** Green circle + animated checkmark — the success pane. */
+/** Compact animated green check. */
 @Composable
 private fun SuccessPane(title: String) {
     Column(
-        Modifier.fillMaxWidth().padding(vertical = 26.dp),
+        Modifier.fillMaxWidth().padding(vertical = 18.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         val circle = remember { Animatable(0f) }
         val check = remember { Animatable(0f) }
         LaunchedEffect(Unit) {
-            circle.animateTo(1f, tween(350))
-            check.animateTo(1f, tween(380))
+            circle.animateTo(1f, tween(300))
+            check.animateTo(1f, tween(340))
         }
-        val boxSize: Dp = 96.dp
-        Box(Modifier.size(boxSize), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(64.dp), contentAlignment = Alignment.Center) {
             androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
                 val c = size.minDimension / 2f
                 drawCircle(color = Color(0xFF16A34A), radius = c * circle.value)
@@ -769,25 +844,27 @@ private fun SuccessPane(title: String) {
                     val p = check.value
                     val w = size.width
                     val h = size.height
-                    val stroke = Stroke(width = w * 0.07f, cap = StrokeCap.Round)
+                    val stroke = w * 0.075f
                     val seg1 = minOf(1f, p / 0.5f)
                     if (seg1 > 0f) {
-                        val from = Offset(w * 0.28f, h * 0.52f)
-                        val to = Offset(w * 0.28f, h * 0.52f) +
-                            (Offset(w * 0.45f, h * 0.68f) - Offset(w * 0.28f, h * 0.52f)) * seg1
-                        drawLine(Color.White, from, to, strokeWidth = stroke.width, cap = StrokeCap.Round)
+                        val from = androidx.compose.ui.geometry.Offset(w * 0.28f, h * 0.52f)
+                        val to =
+                            from +
+                                (androidx.compose.ui.geometry.Offset(w * 0.45f, h * 0.68f) - from) * seg1
+                        drawLine(Color.White, from, to, strokeWidth = stroke, cap = StrokeCap.Round)
                     }
                     val seg2 = ((p - 0.5f) / 0.5f).coerceIn(0f, 1f)
                     if (seg2 > 0f) {
-                        val from = Offset(w * 0.45f, h * 0.68f)
-                        val to = Offset(w * 0.45f, h * 0.68f) +
-                            (Offset(w * 0.72f, h * 0.36f) - Offset(w * 0.45f, h * 0.68f)) * seg2
-                        drawLine(Color.White, from, to, strokeWidth = stroke.width, cap = StrokeCap.Round)
+                        val from = androidx.compose.ui.geometry.Offset(w * 0.45f, h * 0.68f)
+                        val to =
+                            from +
+                                (androidx.compose.ui.geometry.Offset(w * 0.72f, h * 0.36f) - from) * seg2
+                        drawLine(Color.White, from, to, strokeWidth = stroke, cap = StrokeCap.Round)
                     }
                 }
             }
         }
-        Spacer(Modifier.height(16.dp))
-        Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+        Spacer(Modifier.height(10.dp))
+        Text(title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Ink, maxLines = 1)
     }
 }

@@ -462,25 +462,76 @@ const bind = (k, phone, idToken, deviceId, displayName) =>
   check("hammering verify-phone from one IP → 429", saw429);
 }
 
-// ---- 19. the old device can read its pending approval (in-app dialog) ----
+// ---- 19. the approval arrives as a chat message from the official account ----
 {
   const k = await mk();
-  const a = await k.reg("pendingq@x.com", "pendingq");
+  const a = await k.reg("botmsg@x.com", "botmsg");
   const v = await verify(k, a.user.phone, "MATCH", "dev-b");
-  const p = await k.call("GET", "/api/auth/login/pending", undefined, a.token);
+  check("approval still required", v.json.status === "APPROVAL_REQUIRED", v.json.status);
+  await new Promise((r) => setTimeout(r, 200)); // sendApprovalMessage runs via ctx.waitUntil
+  const msg = k.db._db.prepare("SELECT * FROM messages WHERE kind = 'LOGIN_APPROVAL'").get();
   check(
-    "pending endpoint returns the waiting request + device name",
-    p.status === 200 &&
-      p.json.request?.id === v.json.requestId &&
-      p.json.request?.deviceName === "Pixel Test",
-    JSON.stringify(p.json).slice(0, 90),
+    "LOGIN_APPROVAL message from the official account",
+    !!msg && msg.sender_id === "kp_official_bot",
+    msg ? `from ${msg.sender_id}` : "none",
   );
-  await k.call("POST", "/api/auth/login/decline", { id: v.json.requestId }, a.token);
-  const p2 = await k.call("GET", "/api/auth/login/pending", undefined, a.token);
-  check("nothing pending after decline", p2.json.request === null, JSON.stringify(p2.json.request));
+  const meta = msg ? JSON.parse(msg.meta_json || "{}") : {};
+  check(
+    "card meta carries requestId/device/status",
+    meta.requestId === v.json.requestId &&
+      meta.deviceName === "Pixel Test" &&
+      meta.status === "PENDING",
+    JSON.stringify(meta).slice(0, 80),
+  );
+  const unread = k.db._db
+    .prepare("SELECT unread FROM members WHERE user_id = ? AND conv_id = ?")
+    .get(a.user.id, msg.conv_id);
+  check(
+    "the approval is unread in the user's chat list",
+    unread?.unread >= 1,
+    JSON.stringify(unread),
+  );
+
+  await k.call("POST", "/api/auth/login/approve", { id: v.json.requestId }, a.token);
+  const metaAfter = JSON.parse(
+    k.db._db.prepare("SELECT meta_json FROM messages WHERE id = ?").get(msg.id).meta_json || "{}",
+  );
+  check("card status flips to APPROVED", metaAfter.status === "APPROVED", metaAfter.status);
+  const follow = k.db._db
+    .prepare(
+      "SELECT body FROM messages WHERE conv_id = ? AND kind = 'TEXT' AND sender_id = 'kp_official_bot' ORDER BY created_at DESC LIMIT 1",
+    )
+    .get(msg.conv_id);
+  check(
+    "bot posted the outcome message",
+    !!follow?.body?.includes("approved"),
+    follow?.body?.slice(0, 40),
+  );
 }
 
-// ---- 20. audit trail ----
+// ---- 20. deviceGone: unreachable previous install → Google path flag ----
+{
+  const k = await mk();
+  const a = await k.reg("gone@x.com", "gone");
+  const v1 = await verify(k, a.user.phone, "MATCH", "dev-b");
+  check("no push rows → deviceGone true", v1.json.deviceGone === true, String(v1.json.deviceGone));
+  k.db._db
+    .prepare("INSERT INTO devices (token, user_id, updated_at, last_seen_at) VALUES (?, ?, ?, ?)")
+    .run("fcm-live", a.user.id, new Date().toISOString(), new Date().toISOString());
+  const v2 = await verify(k, a.user.phone, "MATCH", "dev-c");
+  check(
+    "fresh handle → deviceGone false",
+    v2.json.deviceGone === false,
+    String(v2.json.deviceGone),
+  );
+  k.db._db
+    .prepare("UPDATE devices SET last_seen_at = ? WHERE token = ?")
+    .run(new Date(Date.now() - 30 * 86_400_000).toISOString(), "fcm-live");
+  const v3 = await verify(k, a.user.phone, "MATCH", "dev-d");
+  check("stale handle → deviceGone true", v3.json.deviceGone === true, String(v3.json.deviceGone));
+}
+
+// ---- 21. audit trail ----
 {
   const k = await mk();
   const a = await k.reg("audit@x.com", "audit");
