@@ -124,3 +124,15 @@ reset.
 5. **Google-fix guard** — 5 new suite assertions pin the GoogleAuth shape:
    filterByAuthorizedAccounts(false), native-first ordering, blank-token
    relaunch, no "Google returned no ID token" dead-end, retryable message.
+
+## Moderator badge round — v3.9.19 / 95 (2026-09-04)
+
+@fsleader gets the owner-supplied crossed-tools badge (SVG from
+savedly.net/f/ufmdyvbf → res/drawable/ic_moderator_badge.xml with the
+source gradient + outline preserved). New `users.moderator` column
+(default 0, independent of `verified` so the 3-tick rule is untouched),
+emitted by userFrom() → flows into chat lists, discovery, profiles,
+calls. App renders ModeratorBadge() beside the name in the chat-list
+row, chat header and profile screen (same spots as the verified tick).
+Live DBs migrated (APAC flagged fsleader; old WNAM altered too so the
+one-line rollback stays safe). 5 new live-worker assertions; 894 total.

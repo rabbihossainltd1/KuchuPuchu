@@ -1118,6 +1118,7 @@ fun ChatScreen(nav: NavController, convId: String) {
     val avatarRef = if (isGroup) null else c?.optJSONObject("other")?.optIso("avatarRef")
     val online = !isGroup && c?.optJSONObject("other")?.optBoolean("online") == true
     val verified = !isGroup && c?.optJSONObject("other")?.optBoolean("verified") == true
+    val moderator = !isGroup && c?.optJSONObject("other")?.optBoolean("moderator") == true
     // Official notification account: one-way (owner rule) — no composer.
     val noReply = !isGroup && otherUserId == "kp_official_bot"
     // Recompose exactly when the six-second typing lease expires. Computing
@@ -1284,6 +1285,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                     if (verified) {
                         Spacer(Modifier.width(5.dp))
                         VerifiedBadge()
+                    }
+                    if (moderator) {
+                        Spacer(Modifier.width(5.dp))
+                        ModeratorBadge()
                     }
                 }
                 Text(

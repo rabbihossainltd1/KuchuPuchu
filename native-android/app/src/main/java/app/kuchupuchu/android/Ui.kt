@@ -6,6 +6,7 @@ import android.util.Base64
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -702,6 +703,21 @@ fun isKpBot(id: String?): Boolean = id == "kp_official_bot" || id == "kp_ai_bot"
  *  14dp rendered soft on several devices, a Canvas path stays crisp at every
  *  density — same shape as the standard verified badge. */
 @Composable
+/**
+ * Moderator badge (owner round 2026-09-04): the owner-supplied crossed-tools
+ * icon (@fsleader), rendered from the vector drawable converted from the
+ * source SVG. Independent of [VerifiedBadge] — an account can carry either
+ * or both.
+ */
+@Composable
+fun ModeratorBadge(size: Dp = 16.dp) {
+    Image(
+        painter = painterResource(R.drawable.ic_moderator_badge),
+        contentDescription = "Moderator",
+        modifier = Modifier.size(width = size, height = size * (1199f / 1312f)),
+    )
+}
+
 fun VerifiedBadge(size: Dp = 16.dp) {
     val badgeSize = size
     androidx.compose.foundation.Canvas(Modifier.size(badgeSize)) {
