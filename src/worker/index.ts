@@ -52,6 +52,9 @@ export type Env = {
    *  misconfigured deploy must break login loudly, never silently skip the
    *  audience check. */
   GOOGLE_WEB_CLIENT_ID?: string;
+  /** Gemini API key (AI Studio) — powers the KuchuPuchu AI welcome message.
+   *  Unset ⇒ the welcome falls back to a fixed friendly line, never a hole. */
+  GEMINI_API_KEY?: string;
 };
 
 type Json = Record<string, unknown>;
@@ -328,13 +331,31 @@ function maskPhone(e164: string) {
  *  and Accept/Decline on it — not a system dialog and not a raw push. */
 const OFFICIAL_BOT_ID = "kp_official_bot";
 
+/** The bundled KuchuPuchu logo (256px JPEG data-URI, ~10KB) — the profile
+ *  photo of both bot accounts. Avatars live as data-URIs in users.avatar_url
+ *  (the same shape a user profile photo has), so every client avatar path
+ *  (avatarRef cache → /api/users/:id/avatar) serves it unchanged. */
+const BOT_LOGO_DATA_URL =
+  "data:image/jpeg;base64,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";
+
 async function ensureOfficialBot(db: D1Database): Promise<string> {
   const existing = await one<{ id: string }>(
     db,
     "SELECT id FROM users WHERE id = ?",
     OFFICIAL_BOT_ID,
   );
-  if (existing) return existing.id;
+  if (existing) {
+    // Idempotent badge/photo top-up for databases created before either
+    // existed. The WHERE keeps it a no-op write once applied.
+    await run(
+      db,
+      `UPDATE users SET verified = 1, avatar_url = COALESCE(avatar_url, ?)
+        WHERE id = ? AND (verified IS NULL OR verified = 0 OR avatar_url IS NULL)`,
+      BOT_LOGO_DATA_URL,
+      OFFICIAL_BOT_ID,
+    );
+    return existing.id;
+  }
   const created = nowIso();
   // username `kuchupuchu` may already belong to a real user (usernames are
   // first-come); fall back to a reserved one. Either way the DISPLAY name is
@@ -344,11 +365,12 @@ async function ensureOfficialBot(db: D1Database): Promise<string> {
       db,
       `INSERT OR IGNORE INTO users
          (id, email, password_hash, username, display_name, avatar_url, about,
-          created_at, last_active_at, auth_status)
-       VALUES (?, ?, '', ?, 'KuchuPuchu', NULL, 'Official account · login & security alerts', ?, ?, 'ACTIVE')`,
+          created_at, last_active_at, auth_status, verified)
+       VALUES (?, ?, '', ?, 'KuchuPuchu', ?, 'Official account · login & security alerts', ?, ?, 'ACTIVE', 1)`,
       OFFICIAL_BOT_ID,
       "official@kuchupuchu.invalid",
       username,
+      BOT_LOGO_DATA_URL,
       created,
       created,
     );
@@ -411,13 +433,29 @@ async function sendApprovalMessage(
   requestId: string,
   deviceName: string | null,
   expiresAt: string,
+  request: Request,
 ) {
   const botId = await ensureOfficialBot(db);
   const convId = await officialBotConvId(db, botId, userId);
   const mid = id();
   const created = nowIso();
   const label = deviceName?.trim() || "Another device";
-  const meta = { requestId, deviceName: label, expiresAt, status: "PENDING" };
+  // Where the attempt came from (owner rule: the card shows everything —
+  // device, place, IP, time — so the approver can judge the request).
+  const cf = (request as Request & { cf?: { country?: string; city?: string } }).cf;
+  const ip = clientIp(request);
+  const place = [cf?.city, cf?.country].filter(Boolean).join(", ");
+  const where = place ? ` · ${place}` : "";
+  const meta = {
+    requestId,
+    deviceName: label,
+    expiresAt,
+    status: "PENDING",
+    ip,
+    city: cf?.city ?? null,
+    country: cf?.country ?? null,
+    time: created,
+  };
   await run(
     db,
     `INSERT INTO messages (id, conv_id, sender_id, kind, body, meta_json, created_at)
@@ -425,7 +463,7 @@ async function sendApprovalMessage(
     mid,
     convId,
     botId,
-    `New sign-in attempt on ${label}`,
+    `New sign-in attempt on ${label}${where}`,
     JSON.stringify(meta),
     created,
   );
@@ -433,7 +471,7 @@ async function sendApprovalMessage(
     db,
     "UPDATE conversations SET last_message_at = ?, last_message = ? WHERE id = ?",
     created,
-    `New sign-in attempt on ${label}`,
+    `New sign-in attempt on ${label}${where}`,
     convId,
   );
   await run(
@@ -447,7 +485,7 @@ async function sendApprovalMessage(
     conv_id: convId,
     sender_id: botId,
     kind: "LOGIN_APPROVAL",
-    body: `New sign-in attempt on ${label}`,
+    body: `New sign-in attempt on ${label}${where}`,
     media: null,
     meta_json: JSON.stringify(meta),
     created_at: created,
@@ -470,13 +508,13 @@ async function sendApprovalMessage(
         mid,
         kind: "SOLO",
         fromName: "KuchuPuchu",
-        body: `New sign-in attempt on ${label}. Tap to review it.`,
+        body: `New sign-in attempt on ${label}${where}. Tap to review it.`,
         kp_chat: convId,
         muted: "0",
       },
       {
         title: "KuchuPuchu",
-        body: `New sign-in attempt on ${label}. Tap to review it.`,
+        body: `New sign-in attempt on ${label}${where}. Tap to review it.`,
         channel: "kp_messages_v2",
       },
     ),
@@ -534,6 +572,187 @@ async function resolveApprovalMessage(db: D1Database, requestId: string, status:
     );
   } catch {
     /* the approval decision itself must never fail because of the card */
+  }
+}
+
+/* ---------------- KuchuPuchu AI (owner feature) ----------------
+ *
+ * A second verified bot account, "KuchuPuchu AI", whose first message
+ * welcomes every new user the moment their account goes live (at Google
+ * bind — the exact moment they land in the app for the first time). The
+ * greeting is generated by Gemini when GEMINI_API_KEY is set and falls
+ * back to a fixed warm line otherwise, so the welcome never depends on
+ * a third-party API being awake.
+ */
+const AI_BOT_ID = "kp_ai_bot";
+
+async function ensureAiBot(db: D1Database): Promise<string> {
+  const existing = await one<{ id: string }>(db, "SELECT id FROM users WHERE id = ?", AI_BOT_ID);
+  if (existing) {
+    await run(
+      db,
+      `UPDATE users SET verified = 1, avatar_url = COALESCE(avatar_url, ?)
+        WHERE id = ? AND (verified IS NULL OR verified = 0 OR avatar_url IS NULL)`,
+      BOT_LOGO_DATA_URL,
+      AI_BOT_ID,
+    );
+    return existing.id;
+  }
+  const created = nowIso();
+  for (const username of ["kuchupuchu.ai", "kuchupuchu_ai"]) {
+    await run(
+      db,
+      `INSERT OR IGNORE INTO users
+         (id, email, password_hash, username, display_name, avatar_url, about,
+          created_at, last_active_at, auth_status, verified)
+       VALUES (?, ?, '', ?, 'KuchuPuchu AI', ?, 'KuchuPuchu AI · your in-app helper', ?, ?, 'ACTIVE', 1)`,
+      AI_BOT_ID,
+      "ai@kuchupuchu.invalid",
+      username,
+      BOT_LOGO_DATA_URL,
+      created,
+      created,
+    );
+    const row = await one<{ id: string }>(db, "SELECT id FROM users WHERE id = ?", AI_BOT_ID);
+    if (row) return row.id;
+  }
+  return AI_BOT_ID;
+}
+
+/** The fixed line used when Gemini is not configured or unreachable. */
+const AI_WELCOME_FALLBACK =
+  "Welcome to KuchuPuchu! 🎉 I'm KuchuPuchu AI, your in-app helper — glad you're here. Enjoy staying close to your people!";
+
+/** One Gemini call, tightly bounded: short output, hard timeout, any
+ *  failure ⇒ null (the caller uses the fallback). Never throws. */
+async function geminiWelcomeText(env: Env, displayName: string | null): Promise<string | null> {
+  if (!env.GEMINI_API_KEY) return null;
+  const name =
+    displayName && displayName !== "KuchuPuchu user"
+      ? ` Their display name is ${displayName}.`
+      : "";
+  const prompt =
+    "You are KuchuPuchu AI, the friendly assistant inside KuchuPuchu, a Bangladeshi messaging app. " +
+    "A user just created their account." +
+    name +
+    " Write a short, warm welcome message to them: 1–2 sentences, at most 35 words, in English, at most one emoji. " +
+    "Do not use hashtags, quotes, or a signature line. Reply with the message text only.";
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    const res = await fetch(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 1, maxOutputTokens: 120 },
+        }),
+        signal: ctrl.signal,
+      },
+    );
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      candidates?: { content?: { parts?: { text?: string }[] } }[];
+    };
+    const text = (data.candidates?.[0]?.content?.parts ?? [])
+      .map((p) => p.text ?? "")
+      .join("")
+      .trim()
+      .slice(0, 400);
+    return text || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Drops the AI welcome message into a fresh 1:1 chat, exactly once per
+ *  account (guarded by "no bot messages exist yet in the pair chat"). */
+async function sendAiWelcome(
+  env: Env,
+  db: D1Database,
+  ctx: ExecutionContext,
+  userId: string,
+  displayName: string | null,
+) {
+  try {
+    const botId = await ensureAiBot(db);
+    const convId = await officialBotConvId(db, botId, userId);
+    const already = await one<{ id: string }>(
+      db,
+      "SELECT id FROM messages WHERE conv_id = ? AND sender_id = ? LIMIT 1",
+      convId,
+      botId,
+    );
+    if (already) return;
+    const body = (await geminiWelcomeText(env, displayName)) ?? AI_WELCOME_FALLBACK;
+    const mid = id();
+    const created = nowIso();
+    await run(
+      db,
+      `INSERT INTO messages (id, conv_id, sender_id, kind, body, created_at)
+       VALUES (?, ?, ?, 'TEXT', ?, ?)`,
+      mid,
+      convId,
+      botId,
+      body,
+      created,
+    );
+    await run(
+      db,
+      "UPDATE conversations SET last_message_at = ?, last_message = ? WHERE id = ?",
+      created,
+      body,
+      convId,
+    );
+    await run(
+      db,
+      "UPDATE members SET unread = unread + 1 WHERE conv_id = ? AND user_id = ?",
+      convId,
+      userId,
+    );
+    ctx.waitUntil(
+      broadcastRoomEvent(env, convId, {
+        type: "message",
+        conversationId: convId,
+        message: msgFrom({
+          id: mid,
+          conv_id: convId,
+          sender_id: botId,
+          kind: "TEXT",
+          body,
+          media: null,
+          meta_json: null,
+          created_at: created,
+          delivered_at: null,
+        } as MsgRow),
+      }),
+    );
+    ctx.waitUntil(
+      broadcastRoomEvent(env, `user:${userId}`, { type: "conv", conversationId: convId }),
+    );
+    ctx.waitUntil(
+      pushToUser(
+        env,
+        db,
+        userId,
+        {
+          type: "message",
+          convoId: convId,
+          mid,
+          kind: "SOLO",
+          fromName: "KuchuPuchu AI",
+          body,
+          kp_chat: convId,
+          muted: "0",
+        },
+        { title: "KuchuPuchu AI", body, channel: "kp_messages_v2" },
+      ),
+    );
+  } catch {
+    /* a failed welcome must never fail the login that triggered it */
   }
 }
 
@@ -757,7 +976,8 @@ async function ensureSchema(db: D1Database) {
       username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL, avatar_url TEXT,
       about TEXT, created_at TEXT NOT NULL, last_active_at TEXT NOT NULL,
       phone_e164 TEXT, phone_verified_at TEXT, phone_verification_method TEXT,
-      google_subject TEXT, google_email TEXT, auth_status TEXT NOT NULL DEFAULT 'ACTIVE'
+      google_subject TEXT, google_email TEXT, auth_status TEXT NOT NULL DEFAULT 'ACTIVE',
+      verified INTEGER
     )`,
     `CREATE TABLE IF NOT EXISTS sessions (
       token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires_at TEXT NOT NULL,
@@ -919,6 +1139,9 @@ async function ensureSchema(db: D1Database) {
     db,
     `ALTER TABLE users ADD COLUMN auth_status TEXT NOT NULL DEFAULT 'ACTIVE'`,
   );
+  // Verified badge (owner decision): official notification account,
+  // KuchuPuchu AI and the owner account carry a tick; everyone else 0.
+  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN verified INTEGER`);
   await runCatchingSql(db, `ALTER TABLE sessions ADD COLUMN device_id TEXT`);
   await runCatchingSql(db, `ALTER TABLE login_requests ADD COLUMN new_device_name TEXT`);
   // Uniqueness the legacy schema cannot express: one phone → one account,
@@ -1003,6 +1226,7 @@ type UserRow = {
   google_subject: string | null;
   google_email: string | null;
   auth_status: string;
+  verified: number | null;
 };
 
 /**
@@ -1025,6 +1249,7 @@ function userFrom(row: UserRow, online = false, light = false) {
     about: row.about,
     online,
     lastActiveAt: row.last_active_at,
+    verified: !!row.verified,
   };
   if (light) {
     return {
@@ -2496,7 +2721,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // "KuchuPuchu" account (owner design): normal message push, tap opens the
     // conversation, Accept/Decline live on the message card. FCM stays a
     // doorbell; the worker decides (§19).
-    ctx.waitUntil(sendApprovalMessage(env, db, ctx, user.id, requestId, deviceName, expiresAt));
+    ctx.waitUntil(
+      sendApprovalMessage(env, db, ctx, user.id, requestId, deviceName, expiresAt, request),
+    );
     return json({ status: "APPROVAL_REQUIRED", requestId, expiresAt, phone, deviceGone });
   }
 
@@ -3021,6 +3248,18 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     }
     const row = (await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", uid))!;
     return json({ user: userSelf(row, true) });
+  }
+
+  /* ---------- KuchuPuchu AI ---------- */
+
+  if (path === "/api/ai/welcome" && method === "POST") {
+    // The client calls this once right after its FIRST login lands in the app
+    // (idempotent: an account that already has its welcome gets a cheap
+    // no-op). Driving it from the client keeps signup/login itself free of
+    // the extra conversation + broadcast pokes, which every other flow that
+    // mints a session would otherwise pay for.
+    await sendAiWelcome(env, db, ctx, uid, me.display_name);
+    return json({ ok: true });
   }
 
   if (path === "/api/devices" && method === "POST") {
@@ -3988,6 +4227,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const convId = msgMatch[1]!;
     const { conv } = await requireMember(db, convId, uid);
     const members = await membersOf(db, convId);
+    // The official notification account is one-way (owner rule): nobody can
+    // reply into it, in-app or via the API.
+    if (conv.kind === "SOLO" && members.some((m) => m.user_id === OFFICIAL_BOT_ID))
+      fail(403, "This account doesn't accept replies.", "NO_REPLIES");
     // Block check for the whole member list in ONE statement (either
     // direction), instead of a blockedBetween() round trip per member.
     const others = members.map((m) => m.user_id).filter((mid) => mid !== uid);

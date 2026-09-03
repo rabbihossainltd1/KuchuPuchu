@@ -829,6 +829,10 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+                if (!isGroup && other?.optBoolean("verified") == true) {
+                    Spacer(Modifier.width(5.dp))
+                    VerifiedBadge()
+                }
                 if (muted) {
                     Spacer(Modifier.width(6.dp))
                     Icon(

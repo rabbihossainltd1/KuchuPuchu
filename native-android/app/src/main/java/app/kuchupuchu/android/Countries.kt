@@ -13,10 +13,6 @@ package app.kuchupuchu.android
  */
 data class KpCountry(val iso: String, val name: String, val dial: String)
 
-/** Regional-indicator flag emoji — renders on every Android the app supports. */
-fun KpCountry.flagEmoji(): String =
-    iso.uppercase().map { ch -> Character.toChars(0x1F1E6 + (ch.code - 'A'.code)) }.joinToString("")
-
 /** The picker's default (owner rule: Bangladesh first). */
 val DEFAULT_COUNTRY = KpCountry("BD", "Bangladesh", "880")
 

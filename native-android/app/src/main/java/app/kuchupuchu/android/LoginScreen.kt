@@ -118,6 +118,10 @@ private enum class LoginStage {
 /** How long to wait for the old device's answer before offering the way out. */
 private const val APPROVAL_WAIT_MS = 60_000L
 
+/** One KuchuPuchu-AI welcome check per process — the server no-ops (one cheap
+ *  SELECT) for accounts that already have their welcome message. */
+private var aiWelcomeAsked = false
+
 private val FieldShape = RoundedCornerShape(14.dp)
 
 @Composable
@@ -164,6 +168,14 @@ fun LoginScreen(onAuthed: () -> Unit) {
         val appCtx = ctx.applicationContext
         scope.launch(Dispatchers.IO) {
             runCatching { if (KpPush.tryInit(appCtx)) KpPush.registerToken(appCtx) }
+        }
+        // First login in this process → make sure KuchuPuchu AI said hello
+        // (idempotent server-side; returning accounts get a silent no-op).
+        if (!aiWelcomeAsked) {
+            aiWelcomeAsked = true
+            scope.launch(Dispatchers.IO) {
+                runCatching { Api.post("/api/ai/welcome", JSONObject()) }
+            }
         }
     }
 
@@ -866,13 +878,31 @@ private fun PhoneField(
                 .padding(horizontal = 12.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                "${country.flagEmoji()} +${country.dial}",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Ink,
-                maxLines = 1,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Real bundled flag image — Android emoji don't render country
+                // flags, which drew as broken letter pairs on most devices.
+                val flag = Flags.of(country.iso)
+                if (flag != null) {
+                    Image(
+                        painterResource(flag),
+                        contentDescription = country.name,
+                        modifier =
+                            Modifier
+                                .width(22.dp)
+                                .height(16.dp)
+                                .clip(RoundedCornerShape(3.dp)),
+                        contentScale = ContentScale.FillBounds,
+                    )
+                    Spacer(Modifier.width(7.dp))
+                }
+                Text(
+                    "+${country.dial}",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Ink,
+                    maxLines = 1,
+                )
+            }
         }
         Spacer(Modifier.width(8.dp))
         OutlinedTextField(
@@ -942,7 +972,21 @@ private fun CountryPickerSheet(
                             .padding(vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(c.flagEmoji(), fontSize = 18.sp)
+                        val flag = Flags.of(c.iso)
+                        if (flag != null) {
+                            Image(
+                                painterResource(flag),
+                                contentDescription = c.name,
+                                modifier =
+                                    Modifier
+                                        .width(24.dp)
+                                        .height(18.dp)
+                                        .clip(RoundedCornerShape(3.dp)),
+                                contentScale = ContentScale.FillBounds,
+                            )
+                        } else {
+                            Text(c.iso, fontSize = 13.sp, color = Muted, maxLines = 1)
+                        }
                         Spacer(Modifier.width(12.dp))
                         Text(
                             c.name,

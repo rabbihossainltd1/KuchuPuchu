@@ -1,0 +1,273 @@
+// Bots & badges (owner round): the KuchuPuchu AI welcome message (Gemini
+// fallback when no key), both bot accounts verified with the bundled logo
+// avatar, the login-approval card carrying the attempt's origin (IP, place,
+// time), and the official notification account being strictly one-way.
+
+import { makeD1, makeR2, makeCtx } from "../d1shim.mjs";
+import { makeReg, installGoogleStub, phoneFrom, fakeIdToken } from "../helpers/phoneauth.mjs";
+
+installGoogleStub();
+
+const WORKER = new URL("../../src/worker/index.ts", import.meta.url).href;
+let n = 0;
+const freshWorker = async () => (await import(`${WORKER}?v=${n++}`)).default;
+
+const lines = [];
+const check = (name, cond, detail) =>
+  lines.push(`  ${cond ? "OK     " : "BROKEN "}  ${name}${detail ? `  -> ${detail}` : ""}`);
+
+async function mk() {
+  const worker = await freshWorker();
+  const db = makeD1();
+  const env = { DB: db, MEDIA: makeR2(), GOOGLE_WEB_CLIENT_ID: "kp-test-web-client" };
+  const ctx = makeCtx();
+  let ipSeq = 0;
+  const call = async (method, path, body, token, fixedIp) => {
+    const headers = { "content-type": "application/json" };
+    if (fixedIp) headers["cf-connecting-ip"] = fixedIp;
+    else if (path.startsWith("/api/auth/"))
+      headers["cf-connecting-ip"] = `203.9.${Math.floor(ipSeq / 250)}.${(ipSeq++ % 250) + 1}`;
+    if (token) headers.authorization = `Bearer ${token}`;
+    const init = { method, headers };
+    if (body !== undefined && method !== "GET") init.body = JSON.stringify(body);
+    const res = await worker.fetch(new Request(`https://kp.test${path}`, init), env, ctx);
+    const t = await res.text();
+    await ctx.drain();
+    let j = {};
+    try {
+      j = t ? JSON.parse(t) : {};
+    } catch {
+      j = { _raw: t.slice(0, 80) };
+    }
+    return { status: res.status, json: j };
+  };
+  return { db, call, reg: makeReg(call) };
+}
+
+const convBetween = (db, a, b) =>
+  db._db
+    .prepare(
+      `SELECT c.id FROM conversations c
+        JOIN members m1 ON m1.conv_id = c.id AND m1.user_id = ?
+        JOIN members m2 ON m2.conv_id = c.id AND m2.user_id = ?`,
+    )
+    .get(a, b);
+
+// ---- 1. a brand-new account is welcomed by KuchuPuchu AI at first bind ----
+{
+  const k = await mk();
+  const a = await k.reg("welcome@x.com", "welcome");
+  const w = await k.call("POST", "/api/ai/welcome", {}, a.token);
+  check("welcome endpoint answers ok", w.status === 200 && w.json.ok === true, w.status);
+  const conv = convBetween(k.db, "kp_ai_bot", a.user.id);
+  check("AI conversation exists after first bind", !!conv, conv ? "" : "no pair conv");
+  const msg = k.db._db
+    .prepare("SELECT * FROM messages WHERE conv_id = ? AND sender_id = 'kp_ai_bot'")
+    .get(conv?.id);
+  check(
+    "welcome message from KuchuPuchu AI (fallback text without GEMINI_API_KEY)",
+    !!msg && msg.kind === "TEXT" && msg.body.includes("Welcome to KuchuPuchu"),
+    msg ? msg.body.slice(0, 50) : "none",
+  );
+  const unread = k.db._db
+    .prepare("SELECT unread FROM members WHERE conv_id = ? AND user_id = ?")
+    .get(conv.id, a.user.id);
+  check(
+    "the welcome is unread in the chat list",
+    (unread?.unread ?? 0) >= 1,
+    JSON.stringify(unread),
+  );
+  const last = k.db._db.prepare("SELECT last_message FROM conversations WHERE id = ?").get(conv.id);
+  check(
+    "chat list preview shows the welcome",
+    !!last?.last_message?.includes("Welcome"),
+    last?.last_message?.slice(0, 40),
+  );
+
+  // exactly ONE welcome, never duplicated by later activity
+  await k.call("POST", "/api/ai/welcome", {}, a.token);
+  await k.call("POST", "/api/ai/welcome", {}, a.token);
+  const again = k.db._db
+    .prepare("SELECT COUNT(*) AS n FROM messages WHERE conv_id = ? AND sender_id = 'kp_ai_bot'")
+    .get(conv.id);
+  check("exactly one welcome message (endpoint is idempotent)", again?.n === 1, String(again?.n));
+}
+
+// ---- 2. both bot accounts: verified badge + bundled logo avatar ----
+{
+  const k = await mk();
+  const a = await k.reg("bots@x.com", "bots");
+  await k.call("POST", "/api/ai/welcome", {}, a.token);
+  const ai = k.db._db.prepare("SELECT * FROM users WHERE id = 'kp_ai_bot'").get();
+  check("AI bot user exists", !!ai && ai.display_name === "KuchuPuchu AI", ai?.display_name);
+  check("AI bot is verified", ai?.verified === 1, String(ai?.verified));
+  check(
+    "AI bot carries the logo avatar",
+    typeof ai?.avatar_url === "string" && ai.avatar_url.startsWith("data:image/jpeg;base64,"),
+    ai?.avatar_url?.slice(0, 30),
+  );
+  // official bot materialises on the first approval; force one
+  const v = await k.call("POST", "/api/auth/verify-phone", {
+    phone: a.user.phone,
+    sim: "MATCH",
+    deviceId: "dev-other",
+    deviceName: "Pixel Test",
+  });
+  check(
+    "approval required from the second device",
+    v.json.status === "APPROVAL_REQUIRED",
+    v.json.status,
+  );
+  await new Promise((r) => setTimeout(r, 200));
+  const official = k.db._db.prepare("SELECT * FROM users WHERE id = 'kp_official_bot'").get();
+  check("official bot is verified", official?.verified === 1, String(official?.verified));
+  check(
+    "official bot carries the logo avatar",
+    typeof official?.avatar_url === "string" &&
+      official.avatar_url.startsWith("data:image/jpeg;base64,"),
+    official?.avatar_url?.slice(0, 30),
+  );
+
+  // the client-facing shapes expose verified + avatarRef for both bots
+  const convs = await k.call("GET", "/api/conversations", undefined, a.token);
+  const aiConv = convs.json.items?.find((c) => c.other?.id === "kp_ai_bot");
+  const offConv = convs.json.items?.find((c) => c.other?.id === "kp_official_bot");
+  check(
+    "chat list marks the AI bot verified",
+    aiConv?.other?.verified === true,
+    JSON.stringify(aiConv?.other?.verified),
+  );
+  check(
+    "chat list marks the official bot verified",
+    offConv?.other?.verified === true,
+    JSON.stringify(offConv?.other?.verified),
+  );
+  check(
+    "bot avatars come as a light avatarRef (fetchable via /avatar)",
+    typeof aiConv?.other?.avatarRef === "string" && typeof offConv?.other?.avatarRef === "string",
+    `${aiConv?.other?.avatarRef} / ${offConv?.other?.avatarRef}`,
+  );
+  const av = await k.call("GET", `/api/users/kp_ai_bot/avatar`, undefined, a.token);
+  check(
+    "/api/users/:id/avatar serves the AI bot logo",
+    av.status === 200 &&
+      typeof av.json.avatarUrl === "string" &&
+      av.json.avatarUrl.startsWith("data:image/jpeg"),
+    av.status,
+  );
+
+  // a normal account stays unverified
+  const b = await k.reg("plain@x.com", "plain");
+  const prof = await k.call("GET", `/api/users/${b.user.id}`, undefined, a.token);
+  check(
+    "a normal account is NOT verified",
+    prof.json.user?.verified === false,
+    JSON.stringify(prof.json.user?.verified),
+  );
+}
+
+// ---- 3. the approval card carries the attempt's origin (owner rule) ----
+{
+  const k = await mk();
+  const a = await k.reg("origin@x.com", "origin");
+  const v = await k.call(
+    "POST",
+    "/api/auth/verify-phone",
+    { phone: a.user.phone, sim: "MATCH", deviceId: "dev-x", deviceName: "Samsung S24" },
+    undefined,
+    "198.51.100.77",
+  );
+  check("approval required", v.json.status === "APPROVAL_REQUIRED", v.json.status);
+  await new Promise((r) => setTimeout(r, 200));
+  const msg = k.db._db.prepare("SELECT * FROM messages WHERE kind = 'LOGIN_APPROVAL'").get();
+  const meta = msg ? JSON.parse(msg.meta_json || "{}") : {};
+  check("card meta carries the caller IP", meta.ip === "198.51.100.77", String(meta.ip));
+  check(
+    "card meta carries city/country (null without cf, key present)",
+    "city" in meta && "country" in meta,
+    JSON.stringify({ city: meta.city, country: meta.country }),
+  );
+  check(
+    "card meta carries the attempt time",
+    typeof meta.time === "string" && meta.time.length >= 20,
+    String(meta.time)?.slice(0, 24),
+  );
+  check(
+    "card body names the device",
+    !!msg?.body?.includes("Samsung S24"),
+    msg?.body?.slice(0, 50),
+  );
+}
+
+// ---- 4. the official account is one-way; the AI chat is not ----
+{
+  const k = await mk();
+  const a = await k.reg("oneway@x.com", "oneway");
+  await k.call("POST", "/api/ai/welcome", {}, a.token);
+  // materialise the official-bot conversation the way real users get it:
+  // a second device asks for approval
+  await k.call(
+    "POST",
+    "/api/auth/verify-phone",
+    { phone: a.user.phone, sim: "MATCH", deviceId: "dev-2", deviceName: "Second Phone" },
+    undefined,
+    "198.51.100.99",
+  );
+  await new Promise((r) => setTimeout(r, 200));
+  const offConv = convBetween(k.db, "kp_official_bot", a.user.id);
+  const aiConv = convBetween(k.db, "kp_ai_bot", a.user.id);
+  check("official conversation exists", !!offConv, offConv ? "" : "none");
+  const r1 = await k.call(
+    "POST",
+    `/api/conversations/${offConv.id}/messages`,
+    { body: "hi?" },
+    a.token,
+  );
+  check(
+    "replying to the official account is rejected",
+    r1.status === 403 && r1.json.error?.code === "NO_REPLIES",
+    `${r1.status} ${r1.json.error?.code}`,
+  );
+  const r2 = await k.call(
+    "POST",
+    `/api/conversations/${aiConv.id}/messages`,
+    { body: "hey AI" },
+    a.token,
+  );
+  check(
+    "messaging the AI bot still works",
+    r2.status === 201 && r2.json.message?.body === "hey AI",
+    r2.status,
+  );
+}
+
+// ---- 5. welcome survives the full e2e shape the app polls ----
+{
+  const k = await mk();
+  const phone = phoneFrom("fresh@x.com");
+  const v = await k.call("POST", "/api/auth/verify-phone", {
+    phone,
+    sim: "MATCH",
+    deviceId: "dev-f",
+  });
+  const b = await k.call("POST", "/api/auth/google/bind", {
+    phone,
+    idToken: fakeIdToken("g-fresh", "fresh@x.com"),
+    deviceId: "dev-f",
+    displayName: "Fresh User",
+  });
+  check("signup completed", b.json.status === "SESSION" && !!b.json.user, b.json.status);
+  await k.call("POST", "/api/ai/welcome", {}, b.json.token);
+  const convs = await k.call("GET", "/api/conversations", undefined, b.json.token);
+  const aiConv = convs.json.items?.find((c) => c.other?.id === "kp_ai_bot");
+  check(
+    "fresh signup sees the AI chat with a proper title",
+    !!aiConv && aiConv.other?.displayName === "KuchuPuchu AI",
+    JSON.stringify(aiConv?.other?.displayName),
+  );
+}
+
+console.log(lines.join("\n"));
+const broken = lines.filter((l) => l.includes("BROKEN")).length;
+console.log(`bots-verified: ${lines.length - broken} ok / ${broken} broken`);
+process.exit(broken ? 1 : 0);
