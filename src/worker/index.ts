@@ -630,22 +630,18 @@ const AI_WELCOME_FALLBACK =
  *  has), and the lite alias covers the flagship being at capacity (503). */
 const GEMINI_WELCOME_MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest"] as const;
 
-async function geminiWelcomeText(env: Env, displayName: string | null): Promise<string | null> {
+/** One bounded Gemini completion: model aliases tried in order, hard timeout,
+ *  any failure ⇒ null. Never throws — callers own the fallback text. */
+async function geminiComplete(
+  env: Env,
+  prompt: string,
+  maxOutputTokens = 120,
+): Promise<string | null> {
   if (!env.GEMINI_API_KEY) return null;
-  const name =
-    displayName && displayName !== "KuchuPuchu user"
-      ? ` Their display name is ${displayName}.`
-      : "";
-  const prompt =
-    "You are KuchuPuchu AI, the friendly assistant inside KuchuPuchu, a Bangladeshi messaging app. " +
-    "A user just created their account." +
-    name +
-    " Write a short, warm welcome message to them: 1–2 sentences, at most 35 words, in English, at most one emoji. " +
-    "Do not use hashtags, quotes, or a signature line. Reply with the message text only.";
   for (const model of GEMINI_WELCOME_MODELS) {
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 6000);
+      const timer = setTimeout(() => ctrl.abort(), 9000);
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
         {
@@ -653,7 +649,7 @@ async function geminiWelcomeText(env: Env, displayName: string | null): Promise<
           headers: { "content-type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 1, maxOutputTokens: 120 },
+            generationConfig: { temperature: 1, maxOutputTokens },
           }),
           signal: ctrl.signal,
         },
@@ -667,13 +663,27 @@ async function geminiWelcomeText(env: Env, displayName: string | null): Promise<
         .map((p) => p.text ?? "")
         .join("")
         .trim()
-        .slice(0, 400);
+        .slice(0, 600);
       if (text) return text;
     } catch {
-      /* next model, then the fixed fallback */
+      /* next model, then the caller's fallback */
     }
   }
   return null;
+}
+
+async function geminiWelcomeText(env: Env, displayName: string | null): Promise<string | null> {
+  const name =
+    displayName && displayName !== "KuchuPuchu user"
+      ? ` Their display name is ${displayName}.`
+      : "";
+  const prompt =
+    "You are KuchuPuchu AI, the friendly assistant inside KuchuPuchu, a Bangladeshi messaging app. " +
+    "A user just created their account." +
+    name +
+    " Write a short, warm welcome message to them: 1–2 sentences, at most 35 words, in English, at most one emoji. " +
+    "Do not use hashtags, quotes, or a signature line. Reply with the message text only.";
+  return geminiComplete(env, prompt);
 }
 
 /** Drops the AI welcome message into a fresh 1:1 chat, exactly once per
@@ -761,6 +771,114 @@ async function sendAiWelcome(
     );
   } catch {
     /* a failed welcome must never fail the login that triggered it */
+  }
+}
+
+/** The AI's line when Gemini is unreachable: it still answers, never silence. */
+const AI_REPLY_FALLBACK =
+  "I'm KuchuPuchu AI 🤖 I'm right here with you! Ask me anything about the app — or just say hi.";
+
+/** KuchuPuchu AI answers a user message in its chat (owner feature). Runs in
+ *  ctx.waitUntil so the user's send stays instant. The transcript keeps the
+ *  last few turns only; the limiter keeps a hammering user from firing a
+ *  Gemini call per message (the reply is skipped, the send never fails). */
+async function sendAiReply(
+  env: Env,
+  db: D1Database,
+  ctx: ExecutionContext,
+  convId: string,
+  userId: string,
+) {
+  try {
+    try {
+      rateLimit(`ai:${userId}`, 20, 20);
+    } catch {
+      return; // rate-limited: no reply this time
+    }
+    const rows = await all<{ sender_id: string; body: string | null }>(
+      db,
+      `SELECT sender_id, body FROM messages
+        WHERE conv_id = ? AND kind = 'TEXT' ORDER BY rowid DESC LIMIT 12`,
+      convId,
+    );
+    const transcript = rows
+      .reverse()
+      .map((r) => `${r.sender_id === AI_BOT_ID ? "KuchuPuchu AI" : "User"}: ${r.body ?? ""}`)
+      .join("\n");
+    const prompt =
+      "You are KuchuPuchu AI, the friendly assistant inside KuchuPuchu, a Bangladeshi messaging app. " +
+      "Reply to the user's latest message in this conversation:\n\n" +
+      transcript +
+      "\n\nRules: be warm and helpful, at most 60 words, at most one emoji. " +
+      "Reply in the language the user wrote in (English, Bengali or Banglish). " +
+      "No hashtags, no signature line. Reply with the message text only.";
+    const body = (await geminiComplete(env, prompt, 220)) ?? AI_REPLY_FALLBACK;
+    const botId = await ensureAiBot(db);
+    const mid = id();
+    const created = nowIso();
+    await run(
+      db,
+      `INSERT INTO messages (id, conv_id, sender_id, kind, body, created_at)
+       VALUES (?, ?, ?, 'TEXT', ?, ?)`,
+      mid,
+      convId,
+      botId,
+      body,
+      created,
+    );
+    await run(
+      db,
+      "UPDATE conversations SET last_message_at = ?, last_message = ? WHERE id = ?",
+      created,
+      body,
+      convId,
+    );
+    await run(
+      db,
+      "UPDATE members SET unread = unread + 1 WHERE conv_id = ? AND user_id = ?",
+      convId,
+      userId,
+    );
+    ctx.waitUntil(
+      broadcastRoomEvent(env, convId, {
+        type: "message",
+        conversationId: convId,
+        message: msgFrom({
+          id: mid,
+          conv_id: convId,
+          sender_id: botId,
+          kind: "TEXT",
+          body,
+          media: null,
+          meta_json: null,
+          created_at: created,
+          delivered_at: null,
+        } as MsgRow),
+      }),
+    );
+    ctx.waitUntil(
+      broadcastRoomEvent(env, `user:${userId}`, { type: "conv", conversationId: convId }),
+    );
+    ctx.waitUntil(
+      pushToUser(
+        env,
+        db,
+        userId,
+        {
+          type: "message",
+          convoId: convId,
+          mid,
+          kind: "SOLO",
+          fromName: "KuchuPuchu AI",
+          body,
+          kp_chat: convId,
+          muted: "0",
+        },
+        { title: "KuchuPuchu AI", body, channel: "kp_messages_v2" },
+      ),
+    );
+  } catch {
+    /* the user's message must never fail because the reply did */
   }
 }
 
@@ -2918,6 +3036,24 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     return json({ ok: true });
   }
 
+  /* ---------- account recovery ---------- */
+
+  if (path === "/api/auth/recovery/lookup" && method === "POST") {
+    // Step 1 of the (owner-redesigned) recovery flow: the app asks whether
+    // the typed number even has an account before showing the "Verify It's
+    // You" Google step. Existence only — nothing else about the account —
+    // and tightly rate-limited: phone enumeration stays as (un)profitable
+    // as it already is through verify-phone's status codes.
+    rateLimit(`rlookup:${clientIp(request)}`, 10, 5);
+    const phone = normalizePhone(body.phone);
+    const user = await one<{ id: string }>(
+      db,
+      "SELECT id FROM users WHERE phone_e164 = ? AND auth_status = 'ACTIVE'",
+      phone,
+    );
+    return json({ exists: !!user });
+  }
+
   if (path === "/api/auth/recovery/start" && method === "POST") {
     // §21: the old device is gone, so the ONLY acceptable proof is the Google
     // identity bound to the account. The entered phone just finds the account.
@@ -4482,6 +4618,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         );
       }
     }
+    // KuchuPuchu AI answers in its chat (owner feature): the reply generates
+    // in the background so the send itself stays instant.
+    if (conv.kind === "SOLO" && members.some((m) => m.user_id === AI_BOT_ID))
+      ctx.waitUntil(sendAiReply(env, db, ctx, convId, uid));
     return json({ message }, 201);
   }
 

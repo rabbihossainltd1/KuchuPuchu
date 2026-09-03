@@ -240,6 +240,18 @@ const convBetween = (db, a, b) =>
     r2.status,
   );
 
+  // the AI ANSWERS (owner feature): reply generated via ctx.waitUntil
+  const reply = k.db._db
+    .prepare(
+      "SELECT body FROM messages WHERE conv_id = ? AND sender_id = 'kp_ai_bot' AND body != 'hey AI' ORDER BY rowid DESC LIMIT 1",
+    )
+    .get(aiConv.id);
+  check(
+    "KuchuPuchu AI replies to the message (fallback text without a key)",
+    !!reply?.body && reply.body.length > 10,
+    reply?.body?.slice(0, 50),
+  );
+
   // bots can't be called or blocked (owner rule, enforced server-side)
   const c1 = await k.call("POST", "/api/calls", { userId: "kp_ai_bot", kind: "AUDIO" }, a.token);
   check(
@@ -279,6 +291,20 @@ const convBetween = (db, a, b) =>
     !!aiConv && aiConv.other?.displayName === "KuchuPuchu AI",
     JSON.stringify(aiConv?.other?.displayName),
   );
+}
+
+// ---- 6. recovery step 1: number lookup before the "Verify It's You" step ----
+{
+  const k = await mk();
+  const a = await k.reg("lookup@x.com", "lookup");
+  const hit = await k.call("POST", "/api/auth/recovery/lookup", { phone: a.user.phone });
+  check("lookup: registered number exists", hit.json.exists === true, JSON.stringify(hit.json));
+  const miss = await k.call("POST", "/api/auth/recovery/lookup", {
+    phone: phoneFrom("nobody@x.com"),
+  });
+  check("lookup: unknown number doesn't", miss.json.exists === false, JSON.stringify(miss.json));
+  const bad = await k.call("POST", "/api/auth/recovery/lookup", { phone: "123" });
+  check("lookup: garbage number rejected", bad.status === 400, bad.status);
 }
 
 console.log(lines.join("\n"));
