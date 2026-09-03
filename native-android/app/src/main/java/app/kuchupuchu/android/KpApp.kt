@@ -15,9 +15,6 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
 
 /**
  * Root of the v3 app. Auth gate → main tabs (Chats / Status / Calls) with
@@ -84,17 +81,6 @@ fun KpApp() {
             }
             // Call screens float above everything while a call is live.
             CallGate()
-            // Phone auth §14: while signed in, keep asking the worker for a
-            // pending new-device login request. Covers a dismissed, missed or
-            // tapped notification — the approval dialog appears either way.
-            LaunchedEffect(authed) {
-                if (!authed) return@LaunchedEffect
-                while (true) {
-                    runCatching { withContext(Dispatchers.IO) { LoginApprovals.refresh() } }
-                    delay(12_000)
-                }
-            }
-            LoginApprovalGate()
         }
     }
 }

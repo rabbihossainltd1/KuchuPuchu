@@ -157,14 +157,5 @@
         <receiver
             android:name=".ReminderReceiver"
             android:exported="false" />
-        <!-- Phone auth §14: Accept/Decline buttons on the new-login card. -->
-        <receiver
-            android:name=".KpLoginApprovalReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="app.kuchupuchu.android.LOGIN_APPROVE" />
-                <action android:name="app.kuchupuchu.android.LOGIN_DECLINE" />
-            </intent-filter>
-        </receiver>
     </application>
 </manifest>

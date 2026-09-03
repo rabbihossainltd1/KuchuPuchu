@@ -215,7 +215,6 @@ object KpPush {
  *  - type=message : { convoId, kind, from, body }
  *  - type=call        : { callId, kind (AUDIO|VIDEO), from, fromId }
  *  - type=call_answer : { callId, kind }  (to the caller, on accept)
- *  - type=login_request : { requestId, deviceId, deviceName } (phone auth §14)
  */
 class KpPushService : FirebaseMessagingService() {
 
@@ -249,34 +248,10 @@ class KpPushService : FirebaseMessagingService() {
             "call_answer" -> handleCallAnswer(data)
             "message" -> handleMessage(data)
             "missed_call" -> handleMissedCall(data)
-            "login_request" -> handleLoginRequest(data)
             "reoffer", "reanswer" -> data["callId"]?.let { CallEngine.instance?.kickPoll(it) }
         }
     }
 
-    /**
-     * Phone auth §14: the CURRENT device's doorbell — a new device is trying
-     * to sign in. The Accept/Decline actions on the card answer the worker
-     * directly; the worker makes the actual transfer decision (§19). Skipped
-     * on the requesting install itself (push reaches every token registered
-     * for the account, including a still-logged-in tablet).
-     */
-    private fun handleLoginRequest(data: Map<String, String>) {
-        val requestId = data["requestId"] ?: return
-        val newDevice = data["deviceId"] ?: ""
-        if (newDevice.isNotBlank() && newDevice == KpPush.deviceId(this)) {
-            KpDiag.log(this, "login_request is for THIS install -> skip approval card")
-            return
-        }
-        if (Store.foreground && Store.authed.value) {
-            // The user is looking at the app — the in-app approval dialog is
-            // the surface, not a shade notification.
-            KpDiag.log(this, "login_request fg -> in-app approval dialog")
-            LoginApprovals.offer(requestId, newDevice, data["deviceName"])
-            return
-        }
-        KpNotify.loginRequest(this, requestId, data["deviceName"])
-    }
 
     /**
      * Sent to the CALLER when the callee accepts: force an immediate poll so

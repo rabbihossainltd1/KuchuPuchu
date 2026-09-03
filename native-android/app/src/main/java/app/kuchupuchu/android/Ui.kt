@@ -507,7 +507,13 @@ fun GoldBtn(
             contentColor = AmberInk,
         ),
     ) {
-        Text(text, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+        Text(
+            text,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 15.sp,
+        )
     }
 }
 
