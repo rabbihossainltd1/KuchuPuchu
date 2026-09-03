@@ -110,9 +110,17 @@ const screenFlat = flat(screen);
   );
   check(
     "the PiP tile is not composed at all while the camera is off",
-    /val localFeedUp = !engine\.cameraOff[\s\S]{0,400}?if \(localFeedUp\) \{\s*BoxWithConstraints/.test(
-      screen,
-    ),
+    /if \(localFeedUp\) \{\s*BoxWithConstraints/.test(screen) &&
+      // ...and declared BEFORE every use. The first cut kept both next to the
+      // tile, 55 lines under the big renderer, and CI said
+      // `CallScreens.kt:516:41 Unresolved reference: effSwap`. There is no
+      // Kotlin compiler in this suite, so source order is the local proxy for
+      // that error, checked against both consumers.
+      screen.indexOf("val effSwap = swapped && localFeedUp") <
+        screen.indexOf("VideoRenderer(engine, remote = !effSwap)") &&
+      screen.indexOf("val localFeedUp = !engine.cameraOff") <
+        screen.indexOf("VideoRenderer(engine, remote = effSwap, fit = true, pip = true)") &&
+      screen.indexOf("val localFeedUp = !engine.cameraOff") < screen.indexOf("if (localFeedUp) {"),
   );
   check(
     "it is really removed, not replaced by a placeholder box",

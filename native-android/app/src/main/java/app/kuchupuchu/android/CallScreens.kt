@@ -487,6 +487,11 @@ fun InCallVideoScreen(call: CallUi) {
     val secs = rememberTick(call.startedAt, call.connecting)
     var controlsVisible by remember { mutableStateOf(true) }
     var swapped by remember { mutableStateOf(false) }
+    // Which feed is where, and whether there is a self feed at all. Declared up
+    // here because BOTH renderers below read it: an off camera is never
+    // promotable full-screen, and the self tile is not composed at all.
+    val localFeedUp = !engine.cameraOff
+    val effSwap = swapped && localFeedUp
     // mutableFloatStateOf avoids boxing a Float on every drag delta —
     // with the boxed mutableStateOf<Float>, each pixel of drag allocated
     // and triggered a state read/write cycle that showed up as PiP drag
@@ -568,8 +573,6 @@ fun InCallVideoScreen(call: CallUi) {
          *    feed there is nothing to draw: it is not composed at all, and it
          *    returns by itself the moment the camera is on again (cameraOff is
          *    mutableStateOf, so flipping it recomposes this branch). */
-        val localFeedUp = !engine.cameraOff
-        val effSwap = swapped && localFeedUp
         if (localFeedUp) {
             BoxWithConstraints(Modifier.fillMaxSize().zIndex(1f)) {
                 val dm = LocalDensity.current
