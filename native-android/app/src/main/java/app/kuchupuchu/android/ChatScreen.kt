@@ -1087,20 +1087,27 @@ fun ChatScreen(nav: NavController, convId: String) {
     val singleMsg = if (single) selectedMessages().firstOrNull() else null
     val c = conv.value
     val isGroup = c?.optBoolean("isGroup") == true
+    val otherUserId = c?.optJSONObject("other")?.optString("id") ?: ""
+    // System accounts: full name in the header (no call buttons there, so
+    // space is never a problem) and no call/block actions anywhere.
+    val botChat = !isGroup && isKpBot(otherUserId)
     val rawTitle =
         if (isGroup) c?.optText("title")?.ifBlank { "Group" } ?: "…"
         else c?.optJSONObject("other")?.optText("displayName")?.ifBlank { "…" } ?: "…"
     // Long names collapse to the first word so the header always stays a
-    // single line (the full name lives on the contact page).
+    // single line (the full name lives on the contact page) — except the
+    // bot chats, whose header has no call buttons and always shows the
+    // full name (owner rule).
     val title =
-        if (rawTitle.length > 14 && rawTitle.contains(' ')) rawTitle.substringBefore(' ') else rawTitle
+        if (botChat) rawTitle
+        else if (rawTitle.length > 14 && rawTitle.contains(' ')) rawTitle.substringBefore(' ') else rawTitle
     val avatarUrl = if (isGroup) null else c?.optJSONObject("other")?.optIso("avatarUrl")
     // The ref is what makes the header paint without re-fetching: pass it too.
     val avatarRef = if (isGroup) null else c?.optJSONObject("other")?.optIso("avatarRef")
     val online = !isGroup && c?.optJSONObject("other")?.optBoolean("online") == true
     val verified = !isGroup && c?.optJSONObject("other")?.optBoolean("verified") == true
     // Official notification account: one-way (owner rule) — no composer.
-    val noReply = !isGroup && c?.optJSONObject("other")?.optString("id") == "kp_official_bot"
+    val noReply = !isGroup && otherUserId == "kp_official_bot"
     // Recompose exactly when the six-second typing lease expires. Computing
     // directly from currentTimeMillis() left the label visible indefinitely
     // on an otherwise idle screen because time passing is not Compose state.
@@ -1207,7 +1214,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             ) {
             KpAvatar(title, avatarUrl, 40.dp, avatarRef = avatarRef)
             Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
+            Column(Modifier.weight(1f).padding(top = 2.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         title,
@@ -1241,7 +1248,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 )
             }
             }
-            if (!isGroup && c != null) {
+            if (!isGroup && c != null && !botChat) {
                 if (otherId.isNotBlank()) {
                     HeaderCallBtn(onClick = {
                         CallEngine.instance?.startCall(otherId, "AUDIO", title, avatarUrl ?: "")

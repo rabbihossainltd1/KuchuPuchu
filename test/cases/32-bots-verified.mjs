@@ -239,6 +239,20 @@ const convBetween = (db, a, b) =>
     r2.status === 201 && r2.json.message?.body === "hey AI",
     r2.status,
   );
+
+  // bots can't be called or blocked (owner rule, enforced server-side)
+  const c1 = await k.call("POST", "/api/calls", { userId: "kp_ai_bot", kind: "AUDIO" }, a.token);
+  check(
+    "calling a bot is rejected",
+    c1.status === 403 && c1.json.error?.code === "BOT_ACCOUNT",
+    `${c1.status} ${c1.json.error?.code}`,
+  );
+  const c2 = await k.call("POST", "/api/blocks", { userId: "kp_official_bot" }, a.token);
+  check(
+    "blocking a bot is rejected",
+    c2.status === 403 && c2.json.error?.code === "BOT_ACCOUNT",
+    `${c2.status} ${c2.json.error?.code}`,
+  );
 }
 
 // ---- 5. welcome survives the full e2e shape the app polls ----
