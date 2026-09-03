@@ -2184,6 +2184,7 @@ private fun EditDialog(original: String, onClose: () -> Unit, onSave: (String) -
                 text,
                 { text = it.take(4000) },
                 singleLine = false,
+            shape = RoundedCornerShape(14.dp),
                 maxLines = 4,
                 modifier = Modifier.fillMaxWidth(),
             )

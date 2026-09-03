@@ -157,6 +157,7 @@ fun StatusPhotoScreen(nav: NavController) {
                 { caption = it.take(200) },
                 label = { Text("Caption (optional)") },
                 singleLine = true,
+                shape = RoundedCornerShape(14.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),

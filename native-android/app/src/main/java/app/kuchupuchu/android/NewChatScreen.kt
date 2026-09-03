@@ -112,6 +112,7 @@ fun NewChatScreen(nav: NavController) {
             { query = it },
             label = { Text("Name or username") },
             singleLine = true,
+            shape = RoundedCornerShape(14.dp),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
             modifier = Modifier
                 .fillMaxWidth()

@@ -424,10 +424,15 @@ fun SettingsScreen(nav: NavController) {
             },
             text = {
                 Column {
-                    OutlinedTextField(editValue, { editValue = it.take(if (editField == "about") 200 else 60) }, singleLine = true)
+                    OutlinedTextField(
+                        editValue,
+                        { editValue = it.take(if (editField == "about") 200 else 60) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                    )
                     if (editField == "username") {
                         Spacer(Modifier.height(6.dp))
-                        Text("Ei username diye manush apnake khujhte parbe — space ba @ chara likhun.", fontSize = 12.sp, color = Muted)
+                        Text("People can find you by this username — use lowercase letters, numbers and underscores only.", fontSize = 12.sp, color = Muted)
                     }
                 }
             },
@@ -451,13 +456,17 @@ fun SettingsScreen(nav: NavController) {
             text = {
                 Column {
                     Text(
-                        "Notun number ta ei device er SIM e thakte hobe — automatic verify " +
-                            "korte parle e change hobe.",
+                        "The new number must be present on this device's SIM — it only changes if it can be verified automatically.",
                         fontSize = 12.sp,
                         color = Muted,
                     )
                     Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(changePhone, { changePhone = it; changePhoneError = "" }, singleLine = true)
+                    OutlinedTextField(
+                        changePhone,
+                        { changePhone = it; changePhoneError = "" },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                    )
                     if (changePhoneError.isNotBlank()) {
                         Spacer(Modifier.height(6.dp))
                         Text(changePhoneError, color = Red, fontSize = 12.sp)
@@ -511,7 +520,7 @@ fun SettingsScreen(nav: NavController) {
         AlertDialog(
             onDismissRequest = { confirmLogout = false },
             title = { Text("Log out?") },
-            text = { Text("Apni abar phone number diye log in korte parben.") },
+            text = { Text("You can sign in again anytime with your phone number.") },
             confirmButton = {
                 TextButton(onClick = {
                     confirmLogout = false
