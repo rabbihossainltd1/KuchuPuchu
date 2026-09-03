@@ -829,7 +829,7 @@ class CallEngine(private val app: Application) {
                     // instead of flipping the call to a VIDEO label with nothing
                     // behind it — that is the "opponent kichu dekhe na" case.
                     cameraOff = true
-                    notify("Camera couldn't start. Abar try koro.")
+                    notify("Camera couldn't start. Please try again.")
                     return@launch
                 }
                 videoTrack?.let { track ->
@@ -896,7 +896,7 @@ class CallEngine(private val app: Application) {
                         .onFailure {
                         // Named so the user's next report tells us exactly
                         // which stage broke (service/FGS/projection/capturer).
-                        notify("Screen share failed (${it.javaClass.simpleName}). Abar try koro.")
+                        notify("Screen share failed (${it.javaClass.simpleName}). Please try again.")
                     }
                 }
             }
@@ -1343,7 +1343,7 @@ class CallEngine(private val app: Application) {
                                     // at this step and succeed over a relay.
                                     if (!relayRetryUsed && pc != null) {
                                         relayRetryUsed = true
-                                        notify("Network e direct hole na — relay theke try kora hochhe…")
+                                        notify("Network is limited — connecting through a relay…")
                                         runCatching { pc?.setConfiguration(relayConfig()) }
                                         scope.launch {
                                             try {
@@ -1374,7 +1374,7 @@ class CallEngine(private val app: Application) {
                                         }
                                         return@post
                                     }
-                                    notify("Call connection failed — net check kore abar try koro")
+                                    notify("Call connection failed. Check your internet and try again.")
                                 }
                             PeerConnection.IceConnectionState.DISCONNECTED ->
                                 Handler(Looper.getMainLooper()).post { armIceWatchdog() }
