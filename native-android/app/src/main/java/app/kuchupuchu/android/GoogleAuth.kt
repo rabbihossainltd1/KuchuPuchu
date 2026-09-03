@@ -65,11 +65,4 @@ object GoogleAuth {
             null
         }
     }
-
-    /** The Gmail in the ID token, for a friendly "bound as …" confirmation. */
-    fun emailFromIdToken(idToken: String): String? = runCatching {
-        val payload = idToken.split(".").getOrNull(1) ?: return null
-        val json = String(java.util.Base64.getUrlDecoder().decode(payload), Charsets.UTF_8)
-        org.json.JSONObject(json).optString("email").takeIf { it.isNotBlank() }
-    }.getOrNull()
 }

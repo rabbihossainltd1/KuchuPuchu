@@ -468,8 +468,20 @@ object KpNotify {
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
                 .setAutoCancel(true)
-                .addAction(NotificationCompat.Action.Builder(0, "Accept", acceptPending).build())
-                .addAction(NotificationCompat.Action.Builder(0, "Decline", declinePending).build())
+                .addAction(
+                    NotificationCompat.Action.Builder(
+                        android.R.drawable.ic_menu_save,
+                        "Accept",
+                        acceptPending,
+                    ).build(),
+                )
+                .addAction(
+                    NotificationCompat.Action.Builder(
+                        android.R.drawable.ic_menu_close_clear_cancel,
+                        "Decline",
+                        declinePending,
+                    ).build(),
+                )
                 .build(),
         )
     }

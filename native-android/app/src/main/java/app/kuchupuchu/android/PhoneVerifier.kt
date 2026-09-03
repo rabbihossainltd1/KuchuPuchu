@@ -1,6 +1,7 @@
 package app.kuchupuchu.android
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.telephony.SubscriptionManager
@@ -96,6 +97,7 @@ object PhoneVerifier {
      * granted (hasPermission first); a SecurityException here still maps to
      * PermissionRequired, never a crash.
      */
+    @SuppressLint("MissingPermission") // checked manually one line below
     fun verify(ctx: Context, e164: String): PhoneVerificationResult {
         if (normalize(e164) != e164) return PhoneVerificationResult.InvalidNumber
         val app = ctx.applicationContext

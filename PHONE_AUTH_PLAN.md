@@ -188,3 +188,14 @@ google verify ✓ (§6), 1 google = 1 account ✓ (unique index), 1 active devic
 KuchuPuchu approval push ✓ (§5/§7), accept/decline/timeout ✓, lost-device recovery ✓, phone change protected ✓,
 backend authoritative ✓, rate limited ✓, single-use expiring requests ✓, secrets APK te nai ✓ (worker secret),
 atomic transfer ✓ (D1 batch), audit logs ✓ (auth_audit).
+
+
+---
+
+## 11. Production cutover (2026-09-03)
+
+- Fresh start by owner decision: purbo D1 user data + R2 media erase kora hoyeche.
+  Shob user phone number diye notun account banabe.
+- Firebase project: `kuchupuchuff2026` (FCM + Google sign-in + GOOGLE_WEB_CLIENT_ID).
+- Legacy email-migration path (§ google/bind) kaj korbe na — migrate korar moto
+  kono legacy row ar nai.

@@ -82,7 +82,6 @@ fun LoginScreen(onAuthed: () -> Unit) {
     var note by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var requestId by remember { mutableStateOf("") }
-    var expiresAtMs by remember { mutableStateOf(0L) }
     val scrollState = rememberScrollState()
 
     fun finish(data: JSONObject) {
@@ -137,12 +136,6 @@ fun LoginScreen(onAuthed: () -> Unit) {
                     }
                     "APPROVAL_REQUIRED" -> {
                         requestId = data.optString("requestId")
-                        // ISO string → epoch ms; the poll loop refreshes this
-                        // from the server's PENDING responses.
-                        expiresAtMs =
-                            runCatching {
-                                java.time.Instant.parse(data.optString("expiresAt")).toEpochMilli()
-                            }.getOrDefault(System.currentTimeMillis() + 5 * 60_000)
                         stage = LoginStage.WAITING
                     }
                     else -> error = "Could not sign in. Please try again."
@@ -284,12 +277,8 @@ fun LoginScreen(onAuthed: () -> Unit) {
                         )
                     }
                 when (data.optString("status")) {
-                    "PENDING" -> {
-                        val exp = runCatching {
-                            java.time.Instant.parse(data.optString("expiresAt")).toEpochMilli()
-                        }.getOrDefault(0L)
-                        if (exp > 0) expiresAtMs = exp
-                    }
+                    // PENDING: keep polling — the server owns the expiry
+                    // (it lazily flips PENDING → EXPIRED once past it).
                     "SESSION" -> {
                         finish(data)
                         return@LaunchedEffect
