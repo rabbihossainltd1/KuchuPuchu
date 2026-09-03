@@ -820,22 +820,28 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f).fillMaxWidth()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    name,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Ink,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    // fill=false: the text takes at most its share but only as
-                    // much as it needs, so the verified tick sits immediately
-                    // after the name (WhatsApp-style) instead of being pushed
-                    // out toward the timestamp.
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                if (!isGroup && other?.optBoolean("verified") == true) {
-                    Spacer(Modifier.width(5.dp))
-                    VerifiedBadge()
+                // This inner Row takes ALL the remaining width, so the time
+                // (outside it) is pinned to the far right edge — while inside
+                // it the name hugs the left and the verified tick hugs the
+                // name (WhatsApp-style). fill=false on the Text is what keeps
+                // the tick next to the name instead of at the block's end.
+                Row(
+                    Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        name,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (!isGroup && other?.optBoolean("verified") == true) {
+                        Spacer(Modifier.width(5.dp))
+                        VerifiedBadge()
+                    }
                 }
                 if (muted) {
                     Spacer(Modifier.width(6.dp))

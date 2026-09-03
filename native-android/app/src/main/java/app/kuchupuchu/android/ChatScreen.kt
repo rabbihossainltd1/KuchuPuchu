@@ -1214,7 +1214,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             ) {
             KpAvatar(title, avatarUrl, 40.dp, avatarRef = avatarRef)
             Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f).padding(top = 2.dp)) {
+            Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         title,

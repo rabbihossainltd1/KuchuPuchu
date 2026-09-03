@@ -62,7 +62,9 @@ fun initials(name: String): String {
     return (parts[0].take(1) + parts[1].take(1)).uppercase()
 }
 
-/** Chat-list style timestamp: 14:05 / Yesterday / Mon / 12 Aug */
+/** Chat-list style timestamp: 14:05 / Yesterday / Mon / 12 Aug — always in
+ *  Bangladesh Standard Time (owner rule): Asia/Dhaka, UTC+6, no DST, whatever
+ *  the device's timezone happens to be. */
 fun listStamp(iso: String): String {
     if (iso.isBlank()) return ""
     val t = try {
@@ -70,8 +72,9 @@ fun listStamp(iso: String): String {
     } catch (e: Exception) {
         return ""
     }
-    val now = java.time.ZonedDateTime.now()
-    val z = t.atZone(java.time.ZoneId.systemDefault())
+    val dhaka = java.time.ZoneId.of("Asia/Dhaka")
+    val now = java.time.ZonedDateTime.now(dhaka)
+    val z = t.atZone(dhaka)
     return when {
         z.toLocalDate() == now.toLocalDate() ->
             String.format("%02d:%02d", z.hour, z.minute)
