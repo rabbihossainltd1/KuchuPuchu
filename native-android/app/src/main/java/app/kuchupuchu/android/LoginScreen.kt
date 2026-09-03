@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -26,12 +27,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,10 +46,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -65,12 +72,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -121,6 +131,8 @@ fun LoginScreen(onAuthed: () -> Unit) {
 
     var stage by remember { mutableStateOf(LoginStage.PHONE) }
     var phone by remember { mutableStateOf("") }
+    var country by remember { mutableStateOf(DEFAULT_COUNTRY) }
+    var showCountries by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var requestId by remember { mutableStateOf("") }
@@ -163,8 +175,14 @@ fun LoginScreen(onAuthed: () -> Unit) {
         scope.launch {
             try {
                 val e164 =
-                    PhoneVerifier.normalize(phone)
-                        ?: throw IllegalStateException("Enter a valid phone number, e.g. 01712345678.")
+                    buildE164(country, phone)
+                        ?: throw IllegalStateException(
+                            if (country.iso == "BD") {
+                                "Enter a valid Bangladeshi mobile number, e.g. 1792929202."
+                            } else {
+                                "Enter a valid phone number."
+                            },
+                        )
                 val sim =
                     simOverride
                         ?: withContext(Dispatchers.IO) { PhoneVerifier.verify(ctx, e164).wire() }
@@ -234,8 +252,13 @@ fun LoginScreen(onAuthed: () -> Unit) {
         focusManager.clearFocus()
         keyboard?.hide()
         if (busy) return
-        if (PhoneVerifier.normalize(phone) == null) {
-            error = "Enter a valid phone number, e.g. 01712345678."
+        if (buildE164(country, phone) == null) {
+            error =
+                if (country.iso == "BD") {
+                    "Enter a valid Bangladeshi mobile number, e.g. 1792929202."
+                } else {
+                    "Enter a valid phone number."
+                }
             return
         }
         val granted =
@@ -258,7 +281,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
                     return@launch
                 }
                 val e164 =
-                    PhoneVerifier.normalize(phone)
+                    buildE164(country, phone)
                         ?: throw IllegalStateException("Enter your phone number again.")
                 val data =
                     withContext(Dispatchers.IO) {
@@ -335,7 +358,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
         scope.launch {
             try {
                 val e164 =
-                    PhoneVerifier.normalize(phone)
+                    buildE164(country, phone)
                         ?: throw IllegalStateException("Enter your phone number first.")
                 val idToken = GoogleAuth.idToken(ctx)
                 if (idToken == null) {
@@ -460,6 +483,29 @@ fun LoginScreen(onAuthed: () -> Unit) {
             }
         }
 
+    // System back owns navigation everywhere (owner rule) — the login screens
+    // carry NO on-screen Back buttons. Inside the flow, back returns to the
+    // phone entry; from the approval wait it cancels the request first.
+    BackHandler(enabled = stage == LoginStage.WAITING) { cancelApproval() }
+    BackHandler(
+        enabled =
+            stage == LoginStage.BIND || stage == LoginStage.PROFILE || stage == LoginStage.RECOVERY,
+    ) {
+        error = ""
+        stage = LoginStage.PHONE
+    }
+
+    if (showCountries) {
+        CountryPickerSheet(
+            current = country,
+            onPick = {
+                country = it
+                showCountries = false
+            },
+            onDismiss = { showCountries = false },
+        )
+    }
+
     Column(
         Modifier
             .fillMaxSize()
@@ -476,26 +522,21 @@ fun LoginScreen(onAuthed: () -> Unit) {
             // Compact single-line header: small logo + name + subtitle.
             when (stage) {
                 LoginStage.PHONE, LoginStage.VERIFYING, LoginStage.VERIFY_OK -> {
-                    AuthHeader("KuchuPuchu", "Sign in with your phone number")
+                    AuthHeader("KuchuPuchu", "Sign in with your phone number", wordmark = true)
                     Spacer(Modifier.height(32.dp))
 
                     when (stage) {
                         LoginStage.PHONE -> {
-                            OutlinedTextField(
-                                phone,
-                                { phone = it; error = "" },
-                                label = { Text("Phone number") },
-                                placeholder = { Text("01712345678", color = Muted.copy(alpha = 0.45f)) },
-                                singleLine = true,
-                                shape = FieldShape,
-                                keyboardOptions =
-                                    KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Done),
-                                keyboardActions =
-                                    KeyboardActions(onDone = {
-                                        focusManager.clearFocus()
-                                        keyboard?.hide()
-                                    }),
-                                modifier = Modifier.fillMaxWidth(),
+                            PhoneField(
+                                phone = phone,
+                                onPhone = { phone = it; error = "" },
+                                country = country,
+                                onPickCountry = { showCountries = true },
+                                imeAction = ImeAction.Done,
+                                onDone = {
+                                    focusManager.clearFocus()
+                                    keyboard?.hide()
+                                },
                             )
                             if (error.isNotBlank()) {
                                 Spacer(Modifier.height(6.dp))
@@ -516,8 +557,8 @@ fun LoginScreen(onAuthed: () -> Unit) {
                 }
 
                 LoginStage.BIND -> {
-                    AuthHeader("Bind your Gmail", "For recovery if you lose this device")
-                    Spacer(Modifier.height(28.dp))
+                    AuthHeader("Bind your Gmail", "For recovery if you lose this device", compact = true)
+                    Spacer(Modifier.height(20.dp))
                     if (deviceOnly) {
                         Spacer(Modifier.height(6.dp))
                         Text(
@@ -533,21 +574,18 @@ fun LoginScreen(onAuthed: () -> Unit) {
                     }
                     Spacer(Modifier.height(24.dp))
                     GoogleButton(text = "Continue with Google", busy = busy, enabled = !busy) { bindGoogle() }
-                    TextButton(onClick = { stage = LoginStage.PHONE; error = "" }) {
-                        Text("Back", color = Muted, maxLines = 1)
-                    }
                 }
 
                 LoginStage.PROFILE -> {
-                    AuthHeader("Set up your profile", "This is how friends will see you")
-                    Spacer(Modifier.height(28.dp))
+                    AuthHeader("Set up your profile", "This is how friends will see you", compact = true)
+                    Spacer(Modifier.height(16.dp))
                     Row(
                         Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Box(
                             Modifier
-                                .size(68.dp)
+                                .size(54.dp)
                                 .clip(CircleShape)
                                 .background(Card)
                                 .border(1.dp, Muted.copy(alpha = 0.3f), CircleShape)
@@ -574,13 +612,10 @@ fun LoginScreen(onAuthed: () -> Unit) {
                                 Icon(Icons.Filled.AccountCircle, "Add photo", tint = Muted.copy(alpha = 0.6f), modifier = Modifier.size(34.dp))
                             }
                         }
-                        Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text("Add a photo (optional)", fontSize = 12.sp, color = Ink, maxLines = 1)
-                            Text("Tap the circle to choose", fontSize = 10.sp, color = Muted, maxLines = 1)
-                        }
+                        Spacer(Modifier.width(10.dp))
+                        Text("Add a photo (optional)", fontSize = 11.sp, color = Muted, maxLines = 1)
                     }
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(12.dp))
                     Row(Modifier.fillMaxWidth()) {
                         OutlinedTextField(
                             firstName,
@@ -635,19 +670,19 @@ fun LoginScreen(onAuthed: () -> Unit) {
                 }
 
                 LoginStage.SAVING -> {
-                    AuthHeader("KuchuPuchu", null)
+                    AuthHeader("KuchuPuchu", null, wordmark = true)
                     Spacer(Modifier.height(40.dp))
                     VerifyingPane("Setting up your profile")
                 }
 
                 LoginStage.DONE -> {
-                    AuthHeader("KuchuPuchu", null)
+                    AuthHeader("KuchuPuchu", null, wordmark = true)
                     Spacer(Modifier.height(40.dp))
                     SuccessPane("All set!")
                 }
 
                 LoginStage.WAITING -> {
-                    AuthHeader("KuchuPuchu", null)
+                    AuthHeader("KuchuPuchu", null, wordmark = true)
                     Spacer(Modifier.height(40.dp))
                     if (!waitFailed) {
                         VerifyingPane(
@@ -673,8 +708,6 @@ fun LoginScreen(onAuthed: () -> Unit) {
                                     // The previous device is gone — Google is the
                                     // primary path, not an alternative.
                                     GoogleButton(text = "Verify with Google", busy = busy, enabled = !busy) { recoverWithGoogle() }
-                                    Spacer(Modifier.height(6.dp))
-                                    TextButton(onClick = { cancelApproval() }) { Text("Back", color = Muted, maxLines = 1) }
                                 } else {
                                     if (busy) {
                                         CircularProgressIndicator(color = Gold, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
@@ -685,8 +718,6 @@ fun LoginScreen(onAuthed: () -> Unit) {
                                         TextButton(onClick = { cancelApproval() }) { Text("Try again", color = Muted, maxLines = 1) }
                                     } else {
                                         GoogleButton(text = "Verify with Google", busy = busy, enabled = !busy) { recoverWithGoogle() }
-                                        Spacer(Modifier.height(6.dp))
-                                        TextButton(onClick = { cancelApproval() }) { Text("Back", color = Muted, maxLines = 1) }
                                     }
                                 }
                             } else {
@@ -701,17 +732,15 @@ fun LoginScreen(onAuthed: () -> Unit) {
                 }
 
                 LoginStage.RECOVERY -> {
-                    AuthHeader("Recover account", "Sign in with the linked Google account")
-                    Spacer(Modifier.height(28.dp))
-                    OutlinedTextField(
-                        phone,
-                        { phone = it; error = "" },
-                        label = { Text("Phone number") },
-                        placeholder = { Text("01712345678", color = Muted.copy(alpha = 0.45f)) },
-                        singleLine = true,
-                        shape = FieldShape,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Done),
-                        modifier = Modifier.fillMaxWidth(),
+                    AuthHeader("Recover account", "Sign in with the linked Google account", compact = true)
+                    Spacer(Modifier.height(20.dp))
+                    PhoneField(
+                        phone = phone,
+                        onPhone = { phone = it; error = "" },
+                        country = country,
+                        onPickCountry = { showCountries = true },
+                        imeAction = ImeAction.Done,
+                        onDone = {},
                     )
                     if (error.isNotBlank()) {
                         Spacer(Modifier.height(6.dp))
@@ -719,9 +748,6 @@ fun LoginScreen(onAuthed: () -> Unit) {
                     }
                     Spacer(Modifier.height(10.dp))
                     GoogleButton(text = "Continue with Google", busy = busy, enabled = !busy) { recoverWithGoogle() }
-                    TextButton(onClick = { stage = LoginStage.PHONE; error = "" }) {
-                        Text("Back", color = Muted, maxLines = 1)
-                    }
                 }
             }
         }
@@ -762,25 +788,180 @@ private fun GoogleButton(text: String, busy: Boolean, enabled: Boolean, onClick:
     }
 }
 
-/** Fullscreen auth header: big logo + stage title (+ optional subtitle). */
+/** Typographic brand wordmark: "Kuchu" ink + "Puchu" gold, extra-bold. */
 @Composable
-private fun AuthHeader(title: String, subtitle: String?) {
+private fun Wordmark() {
+    Text(
+        buildAnnotatedString {
+            withStyle(SpanStyle(color = Ink, fontWeight = FontWeight.ExtraBold)) { append("Kuchu") }
+            withStyle(SpanStyle(color = GoldDeep, fontWeight = FontWeight.ExtraBold)) { append("Puchu") }
+        },
+        fontSize = 34.sp,
+        letterSpacing = (-0.5).sp,
+        maxLines = 1,
+    )
+}
+
+/** Fullscreen auth header: brand wordmark or (compact) icon + stage title. */
+@Composable
+private fun AuthHeader(
+    title: String,
+    subtitle: String?,
+    wordmark: Boolean = false,
+    compact: Boolean = false,
+) {
     Column(
         Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.height(8.dp))
-        Image(
-            painterResource(R.drawable.icon_gold),
-            contentDescription = "KuchuPuchu",
-            modifier = Modifier.size(76.dp),
-            contentScale = ContentScale.Fit,
-        )
-        Spacer(Modifier.height(16.dp))
-        Text(title, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1)
+        if (!compact) Spacer(Modifier.height(8.dp))
+        if (wordmark) {
+            Wordmark()
+        } else {
+            Image(
+                painterResource(R.drawable.icon_gold),
+                contentDescription = "KuchuPuchu",
+                modifier = Modifier.size(if (compact) 40.dp else 76.dp),
+                contentScale = ContentScale.Fit,
+            )
+            Spacer(Modifier.height(if (compact) 8.dp else 16.dp))
+            Text(
+                title,
+                fontSize = if (compact) 20.sp else 26.sp,
+                fontWeight = FontWeight.Bold,
+                color = Ink,
+                maxLines = 1,
+            )
+        }
         if (subtitle != null) {
             Spacer(Modifier.height(4.dp))
-            Text(subtitle, fontSize = 13.sp, color = Muted, maxLines = 1)
+            Text(subtitle, fontSize = if (compact) 12.sp else 13.sp, color = Muted, maxLines = 1)
+        }
+    }
+}
+
+/**
+ * WhatsApp-style phone input: a country chip (flag + dial code, tappable —
+ * the user NEVER types a code) next to the national-number field. Digits
+ * only, capped at E.164 length.
+ */
+@Composable
+private fun PhoneField(
+    phone: String,
+    onPhone: (String) -> Unit,
+    country: KpCountry,
+    onPickCountry: () -> Unit,
+    imeAction: ImeAction,
+    onDone: () -> Unit,
+) {
+    val maxDigits = if (country.iso == "BD") 11 else maxOf(6, 15 - country.dial.length)
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .heightIn(min = 56.dp)
+                .clip(FieldShape)
+                .background(Card)
+                .border(1.dp, Muted.copy(alpha = 0.35f), FieldShape)
+                .clickable(onClick = onPickCountry)
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                "${country.flagEmoji()} +${country.dial}",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Ink,
+                maxLines = 1,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        OutlinedTextField(
+            phone,
+            { raw -> onPhone(raw.filter { it.isDigit() }.take(maxDigits)) },
+            label = { Text("Phone number") },
+            placeholder = {
+                Text(
+                    if (country.iso == "BD") "1XXXXXXXXX" else "Phone number",
+                    color = Muted.copy(alpha = 0.45f),
+                )
+            },
+            singleLine = true,
+            shape = FieldShape,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = imeAction),
+            keyboardActions = KeyboardActions(onDone = onDone),
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+/** Country picker sheet: searchable A→Z list with flags, names and codes. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CountryPickerSheet(
+    current: KpCountry,
+    onPick: (KpCountry) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        var query by remember { mutableStateOf("") }
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp),
+        ) {
+            Text("Select country", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Ink)
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                query,
+                { query = it },
+                label = { Text("Search") },
+                singleLine = true,
+                shape = FieldShape,
+                keyboardOptions =
+                    KeyboardOptions(keyboardType = KeyboardType.Ascii, imeAction = ImeAction.Search),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+            val needle = query.trim()
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
+                items(
+                    COUNTRIES.filter { c ->
+                        needle.isEmpty() ||
+                            c.name.contains(needle, ignoreCase = true) ||
+                            c.dial.contains(needle)
+                    },
+                ) { c ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onPick(c) }
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(c.flagEmoji(), fontSize = 18.sp)
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            c.name,
+                            fontSize = 14.sp,
+                            color = Ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            "+${c.dial}",
+                            fontSize = 13.sp,
+                            color = if (c.iso == current.iso) GoldDeep else Muted,
+                            fontWeight = if (c.iso == current.iso) FontWeight.Bold else FontWeight.Normal,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
         }
     }
 }

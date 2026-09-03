@@ -3,6 +3,6 @@
         <item name="android:statusBarColor">#F7F6F4</item>
         <item name="android:navigationBarColor">#FFFFFF</item>
         <item name="android:windowLightStatusBar">true</item>
-        <item name="android:windowBackground">@color/kp_splash_cream</item>
+        <item name="android:windowBackground">@color/kp_window_bg</item>
     </style>
 </resources>
