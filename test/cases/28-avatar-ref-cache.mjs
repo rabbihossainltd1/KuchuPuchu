@@ -132,28 +132,84 @@ const sites = avatarSites();
   );
 }
 
-// --------------------------------------- 3. the shrinking allow-list (the real guard)
+// ------------------------------------------------- 3. the status screen sees changes
+{
+  const status = read("StatusScreens.kt");
+  const store = read("Store.kt");
+  const api = read("Api.kt");
+  const ring = ui.slice(ui.indexOf("fun StatusRingAvatar("));
+  check(
+    "StatusRingAvatar takes a cache token and forwards it to KpAvatar",
+    /avatarRef: String\? = null/.test(ring.slice(0, 400)) &&
+      /KpAvatar\(.*avatarRef = avatarRef/.test(flat(ring).slice(0, 1600)),
+  );
+  const ringSites = [...status.matchAll(/StatusRingAvatar\(/g)].map((m) => {
+    let i = m.index + "StatusRingAvatar(".length;
+    let depth = 1;
+    while (i < status.length && depth > 0) {
+      if (status[i] === "(") depth++;
+      else if (status[i] === ")") depth--;
+      i++;
+    }
+    return flat(status.slice(m.index, i));
+  });
+  check(
+    "every status rail row passes the token (mine and each contact's)",
+    ringSites.length >= 2 && ringSites.every((t) => /avatarRef =/.test(t)),
+    JSON.stringify(ringSites.map((t) => t.slice(0, 60))),
+  );
+  check(
+    "the viewer header and the seen-by list resolve through the cache too",
+    /avatarRef = user\?\.optIso\("avatarRef"\) \?: Store\.me\?\.optIso\("avatarRef"\)/.test(
+      status,
+    ) && /avatarRef = u\?\.optIso\("avatarRef"\)/.test(status),
+  );
+  check(
+    "Store.me is Compose state (a write must invalidate the readers)",
+    /var me: JSONObject\? by mutableStateOf<JSONObject\?>\(null\)/.test(flat(store)) &&
+      !/@Volatile\s+var me/.test(store),
+  );
+  check(
+    "it is read through that property everywhere (no private backing field to drift)",
+    /private set/.test(store) &&
+      /fun saveMe\(user: JSONObject\?\)/.test(store) &&
+      /me = user/.test(store),
+  );
+  check(
+    "a profile write busts the payload that embeds my avatar, not just /api/me",
+    /path\.contains\("\/api\/me"\)[\s\S]{0,500}?Cache\.bustAll\("\/api\/statuses"\)/.test(
+      flat(api),
+    ),
+    api.slice(api.indexOf("fun bustFor"), api.indexOf("fun bustFor") + 420),
+  );
+  check(
+    "and a JVM test asserts the delegate type, so the state-ness is proven, not eyeballed",
+    readFileSync(
+      "native-android/app/src/test/java/app/kuchupuchu/android/StoreStateTest.kt",
+      "utf8",
+    ).includes('getDeclaredField("me\\$delegate")') &&
+      readFileSync(
+        "native-android/app/src/test/java/app/kuchupuchu/android/StoreStateTest.kt",
+        "utf8",
+      ).includes("MutableState<*>"),
+  );
+}
+
+// --------------------------------------- 4. the shrinking allow-list (the real guard)
 {
   const refless = sites
     .filter((s) => !/avatarRef\s*=/.test(s.text))
     .map((s) => `${s.file} ${s.text.slice(0, 78)}`)
     .sort();
   const known = [
-    // Call UI: `CallUi.otherAvatar` is a string copied out of the signalling payload
-    // and no ref is carried across that boundary yet.
+    // Call UI: `CallUi.otherAvatar` is a string copied out of the signalling payload,
+    // and no avatar token crosses that boundary yet (its own bug, its own step).
     "CallScreens.kt KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 108.dp, ring = fal",
     "CallScreens.kt KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 116.dp, ring = fal",
     "CallScreens.kt KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 84.dp, ring = fals",
-    // Own profile: the /api/me payload always carries the bytes, so there is nothing
-    // to gain from the ref here beyond cross-screen reuse (tracked with the status rows).
+    // Own profile editor: this screen owns the value it just wrote (it PATCHes and
+    // installs the response), so the cache would add a hop, not fix a staleness.
     'SettingsScreen.kt KpAvatar( me.value.optText("displayName"), me.value.optIso("avatarUrl"), 76.dp',
-    'StatusScreens.kt KpAvatar(Store.myName(), Store.me?.optIso("avatarUrl"), 60.dp, ring = false)',
-    'StatusScreens.kt KpAvatar( user?.optText("displayName") ?: Store.myName(), user?.optText("avata',
-    'StatusScreens.kt KpAvatar(name, u?.optText("avatarUrl"), 38.dp, ring = false)',
-    // `StatusRingAvatar`'s own pass-through: it has no avatarRef parameter yet, so it
-    // cannot forward one. Adding it is the fix for "changing my photo never reaches the
-    // status screen"; this line disappears the day that happens.
-    "Ui.kt KpAvatar(name, url, size - ringWidth * 2, ring = false)",
   ].sort();
   check(
     "no new avatar renders outside the cache, and none of the known ones silently got worse",
@@ -161,8 +217,13 @@ const sites = avatarSites();
     `found ${refless.length}, expected ${known.length}: ${JSON.stringify(refless.filter((r) => !known.includes(r)))}`,
   );
   check(
-    "ProfileScreen.kt is no longer in that list (this is the bug this case was written for)",
+    "ProfileScreen.kt is no longer in that list (the profile-reloads-every-start bug)",
     !refless.some((r) => r.startsWith("ProfileScreen.kt")),
+  );
+  check(
+    "neither is StatusScreens.kt, nor the StatusRingAvatar pass-through (the status-staleness bug)",
+    !refless.some((r) => r.startsWith("StatusScreens.kt") || r.startsWith("Ui.kt")),
+    JSON.stringify(refless),
   );
 }
 

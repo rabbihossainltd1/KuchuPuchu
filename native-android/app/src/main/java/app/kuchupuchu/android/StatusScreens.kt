@@ -136,9 +136,16 @@ fun StatusScreen(nav: NavController) {
                                     60.dp,
                                     segments = myStatuses.size,
                                     seen = false,
+                                    avatarRef = Store.me?.optIso("avatarRef"),
                                 )
                             } else {
-                                KpAvatar(Store.myName(), Store.me?.optIso("avatarUrl"), 60.dp, ring = false)
+                                KpAvatar(
+                                    Store.myName(),
+                                    Store.me?.optIso("avatarUrl"),
+                                    60.dp,
+                                    ring = false,
+                                    avatarRef = Store.me?.optIso("avatarRef"),
+                                )
                             }
                             // The little "+" opens the same thing as the row:
                             // your latest status if one exists, else composer.
@@ -230,6 +237,13 @@ fun StatusScreen(nav: NavController) {
                                 60.dp,
                                 segments = statuses.size,
                                 seen = allViewed,
+                                // The token, not just the snapshot: without it this row
+                                // could only ever paint the data-URI that happened to be
+                                // in the `/api/statuses` response it was rendered from —
+                                // so a contact who changed their photo stayed on the old
+                                // one until that endpoint was next fetched, while the
+                                // chat list beside it was already current.
+                                avatarRef = user.optIso("avatarRef"),
                             )
                             Spacer(Modifier.width(14.dp))
                             Column {
@@ -826,6 +840,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                         user?.optText("avatarUrl") ?: Store.me?.optIso("avatarUrl"),
                         42.dp,
                         ring = false,
+                        avatarRef = user?.optIso("avatarRef") ?: Store.me?.optIso("avatarRef"),
                     )
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
@@ -1119,7 +1134,13 @@ private fun ViewersSheet(
                                         .padding(horizontal = 18.dp, vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    KpAvatar(name, u?.optText("avatarUrl"), 38.dp, ring = false)
+                                    KpAvatar(
+                                        name,
+                                        u?.optText("avatarUrl"),
+                                        38.dp,
+                                        ring = false,
+                                        avatarRef = u?.optIso("avatarRef"),
+                                    )
                                     Spacer(Modifier.width(10.dp))
                                     Column(Modifier.weight(1f)) {
                                         Text(name, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, color = Ink)

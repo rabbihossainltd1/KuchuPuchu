@@ -545,6 +545,7 @@ fun StatusRingAvatar(
     segments: Int,
     seen: Boolean,
     ringWidth: Dp = 2.5.dp,
+    avatarRef: String? = null,
 ) {
     val ringColor = if (seen) Color(0xFFD6D3D1) else Gold
     Box(Modifier.size(size), contentAlignment = Alignment.Center) {
@@ -573,7 +574,7 @@ fun StatusRingAvatar(
                 start += segAngle + gapAngle
             }
         }
-        KpAvatar(name, url, size - ringWidth * 2, ring = false)
+        KpAvatar(name, url, size - ringWidth * 2, ring = false, avatarRef = avatarRef)
     }
 }
 

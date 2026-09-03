@@ -170,7 +170,13 @@ object Api {
             Cache.bust("/api/conversations")
         }
         if (path.contains("/statuses")) Cache.bustAll("/api/statuses")
-        if (path.contains("/api/me")) Cache.bust("/api/me")
+        if (path.contains("/api/me")) {
+            Cache.bust("/api/me")
+            // `/api/statuses` embeds MY avatar and display name in the `mine` group (and
+            // the viewer header falls back to that payload), so a profile write has to
+            // refresh it too — otherwise the status tab keeps the old snapshot.
+            Cache.bustAll("/api/statuses")
+        }
     }
 
     fun request(path: String, method: String, body: JSONObject?): JSONObject {
