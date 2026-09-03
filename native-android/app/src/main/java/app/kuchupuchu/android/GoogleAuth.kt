@@ -4,7 +4,9 @@ import android.content.Context
 import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.GetCredentialException
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -36,8 +38,11 @@ object GoogleAuth {
 
     /**
      * Runs the account picker and returns a fresh Google ID token.
-     * Null = the user cancelled (no error UI for that case). Throws on real
-     * failures (not configured, no Play services, auth error).
+     * Null = the user cancelled. One-tap is tried first; when it answers
+     * "16: Cannot find a matching credential" (a Play-services cache/propagation
+     * hiccup right after new SHA fingerprints are registered — the documented
+     * workaround is the plain Sign-in-with-Google sheet, same serverClientId),
+     * that fallback runs automatically before giving up.
      *
      * MUST be called with the Activity context from the Main dispatcher —
      * Credential Manager shows system UI.
@@ -45,24 +50,47 @@ object GoogleAuth {
     suspend fun idToken(ctx: Context): String? {
         val clientId = webClientId()
         val manager = CredentialManager.create(ctx)
-        val option =
+        val oneTap =
             GetGoogleIdOption.Builder()
                 .setServerClientId(clientId)
                 // Show the full account picker, not just previously-used
                 // accounts: binding a specific Gmail is the whole point.
                 .setFilterByAuthorizedAccounts(false)
                 .build()
-        val request = GetCredentialRequest.Builder().addCredentialOption(option).build()
-        return try {
-            val response = manager.getCredential(ctx, request)
-            val credential = response.credential
-            if (credential is GoogleIdTokenCredential && credential.idToken.isNotBlank()) {
-                credential.idToken
-            } else {
-                throw IllegalStateException("Google returned no ID token")
+        val response =
+            try {
+                manager.getCredential(ctx, GetCredentialRequest.Builder().addCredentialOption(oneTap).build())
+            } catch (cancellation: GetCredentialCancellationException) {
+                return null
+            } catch (_: GetCredentialException) {
+                // One-tap refused (the classic "16: Cannot find a matching
+                // credential" right after SHA changes). The bottom-sheet
+                // "Sign in with Google" flow uses a different code path in
+                // Play services and typically still works.
+                try {
+                    manager.getCredential(
+                        ctx,
+                        GetCredentialRequest.Builder()
+                            .addCredentialOption(
+                                GetSignInWithGoogleOption.Builder().setServerClientId(clientId).build(),
+                            )
+                            .build(),
+                    )
+                } catch (cancellation: GetCredentialCancellationException) {
+                    return null
+                } catch (e: GetCredentialException) {
+                    throw IllegalStateException(
+                        "Google sign-in couldn't start. Make sure a Google account is signed in on " +
+                            "this phone and Google Play services is up to date, then try again.",
+                        e,
+                    )
+                }
             }
-        } catch (_: GetCredentialCancellationException) {
-            null
+        val credential = response.credential
+        return if (credential is GoogleIdTokenCredential && credential.idToken.isNotBlank()) {
+            credential.idToken
+        } else {
+            throw IllegalStateException("Google returned no ID token")
         }
     }
 }
