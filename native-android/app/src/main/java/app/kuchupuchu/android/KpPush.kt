@@ -268,6 +268,13 @@ class KpPushService : FirebaseMessagingService() {
             KpDiag.log(this, "login_request is for THIS install -> skip approval card")
             return
         }
+        if (Store.foreground && Store.authed.value) {
+            // The user is looking at the app — the in-app approval dialog is
+            // the surface, not a shade notification.
+            KpDiag.log(this, "login_request fg -> in-app approval dialog")
+            LoginApprovals.offer(requestId, newDevice, data["deviceName"])
+            return
+        }
         KpNotify.loginRequest(this, requestId, data["deviceName"])
     }
 

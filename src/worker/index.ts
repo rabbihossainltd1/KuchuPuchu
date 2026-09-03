@@ -560,7 +560,7 @@ async function ensureSchema(db: D1Database) {
     )`,
     `CREATE TABLE IF NOT EXISTS login_requests (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, new_device_id TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'PENDING',
+      new_device_name TEXT, status TEXT NOT NULL DEFAULT 'PENDING',
       created_at TEXT NOT NULL, expires_at TEXT NOT NULL, resolved_at TEXT
     )`,
     `CREATE TABLE IF NOT EXISTS recovery_requests (
@@ -706,6 +706,7 @@ async function ensureSchema(db: D1Database) {
     `ALTER TABLE users ADD COLUMN auth_status TEXT NOT NULL DEFAULT 'ACTIVE'`,
   );
   await runCatchingSql(db, `ALTER TABLE sessions ADD COLUMN device_id TEXT`);
+  await runCatchingSql(db, `ALTER TABLE login_requests ADD COLUMN new_device_name TEXT`);
   // Uniqueness the legacy schema cannot express: one phone → one account,
   // one Google subject → one account (§9/§22). Partial indexes so legacy
   // NULL rows never collide; fresh DBs got these constraints in the CREATE,
@@ -2252,12 +2253,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       db
         .prepare(
           `INSERT INTO login_requests
-             (id, user_id, new_device_id, status, created_at, expires_at)
-           VALUES (?, ?, ?, 'PENDING', ?, ?)`,
+             (id, user_id, new_device_id, new_device_name, status, created_at, expires_at)
+           VALUES (?, ?, ?, ?, 'PENDING', ?, ?)`,
         )
         // NOTE: binds `requestId`, the SAME id the response returns — the
         // polling device only ever learns this one.
-        .bind(requestId, user.id, deviceId, nowIso(), expiresAt),
+        .bind(requestId, user.id, deviceId, deviceName, nowIso(), expiresAt),
     ]);
     await audit(db, "LOGIN_REQUESTED", user.id, deviceId, { phone: maskPhone(phone) });
     // KuchuPuchu push to the CURRENT device; the new device polls — FCM is
@@ -2649,6 +2650,38 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     }
     await audit(db, "LOGIN_APPROVED", uid, row.new_device_id, {});
     return json({ ok: true });
+  }
+
+  if (path === "/api/auth/login/pending" && method === "GET") {
+    // Phone auth §14, in-app half: the CURRENT device's app polls this while
+    // signed in, so an approval can be answered even if the push notification
+    // was dismissed, never delivered, or the app was opened by tapping it.
+    const row = await one<{
+      id: string;
+      new_device_id: string;
+      new_device_name: string | null;
+      created_at: string;
+      expires_at: string;
+    }>(
+      db,
+      `SELECT id, new_device_id, new_device_name, created_at, expires_at
+         FROM login_requests
+        WHERE user_id = ? AND status = 'PENDING' AND expires_at > ?
+        ORDER BY created_at DESC LIMIT 1`,
+      uid,
+      nowIso(),
+    );
+    return json({
+      request: row
+        ? {
+            id: row.id,
+            newDeviceId: row.new_device_id,
+            deviceName: row.new_device_name,
+            createdAt: row.created_at,
+            expiresAt: row.expires_at,
+          }
+        : null,
+    });
   }
 
   if (path === "/api/auth/login/decline" && method === "POST") {

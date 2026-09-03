@@ -432,6 +432,17 @@ object KpNotify {
         ensureChannels(ctx)
         val nm = NotificationManagerCompat.from(ctx)
         if (!nm.areNotificationsEnabled()) return
+        // Tapping the card opens the app — the approval dialog then appears
+        // within one pending-poll cycle (LoginApprovals), so the tap is never
+        // a dead end even though the answers live on the action buttons.
+        val openApp =
+            PendingIntent.getActivity(
+                ctx,
+                910_247,
+                Intent(ctx, MainActivity::class.java)
+                    .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
         val acceptPending =
             PendingIntent.getBroadcast(
                 ctx,
@@ -468,6 +479,7 @@ object KpNotify {
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
                 .setAutoCancel(true)
+                .setContentIntent(openApp)
                 .addAction(
                     NotificationCompat.Action.Builder(
                         android.R.drawable.ic_menu_save,
@@ -484,6 +496,11 @@ object KpNotify {
                 )
                 .build(),
         )
+    }
+
+    /** Dismiss the login-approval card (used by the in-app dialog too). */
+    fun cancelLoginCard(ctx: Context) {
+        NotificationManagerCompat.from(ctx).cancel(LOGIN_CARD_ID)
     }
 }
 

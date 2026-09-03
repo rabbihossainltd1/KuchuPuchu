@@ -462,7 +462,25 @@ const bind = (k, phone, idToken, deviceId, displayName) =>
   check("hammering verify-phone from one IP → 429", saw429);
 }
 
-// ---- 19. audit trail ----
+// ---- 19. the old device can read its pending approval (in-app dialog) ----
+{
+  const k = await mk();
+  const a = await k.reg("pendingq@x.com", "pendingq");
+  const v = await verify(k, a.user.phone, "MATCH", "dev-b");
+  const p = await k.call("GET", "/api/auth/login/pending", undefined, a.token);
+  check(
+    "pending endpoint returns the waiting request + device name",
+    p.status === 200 &&
+      p.json.request?.id === v.json.requestId &&
+      p.json.request?.deviceName === "Pixel Test",
+    JSON.stringify(p.json).slice(0, 90),
+  );
+  await k.call("POST", "/api/auth/login/decline", { id: v.json.requestId }, a.token);
+  const p2 = await k.call("GET", "/api/auth/login/pending", undefined, a.token);
+  check("nothing pending after decline", p2.json.request === null, JSON.stringify(p2.json.request));
+}
+
+// ---- 20. audit trail ----
 {
   const k = await mk();
   const a = await k.reg("audit@x.com", "audit");
