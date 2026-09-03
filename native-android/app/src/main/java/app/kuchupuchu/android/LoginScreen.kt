@@ -185,6 +185,11 @@ fun LoginScreen(onAuthed: () -> Unit) {
         }
     }
 
+    val permissionLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            startVerify(if (granted) null else PhoneVerificationResult.PermissionRequired.wire())
+        }
+
     fun onContinue() {
         focusManager.clearFocus()
         keyboard?.hide()
@@ -201,11 +206,6 @@ fun LoginScreen(onAuthed: () -> Unit) {
         if (granted) startVerify()
         else permissionLauncher.launch(Manifest.permission.READ_PHONE_STATE)
     }
-
-    val permissionLauncher =
-        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            startVerify(if (granted) null else PhoneVerificationResult.PermissionRequired.wire())
-        }
 
     /** Google binding for a brand-new account (§8/§9). */
     fun bindGoogle() {
@@ -486,6 +486,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
                         LoginStage.VERIFYING -> VerifyingPane("Verifying your number")
 
                         LoginStage.VERIFY_OK -> SuccessPane("Number verified")
+                        else -> {}
                     }
                 }
 
