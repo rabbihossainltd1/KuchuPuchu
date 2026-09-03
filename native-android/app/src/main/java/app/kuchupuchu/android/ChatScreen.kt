@@ -2266,7 +2266,6 @@ private fun convRowSnapshot(convId: String): JSONObject? {
 
 /* ------------------------------------------------------------------ */
 
-@OptIn(ExperimentalFoundationApi::class)
 /**
  * Phone auth §14 (owner design): new-device login approval arrives as a chat
  * message from the official "KuchuPuchu" account — details + Accept/Decline
@@ -2369,6 +2368,7 @@ private fun LoginApprovalMessage(m: JSONObject) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MessageRow(
     m: JSONObject,
