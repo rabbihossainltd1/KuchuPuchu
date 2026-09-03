@@ -625,6 +625,11 @@ const AI_WELCOME_FALLBACK =
 
 /** One Gemini call, tightly bounded: short output, hard timeout, any
  *  failure ⇒ null (the caller uses the fallback). Never throws. */
+/** Model aliases tried in order: "-latest" floats with Google's rotations
+ *  (specific versions get retired with a 404 — gemini-2.0-flash already
+ *  has), and the lite alias covers the flagship being at capacity (503). */
+const GEMINI_WELCOME_MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest"] as const;
+
 async function geminiWelcomeText(env: Env, displayName: string | null): Promise<string | null> {
   if (!env.GEMINI_API_KEY) return null;
   const name =
@@ -637,35 +642,38 @@ async function geminiWelcomeText(env: Env, displayName: string | null): Promise<
     name +
     " Write a short, warm welcome message to them: 1–2 sentences, at most 35 words, in English, at most one emoji. " +
     "Do not use hashtags, quotes, or a signature line. Reply with the message text only.";
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 8000);
-    const res = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
-      {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 1, maxOutputTokens: 120 },
-        }),
-        signal: ctrl.signal,
-      },
-    );
-    clearTimeout(timer);
-    if (!res.ok) return null;
-    const data = (await res.json()) as {
-      candidates?: { content?: { parts?: { text?: string }[] } }[];
-    };
-    const text = (data.candidates?.[0]?.content?.parts ?? [])
-      .map((p) => p.text ?? "")
-      .join("")
-      .trim()
-      .slice(0, 400);
-    return text || null;
-  } catch {
-    return null;
+  for (const model of GEMINI_WELCOME_MODELS) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 6000);
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 1, maxOutputTokens: 120 },
+          }),
+          signal: ctrl.signal,
+        },
+      );
+      clearTimeout(timer);
+      if (!res.ok) continue;
+      const data = (await res.json()) as {
+        candidates?: { content?: { parts?: { text?: string }[] } }[];
+      };
+      const text = (data.candidates?.[0]?.content?.parts ?? [])
+        .map((p) => p.text ?? "")
+        .join("")
+        .trim()
+        .slice(0, 400);
+      if (text) return text;
+    } catch {
+      /* next model, then the fixed fallback */
+    }
   }
+  return null;
 }
 
 /** Drops the AI welcome message into a fresh 1:1 chat, exactly once per
