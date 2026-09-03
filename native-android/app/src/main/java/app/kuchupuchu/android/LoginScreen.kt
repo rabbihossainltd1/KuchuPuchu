@@ -113,6 +113,7 @@ private enum class LoginStage {
     DONE,
     WAITING,
     RECOVERY,
+    RECOVERY_VERIFY,
 }
 
 /** How long to wait for the old device's answer before offering the way out. */
@@ -362,6 +363,44 @@ fun LoginScreen(onAuthed: () -> Unit) {
         }
     }
 
+    /** Recovery step 1 (owner design): check the number HAS an account before
+     *  the Google step is shown. Existence only, rate-limited server-side. */
+    fun checkRecoveryNumber() {
+        if (busy) return
+        val e164 =
+            buildE164(country, phone)
+                ?: run {
+                    error =
+                        if (country.iso == "BD") {
+                            "Enter a valid Bangladeshi mobile number, e.g. 1792929202."
+                        } else {
+                            "Enter a valid phone number."
+                        }
+                    return
+                }
+        busy = true
+        error = ""
+        scope.launch {
+            try {
+                val data =
+                    withContext(Dispatchers.IO) {
+                        Api.post("/api/auth/recovery/lookup", JSONObject().put("phone", e164))
+                    }
+                if (data.optBoolean("exists")) {
+                    focusManager.clearFocus()
+                    keyboard?.hide()
+                    stage = LoginStage.RECOVERY_VERIFY
+                } else {
+                    error = "No account found with this number."
+                }
+            } catch (e: Exception) {
+                error = e.message ?: "Could not check this number. Please try again."
+            } finally {
+                busy = false
+            }
+        }
+    }
+
     /** Recovery when the previous device is lost/broken (§21). */
     fun recoverWithGoogle() {
         if (busy) return
@@ -499,6 +538,10 @@ fun LoginScreen(onAuthed: () -> Unit) {
     // carry NO on-screen Back buttons. Inside the flow, back returns to the
     // phone entry; from the approval wait it cancels the request first.
     BackHandler(enabled = stage == LoginStage.WAITING) { cancelApproval() }
+    BackHandler(enabled = stage == LoginStage.RECOVERY_VERIFY) {
+        error = ""
+        stage = LoginStage.RECOVERY
+    }
     BackHandler(
         enabled =
             stage == LoginStage.BIND || stage == LoginStage.PROFILE || stage == LoginStage.RECOVERY,
@@ -744,7 +787,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
                 }
 
                 LoginStage.RECOVERY -> {
-                    AuthHeader("Recover account", "Sign in with the linked Google account", compact = true)
+                    AuthHeader("Recover account", "Enter the number of the account to recover", compact = true)
                     Spacer(Modifier.height(20.dp))
                     PhoneField(
                         phone = phone,
@@ -759,7 +802,19 @@ fun LoginScreen(onAuthed: () -> Unit) {
                         Text(error, color = Red, fontSize = 12.sp, maxLines = 2)
                     }
                     Spacer(Modifier.height(10.dp))
-                    GoogleButton(text = "Continue with Google", busy = busy, enabled = !busy) { recoverWithGoogle() }
+                    GoldBtn("Continue", Modifier.fillMaxWidth(), enabled = !busy) { checkRecoveryNumber() }
+                }
+
+                LoginStage.RECOVERY_VERIFY -> {
+                    AuthHeader("Recover account", "Verify with your linked Google account", compact = true)
+                    Spacer(Modifier.height(28.dp))
+                    // Owner design: the Google step says "Verify It's You" —
+                    // the button carries the Google logo as always.
+                    GoogleButton(text = "Verify It's You", busy = busy, enabled = !busy) { recoverWithGoogle() }
+                    if (error.isNotBlank()) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(error, color = Red, fontSize = 12.sp, maxLines = 2)
+                    }
                 }
             }
         }
