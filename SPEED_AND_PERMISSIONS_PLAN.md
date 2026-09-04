@@ -160,3 +160,23 @@ one-line rollback stays safe). 5 new live-worker assertions; 894 total.
    (280 floor, 420 cap) — long bodies no longer flatten.
 6. **Header name sits a touch lower** for every account.
 Suite: 32/32, 905 assertions (+11).
+
+## Owner round 3 — v3.9.23 / 99 (2026-09-04)
+
+1. **Header name row lowered TOGETHER** — the verified/moderator badges move
+   with the name now (the old per-Text padding split them apart).
+2. **Owner card animation removed** (static, per owner request).
+3. **Timestamp no longer overlays the body** — it sits under the text,
+   right-aligned; single-line messages never get climbed over and long
+   bodies use the full widened bubble.
+4. **Owner card covers the full bubble width** (82% screen, 280–420dp):
+   photo (4:3, tap-to-view), texts, socials (spread edge-to-edge) and the
+   Send Message button all stretch with it.
+5. **Header shows the first name only** ("MD Rabbi Hossain" → "Rabbi";
+   MD/Mohammad honorifics skipped); the two bots and group titles stay
+   full; owner's account shows "Rabbi" + verified tick.
+6. **Login-approval Accept/Decline expire in 5 minutes** — client hides the
+   buttons at the 5-minute mark ("⏰ Expired"), remembers the decision for
+   the whole app session (never reappears), and the worker's decline
+   endpoint now enforces the same 5-minute window server-side.
+Suite: 32/32, 914 assertions.

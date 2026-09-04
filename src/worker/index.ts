@@ -3570,15 +3570,31 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       .trim()
       .slice(0, 64);
     if (!requestId) fail(400, "Missing request id.");
+    // Owner round 3 (2026-09-04): a request can only be acted on inside its
+    // 5-minute window — after that the answer is EXPIRED, whatever it is.
     const declined = await run(
       db,
       `UPDATE login_requests SET status = 'DECLINED', resolved_at = ?
-        WHERE id = ? AND user_id = ? AND status = 'PENDING'`,
+        WHERE id = ? AND user_id = ? AND status = 'PENDING' AND expires_at > ?`,
       nowIso(),
       requestId,
       uid,
+      nowIso(),
     );
-    if (!declined) fail(409, "The login request was already handled.", "REQUEST_NOT_PENDING");
+    if (!declined) {
+      const stale = await one<{ status: string; expires_at: string }>(
+        db,
+        "SELECT status, expires_at FROM login_requests WHERE id = ?",
+        requestId,
+      );
+      if (stale?.status === "PENDING")
+        fail(
+          410,
+          "The login request expired. Please try again from the other device.",
+          "REQUEST_EXPIRED",
+        );
+      fail(409, "The login request was already handled.", "REQUEST_NOT_PENDING");
+    }
     await resolveApprovalMessage(db, requestId, "DECLINED");
     await audit(db, "LOGIN_DECLINED", uid, null, {});
     return json({ ok: true });
