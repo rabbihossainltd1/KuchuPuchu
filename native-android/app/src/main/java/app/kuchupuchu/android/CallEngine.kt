@@ -649,7 +649,18 @@ class CallEngine(private val app: Application) {
                         otherAvatar = avatar,
                     )
             } catch (e: Exception) {
-                val message = (e as? ApiException)?.message ?: "Couldn't start the call. Try again."
+                val api = e as? ApiException
+                val message = api?.message ?: "Couldn't start the call. Try again."
+                if (api?.status == 486) {
+                    // Owner round 12 (2026-09-05): the callee is already on a
+                    // call — show "Line busy" ON the calling screen for a beat
+                    // (no endless ringing) before it closes. 486 = LINE_BUSY
+                    // from POST /api/calls.
+                    CallSounds.stopRingback()
+                    active = active?.copy(status = "BUSY")
+                    publishChange()
+                    delay(2200)
+                }
                 notify(message)
                 hangupLocal()
             }
@@ -1108,6 +1119,21 @@ class CallEngine(private val app: Application) {
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
             PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
             PeerConnection.IceServer.builder("stun:stun.cloudflare.com:3478").createIceServer(),
+            // Owner round 12 (2026-09-05): carrier NATs (mobile data) need a
+            // TURN relay on TCP/443. The openrelay free service got flaky, so
+            // Nextcloud's public relay (tcp+udp on 443) leads the list now.
+            PeerConnection.IceServer.builder("turn:turn.nextcloud.com:443?transport=tcp")
+                .setUsername("nextcloud")
+                .setPassword("nextcloud")
+                .createIceServer(),
+            PeerConnection.IceServer.builder("turn:turn.nextcloud.com:443")
+                .setUsername("nextcloud")
+                .setPassword("nextcloud")
+                .createIceServer(),
+            PeerConnection.IceServer.builder("turn:standard.relay.metered.ca:80")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer(),
             PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
                 .setUsername("openrelayproject")
                 .setPassword("openrelayproject")

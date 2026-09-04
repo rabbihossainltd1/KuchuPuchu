@@ -491,10 +491,9 @@ const convBetween = (db, a, b) =>
     chat.includes("ScreenStore.loginApprovals") && chat.includes("plusSeconds(300)"),
   );
   check(
-    "timestamp no longer overlays the text (in-flow under the body)",
-    !chat.includes(
-      "Modifier.align(Alignment.BottomEnd),\n                    verticalAlignment = Alignment.CenterVertically,\n                ) {\n                    Text(\n                        msgStamp",
-    ) && chat.includes("Modifier.align(Alignment.End).padding(top = 1.dp)"),
+    "timestamp overlays a RESERVED band, never the text itself (round 12)",
+    chat.includes('if (kind == "TEXT") 15.dp else 3.dp') &&
+      chat.includes("Modifier.align(Alignment.BottomEnd).padding(end = 2.dp, bottom = 1.dp)"),
   );
   check(
     "worker: decline also enforces the 5-minute window",
@@ -551,8 +550,8 @@ const convBetween = (db, a, b) =>
     chat.includes("0.92f") && chat.includes(".aspectRatio(1f)"),
   );
   check(
-    "text bubbles carry the timestamp INLINE (single-line stays single-line)",
-    chat.includes('appendInlineContent("tick"') && chat.includes('if (kind != "TEXT")'),
+    "stamp can never wrap to its own line (inline machinery retired r12)",
+    !chat.includes("appendInlineContent") && !chat.includes("InlineTextContent"),
   );
   check("timestamp parsing memoized (scroll perf)", chat.includes("stampCache"));
   check(
@@ -760,6 +759,52 @@ const convBetween = (db, a, b) =>
     ).includes("SoundPrefs.customRingPath"),
   );
   check("the retired Banglish-spelling rule is gone", !src.includes("kemon achen"));
+
+  // ---- Owner round 12 (2026-09-05): 5 device reports ----
+  check(
+    "AI budget 900 tokens: Bengali script no longer dies mid-message",
+    src.includes("geminiComplete(env, prompt, 900)"),
+  );
+  check(
+    "callee in a call → 486 LINE_BUSY (pair-redial never blocked)",
+    src.includes('fail(486, "Line busy — on another call right now.", "LINE_BUSY")') &&
+      src.includes("NOT (caller_id IN (?, ?) AND callee_id IN (?, ?))"),
+  );
+  const engine = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/CallEngine.kt",
+    "utf8",
+  );
+  check(
+    "LINE_BUSY shows on the calling screen, then closes",
+    engine.includes("api?.status == 486") &&
+      engine.includes('copy(status = "BUSY")') &&
+      engine.includes("delay(2200)"),
+  );
+  check(
+    "mobile-data calls: TURN over TCP 443 ahead of openrelay",
+    engine.includes("turn:turn.nextcloud.com:443?transport=tcp") &&
+      engine.includes("turn:standard.relay.metered.ca:80") &&
+      engine.indexOf("turn:turn.nextcloud.com:443?transport=tcp") <
+        engine.indexOf("turn:openrelay.metered.ca:80"),
+  );
+  check(
+    "timestamp + tick pinned to the bubble's bottom-end, never its own line",
+    chat.includes("Alignment.BottomEnd") &&
+      chat.includes('if (kind == "TEXT") 15.dp else 3.dp') &&
+      !chat.includes("appendInlineContent"),
+  );
+  const calls = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/CallScreens.kt",
+    "utf8",
+  );
+  const voiceStart = calls.indexOf("fun VoiceCallScreen");
+  const voiceBody = calls.slice(voiceStart, calls.indexOf("fun ", voiceStart + 30));
+  check(
+    "voice call: blurred fullscreen callee photo, avatar zoom/pulse removed",
+    calls.includes(".blur(28.dp)") &&
+      voiceBody.includes("BlurredAvatarBackdrop") &&
+      !voiceBody.includes("PulseRing"),
+  );
 }
 
 console.log(lines.join("\n"));
