@@ -3,7 +3,7 @@
 // avatar, the login-approval card carrying the attempt's origin (IP, place,
 // time), and the official notification account being strictly one-way.
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { makeD1, makeR2, makeCtx } from "../d1shim.mjs";
 import { makeReg, installGoogleStub, phoneFrom, fakeIdToken } from "../helpers/phoneauth.mjs";
 
@@ -523,6 +523,26 @@ const convBetween = (db, a, b) =>
   check(
     "viewing messages cancels their OS notification cards instantly",
     chat.includes("KpNotify.cancelConversation(ctx, convId)"),
+  );
+
+  // ---- Owner round 5 (2026-09-04) ----
+  const gauth = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/GoogleAuth.kt",
+    "utf8",
+  );
+  check(
+    "Google token extraction parses the CustomCredential payload (works on every OEM)",
+    gauth.includes("GoogleIdTokenCredential.createFrom(c.data)") &&
+      gauth.includes("TYPE_GOOGLE_ID_TOKEN_CREDENTIAL"),
+  );
+  check(
+    "header subtitle line alone rises a touch (name/header untouched)",
+    chat.includes("Modifier.offset(y = (-2).dp)"),
+  );
+  check(
+    "bundled owner photo is high-res (fullscreen stays sharp)",
+    existsSync("native-android/app/src/main/res/drawable-nodpi/owner_avatar.jpg") &&
+      statSync("native-android/app/src/main/res/drawable-nodpi/owner_avatar.jpg").size > 40000,
   );
   check("the retired Banglish-spelling rule is gone", !src.includes("kemon achen"));
 }

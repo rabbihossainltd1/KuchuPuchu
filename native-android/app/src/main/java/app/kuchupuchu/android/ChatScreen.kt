@@ -1339,6 +1339,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                         online -> "online"
                         else -> otherLastSeen(other?.optText("lastActiveAt"))
                     },
+                    // Owner round 5: ONLY this subtitle line rises a touch —
+                    // the name, the header height and everything else stay
+                    // exactly where they are.
+                    modifier = Modifier.offset(y = (-2).dp),
                     fontSize = 11.5.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,

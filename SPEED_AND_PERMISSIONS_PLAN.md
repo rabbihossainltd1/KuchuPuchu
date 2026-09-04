@@ -203,3 +203,19 @@ Suite: 32/32, 914 assertions.
    that conversation's OS notification cards on read and on live view, not
    just the in-app badge.
 Suite: 32/32, 919 assertions.
+
+## Owner round 5 — v3.9.25 / 101 (2026-09-04)
+
+1. **Google sign-in truly fixed** — root cause found: Credential Manager
+   returns the Google credential as a plain CustomCredential (type string +
+   data payload) on EVERY OEM; it never auto-deserializes into
+   GoogleIdTokenCredential. The old `is GoogleIdTokenCredential` check read
+   every successful sign-in as "no token". Now parsed manually via
+   GoogleIdTokenCredential.createFrom(data) — a local parse, identical on
+   Realme / MIUI / Pixel / any Android.
+2. **Header subtitle ("last seen" / "Official account") rises a touch** —
+   only that line (−2dp draw offset); name, badges and header height
+   untouched.
+3. **Owner photo sharper** — bundled image rebundled at 640×640 so the
+   fullscreen viewer (fixed in v100) stays crisp edge to edge.
+Suite: 32/32, 922 assertions.
