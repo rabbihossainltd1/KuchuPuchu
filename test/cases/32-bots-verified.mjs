@@ -626,13 +626,13 @@ const convBetween = (db, a, b) =>
     gauth.includes('"idToken"') && gauth.includes("googleIdToken"),
   );
   check(
-    "OTP test path present (Firebase Phone Auth, test-only)",
+    "OTP test code kept on file (Firebase Phone Auth; UI hidden per owner round 10)",
     existsSync("native-android/app/src/main/java/app/kuchupuchu/android/OtpTest.kt") &&
       readFileSync(
         "native-android/app/src/main/java/app/kuchupuchu/android/OtpTest.kt",
         "utf8",
       ).includes("PhoneAuthProvider.verifyPhoneNumber") &&
-      readFileSync(
+      !readFileSync(
         "native-android/app/src/main/java/app/kuchupuchu/android/LoginScreen.kt",
         "utf8",
       ).includes("Test OTP (beta)"),
@@ -646,8 +646,64 @@ const convBetween = (db, a, b) =>
   // ---- Owner round 9 (2026-09-04) ----
   check(
     "owner card: Bangla verb family + Bengali-script name + photo asks match",
-    src.includes("বানিয়েছে") && src.includes("রবি\\s*হোসাইন") && src.includes("তৈরি\\s*করে"),
+    src.includes("|বানা|বানি|") &&
+      src.includes("(রাব্বি|রবি)") &&
+      src.includes("হোসেন") &&
+      src.includes("তৈরি\\s*করে"),
   );
+
+  // ---- Owner round 10 (2026-09-04) ----
+  const feel = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/Feel.kt",
+    "utf8",
+  );
+  check(
+    "owner sound set bundled: call ring + 7 incoming ringtones + sent + in-app",
+    existsSync("native-android/app/src/main/res/raw/kp_call_ring.mp3") &&
+      existsSync("native-android/app/src/main/res/raw/kp_in_ring_7.mp3") &&
+      existsSync("native-android/app/src/main/res/raw/kp_sent.mp3") &&
+      existsSync("native-android/app/src/main/res/raw/kp_inapp_msg.mp3"),
+  );
+  check(
+    "incoming ringtone user-selectable (SoundPrefs) and used by CallNotify",
+    feel.includes("SoundPrefs") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/CallNotify.kt",
+        "utf8",
+      ).includes("SoundPrefs.incomingRingRes(ctx)") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/SettingsScreen.kt",
+        "utf8",
+      ).includes("Incoming ringtone"),
+  );
+  check(
+    "sent sound plays on server accept (any kind), not on tap",
+    chat.includes("KpSounds.sent(ctx)") && !chat.includes("KpSounds.send(ctx)"),
+  );
+  check(
+    "in-app message sound only when off the chat screen",
+    readFileSync(
+      "native-android/app/src/main/java/app/kuchupuchu/android/KpPush.kt",
+      "utf8",
+    ).includes("!muted && !inChat") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/KpPush.kt",
+        "utf8",
+      ).includes("KpSounds.inApp(this)"),
+  );
+  check(
+    "bubbles + mic/send circles got the 3D treatment",
+    chat.includes(".shadow(2.dp, bubbleShape)") && chat.includes(".shadow(4.dp, CircleShape)"),
+  );
+  check(
+    "OTP test UI hidden (kept for later)",
+    !readFileSync(
+      "native-android/app/src/main/java/app/kuchupuchu/android/LoginScreen.kt",
+      "utf8",
+    ).includes("Test OTP (beta)") &&
+      existsSync("native-android/app/src/main/java/app/kuchupuchu/android/OtpTest.kt"),
+  );
+  check("owner Bangla name spelled রাব্বি হোসেন in the persona", src.includes("রাব্বি হোসেন"));
   check("the retired Banglish-spelling rule is gone", !src.includes("kemon achen"));
 }
 

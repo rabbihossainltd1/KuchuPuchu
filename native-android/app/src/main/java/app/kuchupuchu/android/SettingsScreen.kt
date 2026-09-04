@@ -27,6 +27,8 @@ import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.AlertDialog
@@ -76,6 +78,7 @@ fun SettingsScreen(nav: NavController) {
     var confirmLogout by remember { mutableStateOf(false) }
     // Phone-auth: change-number dialog state.
     var showChangePhone by remember { mutableStateOf(false) }
+    var showRingPicker by remember { mutableStateOf(false) }
     var changePhone by remember { mutableStateOf("") }
     var changePhoneError by remember { mutableStateOf("") }
 
@@ -256,6 +259,14 @@ fun SettingsScreen(nav: NavController) {
                 changePhoneError = ""
                 showChangePhone = true
             }
+            // Owner round 10 (2026-09-04): his incoming-ringtone pack — the
+            // user picks which one rings for calls; Default is his own
+            // "calling ringing" sound.
+            SettingRow(
+                Icons.Filled.NotificationsActive,
+                "Incoming ringtone",
+                SoundPrefs.ringNames[SoundPrefs.ringIndex(ctx)],
+            ) { showRingPicker = true }
             // Which build am I running? This row ends the "ami ki notun APK
             // install korsi?" confusion — bug reports can quote it directly.
             SettingRow(
@@ -322,6 +333,58 @@ fun SettingsScreen(nav: NavController) {
 
     /* ---------- edit dialog ---------- */
     if (editField != null) {
+        // Owner round 10: incoming-ringtone picker with preview.
+        if (showRingPicker) {
+            AlertDialog(
+                onDismissRequest = { showRingPicker = false },
+                title = { Text("Incoming ringtone", fontWeight = FontWeight.SemiBold) },
+                text = {
+                    Column {
+                        SoundPrefs.ringNames.forEachIndexed { idx, name ->
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        SoundPrefs.setRingIndex(ctx, idx)
+                                        // Preview the picked ring right away.
+                                        runCatching {
+                                            val mp = android.media.MediaPlayer()
+                                            mp.setAudioAttributes(
+                                                android.media.AudioAttributes.Builder()
+                                                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                                                    .build(),
+                                            )
+                                            val afd = ctx.resources.openRawResourceFd(SoundPrefs.ringRes[idx])
+                                            mp.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+                                            afd.close()
+                                            mp.setOnCompletionListener { it.release() }
+                                            mp.prepare()
+                                            mp.start()
+                                        }
+                                        showRingPicker = false
+                                    }
+                                    .padding(vertical = 12.dp, horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    name,
+                                    fontSize = 14.5.sp,
+                                    color = if (SoundPrefs.ringIndex(ctx) == idx) GoldDeep else Ink,
+                                    fontWeight = if (SoundPrefs.ringIndex(ctx) == idx) FontWeight.SemiBold else FontWeight.Normal,
+                                )
+                                Spacer(Modifier.weight(1f))
+                                if (SoundPrefs.ringIndex(ctx) == idx) {
+                                    Icon(Icons.Filled.Done, null, tint = GoldDeep, modifier = Modifier.size(18.dp))
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = { showRingPicker = false }) { Text("Close") }
+                },
+            )
+        }
         AlertDialog(
             onDismissRequest = { editField = null },
             title = {

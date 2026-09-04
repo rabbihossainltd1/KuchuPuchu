@@ -111,7 +111,7 @@ object CallSounds {
             // see toneUsage().
             .build()
         val player =
-            runCatching { MediaPlayer.create(ctx.applicationContext, R.raw.kp_ring, attrs, 1) }.getOrNull()
+            runCatching { MediaPlayer.create(ctx.applicationContext, R.raw.kp_call_ring, attrs, 1) }.getOrNull()
                 ?: return
         player.isLooping = true
         runCatching { player.setVolume(0.62f, 0.62f) }
@@ -144,7 +144,7 @@ object CallSounds {
             .build()
         val player =
             runCatching {
-                MediaPlayer.create(ctx.applicationContext, R.raw.kp_ring3, attrs, 1)
+                MediaPlayer.create(ctx.applicationContext, SoundPrefs.incomingRingRes(ctx), attrs, 1)
             }.getOrNull()
                 ?: run {
                     // No 4-arg (Uri, attrs) overload exists — build manually:
@@ -265,7 +265,7 @@ object CallNotify {
         if (nm.getNotificationChannel(CH_IN) == null) {
             val ch = NotificationChannel(CH_IN, "Incoming calls", NotificationManager.IMPORTANCE_HIGH)
             ch.setSound(
-                Uri.parse("android.resource://${ctx.packageName}/${R.raw.kp_ring3}"),
+                Uri.parse("android.resource://${ctx.packageName}/${R.raw.kp_call_ring}"),
                 AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_ALARM)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
@@ -328,7 +328,7 @@ object CallNotify {
                 .setFullScreenIntent(open, true)
                 .addAction(0, "Accept", accept)
                 .addAction(0, "Decline", decline)
-                .setSound(Uri.parse("android.resource://${ctx.packageName}/${R.raw.kp_ring2}"))
+                .setSound(Uri.parse("android.resource://${ctx.packageName}/${R.raw.kp_call_ring}"))
                 .build()
         ctx.getSystemService(NotificationManager::class.java).notify(INCOMING_ID, n)
     }
