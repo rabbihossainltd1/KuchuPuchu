@@ -631,63 +631,6 @@ fun LoginScreen(onAuthed: () -> Unit) {
                     Spacer(Modifier.height(24.dp))
                     GoogleButton(text = "Continue with Google", busy = busy, enabled = !busy) { bindGoogle() }
 
-                    // Owner round 8 (2026-09-04): SMS OTP TEST path — visible
-                    // until the owner confirms OTPs arrive on real SIMs.
-                    var otpOpen by remember { mutableStateOf(false) }
-                    var otpStage by remember { mutableStateOf("") }
-                    var otpMsg by remember { mutableStateOf("") }
-                    var otpCode by remember { mutableStateOf("") }
-                    TextButton(onClick = { otpOpen = !otpOpen }) {
-                        Text("Test OTP (beta)", color = Muted, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                    }
-                    if (otpOpen) {
-                        Text(
-                            "Checks whether an OTP SMS can arrive on this phone. Test only — it does not log you in.",
-                            fontSize = 10.5.sp,
-                            color = Muted,
-                            maxLines = 2,
-                        )
-                        if (otpStage == "code-sent") {
-                            Spacer(Modifier.height(8.dp))
-                            OutlinedTextField(
-                                value = otpCode,
-                                onValueChange = { otpCode = it.take(8) },
-                                label = { Text("6-digit code") },
-                                singleLine = true,
-                                shape = FieldShape,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            TextButton(onClick = {
-                                OtpTest.verify(otpCode) { st, d -> otpStage = st; otpMsg = d }
-                            }) { Text("Verify OTP", color = GoldDeep, fontWeight = FontWeight.SemiBold) }
-                        } else {
-                            TextButton(onClick = {
-                                val e164 = buildE164(country, phone)
-                                if (e164 == null) {
-                                    otpStage = "error"
-                                    otpMsg = "Enter your phone number first."
-                                } else {
-                                    val act = runCatching { ctx as android.app.Activity }.getOrNull()
-                                    if (act == null) {
-                                        otpStage = "error"
-                                        otpMsg = "Open this screen again and retry."
-                                    } else {
-                                        OtpTest.start(act, e164) { st, d -> otpStage = st; otpMsg = d }
-                                    }
-                                }
-                            }) { Text("Send OTP to this number", color = GoldDeep, fontWeight = FontWeight.SemiBold) }
-                        }
-                        if (otpStage == "sending") Text("Requesting…", fontSize = 11.5.sp, color = Muted)
-                        if (otpMsg.isNotBlank()) {
-                            Text(
-                                otpMsg,
-                                fontSize = 11.5.sp,
-                                color = when (otpStage) { "ok" -> Green; "error" -> Red; else -> Muted },
-                                maxLines = 4,
-                            )
-                        }
-                    }
                 }
 
                 LoginStage.PROFILE -> {

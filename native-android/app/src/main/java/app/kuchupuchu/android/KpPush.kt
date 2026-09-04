@@ -360,13 +360,15 @@ class KpPushService : FirebaseMessagingService() {
         if (Store.foreground) {
             // Badge jumps instantly; the next list refresh confirms the same number.
             ScreenStore.bumpUnread(convoId, data["body"])
-            if (!muted) runCatching { KpSounds.receive(this) }
+            // Owner round 10: his "in app massage" sound plays only when the
+            // user is inside the app but NOT on this chat's screen — the open
+            // chat itself stays silent (the bubble arriving is the feedback).
+            if (!muted && !inChat) runCatching { KpSounds.inApp(this) }
             return
         }
         // Background (process alive): message card WITH Reply / Like / Mark-as-read.
         // Badge jumps instantly; the next list refresh confirms the same number.
         ScreenStore.bumpUnread(convoId, data["body"])
-        if (!muted) runCatching { KpSounds.receive(this) }
         KpNotify.message(
             this,
             data["fromName"] ?: data["from"] ?: "KuchuPuchu",

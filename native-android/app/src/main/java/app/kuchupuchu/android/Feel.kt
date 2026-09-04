@@ -13,9 +13,47 @@ import androidx.compose.ui.platform.LocalView
  * Feel: subtle send/receive sounds + haptics. All opt-in per action,
  * quiet volumes so nothing feels harsh.
  */
+/** Owner-supplied sound set (round 10, 2026-09-04). */
+object SoundPrefs {
+
+    /** index 0 = the owner's default calling ring; 1..7 = his incoming ringtones. */
+    val ringRes = intArrayOf(
+        R.raw.kp_call_ring,
+        R.raw.kp_in_ring_1,
+        R.raw.kp_in_ring_2,
+        R.raw.kp_in_ring_3,
+        R.raw.kp_in_ring_4,
+        R.raw.kp_in_ring_5,
+        R.raw.kp_in_ring_6,
+        R.raw.kp_in_ring_7,
+    )
+
+    val ringNames = arrayOf(
+        "Default (KuchuPuchu)",
+        "Ringtone 1",
+        "Ringtone 2",
+        "Ringtone 3",
+        "Ringtone 4",
+        "Ringtone 5",
+        "Ringtone 6",
+        "Ringtone 7",
+    )
+
+    fun ringIndex(ctx: Context): Int =
+        ctx.getSharedPreferences("kp", 0).getInt("incoming_ringtone", 0).coerceIn(0, ringRes.size - 1)
+
+    fun setRingIndex(ctx: Context, index: Int) {
+        ctx.getSharedPreferences("kp", 0).edit().putInt("incoming_ringtone", index.coerceIn(0, ringRes.size - 1)).apply()
+    }
+
+    /** The incoming-ring resource the user picked (default = owner's file). */
+    fun incomingRingRes(ctx: Context): Int = ringRes[ringIndex(ctx)]
+}
+
 object KpSounds {
     private var pool: SoundPool? = null
-    private var sendId = 0
+    private var sentId = 0
+    private var inAppId = 0
     private var receiveId = 0
 
     @Synchronized
@@ -27,14 +65,28 @@ object KpSounds {
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                 .build()
         pool = SoundPool.Builder().setMaxStreams(2).setAudioAttributes(attrs).build()
-        sendId = pool!!.load(ctx, R.raw.kp_send, 1)
+        // Owner round 10: his own sound set — "massage sent" plays when a
+        // message of ANY kind actually reaches the server; "in app massage"
+        // plays when a message arrives while the user is inside the app but
+        // NOT on that chat screen.
+        sentId = pool!!.load(ctx, R.raw.kp_sent, 1)
+        inAppId = pool!!.load(ctx, R.raw.kp_inapp_msg, 1)
         receiveId = pool!!.load(ctx, R.raw.kp_receive, 1)
     }
 
-    fun send(ctx: Context) {
+    /** A message the server accepted — any kind (text, photo, file, voice). */
+    fun sent(ctx: Context) {
         runCatching {
             ensure(ctx)
-            pool?.play(sendId, 0.6f, 0.6f, 1, 0, 1f)
+            pool?.play(sentId, 0.7f, 0.7f, 1, 0, 1f)
+        }
+    }
+
+    /** A message arrived while the user is in the app, off the chat screen. */
+    fun inApp(ctx: Context) {
+        runCatching {
+            ensure(ctx)
+            pool?.play(inAppId, 0.7f, 0.7f, 1, 0, 1f)
         }
     }
 

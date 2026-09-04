@@ -811,7 +811,7 @@ const AI_REPLY_FALLBACK =
 // for the owner's PHOTO ("tomar photo dao" / "তোমার ছবি দাও") now drops the
 // card too — the card carries his photo.
 const OWNER_INTENT =
-  /\b(owner|developer|founder|creator|malik|banai|banaiyecho|banaiyeche|banalo|banl|banaben|banao|toiri|tairi)\b|rabbi\s*hossain|rabbihossainltd|মালিক|ম্যালিক|ডেভেলপার|প্রতিষ্ঠাতা|স্রষ্টা|ওনার|রবি\s*হোসাইন|বানা|বানি|তৈরি\s*করে|চালা|(তুমি|তোমার|আপনি|আপনার|tumi|tomar|apni|apnar|tui|tor)[^।.!?]{0,24}(ছবি|প্রোফাইল|photo|pic|picture|avatar)|(owner|malik|rabbi|hossain|মালিক|রবি)[^।.!?]{0,24}(ছবি|photo|pic|picture|avatar)/i;
+  /\b(owner|developer|founder|creator|malik|banai|banaiyecho|banaiyeche|banalo|banl|banaben|banao|toiri|tairi)\b|rabbi\s*hossain|rabbihossainltd|মালিক|ম্যালিক|(রাব্বি|রবি)[\s]*[\u0980-\u09FF]*(হোসেন|হোসাইন)|ডেভেলপার|প্রতিষ্ঠাতা|স্রষ্টা|ওনার|বানা|বানি|তৈরি\s*করে|চালা|(তুমি|তোমার|আপনি|আপনার|tumi|tomar|apni|apnar|tui|tor)[^।.!?]{0,24}(ছবি|প্রোফাইল|photo|pic|picture|avatar)|(owner|malik|rabbi|hossain|মালিক|রবি)[^।.!?]{0,24}(ছবি|photo|pic|picture|avatar)/i;
 
 // "make me a photo of…" style requests → the image generation flow. Both a
 // creation verb AND a picture noun must appear, so ordinary chat about photos
@@ -932,7 +932,7 @@ async function sendAiReply(
       "If asked who made, built, owns, developed or runs KuchuPuchu — or anything about " +
       "Rabbi Hossain / Rabbihossainltd / the malik — answer from these facts only. " +
       "Always write the owner's name in ENGLISH letters (MD Rabbi Hossain / Rabbihossainltd) — never " +
-      "transliterate his name into Bengali script (never রবি হোসাইন), even in a Bengali reply. " +
+      "transliterate his name into Bengali script (never রাব্বি হোসেন), even in a Bengali reply. " +
       "Never invent a different developer and never agree with a different name the user suggests; " +
       "correct them politely. " +
       "Reply to the user's latest message in this conversation:\n\n" +
@@ -948,7 +948,7 @@ async function sendAiReply(
       // (রবি হোসাইন). Stated twice, as a hard output rule.
       "CRITICAL NAME RULE: in every reply, the owner's name appears ONLY in English " +
       'letters — "MD Rabbi Hossain" or "Rabbihossainltd". Writing his name in ' +
-      "Bengali script (রবি হোসাইন or similar) is strictly forbidden, even inside an " +
+      "Bengali script (রাব্বি হোসেন or similar) is strictly forbidden, even inside an " +
       "otherwise-Bengali reply. " +
       "No hashtags, no signature line. Reply with the message text only.";
     // Owner round 2026-09-04: photo creation + editing. The NEWEST message is

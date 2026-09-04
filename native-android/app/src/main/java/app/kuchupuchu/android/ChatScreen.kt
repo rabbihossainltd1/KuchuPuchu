@@ -400,6 +400,16 @@ fun ChatScreen(nav: NavController, convId: String) {
                 ScreenStore.setMsgs(convId, carried + fresh)
                 paintFromStore()
                 if (pending.isNotEmpty()) {
+                    // Owner round 10: the moment the server row for one of our
+                    // pending bubbles appears, THAT message is truly sent —
+                    // text, photo, file or voice all pass through here, and
+                    // the owner's "massage sent" sound plays exactly once.
+                    val accepted =
+                        pending.count { p ->
+                            val cid = p.optString("clientId").ifBlank { "" }
+                            cid.isNotBlank() && fresh.any { it.optString("clientId") == cid }
+                        }
+                    if (accepted > 0) runCatching { KpSounds.sent(ctx) }
                     pending.removeAll { p ->
                         val cid = p.optString("clientId").ifBlank { "" }
                         cid.isNotBlank() && fresh.any { it.optString("clientId") == cid }
@@ -716,7 +726,6 @@ fun ChatScreen(nav: NavController, convId: String) {
         scope.launch {
             val total = msgs.size + pending.size
             if (total > 0) listState.animateScrollToItem(total - 1)
-            KpSounds.send(ctx)
             try {
                 withContext(Dispatchers.IO) {
                     Api.post("/api/conversations/$convId/messages", payload)
@@ -808,7 +817,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                     withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
                 }
                 UploadProgress.done(clientId)
-                KpSounds.send(ctx)
                 refreshMessages(forceScroll = true)
             } catch (e: Exception) {
                 try {
@@ -819,7 +827,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                     if (shotW > 0 && shotH > 0) payload.put("meta", JSONObject().put("w", shotW).put("h", shotH))
                     withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
                     UploadProgress.done(clientId)
-                    KpSounds.send(ctx)
                     refreshMessages(forceScroll = true)
                 } catch (e2: Exception) {
                     UploadProgress.done(clientId)
@@ -862,7 +869,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                     )
                 }
                 UploadProgress.done(clientId)
-                KpSounds.send(ctx)
                 refreshMessages(forceScroll = true)
             } catch (e: Exception) {
                 // Before this the optimistic bubble stayed on screen forever
@@ -914,7 +920,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                         .put("meta", JSONObject().put("voice", true).put("seconds", seconds).put("clientId", clientId))
                 withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
                 UploadProgress.done(clientId)
-                KpSounds.send(ctx)
                 file.delete()
                 refreshMessages(forceScroll = false)
             } catch (e: Exception) {
@@ -2070,12 +2075,10 @@ private fun Composer(
                 Modifier
                     .size(42.dp)
                     .pressScale(sendInteraction)
+                    // Owner round 10: the send/mic circles carry the same 3D
+                    // lift as the header call buttons now.
+                    .shadow(4.dp, CircleShape)
                     .clip(CircleShape)
-                    // Flat solid fill — matches the New Chat FAB / Status
-                    // pencil & camera FABs elsewhere in the app. The old
-                    // gradient (goldFill()) gave this one button alone a
-                    // glossy "3D" look that was inconsistent with the rest
-                    // of the app's flat button language.
                     .background(Gold)
                     .clickable(
                         interactionSource = sendInteraction,
@@ -2128,6 +2131,8 @@ private fun HoldMicButton(
         Modifier
             .size(42.dp)
             .offset { IntOffset((if (recording) animX else 0f).roundToInt(), 0) }
+            // Owner round 10: 3D lift matching the send circle + call buttons.
+            .shadow(4.dp, CircleShape)
             .clip(CircleShape)
             // Flat solid fill, same reasoning as the send button above.
             .background(if (cancelArmed) Color.White else Gold)
@@ -2745,18 +2750,21 @@ private fun MessageRow(
             // uses as much room as there actually is.
             val bubbleMax =
                 maxOf(280.dp, minOf(420.dp, (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp * 0.82f).dp))
+            val bubbleShape =
+                RoundedCornerShape(
+                    topStart = 16.dp,
+                    topEnd = 16.dp,
+                    bottomStart = if (mine) 16.dp else 5.dp,
+                    bottomEnd = if (mine) 5.dp else 16.dp,
+                )
             Box(
                 Modifier
                     .widthIn(min = 72.dp, max = bubbleMax)
                     .wrapContentWidth()
-                    .clip(
-                        RoundedCornerShape(
-                            topStart = 16.dp,
-                            topEnd = 16.dp,
-                            bottomStart = if (mine) 16.dp else 5.dp,
-                            bottomEnd = if (mine) 5.dp else 16.dp,
-                        ),
-                    )
+                    // Owner round 10: the same soft 3D lift the call buttons
+                    // have — bubbles float on the wallpaper now.
+                    .shadow(2.dp, bubbleShape)
+                    .clip(bubbleShape)
                     .background(
                         when {
                             // Deleted tombstones sit in a flat, greyed bubble.
@@ -2908,6 +2916,9 @@ private fun ImageMessageRow(
         Box(
             Modifier
                 .widthIn(max = 225.dp)
+                // Owner round 10: photos float too — 3D lift + the round-8
+                // thin border.
+                .shadow(2.dp, RoundedCornerShape(12.dp))
                 .clip(RoundedCornerShape(12.dp))
                 // Owner round 8: photos get a thin border so they read as
                 // framed content on the cream wallpaper.
@@ -3627,6 +3638,7 @@ private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
         Column(
             Modifier
                 .width(cardMax)
+                .shadow(4.dp, RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 5.dp, bottomEnd = 16.dp))
                 .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 5.dp, bottomEnd = 16.dp))
                 .background(Brush.linearGradient(listOf(Card, Card))),
         ) {

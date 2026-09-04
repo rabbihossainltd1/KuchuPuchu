@@ -293,3 +293,20 @@ Suite: 32/32, 942 assertions.
    11/11 live phrase checks pass. Card also drops when the user asks the
    AI for the owner's photo.
 Suite: 32/32, 944 assertions.
+
+## Owner round 10 — v3.9.30 / 106 (2026-09-04)
+
+1. **Owner's Bangla name spelling corrected** — রাব্বি হোসেন (was রবি হোসাইন
+   everywhere); the card trigger matches রাব্বি/রবি + হোসেন/হোসাইন variants.
+2. **OTP test UI hidden** (code kept in OtpTest.kt for when Blaze is on).
+3. **Owner sound pack wired in**: default calling ring replaced everywhere
+   (ringback + incoming + call channel); 7 incoming ringtones user-pickable
+   in Settings → Incoming ringtone (with preview); "massage sent" plays the
+   moment ANY message (text/photo/file/voice) is actually accepted by the
+   server — not on tap; "in app massage" plays when a message arrives while
+   the user is inside the app but NOT on that chat screen.
+4. **3D bubbles** — text + photo bubbles and the owner card float with the
+   same soft shadow as the call buttons; send + mic circles got the lift too.
+5. **HANDOFF.md** written at the workspace root (credentials, architecture,
+   workflow, links, pitfalls).
+Suite: 32/32, 951 assertions.
