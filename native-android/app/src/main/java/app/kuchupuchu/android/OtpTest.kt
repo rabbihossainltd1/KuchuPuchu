@@ -73,7 +73,7 @@ object OtpTest {
                 // Test passed. Sign out immediately — this path must never
                 // leave a stray Firebase session around.
                 runCatching { auth.signOut() }
-                cb("ok", "✅ OTP verified — SMS delivery works on this phone. Ready for production.")
+                cb("ok", "OTP verified — SMS delivery works on this phone. Ready for production.")
             } else {
                 cb("error", friendly(task.exception ?: IllegalStateException("Unknown failure")))
             }

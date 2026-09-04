@@ -278,8 +278,11 @@ object CallNotify {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         if (nm.getNotificationChannel(CH_IN) == null) {
             val ch = NotificationChannel(CH_IN, "Incoming calls", NotificationManager.IMPORTANCE_HIGH)
+            // Owner round 13 (2026-09-05): incoming rings play the INCOMING
+            // tone (original default or the user's pick) — the caller-side
+            // ringback file was doing double duty here.
             ch.setSound(
-                Uri.parse("android.resource://${ctx.packageName}/${R.raw.kp_call_ring}"),
+                Uri.parse("android.resource://${ctx.packageName}/${SoundPrefs.incomingRingRes(ctx)}"),
                 AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_ALARM)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
@@ -342,7 +345,7 @@ object CallNotify {
                 .setFullScreenIntent(open, true)
                 .addAction(0, "Accept", accept)
                 .addAction(0, "Decline", decline)
-                .setSound(Uri.parse("android.resource://${ctx.packageName}/${R.raw.kp_call_ring}"))
+                .setSound(Uri.parse("android.resource://${ctx.packageName}/${SoundPrefs.incomingRingRes(ctx)}"))
                 .build()
         ctx.getSystemService(NotificationManager::class.java).notify(INCOMING_ID, n)
     }
@@ -371,6 +374,22 @@ object CallNotify {
         val call = CallEngine.instance?.active
         val startedAt = call?.startedAt ?: 0L
         val isVideo = call?.kind == "VIDEO"
+        // Owner round 13 (2026-09-05): the in-call notification got the app's
+        // own look — dark-blue card, a BIG red End button, and the speaker
+        // toggle styled to match (voice calls only; video = End only, owner
+        // rule). Custom RemoteViews instead of bare system action chips.
+        val views = android.widget.RemoteViews(ctx.packageName, R.layout.kp_ongoing_call)
+        views.setTextViewText(R.id.kp_ongoing_title, title)
+        views.setTextViewText(
+            R.id.kp_ongoing_status,
+            if (startedAt > 0L) "Call in progress" else "Connecting…",
+        )
+        views.setViewVisibility(
+            R.id.kp_ongoing_speaker_wrap,
+            if (isVideo) android.view.View.GONE else android.view.View.VISIBLE,
+        )
+        views.setOnClickPendingIntent(R.id.kp_ongoing_speaker_wrap, speaker)
+        views.setOnClickPendingIntent(R.id.kp_ongoing_end, end)
         val builder = NotificationCompat.Builder(ctx, CH_FG)
             .setSmallIcon(R.mipmap.ic_stat_kp)
             .setContentTitle(title)
@@ -379,15 +398,14 @@ object CallNotify {
             .setContentIntent(open)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setOnlyAlertOnce(true)
+            .setCustomContentView(views)
+            .setColor(0xFF16213A.toInt())
         if (startedAt > 0L) {
             builder.setWhen(startedAt).setUsesChronometer(true).setShowWhen(true)
         } else {
             builder.setShowWhen(false)
         }
-        // Video uses the screen controls for routing; its notification has
-        // End only. Voice calls retain Speaker + End.
-        if (!isVideo) builder.addAction(0, "Speaker", speaker)
-        return builder.addAction(0, "End call", end).build()
+        return builder.build()
     }
 
     fun cancelIncoming(ctx: Context) {

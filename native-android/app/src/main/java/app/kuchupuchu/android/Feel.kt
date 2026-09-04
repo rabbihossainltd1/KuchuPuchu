@@ -16,9 +16,9 @@ import androidx.compose.ui.platform.LocalView
 /** Owner-supplied sound set (round 10, 2026-09-04). */
 object SoundPrefs {
 
-    /** index 0 = the owner's default calling ring; 1..7 = his incoming ringtones. */
+    /** index 0 = the app's ORIGINAL incoming tone; 1..7 = his ringtone pack. */
     val ringRes = intArrayOf(
-        R.raw.kp_call_ring,
+        R.raw.kp_ring3,
         R.raw.kp_in_ring_1,
         R.raw.kp_in_ring_2,
         R.raw.kp_in_ring_3,
@@ -63,7 +63,7 @@ object SoundPrefs {
             .apply()
     }
 
-    /** The incoming-ring resource the user picked (default = owner's file). */
+    /** The incoming-ring resource the user picked (default = the original tone). */
     fun incomingRingRes(ctx: Context): Int = ringRes[ringIndex(ctx)]
 
     /** Row label: the custom file's name when one is set, else the built-in's. */

@@ -78,8 +78,8 @@ async function mk() {
   );
   check("A still sees it", (await k.list(A)).includes(cid));
   check(
-    "A still has the full history",
-    (await k.msgs(A, cid)).length === 2,
+    "round 13 real-delete: even A's copy of the history is gone",
+    (await k.msgs(A, cid)).length === 0,
     String((await k.msgs(A, cid)).length),
   );
 
@@ -137,8 +137,8 @@ async function mk() {
   await k.send(A, cid, "m3");
   const aMsgs = await k.msgs(A, cid);
   check(
-    "the member who never deleted still sees everything",
-    aMsgs.length === 3,
+    "round 13: a 1:1 delete wipes it for both sides; A sees only the post-delete message",
+    aMsgs.length === 1 && aMsgs[0].body === "m3",
     JSON.stringify(aMsgs.map((m) => m.body)),
   );
 }
@@ -201,8 +201,8 @@ async function mk() {
     .get(cid).hidden_json;
   const mark = JSON.parse(hiddenRaw)[B.user.id];
   check(
-    "the watermark records a rowid, not just a timestamp",
-    typeof mark === "object" && typeof mark.row === "number",
+    "round 13: the shell stays hidden via a TIME watermark ({row:-1})",
+    typeof mark === "object" && typeof mark.row === "number" && mark.row === -1,
     JSON.stringify(mark),
   );
   // Force the next message to share the watermark's exact millisecond.

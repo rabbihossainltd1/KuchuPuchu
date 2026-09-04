@@ -1,6 +1,8 @@
 package app.kuchupuchu.android
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -44,6 +46,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
@@ -58,6 +61,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -294,8 +298,14 @@ fun ChatListScreen(nav: NavController) {
 @Composable
 private fun ArchivePullArea(nav: NavController, content: @Composable () -> Unit) {
     val density = LocalDensity.current
-    val threshold = with(density) { 110.dp.toPx() }
+    val threshold = with(density) { 90.dp.toPx() }
     var pull by remember { mutableStateOf(0f) }
+    // Owner round 13 (2026-09-05): the archive now opens by PULL + HOLD —
+    // pull the list down past the mark and keep holding: a progress bar
+    // fills over three seconds, then the ARCHIVED logo pops in (animated)
+    // and the screen opens. Works from the blank area AND on top of rows.
+    var holdProgress by remember { mutableStateOf(0f) }
+    var logoShown by remember { mutableStateOf(false) }
     val conn = remember {
         object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
             override fun onPostScroll(
@@ -304,7 +314,7 @@ private fun ArchivePullArea(nav: NavController, content: @Composable () -> Unit)
                 source: androidx.compose.ui.input.nestedscroll.NestedScrollSource,
             ): androidx.compose.ui.geometry.Offset {
                 // Leftover downward scroll = the list is already at its top.
-                if (available.y > 0f) pull = (pull + available.y).coerceAtMost(threshold * 1.5f)
+                if (available.y > 0f) pull = (pull + available.y).coerceAtMost(threshold * 1.6f)
                 return androidx.compose.ui.geometry.Offset.Zero
             }
 
@@ -312,32 +322,75 @@ private fun ArchivePullArea(nav: NavController, content: @Composable () -> Unit)
                 consumed: androidx.compose.ui.unit.Velocity,
                 available: androidx.compose.ui.unit.Velocity,
             ): androidx.compose.ui.unit.Velocity {
-                if (pull > threshold) nav.navigate("archive")
+                // Finger lifted: the hold resets (no more fling-to-open).
                 pull = 0f
                 return androidx.compose.ui.unit.Velocity.Zero
             }
         }
     }
+    LaunchedEffect(pull) {
+        if (pull >= threshold) {
+            val start = System.currentTimeMillis()
+            while (pull >= threshold && System.currentTimeMillis() - start < 3000) {
+                holdProgress = (System.currentTimeMillis() - start) / 3000f
+                delay(50)
+            }
+            if (pull >= threshold) {
+                holdProgress = 1f
+                logoShown = true
+                delay(450)
+                nav.navigate("archive")
+                logoShown = false
+                holdProgress = 0f
+            }
+            pull = 0f
+        } else {
+            holdProgress = 0f
+        }
+    }
     Box(Modifier.fillMaxSize().nestedScroll(conn)) {
         content()
-        if (pull > threshold * 0.3f) {
-            Row(
+        if (pull > threshold * 0.3f || logoShown) {
+            Column(
                 Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = 4.dp)
-                    .clip(RoundedCornerShape(14.dp))
+                    .padding(top = 10.dp)
+                    .clip(RoundedCornerShape(18.dp))
                     .background(GoldSoft)
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Icon(Icons.Filled.Archive, null, tint = GoldDeep, modifier = Modifier.size(14.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    if (pull > threshold) "Release for archived chats" else "Pull down for archived chats",
-                    fontSize = 12.sp,
-                    color = GoldDeep,
-                    fontWeight = FontWeight.SemiBold,
-                )
+                if (logoShown) {
+                    // The ARCHIVED logo — springs in, never just text.
+                    val pop = remember { androidx.compose.animation.core.Animatable(0.35f) }
+                    LaunchedEffect(Unit) {
+                        pop.animateTo(
+                            1f,
+                            spring(dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy),
+                        )
+                    }
+                    Row(Modifier.scale(pop.value), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Archive, null, tint = GoldDeep, modifier = Modifier.size(24.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Archived", fontSize = 16.sp, color = GoldDeep, fontWeight = FontWeight.Bold)
+                    }
+                } else {
+                    Icon(Icons.Filled.Archive, null, tint = GoldDeep, modifier = Modifier.size(22.dp))
+                    Spacer(Modifier.height(6.dp))
+                    LinearProgressIndicator(
+                        progress = { holdProgress },
+                        color = Gold,
+                        trackColor = GoldDeep.copy(alpha = 0.18f),
+                        modifier = Modifier.width(110.dp).height(4.dp).clip(RoundedCornerShape(2.dp)),
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        if (pull >= threshold) "Keep holding for archived chats" else "Pull down and hold",
+                        fontSize = 11.sp,
+                        color = GoldDeep,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
         }
     }
@@ -765,14 +818,14 @@ private fun friendlyPreview(raw: String): String {
     val videoExts = listOf(".mp4", ".mkv", ".mov", ".webm", ".avi", ".3gp")
     val audioExts = listOf(".m4a", ".mp3", ".aac", ".ogg", ".wav", ".opus", ".flac")
     val docExts = listOf(".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".zip", ".rar", ".txt", ".csv")
-    if (t == "Photo" || t == "📷 Photo") return "📷 Photo"
-    if (EmojiRepo.isCustomId(t)) return "🙂 Emoji"
+    if (t == "Photo" || t == "📷 Photo") return "Photo"
+    if (EmojiRepo.isCustomId(t)) return "Sticker"
     return when {
-        lower.startsWith("voice_") || lower.startsWith("voice ") -> "🎤 Voice message"
+        lower.startsWith("voice_") || lower.startsWith("voice ") -> "Voice message"
         lower == "video" -> "🎬 Video"
-        photoExts.any { lower.endsWith(it) } || lower.startsWith("photo_") -> "📷 Photo"
+        photoExts.any { lower.endsWith(it) } || lower.startsWith("photo_") -> "Photo"
         videoExts.any { lower.endsWith(it) } -> "🎬 Video"
-        audioExts.any { lower.endsWith(it) } -> "🎤 Voice message"
+        audioExts.any { lower.endsWith(it) } -> "Voice message"
         docExts.any { lower.endsWith(it) } -> "📄 Document"
         else -> t
     }

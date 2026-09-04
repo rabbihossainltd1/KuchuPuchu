@@ -491,9 +491,8 @@ const convBetween = (db, a, b) =>
     chat.includes("ScreenStore.loginApprovals") && chat.includes("plusSeconds(300)"),
   );
   check(
-    "timestamp overlays a RESERVED band, never the text itself (round 12)",
-    chat.includes("bottom = 15.dp") &&
-      chat.includes("Modifier.align(Alignment.BottomEnd).padding(end = 2.dp, bottom = 1.dp)"),
+    "stamp reserves its width INLINE at the last line (rounds 12→13)",
+    chat.includes("\u00A0\u00A0") && chat.includes('bottom = if (kind == "TEXT") 0.dp else 15.dp'),
   );
   check(
     "worker: decline also enforces the 5-minute window",
@@ -790,13 +789,143 @@ const convBetween = (db, a, b) =>
   check(
     "timestamp + tick pinned to the bubble's bottom-end, never its own line",
     chat.includes("Alignment.BottomEnd") &&
-      chat.includes("bottom = 15.dp") &&
+      chat.includes('bottom = if (kind == "TEXT") 0.dp else 15.dp') &&
       !chat.includes("appendInlineContent"),
   );
   const calls = readFileSync(
     "native-android/app/src/main/java/app/kuchupuchu/android/CallScreens.kt",
     "utf8",
   );
+  // ---- Owner round 13 (2026-09-05): 20 reports ----
+  const chatlist = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/ChatListScreen.kt",
+    "utf8",
+  );
+  const theme = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/Theme.kt",
+    "utf8",
+  );
+  check(
+    "in-app sound: the MAIN send path pokes msg:1 + senderId",
+    src.includes('{ type: "conv", conversationId, at, msg: 1, senderId }') &&
+      src.includes("pokeUserConversation(env, memberId.user_id, convId, created, uid)"),
+  );
+  check(
+    "own sends never trigger the in-app sound",
+    kpapp.includes('ev.optString("senderId") == Store.me?.optString("id").orEmpty()'),
+  );
+  check(
+    "owner card lands BEFORE the AI reply (card first, then the answer)",
+    src.includes("Date.parse(created) - 1") &&
+      src.indexOf("id: mid,", src.indexOf("the card now lands BEFORE")) -
+        src.indexOf("the card now lands BEFORE") <
+        2500,
+  );
+  check(
+    "delete chat is REAL: rows gone, search can't resurrect it",
+    src.includes("DELETE FROM messages WHERE conv_id = ?") &&
+      src.includes("last_message = NULL, last_message_at = NULL"),
+  );
+  check(
+    "swipe-to-reply threads server-side (reply_to column + validated)",
+    src.includes("ALTER TABLE messages ADD COLUMN reply_to") &&
+      src.includes("SELECT id FROM messages WHERE id = ? AND conv_id = ? LIMIT 1") &&
+      src.includes("replyTo: row.reply_to || undefined"),
+  );
+  check(
+    "incoming ringtone is the ORIGINAL tone again (ringback stays caller-side)",
+    feel.includes("R.raw.kp_ring3,") &&
+      !feel.includes("R.raw.kp_call_ring,\n        R.raw.kp_in_ring_1"),
+  );
+  check(
+    "dark blue theme is the default (live-switchable)",
+    theme.includes("darkBlue: Boolean by androidx.compose.runtime.mutableStateOf(true)") &&
+      theme.includes('getString(PREF, "dark_blue")') &&
+      settings.includes('"App theme"'),
+  );
+  check(
+    "in-call notification is app-styled: big red End, speaker voice-only",
+    readFileSync(
+      "native-android/app/src/main/java/app/kuchupuchu/android/CallNotify.kt",
+      "utf8",
+    ).includes("R.layout.kp_ongoing_call") &&
+      existsSync("native-android/app/src/main/res/layout/kp_ongoing_call.xml") &&
+      readFileSync("native-android/app/src/main/res/layout/kp_ongoing_call.xml", "utf8").includes(
+        "kp_ongoing_end",
+      ),
+  );
+  check(
+    "accept is on the RIGHT, decline LEFT",
+    calls.indexOf("Decline LEFT, Accept RIGHT") < calls.indexOf("fun VoiceCallScreen"),
+  );
+  check(
+    "AI chat: mic disabled; sub-second voice cancels silently",
+    chat.includes("micEnabled = !isAiChat") && !chat.includes("at least 1 second to record"),
+  );
+  check(
+    "mic button: fill removed, faint 3D lift",
+    chat.includes("shadow(2.dp, CircleShape") &&
+      !chat.includes(".background(if (cancelArmed) Color.White else Gold)"),
+  );
+  check(
+    "keyboard opening jumps the list to the newest message",
+    chat.includes("WindowInsets.ime") && chat.includes("kpIme.getBottom(kpDensity)"),
+  );
+  check(
+    "swipe a bubble right to quote-reply",
+    chat.includes("onReply = { haptics.tap(); replyTo = it }") &&
+      chat.includes('payload.put("replyTo", it)') &&
+      chat.includes("quoteFor = { rid ->"),
+  );
+  check(
+    "archive opens by pull + 3s hold with an animated logo",
+    chatlist.includes("Keep holding for archived chats") &&
+      chatlist.includes("pop.animateTo(") &&
+      !chatlist.includes("Release for archived chats"),
+  );
+  check(
+    "calls tab: skeleton rows + 20s cache (no laggy refetch)",
+    readFileSync(
+      "native-android/app/src/main/java/app/kuchupuchu/android/CallsTabScreen.kt",
+      "utf8",
+    ).includes("KpShimmerListItem()") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/CallsTabScreen.kt",
+        "utf8",
+      ).includes("lastCallsFetch"),
+  );
+  check(
+    "AI history lands on the newest messages + skeleton list",
+    readFileSync(
+      "native-android/app/src/main/java/app/kuchupuchu/android/AIHistoryScreen.kt",
+      "utf8",
+    ).includes("scrollToItem(msgs.size - 1)") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/AIHistoryScreen.kt",
+        "utf8",
+      ).includes("KpShimmerListItem()"),
+  );
+  check(
+    "ringtone picker compacted",
+    settings.includes("vertical = 7.dp") && settings.includes("fontSize = 13.5.sp"),
+  );
+  check(
+    "status replies quote with >, no emoji anywhere in UI text",
+    readFileSync(
+      "native-android/app/src/main/java/app/kuchupuchu/android/StatusScreens.kt",
+      "utf8",
+    ).includes("> $snippet") &&
+      !src.includes("🤖") &&
+      !chatlist.includes('return "📷 Photo"') &&
+      !chatlist.includes('return "🎤 Voice message"'),
+  );
+  check(
+    "loading skeletons exist (Ui.kt shimmer primitives)",
+    readFileSync("native-android/app/src/main/java/app/kuchupuchu/android/Ui.kt", "utf8").includes(
+      "fun kpShimmerBrush",
+    ) && chat.includes("KpShimmerRow(alignedEnd"),
+  );
+
   const voiceStart = calls.indexOf("fun VoiceCallScreen");
   const voiceBody = calls.slice(voiceStart, calls.indexOf("fun ", voiceStart + 30));
   check(

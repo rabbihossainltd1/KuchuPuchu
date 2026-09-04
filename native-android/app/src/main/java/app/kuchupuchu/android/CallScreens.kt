@@ -214,6 +214,11 @@ fun IncomingCallScreen(call: CallUi) {
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // Owner round 13: Decline LEFT, Accept RIGHT — the universal
+                // phone convention.
+                CallCircle(Red, 70.dp, onClick = { if (engine.active?.incoming == true) engine.decline() else engine.hangup() }) {
+                    Icon(Icons.Filled.CallEnd, "Decline", tint = Color.White, modifier = Modifier.size(30.dp))
+                }
                 CallCircle(Green, 70.dp, onClick = {
                     // Mic (and camera on a video call) asked at the moment of
                     // answering — the contextual-permission rule.
@@ -225,9 +230,6 @@ fun IncomingCallScreen(call: CallUi) {
                         tint = Color.White,
                         modifier = Modifier.size(if (call.kind == "VIDEO") 33.dp else 30.dp),
                     )
-                }
-                CallCircle(Red, 70.dp, onClick = { if (engine.active?.incoming == true) engine.decline() else engine.hangup() }) {
-                    Icon(Icons.Filled.CallEnd, "Decline", tint = Color.White, modifier = Modifier.size(30.dp))
                 }
             }
             Spacer(Modifier.height(20.dp))
@@ -241,7 +243,7 @@ fun IncomingCallScreen(call: CallUi) {
                     fontSize = 13.sp,
                     modifier = Modifier.clickable {
                         engine.decline()
-                        engine.sendQuickReply(call, "Can't talk right now — message diye reply korbo!")
+                        engine.sendQuickReply(call, "Can't talk right now — I'll reply with a message.")
                     },
                 )
                 Text(

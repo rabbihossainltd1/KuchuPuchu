@@ -203,8 +203,8 @@ async function main() {
     );
     const forA = await h.call("GET", `/api/conversations/${cid}/messages`, undefined, A.token);
     check(
-      "…while the sender, who re-entered the chat, keeps full history and paging",
-      forA.json.items.length === 50 && forA.json.hasMore === true,
+      "…and round 13 real-delete means even the sender's history is gone (fresh start)",
+      forA.json.items.length === 1 && forA.json.hasMore === false,
       JSON.stringify({ n: forA.json.items.length, hm: forA.json.hasMore }),
     );
   }

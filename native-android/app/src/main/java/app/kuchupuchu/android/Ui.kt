@@ -3,7 +3,9 @@ package app.kuchupuchu.android
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Base64
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Image
 import androidx.compose.ui.res.painterResource
@@ -15,8 +17,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -34,6 +39,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -750,5 +757,72 @@ fun VerifiedBadge(size: Dp = 16.dp) {
             strokeWidth = w,
             cap = cap,
         )
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Owner round 13 (2026-09-05): loading skeletons — Facebook-feed      */
+/* style placeholders so loading states never look dead.               */
+/* ------------------------------------------------------------------ */
+
+/** Animated shimmer brush — one soft light sweep across a placeholder. */
+@Composable
+fun kpShimmerBrush(): Brush {
+    val t = rememberInfiniteTransition(label = "shimmer")
+    val x by t.animateFloat(
+        initialValue = 400f,
+        targetValue = 1400f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = androidx.compose.animation.core.tween(1400, easing = androidx.compose.animation.core.LinearEasing),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse,
+        ),
+        label = "sx",
+    )
+    return Brush.linearGradient(
+        listOf(Line, Card.copy(alpha = 0.92f), Line),
+        start = Offset(x, 0f),
+        end = Offset(x + 320f, 90f),
+    )
+}
+
+/** One chat-bubble-sized skeleton row (left or right aligned). */
+@Composable
+fun KpShimmerRow(alignedEnd: Boolean = false, widthDp: Int = 200, heightDp: Int = 44) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 5.dp),
+        horizontalArrangement = if (alignedEnd) Arrangement.End else Arrangement.Start,
+    ) {
+        Box(
+            Modifier
+                .width(widthDp.dp)
+                .height(heightDp.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(kpShimmerBrush()),
+        )
+    }
+}
+
+/** One list-item skeleton: avatar circle + two text lines. */
+@Composable
+fun KpShimmerListItem() {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(48.dp).clip(CircleShape).background(kpShimmerBrush()),
+        )
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Box(
+                Modifier.width(150.dp).height(15.dp)
+                    .clip(RoundedCornerShape(6.dp)).background(kpShimmerBrush()),
+            )
+            Spacer(Modifier.height(7.dp))
+            Box(
+                Modifier.width(96.dp).height(12.dp)
+                    .clip(RoundedCornerShape(6.dp)).background(kpShimmerBrush()),
+            )
+        }
     }
 }

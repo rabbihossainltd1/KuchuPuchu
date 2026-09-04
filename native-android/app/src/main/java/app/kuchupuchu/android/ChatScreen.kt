@@ -24,6 +24,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -100,6 +102,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
@@ -185,6 +188,10 @@ fun ChatScreen(nav: NavController, convId: String) {
     var showStickers by remember { mutableStateOf(false) }
     var recording by remember { mutableStateOf(false) }
     var recMs by remember { mutableStateOf(0) }
+    // Owner round 13: swipe a bubble right to quote-reply to it.
+    var replyTo by remember { mutableStateOf<JSONObject?>(null) }
+    // First page still in flight → skeleton bubbles instead of a blank void.
+    var initialLoad by remember { mutableStateOf(true) }
     var uploading by remember { mutableStateOf(0) } // >0 = photo/file uploads in flight
     var error by remember { mutableStateOf("") }
     var otherReadAt by remember { mutableStateOf<String?>(null) }
@@ -462,6 +469,8 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
         refreshMeta()
         refreshMessages(forceScroll = true, markRead = true)
+        // First page landed (or failed) — the skeleton gives way.
+        initialLoad = false
         runCatching { Outbox.flushNow(force = true) }
     }
 
@@ -693,10 +702,28 @@ fun ChatScreen(nav: NavController, convId: String) {
             .collect { (idx, scrolling) -> if (idx == 0 && scrolling) loadOlder() }
     }
 
+    // Owner round 13 (2026-09-05): keyboard opening used to COVER the latest
+    // messages — the user had to swipe down manually every time. Ride the IME
+    // inset: when it grows, jump the list to its bottom.
+    val kpDensity = androidx.compose.ui.platform.LocalDensity.current
+    val kpIme = WindowInsets.ime
+    LaunchedEffect(Unit) {
+        snapshotFlow { kpIme.getBottom(kpDensity) }.collect { ime ->
+            if (ime > 0) {
+                delay(250)
+                val total = listState.layoutInfo.totalItemsCount
+                if (total > 0) listState.animateScrollToItem(total - 1)
+            }
+        }
+    }
+
     fun sendText(body: String, kind: String = "TEXT") {
         if (body.isBlank()) return
         val clientId = "c_${java.util.UUID.randomUUID()}"
         val payload = JSONObject().put("kind", kind).put("body", body).put("clientId", clientId)
+        // Owner round 13: attach the quoted message when replying.
+        replyTo?.optString("id")?.takeIf { it.isNotBlank() }?.let { payload.put("replyTo", it) }
+        replyTo = null
         pending.add(
             JSONObject()
                 .put("id", clientId)
@@ -1026,8 +1053,9 @@ fun ChatScreen(nav: NavController, convId: String) {
             return
         }
         if (VoiceNote.elapsedMs() < 1000) {
+            // Owner round 13: a sub-second tap is a slip, not an error —
+            // cancel silently instead of scolding.
             VoiceNote.cancel()
-            error = "Hold the mic for at least 1 second to record."
             return
         }
         val result = VoiceNote.stop()
@@ -1616,6 +1644,15 @@ fun ChatScreen(nav: NavController, convId: String) {
                     }
                 }
             }
+            if (visibleMsgs.isEmpty() && pending.isEmpty() && initialLoad) {
+                // Owner round 13: Facebook-feed style skeletons while the
+                // first page loads — never a blank, silent screen.
+                Column(Modifier.fillMaxSize().padding(10.dp)) {
+                    repeat(7) { i ->
+                        KpShimmerRow(alignedEnd = i % 3 == 2, widthDp = 150 + (i % 4) * 55)
+                    }
+                }
+            }
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
@@ -1651,6 +1688,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                             },
                             onOpenImage = { msg -> viewerMsg = msg },
                             revealChars = if (m.optString("id") == aiRevealId) aiRevealChars else null,
+                            onReply = { haptics.tap(); replyTo = it },
+                            quoteFor = { rid -> (msgs + pending).firstOrNull { it.optString("id") == rid } },
                             onMessageOwner = { ownerId -> openChatWithUser(ownerId) },
                         )
                     }
@@ -1765,6 +1804,46 @@ fun ChatScreen(nav: NavController, convId: String) {
         )
 
         /* ---------------- composer (doubles as the recording bar) ---------------- */
+        if (replyTo != null) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(GoldSoft)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier
+                        .width(3.dp)
+                        .height(30.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(Gold),
+                )
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        if (replyTo?.optString("senderId") == Store.myId()) "You"
+                        else (replyTo?.optText("senderName") ?: "").ifBlank { "Reply" },
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = GoldDeep,
+                        maxLines = 1,
+                    )
+                    Text(
+                        ((replyTo?.optText("body") ?: "").ifBlank { "Media message" }).take(80),
+                        fontSize = 12.sp,
+                        color = Muted,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
+                }
+                IconButton(onClick = { replyTo = null }, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Filled.Close, "Cancel reply", tint = Muted, modifier = Modifier.size(16.dp))
+                }
+            }
+        }
         if (noReply) {
             // Official security account: replies are off (owner rule).
             Text(
@@ -1823,6 +1902,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 showStickers = false
                 startRecording()
             },
+            micEnabled = !isAiChat,
             onFinishRecord = { cancelled -> finishRecording(cancelled) },
             selectCount = selected.size,
             onSendSelection = { sendSelectedMedia() },
@@ -1969,6 +2049,7 @@ private fun Composer(
     onSend: () -> Unit,
     recording: Boolean,
     recMs: Int,
+    micEnabled: Boolean = true,
     onStartRecord: () -> Unit,
     onFinishRecord: (cancelled: Boolean) -> Unit,
     selectCount: Int = 0,
@@ -2124,6 +2205,7 @@ private fun Composer(
         } else {
             HoldMicButton(
                 recording = recording,
+                enabled = micEnabled,
                 onStartRecord = onStartRecord,
                 onFinishRecord = onFinishRecord,
             )
@@ -2139,6 +2221,7 @@ private fun Composer(
 @Composable
 private fun HoldMicButton(
     recording: Boolean,
+    enabled: Boolean = true,
     onStartRecord: () -> Unit,
     onFinishRecord: (cancelled: Boolean) -> Unit,
 ) {
@@ -2153,14 +2236,16 @@ private fun HoldMicButton(
         Modifier
             .size(42.dp)
             .offset { IntOffset((if (recording) animX else 0f).roundToInt(), 0) }
-            // Owner round 10: 3D lift matching the send circle + call buttons.
-            .shadow(4.dp, CircleShape)
+            // Owner round 13: background fill removed — just a faint 3D lift
+            // (very light shadow) behind the bare icon, and a disabled state
+            // for the AI chat (voice notes are off there).
+            .shadow(2.dp, CircleShape, ambientColor = Color(0x22000000), spotColor = Color(0x22000000))
             .clip(CircleShape)
-            // Flat solid fill, same reasoning as the send button above.
-            .background(if (cancelArmed) Color.White else Gold)
+            .alpha(if (enabled) 1f else 0.4f)
             .border(1.dp, if (cancelArmed) Red else Color.Transparent, CircleShape)
-            .pointerInput(Unit) {
+            .pointerInput(enabled) {
                 awaitEachGesture {
+                    if (!enabled) return@awaitEachGesture
                     awaitFirstDown(requireUnconsumed = false)
                     dragX = 0f
                     var armed = false
@@ -2186,8 +2271,8 @@ private fun HoldMicButton(
         Icon(
             if (cancelArmed) Icons.Filled.Delete else Icons.Filled.Mic,
             contentDescription = if (cancelArmed) "Release to cancel" else "Hold to record",
-            tint = if (cancelArmed) Red else AmberInk,
-            modifier = Modifier.size(19.dp),
+            tint = if (!enabled) Muted else if (cancelArmed) Red else GoldDeep,
+            modifier = Modifier.size(20.dp),
         )
     }
 }
@@ -2694,7 +2779,7 @@ private fun LoginApprovalMessage(m: JSONObject) {
             }
         } else {
             val (label, color) = when (status) {
-                "APPROVED" -> "✅ Approved — new device signed in" to Color(0xFF16A34A)
+                "APPROVED" -> "Approved — new device signed in" to Color(0xFF16A34A)
                 "DECLINED" -> "⛔ Declined" to Red
                 else -> "⏰ Expired" to Muted
             }
@@ -2717,6 +2802,8 @@ private fun MessageRow(
     onOpenImage: (JSONObject) -> Unit = {},
     revealChars: Int? = null,
     onMessageOwner: (String) -> Unit = {},
+    onReply: (JSONObject) -> Unit = {},
+    quoteFor: (String) -> JSONObject? = { null },
 ) {
     val mine = m.optString("senderId") == myId
     val kind = m.optString("kind")
@@ -2759,6 +2846,11 @@ private fun MessageRow(
         return
     }
 
+    // Owner round 13: hold-drag a bubble RIGHT to quote-reply. The offset
+    // follows the finger up to ~65dp; past 36dp on release it arms the reply.
+    var replyDrag by remember { mutableStateOf(0f) }
+    val replyOffset by animateFloatAsState(replyDrag, spring(stiffness = 1400f), label = "replydrag")
+    val replyThreshold = with(LocalDensity.current) { 36.dp.toPx() }
     Row(
         Modifier
             .fillMaxWidth()
@@ -2781,6 +2873,29 @@ private fun MessageRow(
                 )
             Box(
                 Modifier
+                    .offset { IntOffset(replyOffset.roundToInt(), 0) }
+                    .pointerInput(m.optString("id")) {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            var dx = 0f
+                            var consumed = false
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull() ?: break
+                                val d = change.positionChange().x
+                                val dy = change.positionChange().y
+                                if (!consumed && kotlin.math.abs(dy) > kotlin.math.abs(d) * 2f) break
+                                dx = (dx + d).coerceIn(0f, replyThreshold * 1.8f)
+                                replyDrag = dx
+                                if (dx > 8f) consumed = true
+                                if (consumed) event.changes.forEach { it.consume() }
+                                if (event.changes.all { !it.pressed }) break
+                            }
+                            val armed = replyDrag >= replyThreshold
+                            replyDrag = 0f
+                            if (armed) onReply(m)
+                        }
+                    }
                     .widthIn(min = 72.dp, max = bubbleMax)
                     .wrapContentWidth()
                     // Owner round 10: the same soft 3D lift the call buttons
@@ -2805,14 +2920,46 @@ private fun MessageRow(
                             }
                         },
                     )
-                    // Owner round 12: every bubble here keeps a small bottom
-                    // band for the timestamp + ticks overlay — it can never
-                    // wrap to its own line and never overlaps the content
-                    // (photos never reach this Box; they draw their own).
-                    .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = 15.dp),
+                    // Owner round 13: TEXT bubbles reserve the stamp's width
+                    // INLINE (trailing non-breaking spaces glued to the last
+                    // word — the WhatsApp trick), so the overlay can never
+                    // overlap a glyph and never leaves a blank strip under
+                    // the text. Other kinds keep the small bottom band.
+                    .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (kind == "TEXT") 0.dp else 15.dp),
             ) {
                 val senderName = m.optText("senderName")
                 Column {
+                    // Owner round 13: quoted original when this is a reply.
+                    m.optString("replyTo").takeIf { it.isNotBlank() }?.let { rid ->
+                        val q = quoteFor(rid)
+                        Row(
+                            Modifier
+                                .padding(bottom = 3.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (mine) Color(0x26FFFFFF) else GoldSoft)
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                        ) {
+                            Box(Modifier.width(2.5.dp).height(26.dp).clip(RoundedCornerShape(2.dp)).background(Gold))
+                            Spacer(Modifier.width(6.dp))
+                            Column {
+                                Text(
+                                    if (q?.optString("senderId") == myId) "You"
+                                    else (q?.optText("senderName") ?: "").ifBlank { "Original message" },
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = GoldDeep,
+                                    maxLines = 1,
+                                )
+                                Text(
+                                    q?.optText("body")?.take(64)?.ifBlank { "Original message" } ?: "Original message",
+                                    fontSize = 11.sp,
+                                    color = Muted,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
                     if (!mine && isGroup && senderName.isNotBlank()) {
                         Text(senderName, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = GoldDeep)
                     }
@@ -2830,7 +2977,11 @@ private fun MessageRow(
                             color = Color(0xFF4A463F),
                         )
                         else -> {
-                            val full = m.optText("body") + if (m.optBoolean("edited")) "  (edited)" else ""
+                            //   runs glue to the last word, so the stamp's
+                            // spot travels WITH the final line — no separate
+                            // line, no overlap, no drifting left.
+                            val reserve = if (mine) "                 " else "            "
+                            val full = m.optText("body") + (if (m.optBoolean("edited")) "  (edited)" else "") + reserve
                             if (revealChars != null && revealChars < full.length) {
                                 // The AI reply is still typing itself out —
                                 // reveal up to the current word + a caret.
@@ -2852,7 +3003,7 @@ private fun MessageRow(
                 // scrim), always at the bottom-END corner, never on its own
                 // text line.
                 Row(
-                    Modifier.align(Alignment.BottomEnd).padding(end = 2.dp, bottom = 1.dp),
+                    Modifier.align(Alignment.BottomEnd).padding(end = 2.dp, bottom = if (kind == "TEXT") 3.dp else 1.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
