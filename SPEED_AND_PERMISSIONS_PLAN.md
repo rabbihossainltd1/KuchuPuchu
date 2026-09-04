@@ -219,3 +219,22 @@ Suite: 32/32, 919 assertions.
 3. **Owner photo sharper** — bundled image rebundled at 640×640 so the
    fullscreen viewer (fixed in v100) stays crisp edge to edge.
 Suite: 32/32, 922 assertions.
+
+## Owner round 6 — v3.9.26 / 102 (2026-09-04)
+
+1. **Owner card photo much bigger** — card widened to 92% of the screen and
+   the photo is square now (was 4:3 at 82%).
+2. **Header subtitle raised further** (net back to its original line) and
+   the blank strip under the header trimmed (vertical padding 4→2dp) — only
+   the subtitle text and that strip move.
+3. **Scroll perf** — timestamp parsing (Instant.parse + zone math) ran for
+   every visible row on every recomposition; now memoized in a concurrent
+   map. Inline stamp strings cached per message too.
+4. **Realtime lateness** — when the chat socket dies the fallback poll now
+   runs every 3s (was 10s) and the socket is actively rejoined every 10s
+   (a dead channel used to stay dead until reopening the screen).
+5. **Text bubbles: inline timestamp** — the time (and read ticks) ride at
+   the end of the text IN-FLOW: single-line messages are true single-line
+   bubbles, nothing sits on a separate line, and no overlay is possible.
+   Sticker/file/deleted bubbles keep the small stamp line.
+Suite: 32/32, 926 assertions.

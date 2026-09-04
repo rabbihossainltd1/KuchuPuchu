@@ -38,6 +38,8 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -115,7 +117,12 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -566,6 +573,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
         var lastForeground = Store.foreground
         var lastFallbackRefresh = 0L
+        var lastRejoin = 0L
         try {
             while (true) {
                 delay(1_000)
@@ -576,14 +584,19 @@ fun ChatScreen(nav: NavController, convId: String) {
                 val onScreen = Store.route == "chat/$convId"
                 if (justReturned && onScreen) refreshMessages(forceNetwork = true)
                 else if (onScreen && !KpSocket.chatLive(convId)) {
-                    // Socket down: this loop IS the delivery path, so keep
-                    // polling — but at 10s, not on every tick of a 1s loop.
-                    // The counter starts at 0 so a chat opened with no socket
-                    // syncs on the first tick instead of waiting 10s.
+                    // Owner round 6: socket down used to mean messages up to
+                    // 10s late ("realtime update late"). Two changes: the
+                    // fallback poll runs every 3s, and the socket gets an
+                    // active rejoin every 10s (a dead channel used to stay
+                    // dead until the screen was reopened).
                     val now = System.currentTimeMillis()
-                    if (now - lastFallbackRefresh >= 10_000) {
+                    if (now - lastFallbackRefresh >= 3_000) {
                         lastFallbackRefresh = now
                         refreshMessages(forceNetwork = true)
+                    }
+                    if (now - lastRejoin >= 10_000) {
+                        lastRejoin = now
+                        KpSocket.joinChat(convId)
                     }
                 }
             }
@@ -1281,7 +1294,8 @@ fun ChatScreen(nav: NavController, convId: String) {
             Modifier
                 .fillMaxWidth()
                 .background(Cream)
-                .padding(horizontal = 4.dp, vertical = 4.dp),
+                // Owner round 6: the blank strip under the header trimmed.
+                .padding(horizontal = 4.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(
@@ -1342,7 +1356,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // Owner round 5: ONLY this subtitle line rises a touch —
                     // the name, the header height and everything else stay
                     // exactly where they are.
-                    modifier = Modifier.offset(y = (-2).dp),
+                    // Owner round 6: raised further (net back to the
+                    // original line) — only this text moves.
+                    modifier = Modifier.offset(y = (-6).dp),
                     fontSize = 11.5.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -2693,22 +2709,61 @@ private fun MessageRow(
                                     color = Ink,
                                 )
                             } else {
-                                Text(full, fontSize = 14.5.sp, lineHeight = 19.sp, color = Ink)
+                                // Owner round 6: the stamp rides INLINE at the
+                                // end of the text — a single-line message is a
+                                // true single-line bubble (no extra line), and
+                                // an in-flow stamp can never overlap anything.
+                                val stamp = msgStamp(m.optString("createdAt"))
+                                val stampColor = if (mine) Color(0xD9FFFFFF) else Muted
+                                val line =
+                                    remember(full, stamp, mine) {
+                                        buildAnnotatedString {
+                                            append(full)
+                                            if (stamp.isNotBlank()) {
+                                                append("  ")
+                                                withStyle(SpanStyle(fontSize = 10.sp, color = stampColor)) {
+                                                    append(stamp)
+                                                }
+                                                if (mine) appendInlineContent("tick", " ")
+                                            }
+                                        }
+                                    }
+                                Text(
+                                    line,
+                                    fontSize = 14.5.sp,
+                                    lineHeight = 19.sp,
+                                    color = Ink,
+                                    inlineContent =
+                                        if (mine)
+                                            mapOf(
+                                                "tick" to
+                                                    InlineTextContent(
+                                                        Placeholder(13.sp, 13.sp, PlaceholderVerticalAlign.Bottom),
+                                                    ) {
+                                                        TickIcon(m, pendingEcho, otherReadAt)
+                                                    },
+                                            )
+                                        else emptyMap(),
+                                )
                             }
                         }
                     }
-                    Row(
-                        Modifier.align(Alignment.End).padding(top = 1.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            msgStamp(m.optString("createdAt")),
-                            fontSize = 10.sp,
-                            color = if (mine) Color(0xD9FFFFFF) else Muted,
-                        )
-                        if (mine) {
-                            Spacer(Modifier.width(3.dp))
-                            TickIcon(m, pendingEcho, otherReadAt)
+                    // Non-text bubbles (sticker / file / deleted) keep the
+                    // stamp on its own small line under the content.
+                    if (kind != "TEXT") {
+                        Row(
+                            Modifier.align(Alignment.End).padding(top = 1.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                msgStamp(m.optString("createdAt")),
+                                fontSize = 10.sp,
+                                color = if (mine) Color(0xD9FFFFFF) else Muted,
+                            )
+                            if (mine) {
+                                Spacer(Modifier.width(3.dp))
+                                TickIcon(m, pendingEcho, otherReadAt)
+                            }
                         }
                     }
                 }
@@ -3172,21 +3227,28 @@ private fun compactFileName(name: String, headKeep: Int = 10, tailDots: Int = 4)
     return stem.take(headKeep) + ".".repeat(tailDots) + ext
 }
 
+// Owner round 6: memoized — Instant.parse + zone math used to run for
+// EVERY visible row on EVERY recomposition (selection, typing, receipts),
+// which is pure jank on long threads. Timestamps are immutable per iso.
+private val stampCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+
 private fun msgStamp(iso: String): String {
     if (iso.isBlank()) return ""
-    return try {
-        val z = atDhaka(java.time.Instant.parse(iso))
-        // Owner round 4: 12-hour clock with AM/PM (the 24-hour stamp read
-        // as wrong in the AI chat; now every bubble matches the security
-        // card's format).
-        String.format(
-            "%d:%02d %s",
-            (z.hour % 12).let { if (it == 0) 12 else it },
-            z.minute,
-            if (z.hour >= 12) "PM" else "AM",
-        )
-    } catch (e: Exception) {
-        ""
+    return stampCache.getOrPut(iso) {
+        try {
+            val z = atDhaka(java.time.Instant.parse(iso))
+            // Owner round 4: 12-hour clock with AM/PM (the 24-hour stamp read
+            // as wrong in the AI chat; now every bubble matches the security
+            // card's format).
+            String.format(
+                "%d:%02d %s",
+                (z.hour % 12).let { if (it == 0) 12 else it },
+                z.minute,
+                if (z.hour >= 12) "PM" else "AM",
+            )
+        } catch (e: Exception) {
+            ""
+        }
     }
 }
 
@@ -3453,11 +3515,10 @@ private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
         Modifier.fillMaxWidth().padding(vertical = 3.dp),
         horizontalArrangement = Arrangement.Start,
     ) {
-        // Owner round 3 (2026-09-04): the card covers the full bubble width
-        // (82% of the screen, 280dp floor / 420dp cap) — the photo, texts,
-        // socials and the button all stretch with it.
+        // Owner round 6: card widened to 92% of the screen and the photo is
+        // now SQUARE — the picture renders far bigger than a normal bubble.
         val cardMax =
-            maxOf(280.dp, minOf(420.dp, (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp * 0.82f).dp))
+            maxOf(300.dp, minOf(440.dp, (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp * 0.92f).dp))
         Column(
             Modifier
                 .width(cardMax)
@@ -3471,7 +3532,7 @@ private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(4f / 3f)
+                    .aspectRatio(1f)
                     .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
                     .clickable { showPhoto = true },
             )
