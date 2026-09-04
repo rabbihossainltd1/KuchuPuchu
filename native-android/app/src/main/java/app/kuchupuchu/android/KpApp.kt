@@ -37,6 +37,23 @@ fun KpApp() {
     // lands pre-login is replayed by the StateFlow once this effect runs
     // again after `authed` flips. (The old read-once var was silently
     // dropped in exactly the common case: app open, user taps the card.)
+    // Owner round 11 (2026-09-05): the in-app message sound also fires from
+    // the realtime user channel — the worker SKIPS the FCM push while the
+    // socket is alive, so the push-only path was silent for online users.
+    // Process-level: registered once, never removed.
+    val appCtx = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    LaunchedEffect(Unit) {
+        KpSocket.onEvent { ev ->
+            if (ev.optString("type") == "conv" && ev.optBoolean("msg") && Store.foreground) {
+                val cid = ev.optString("conversationId")
+                val inChat = Store.route == "chat/$cid" || Store.route.startsWith("chat/$cid?")
+                if (cid.isNotBlank() && !inChat && !ScreenStore.isMuted(cid)) {
+                    runCatching { KpSounds.inApp(appCtx) }
+                }
+            }
+        }
+    }
+
     LaunchedEffect(authed) {
         MainActivity.pendingChat.collect { pending ->
             if (authed && !pending.isNullOrBlank()) {

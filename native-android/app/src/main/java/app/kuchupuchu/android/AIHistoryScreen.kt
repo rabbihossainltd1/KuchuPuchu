@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -160,8 +161,11 @@ fun AIHistoryScreen(nav: NavController) {
                     val body = m.optText("body").ifBlank { when (m.optString("kind")) { "IMAGE" -> "📷 Photo"; "OWNER_CARD" -> "👤 Owner card"; else -> "" } }
                     if (body.isNotBlank()) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
+                            // Owner round 11: bubbles capped at 300dp so a
+                            // long archived line can never run off-screen.
                             Box(
                                 Modifier
+                                    .widthIn(max = 300.dp)
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(
                                         if (mine) Brush.linearGradient(listOf(Gold, Gold))

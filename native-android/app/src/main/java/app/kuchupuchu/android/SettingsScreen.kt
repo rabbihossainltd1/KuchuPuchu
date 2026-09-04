@@ -331,60 +331,61 @@ fun SettingsScreen(nav: NavController) {
         Spacer(Modifier.height(32.dp))
     }
 
-    /* ---------- edit dialog ---------- */
-    if (editField != null) {
-        // Owner round 10: incoming-ringtone picker with preview.
-        if (showRingPicker) {
-            AlertDialog(
-                onDismissRequest = { showRingPicker = false },
-                title = { Text("Incoming ringtone", fontWeight = FontWeight.SemiBold) },
-                text = {
-                    Column {
-                        SoundPrefs.ringNames.forEachIndexed { idx, name ->
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        SoundPrefs.setRingIndex(ctx, idx)
-                                        // Preview the picked ring right away.
-                                        runCatching {
-                                            val mp = android.media.MediaPlayer()
-                                            mp.setAudioAttributes(
-                                                android.media.AudioAttributes.Builder()
-                                                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
-                                                    .build(),
-                                            )
-                                            val afd = ctx.resources.openRawResourceFd(SoundPrefs.ringRes[idx])
-                                            mp.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
-                                            afd.close()
-                                            mp.setOnCompletionListener { it.release() }
-                                            mp.prepare()
-                                            mp.start()
-                                        }
-                                        showRingPicker = false
+    // Owner round 10: incoming-ringtone picker with preview.
+    if (showRingPicker) {
+        AlertDialog(
+            onDismissRequest = { showRingPicker = false },
+            title = { Text("Incoming ringtone", fontWeight = FontWeight.SemiBold) },
+            text = {
+                Column {
+                    SoundPrefs.ringNames.forEachIndexed { idx, name ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    SoundPrefs.setRingIndex(ctx, idx)
+                                    // Preview the picked ring right away.
+                                    runCatching {
+                                        val mp = android.media.MediaPlayer()
+                                        mp.setAudioAttributes(
+                                            android.media.AudioAttributes.Builder()
+                                                .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                                                .build(),
+                                        )
+                                        val afd = ctx.resources.openRawResourceFd(SoundPrefs.ringRes[idx])
+                                        mp.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+                                        afd.close()
+                                        mp.setOnCompletionListener { it.release() }
+                                        mp.prepare()
+                                        mp.start()
                                     }
-                                    .padding(vertical = 12.dp, horizontal = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    name,
-                                    fontSize = 14.5.sp,
-                                    color = if (SoundPrefs.ringIndex(ctx) == idx) GoldDeep else Ink,
-                                    fontWeight = if (SoundPrefs.ringIndex(ctx) == idx) FontWeight.SemiBold else FontWeight.Normal,
-                                )
-                                Spacer(Modifier.weight(1f))
-                                if (SoundPrefs.ringIndex(ctx) == idx) {
-                                    Icon(Icons.Filled.Done, null, tint = GoldDeep, modifier = Modifier.size(18.dp))
+                                    showRingPicker = false
                                 }
+                                .padding(vertical = 12.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                name,
+                                fontSize = 14.5.sp,
+                                color = if (SoundPrefs.ringIndex(ctx) == idx) GoldDeep else Ink,
+                                fontWeight = if (SoundPrefs.ringIndex(ctx) == idx) FontWeight.SemiBold else FontWeight.Normal,
+                            )
+                            Spacer(Modifier.weight(1f))
+                            if (SoundPrefs.ringIndex(ctx) == idx) {
+                                Icon(Icons.Filled.Done, null, tint = GoldDeep, modifier = Modifier.size(18.dp))
                             }
                         }
                     }
-                },
-                confirmButton = {
-                    androidx.compose.material3.TextButton(onClick = { showRingPicker = false }) { Text("Close") }
-                },
-            )
-        }
+                }
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { showRingPicker = false }) { Text("Close") }
+            },
+        )
+    }
+
+    /* ---------- edit dialog ---------- */
+    if (editField != null) {
         AlertDialog(
             onDismissRequest = { editField = null },
             title = {
