@@ -170,7 +170,8 @@ fun ProfileScreen(nav: NavController, userId: String) {
                 Text(about, fontSize = 13.5.sp, color = Ink, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             }
         }
-        if (!isKpBot(userId)) {
+        // Owner round 7: the owner's account can never be blocked.
+        if (!isKpBot(userId) && u.optText("username") != "rabbihossainltd") {
         Row(
             Modifier
                 .fillMaxWidth()

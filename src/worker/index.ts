@@ -628,7 +628,17 @@ const AI_WELCOME_FALLBACK =
 /** Model aliases tried in order: "-latest" floats with Google's rotations
  *  (specific versions get retired with a 404 — gemini-2.0-flash already
  *  has), and the lite alias covers the flagship being at capacity (503). */
-const GEMINI_WELCOME_MODELS = ["gemini-flash-lite-latest", "gemini-flash-latest"] as const;
+// Owner round 7 (2026-09-04): the aliases now route to thinking models
+// (and were 503ing under load), which starved the small maxOutputTokens
+// budget — every reply came back EMPTY and users got the canned fallback.
+// gemini-3.5-flash is live-verified with this key; thinking is disabled
+// (thinkingBudget 0) so replies are fast and the token budget goes to the
+// answer, not to thinking.
+const GEMINI_WELCOME_MODELS = [
+  "gemini-3.5-flash",
+  "gemini-flash-latest",
+  "gemini-flash-lite-latest",
+] as const;
 
 /** One bounded Gemini completion: model aliases tried in order under a
  *  shared wall-clock budget, any failure ⇒ null. Never throws — callers
@@ -658,7 +668,11 @@ async function geminiComplete(
           headers: { "content-type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 1, maxOutputTokens },
+            generationConfig: {
+              temperature: 1,
+              maxOutputTokens,
+              thinkingConfig: { thinkingBudget: 0 },
+            },
           }),
           signal: ctrl.signal,
         },
@@ -1072,7 +1086,7 @@ async function sendAiReply(
       }
     }
 
-    const body = (await geminiComplete(env, prompt, 220)) ?? AI_REPLY_FALLBACK;
+    const body = (await geminiComplete(env, prompt, 400)) ?? AI_REPLY_FALLBACK;
     const botId = await ensureAiBot(db);
     const mid = id();
     const created = nowIso();
@@ -4374,6 +4388,34 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         convId,
       );
     }
+    return json({ ok: true });
+  }
+
+  // Owner round 7 (2026-09-04): AI-chat "Reset session" / "New chat" — wipes
+  // the conversation's message history so the bot starts a fresh context.
+  // Only allowed for bot conversations (a normal chat must not be erasable
+  // from one side).
+  if (convMatch && method === "POST" && url.pathname.endsWith("/reset")) {
+    const convId = convMatch[1]!;
+    const { conv } = await requireMember(db, convId, uid);
+    const other =
+      conv.kind === "GROUP"
+        ? null
+        : await one<{ id: string }>(
+            db,
+            `SELECT id FROM users WHERE id =
+               (SELECT user_id FROM members WHERE conv_id = ? AND user_id != ? LIMIT 1)`,
+            convId,
+            uid,
+          );
+    if (!other || (other.id !== AI_BOT_ID && other.id !== OFFICIAL_BOT_ID))
+      fail(403, "Only bot chats can be reset.");
+    await run(db, "DELETE FROM messages WHERE conv_id = ?", convId);
+    await run(
+      db,
+      "UPDATE conversations SET last_message = NULL, last_message_at = NULL WHERE id = ?",
+      convId,
+    );
     return json({ ok: true });
   }
 
