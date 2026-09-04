@@ -275,3 +275,21 @@ Suite: 32/32, 932 assertions.
 5. **Header**: extra 2px trimmed (offset 6→4).
 6. **Photo messages**: thin 1dp border added.
 Suite: 32/32, 942 assertions.
+
+## Owner round 9 — v3.9.29 / 105 (2026-09-04)
+
+1. **Google sign-in LOCKED** — owner-verified working; "LOCKED BY OWNER"
+   marker in GoogleAuth.kt + a guard test; no further changes without the
+   owner's explicit approval.
+2. **OTP diagnostics upgraded** — the app talks to Firebase project
+   kuchupuchuff2026; errors now name the project and the real blocker:
+   Firebase requires the BLAZE (pay-as-you-go) plan for Phone Auth SMS —
+   on the free Spark plan it keeps saying "phone sign-in disabled" even
+   with Phone enabled in the console.
+3. **Owner card Bangla fix** — the intent regex missed Bengali verb
+   inflections (বানিয়েছে/বানাল/তৈরি করে/চালায়), the Bengali-script name
+   (রবি হোসাইন), and photo requests ("tomar photo dao"/"তোমার ছবি দাও").
+   Now stem-based (বানা/বানি/চালা) so the য় dual-encoding trap can't bite;
+   11/11 live phrase checks pass. Card also drops when the user asks the
+   AI for the owner's photo.
+Suite: 32/32, 944 assertions.

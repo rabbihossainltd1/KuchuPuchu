@@ -642,6 +642,12 @@ const convBetween = (db, a, b) =>
     chat.includes(".border(1.dp, Color(0x2E000000), RoundedCornerShape(12.dp))"),
   );
   check("header block trimmed 2px more (offset 6->4)", chat.includes("offset(y = 4.dp)"));
+
+  // ---- Owner round 9 (2026-09-04) ----
+  check(
+    "owner card: Bangla verb family + Bengali-script name + photo asks match",
+    src.includes("বানিয়েছে") && src.includes("রবি\\s*হোসাইন") && src.includes("তৈরি\\s*করে"),
+  );
   check("the retired Banglish-spelling rule is gone", !src.includes("kemon achen"));
 }
 

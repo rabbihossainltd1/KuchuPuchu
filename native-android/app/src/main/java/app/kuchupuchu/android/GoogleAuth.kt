@@ -22,6 +22,13 @@ import kotlinx.coroutines.withContext
  */
 object GoogleAuth {
 
+    /* ==================================================================
+     * LOCKED BY OWNER (2026-09-04): "google sing in success eita lock koro
+     * jeno ar changes na hoi" — verified working across devices. Do NOT
+     * modify this flow (single native sheet + createFrom/raw-bundle parse +
+     * one web-flow fallback) without the owner's explicit approval.
+     * ================================================================== */
+
     class NotConfiguredException(message: String = "Google sign-in is not set up on the server yet.") :
         Exception(message)
 
