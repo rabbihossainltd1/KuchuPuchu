@@ -561,6 +561,39 @@ const convBetween = (db, a, b) =>
       chat.includes("KpSocket.joinChat(convId)") &&
       chat.includes("lastRejoin"),
   );
+
+  // ---- Owner round 7 (2026-09-04) ----
+  check(
+    "AI replies: gemini-3.5-flash first + thinking disabled (empty-reply bug)",
+    src.includes("gemini-3.5-flash") && src.includes("thinkingBudget"),
+  );
+  check(
+    "bot-conversation reset endpoint exists (bot chats only)",
+    src.includes('endsWith("/reset")') && src.includes("Only bot chats can be reset"),
+  );
+  check(
+    "AI chat menu: exactly the six owner options",
+    chat.includes('"Reset session"') &&
+      chat.includes('"New chat"') &&
+      chat.includes('"Incognito mode"') &&
+      chat.includes('"Search in chat"') &&
+      chat.includes('otherUserId == "kp_ai_bot"'),
+  );
+  check(
+    "notifications bot has no options menu",
+    chat.includes('if (otherUserId != "kp_official_bot") {'),
+  );
+  check(
+    "owner account cannot be blocked from its profile",
+    readFileSync(
+      "native-android/app/src/main/java/app/kuchupuchu/android/ProfileScreen.kt",
+      "utf8",
+    ).includes('u.optText("username") != "rabbihossainltd"'),
+  );
+  check(
+    "owner card photo is display-only (no viewer, no click)",
+    !chat.includes("clickable { showPhoto = true }"),
+  );
   check("the retired Banglish-spelling rule is gone", !src.includes("kemon achen"));
 }
 

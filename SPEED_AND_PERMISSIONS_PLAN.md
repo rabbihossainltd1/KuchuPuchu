@@ -238,3 +238,20 @@ Suite: 32/32, 922 assertions.
    bubbles, nothing sits on a separate line, and no overlay is possible.
    Sticker/file/deleted bubbles keep the small stamp line.
 Suite: 32/32, 926 assertions.
+
+## Owner round 7 — v3.9.27 / 103 (2026-09-04)
+
+1. **AI canned-reply + slowness fixed** — root cause: the "flash-latest"
+   aliases now route to thinking models (and were 503ing), so the 220-token
+   budget was eaten by thinking and every reply came back EMPTY → the canned
+   fallback. Now: gemini-3.5-flash first (live-verified with this key),
+   thinkingBudget 0 (fast, budget goes to the answer), reply budget 400.
+2. **Header**: the last blank strip under "last seen" is gone (padding 0).
+3. **Owner card photo**: display-only — tapping does nothing.
+4. **AI chat 3-dot menu**: exactly Reset session / New chat / Mute / Chat
+   theme / Incognito mode / Search in chat. Reset+New chat wipe the bot
+   conversation via new POST /api/conversations/:id/reset (bot chats only);
+   Incognito wipes the session on leaving the chat.
+5. **KuchuPuchu notifications bot**: no 3-dot menu at all.
+6. **Owner account**: Block removed from his profile.
+Suite: 32/32, 932 assertions.

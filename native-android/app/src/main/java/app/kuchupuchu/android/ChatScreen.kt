@@ -77,6 +77,8 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.GroupAdd
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PermMedia
 import androidx.compose.material.icons.filled.Timer
@@ -212,6 +214,8 @@ fun ChatScreen(nav: NavController, convId: String) {
     // used to fire a request per bubble).
     val msgSyncPending = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
     var menuOpen by remember { mutableStateOf(false) }
+    // Owner round 7: AI-chat incognito — the session is wiped on leaving.
+    var aiIncognito by remember { mutableStateOf(false) }
     var showChatSearch by remember { mutableStateOf(false) }
     var showDisappear by remember { mutableStateOf(false) }
     var showTheme by remember { mutableStateOf(false) }
@@ -232,6 +236,27 @@ fun ChatScreen(nav: NavController, convId: String) {
     var viewerMsg by remember { mutableStateOf<JSONObject?>(null) }
     var editing by remember { mutableStateOf<JSONObject?>(null) }
     var forwarding by remember { mutableStateOf(false) }
+
+    // Owner round 7: AI "Reset session" / "New chat" — wipes this bot
+    // conversation server-side and locally, giving the AI a fresh context.
+    fun resetAiSession() {
+        scope.launch {
+            val ok =
+                runCatching {
+                    withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/reset", JSONObject()) }
+                }.isSuccess
+            if (ok) {
+                msgs.clear()
+                pending.clear()
+                olderIds.clear()
+                olderCursor = null
+                hasMoreOlder = false
+                lastTopId = ""
+                msgsMarker = ""
+                ScreenStore.setMsgs(convId, emptyList())
+            }
+        }
+    }
 
     // Owner-card Message button: open (or create) the direct chat with the
     // owner. Cache-first via convIdForUser so an existing chat opens on the
@@ -603,6 +628,13 @@ fun ChatScreen(nav: NavController, convId: String) {
         } finally {
             removeListener()
             KpSocket.leaveChat(convId)
+            // Owner round 7: AI incognito mode — leaving the chat wipes the
+            // session (best-effort, off the composable's cancelled scope).
+            if (aiIncognito && convId.endsWith("_kp_ai_bot")) {
+                Thread {
+                    runCatching { Api.post("/api/conversations/$convId/reset", JSONObject()) }
+                }.start()
+            }
         }
     }
 
@@ -1294,8 +1326,8 @@ fun ChatScreen(nav: NavController, convId: String) {
             Modifier
                 .fillMaxWidth()
                 .background(Cream)
-                // Owner round 6: the blank strip under the header trimmed.
-                .padding(horizontal = 4.dp, vertical = 2.dp),
+                // Owner round 7: the blank strip under the header is gone.
+                .padding(horizontal = 4.dp, vertical = 0.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(
@@ -1384,15 +1416,84 @@ fun ChatScreen(nav: NavController, convId: String) {
                     }
                 }
             }
-            Box {
-                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Filled.MoreVert, "More", tint = Ink, modifier = Modifier.size(22.dp))
-                }
-                DropdownMenu(
-                    expanded = menuOpen,
-                    onDismissRequest = { menuOpen = false },
-                    modifier = Modifier.background(Cream),
-                ) {
+            // Owner round 7: the notifications bot carries NO options menu.
+            if (otherUserId != "kp_official_bot") {
+                Box {
+                    IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Filled.MoreVert, "More", tint = Ink, modifier = Modifier.size(22.dp))
+                    }
+                    DropdownMenu(
+                        expanded = menuOpen,
+                        onDismissRequest = { menuOpen = false },
+                        modifier = Modifier.background(Cream),
+                    ) {
+                    if (otherUserId == "kp_ai_bot") {
+                        // Owner round 7: the AI chat's own menu, exactly six
+                        // options — nothing else.
+                        DropdownMenuItem(
+                            text = { Text("Reset session", color = Ink) },
+                            leadingIcon = { Icon(Icons.Filled.Refresh, null, tint = GoldDeep) },
+                            onClick = { menuOpen = false; resetAiSession() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("New chat", color = Ink) },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.Chat, null, tint = GoldDeep) },
+                            onClick = { menuOpen = false; resetAiSession() },
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    if (c?.optBoolean("muted") == true) "Unmute notifications" else "Mute notifications",
+                                    color = Ink,
+                                )
+                            },
+                            leadingIcon = { Icon(Icons.Filled.NotificationsOff, null, tint = GoldDeep) },
+                            onClick = {
+                                menuOpen = false
+                                val snap = conv.value ?: c
+                                val next = snap?.optBoolean("muted") != true
+                                val copy = JSONObject((snap ?: JSONObject()).toString()).put("muted", next)
+                                conv.value = copy
+                                ScreenStore.setMuted(convId, next)
+                                muteInFlight = true
+                                scope.launch {
+                                    val ok =
+                                        runCatching {
+                                            withContext(Dispatchers.IO) {
+                                                Api.post("/api/conversations/$convId/mute", JSONObject().put("muted", next))
+                                            }
+                                        }.isSuccess
+                                    if (!ok) {
+                                        conv.value = JSONObject(copy.toString()).put("muted", !next)
+                                        ScreenStore.setMuted(convId, !next)
+                                    }
+                                    muteInFlight = false
+                                }
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Chat theme", color = Ink) },
+                            leadingIcon = { Icon(Icons.Filled.Palette, null, tint = GoldDeep) },
+                            onClick = { menuOpen = false; showTheme = true },
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    if (aiIncognito) "Incognito mode (on)" else "Incognito mode",
+                                    color = Ink,
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Filled.VisibilityOff, null, tint = if (aiIncognito) GoldDeep else Muted)
+                            },
+                            onClick = { menuOpen = false; aiIncognito = !aiIncognito },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Search in chat", color = Ink) },
+                            leadingIcon = { Icon(Icons.Filled.Search, null, tint = GoldDeep) },
+                            onClick = { menuOpen = false; showChatSearch = true },
+                        )
+                    } else {
                     DropdownMenuItem(
                         text = { Text("New group", color = Ink) },
                         leadingIcon = { Icon(Icons.Filled.GroupAdd, null, tint = GoldDeep) },
@@ -1451,7 +1552,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                         leadingIcon = { Icon(Icons.Filled.Palette, null, tint = GoldDeep) },
                         onClick = { menuOpen = false; showTheme = true },
                     )
+                    }
                 }
+            }
             }
         }
         }
@@ -3502,7 +3605,6 @@ private fun TypingBubble() {
 private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
     val ctx = LocalContext.current
     val ownerId = m.optJSONObject("meta")?.optString("ownerUserId").orEmpty()
-    var showPhoto by remember { mutableStateOf(false) }
     fun open(url: String) {
         runCatching {
             ctx.startActivity(
@@ -3526,6 +3628,8 @@ private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
                 .background(Brush.linearGradient(listOf(Card, Card))),
         ) {
             // ---- the photo: sent-picture size, tap to open fullscreen ----
+            // Owner round 7: the photo is display-only — tapping does
+            // nothing (the owner removed the fullscreen viewer).
             androidx.compose.foundation.Image(
                 painter = painterResource(R.drawable.owner_avatar),
                 contentDescription = "Rabbi Hossain",
@@ -3533,8 +3637,7 @@ private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
-                    .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
-                    .clickable { showPhoto = true },
+                    .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)),
             )
             Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
                 Text("MD Rabbi Hossain", fontSize = 15.5.sp, fontWeight = FontWeight.Bold, color = Ink)
@@ -3598,29 +3701,6 @@ private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
     }
 
     // ---- fullscreen photo view (tap the picture) ----
-    if (showPhoto) {
-        // Owner round 4: usePlatformDefaultWidth = false — the platform's
-        // default dialog width capped the whole thing into a small box;
-        // without it the dark backdrop truly fills the screen.
-        Dialog(
-            onDismissRequest = { showPhoto = false },
-            properties = DialogProperties(usePlatformDefaultWidth = false),
-        ) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(Color(0xEE000000))
-                    .clickable { showPhoto = false },
-                contentAlignment = Alignment.Center,
-            ) {
-                androidx.compose.foundation.Image(
-                    painter = painterResource(R.drawable.owner_avatar),
-                    contentDescription = "Rabbi Hossain",
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        }
-    }
 }
 
 @Composable
