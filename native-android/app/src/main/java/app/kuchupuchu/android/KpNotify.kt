@@ -24,6 +24,21 @@ private const val KEY_REPLY = "kp_reply_text"
  * (they replace this with full-screen ringing + accept/decline).
  */
 object KpNotify {
+    /**
+     * convId -> posted message-card ids (Owner round 4, 2026-09-04). The
+     * chat screen cancels a conversation's cards the moment its messages
+     * are actually viewed, so the notification count never lingers behind
+     * what the user has already read.
+     */
+    private val cardsByConv = mutableMapOf<String, MutableSet<Int>>()
+
+    /** Cancel every message card posted for a conversation (+ the summary). */
+    fun cancelConversation(ctx: Context, convId: String) {
+        val mgr = NotificationManagerCompat.from(ctx)
+        cardsByConv.remove(convId)?.forEach { runCatching { mgr.cancel(it) } }
+        runCatching { mgr.cancel(GROUP.hashCode()) }
+    }
+
     private const val CHAT_CHANNEL = "kp_messages_v2"
     // Muted conversations land here: badge + shade entry, but no sound and
     // no vibration (IMPORTANCE_DEFAULT). The mute toggle used to change only
@@ -256,6 +271,7 @@ object KpNotify {
             // String.hashCode() is ~55% of real ids, so again: actions that
             // "did nothing").
             val msgId = NotifyIds.messageCard(mid, convoId, System.nanoTime())
+            cardsByConv.getOrPut(convoId) { mutableSetOf() }.add(msgId)
             mgr.notify(msgId, n)
             mgr.notify(GROUP.hashCode(), summary)
         }

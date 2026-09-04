@@ -477,8 +477,9 @@ const convBetween = (db, a, b) =>
     chat.includes('w.equals("MD", true)') && chat.includes("if (botChat || isGroup) rawTitle"),
   );
   check(
-    "header name row (with badges) lowered together — no per-Text padding",
-    /Row\(\s*verticalAlignment = Alignment\.CenterVertically,\s*\/\/ Owner round 3/.test(chat),
+    "header text block sits at the avatar middle via draw-time offset (no layout space)",
+    chat.includes("Column(Modifier.weight(1f).offset(y = 6.dp))") &&
+      !/modifier = Modifier\.padding\(top = \d+\.dp\),\s*\) \{\s*Text\(\s*title/.test(chat),
   );
   check("owner card animation removed", !chat.includes("cardScale"));
   check(
@@ -498,6 +499,30 @@ const convBetween = (db, a, b) =>
   check(
     "worker: decline also enforces the 5-minute window",
     src.includes("AND status = 'PENDING' AND expires_at > ?"),
+  );
+
+  // ---- Owner round 4 (2026-09-04) ----
+  check(
+    "message stamps use the 12-hour clock (AM/PM) everywhere",
+    chat.includes('if (z.hour >= 12) "PM" else "AM"') && !chat.includes('"%02d:%02d", z.hour'),
+  );
+  check(
+    "typing bubble: one shared bouncing-dots indicator, header typing text removed",
+    chat.includes("aiTyping || typingLeaseActive") &&
+      chat.includes("TypingBubble()") &&
+      !chat.includes('typingNow -> "typing..."'),
+  );
+  check(
+    "owner photo viewer is truly fullscreen (no platform dialog width cap)",
+    chat.includes("usePlatformDefaultWidth = false"),
+  );
+  check(
+    "owner card dedupe: once per conversation per 24h / 100 messages",
+    src.includes("- 100") && src.includes("24 * 3600_000"),
+  );
+  check(
+    "viewing messages cancels their OS notification cards instantly",
+    chat.includes("KpNotify.cancelConversation(ctx, convId)"),
   );
   check("the retired Banglish-spelling rule is gone", !src.includes("kemon achen"));
 }
