@@ -869,7 +869,7 @@ const convBetween = (db, a, b) =>
   );
   check(
     "keyboard opening jumps the list to the newest message",
-    chat.includes("WindowInsets.ime.getBottom"),
+    chat.includes("WindowInsets.ime") && chat.includes("kpIme.getBottom(kpDensity)"),
   );
   check(
     "swipe a bubble right to quote-reply",
