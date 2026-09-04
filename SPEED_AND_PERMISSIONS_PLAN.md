@@ -255,3 +255,23 @@ Suite: 32/32, 926 assertions.
 5. **KuchuPuchu notifications bot**: no 3-dot menu at all.
 6. **Owner account**: Block removed from his profile.
 Suite: 32/32, 932 assertions.
+
+## Owner round 8 — v3.9.28 / 104 (2026-09-04)
+
+1. **Google sign-in**: single native sheet launch (the auto-relaunch was the
+   1-second popup flash on Realme); hardened parser (official createFrom +
+   raw bundle keys); unusable picks fall to the web flow once. Works the
+   same on every OEM.
+2. **AI**: NEW Gemini API key set (system prompt unchanged; same key powers
+   photos when image quota exists). gemini-3.5-flash + thinkingBudget 0.
+3. **OTP TEST path** (beta, does not log in): "Test OTP (beta)" on the
+   login screen runs Firebase Phone Auth on the typed number and reports
+   exactly where it stops (console Phone disabled / SHA-1 missing / OTP
+   arrived + verified). Production switch only after the owner sees SMS.
+4. **AI menu fixed + History**: the reset route regex was dead
+   (convMatch never matched /reset — that's why nothing worked); now its own
+   route, and every wipe ARCHIVES the session into ai_sessions. "Reset
+   session" replaced by "History" (list of past sessions, read-only view).
+5. **Header**: extra 2px trimmed (offset 6→4).
+6. **Photo messages**: thin 1dp border added.
+Suite: 32/32, 942 assertions.
