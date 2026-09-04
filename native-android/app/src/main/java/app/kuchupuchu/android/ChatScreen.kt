@@ -630,7 +630,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             KpSocket.leaveChat(convId)
             // Owner round 7: AI incognito mode — leaving the chat wipes the
             // session (best-effort, off the composable's cancelled scope).
-            if (aiIncognito && otherUserId == "kp_ai_bot") {
+            if (aiIncognito && convId.endsWith("_kp_ai_bot")) {
                 Thread {
                     runCatching { Api.post("/api/conversations/$convId/reset", JSONObject()) }
                 }.start()
