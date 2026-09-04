@@ -677,8 +677,8 @@ const convBetween = (db, a, b) =>
       ).includes("Incoming ringtone"),
   );
   check(
-    "sent sound plays on server accept (any kind), not on tap",
-    chat.includes("KpSounds.sent(ctx)") && !chat.includes("KpSounds.send(ctx)"),
+    "BOTH sounds live: tap (send) + server-accept (sent) on every kind",
+    chat.includes("KpSounds.sent(ctx)") && chat.includes("KpSounds.send(ctx)"),
   );
   check(
     "in-app message sound only when off the chat screen",
@@ -704,6 +704,41 @@ const convBetween = (db, a, b) =>
       existsSync("native-android/app/src/main/java/app/kuchupuchu/android/OtpTest.kt"),
   );
   check("owner Bangla name spelled রাব্বি হোসেন in the persona", src.includes("রাব্বি হোসেন"));
+
+  // ---- Owner round 11 (2026-09-05) ----
+  check(
+    "AI: each Gemini model capped at 10s so one 503 can't starve the rest",
+    src.includes("Math.min(remaining, 10_000)") && src.includes("gemini-3.8-flash"),
+  );
+  check("user-channel conv pokes carry msg:1 for the in-app sound", src.includes("msg: 1 }"));
+  const kpapp = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/KpApp.kt",
+    "utf8",
+  );
+  check(
+    "in-app sound also wired at the socket level (FCM skip hole)",
+    kpapp.includes("KpSounds.inApp(appCtx)") && kpapp.includes('ev.optBoolean("msg")'),
+  );
+  check(
+    "Close incognito mode restores the latest session server-side",
+    chat.includes('"Close incognito mode"') &&
+      chat.includes("/api/conversations/$convId/restore-latest") &&
+      src.includes("/restore-latest"),
+  );
+  check(
+    "ringtone picker is top-level (not nested inside the edit dialog)",
+    !readFileSync(
+      "native-android/app/src/main/java/app/kuchupuchu/android/SettingsScreen.kt",
+      "utf8",
+    ).includes("if (editField != null) {\n        // Owner round 10: incoming-ringtone"),
+  );
+  check(
+    "history session bubbles capped at 300dp (no off-screen content)",
+    readFileSync(
+      "native-android/app/src/main/java/app/kuchupuchu/android/AIHistoryScreen.kt",
+      "utf8",
+    ).includes(".widthIn(max = 300.dp)"),
+  );
   check("the retired Banglish-spelling rule is gone", !src.includes("kemon achen"));
 }
 

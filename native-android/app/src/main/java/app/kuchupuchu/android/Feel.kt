@@ -52,6 +52,7 @@ object SoundPrefs {
 
 object KpSounds {
     private var pool: SoundPool? = null
+    private var tapSendId = 0
     private var sentId = 0
     private var inAppId = 0
     private var receiveId = 0
@@ -69,9 +70,19 @@ object KpSounds {
         // message of ANY kind actually reaches the server; "in app massage"
         // plays when a message arrives while the user is inside the app but
         // NOT on that chat screen.
+        tapSendId = pool!!.load(ctx, R.raw.kp_send, 1)
         sentId = pool!!.load(ctx, R.raw.kp_sent, 1)
         inAppId = pool!!.load(ctx, R.raw.kp_inapp_msg, 1)
         receiveId = pool!!.load(ctx, R.raw.kp_receive, 1)
+    }
+
+    /** The tap/send sound (owner round 11: BOTH sounds live — this on the
+     *  tap, [sent] when the server actually accepts the message). */
+    fun send(ctx: Context) {
+        runCatching {
+            ensure(ctx)
+            pool?.play(tapSendId, 0.6f, 0.6f, 1, 0, 1f)
+        }
     }
 
     /** A message the server accepted — any kind (text, photo, file, voice). */

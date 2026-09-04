@@ -622,7 +622,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
         replyFocused = false
         // The keyboard MUST fold after send — focus release alone left it up.
         focusManager.clearFocus()
-        runCatching { KpSounds.sent(ctx) }
+        runCatching { KpSounds.send(ctx) }
         scope.launch {
             try {
                 val conv = withContext(Dispatchers.IO) {

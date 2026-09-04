@@ -310,3 +310,26 @@ Suite: 32/32, 944 assertions.
 5. **HANDOFF.md** written at the workspace root (credentials, architecture,
    workflow, links, pitfalls).
 Suite: 32/32, 951 assertions.
+
+## Owner round 11 — v3.9.31 / 107 (2026-09-05)
+
+1. **Ringtone picker fixed** — the dialog was accidentally nested inside the
+   edit-dialog block (click did nothing; edit popups showed it underneath).
+   Now top-level: click opens instantly, previews, persists.
+2. **AI canned reply (round 2)** — one 503ing model sat on the whole 25s
+   budget so healthy models were never tried. Per-model timeout now 10s and
+   the list widened (3.5 / 3.8 / 3.7 / flash-latest / flash-lite-latest).
+3. **Both send sounds live** — tap sound (kp_send) restored on every send
+   entry (text/photo/file/voice/status) AND the owner's "massage sent"
+   plays on each POST success directly (deterministic, all kinds).
+4. **In-app message sound fixed** — root cause: the worker SKIPS the FCM
+   push while the user socket is alive, so the push-driven sound never
+   fired for online users. user-channel conv pokes now carry msg:1 and a
+   process-level listener in KpApp plays the sound (off-chat, unmuted).
+5. **History session bubbles capped at 300dp** — content can no longer run
+   off-screen.
+6. **Incognito toggle proper** — turning ON archives + starts clean
+   immediately; the menu item flips to "Close incognito mode", and closing
+   archives the incognito run and RESTORES the previous session into the
+   chat via the new /restore-latest endpoint.
+Suite: 32/32, 957 assertions.

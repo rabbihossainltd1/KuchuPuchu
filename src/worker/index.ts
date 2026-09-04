@@ -495,7 +495,9 @@ async function sendApprovalMessage(
     broadcastRoomEvent(env, convId, { type: "message", conversationId: convId, message }),
   );
   ctx.waitUntil(
-    broadcastRoomEvent(env, `user:${userId}`, { type: "conv", conversationId: convId }),
+    // msg:1 — the app's process-level listener plays the in-app message
+    // sound on this flag (FCM is skipped while the socket is live).
+    broadcastRoomEvent(env, `user:${userId}`, { type: "conv", conversationId: convId, msg: 1 }),
   );
   ctx.waitUntil(
     pushToUser(
@@ -636,6 +638,8 @@ const AI_WELCOME_FALLBACK =
 // answer, not to thinking.
 const GEMINI_WELCOME_MODELS = [
   "gemini-3.5-flash",
+  "gemini-3.8-flash",
+  "gemini-3.7-flash",
   "gemini-flash-latest",
   "gemini-flash-lite-latest",
 ] as const;
@@ -660,7 +664,10 @@ async function geminiComplete(
     if (remaining < 4_000) break; // no point starting a call that can't finish
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), remaining);
+      // Owner round 11 (2026-09-05): a 503ing model used to sit on the
+      // ENTIRE budget, so the later (healthy) models were never tried and
+      // the user got the canned fallback. Each model now gets at most 10s.
+      const timer = setTimeout(() => ctrl.abort(), Math.min(remaining, 10_000));
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
         {
@@ -772,7 +779,7 @@ async function sendAiWelcome(
       }),
     );
     ctx.waitUntil(
-      broadcastRoomEvent(env, `user:${userId}`, { type: "conv", conversationId: convId }),
+      broadcastRoomEvent(env, `user:${userId}`, { type: "conv", conversationId: convId, msg: 1 }),
     );
     ctx.waitUntil(
       pushToUser(
@@ -1067,7 +1074,11 @@ async function sendAiReply(
             }),
           );
           ctx.waitUntil(
-            broadcastRoomEvent(env, `user:${userId}`, { type: "conv", conversationId: convId }),
+            broadcastRoomEvent(env, `user:${userId}`, {
+              type: "conv",
+              conversationId: convId,
+              msg: 1,
+            }),
           );
           ctx.waitUntil(
             pushToUser(
@@ -1137,7 +1148,7 @@ async function sendAiReply(
       }),
     );
     ctx.waitUntil(
-      broadcastRoomEvent(env, `user:${userId}`, { type: "conv", conversationId: convId }),
+      broadcastRoomEvent(env, `user:${userId}`, { type: "conv", conversationId: convId, msg: 1 }),
     );
     ctx.waitUntil(
       pushToUser(
@@ -4458,6 +4469,100 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       convId,
     );
     return json({ ok: true });
+  }
+
+  // Owner round 11 (2026-09-05): "Close incognito mode" — archive whatever
+  // the incognito run produced, then move the most recent PREVIOUS session
+  // back into the live conversation (the user lands where they were).
+  const convRestoreMatch = path.match(/^\/api\/conversations\/([^/]+)\/restore-latest$/);
+  if (convRestoreMatch && method === "POST") {
+    const convId = convRestoreMatch[1]!;
+    const { conv } = await requireMember(db, convId, uid);
+    const other =
+      conv.kind === "GROUP"
+        ? null
+        : await one<{ id: string }>(
+            db,
+            `SELECT id FROM users WHERE id =
+               (SELECT user_id FROM members WHERE conv_id = ? AND user_id != ? LIMIT 1)`,
+            convId,
+            uid,
+          );
+    if (!other || (other.id !== AI_BOT_ID && other.id !== OFFICIAL_BOT_ID))
+      fail(403, "Only bot chats can be restored.");
+    // 1. Archive the incognito run (if it produced anything).
+    const cur = await one<{ n: number }>(
+      db,
+      "SELECT COUNT(*) AS n FROM messages WHERE conv_id = ?",
+      convId,
+    );
+    const archiveId = id();
+    if ((cur?.n ?? 0) > 0) {
+      await run(
+        db,
+        `INSERT INTO ai_sessions (id, user_id, conv_id, created_at, ended_at, msg_count)
+         SELECT ?, ?, ?, COALESCE(MIN(created_at), ?), ?, COUNT(*)
+           FROM messages WHERE conv_id = ?`,
+        archiveId,
+        uid,
+        convId,
+        nowIso(),
+        nowIso(),
+        convId,
+      );
+      await run(
+        db,
+        `INSERT INTO ai_session_msgs (session_id, seq, sender_id, kind, body, created_at)
+         SELECT ?, ROW_NUMBER() OVER (ORDER BY rowid), sender_id, kind, body, created_at
+           FROM messages WHERE conv_id = ?`,
+        archiveId,
+        convId,
+      );
+      await run(db, "DELETE FROM messages WHERE conv_id = ?", convId);
+    }
+    // 2. The newest session that is NOT the archive we just made.
+    const prev = await one<{ id: string }>(
+      db,
+      "SELECT id FROM ai_sessions WHERE user_id = ? AND conv_id = ? AND id != ? ORDER BY ended_at DESC LIMIT 1",
+      uid,
+      convId,
+      archiveId,
+    );
+    let restored = 0;
+    if (prev) {
+      const rows = await all<{
+        sender_id: string;
+        kind: string;
+        body: string | null;
+        created_at: string;
+      }>(
+        db,
+        "SELECT sender_id, kind, body, created_at FROM ai_session_msgs WHERE session_id = ? ORDER BY seq",
+        prev.id,
+      );
+      for (const m of rows) {
+        await run(
+          db,
+          `INSERT INTO messages (id, conv_id, sender_id, kind, body, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          id(),
+          convId,
+          m.sender_id,
+          m.kind,
+          m.body,
+          m.created_at,
+        );
+        restored++;
+      }
+      await run(db, "DELETE FROM ai_session_msgs WHERE session_id = ?", prev.id);
+      await run(db, "DELETE FROM ai_sessions WHERE id = ?", prev.id);
+    }
+    await run(
+      db,
+      `UPDATE conversations SET last_message = NULL, last_message_at = NULL WHERE id = ?`,
+      convId,
+    );
+    return json({ ok: true, restored });
   }
 
   // Owner round 8 (2026-09-04): AI session History — the archived sessions

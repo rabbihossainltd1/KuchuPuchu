@@ -400,16 +400,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                 ScreenStore.setMsgs(convId, carried + fresh)
                 paintFromStore()
                 if (pending.isNotEmpty()) {
-                    // Owner round 10: the moment the server row for one of our
-                    // pending bubbles appears, THAT message is truly sent —
-                    // text, photo, file or voice all pass through here, and
-                    // the owner's "massage sent" sound plays exactly once.
-                    val accepted =
-                        pending.count { p ->
-                            val cid = p.optString("clientId").ifBlank { "" }
-                            cid.isNotBlank() && fresh.any { it.optString("clientId") == cid }
-                        }
-                    if (accepted > 0) runCatching { KpSounds.sent(ctx) }
                     pending.removeAll { p ->
                         val cid = p.optString("clientId").ifBlank { "" }
                         cid.isNotBlank() && fresh.any { it.optString("clientId") == cid }
@@ -726,10 +716,14 @@ fun ChatScreen(nav: NavController, convId: String) {
         scope.launch {
             val total = msgs.size + pending.size
             if (total > 0) listState.animateScrollToItem(total - 1)
+            // Owner round 11: tap sound on the send itself…
+            runCatching { KpSounds.send(ctx) }
             try {
                 withContext(Dispatchers.IO) {
                     Api.post("/api/conversations/$convId/messages", payload)
                 }
+                // …and the owner's "sent" sound when the server accepted it.
+                runCatching { KpSounds.sent(ctx) }
                 refreshMessages(forceScroll = true)
             } catch (e: Exception) {
                 Outbox.add(convId, clientId, payload)
@@ -758,6 +752,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         )
         scope.launch {
             listState.animateScrollToItem(msgs.size + pending.size - 1)
+            runCatching { KpSounds.send(ctx) }
             var shotW = 0
             var shotH = 0
             val jpeg = withContext(Dispatchers.IO) {
@@ -827,6 +822,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     if (shotW > 0 && shotH > 0) payload.put("meta", JSONObject().put("w", shotW).put("h", shotH))
                     withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
                     UploadProgress.done(clientId)
+                    runCatching { KpSounds.sent(ctx) }
                     refreshMessages(forceScroll = true)
                 } catch (e2: Exception) {
                     UploadProgress.done(clientId)
@@ -851,6 +847,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .put("createdAt", java.time.Instant.now().toString()),
         )
         scope.launch {
+            runCatching { KpSounds.send(ctx) }
             try {
                 val data = withContext(Dispatchers.IO) {
                     Api.upload(name, mime, bytes) { w, t -> UploadProgress.set(clientId, 0.9f * w / t) }
@@ -869,6 +866,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     )
                 }
                 UploadProgress.done(clientId)
+                runCatching { KpSounds.sent(ctx) }
                 refreshMessages(forceScroll = true)
             } catch (e: Exception) {
                 // Before this the optimistic bubble stayed on screen forever
@@ -903,6 +901,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         )
         scope.launch {
             listState.animateScrollToItem(msgs.size + pending.size - 1)
+            runCatching { KpSounds.send(ctx) }
             try {
                 val bytes = withContext(Dispatchers.IO) { file.readBytes() }
                 val data = withContext(Dispatchers.IO) {
@@ -920,6 +919,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         .put("meta", JSONObject().put("voice", true).put("seconds", seconds).put("clientId", clientId))
                 withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
                 UploadProgress.done(clientId)
+                runCatching { KpSounds.sent(ctx) }
                 file.delete()
                 refreshMessages(forceScroll = false)
             } catch (e: Exception) {
@@ -1484,14 +1484,43 @@ fun ChatScreen(nav: NavController, convId: String) {
                         DropdownMenuItem(
                             text = {
                                 Text(
-                                    if (aiIncognito) "Incognito mode (on)" else "Incognito mode",
+                                    if (aiIncognito) "Close incognito mode" else "Incognito mode",
                                     color = Ink,
                                 )
                             },
                             leadingIcon = {
                                 Icon(Icons.Filled.VisibilityOff, null, tint = if (aiIncognito) GoldDeep else Muted)
                             },
-                            onClick = { menuOpen = false; aiIncognito = !aiIncognito },
+                            onClick = {
+                                menuOpen = false
+                                if (aiIncognito) {
+                                    // Close: the incognito run is archived and
+                                    // the previous session comes BACK into the
+                                    // chat (owner round 11).
+                                    aiIncognito = false
+                                    scope.launch {
+                                        runCatching {
+                                            withContext(Dispatchers.IO) {
+                                                Api.post("/api/conversations/$convId/restore-latest", JSONObject())
+                                            }
+                                        }
+                                        msgs.clear()
+                                        pending.clear()
+                                        olderIds.clear()
+                                        olderCursor = null
+                                        hasMoreOlder = false
+                                        lastTopId = ""
+                                        msgsMarker = ""
+                                        ScreenStore.setMsgs(convId, emptyList())
+                                        refreshMessages(forceNetwork = true, forceScroll = true)
+                                    }
+                                } else {
+                                    // Open: archive the current session NOW and
+                                    // start clean — nothing further is kept.
+                                    aiIncognito = true
+                                    resetAiSession()
+                                }
+                            },
                         )
                         DropdownMenuItem(
                             text = { Text("Search in chat", color = Ink) },
