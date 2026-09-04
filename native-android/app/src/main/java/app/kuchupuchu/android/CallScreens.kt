@@ -59,6 +59,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.scale
@@ -271,6 +272,10 @@ fun VoiceCallScreen(call: CallUi) {
     val connected = call.status == "ACTIVE" || engine.hasRemote
 
     DarkCallScaffold {
+        // Owner round 12 (2026-09-05): the other person's photo, fullscreen
+        // and heavily blurred, replaces the flat black background (with a
+        // 40% dark scrim so the white text stays readable).
+        BlurredAvatarBackdrop(call.otherAvatar.ifBlank { null })
         Column(
             Modifier
                 .fillMaxSize()
@@ -280,14 +285,14 @@ fun VoiceCallScreen(call: CallUi) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Spacer(Modifier.weight(0.62f))
-            PulseRing {
-                KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 116.dp, ring = false)
-            }
+            // Owner round 12: zoom/pulse effect removed — a calm static avatar.
+            KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 116.dp, ring = false)
             Spacer(Modifier.height(28.dp))
             Text(call.otherName, color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
             Text(
                 when {
+                    call.status == "BUSY" -> "Line busy — on another call"
                     engine.onHold -> "On hold"
                     call.status == "ACTIVE" && (call.connecting || call.startedAt <= 0L) -> "Connecting…"
                     connected -> clockText(secs)
@@ -437,6 +442,7 @@ fun OutgoingVideoScreen(call: CallUi) {
             Spacer(Modifier.height(6.dp))
             Text(
                 when {
+                    call.status == "BUSY" -> "Line busy — on another call"
                     call.connecting -> "Connecting…"
                     call.otherOnline -> "Ringing…"
                     else -> "Calling…"
@@ -687,6 +693,19 @@ private fun DarkCallScaffold(content: @Composable () -> Unit) {
     Box(Modifier.fillMaxSize().background(Dark)) {
         content()
     }
+}
+
+/**
+ * Owner round 12 (2026-09-05): fullscreen, blurred profile picture behind the
+ * voice-call UI — 40% dark scrim on top keeps the controls readable. Falls
+ * back to the plain dark background when there is no photo. (Modifier.blur
+ * needs API 31+; older devices just get the dimmed photo.)
+ */
+@Composable
+private fun BlurredAvatarBackdrop(avatarUrl: String?) {
+    if (avatarUrl.isNullOrBlank()) return
+    KpNetImage(avatarUrl, "Caller photo", Modifier.fillMaxSize().blur(28.dp))
+    Box(Modifier.fillMaxSize().background(Color(0x66000000)))
 }
 
 @Composable

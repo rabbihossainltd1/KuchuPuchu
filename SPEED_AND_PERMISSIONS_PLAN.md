@@ -342,3 +342,27 @@ Suite: 32/32, 957 assertions.
    survives reboots) — the incoming call plays it; Settings row shows
    "Custom · <name>".
 Suite: 32/32, 959 assertions.
+
+## Owner round 12 — v3.9.33 / 109 (2026-09-05)
+
+1. **AI message no longer dies mid-way** — the reply budget was 400 output
+   tokens, and Bengali script burns roughly twice the tokens of English per
+   character, so longer replies were being cut in half and could look
+   "stuck". Budget raised to 900 tokens.
+2. **Mobile-data calls connect** — carrier NAT blocks plain UDP; two public
+   TURN relays over TCP were added AHEAD of the openrelay set:
+   turn.nextcloud.com:443 (tcp + udp) and standard.relay.metered.ca:80.
+   WiFi behaviour unchanged (STUN still first).
+3. **"Line busy" instead of endless ringing** — POST /api/calls now fails
+   with 486 LINE_BUSY when the callee is already RINGING/ACTIVE with a third
+   user (a redial between the same pair is never blocked, so an orphaned
+   call can't freeze a chat). The calling screen shows "Line busy — on
+   another call" for ~2s before closing.
+4. **Timestamp + ticks pinned** — text bubbles reserve a small bottom band
+   and the time + double-tick overlay sits at its bottom-END corner: never
+   wraps to its own line, never drifts left, never overlaps the text.
+5. **Voice call redesign** — the flat black background is replaced by the
+   OTHER user's profile photo, fullscreen and blurred (40% scrim for
+   readability; falls back to dark when no photo); the avatar zoom/pulse
+   effect is removed (calm static avatar).
+Suite: 32/32, 965 assertions.

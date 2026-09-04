@@ -1103,7 +1103,7 @@ async function sendAiReply(
       }
     }
 
-    const body = (await geminiComplete(env, prompt, 400)) ?? AI_REPLY_FALLBACK;
+    const body = (await geminiComplete(env, prompt, 900)) ?? AI_REPLY_FALLBACK;
     const botId = await ensureAiBot(db);
     const mid = id();
     const created = nowIso();
@@ -5581,6 +5581,27 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (other === OFFICIAL_BOT_ID || other === AI_BOT_ID)
       fail(403, "This account can't be called.", "BOT_ACCOUNT");
     if (await blockedBetween(db, uid, other)) fail(403, "You can't call this user.", "BLOCKED");
+    // Owner round 12 (2026-09-05): the callee is already on another call →
+    // the caller sees "Line busy" instantly instead of endless ringing.
+    // NOTE the pair-exclusion: an orphaned ACTIVE call between THESE two
+    // users (crash, dead battery) must not block a redial — a fresh call
+    // between the same pair supersedes it. Only a call with a THIRD user
+    // counts as "busy".
+    const calleeBusy = await one<{ id: string }>(
+      db,
+      `SELECT id FROM calls
+        WHERE (callee_id = ? OR caller_id = ?) AND status IN ('RINGING', 'ACTIVE')
+          AND NOT (caller_id IN (?, ?) AND callee_id IN (?, ?))
+          AND julianday(created_at) > julianday('now', '-2 hours')
+        LIMIT 1`,
+      other,
+      other,
+      uid,
+      other,
+      uid,
+      other,
+    );
+    if (calleeBusy) fail(486, "Line busy — on another call right now.", "LINE_BUSY");
     const convId = pairId(uid, other);
     if (!(await one(db, "SELECT id FROM conversations WHERE id = ?", convId))) {
       const createdConv = nowIso();

@@ -38,8 +38,6 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.text.InlineTextContent
-import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -118,12 +116,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.Placeholder
-import androidx.compose.ui.text.PlaceholderVerticalAlign
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -2812,14 +2805,13 @@ private fun MessageRow(
                             }
                         },
                     )
-                    .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = 3.dp),
+                    // Owner round 12: every bubble here keeps a small bottom
+                    // band for the timestamp + ticks overlay — it can never
+                    // wrap to its own line and never overlaps the content
+                    // (photos never reach this Box; they draw their own).
+                    .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = 15.dp),
             ) {
                 val senderName = m.optText("senderName")
-                // Owner round 3 (2026-09-04): the timestamp no longer
-                // overlays the text — it sits UNDER it, right-aligned. No
-                // more reserved strip on the wrap: single-line messages
-                // never get climbed over and long bodies use the full
-                // width of the widened bubble.
                 Column {
                     if (!mine && isGroup && senderName.isNotBlank()) {
                         Text(senderName, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = GoldDeep)
@@ -2849,62 +2841,28 @@ private fun MessageRow(
                                     color = Ink,
                                 )
                             } else {
-                                // Owner round 6: the stamp rides INLINE at the
-                                // end of the text — a single-line message is a
-                                // true single-line bubble (no extra line), and
-                                // an in-flow stamp can never overlap anything.
-                                val stamp = msgStamp(m.optString("createdAt"))
-                                val stampColor = if (mine) Color(0xD9FFFFFF) else Muted
-                                val line =
-                                    remember(full, stamp, mine) {
-                                        buildAnnotatedString {
-                                            append(full)
-                                            if (stamp.isNotBlank()) {
-                                                append("  ")
-                                                withStyle(SpanStyle(fontSize = 10.sp, color = stampColor)) {
-                                                    append(stamp)
-                                                }
-                                                if (mine) appendInlineContent("tick", " ")
-                                            }
-                                        }
-                                    }
-                                Text(
-                                    line,
-                                    fontSize = 14.5.sp,
-                                    lineHeight = 19.sp,
-                                    color = Ink,
-                                    inlineContent =
-                                        if (mine)
-                                            mapOf(
-                                                "tick" to
-                                                    InlineTextContent(
-                                                        Placeholder(13.sp, 13.sp, PlaceholderVerticalAlign.Bottom),
-                                                    ) {
-                                                        TickIcon(m, pendingEcho, otherReadAt)
-                                                    },
-                                            )
-                                        else emptyMap(),
-                                )
+                                Text(full, fontSize = 14.5.sp, lineHeight = 19.sp, color = Ink)
                             }
                         }
                     }
-                    // Non-text bubbles (sticker / file / deleted) keep the
-                    // stamp on its own small line under the content.
-                    if (kind != "TEXT") {
-                        Row(
-                            Modifier.align(Alignment.End).padding(top = 1.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                msgStamp(m.optString("createdAt")),
-                                fontSize = 10.sp,
-                                color = if (mine) Color(0xD9FFFFFF) else Muted,
-                            )
-                            if (mine) {
-                                Spacer(Modifier.width(3.dp))
-                                TickIcon(m, pendingEcho, otherReadAt)
-                            }
-                        }
+                }
+                // Owner round 12: one pinned stamp row for every bubble,
+                // directly in the Box scope — it sits in the reserved bottom
+                // band (TEXT) or over the bottom edge (photos keep their
+                // scrim), always at the bottom-END corner, never on its own
+                // text line.
+                Row(
+                    Modifier.align(Alignment.BottomEnd).padding(end = 2.dp, bottom = 1.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        msgStamp(m.optString("createdAt")),
+                        fontSize = 10.sp,
+                        color = if (mine) Color(0xD9FFFFFF) else Muted,
+                    )
+                    if (mine) {
+                        Spacer(Modifier.width(3.dp))
+                        TickIcon(m, pendingEcho, otherReadAt)
                     }
                 }
             }
