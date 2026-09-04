@@ -127,6 +127,11 @@ check(
   "",
 );
 check(
+  "Google sign-in is LOCKED (owner-verified 2026-09-04) — marker present",
+  ga.includes("LOCKED BY OWNER"),
+  "",
+);
+check(
   "blank-token/unusable native pick falls to the web flow, never a second sheet",
   idTokenBody.indexOf("return token") <
     idTokenBody.indexOf("GetSignInWithGoogleOption.Builder(clientId).build()"),

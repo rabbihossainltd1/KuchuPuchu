@@ -804,8 +804,14 @@ const AI_REPLY_FALLBACK =
 // Owner-identity questions in the AI chat: after the text answer, the app
 // also renders a tappable profile card (kind "OWNER_CARD") with the owner's
 // real social/email/website links — see OwnerCardBubble on the Android side.
+// Owner round 9 (2026-09-04): Bangla questions were missing the card —
+// the old pattern only knew "কে বানা" while real questions use the full
+// verb family (বানিয়েছে / বানালো / তৈরি করেছে / চালায়), and the owner's
+// name in Bengali script (রবি হোসাইন) wasn't listed at all. Asking the AI
+// for the owner's PHOTO ("tomar photo dao" / "তোমার ছবি দাও") now drops the
+// card too — the card carries his photo.
 const OWNER_INTENT =
-  /\b(owner|developer|founder|creator|malik)\b|rabbi\s*hossain|rabbihossainltd|ke\s*banai|ke\s*banlo|ke\s*banao|মালিক|ডেভেলপার|প্রতিষ্ঠাতা|স্রষ্টা|ওনার|কে\s*বানা/i;
+  /\b(owner|developer|founder|creator|malik|banai|banaiyecho|banaiyeche|banalo|banl|banaben|banao|toiri|tairi)\b|rabbi\s*hossain|rabbihossainltd|মালিক|ম্যালিক|ডেভেলপার|প্রতিষ্ঠাতা|স্রষ্টা|ওনার|রবি\s*হোসাইন|বানা|বানি|তৈরি\s*করে|চালা|(তুমি|তোমার|আপনি|আপনার|tumi|tomar|apni|apnar|tui|tor)[^।.!?]{0,24}(ছবি|প্রোফাইল|photo|pic|picture|avatar)|(owner|malik|rabbi|hossain|মালিক|রবি)[^।.!?]{0,24}(ছবি|photo|pic|picture|avatar)/i;
 
 // "make me a photo of…" style requests → the image generation flow. Both a
 // creation verb AND a picture noun must appear, so ordinary chat about photos

@@ -82,12 +82,18 @@ object OtpTest {
 
     private fun friendly(e: Exception): String {
         val code = (e as? FirebaseAuthException)?.errorCode ?: e.javaClass.simpleName
+        val project = runCatching { FirebaseApp.getInstance().options.projectId }.getOrNull() ?: "?"
         return when {
             code.contains("OPERATION_NOT_ALLOWED") ->
-                "Phone sign-in is disabled in the Firebase console (Authentication → Sign-in method → Phone)."
+                "Firebase says phone sign-in is off for project \"$project\" — even when Phone IS enabled in " +
+                    "Authentication → Sign-in method. The usual remaining blocker: Firebase now requires the " +
+                    "BLAZE (pay-as-you-go) plan for Phone Auth SMS. Check Firebase console → Usage and billing " +
+                    "for \"$project\" (upgrade to Blaze — Google includes a free monthly SMS allowance; a card " +
+                    "is needed to upgrade)."
             code.contains("17028") || code.contains("app-not-authorized", true) || code.contains("INVALID_APP_CREDENTIAL") ->
-                "The app's signing key (SHA-1) is missing in Firebase console → Project settings."
-            else -> "[$code] ${e.message ?: ""}"
+                "The app's signing key (SHA-1/SHA-256) is missing in Firebase console → Project settings → " +
+                    "Your apps (project \"$project\", package app.kuchupuchu.android)."
+            else -> "[$code · $project] ${e.message ?: ""}"
         }
     }
 }
