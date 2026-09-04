@@ -122,8 +122,14 @@ check(
   "",
 );
 check(
-  "a blank-token credential relaunches the sheet instead of dead-ending",
-  idTokenBody.split("attempt(nativeOption())").length >= 3, // 2 call sites + the definition
+  "exactly ONE native sheet launch — a relaunch was the 1-second popup flash",
+  idTokenBody.split("attempt(nativeOption())").length === 2, // 1 call site + the definition
+  "",
+);
+check(
+  "blank-token/unusable native pick falls to the web flow, never a second sheet",
+  idTokenBody.indexOf("return token") <
+    idTokenBody.indexOf("GetSignInWithGoogleOption.Builder(clientId).build()"),
   "",
 );
 lacks(ga, "Google returned no ID token", "the cryptic dead-end error is gone");

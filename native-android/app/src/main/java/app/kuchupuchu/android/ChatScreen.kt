@@ -77,7 +77,6 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.GroupAdd
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PermMedia
@@ -237,8 +236,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     var editing by remember { mutableStateOf<JSONObject?>(null) }
     var forwarding by remember { mutableStateOf(false) }
 
-    // Owner round 7: AI "Reset session" / "New chat" — wipes this bot
-    // conversation server-side and locally, giving the AI a fresh context.
+    // Owner round 7/8: the AI menu's "New chat" (and Incognito on leave) —
+    // archives + wipes this bot conversation server-side and locally, giving
+    // the AI a fresh context.
     fun resetAiSession() {
         scope.launch {
             val ok =
@@ -1359,7 +1359,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             // middle. A draw-time offset (not padding!) moves the text block
             // down WITHOUT growing the header — so the last-seen line lands
             // right under the name and NO extra space appears at the bottom.
-            Column(Modifier.weight(1f).offset(y = 6.dp)) {
+            Column(Modifier.weight(1f).offset(y = 4.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         title,
@@ -1431,9 +1431,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                         // Owner round 7: the AI chat's own menu, exactly six
                         // options — nothing else.
                         DropdownMenuItem(
-                            text = { Text("Reset session", color = Ink) },
-                            leadingIcon = { Icon(Icons.Filled.Refresh, null, tint = GoldDeep) },
-                            onClick = { menuOpen = false; resetAiSession() },
+                            text = { Text("History", color = Ink) },
+                            leadingIcon = { Icon(Icons.Filled.Schedule, null, tint = GoldDeep) },
+                            onClick = { menuOpen = false; nav.navigate("aihistory") },
                         )
                         DropdownMenuItem(
                             text = { Text("New chat", color = Ink) },
@@ -2909,6 +2909,9 @@ private fun ImageMessageRow(
             Modifier
                 .widthIn(max = 225.dp)
                 .clip(RoundedCornerShape(12.dp))
+                // Owner round 8: photos get a thin border so they read as
+                // framed content on the cream wallpaper.
+                .border(1.dp, Color(0x2E000000), RoundedCornerShape(12.dp))
                 .combinedClickable(
                     onClick = {
                         if (pendingEcho) return@combinedClickable

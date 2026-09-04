@@ -478,7 +478,7 @@ const convBetween = (db, a, b) =>
   );
   check(
     "header text block sits at the avatar middle via draw-time offset (no layout space)",
-    chat.includes("Column(Modifier.weight(1f).offset(y = 6.dp))") &&
+    /Column\(Modifier\.weight\(1f\)\.offset\(y = \d+\.dp\)\)/.test(chat) &&
       !/modifier = Modifier\.padding\(top = \d+\.dp\),\s*\) \{\s*Text\(\s*title/.test(chat),
   );
   check("owner card animation removed", !chat.includes("cardScale"));
@@ -569,14 +569,14 @@ const convBetween = (db, a, b) =>
   );
   check(
     "bot-conversation reset endpoint exists (bot chats only)",
-    src.includes('endsWith("/reset")') && src.includes("Only bot chats can be reset"),
+    src.includes("convResetMatch = path.match") && src.includes("Only bot chats can be reset"),
   );
   check(
     "AI chat menu: exactly the six owner options",
-    chat.includes('"Reset session"') &&
-      chat.includes('"New chat"') &&
+    chat.includes('"New chat"') &&
       chat.includes('"Incognito mode"') &&
       chat.includes('"Search in chat"') &&
+      chat.includes('"History"') &&
       chat.includes('otherUserId == "kp_ai_bot"'),
   );
   check(
@@ -594,6 +594,54 @@ const convBetween = (db, a, b) =>
     "owner card photo is display-only (no viewer, no click)",
     !chat.includes("clickable { showPhoto = true }"),
   );
+
+  // ---- Owner round 8 (2026-09-04) ----
+  check(
+    "reset route has its own regex (convMatch never matched /reset)",
+    src.includes("convResetMatch = path.match") &&
+      !src.includes('convMatch && method === "POST" && url.pathname.endsWith("/reset")'),
+  );
+  check(
+    "AI resets archive to ai_sessions for History",
+    src.includes("INSERT INTO ai_sessions") && src.includes("/api/ai/sessions"),
+  );
+  const hist = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/AIHistoryScreen.kt",
+    "utf8",
+  );
+  check(
+    "AI History screen exists + routed",
+    hist.includes("AIHistoryScreen") && chat.includes('nav.navigate("aihistory")'),
+  );
+  check(
+    "AI menu: Reset session replaced by History",
+    !chat.includes('"Reset session"') && chat.includes('"History"'),
+  );
+  check(
+    "Google sign-in: single sheet launch (no relaunch flash)",
+    gauth.split("attempt(nativeOption())").length === 2,
+  );
+  check(
+    "Google parser also reads raw bundle token keys",
+    gauth.includes('"idToken"') && gauth.includes("googleIdToken"),
+  );
+  check(
+    "OTP test path present (Firebase Phone Auth, test-only)",
+    existsSync("native-android/app/src/main/java/app/kuchupuchu/android/OtpTest.kt") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/OtpTest.kt",
+        "utf8",
+      ).includes("PhoneAuthProvider.verifyPhoneNumber") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/LoginScreen.kt",
+        "utf8",
+      ).includes("Test OTP (beta)"),
+  );
+  check(
+    "photo bubbles have a 1dp border",
+    chat.includes(".border(1.dp, Color(0x2E000000), RoundedCornerShape(12.dp))"),
+  );
+  check("header block trimmed 2px more (offset 6->4)", chat.includes("offset(y = 4.dp)"));
   check("the retired Banglish-spelling rule is gone", !src.includes("kemon achen"));
 }
 

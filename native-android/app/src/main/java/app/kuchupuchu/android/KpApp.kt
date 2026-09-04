@@ -81,6 +81,7 @@ fun KpApp() {
                 composable("profile/{id}") { entry ->
                     ProfileScreen(nav, entry.arguments?.getString("id") ?: "")
                 }
+                composable("aihistory") { AIHistoryScreen(nav) }
                 composable("chatmedia/{id}") { entry ->
                     ChatMediaScreen(nav, entry.arguments?.getString("id") ?: "")
                 }

@@ -1456,6 +1456,16 @@ async function ensureSchema(db: D1Database) {
       created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, revoked_at TEXT,
       UNIQUE (user_id, device_id)
     )`,
+    `CREATE TABLE IF NOT EXISTS ai_sessions (
+       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, conv_id TEXT NOT NULL,
+       created_at TEXT NOT NULL, ended_at TEXT NOT NULL, msg_count INTEGER NOT NULL DEFAULT 0
+     )`,
+    `CREATE TABLE IF NOT EXISTS ai_session_msgs (
+       session_id TEXT NOT NULL, seq INTEGER NOT NULL, sender_id TEXT NOT NULL,
+       kind TEXT NOT NULL, body TEXT, created_at TEXT NOT NULL
+     )`,
+    `CREATE INDEX IF NOT EXISTS idx_ai_sessions_user ON ai_sessions(user_id, ended_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_ai_session_msgs ON ai_session_msgs(session_id, seq)`,
     `CREATE TABLE IF NOT EXISTS login_requests (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, new_device_id TEXT NOT NULL,
       new_device_name TEXT, status TEXT NOT NULL DEFAULT 'PENDING',
@@ -4391,12 +4401,15 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     return json({ ok: true });
   }
 
-  // Owner round 7 (2026-09-04): AI-chat "Reset session" / "New chat" — wipes
-  // the conversation's message history so the bot starts a fresh context.
-  // Only allowed for bot conversations (a normal chat must not be erasable
-  // from one side).
-  if (convMatch && method === "POST" && url.pathname.endsWith("/reset")) {
-    const convId = convMatch[1]!;
+  // Owner round 7 (2026-09-04, fixed round 8): AI-chat "New chat" /
+  // "Incognito" — archives the current session (so History can show it) and
+  // clears the conversation so the bot starts fresh. NOTE: this route needs
+  // its OWN regex — `convMatch` is anchored with `$` to the conversation id
+  // and never matched ".../reset", which is why the first version 404'd and
+  // the menu items did nothing.
+  const convResetMatch = path.match(/^\/api\/conversations\/([^/]+)\/reset$/);
+  if (convResetMatch && method === "POST") {
+    const convId = convResetMatch[1]!;
     const { conv } = await requireMember(db, convId, uid);
     const other =
       conv.kind === "GROUP"
@@ -4410,6 +4423,28 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           );
     if (!other || (other.id !== AI_BOT_ID && other.id !== OFFICIAL_BOT_ID))
       fail(403, "Only bot chats can be reset.");
+    // Archive the outgoing session for the in-app History list, then clear.
+    const sessionId = id();
+    await run(
+      db,
+      `INSERT INTO ai_sessions (id, user_id, conv_id, created_at, ended_at, msg_count)
+       SELECT ?, ?, ?, COALESCE(MIN(created_at), ?), ?, COUNT(*)
+         FROM messages WHERE conv_id = ?`,
+      sessionId,
+      uid,
+      convId,
+      nowIso(),
+      nowIso(),
+      convId,
+    );
+    await run(
+      db,
+      `INSERT INTO ai_session_msgs (session_id, seq, sender_id, kind, body, created_at)
+       SELECT ?, ROW_NUMBER() OVER (ORDER BY rowid), sender_id, kind, body, created_at
+         FROM messages WHERE conv_id = ?`,
+      sessionId,
+      convId,
+    );
     await run(db, "DELETE FROM messages WHERE conv_id = ?", convId);
     await run(
       db,
@@ -4417,6 +4452,56 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       convId,
     );
     return json({ ok: true });
+  }
+
+  // Owner round 8 (2026-09-04): AI session History — the archived sessions
+  // of the signed-in user, newest first.
+  if (path === "/api/ai/sessions" && method === "GET") {
+    const rows = await all<{
+      id: string;
+      created_at: string;
+      ended_at: string;
+      msg_count: number;
+    }>(
+      db,
+      "SELECT id, created_at, ended_at, msg_count FROM ai_sessions WHERE user_id = ? ORDER BY ended_at DESC LIMIT 50",
+      uid,
+    );
+    return json({
+      sessions: rows.map((r) => ({
+        id: r.id,
+        startedAt: r.created_at,
+        endedAt: r.ended_at,
+        messages: r.msg_count,
+      })),
+    });
+  }
+  const aiSessionMatch = path.match(/^\/api\/ai\/sessions\/([^/]+)$/);
+  if (aiSessionMatch && method === "GET") {
+    const sess = await one<{ id: string; user_id: string }>(
+      db,
+      "SELECT id, user_id FROM ai_sessions WHERE id = ?",
+      aiSessionMatch[1]!,
+    );
+    if (!sess || sess.user_id !== uid) fail(404, "Session not found.");
+    const msgs = await all<{
+      sender_id: string;
+      kind: string;
+      body: string | null;
+      created_at: string;
+    }>(
+      db,
+      "SELECT sender_id, kind, body, created_at FROM ai_session_msgs WHERE session_id = ? ORDER BY seq",
+      sess.id,
+    );
+    return json({
+      messages: msgs.map((m) => ({
+        senderId: m.sender_id,
+        kind: m.kind,
+        body: m.body,
+        createdAt: m.created_at,
+      })),
+    });
   }
 
   // A/B push tester: shape A = notification payload (system-drawn card, no

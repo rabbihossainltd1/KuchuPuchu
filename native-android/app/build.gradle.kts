@@ -40,8 +40,8 @@ android {
         applicationId = "app.kuchupuchu.android"
         minSdk = 24
         targetSdk = 35
-        versionCode = 103
-        versionName = "3.9.27"
+        versionCode = 104
+        versionName = "3.9.28"
     }
     signingConfigs {
         getByName("debug") {
@@ -138,6 +138,9 @@ dependencies {
     // from the worker's /api/config/firebase — no google-services.json needed
     // in the build, so the app works fine before FCM is set up.
     implementation("com.google.firebase:firebase-messaging:24.1.0")
+    // Owner round 8 (2026-09-04): SMS OTP test path (Firebase Phone Auth) —
+    // TEST ONLY until the owner confirms OTPs actually arrive on his SIMs.
+    implementation("com.google.firebase:firebase-auth:24.1.0")
     // Phone auth: Credential Manager + Google ID token (binding & recovery).
     // No google-services.json — the web client id comes from the worker's
     // /api/config/firebase at runtime (same pattern as Firebase init above).
