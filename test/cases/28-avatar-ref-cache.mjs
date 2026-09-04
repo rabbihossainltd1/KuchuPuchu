@@ -210,9 +210,6 @@ const sites = avatarSites();
     // Own profile editor: this screen owns the value it just wrote (it PATCHes and
     // installs the response), so the cache would add a hop, not fix a staleness.
     'SettingsScreen.kt KpAvatar( me.value.optText("displayName"), me.value.optIso("avatarUrl"), 76.dp',
-    // Owner profile card (AI chat): a static name-initial avatar for a person
-    // who is not a server user row — there is no avatarRef to carry.
-    'ChatScreen.kt KpAvatar("Rabbi Hossain", null, 46.dp, ring = false)',
   ].sort();
   check(
     "no new avatar renders outside the cache, and none of the known ones silently got worse",

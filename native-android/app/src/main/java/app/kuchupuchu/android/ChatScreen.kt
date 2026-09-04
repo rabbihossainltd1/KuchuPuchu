@@ -45,6 +45,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
@@ -224,6 +225,29 @@ fun ChatScreen(nav: NavController, convId: String) {
     var viewerMsg by remember { mutableStateOf<JSONObject?>(null) }
     var editing by remember { mutableStateOf<JSONObject?>(null) }
     var forwarding by remember { mutableStateOf(false) }
+
+    // Owner-card Message button: open (or create) the direct chat with the
+    // owner. Cache-first via convIdForUser so an existing chat opens on the
+    // same frame; a first-ever chat costs one POST.
+    fun openChatWithUser(userId: String) {
+        val cached = ScreenStore.convIdForUser[userId]
+        if (cached != null) {
+            nav.navigate("chat/$cached")
+            return
+        }
+        scope.launch {
+            runCatching {
+                val conv =
+                    withContext(Dispatchers.IO) {
+                        Api.post("/api/conversations", JSONObject().put("userId", userId))
+                    }
+                conv.optJSONObject("conversation")?.optString("id")?.takeIf { it.isNotBlank() }?.let {
+                    ScreenStore.convIdForUser[userId] = it
+                    nav.navigate("chat/$it")
+                }
+            }
+        }
+    }
 
     fun paintFromStore() {
         val next = ScreenStore.msgsOf(convId).filter { it.optString("id") !in ScreenStore.hiddenMsgIds }
@@ -1286,7 +1310,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         color = Ink,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 3.dp),
+                        modifier = Modifier.padding(top = 6.dp),
                     )
                     if (verified) {
                         Spacer(Modifier.width(5.dp))
@@ -1472,6 +1496,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             },
                             onOpenImage = { msg -> viewerMsg = msg },
                             revealChars = if (m.optString("id") == aiRevealId) aiRevealChars else null,
+                            onMessageOwner = { ownerId -> openChatWithUser(ownerId) },
                         )
                     }
                 }
@@ -2509,6 +2534,7 @@ private fun MessageRow(
     onToggleSelect: (JSONObject) -> Unit = {},
     onOpenImage: (JSONObject) -> Unit = {},
     revealChars: Int? = null,
+    onMessageOwner: (String) -> Unit = {},
 ) {
     val mine = m.optString("senderId") == myId
     val kind = m.optString("kind")
@@ -2537,9 +2563,10 @@ private fun MessageRow(
         return
     }
     // The owner profile card (dropped in by the worker right after the AI
-    // answers an owner-identity question): tappable socials/email/website.
+    // answers an owner-identity question): tappable socials/email/website +
+    // a direct-message button that opens the owner's chat.
     if (kind == "OWNER_CARD") {
-        OwnerCardBubble()
+        OwnerCardBubble(m, onMessageOwner)
         return
     }
     // Photos skip the chat bubble entirely: the image IS the bubble, with the
@@ -2553,7 +2580,7 @@ private fun MessageRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 3.dp),
+            .padding(vertical = 2.dp),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
         Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
@@ -2593,10 +2620,13 @@ private fun MessageRow(
                             }
                         },
                     )
-                    .padding(start = 10.dp, top = 7.dp, end = 8.dp, bottom = 5.dp),
+                    .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = 3.dp),
             ) {
                 val senderName = m.optText("senderName")
-                Column(Modifier.padding(end = 52.dp, bottom = 2.dp)) {
+                // Owner round 2026-09-04: compact body — the timestamp
+                // overlay reserve shrunk 52→40dp so long lines use the
+                // right side, and the wrap padding tightened.
+                Column(Modifier.padding(end = 40.dp, bottom = 1.dp)) {
                     if (!mine && isGroup && senderName.isNotBlank()) {
                         Text(senderName, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = GoldDeep)
                     }
@@ -2621,10 +2651,11 @@ private fun MessageRow(
                                 Text(
                                     full.take(revealChars) + " ▍",
                                     fontSize = 14.5.sp,
+                                    lineHeight = 19.sp,
                                     color = Ink,
                                 )
                             } else {
-                                Text(full, fontSize = 14.5.sp, color = Ink)
+                                Text(full, fontSize = 14.5.sp, lineHeight = 19.sp, color = Ink)
                             }
                         }
                     }
@@ -3348,14 +3379,17 @@ private fun AiTypingBubble() {
 
 /**
  * Owner profile card (owner round 2026-09-04): shown in the KuchuPuchu AI
- * chat under the answer to any owner/developer/malik question. Every icon
- * deep-links out — Facebook/Instagram/Telegram/TikTok open the app (via the
- * standard profile URLs; Android routes to the installed app, browser as the
- * fallback), the mail icon opens the mail client, the globe opens the site.
+ * chat under the answer to any owner/developer/malik question. Compact by
+ * owner request (2026-09-04 second pass): real owner photo, smaller icons.
+ * Every icon deep-links out — Facebook/Instagram/Telegram/TikTok open the
+ * app via the standard profile URLs, mail opens the mail client, the globe
+ * opens the site — and the chat button starts a DIRECT chat with the owner
+ * inside KuchuPuchu.
  */
 @Composable
-private fun OwnerCardBubble() {
+private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
     val ctx = LocalContext.current
+    val ownerId = m.optJSONObject("meta")?.optString("ownerUserId").orEmpty()
     fun open(url: String) {
         runCatching {
             ctx.startActivity(
@@ -3364,12 +3398,12 @@ private fun OwnerCardBubble() {
         }
     }
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        Modifier.fillMaxWidth().padding(vertical = 3.dp),
         horizontalArrangement = Arrangement.Start,
     ) {
         Column(
             Modifier
-                .widthIn(min = 210.dp, max = 300.dp)
+                .widthIn(min = 200.dp, max = 264.dp)
                 .clip(
                     RoundedCornerShape(
                         topStart = 16.dp,
@@ -3379,27 +3413,32 @@ private fun OwnerCardBubble() {
                     ),
                 )
                 .background(Brush.linearGradient(listOf(Card, Card)))
-                .padding(14.dp)
-                .padding(top = 2.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                KpAvatar("Rabbi Hossain", null, 46.dp, ring = false)
-                Spacer(Modifier.width(10.dp))
+                androidx.compose.foundation.Image(
+                    painter = painterResource(R.drawable.owner_avatar),
+                    contentDescription = "Rabbi Hossain",
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape),
+                )
+                Spacer(Modifier.width(9.dp))
                 Column {
-                    Text("Rabbi Hossain", fontSize = 15.5.sp, fontWeight = FontWeight.Bold, color = Ink)
+                    Text("Rabbi Hossain", fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = Ink)
                     Text(
                         "Founder & Developer of KuchuPuchu",
-                        fontSize = 11.5.sp,
+                        fontSize = 10.5.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = GoldDeep,
                     )
                 }
             }
-            Spacer(Modifier.height(7.dp))
-            Text("Kaliganj, Jhenaidah, Khulna, Bangladesh", fontSize = 11.sp, color = Muted)
-            Spacer(Modifier.height(11.dp))
+            Spacer(Modifier.height(5.dp))
+            Text("Kaliganj, Jhenaidah, Khulna, Bangladesh", fontSize = 10.sp, color = Muted)
+            Spacer(Modifier.height(8.dp))
             Row(
-                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 OwnerCardIcon(onClick = { open("https://facebook.com/Rabbihossainltd") }) {
@@ -3407,7 +3446,7 @@ private fun OwnerCardBubble() {
                         painterResource(R.drawable.ic_brand_facebook),
                         contentDescription = "Facebook",
                         tint = Color.Unspecified,
-                        modifier = Modifier.size(19.dp),
+                        modifier = Modifier.size(15.dp),
                     )
                 }
                 OwnerCardIcon(onClick = { open("https://instagram.com/Rabbihossainltd1") }) {
@@ -3415,7 +3454,7 @@ private fun OwnerCardBubble() {
                         painterResource(R.drawable.ic_brand_instagram),
                         contentDescription = "Instagram",
                         tint = Color.Unspecified,
-                        modifier = Modifier.size(19.dp),
+                        modifier = Modifier.size(15.dp),
                     )
                 }
                 OwnerCardIcon(onClick = { open("https://t.me/Rabbihossainltd0") }) {
@@ -3423,7 +3462,7 @@ private fun OwnerCardBubble() {
                         painterResource(R.drawable.ic_brand_telegram),
                         contentDescription = "Telegram",
                         tint = Color.Unspecified,
-                        modifier = Modifier.size(19.dp),
+                        modifier = Modifier.size(15.dp),
                     )
                 }
                 OwnerCardIcon(onClick = { open("https://tiktok.com/@Rabbihossainltd") }) {
@@ -3431,14 +3470,24 @@ private fun OwnerCardBubble() {
                         painterResource(R.drawable.ic_brand_tiktok),
                         contentDescription = "TikTok",
                         tint = Color.Unspecified,
-                        modifier = Modifier.size(19.dp),
+                        modifier = Modifier.size(15.dp),
                     )
                 }
                 OwnerCardIcon(onClick = { open("mailto:info@rabbihossainltd.online") }) {
-                    Icon(Icons.Filled.Email, contentDescription = "Email", tint = GoldDeep, modifier = Modifier.size(19.dp))
+                    Icon(Icons.Filled.Email, contentDescription = "Email", tint = GoldDeep, modifier = Modifier.size(15.dp))
                 }
                 OwnerCardIcon(onClick = { open("https://rabbihossainltd.online") }) {
-                    Icon(Icons.Filled.Language, contentDescription = "Website", tint = GoldDeep, modifier = Modifier.size(19.dp))
+                    Icon(Icons.Filled.Language, contentDescription = "Website", tint = GoldDeep, modifier = Modifier.size(15.dp))
+                }
+                if (ownerId.isNotBlank()) {
+                    OwnerCardIcon(highlight = true, onClick = { onMessageOwner(ownerId) }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Chat,
+                            contentDescription = "Message",
+                            tint = Color.White,
+                            modifier = Modifier.size(15.dp),
+                        )
+                    }
                 }
             }
         }
@@ -3446,12 +3495,12 @@ private fun OwnerCardBubble() {
 }
 
 @Composable
-private fun OwnerCardIcon(onClick: () -> Unit, icon: @Composable () -> Unit) {
+private fun OwnerCardIcon(highlight: Boolean = false, onClick: () -> Unit, icon: @Composable () -> Unit) {
     Box(
         Modifier
-            .size(37.dp)
+            .size(30.dp)
             .clip(CircleShape)
-            .background(GoldSoft)
+            .background(if (highlight) Gold else GoldSoft)
             .clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) {
