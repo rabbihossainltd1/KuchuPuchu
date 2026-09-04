@@ -22,6 +22,14 @@ object ScreenStore {
      * see them; the owner's list just skips them. Persisted locally.
      */
     val hiddenMsgIds = mutableSetOf<String>()
+
+    /**
+     * requestId -> decision for login-approval cards (Owner round 3,
+     * 2026-09-04): a decision sticks for the whole app session even after
+     * the message row leaves composition, so Accept/Decline never reappear
+     * on a request that was already answered.
+     */
+    val loginApprovals = mutableMapOf<String, String>()
     private var hiddenFile: File? = null
 
     /**

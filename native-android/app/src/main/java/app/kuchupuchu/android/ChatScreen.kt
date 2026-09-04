@@ -6,7 +6,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -1139,8 +1138,12 @@ fun ChatScreen(nav: NavController, convId: String) {
     // bot chats, whose header has no call buttons and always shows the
     // full name (owner rule).
     val title =
-        if (botChat) rawTitle
-        else if (rawTitle.length > 14 && rawTitle.contains(' ')) rawTitle.substringBefore(' ') else rawTitle
+        if (botChat || isGroup) rawTitle
+        else
+            rawTitle.trim().split(Regex("\\s+")).dropWhile { w ->
+                w.equals("MD", true) || w.equals("M.D", true) || w.equals("Md.", true) ||
+                    w.equals("Mohammad", true) || w.equals("Muhammad", true) || w == "মোঃ"
+            }.firstOrNull() ?: rawTitle
     val avatarUrl = if (isGroup) null else c?.optJSONObject("other")?.optIso("avatarUrl")
     // The ref is what makes the header paint without re-fetching: pass it too.
     val avatarRef = if (isGroup) null else c?.optJSONObject("other")?.optIso("avatarRef")
@@ -1301,9 +1304,13 @@ fun ChatScreen(nav: NavController, convId: String) {
             KpAvatar(title, avatarUrl, 40.dp, avatarRef = avatarRef)
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Owner round 2026-09-04: the name sits a touch lower in
-                    // the header for every account.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    // Owner round 3 (2026-09-04): the whole name row — name
+                    // AND its badges — sits lower TOGETHER, so the verified
+                    // tick never separates from the name.
+                    modifier = Modifier.padding(top = 8.dp),
+                ) {
                     Text(
                         title,
                         fontSize = 16.sp,
@@ -1311,7 +1318,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                         color = Ink,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 10.dp),
                     )
                     if (verified) {
                         Spacer(Modifier.width(5.dp))
@@ -2410,7 +2416,21 @@ private fun convRowSnapshot(convId: String): JSONObject? {
 private fun LoginApprovalMessage(m: JSONObject) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val meta = m.optJSONObject("meta") ?: JSONObject()
-    var status by remember(m.optString("id")) { mutableStateOf(meta.optString("status", "PENDING")) }
+    // Owner round 3 (2026-09-04): buttons live exactly as long as the
+    // request does (5 minutes) and a decision sticks for the whole app
+    // session (ScreenStore) — Accept/Decline never come back once answered
+    // or expired.
+    val requestId = meta.optString("requestId")
+    val expired = runCatching {
+        java.time.Instant.parse(m.optText("createdAt")).plusSeconds(300).isBefore(java.time.Instant.now())
+    }.getOrDefault(true)
+    var status by remember(m.optString("id")) {
+        mutableStateOf(
+            ScreenStore.loginApprovals[requestId]
+                ?: if (meta.optString("status", "PENDING") == "PENDING" && expired) "EXPIRED"
+                else meta.optString("status", "PENDING"),
+        )
+    }
     var busy by remember(m.optString("id")) { mutableStateOf(false) }
     val device = meta.optString("deviceName").takeIf { it.isNotBlank() } ?: "Another device"
     // Attempt time in Bangladesh Standard Time (owner rule) — the raw UTC
@@ -2481,7 +2501,12 @@ private fun LoginApprovalMessage(m: JSONObject) {
                             val ok = runCatching {
                                 Api.post("/api/auth/login/approve", JSONObject().put("id", meta.optString("requestId")))
                             }.isSuccess
-                            if (ok) status = "APPROVED" else busy = false
+                            if (ok) {
+                                ScreenStore.loginApprovals[requestId] = "APPROVED"
+                                status = "APPROVED"
+                            } else {
+                                busy = false
+                            }
                         }.start()
                     },
                     enabled = !busy,
@@ -2500,7 +2525,12 @@ private fun LoginApprovalMessage(m: JSONObject) {
                             val ok = runCatching {
                                 Api.post("/api/auth/login/decline", JSONObject().put("id", meta.optString("requestId")))
                             }.isSuccess
-                            if (ok) status = "DECLINED" else busy = false
+                            if (ok) {
+                                ScreenStore.loginApprovals[requestId] = "DECLINED"
+                                status = "DECLINED"
+                            } else {
+                                busy = false
+                            }
                         }.start()
                     },
                     enabled = !busy,
@@ -2624,10 +2654,12 @@ private fun MessageRow(
                     .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = 3.dp),
             ) {
                 val senderName = m.optText("senderName")
-                // Owner round 2026-09-04: compact body — the timestamp
-                // overlay reserve shrunk 52→40dp so long lines use the
-                // right side, and the wrap padding tightened.
-                Column(Modifier.padding(end = 40.dp, bottom = 1.dp)) {
+                // Owner round 3 (2026-09-04): the timestamp no longer
+                // overlays the text — it sits UNDER it, right-aligned. No
+                // more reserved strip on the wrap: single-line messages
+                // never get climbed over and long bodies use the full
+                // width of the widened bubble.
+                Column {
                     if (!mine && isGroup && senderName.isNotBlank()) {
                         Text(senderName, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = GoldDeep)
                     }
@@ -2660,19 +2692,19 @@ private fun MessageRow(
                             }
                         }
                     }
-                }
-                Row(
-                    Modifier.align(Alignment.BottomEnd),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        msgStamp(m.optString("createdAt")),
-                        fontSize = 10.sp,
-                        color = if (mine) Color(0xD9FFFFFF) else Muted,
-                    )
-                    if (mine) {
-                        Spacer(Modifier.width(3.dp))
-                        TickIcon(m, pendingEcho, otherReadAt)
+                    Row(
+                        Modifier.align(Alignment.End).padding(top = 1.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            msgStamp(m.optString("createdAt")),
+                            fontSize = 10.sp,
+                            color = if (mine) Color(0xD9FFFFFF) else Muted,
+                        )
+                        if (mine) {
+                            Spacer(Modifier.width(3.dp))
+                            TickIcon(m, pendingEcho, otherReadAt)
+                        }
                     }
                 }
             }
@@ -3399,34 +3431,18 @@ private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
         }
     }
 
-    // Entrance: pop in with a soft spring + fade.
-    var appeared by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { appeared = true }
-    val scale by animateFloatAsState(
-        if (appeared) 1f else 0.86f,
-        spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
-        label = "cardScale",
-    )
-    val alpha by animateFloatAsState(
-        if (appeared) 1f else 0f,
-        tween(200),
-        label = "cardAlpha",
-    )
-
     Row(
         Modifier.fillMaxWidth().padding(vertical = 3.dp),
         horizontalArrangement = Arrangement.Start,
     ) {
+        // Owner round 3 (2026-09-04): the card covers the full bubble width
+        // (82% of the screen, 280dp floor / 420dp cap) — the photo, texts,
+        // socials and the button all stretch with it.
+        val cardMax =
+            maxOf(280.dp, minOf(420.dp, (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp * 0.82f).dp))
         Column(
             Modifier
-                .graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
-                    this.alpha = alpha
-                }
-                // Same width a sent photo gets — the owner asked for exactly
-                // that size for his picture.
-                .widthIn(max = 225.dp)
+                .width(cardMax)
                 .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 5.dp, bottomEnd = 16.dp))
                 .background(Brush.linearGradient(listOf(Card, Card))),
         ) {
@@ -3437,7 +3453,7 @@ private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(1f)
+                    .aspectRatio(4f / 3f)
                     .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
                     .clickable { showPhoto = true },
             )
@@ -3454,7 +3470,8 @@ private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
                 Spacer(Modifier.height(9.dp))
                 // ---- compact social row ----
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     OwnerCardIcon(onClick = { open("https://facebook.com/Rabbihossainltd") }) {

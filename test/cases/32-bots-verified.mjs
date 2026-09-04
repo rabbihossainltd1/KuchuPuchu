@@ -466,6 +466,39 @@ const convBetween = (db, a, b) =>
     "owner name always in English letters (never transliterated)",
     src.includes("transliterate his name into Bengali script"),
   );
+
+  // ---- Owner round 3 (2026-09-04) — static wiring checks ----
+  const chat = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/ChatScreen.kt",
+    "utf8",
+  );
+  check(
+    "header shows the first name only (honorific MD skipped, bots/groups full)",
+    chat.includes('w.equals("MD", true)') && chat.includes("if (botChat || isGroup) rawTitle"),
+  );
+  check(
+    "header name row (with badges) lowered together — no per-Text padding",
+    /Row\(\s*verticalAlignment = Alignment\.CenterVertically,\s*\/\/ Owner round 3/.test(chat),
+  );
+  check("owner card animation removed", !chat.includes("cardScale"));
+  check(
+    "owner card covers the full bubble width",
+    chat.includes("val cardMax =") && chat.includes(".width(cardMax)"),
+  );
+  check(
+    "login approval: 5-minute client expiry + decision memory",
+    chat.includes("ScreenStore.loginApprovals") && chat.includes("plusSeconds(300)"),
+  );
+  check(
+    "timestamp no longer overlays the text (in-flow under the body)",
+    !chat.includes(
+      "Modifier.align(Alignment.BottomEnd),\n                    verticalAlignment = Alignment.CenterVertically,\n                ) {\n                    Text(\n                        msgStamp",
+    ) && chat.includes("Modifier.align(Alignment.End).padding(top = 1.dp)"),
+  );
+  check(
+    "worker: decline also enforces the 5-minute window",
+    src.includes("AND status = 'PENDING' AND expires_at > ?"),
+  );
   check("the retired Banglish-spelling rule is gone", !src.includes("kemon achen"));
 }
 
