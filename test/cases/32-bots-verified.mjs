@@ -492,7 +492,7 @@ const convBetween = (db, a, b) =>
   );
   check(
     "timestamp overlays a RESERVED band, never the text itself (round 12)",
-    chat.includes('if (kind == "TEXT") 15.dp else 3.dp') &&
+    chat.includes("bottom = 15.dp") &&
       chat.includes("Modifier.align(Alignment.BottomEnd).padding(end = 2.dp, bottom = 1.dp)"),
   );
   check(
@@ -790,7 +790,7 @@ const convBetween = (db, a, b) =>
   check(
     "timestamp + tick pinned to the bubble's bottom-end, never its own line",
     chat.includes("Alignment.BottomEnd") &&
-      chat.includes('if (kind == "TEXT") 15.dp else 3.dp') &&
+      chat.includes("bottom = 15.dp") &&
       !chat.includes("appendInlineContent"),
   );
   const calls = readFileSync(

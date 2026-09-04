@@ -2805,17 +2805,13 @@ private fun MessageRow(
                             }
                         },
                     )
-                    // Owner round 12: TEXT bubbles keep a small bottom band
-                    // where the timestamp + ticks overlay lives — it can never
-                    // wrap to its own line and never overlaps the text.
-                    .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (kind == "TEXT") 15.dp else 3.dp),
+                    // Owner round 12: every bubble here keeps a small bottom
+                    // band for the timestamp + ticks overlay — it can never
+                    // wrap to its own line and never overlaps the content
+                    // (photos never reach this Box; they draw their own).
+                    .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = 15.dp),
             ) {
                 val senderName = m.optText("senderName")
-                // Owner round 3 (2026-09-04): the timestamp no longer
-                // overlays the text — it sits UNDER it, right-aligned. No
-                // more reserved strip on the wrap: single-line messages
-                // never get climbed over and long bodies use the full
-                // width of the widened bubble.
                 Column {
                     if (!mine && isGroup && senderName.isNotBlank()) {
                         Text(senderName, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = GoldDeep)
@@ -2849,23 +2845,24 @@ private fun MessageRow(
                             }
                         }
                     }
-                    // Owner round 12: one pinned stamp row for every bubble —
-                    // it sits in the reserved bottom band (TEXT) or over the
-                    // bottom edge (photos keep their scrim), always at the
-                    // bottom-END corner, never on its own text line.
-                    Row(
-                        Modifier.align(Alignment.BottomEnd).padding(end = 2.dp, bottom = 1.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            msgStamp(m.optString("createdAt")),
-                            fontSize = 10.sp,
-                            color = if (mine) Color(0xD9FFFFFF) else Muted,
-                        )
-                        if (mine) {
-                            Spacer(Modifier.width(3.dp))
-                            TickIcon(m, pendingEcho, otherReadAt)
-                        }
+                }
+                // Owner round 12: one pinned stamp row for every bubble,
+                // directly in the Box scope — it sits in the reserved bottom
+                // band (TEXT) or over the bottom edge (photos keep their
+                // scrim), always at the bottom-END corner, never on its own
+                // text line.
+                Row(
+                    Modifier.align(Alignment.BottomEnd).padding(end = 2.dp, bottom = 1.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        msgStamp(m.optString("createdAt")),
+                        fontSize = 10.sp,
+                        color = if (mine) Color(0xD9FFFFFF) else Muted,
+                    )
+                    if (mine) {
+                        Spacer(Modifier.width(3.dp))
+                        TickIcon(m, pendingEcho, otherReadAt)
                     }
                 }
             }
