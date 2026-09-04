@@ -706,8 +706,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     // messages — the user had to swipe down manually every time. Ride the IME
     // inset: when it grows, jump the list to its bottom.
     val kpDensity = androidx.compose.ui.platform.LocalDensity.current
+    val kpIme = WindowInsets.ime
     LaunchedEffect(Unit) {
-        snapshotFlow { WindowInsets.ime.getBottom(kpDensity) }.collect { ime ->
+        snapshotFlow { kpIme.getBottom(kpDensity) }.collect { ime ->
             if (ime > 0) {
                 delay(250)
                 val total = listState.layoutInfo.totalItemsCount
