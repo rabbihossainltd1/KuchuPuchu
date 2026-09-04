@@ -140,7 +140,7 @@ dependencies {
     implementation("com.google.firebase:firebase-messaging:24.1.0")
     // Owner round 8 (2026-09-04): SMS OTP test path (Firebase Phone Auth) —
     // TEST ONLY until the owner confirms OTPs actually arrive on his SIMs.
-    implementation("com.google.firebase:firebase-auth:24.1.0")
+    implementation("com.google.firebase:firebase-auth:23.1.0")
     // Phone auth: Credential Manager + Google ID token (binding & recovery).
     // No google-services.json — the web client id comes from the worker's
     // /api/config/firebase at runtime (same pattern as Firebase init above).
