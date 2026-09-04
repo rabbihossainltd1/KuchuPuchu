@@ -43,11 +43,34 @@ object SoundPrefs {
         ctx.getSharedPreferences("kp", 0).getInt("incoming_ringtone", 0).coerceIn(0, ringRes.size - 1)
 
     fun setRingIndex(ctx: Context, index: Int) {
-        ctx.getSharedPreferences("kp", 0).edit().putInt("incoming_ringtone", index.coerceIn(0, ringRes.size - 1)).apply()
+        ctx.getSharedPreferences("kp", 0)
+            .edit()
+            .putInt("incoming_ringtone", index.coerceIn(0, ringRes.size - 1))
+            .remove("incoming_ring_custom")
+            .apply()
+    }
+
+    /** The user's own audio file set as the incoming ring (round 11). */
+    fun customRingPath(ctx: Context): String? =
+        ctx.getSharedPreferences("kp", 0)
+            .getString("incoming_ring_custom", null)
+            ?.takeIf { java.io.File(it).exists() }
+
+    fun setCustomRing(ctx: Context, path: String) {
+        ctx.getSharedPreferences("kp", 0)
+            .edit()
+            .putString("incoming_ring_custom", path)
+            .apply()
     }
 
     /** The incoming-ring resource the user picked (default = owner's file). */
     fun incomingRingRes(ctx: Context): Int = ringRes[ringIndex(ctx)]
+
+    /** Row label: the custom file's name when one is set, else the built-in's. */
+    fun currentLabel(ctx: Context): String {
+        val custom = customRingPath(ctx)
+        return if (custom != null) "Custom · ${java.io.File(custom).nameWithoutExtension}" else ringNames[ringIndex(ctx)]
+    }
 }
 
 object KpSounds {
