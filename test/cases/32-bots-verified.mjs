@@ -739,6 +739,26 @@ const convBetween = (db, a, b) =>
       "utf8",
     ).includes(".widthIn(max = 300.dp)"),
   );
+
+  // ---- Owner round 11b (2026-09-05): fullscreen ringtone picker ----
+  const settings = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/SettingsScreen.kt",
+    "utf8",
+  );
+  check(
+    "fullscreen ringtone picker: tap=preview, Save=keep, custom audio option",
+    settings.includes("RingtonePickerScreen") &&
+      settings.includes("OpenDocument()") &&
+      settings.includes('"Pick any audio from this phone"') &&
+      settings.includes('Text("Save"'),
+  );
+  check(
+    "custom ringtone actually plays (CallNotify prefers the file)",
+    readFileSync(
+      "native-android/app/src/main/java/app/kuchupuchu/android/CallNotify.kt",
+      "utf8",
+    ).includes("SoundPrefs.customRingPath"),
+  );
   check("the retired Banglish-spelling rule is gone", !src.includes("kemon achen"));
 }
 

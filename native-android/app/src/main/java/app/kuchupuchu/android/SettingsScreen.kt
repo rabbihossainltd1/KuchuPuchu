@@ -16,6 +16,10 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -265,7 +269,7 @@ fun SettingsScreen(nav: NavController) {
             SettingRow(
                 Icons.Filled.NotificationsActive,
                 "Incoming ringtone",
-                SoundPrefs.ringNames[SoundPrefs.ringIndex(ctx)],
+                SoundPrefs.currentLabel(ctx),
             ) { showRingPicker = true }
             // Which build am I running? This row ends the "ami ki notun APK
             // install korsi?" confusion — bug reports can quote it directly.
@@ -331,57 +335,11 @@ fun SettingsScreen(nav: NavController) {
         Spacer(Modifier.height(32.dp))
     }
 
-    // Owner round 10: incoming-ringtone picker with preview.
+
+
+    // Owner round 11: FULLSCREEN ringtone picker — tap previews, Save keeps.
     if (showRingPicker) {
-        AlertDialog(
-            onDismissRequest = { showRingPicker = false },
-            title = { Text("Incoming ringtone", fontWeight = FontWeight.SemiBold) },
-            text = {
-                Column {
-                    SoundPrefs.ringNames.forEachIndexed { idx, name ->
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    SoundPrefs.setRingIndex(ctx, idx)
-                                    // Preview the picked ring right away.
-                                    runCatching {
-                                        val mp = android.media.MediaPlayer()
-                                        mp.setAudioAttributes(
-                                            android.media.AudioAttributes.Builder()
-                                                .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
-                                                .build(),
-                                        )
-                                        val afd = ctx.resources.openRawResourceFd(SoundPrefs.ringRes[idx])
-                                        mp.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
-                                        afd.close()
-                                        mp.setOnCompletionListener { it.release() }
-                                        mp.prepare()
-                                        mp.start()
-                                    }
-                                    showRingPicker = false
-                                }
-                                .padding(vertical = 12.dp, horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                name,
-                                fontSize = 14.5.sp,
-                                color = if (SoundPrefs.ringIndex(ctx) == idx) GoldDeep else Ink,
-                                fontWeight = if (SoundPrefs.ringIndex(ctx) == idx) FontWeight.SemiBold else FontWeight.Normal,
-                            )
-                            Spacer(Modifier.weight(1f))
-                            if (SoundPrefs.ringIndex(ctx) == idx) {
-                                Icon(Icons.Filled.Done, null, tint = GoldDeep, modifier = Modifier.size(18.dp))
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                androidx.compose.material3.TextButton(onClick = { showRingPicker = false }) { Text("Close") }
-            },
-        )
+        RingtonePickerScreen(onClose = { showRingPicker = false })
     }
 
     /* ---------- edit dialog ---------- */
@@ -548,6 +506,194 @@ private fun SettingRow(
         }
         if (clickable) {
             Icon(Icons.Filled.Edit, contentDescription = "Edit", tint = Color(0xFFD6D3D1), modifier = Modifier.size(16.dp))
+        }
+    }
+}
+
+
+/**
+ * Owner round 11 (2026-09-05): fullscreen incoming-ringtone picker.
+ * Tap a ringtone = select + instant preview; SAVE keeps the choice; the
+ * device's own audio files can be picked as a CUSTOM ringtone.
+ */
+@Composable
+fun RingtonePickerScreen(onClose: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val savedCustom = SoundPrefs.customRingPath(ctx)
+    var selRes by remember { mutableStateOf(if (savedCustom == null) SoundPrefs.ringRes[SoundPrefs.ringIndex(ctx)] else -1) }
+    var selCustom by remember { mutableStateOf(savedCustom) }
+    var playingRes by remember { mutableStateOf(-2) } // -2 none, -1 custom
+    var player by remember { mutableStateOf<android.media.MediaPlayer?>(null) }
+
+    fun stopPreview() {
+        runCatching { player?.stop() }
+        runCatching { player?.release() }
+        player = null
+    }
+
+    fun preview(res: Int, customPath: String?) {
+        stopPreview()
+        playingRes = res
+        player = runCatching {
+            val mp = android.media.MediaPlayer()
+            mp.setAudioAttributes(
+                android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                    .build(),
+            )
+            if (customPath != null) mp.setDataSource(customPath)
+            else {
+                val afd = ctx.resources.openRawResourceFd(res)
+                mp.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+                afd.close()
+            }
+            mp.setOnCompletionListener {
+                it.release()
+                if (playingRes == res) playingRes = -2
+            }
+            mp.prepare()
+            mp.start()
+            mp
+        }.getOrNull()
+    }
+
+    val customPicker =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) {
+                runCatching {
+                    val dir = java.io.File(ctx.filesDir, "ringtones").apply { mkdirs() }
+                    dir.listFiles()?.forEach { it.delete() }
+                    val mime = ctx.contentResolver.getType(uri)
+                    val ext =
+                        when {
+                            mime?.contains("mpeg") == true || mime?.contains("mp3") == true -> ".mp3"
+                            mime?.contains("ogg") == true -> ".ogg"
+                            mime?.contains("wav") == true -> ".wav"
+                            mime?.contains("flac") == true -> ".flac"
+                            else -> ".mp3"
+                        }
+                    val f = java.io.File(dir, "custom$ext")
+                    ctx.contentResolver.openInputStream(uri)?.use { input ->
+                        f.outputStream().use { input.copyTo(it) }
+                    }
+                    selCustom = f.absolutePath
+                    selRes = -1
+                    preview(-1, f.absolutePath)
+                }
+            }
+        }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Cream)
+            .statusBarsPadding()
+            .navigationBarsPadding(),
+    ) {
+        // header
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            androidx.compose.material3.IconButton(onClick = { stopPreview(); onClose() }) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Ink, modifier = Modifier.size(26.dp))
+            }
+            Column {
+                Text("Incoming ringtone", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+                Text("Tap to preview · Save to keep", fontSize = 11.5.sp, color = Muted)
+            }
+        }
+
+        Column(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 14.dp),
+        ) {
+            SoundPrefs.ringNames.forEachIndexed { idx, name ->
+                val res = SoundPrefs.ringRes[idx]
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 2.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(if (selRes == res) GoldSoft else Color.White)
+                        .clickable {
+                            selRes = res
+                            selCustom = null
+                            preview(res, null)
+                        }
+                        .padding(horizontal = 14.dp, vertical = 13.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        if (playingRes == res) Icons.Filled.PlayArrow else Icons.Filled.NotificationsActive,
+                        null,
+                        tint = GoldDeep,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        name,
+                        fontSize = 14.5.sp,
+                        color = Ink,
+                        fontWeight = if (selRes == res) FontWeight.SemiBold else FontWeight.Normal,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (selRes == res) {
+                        Icon(Icons.Filled.Done, null, tint = GoldDeep, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+            // Custom ringtone row
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (selCustom != null) GoldSoft else Color.White)
+                    .clickable { customPicker.launch(arrayOf("audio/*")) }
+                    .padding(horizontal = 14.dp, vertical = 13.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.LibraryMusic, null, tint = GoldDeep, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        if (selCustom != null) "Custom · ${java.io.File(selCustom!!).nameWithoutExtension}" else "Custom ringtone",
+                        fontSize = 14.5.sp,
+                        color = Ink,
+                        fontWeight = if (selCustom != null) FontWeight.SemiBold else FontWeight.Normal,
+                    )
+                    Text("Pick any audio from this phone", fontSize = 11.sp, color = Muted)
+                }
+                if (selCustom != null) {
+                    Icon(Icons.Filled.Done, null, tint = GoldDeep, modifier = Modifier.size(18.dp))
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+
+        // SAVE
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(14.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Gold)
+                .clickable {
+                    if (selCustom != null) SoundPrefs.setCustomRing(ctx, selCustom!!)
+                    else if (selRes >= 0) SoundPrefs.setRingIndex(ctx, SoundPrefs.ringRes.indexOf(selRes))
+                    stopPreview()
+                    onClose()
+                }
+                .padding(vertical = 14.dp),
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            Text("Save", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }

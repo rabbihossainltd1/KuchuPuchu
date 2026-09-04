@@ -333,3 +333,12 @@ Suite: 32/32, 951 assertions.
    archives the incognito run and RESTORES the previous session into the
    chat via the new /restore-latest endpoint.
 Suite: 32/32, 957 assertions.
+
+## Owner round 11b — v3.9.32 / 108 (2026-09-05)
+
+1. **Fullscreen ringtone picker** — tap a ringtone = select + instant preview
+   (play indicator); **Save** keeps the choice; back discards. Custom
+   ringtone: pick ANY audio file from the phone (copied into app storage,
+   survives reboots) — the incoming call plays it; Settings row shows
+   "Custom · <name>".
+Suite: 32/32, 959 assertions.

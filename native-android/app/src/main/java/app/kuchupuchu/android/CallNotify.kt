@@ -142,10 +142,24 @@ object CallSounds {
             // silent — per the user's explicit request. Before it is answered
             // there is no call route yet, so nothing changes there either.
             .build()
+        // Owner round 11: a custom ringtone file (user-picked) wins over the
+        // built-in pack; both loop exactly like before.
+        val customPath = SoundPrefs.customRingPath(ctx.applicationContext)
+        val customPlayer =
+            if (customPath != null)
+                runCatching {
+                    val mp = MediaPlayer()
+                    mp.setAudioAttributes(attrs)
+                    mp.setDataSource(customPath)
+                    mp.prepare()
+                    mp
+                }.getOrNull()
+            else null
         val player =
-            runCatching {
-                MediaPlayer.create(ctx.applicationContext, SoundPrefs.incomingRingRes(ctx), attrs, 1)
-            }.getOrNull()
+            customPlayer
+                ?: runCatching {
+                    MediaPlayer.create(ctx.applicationContext, SoundPrefs.incomingRingRes(ctx), attrs, 1)
+                }.getOrNull()
                 ?: run {
                     // No 4-arg (Uri, attrs) overload exists — build manually:
                     // setAudioAttributes BEFORE setDataSource/prepare is the
