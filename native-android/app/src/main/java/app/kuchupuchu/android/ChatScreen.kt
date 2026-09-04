@@ -24,6 +24,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -703,12 +705,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     // Owner round 13 (2026-09-05): keyboard opening used to COVER the latest
     // messages — the user had to swipe down manually every time. Ride the IME
     // inset: when it grows, jump the list to its bottom.
+    val kpDensity = androidx.compose.ui.platform.LocalDensity.current
     LaunchedEffect(Unit) {
-        snapshotFlow {
-            androidx.compose.foundation.layout.WindowInsets.ime.getBottom(
-                androidx.compose.ui.platform.LocalDensity.current,
-            )
-        }.collect { ime ->
+        snapshotFlow { WindowInsets.ime.getBottom(kpDensity) }.collect { ime ->
             if (ime > 0) {
                 delay(250)
                 val total = listState.layoutInfo.totalItemsCount
@@ -1824,14 +1823,15 @@ fun ChatScreen(nav: NavController, convId: String) {
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        if (replyTo?.optString("senderId") == Store.myId()) "You" else (replyTo?.optText("senderName").ifBlank { "Reply" }),
+                        if (replyTo?.optString("senderId") == Store.myId()) "You"
+                        else (replyTo?.optText("senderName") ?: "").ifBlank { "Reply" },
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = GoldDeep,
                         maxLines = 1,
                     )
                     Text(
-                        (replyTo?.optText("body").ifBlank { "Media message" }).take(80),
+                        ((replyTo?.optText("body") ?: "").ifBlank { "Media message" }).take(80),
                         fontSize = 12.sp,
                         color = Muted,
                         maxLines = 1,
@@ -2942,14 +2942,15 @@ private fun MessageRow(
                             Spacer(Modifier.width(6.dp))
                             Column {
                                 Text(
-                                    if (q?.optString("senderId") == myId) "You" else (q?.optText("senderName").ifBlank { "Original message" }),
+                                    if (q?.optString("senderId") == myId) "You"
+                                    else (q?.optText("senderName") ?: "").ifBlank { "Original message" },
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = GoldDeep,
                                     maxLines = 1,
                                 )
                                 Text(
-                                    q?.optText("body")?.take(64) ?: "Original message",
+                                    q?.optText("body")?.take(64)?.ifBlank { "Original message" } ?: "Original message",
                                     fontSize = 11.sp,
                                     color = Muted,
                                     maxLines = 1,

@@ -53,6 +53,9 @@ import org.json.JSONObject
  * Calls tab — locked design #2: date sections (Today / Yesterday / weekday),
  * direction arrows, gold callback buttons.
  */
+/** Owner round 13: when /api/calls/history was last fetched (ms). */
+private var lastCallsFetch = 0L
+
 @Composable
 fun CallsScreen(nav: NavController) {
     val scope = rememberCoroutineScope()

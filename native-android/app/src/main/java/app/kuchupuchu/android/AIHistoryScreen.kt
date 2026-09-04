@@ -159,8 +159,8 @@ fun AIHistoryScreen(nav: NavController) {
                 if (msgs.isNotEmpty()) sessionListState.scrollToItem(msgs.size - 1)
             }
             LazyColumn(
-                state = sessionListState,
                 Modifier.fillMaxSize(),
+                state = sessionListState,
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
