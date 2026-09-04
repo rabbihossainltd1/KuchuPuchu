@@ -24,7 +24,6 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallMade
 import androidx.compose.material.icons.filled.CallReceived
 import androidx.compose.material.icons.filled.Videocam
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -62,9 +61,17 @@ fun CallsScreen(nav: NavController) {
     val haptics = rememberHaptics()
 
     LaunchedEffect(Unit) {
+        // Owner round 13: the tab refetched the whole history on EVERY visit
+        // and that read as lag. Show the cached list at once and only hit the
+        // network when the cache is stale (>20s) or empty.
+        if (ScreenStore.callsLoaded && calls.isNotEmpty() && System.currentTimeMillis() - lastCallsFetch < 20_000) {
+            loading = false
+            return@LaunchedEffect
+        }
         try {
             val data = withContext(Dispatchers.IO) { Api.get("/api/calls/history") }
             ScreenStore.setCalls(data.arr("items").objects())
+            lastCallsFetch = System.currentTimeMillis()
         } catch (_: Exception) {
         } finally {
             loading = false
@@ -81,8 +88,10 @@ fun CallsScreen(nav: NavController) {
         // No "Calls" heading here: this screen only ever appears inside the
         // Calls tab, which is already labelled right above it.
         if (calls.isEmpty() && loading) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = Gold)
+            // Owner round 13: Facebook-feed style skeletons while the history
+            // loads — never a lone spinner on a blank screen.
+            Column(Modifier.fillMaxSize()) {
+                repeat(7) { KpShimmerListItem() }
             }
         } else if (calls.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

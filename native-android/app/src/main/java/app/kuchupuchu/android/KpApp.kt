@@ -25,6 +25,11 @@ fun KpApp() {
     val nav = rememberNavController()
     val authed by Store.authed
 
+    // Owner round 13: dark-blue theme, default. Loaded once per composition;
+    // KpThemeMode.set() flips it live from Settings.
+    val themeCtx = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    androidx.compose.runtime.LaunchedEffect(Unit) { KpThemeMode.load(themeCtx) }
+
     // Owner rule (2026-09-04): the ONLY launch-time permission asks are
     // notification permission and the battery-optimization exemption dialog —
     // both on the first signed-in open, once per install. Camera/mic are asked
@@ -45,6 +50,13 @@ fun KpApp() {
     LaunchedEffect(Unit) {
         KpSocket.onEvent { ev ->
             if (ev.optString("type") == "conv" && ev.optBoolean("msg") && Store.foreground) {
+                // Own sends arrive as pokes too (round 13): never play the
+                // in-app sound for a message this device just sent.
+                if (!ev.optString("senderId").isBlank() &&
+                    ev.optString("senderId") == Store.me?.optString("id").orEmpty()
+                ) {
+                    return@onEvent
+                }
                 val cid = ev.optString("conversationId")
                 val inChat = Store.route == "chat/$cid" || Store.route.startsWith("chat/$cid?")
                 if (cid.isNotBlank() && !inChat && !ScreenStore.isMuted(cid)) {

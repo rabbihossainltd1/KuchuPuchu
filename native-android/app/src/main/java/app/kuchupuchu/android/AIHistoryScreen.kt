@@ -100,8 +100,9 @@ fun AIHistoryScreen(nav: NavController) {
 
         if (open == null) {
             if (loading) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Loading…", color = Muted)
+                // Owner round 13: skeleton rows, not a dead "Loading…" page.
+                Column(Modifier.fillMaxSize()) {
+                    repeat(6) { KpShimmerListItem() }
                 }
             } else if (sessions.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -151,14 +152,21 @@ fun AIHistoryScreen(nav: NavController) {
                 }
             }
         } else {
+            // Owner round 13: a session used to open at the very TOP — the
+            // owner had to scroll "onek upore". Land on the newest messages.
+            val sessionListState = androidx.compose.foundation.lazy.rememberLazyListState()
+            LaunchedEffect(msgs.size) {
+                if (msgs.isNotEmpty()) sessionListState.scrollToItem(msgs.size - 1)
+            }
             LazyColumn(
+                state = sessionListState,
                 Modifier.fillMaxSize(),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 items(msgs, key = { it.optString("createdAt") + it.optString("senderId") + it.optString("body").take(20) }) { m ->
                     val mine = m.optString("senderId") == Store.myId()
-                    val body = m.optText("body").ifBlank { when (m.optString("kind")) { "IMAGE" -> "📷 Photo"; "OWNER_CARD" -> "👤 Owner card"; else -> "" } }
+                    val body = m.optText("body").ifBlank { when (m.optString("kind")) { "IMAGE" -> "Photo"; "OWNER_CARD" -> "Owner card"; else -> "" } }
                     if (body.isNotBlank()) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
                             // Owner round 11: bubbles capped at 300dp so a

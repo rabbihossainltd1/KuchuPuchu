@@ -313,14 +313,14 @@ async function main() {
     const after = await h.call("GET", "/api/conversations", undefined, A.token);
     const probes = h.since(mark).filter((q) => q.includes("MAX(rowid) AS max_row FROM messages"));
     check(
-      "a watermarked chat still gets its newest-rowid probe",
-      probes.length === 1,
+      "round 13: a real-deleted chat carries a TIME watermark — no rowid probe needed",
+      probes.length === 0,
       `${probes.length} probes`,
     );
     check(
-      "…as ONE batched statement, not one per conversation",
-      probes[0] ? probes[0].includes("GROUP BY conv_id") : false,
-      probes[0],
+      "…and the deleted chat is out of the list without any messages-table scan",
+      !(after.json.items ?? []).some((c) => c.id === cid0),
+      "still listed",
     );
     check(
       "…and the chat stays hidden while nothing newer exists",

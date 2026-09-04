@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.AlertDialog
@@ -264,8 +265,19 @@ fun SettingsScreen(nav: NavController) {
                 showChangePhone = true
             }
             // Owner round 10 (2026-09-04): his incoming-ringtone pack — the
-            // user picks which one rings for calls; Default is his own
-            // "calling ringing" sound.
+            // user picks which one rings for calls. Default is the app's
+            // ORIGINAL tone again (owner round 13); his "calling ringing"
+            // file stays as the caller-side ringback only.
+            SettingRow(
+                Icons.Filled.Palette,
+                "App theme",
+                if (KpThemeMode.darkBlue) "Dark blue" else "Light",
+            ) {
+                // Owner round 13 (2026-09-05): dark blue is the DEFAULT; the
+                // previous light look stays one tap away. Applies instantly.
+                val setDark = !KpThemeMode.darkBlue
+                KpThemeMode.set(ctx, setDark)
+            }
             SettingRow(
                 Icons.Filled.NotificationsActive,
                 "Incoming ringtone",
@@ -611,31 +623,32 @@ fun RingtonePickerScreen(onClose: () -> Unit) {
                 .weight(1f)
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 14.dp),
+                .padding(horizontal = 10.dp),
         ) {
             SoundPrefs.ringNames.forEachIndexed { idx, name ->
                 val res = SoundPrefs.ringRes[idx]
+                // Owner round 13: compact rows — tighter padding, smaller type.
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 2.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(if (selRes == res) GoldSoft else Color.White)
+                        .padding(vertical = 1.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (selRes == res) GoldSoft else Card)
                         .clickable {
                             selRes = res
                             selCustom = null
                             preview(res, null)
                         }
-                        .padding(horizontal = 14.dp, vertical = 13.dp),
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
                         if (playingRes == res) Icons.Filled.PlayArrow else Icons.Filled.NotificationsActive,
                         null,
                         tint = GoldDeep,
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(16.dp),
                     )
-                    Spacer(Modifier.width(12.dp))
+                    Spacer(Modifier.width(8.dp))
                     Text(
                         name,
                         fontSize = 14.5.sp,
@@ -674,15 +687,15 @@ fun RingtonePickerScreen(onClose: () -> Unit) {
                     Icon(Icons.Filled.Done, null, tint = GoldDeep, modifier = Modifier.size(18.dp))
                 }
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(8.dp))
         }
 
         // SAVE
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(14.dp)
-                .clip(RoundedCornerShape(14.dp))
+                .padding(10.dp)
+                .clip(RoundedCornerShape(10.dp))
                 .background(Gold)
                 .clickable {
                     if (selCustom != null) SoundPrefs.setCustomRing(ctx, selCustom!!)
@@ -690,10 +703,10 @@ fun RingtonePickerScreen(onClose: () -> Unit) {
                     stopPreview()
                     onClose()
                 }
-                .padding(vertical = 14.dp),
+                .padding(vertical = 8.dp),
             horizontalArrangement = Arrangement.Center,
         ) {
-            Text("Save", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text("Save", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }

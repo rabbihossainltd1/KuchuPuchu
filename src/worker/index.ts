@@ -806,7 +806,7 @@ async function sendAiWelcome(
 
 /** The AI's line when Gemini is unreachable: it still answers, never silence. */
 const AI_REPLY_FALLBACK =
-  "I'm KuchuPuchu AI 🤖 I'm right here with you! Ask me anything about the app — or just say hi.";
+  "I'm KuchuPuchu AI — I'm right here with you! Ask me anything about the app — or just say hi.";
 
 // Owner-identity questions in the AI chat: after the text answer, the app
 // also renders a tappable profile card (kind "OWNER_CARD") with the owner's
@@ -1091,11 +1091,11 @@ async function sendAiReply(
                 mid: imgMid,
                 kind: "SOLO",
                 fromName: "KuchuPuchu AI",
-                body: "📷 Photo",
+                body: "Photo",
                 kp_chat: convId,
                 muted: "0",
               },
-              { title: "KuchuPuchu AI", body: "📷 Photo", channel: "kp_messages_v2" },
+              { title: "KuchuPuchu AI", body: "Photo", channel: "kp_messages_v2" },
             ),
           );
           return;
@@ -1130,45 +1130,6 @@ async function sendAiReply(
       convId,
       userId,
     );
-    ctx.waitUntil(
-      broadcastRoomEvent(env, convId, {
-        type: "message",
-        conversationId: convId,
-        message: msgFrom({
-          id: mid,
-          conv_id: convId,
-          sender_id: botId,
-          kind: "TEXT",
-          body,
-          media: null,
-          meta_json: null,
-          created_at: created,
-          delivered_at: null,
-        } as MsgRow),
-      }),
-    );
-    ctx.waitUntil(
-      broadcastRoomEvent(env, `user:${userId}`, { type: "conv", conversationId: convId, msg: 1 }),
-    );
-    ctx.waitUntil(
-      pushToUser(
-        env,
-        db,
-        userId,
-        {
-          type: "message",
-          convoId: convId,
-          mid,
-          kind: "SOLO",
-          fromName: "KuchuPuchu AI",
-          body,
-          kp_chat: convId,
-          muted: "0",
-        },
-        { title: "KuchuPuchu AI", body, channel: "kp_messages_v2" },
-      ),
-    );
-
     // Owner round 2026-09-04: an owner-identity question ALSO drops the
     // tappable profile card (socials/email/website) into the thread, right
     // under the answer. Deduped: at most one card per 10-message window, so
@@ -1193,10 +1154,10 @@ async function sendAiReply(
       );
       if (!cardAlready) {
         const cardMid = id();
-        // +2ms keeps the card strictly AFTER the reply it follows even when
-        // both land in the same millisecond (the history page sorts by
-        // created_at, and a tie could float the card above its answer).
-        const cardCreated = new Date(Date.now() + 2).toISOString();
+        // Owner round 13 (2026-09-05): the card now lands BEFORE the AI's
+        // reply — card first, then the answer. 1ms earlier than the reply
+        // keeps the history page order stable too.
+        const cardCreated = new Date(Date.parse(created) - 1).toISOString();
         const ownerRow = await one<{ id: string }>(
           db,
           "SELECT id FROM users WHERE username = 'rabbihossainltd' LIMIT 1",
@@ -1228,6 +1189,48 @@ async function sendAiReply(
               delivered_at: null,
             } as MsgRow),
           }),
+        );
+        ctx.waitUntil(
+          broadcastRoomEvent(env, convId, {
+            type: "message",
+            conversationId: convId,
+            message: msgFrom({
+              id: mid,
+              conv_id: convId,
+              sender_id: botId,
+              kind: "TEXT",
+              body,
+              media: null,
+              meta_json: null,
+              created_at: created,
+              delivered_at: null,
+            } as MsgRow),
+          }),
+        );
+        ctx.waitUntil(
+          broadcastRoomEvent(env, `user:${userId}`, {
+            type: "conv",
+            conversationId: convId,
+            msg: 1,
+          }),
+        );
+        ctx.waitUntil(
+          pushToUser(
+            env,
+            db,
+            userId,
+            {
+              type: "message",
+              convoId: convId,
+              mid,
+              kind: "SOLO",
+              fromName: "KuchuPuchu AI",
+              body,
+              kp_chat: convId,
+              muted: "0",
+            },
+            { title: "KuchuPuchu AI", body, channel: "kp_messages_v2" },
+          ),
         );
       }
     }
@@ -1610,6 +1613,8 @@ async function ensureSchema(db: D1Database) {
   await runCatchingSql(db, `ALTER TABLE devices ADD COLUMN platform TEXT`);
   await runCatchingSql(db, `ALTER TABLE devices ADD COLUMN app_version TEXT`);
   await runCatchingSql(db, `ALTER TABLE devices ADD COLUMN last_seen_at TEXT`);
+  // Owner round 13: swipe-to-reply quote threading.
+  await runCatchingSql(db, `ALTER TABLE messages ADD COLUMN reply_to TEXT`);
   await runCatchingSql(
     db,
     `CREATE INDEX IF NOT EXISTS idx_devices_user_dev ON devices(user_id, device_id)`,
@@ -2158,6 +2163,7 @@ async function pokeUserConversation(
   userId: string,
   conversationId: string,
   at: string,
+  senderId?: string,
 ): Promise<number> {
   if (!env.CHAT_ROOM) return -1;
   try {
@@ -2165,7 +2171,11 @@ async function pokeUserConversation(
     const res = await stub.fetch("https://chat-room/broadcast", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ type: "conv", conversationId, at }),
+      // msg:1 is what the app's process-level listener needs to play the
+      // in-app message sound. The MAIN send path never set it — only the
+      // bot/login paths did — exactly why the sound stayed silent for normal
+      // messages (owner round 13). senderId lets a client skip its own sends.
+      body: JSON.stringify({ type: "conv", conversationId, at, msg: 1, senderId }),
     });
     const body = (await res.json().catch(() => null)) as { sent?: number } | null;
     if (typeof body?.sent !== "number") return -1;
@@ -4190,7 +4200,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           if (Number(conv.max_row || 0) <= mark.row) continue;
         } else {
           const lastAt = conv.last_message_at ? Date.parse(conv.last_message_at) : 0;
-          if (!lastAt || lastAt <= Date.parse(mark.at)) continue;
+          // <= would keep a same-millisecond reply hidden (data-loss bug the
+          // round-13 time watermark made reachable); equal counts as newer.
+          if (!lastAt || lastAt < Date.parse(mark.at)) continue;
         }
       }
       list.push(buildConvDetail(conv, membersByConv.get(conv.id) ?? [], users, uid, true));
@@ -4401,19 +4413,27 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       await run(db, "DELETE FROM members WHERE conv_id = ? AND user_id = ?", convId, uid);
       await systemMessage(db, convId, `${me.display_name} left`);
     } else {
+      // Owner round 13 (2026-09-05): "delete chat" used to only watermark the
+      // history — the rows survived and SEARCH still surfaced the old chat
+      // with its messages. A deleted 1:1 chat is now really deleted: rows
+      // gone, preview cleared, counters reset. The conversation shell stays
+      // so a new message can reopen it; the deleter keeps a watermark at the
+      // pre-delete high-water rowid so the empty shell doesn't pop straight
+      // back into their list (a new message clears it, as always).
+      // TIME watermark, not rowid: the rows are about to be deleted, and a
+      // fresh insert can REUSE a lower rowid than the one we captured —
+      // which would keep the reopened chat invisible to its own deleter.
+      // {row: -1} switches every consumer to the created_at comparison.
       const hidden = parseJson<HiddenMap>(await hiddenJson(db, convId), {});
-      const newest = await one<{ row: number | null }>(
-        db,
-        "SELECT MAX(rowid) AS row FROM messages WHERE conv_id = ?",
-        convId,
-      );
-      hidden[uid] = { row: Number(newest?.row || 0), at: nowIso() };
+      hidden[uid] = { row: -1, at: nowIso() };
+      await run(db, "DELETE FROM messages WHERE conv_id = ?", convId);
       await run(
         db,
-        "UPDATE conversations SET hidden_json = ? WHERE id = ?",
+        "UPDATE conversations SET hidden_json = ?, last_message = NULL, last_message_at = NULL WHERE id = ?",
         JSON.stringify(hidden),
         convId,
       );
+      await run(db, "UPDATE members SET unread = 0 WHERE conv_id = ?", convId);
     }
     return json({ ok: true });
   }
@@ -4794,7 +4814,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // chat that reappeared after a new message came back with its whole
     // history, which is not what "delete chat" means.
     const mark = watermarkFor(parseJson<HiddenMap>(conv.hidden_json ?? "{}", {}), uid);
-    const sinceClause = mark ? (mark.row >= 0 ? "AND rowid > ?" : "AND created_at > ?") : "";
+    // created_at >= (not >): with round 13's real-delete TIME watermark, a
+    // message written in the same millisecond as the delete must survive.
+    const sinceClause = mark ? (mark.row >= 0 ? "AND rowid > ?" : "AND created_at >= ?") : "";
     const sinceArgs = mark ? [mark.row >= 0 ? mark.row : mark.at] : [];
     // Live means "not expired yet" OR "sent before the timer was armed". The
     // second arm is what keeps existing history alive: a message only counts as
@@ -4992,6 +5014,19 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // coins" notices and fake call-log entries in someone else's chat.
     const requestedKind = String(body.kind || "TEXT").toUpperCase();
     const kind = ALLOWED_MESSAGE_KINDS.has(requestedKind) ? requestedKind : "TEXT";
+    // Owner round 13: swipe-to-reply — replyTo must reference a message in
+    // THIS conversation, else it is dropped (never trusted blind).
+    let replyTo: string | null = null;
+    const rawReplyTo = String(body.replyTo || "").slice(0, 64);
+    if (rawReplyTo) {
+      const target = await one<{ id: string }>(
+        db,
+        "SELECT id FROM messages WHERE id = ? AND conv_id = ? LIMIT 1",
+        rawReplyTo,
+        convId,
+      );
+      replyTo = target ? rawReplyTo : null;
+    }
     const imageData =
       typeof body.imageData === "string" && isSafeDataUrl(body.imageData) ? body.imageData : null;
     if (typeof body.imageData === "string" && body.imageData.startsWith("data:") && !imageData) {
@@ -5046,7 +5081,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     try {
       await run(
         db,
-        "INSERT INTO messages (id, conv_id, sender_id, kind, body, media, meta_json, created_at, client_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO messages (id, conv_id, sender_id, kind, body, media, meta_json, created_at, client_id, reply_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         mid,
         convId,
         uid,
@@ -5056,6 +5091,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         meta,
         created,
         clientId,
+        replyTo,
       );
     } catch (err) {
       // Two identical POSTs racing past the dup check: the UNIQUE index lets
@@ -5124,7 +5160,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       meta_json: meta,
       created_at: created,
       delivered_at: null,
-    });
+      reply_to: replyTo,
+    } as MsgRow);
     // Realtime: anyone with this chat open hears about the message the
     // instant it lands; everyone else's chat list gets a light poke. FCM
     // (below) still wakes fully backgrounded apps — WS is the foreground path.
@@ -5139,7 +5176,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       if (memberId.user_id === uid) continue;
       ctx.waitUntil(
         (async () => {
-          const live = await pokeUserConversation(env, memberId.user_id, convId, created);
+          const live = await pokeUserConversation(env, memberId.user_id, convId, created, uid);
           await pushMessageToMember(memberId, live);
         })(),
       );
@@ -6066,6 +6103,7 @@ type MsgRow = {
   meta_json: string | null;
   created_at: string;
   delivered_at?: string | null;
+  reply_to?: string | null;
 };
 
 /**
@@ -6114,6 +6152,7 @@ function msgFrom(row: MsgRow) {
     senderId: row.sender_id,
     kind: row.kind,
     body: row.body,
+    replyTo: row.reply_to || undefined,
     hasImage: (row.kind === "IMAGE" && !!row.media) || imageFile,
     mediaUrl: row.kind === "IMAGE" && row.media ? `/api/messages/${row.id}/media` : undefined,
     // Set only when the sender supplied usable dimensions (see imageDims). The

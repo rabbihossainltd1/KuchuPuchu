@@ -105,7 +105,42 @@ fun ProfileScreen(nav: NavController, userId: String) {
         }
         val u = user
         if (u == null) {
-            Text(error.ifBlank { "Loading…" }, color = Muted, modifier = Modifier.padding(24.dp))
+            // Owner round 13: skeleton placeholders while the profile loads —
+            // only a real error shows as text now.
+            if (error.isNotBlank()) {
+                Text(error, color = Muted, modifier = Modifier.padding(24.dp))
+            } else {
+                Column(
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Spacer(Modifier.height(18.dp))
+                    Box(
+                        Modifier.size(110.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                            .background(kpShimmerBrush()),
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Box(
+                        Modifier.width(170.dp).height(18.dp)
+                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+                            .background(kpShimmerBrush()),
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Box(
+                        Modifier.width(120.dp).height(13.dp)
+                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+                            .background(kpShimmerBrush()),
+                    )
+                    Spacer(Modifier.height(22.dp))
+                    repeat(3) {
+                        Box(
+                            Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 6.dp, vertical = 6.dp)
+                                .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+                                .background(kpShimmerBrush()),
+                        )
+                    }
+                }
+            }
             return
         }
         // Compact header: avatar, name, @username, online, about — no big

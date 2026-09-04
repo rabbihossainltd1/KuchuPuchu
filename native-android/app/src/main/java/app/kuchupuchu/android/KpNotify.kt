@@ -353,7 +353,7 @@ object KpNotify {
             NotificationCompat.Builder(ctx, CALL_CHANNEL)
                 .setSmallIcon(R.mipmap.ic_stat_kp)
                 .setContentTitle("Missed call · $from")
-                .setContentText(if (video) "📹 Missed video call" else "📞 Missed voice call")
+                .setContentText(if (video) "Missed video call" else "Missed voice call")
                 .setAutoCancel(true)
                 .setContentIntent(message)
                 .addAction(0, "Call back", callBack)
@@ -475,7 +475,9 @@ class KpNotifActionReceiver : android.content.BroadcastReceiver() {
                             "/api/conversations/$convoId/messages",
                             org.json.JSONObject()
                                 .put("kind", "TEXT")
-                                .put("body", "❤️")
+                                // Owner round 13: no emoji anywhere in app UI/messaging surfaces —
+                                    // the Like action now sends plain text.
+                                    .put("body", "Liked your message")
                                 .put("clientId", "c_${java.util.UUID.randomUUID()}"),
                         )
                     }

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Owner round 13: the speaker toggle for the in-call notification. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+    <solid android:color="#24304E" />
+    <stroke android:width="1dp" android:color="#3A4A72" />
+</shape>

@@ -630,7 +630,8 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                 }
                 val cid = conv.optJSONObject("conversation")?.optString("id").orEmpty()
                 if (cid.isBlank()) throw Exception("Couldn't open the chat.")
-                val body = if (snippet.isBlank()) "↩️ $text" else "↩️ $snippet\n$text"
+                // Owner round 13: plain ">" quote prefix — no emoji in app UI.
+                val body = if (snippet.isBlank()) "> $text" else "> $snippet\n$text"
                 withContext(Dispatchers.IO) {
                     Api.post("/api/conversations/$cid/messages", JSONObject().put("body", body))
                 }

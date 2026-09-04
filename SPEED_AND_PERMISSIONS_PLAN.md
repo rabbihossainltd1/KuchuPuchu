@@ -366,3 +366,54 @@ Suite: 32/32, 959 assertions.
    readability; falls back to dark when no photo); the avatar zoom/pulse
    effect is removed (calm static avatar).
 Suite: 32/32, 965 assertions.
+
+## Owner round 13 — v3.9.34 / 110 (2026-09-05)
+
+1. **Delete chat is real** — a 1:1 delete now wipes the message rows and clears
+   the preview; SEARCH can no longer resurrect an old chat. The conversation
+   shell survives (a new message reopens it) and the deleter's list row stays
+   hidden via a TIME watermark (row:-1) — no rowid reuse trap, same-ms safe.
+2. **In-app message sound fixed at the root** — the MAIN send path's chat-list
+   poke never carried `msg: 1` (only the bot/login paths did), so the socket
+   listener never fired for normal messages. Now it does, with `senderId` so
+   your own sends stay silent.
+3. **AI owner card first** — the owner card lands BEFORE the AI's reply
+   (card, then the answer), 1ms apart so history order is stable.
+4. **Reply by swiping a bubble right** — drag right past ~36dp and release:
+   the composer shows the quoted message, the send threads `replyTo` through
+   a new `reply_to` column (validated same-conversation), and the bubble
+   renders the quoted block.
+5. **Stamp final form** — text bubbles reserve the stamp's width inline with
+   invisible non-breaking spaces glued to the last word (WhatsApp trick): no
+   separate line, no overlap, no blank strip under the text.
+6. **Voice <1s = silent cancel** — no more error toast for a slip of the
+   finger.
+7. **AI chat mic disabled** — the hold-to-record button is inert (dimmed) in
+   the AI chat.
+8. **Mic button restyle** — background fill removed; a faint 3D shadow only.
+9. **Keyboard = auto-jump to newest** — opening the keyboard scrolls the chat
+   to the bottom by itself.
+10. **Dark blue theme (default)** — Settings → App theme: Dark blue / Light,
+    applies live. Gold accents unchanged.
+11. **Incoming ringtone restored** — incoming calls ring the ORIGINAL tone
+    again (default of the selectable pack); the owner's calling-ringing file
+    stays as the caller-side ringback only.
+12. **Incoming call buttons** — Decline left, Accept right.
+13. **In-call notification, app-styled** — custom layout: dark-blue card, BIG
+   red End button, speaker toggle styled to match (voice only; video = End
+   only). No more system action chips.
+14. **Archive by pull + 3s hold** — pull the list down anywhere (rows too) and
+   hold: a progress bar fills, then an animated ARCHIVED logo pops in and the
+   screen opens. Fling no longer triggers it.
+15. **Ringtone picker compacted** — tighter rows, smaller type.
+16. **AI history lands on the newest** — a session opens at its latest
+   messages; skeleton rows while the list loads.
+17. **Calls tab** — skeleton placeholders while loading and a 20s cache so the
+   tab stops refetching (the laggy feel).
+18. **Loading placeholders everywhere** — shimmer skeletons for chat messages,
+   call rows, profile and AI history (Facebook-feed style), never blank.
+19. **No emoji in app UI** — status replies quote with ">", chat previews /
+   notifications / fallbacks are plain text. The sticker keyboard (content)
+   is untouched.
+20. **Workspace cleanup** — one repo + HANDOFF.md only.
+Suite: 32/32, 984 assertions.

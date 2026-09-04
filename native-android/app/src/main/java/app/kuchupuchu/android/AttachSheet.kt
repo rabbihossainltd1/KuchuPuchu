@@ -859,9 +859,9 @@ internal fun readContact(ctx: android.content.Context, uri: Uri): String {
             }
         }
         buildString {
-            append("👤 Contact")
+            append("Contact")
             if (name.isNotBlank()) append(": $name")
-            if (number.isNotBlank()) append("\n📱 $number")
+            if (number.isNotBlank()) append("\nPhone: $number")
         }
     }.getOrDefault("")
 }

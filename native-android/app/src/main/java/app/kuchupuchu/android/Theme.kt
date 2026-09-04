@@ -11,15 +11,42 @@ import androidx.compose.ui.unit.Density
 
 /* ---- KuchuPuchu v3 design tokens (locked: Chat List #7 "Gradient Rings") ---- */
 
-val Cream = Color(0xFFF7F6F4)      // app background
-val Card = Color(0xFFFFFFFF)       // white cards, 16dp radius
-val Ink = Color(0xFF1C1917)        // primary text
-val Muted = Color(0xFF7A6F63)      // secondary text
-val Line = Color(0xFFE8E4DE)       // hairlines / card borders
+/**
+ * Owner round 13 (2026-09-05): a DARK BLUE app theme, on by default. The
+ * palette below is state-backed, so flipping [KpThemeMode.darkBlue] live at
+ * runtime re-skins every screen that reads these tokens — no restart needed.
+ */
+object KpThemeMode {
+    var darkBlue: Boolean by androidx.compose.runtime.mutableStateOf(true)
+
+    private const val PREF = "app_theme"
+
+    fun load(ctx: android.content.Context) {
+        darkBlue = ctx.getSharedPreferences("kp", 0).getString(PREF, "dark_blue") != "light"
+    }
+
+    fun set(ctx: android.content.Context, dark: Boolean) {
+        darkBlue = dark
+        ctx.getSharedPreferences("kp", 0).edit().putString(PREF, if (dark) "dark_blue" else "light").apply()
+    }
+}
+
+val Cream: Color
+    get() = if (KpThemeMode.darkBlue) Color(0xFF0D1524) else Color(0xFFF7F6F4) // app background
+val Card: Color
+    get() = if (KpThemeMode.darkBlue) Color(0xFF16213A) else Color(0xFFFFFFFF) // cards, 16dp radius
+val Ink: Color
+    get() = if (KpThemeMode.darkBlue) Color(0xFFE9EDF6) else Color(0xFF1C1917) // primary text
+val Muted: Color
+    get() = if (KpThemeMode.darkBlue) Color(0xFF8A97B2) else Color(0xFF7A6F63) // secondary text
+val Line: Color
+    get() = if (KpThemeMode.darkBlue) Color(0xFF233150) else Color(0xFFE8E4DE) // hairlines / borders
 val Gold = Color(0xFFF59E0B)       // primary amber
 val GoldLight = Color(0xFFFDE68A)  // gradient ring start
-val GoldDeep = Color(0xFFB45309)   // pressed / emphasized amber text
-val GoldSoft = Color(0xFFFEF3C7)   // soft amber fills
+val GoldDeep: Color
+    get() = if (KpThemeMode.darkBlue) Color(0xFFF5A623) else Color(0xFFB45309) // emphasized amber
+val GoldSoft: Color
+    get() = if (KpThemeMode.darkBlue) Color(0xFF2A2C3D) else Color(0xFFFEF3C7) // soft amber fills
 val AmberInk = Color(0xFFFFFBEB)   // on-gold text
 val Green = Color(0xFF16A34A)      // accept / online
 val Red = Color(0xFFDC2626)        // end / decline
