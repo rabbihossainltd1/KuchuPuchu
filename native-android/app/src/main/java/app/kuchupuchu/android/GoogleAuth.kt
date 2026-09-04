@@ -143,10 +143,29 @@ object GoogleAuth {
 
     /**
      * Extracts the ID token from whatever the Credential Manager handed back.
-     * Only a real GoogleIdTokenCredential with a non-blank token counts —
-     * anything else (password credential, web-flow pseudo-credential) maps to
-     * "" so the caller can retry instead of dying with a cryptic error.
+     *
+     * THE fix (owner round 5, 2026-09-04): Credential Manager does NOT
+     * auto-deserialize the Google credential — on every OEM (Realme, MIUI,
+     * Pixel, anything) it returns a plain CustomCredential whose `type` is
+     * the Google ID-token string and whose payload lives in `data`. The old
+     * `is GoogleIdTokenCredential` check therefore failed on EVERY successful
+     * sign-in — the sheet worked, the token sat right there in `data`, and
+     * the app still said "didn't return a token". The official pattern is
+     * GoogleIdTokenCredential.createFrom(credential.data); that parse is a
+     * local operation, so this works identically on every Android phone.
+     * Anything that still parses to nothing maps to "" so the caller can
+     * retry instead of dying with a cryptic error.
      */
-    private fun tokenOf(c: androidx.credentials.Credential): String =
-        if (c is GoogleIdTokenCredential && c.idToken.isNotBlank()) c.idToken else ""
+    private fun tokenOf(c: androidx.credentials.Credential): String {
+        if (c is GoogleIdTokenCredential && c.idToken.isNotBlank()) return c.idToken
+        if (c is androidx.credentials.CustomCredential &&
+            c.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+        ) {
+            return runCatching { GoogleIdTokenCredential.createFrom(c.data).idToken }
+                .getOrNull()
+                ?.takeIf { it.isNotBlank() }
+                ?: ""
+        }
+        return ""
+    }
 }
