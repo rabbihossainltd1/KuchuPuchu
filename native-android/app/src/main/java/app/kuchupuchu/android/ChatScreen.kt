@@ -6,6 +6,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -1310,7 +1311,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         color = Ink,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 6.dp),
+                        modifier = Modifier.padding(top = 10.dp),
                     )
                     if (verified) {
                         Spacer(Modifier.width(5.dp))
@@ -3378,18 +3379,18 @@ private fun AiTypingBubble() {
 }
 
 /**
- * Owner profile card (owner round 2026-09-04): shown in the KuchuPuchu AI
- * chat under the answer to any owner/developer/malik question. Compact by
- * owner request (2026-09-04 second pass): real owner photo, smaller icons.
- * Every icon deep-links out — Facebook/Instagram/Telegram/TikTok open the
- * app via the standard profile URLs, mail opens the mail client, the globe
- * opens the site — and the chat button starts a DIRECT chat with the owner
- * inside KuchuPuchu.
+ * Owner profile card (owner rounds 2026-09-04). Final layout per the owner's
+ * own spec: the photo sits on top at the SAME size a sent picture renders
+ * (225dp, rounded, tap to view fullscreen); under it the name "MD Rabbi
+ * Hossain", his details, then compact social icons and a full-width
+ * "Send Message" button that opens a direct chat with his KuchuPuchu
+ * account. The card springs in with a scale+fade entrance.
  */
 @Composable
 private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
     val ctx = LocalContext.current
     val ownerId = m.optJSONObject("meta")?.optString("ownerUserId").orEmpty()
+    var showPhoto by remember { mutableStateOf(false) }
     fun open(url: String) {
         runCatching {
             ctx.startActivity(
@@ -3397,110 +3398,136 @@ private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
             )
         }
     }
+
+    // Entrance: pop in with a soft spring + fade.
+    var appeared by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { appeared = true }
+    val scale by animateFloatAsState(
+        if (appeared) 1f else 0.86f,
+        spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
+        label = "cardScale",
+    )
+    val alpha by animateFloatAsState(
+        if (appeared) 1f else 0f,
+        tween(200),
+        label = "cardAlpha",
+    )
+
     Row(
         Modifier.fillMaxWidth().padding(vertical = 3.dp),
         horizontalArrangement = Arrangement.Start,
     ) {
         Column(
             Modifier
-                .widthIn(min = 200.dp, max = 264.dp)
-                .clip(
-                    RoundedCornerShape(
-                        topStart = 16.dp,
-                        topEnd = 16.dp,
-                        bottomStart = 5.dp,
-                        bottomEnd = 16.dp,
-                    ),
-                )
-                .background(Brush.linearGradient(listOf(Card, Card)))
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                    this.alpha = alpha
+                }
+                // Same width a sent photo gets — the owner asked for exactly
+                // that size for his picture.
+                .widthIn(max = 225.dp)
+                .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 5.dp, bottomEnd = 16.dp))
+                .background(Brush.linearGradient(listOf(Card, Card))),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // ---- the photo: sent-picture size, tap to open fullscreen ----
+            androidx.compose.foundation.Image(
+                painter = painterResource(R.drawable.owner_avatar),
+                contentDescription = "Rabbi Hossain",
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f)
+                    .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+                    .clickable { showPhoto = true },
+            )
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+                Text("MD Rabbi Hossain", fontSize = 15.5.sp, fontWeight = FontWeight.Bold, color = Ink)
+                Text(
+                    "Founder & Developer of KuchuPuchu",
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = GoldDeep,
+                )
+                Spacer(Modifier.height(3.dp))
+                Text("Kaliganj, Jhenaidah, Khulna, Bangladesh", fontSize = 10.sp, color = Muted)
+                Spacer(Modifier.height(9.dp))
+                // ---- compact social row ----
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OwnerCardIcon(onClick = { open("https://facebook.com/Rabbihossainltd") }) {
+                        Icon(painterResource(R.drawable.ic_brand_facebook), "Facebook", tint = Color.Unspecified, modifier = Modifier.size(14.dp))
+                    }
+                    OwnerCardIcon(onClick = { open("https://instagram.com/Rabbihossainltd1") }) {
+                        Icon(painterResource(R.drawable.ic_brand_instagram), "Instagram", tint = Color.Unspecified, modifier = Modifier.size(14.dp))
+                    }
+                    OwnerCardIcon(onClick = { open("https://t.me/Rabbihossainltd0") }) {
+                        Icon(painterResource(R.drawable.ic_brand_telegram), "Telegram", tint = Color.Unspecified, modifier = Modifier.size(14.dp))
+                    }
+                    OwnerCardIcon(onClick = { open("https://tiktok.com/@Rabbihossainltd") }) {
+                        Icon(painterResource(R.drawable.ic_brand_tiktok), "TikTok", tint = Color.Unspecified, modifier = Modifier.size(14.dp))
+                    }
+                    OwnerCardIcon(onClick = { open("mailto:info@rabbihossainltd.online") }) {
+                        Icon(Icons.Filled.Email, "Email", tint = GoldDeep, modifier = Modifier.size(14.dp))
+                    }
+                    OwnerCardIcon(onClick = { open("https://rabbihossainltd.online") }) {
+                        Icon(Icons.Filled.Language, "Website", tint = GoldDeep, modifier = Modifier.size(14.dp))
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                // ---- Send Message: direct chat with the owner's account ----
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (ownerId.isNotBlank()) Gold else Color(0xFFE7E5E4))
+                        .clickable(enabled = ownerId.isNotBlank()) { onMessageOwner(ownerId) }
+                        .padding(vertical = 9.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Chat,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text("Send Message", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+
+    // ---- fullscreen photo view (tap the picture) ----
+    if (showPhoto) {
+        Dialog(onDismissRequest = { showPhoto = false }) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color(0xEE000000))
+                    .clickable { showPhoto = false },
+                contentAlignment = Alignment.Center,
+            ) {
                 androidx.compose.foundation.Image(
                     painter = painterResource(R.drawable.owner_avatar),
                     contentDescription = "Rabbi Hossain",
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(CircleShape),
+                    modifier = Modifier.fillMaxWidth(),
                 )
-                Spacer(Modifier.width(9.dp))
-                Column {
-                    Text("Rabbi Hossain", fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = Ink)
-                    Text(
-                        "Founder & Developer of KuchuPuchu",
-                        fontSize = 10.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = GoldDeep,
-                    )
-                }
-            }
-            Spacer(Modifier.height(5.dp))
-            Text("Kaliganj, Jhenaidah, Khulna, Bangladesh", fontSize = 10.sp, color = Muted)
-            Spacer(Modifier.height(8.dp))
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OwnerCardIcon(onClick = { open("https://facebook.com/Rabbihossainltd") }) {
-                    Icon(
-                        painterResource(R.drawable.ic_brand_facebook),
-                        contentDescription = "Facebook",
-                        tint = Color.Unspecified,
-                        modifier = Modifier.size(15.dp),
-                    )
-                }
-                OwnerCardIcon(onClick = { open("https://instagram.com/Rabbihossainltd1") }) {
-                    Icon(
-                        painterResource(R.drawable.ic_brand_instagram),
-                        contentDescription = "Instagram",
-                        tint = Color.Unspecified,
-                        modifier = Modifier.size(15.dp),
-                    )
-                }
-                OwnerCardIcon(onClick = { open("https://t.me/Rabbihossainltd0") }) {
-                    Icon(
-                        painterResource(R.drawable.ic_brand_telegram),
-                        contentDescription = "Telegram",
-                        tint = Color.Unspecified,
-                        modifier = Modifier.size(15.dp),
-                    )
-                }
-                OwnerCardIcon(onClick = { open("https://tiktok.com/@Rabbihossainltd") }) {
-                    Icon(
-                        painterResource(R.drawable.ic_brand_tiktok),
-                        contentDescription = "TikTok",
-                        tint = Color.Unspecified,
-                        modifier = Modifier.size(15.dp),
-                    )
-                }
-                OwnerCardIcon(onClick = { open("mailto:info@rabbihossainltd.online") }) {
-                    Icon(Icons.Filled.Email, contentDescription = "Email", tint = GoldDeep, modifier = Modifier.size(15.dp))
-                }
-                OwnerCardIcon(onClick = { open("https://rabbihossainltd.online") }) {
-                    Icon(Icons.Filled.Language, contentDescription = "Website", tint = GoldDeep, modifier = Modifier.size(15.dp))
-                }
-                if (ownerId.isNotBlank()) {
-                    OwnerCardIcon(highlight = true, onClick = { onMessageOwner(ownerId) }) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Chat,
-                            contentDescription = "Message",
-                            tint = Color.White,
-                            modifier = Modifier.size(15.dp),
-                        )
-                    }
-                }
             }
         }
     }
 }
 
 @Composable
-private fun OwnerCardIcon(highlight: Boolean = false, onClick: () -> Unit, icon: @Composable () -> Unit) {
+private fun OwnerCardIcon(onClick: () -> Unit, icon: @Composable () -> Unit) {
     Box(
         Modifier
-            .size(30.dp)
+            .size(27.dp)
             .clip(CircleShape)
-            .background(if (highlight) Gold else GoldSoft)
+            .background(GoldSoft)
             .clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) {

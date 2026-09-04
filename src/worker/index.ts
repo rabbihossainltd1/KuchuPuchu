@@ -924,6 +924,12 @@ async function sendAiReply(
       "Bengali OR Banglish (Bengali typed in Latin letters), ALWAYS reply in pure Bengali " +
       "script in natural everyday language (চলতি ভাষা) — NEVER reply in Banglish or " +
       "Latin-letter Bengali. " +
+      // Owner follow-up 2026-09-04: the name still came out in Bengali script
+      // (রবি হোসাইন). Stated twice, as a hard output rule.
+      "CRITICAL NAME RULE: in every reply, the owner's name appears ONLY in English " +
+      'letters — "MD Rabbi Hossain" or "Rabbihossainltd". Writing his name in ' +
+      "Bengali script (রবি হোসাইন or similar) is strictly forbidden, even inside an " +
+      "otherwise-Bengali reply. " +
       "No hashtags, no signature line. Reply with the message text only.";
     // Owner round 2026-09-04: photo creation + editing. The NEWEST message is
     // the user's: an IMAGE with a caption = edit request; a TEXT with a
