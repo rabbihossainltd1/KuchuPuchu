@@ -536,13 +536,30 @@ const convBetween = (db, a, b) =>
       gauth.includes("TYPE_GOOGLE_ID_TOKEN_CREDENTIAL"),
   );
   check(
-    "header subtitle line alone rises a touch (name/header untouched)",
-    chat.includes("Modifier.offset(y = (-2).dp)"),
+    "header subtitle raised further (only that line moves)",
+    chat.includes("Modifier.offset(y = (-6).dp)"),
   );
   check(
     "bundled owner photo is high-res (fullscreen stays sharp)",
     existsSync("native-android/app/src/main/res/drawable-nodpi/owner_avatar.jpg") &&
       statSync("native-android/app/src/main/res/drawable-nodpi/owner_avatar.jpg").size > 40000,
+  );
+
+  // ---- Owner round 6 (2026-09-04) ----
+  check(
+    "owner card photo bigger: 92% width card + square photo",
+    chat.includes("0.92f") && chat.includes(".aspectRatio(1f)"),
+  );
+  check(
+    "text bubbles carry the timestamp INLINE (single-line stays single-line)",
+    chat.includes('appendInlineContent("tick"') && chat.includes('if (kind != "TEXT")'),
+  );
+  check("timestamp parsing memoized (scroll perf)", chat.includes("stampCache"));
+  check(
+    "socket-down fallback poll 3s + active rejoin (realtime lateness)",
+    chat.includes(">= 3_000") &&
+      chat.includes("KpSocket.joinChat(convId)") &&
+      chat.includes("lastRejoin"),
   );
   check("the retired Banglish-spelling rule is gone", !src.includes("kemon achen"));
 }
