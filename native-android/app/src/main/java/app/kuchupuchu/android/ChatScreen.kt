@@ -410,6 +410,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // Clear the list badge NOW — waiting for the next list poll
                     // made the unread counter hang around after reading.
                     ScreenStore.markRead(convId)
+                    // ...and the OS notification cards too (Owner round 4):
+                    // reading live must shrink the number instantly, on every
+                    // surface there is.
+                    runCatching { KpNotify.cancelConversation(ctx, convId) }
                 }
             } catch (_: Exception) {
             }
@@ -500,6 +504,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                             }
                             ScreenStore.setMsgs(convId, msgs.toList())
                         }
+                        // Viewed live with the chat open: the notification
+                        // card for this conversation is already stale.
+                        runCatching { KpNotify.cancelConversation(ctx, convId) }
                         if (msgSyncPending.compareAndSet(false, true)) {
                             scope.launch {
                                 // Force the authoritative GET: a realtime event is
@@ -1176,7 +1183,6 @@ fun ChatScreen(nav: NavController, convId: String) {
             lastInThread != null &&
             !lastInThread.optBoolean("failed", false) &&
             lastInThread.optString("senderId") == Store.myId()
-    val typingNow = typingLeaseActive || aiTyping
 
     // A brand-new AI reply (created after open) types itself out word by word.
     LaunchedEffect(msgs.size) {
@@ -1303,14 +1309,12 @@ fun ChatScreen(nav: NavController, convId: String) {
             ) {
             KpAvatar(title, avatarUrl, 40.dp, avatarRef = avatarRef)
             Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    // Owner round 3 (2026-09-04): the whole name row — name
-                    // AND its badges — sits lower TOGETHER, so the verified
-                    // tick never separates from the name.
-                    modifier = Modifier.padding(top = 8.dp),
-                ) {
+            // Owner round 4 (2026-09-04): the name sits at the avatar's
+            // middle. A draw-time offset (not padding!) moves the text block
+            // down WITHOUT growing the header — so the last-seen line lands
+            // right under the name and NO extra space appears at the bottom.
+            Column(Modifier.weight(1f).offset(y = 6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         title,
                         fontSize = 16.sp,
@@ -1330,7 +1334,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                 }
                 Text(
                     when {
-                        typingNow -> "typing..."
                         isGroup -> "${c?.arr("members")?.length() ?: 0} members"
                         botChat -> "Official account"
                         online -> "online"
@@ -1339,12 +1342,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     fontSize = 11.5.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    color = when {
-                        typingNow -> GoldDeep
-                        online -> Green
-                        else -> Muted
-                    },
-                    fontWeight = if (typingNow) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (online) Green else Muted,
                 )
             }
             }
@@ -1516,8 +1514,11 @@ fun ChatScreen(nav: NavController, convId: String) {
                 ) { m ->
                     MessageRow(m, isGroup, Store.myId(), otherReadAt, player, pendingEcho = true)
                 }
-                if (aiTyping) {
-                    item(key = "ai-typing-bubble") { AiTypingBubble() }
+                // Owner round 4: one pretty bouncing-dots bubble whenever
+                // EITHER side is typing — the AI composing, or the other
+                // person's typing lease (the header used to carry this).
+                if (aiTyping || typingLeaseActive) {
+                    item(key = "typing-bubble") { TypingBubble() }
                 }
                 if (uploading > 0) {
                     item {
@@ -3171,7 +3172,15 @@ private fun msgStamp(iso: String): String {
     if (iso.isBlank()) return ""
     return try {
         val z = atDhaka(java.time.Instant.parse(iso))
-        String.format("%02d:%02d", z.hour, z.minute)
+        // Owner round 4: 12-hour clock with AM/PM (the 24-hour stamp read
+        // as wrong in the AI chat; now every bubble matches the security
+        // card's format).
+        String.format(
+            "%d:%02d %s",
+            (z.hour % 12).let { if (it == 0) 12 else it },
+            z.minute,
+            if (z.hour >= 12) "PM" else "AM",
+        )
     } catch (e: Exception) {
         ""
     }
@@ -3376,11 +3385,11 @@ private fun CallLogBubble(m: JSONObject, mine: Boolean, pendingEcho: Boolean) {
  * dots stepping gold while the reply is being generated, WhatsApp-style.
  */
 @Composable
-private fun AiTypingBubble() {
-    val phase by rememberInfiniteTransition(label = "ai-typing").animateFloat(
+private fun TypingBubble() {
+    val phase by rememberInfiniteTransition(label = "typing").animateFloat(
         initialValue = 0f,
         targetValue = 3f,
-        animationSpec = infiniteRepeatable(tween(850, easing = LinearEasing), RepeatMode.Restart),
+        animationSpec = infiniteRepeatable(tween(1100, easing = LinearEasing), RepeatMode.Restart),
         label = "phase",
     )
     Row(
@@ -3394,15 +3403,20 @@ private fun AiTypingBubble() {
                 .widthIn(min = 64.dp)
                 .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 5.dp, bottomEnd = 16.dp))
                 .background(Brush.linearGradient(listOf(Card, Card)))
-                .padding(horizontal = 14.dp, vertical = 12.dp),
+                .padding(horizontal = 14.dp, vertical = 13.dp),
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 repeat(3) { i ->
+                    // Owner round 4: each dot lifts and brightens in turn —
+                    // a smooth wave instead of the old hard on/off swap.
+                    val t = (phase - i).coerceIn(0f, 1f)
+                    val lift = kotlin.math.sin((t * Math.PI).toFloat())
                     Box(
                         Modifier
                             .size(8.dp)
+                            .graphicsLayer { translationY = -4.dp.toPx() * lift }
                             .clip(CircleShape)
-                            .background(if (phase.toInt() == i) GoldDeep else Color(0xFFD6D3D1)),
+                            .background(GoldDeep.copy(alpha = 0.35f + 0.65f * lift)),
                     )
                 }
             }
@@ -3520,7 +3534,13 @@ private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
 
     // ---- fullscreen photo view (tap the picture) ----
     if (showPhoto) {
-        Dialog(onDismissRequest = { showPhoto = false }) {
+        // Owner round 4: usePlatformDefaultWidth = false — the platform's
+        // default dialog width capped the whole thing into a small box;
+        // without it the dark backdrop truly fills the screen.
+        Dialog(
+            onDismissRequest = { showPhoto = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
             Box(
                 Modifier
                     .fillMaxSize()

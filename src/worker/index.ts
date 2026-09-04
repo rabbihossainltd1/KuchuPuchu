@@ -1145,16 +1145,27 @@ async function sendAiReply(
     // — the text reply above already did unread/push/last_message.
     const asked = rows.length ? (rows[rows.length - 1]?.body ?? "") : "";
     if (OWNER_INTENT.test(asked)) {
+      // Owner round 4 (2026-09-04): the old 10-message window let a NEW card
+      // land at the bottom every few exchanges, so a card was practically
+      // ALWAYS the newest thing in an owner-heavy thread. One card per
+      // conversation per 24h (and per 100 messages) — the card now behaves
+      // like a normal message: it appears once and scrolls up with the rest.
+      const dayAgo = new Date(Date.now() - 24 * 3600_000).toISOString();
       const cardAlready = await one<{ id: string }>(
         db,
         `SELECT id FROM messages WHERE conv_id = ? AND kind = 'OWNER_CARD' AND rowid >
-           (SELECT COALESCE(MAX(rowid), 0) FROM messages WHERE conv_id = ?) - 10`,
+           (SELECT COALESCE(MAX(rowid), 0) FROM messages WHERE conv_id = ?) - 100
+           AND created_at > ?`,
         convId,
         convId,
+        dayAgo,
       );
       if (!cardAlready) {
         const cardMid = id();
-        const cardCreated = nowIso();
+        // +2ms keeps the card strictly AFTER the reply it follows even when
+        // both land in the same millisecond (the history page sorts by
+        // created_at, and a tie could float the card above its answer).
+        const cardCreated = new Date(Date.now() + 2).toISOString();
         const ownerRow = await one<{ id: string }>(
           db,
           "SELECT id FROM users WHERE username = 'rabbihossainltd' LIMIT 1",

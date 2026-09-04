@@ -180,3 +180,26 @@ Suite: 32/32, 905 assertions (+11).
    the whole app session (never reappears), and the worker's decline
    endpoint now enforces the same 5-minute window server-side.
 Suite: 32/32, 914 assertions.
+
+## Owner round 4 — v3.9.24 / 100 (2026-09-04)
+
+1. **Header back to normal height** — the name block sits at the avatar's
+   optical middle via a draw-time offset (6dp): no layout growth, no extra
+   space under the header, last-seen right under the name, badges locked to
+   the name.
+2. **Owner photo viewer truly fullscreen** — the platform's default dialog
+   width was capping the black backdrop into a small box;
+   usePlatformDefaultWidth = false fixes it.
+3. **Owner card behaves like a normal message** — dedupe widened from 10
+   messages to once per conversation per 24h (and per 100 messages), so a
+   card no longer keeps landing at the bottom of owner-heavy threads; the
+   card timestamp is guaranteed strictly after its reply.
+4. **12-hour clock with AM/PM on every message stamp** (the AI chat had
+   24-hour stamps).
+5. **Pretty shared typing indicator** — one bouncing-dots bubble (smooth
+   wave, gold) for both the AI composing and the other person typing; the
+   header's "typing..." text is gone for all accounts.
+6. **Unread numbers update instantly** — viewing messages now also cancels
+   that conversation's OS notification cards on read and on live view, not
+   just the in-app badge.
+Suite: 32/32, 919 assertions.
