@@ -36,6 +36,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -1741,7 +1742,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFFFEE2E2))
+                    .background(Red.copy(alpha = 0.14f))
                     .padding(horizontal = 14.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -2151,7 +2152,7 @@ private fun Composer(
                 Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(Color(0xFFFEE2E2))
+                    .background(Red.copy(alpha = 0.14f))
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -2685,7 +2686,7 @@ private fun LoginApprovalMessage(m: JSONObject) {
             .fillMaxWidth()
             .padding(vertical = 6.dp)
             .clip(RoundedCornerShape(14.dp))
-            .background(Color(0xFFFFFBEB))
+            .background(GoldSoft)
             .border(
                 androidx.compose.foundation.BorderStroke(1.dp, Color(0x33F59E0B)),
                 RoundedCornerShape(14.dp),
@@ -2874,27 +2875,24 @@ private fun MessageRow(
             Box(
                 Modifier
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
+                    // Owner round 13b: the hand-rolled awaitEachGesture fought
+                    // the list's vertical scrolling (jank + crash on device).
+                    // detectHorizontalDragGestures waits for clear horizontal
+                    // intent (touch slop) before consuming, so chat scrolling
+                    // stays smooth and the reply swipe still works.
                     .pointerInput(m.optString("id")) {
-                        awaitEachGesture {
-                            awaitFirstDown(requireUnconsumed = false)
-                            var dx = 0f
-                            var consumed = false
-                            while (true) {
-                                val event = awaitPointerEvent()
-                                val change = event.changes.firstOrNull() ?: break
-                                val d = change.positionChange().x
-                                val dy = change.positionChange().y
-                                if (!consumed && kotlin.math.abs(dy) > kotlin.math.abs(d) * 2f) break
-                                dx = (dx + d).coerceIn(0f, replyThreshold * 1.8f)
-                                replyDrag = dx
-                                if (dx > 8f) consumed = true
-                                if (consumed) event.changes.forEach { it.consume() }
-                                if (event.changes.all { !it.pressed }) break
-                            }
-                            val armed = replyDrag >= replyThreshold
-                            replyDrag = 0f
-                            if (armed) onReply(m)
-                        }
+                        detectHorizontalDragGestures(
+                            onHorizontalDrag = { change, dragAmount ->
+                                change.consume()
+                                replyDrag = (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.8f)
+                            },
+                            onDragEnd = {
+                                val armed = replyDrag >= replyThreshold
+                                replyDrag = 0f
+                                if (armed) onReply(m)
+                            },
+                            onDragCancel = { replyDrag = 0f },
+                        )
                     }
                     .widthIn(min = 72.dp, max = bubbleMax)
                     .wrapContentWidth()

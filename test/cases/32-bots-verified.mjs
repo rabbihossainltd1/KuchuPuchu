@@ -839,9 +839,26 @@ const convBetween = (db, a, b) =>
   );
   check(
     "dark blue theme is the default (live-switchable)",
-    theme.includes("darkBlue: Boolean by androidx.compose.runtime.mutableStateOf(true)") &&
+    theme.includes("@Volatile\n    var darkBlue: Boolean = true") &&
       theme.includes('getString(PREF, "dark_blue")') &&
-      settings.includes('"App theme"'),
+      settings.includes('"App theme"') &&
+      settings.includes("recreate()"),
+  );
+  check(
+    "13b hotfix: palette is STATIC (no per-read snapshot state), theme applies via activity recreate",
+    !theme.includes("mutableStateOf") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/MainActivity.kt",
+        "utf8",
+      ).includes("KpThemeMode.load(this)"),
+  );
+  check(
+    "13b hotfix: reply swipe uses the standard gesture detector (no scroll fight)",
+    chat.includes("detectHorizontalDragGestures(") && !chat.includes("var consumed = false"),
+  );
+  check(
+    "13b hotfix: archive pull-hold observes crossings (no per-pixel restarts)",
+    chatlist.includes("snapshotFlow { pull >= threshold }"),
   );
   check(
     "in-call notification is app-styled: big red End, speaker voice-only",

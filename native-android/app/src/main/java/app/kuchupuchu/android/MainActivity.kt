@@ -157,6 +157,9 @@ class MainActivity : ComponentActivity() {
         }
 
         handleIntent(intent)
+        // Owner round 13b: the palette must be settled BEFORE the first frame —
+        // a post-composition load left one frame of mixed tokens.
+        KpThemeMode.load(this)
         setContent {
             KpTheme {
                 KpApp()

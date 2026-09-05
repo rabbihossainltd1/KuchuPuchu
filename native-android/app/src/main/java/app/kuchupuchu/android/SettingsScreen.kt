@@ -34,6 +34,8 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.AlertDialog
@@ -84,6 +86,9 @@ fun SettingsScreen(nav: NavController) {
     // Phone-auth: change-number dialog state.
     var showChangePhone by remember { mutableStateOf(false) }
     var showRingPicker by remember { mutableStateOf(false) }
+    // Owner round 13b: a proper two-option picker; applying recreates the
+    // activity so every surface re-skins at once (no half-applied theme).
+    var showThemePicker by remember { mutableStateOf(false) }
     var changePhone by remember { mutableStateOf("") }
     var changePhoneError by remember { mutableStateOf("") }
 
@@ -185,7 +190,7 @@ fun SettingsScreen(nav: NavController) {
                             .align(Alignment.BottomEnd)
                             .size(26.dp)
                             .clip(CircleShape)
-                            .background(Color.White)
+                            .background(Card)
                             .clickable {
                                 avatarPicker.launch(
                                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
@@ -241,7 +246,7 @@ fun SettingsScreen(nav: NavController) {
                 .fillMaxWidth()
                 .padding(14.dp)
                 .clip(RoundedCornerShape(16.dp))
-                .background(Color.White),
+                .background(Card),
         ) {
             SettingRow(Icons.Filled.Badge, "Name", me.value.optText("displayName").ifBlank { "—" }) {
                 editField = "displayName"; editValue = me.value.optText("displayName")
@@ -272,12 +277,7 @@ fun SettingsScreen(nav: NavController) {
                 Icons.Filled.Palette,
                 "App theme",
                 if (KpThemeMode.darkBlue) "Dark blue" else "Light",
-            ) {
-                // Owner round 13 (2026-09-05): dark blue is the DEFAULT; the
-                // previous light look stays one tap away. Applies instantly.
-                val setDark = !KpThemeMode.darkBlue
-                KpThemeMode.set(ctx, setDark)
-            }
+            ) { showThemePicker = true }
             SettingRow(
                 Icons.Filled.NotificationsActive,
                 "Incoming ringtone",
@@ -306,7 +306,7 @@ fun SettingsScreen(nav: NavController) {
                 .fillMaxWidth()
                 .padding(horizontal = 14.dp)
                 .clip(RoundedCornerShape(16.dp))
-                .background(Color.White),
+                .background(Card),
         ) {
             Row(
                 Modifier
@@ -335,7 +335,7 @@ fun SettingsScreen(nav: NavController) {
                 .fillMaxWidth()
                 .padding(horizontal = 14.dp)
                 .clip(RoundedCornerShape(16.dp))
-                .background(Color(0xFFFEE2E2))
+                .background(Red.copy(alpha = 0.12f))
                 .clickable { confirmLogout = true }
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -350,6 +350,46 @@ fun SettingsScreen(nav: NavController) {
 
 
     // Owner round 11: FULLSCREEN ringtone picker — tap previews, Save keeps.
+    if (showThemePicker) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showThemePicker = false },
+            confirmButton = {},
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { showThemePicker = false }) { Text("Close") }
+            },
+            title = { Text("App theme") },
+            text = {
+                Column {
+                    listOf(true to "Dark blue", false to "Light").forEach { (dark, label) ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (KpThemeMode.darkBlue == dark) GoldSoft else Color.Transparent)
+                                .clickable {
+                                    showThemePicker = false
+                                    if (KpThemeMode.darkBlue != dark) {
+                                        KpThemeMode.set(ctx, dark)
+                                        (ctx as? android.app.Activity)?.recreate()
+                                    }
+                                }
+                                .padding(horizontal = 12.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                if (KpThemeMode.darkBlue == dark) Icons.Filled.Check else Icons.Filled.Circle,
+                                null,
+                                tint = GoldDeep,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Text(label, fontSize = 14.5.sp, color = Ink)
+                        }
+                    }
+                }
+            },
+        )
+    }
     if (showRingPicker) {
         RingtonePickerScreen(onClose = { showRingPicker = false })
     }

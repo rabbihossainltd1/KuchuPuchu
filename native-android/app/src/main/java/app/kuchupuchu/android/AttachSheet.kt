@@ -791,7 +791,7 @@ private fun AttachTile(icon: ImageVector, tint: Color, label: String, onClick: (
                 .size(38.dp)
                 .clip(CircleShape)
                 .border(1.dp, Color(0x1F1C1917), CircleShape)
-                .background(Color(0xFFFFFFFF)),
+                .background(Card),
             contentAlignment = Alignment.Center,
         ) {
             Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(17.dp))

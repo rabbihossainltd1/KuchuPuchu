@@ -51,6 +51,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -328,24 +329,28 @@ private fun ArchivePullArea(nav: NavController, content: @Composable () -> Unit)
             }
         }
     }
-    LaunchedEffect(pull) {
-        if (pull >= threshold) {
-            val start = System.currentTimeMillis()
-            while (pull >= threshold && System.currentTimeMillis() - start < 3000) {
-                holdProgress = (System.currentTimeMillis() - start) / 3000f
-                delay(50)
+    // Owner round 13b: keying the effect on `pull` restarted the coroutine
+    // on EVERY overscroll pixel — coroutine churn read as main-screen jank.
+    // The effect runs once; snapshotFlow fires only when the held/not-held
+    // crossing actually changes.
+    LaunchedEffect(Unit) {
+        snapshotFlow { pull >= threshold }.collect { held ->
+            if (held) {
+                val start = System.currentTimeMillis()
+                while (pull >= threshold && System.currentTimeMillis() - start < 3000) {
+                    holdProgress = (System.currentTimeMillis() - start) / 3000f
+                    delay(50)
+                }
+                if (pull >= threshold) {
+                    holdProgress = 1f
+                    logoShown = true
+                    delay(450)
+                    nav.navigate("archive")
+                    logoShown = false
+                }
             }
-            if (pull >= threshold) {
-                holdProgress = 1f
-                logoShown = true
-                delay(450)
-                nav.navigate("archive")
-                logoShown = false
-                holdProgress = 0f
-            }
-            pull = 0f
-        } else {
             holdProgress = 0f
+            pull = 0f
         }
     }
     Box(Modifier.fillMaxSize().nestedScroll(conn)) {
