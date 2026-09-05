@@ -33,7 +33,11 @@ object KpUpdate {
     var downloadError by mutableStateOf("")
 
     fun installedVersionCode(ctx: Context): Int =
-        runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).let { it.longVersionCode.toInt() } }
+        runCatching {
+                val pi = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+                // longVersionCode needs API 28; versionCode (int) covers 24-27.
+                if (android.os.Build.VERSION.SDK_INT >= 28) pi.longVersionCode.toInt() else @Suppress("DEPRECATION") pi.versionCode
+            }
             .getOrDefault(0)
 
     /** Best-effort check; never throws. Call off the main thread. */
