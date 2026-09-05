@@ -171,7 +171,8 @@ fun StatusScreen(nav: NavController) {
                                     Icon(
                                         Icons.Filled.Add,
                                         contentDescription = "Add status",
-                                        tint = AmberInk,
+                                        // Round 22: ink-on-blue like ActionBtn, not theme amber.
+                                        tint = ActionBlueInk,
                                         modifier = Modifier.size(14.dp),
                                     )
                                 }

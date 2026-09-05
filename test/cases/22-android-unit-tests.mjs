@@ -33,10 +33,10 @@ const ciFlat = ci.replace(/\s+/g, " ");
     ci.indexOf("Unit tests + Android lint") < ci.indexOf("Build APK"),
   );
   check(
-    "round 15: CI builds exactly ONE APK artifact (owner pick: debug)",
-    ci.includes("assembleDebug") &&
+    "round 15/r22: CI builds debug AND release APKs (owner pick: both)",
+    ci.includes("assembleDebug assembleRelease") &&
       ci.includes("kuchupuchu-apk") &&
-      !ci.includes("assembleRelease"),
+      ci.includes("app-release.apk"),
   );
   check(
     "the style gate also lints test sources",

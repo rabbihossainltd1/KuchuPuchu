@@ -59,15 +59,17 @@
         <ImageView
             android:layout_width="17dp"
             android:layout_height="17dp"
-            android:layout_gravity="center"
+            android:layout_gravity="center_vertical"
             android:src="@drawable/kp_ic_call_end"
-            android:tint="#F0402F"
+            android:tint="#FFFFFF"
             android:contentDescription="@null" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="5dp"
+            android:gravity="center"
+            android:includeFontPadding="false"
             android:text="Hang up"
             android:textColor="#FFFFFF"
             android:textSize="13sp"

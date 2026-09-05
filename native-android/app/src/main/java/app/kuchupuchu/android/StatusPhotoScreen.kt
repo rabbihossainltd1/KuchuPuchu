@@ -129,7 +129,7 @@ fun StatusPhotoScreen(nav: NavController) {
                     Icon(
                         Icons.Filled.Videocam,
                         contentDescription = "Video status",
-                        tint = GoldDeep,
+                        tint = ActionBlueDeep,
                         modifier = Modifier.size(64.dp),
                     )
                     Spacer(Modifier.height(8.dp))
@@ -140,7 +140,7 @@ fun StatusPhotoScreen(nav: NavController) {
                     Icon(
                         androidx.compose.material.icons.Icons.Filled.PhotoLibrary,
                         contentDescription = "Pick photo",
-                        tint = GoldDeep,
+                        tint = ActionBlueDeep,
                         modifier = Modifier.size(44.dp),
                     )
                     Spacer(Modifier.height(8.dp))

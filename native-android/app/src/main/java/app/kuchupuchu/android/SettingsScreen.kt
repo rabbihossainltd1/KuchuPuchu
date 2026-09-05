@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -43,6 +44,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -272,66 +274,22 @@ fun SettingsScreen(nav: NavController) {
                 .clip(RoundedCornerShape(16.dp))
                 .background(Card),
         ) {
-            EditableSettingRow(
-                Icons.Filled.Badge, "Name", me.value.optText("displayName").ifBlank { "—" },
-                busy = busy,
-                rowKey = "displayName", activeKey = editingKey, onActiveKey = { editingKey = it },
-                onSubmit = { v, done -> saveInline("displayName", v, done) },
-            )
-            EditableSettingRow(
-                Icons.Filled.AlternateEmail, "Username", me.value.optText("username").ifBlank { "not set" },
-                busy = busy,
-                maxLength = 30,
-                hint = "lowercase letters, numbers, underscores",
-                rowKey = "username", activeKey = editingKey, onActiveKey = { editingKey = it },
-                onSubmit = { v, done -> saveInline("username", v, done) },
-            )
-            EditableSettingRow(
-                Icons.Filled.Info, "About", me.value.optText("about").ifBlank { "Hey! I'm using KuchuPuchu" },
-                busy = busy,
-                maxLength = 200,
-                rowKey = "about", activeKey = editingKey, onActiveKey = { editingKey = it },
-                onSubmit = { v, done -> saveInline("about", v, done) },
-            )
+            // Owner round 22: every profile field edits on its OWN screen.
+            SettingRow(Icons.Filled.Badge, "Name", me.value.optText("displayName").ifBlank { "—" }) {
+                nav.navigate("editfield/name")
+            }
+            SettingRow(Icons.Filled.AlternateEmail, "Username", me.value.optText("username").ifBlank { "not set" }) {
+                nav.navigate("editfield/username")
+            }
+            SettingRow(Icons.Filled.Info, "About", me.value.optText("about").ifBlank { "Hey! I'm using KuchuPuchu" }) {
+                nav.navigate("editfield/about")
+            }
             // Phone auth: the login identity now. Change needs the new SIM
             // literally present on this device (MATCH) — the worker rejects
             // anything weaker for a number change (PHONE_AUTH_PLAN.md §5).
-            EditableSettingRow(
-                Icons.Filled.Call, "Phone number", me.value.optText("phone").ifBlank { "not set" },
-                busy = busy,
-                rowKey = "phone", activeKey = editingKey, onActiveKey = { editingKey = it },
-                hint = "new SIM must be in this phone",
-                onSubmit = { v, done ->
-                    scope.launch {
-                        busy = true
-                        try {
-                            val e164 = PhoneVerifier.normalize(v)
-                            if (e164 == null) {
-                                done("Enter a valid number, e.g. 01712345678.")
-                            } else {
-                                val sim =
-                                    withContext(Dispatchers.IO) {
-                                        PhoneVerifier.verify(ctx, e164).wire()
-                                    }
-                                val updated =
-                                    withContext(Dispatchers.IO) {
-                                        Api.post(
-                                            "/api/auth/phone/change",
-                                            JSONObject().put("phone", e164).put("sim", sim),
-                                        )
-                                    }
-                                me.value = updated.optJSONObject("user") ?: me.value
-                                Store.saveMe(me.value)
-                                done(null)
-                            }
-                        } catch (e: Exception) {
-                            done(e.message ?: "Could not change the number.")
-                        } finally {
-                            busy = false
-                        }
-                    }
-                },
-            )
+            SettingRow(Icons.Filled.Call, "Phone number", me.value.optText("phone").ifBlank { "not set" }) {
+                nav.navigate("editfield/phone")
+            }
             // Owner round 10 (2026-09-04): his incoming-ringtone pack — the
             // user picks which one rings for calls. Default is the app's
             // ORIGINAL tone again (owner round 13); his "calling ringing"
@@ -374,6 +332,12 @@ fun SettingsScreen(nav: NavController) {
                         crashOn = on
                         KpCrash.setEnabled(ctx, on)
                     },
+                    // Owner round 22: the toggle rides the blue accent.
+                    colors = androidx.compose.material3.SwitchDefaults.colors(
+                        checkedThumbColor = ActionBlueInk,
+                        checkedTrackColor = ActionBlue,
+                        checkedBorderColor = ActionBlue,
+                    ),
                 )
             }
             // Owner round 16: in-app updates — checks the GitHub release and
@@ -543,7 +507,7 @@ private fun EditableSettingRow(
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(icon, contentDescription = label, tint = ActionBlueDeep, modifier = Modifier.size(21.dp))
+            Icon(icon, contentDescription = label, tint = ActionBlue, modifier = Modifier.size(21.dp))
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(label, fontSize = 13.sp, color = Muted)
@@ -990,5 +954,235 @@ fun SoundTypePickerScreen(onClose: () -> Unit, onPick: (String) -> Unit) {
             "Call ringtone",
             SoundPrefs.currentLabel(ctx) + " · plays for calls",
         ) { onPick("call") }
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Owner round 22: every profile field edits on its OWN screen.        */
+/* ------------------------------------------------------------------ */
+
+@Composable
+private fun EditFieldScaffold(title: String, hint: String, nav: NavController, content: @Composable () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Cream)
+            .statusBarsPadding()
+            .navigationBarsPadding(),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            androidx.compose.material3.IconButton(onClick = { nav.popBackStack() }) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Ink, modifier = Modifier.size(26.dp))
+            }
+            Column {
+                Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+                Text(hint, fontSize = 11.5.sp, color = Muted)
+            }
+        }
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
+            content()
+        }
+    }
+}
+
+@Composable
+private fun EditSaveButton(text: String, enabled: Boolean, busy: Boolean, onClick: () -> Unit) {
+    if (KpThemeMode.darkBlue) {
+        ActionBtn(text, Modifier.fillMaxWidth().padding(top = 18.dp), enabled && !busy, onClick)
+    } else {
+        GoldBtn(text, Modifier.fillMaxWidth().padding(top = 18.dp), enabled && !busy, onClick)
+    }
+}
+
+/** NAME: first + last, saved as the display name. */
+@Composable
+fun EditNameScreen(nav: NavController) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val full = Store.me?.optText("displayName") ?: ""
+    var first by remember { mutableStateOf(full.substringBefore(' ').trim()) }
+    var last by remember { mutableStateOf(full.substringAfter(' ', "").trim()) }
+    var busy by remember { mutableStateOf(false) }
+    var err by remember { mutableStateOf("") }
+    EditFieldScaffold("Name", "First and last name", nav) {
+        OutlinedTextField(value = first, onValueChange = { first = it.take(40); err = "" }, label = { Text("First name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(10.dp))
+        OutlinedTextField(value = last, onValueChange = { last = it.take(40); err = "" }, label = { Text("Last name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        if (err.isNotBlank()) Text(err, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+        EditSaveButton(
+            "Save",
+            first.isNotBlank(),
+            busy,
+        ) {
+            scope.launch {
+                busy = true
+                try {
+                    val updated = withContext(Dispatchers.IO) {
+                        Api.patch("/api/me", JSONObject().put("displayName", (first.trim() + " " + last.trim()).trim()))
+                    }
+                    Store.saveMe(updated.optJSONObject("user") ?: JSONObject())
+                    nav.popBackStack()
+                } catch (e: Exception) {
+                    err = e.message ?: "Could not save."
+                } finally {
+                    busy = false
+                }
+            }
+        }
+    }
+}
+
+/** USERNAME: live availability check with a tick when free. */
+@Composable
+fun EditUsernameScreen(nav: NavController) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var value by remember { mutableStateOf(Store.me?.optText("username") ?: "") }
+    var busy by remember { mutableStateOf(false) }
+    var checking by remember { mutableStateOf(false) }
+    var available by remember { mutableStateOf<Boolean?>(null) }
+    var err by remember { mutableStateOf("") }
+    fun check() {
+        val v = value.trim().lowercase()
+        if (!Regex("^[a-z0-9_]{3,30}$").matches(v)) {
+            available = false
+            return
+        }
+        checking = true
+        scope.launch {
+            try {
+                val res = withContext(Dispatchers.IO) { Api.get("/api/users/username-available?u=${android.net.Uri.encode(v)}") }
+                available = res.optBoolean("available")
+            } catch (_: Exception) {
+                available = null
+            } finally {
+                checking = false
+            }
+        }
+    }
+    EditFieldScaffold("Username", "lowercase letters, numbers, underscores", nav) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = value,
+                onValueChange = { value = it.trim().lowercase().take(30); available = null; err = "" },
+                label = { Text("Username") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
+            // the CHECK button: green tick when the name is free
+            IconButton(
+                onClick = { check() },
+                enabled = !checking && value.isNotBlank(),
+            ) {
+                when {
+                    checking -> CircularProgressIndicator(color = ActionBlue, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                    available == true -> Icon(Icons.Filled.Check, "Available", tint = Color(0xFF16A34A), modifier = Modifier.size(26.dp))
+                    available == false -> Icon(Icons.Filled.Close, "Taken", tint = Red, modifier = Modifier.size(24.dp))
+                    else -> Icon(Icons.Filled.Search, "Check availability", tint = ActionBlueDeep, modifier = Modifier.size(24.dp))
+                }
+            }
+        }
+        if (err.isNotBlank()) Text(err, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+        EditSaveButton("Save", available == true, busy) {
+            scope.launch {
+                busy = true
+                try {
+                    val updated = withContext(Dispatchers.IO) {
+                        Api.patch("/api/me", JSONObject().put("username", value.trim().lowercase()))
+                    }
+                    Store.saveMe(updated.optJSONObject("user") ?: JSONObject())
+                    nav.popBackStack()
+                } catch (e: Exception) {
+                    err = e.message ?: "Could not save."
+                } finally {
+                    busy = false
+                }
+            }
+        }
+    }
+}
+
+/** ABOUT: multiline, max 150 characters. */
+@Composable
+fun EditAboutScreen(nav: NavController) {
+    val scope = rememberCoroutineScope()
+    var value by remember { mutableStateOf(Store.me?.optText("about") ?: "") }
+    var busy by remember { mutableStateOf(false) }
+    var err by remember { mutableStateOf("") }
+    EditFieldScaffold("About", "Up to 150 characters", nav) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = { value = it.take(150); err = "" },
+            label = { Text("About") },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp),
+        )
+        Text("${value.length}/150", fontSize = 11.sp, color = Muted, modifier = Modifier.padding(top = 4.dp))
+        if (err.isNotBlank()) Text(err, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+        EditSaveButton("Save", true, busy) {
+            scope.launch {
+                busy = true
+                try {
+                    val updated = withContext(Dispatchers.IO) {
+                        Api.patch("/api/me", JSONObject().put("about", value.trim()))
+                    }
+                    Store.saveMe(updated.optJSONObject("user") ?: JSONObject())
+                    nav.popBackStack()
+                } catch (e: Exception) {
+                    err = e.message ?: "Could not save."
+                } finally {
+                    busy = false
+                }
+            }
+        }
+    }
+}
+
+/** PHONE: new number -> SIM verify (the new SIM must be in this phone). */
+@Composable
+fun EditPhoneScreen(nav: NavController) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var value by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var err by remember { mutableStateOf("") }
+    EditFieldScaffold("Phone number", "The new SIM must be in this phone", nav) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = { value = it; err = "" },
+            label = { Text("New number (e.g. +8801712345678)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (err.isNotBlank()) Text(err, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+        Text(
+            "Verification reads the SIM in this phone and matches it to the number — like login.",
+            fontSize = 11.5.sp, color = Muted, modifier = Modifier.padding(top = 8.dp),
+        )
+        EditSaveButton("Verify and change", true, busy) {
+            scope.launch {
+                busy = true
+                try {
+                    val e164 = PhoneVerifier.normalize(value)
+                    if (e164 == null) {
+                        err = "Enter a valid number, e.g. 01712345678."
+                    } else {
+                        val sim = withContext(Dispatchers.IO) { PhoneVerifier.verify(ctx, e164).wire() }
+                        val updated = withContext(Dispatchers.IO) {
+                            Api.post("/api/auth/phone/change", JSONObject().put("phone", e164).put("sim", sim))
+                        }
+                        Store.saveMe(updated.optJSONObject("user") ?: JSONObject())
+                        nav.popBackStack()
+                    }
+                } catch (e: Exception) {
+                    err = e.message ?: "Could not change the number."
+                } finally {
+                    busy = false
+                }
+            }
+        }
     }
 }

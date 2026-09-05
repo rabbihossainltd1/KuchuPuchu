@@ -345,6 +345,10 @@ object CallNotify {
                 .setFullScreenIntent(open, true)
                 .addAction(0, "Accept", accept)
                 .addAction(0, "Decline", decline)
+                // Owner round 22: if the process dies before the missed-call
+                // push lands, nobody is left to cancel this card — it self-
+                // retires after 60s instead of ringing forever.
+                .setTimeoutAfter(60_000L)
                 .setSound(Uri.parse("android.resource://${ctx.packageName}/${SoundPrefs.incomingRingRes(ctx)}"))
                 .build()
         ctx.getSystemService(NotificationManager::class.java).notify(INCOMING_ID, n)

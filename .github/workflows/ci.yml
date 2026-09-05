@@ -72,15 +72,17 @@ jobs:
       # Owner round 15 follow-up: the owner wants the DEBUG apk as the ONE
       # artifact CI uploads — release build, signing secrets and certificate
       # verification removed from CI at his instruction.
-      - name: Build APK
+      - name: Build APKs (debug + release)
         working-directory: native-android
         run: |
-          ./gradlew assembleDebug --no-daemon --stacktrace \
+          ./gradlew assembleDebug assembleRelease --no-daemon --stacktrace \
             -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
-      - name: Upload APK
+      - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
           name: kuchupuchu-apk
-          path: native-android/app/build/outputs/apk/debug/app-debug.apk
+          path: |
+            native-android/app/build/outputs/apk/debug/app-debug.apk
+            native-android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
 

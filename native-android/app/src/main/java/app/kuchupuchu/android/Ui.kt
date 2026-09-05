@@ -409,7 +409,9 @@ fun KpAvatar(
     name: String,
     url: String?,
     size: Dp,
-    ring: Boolean = true,
+    // Owner round 22: NO border on profile pictures in any theme — the
+    // ring only draws where the caller passes ring=true (status rings).
+    ring: Boolean = false,
     ringWidth: Dp = 2.5.dp,
     avatarRef: String? = null,
 ) {
@@ -504,6 +506,11 @@ fun GoldBtn(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
+    // Owner round 22: in dark-blue mode primary buttons ride the blue accent.
+    if (KpThemeMode.darkBlue) {
+        ActionBtn(text, modifier, enabled, onClick)
+        return
+    }
     androidx.compose.material3.Button(
         onClick = onClick,
         enabled = enabled,
@@ -824,5 +831,32 @@ fun KpShimmerListItem(alpha: Float = 0.6f) {
                     .clip(RoundedCornerShape(6.dp)).background(Line.copy(alpha = alpha)),
             )
         }
+    }
+}
+
+
+/** Owner round 22: the dark-blue primary button (GoldBtn routes here). */
+@Composable
+fun ActionBtn(
+    text: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    androidx.compose.material3.Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier,
+        shape = RoundedCornerShape(14.dp),
+        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+            containerColor = ActionBlue,
+            contentColor = ActionBlueInk,
+        ),
+    ) {
+        Text(
+            text,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        )
     }
 }

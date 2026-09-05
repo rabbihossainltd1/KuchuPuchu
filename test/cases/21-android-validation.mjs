@@ -213,8 +213,8 @@ const has = (finds, name) => finds.some((f) => f.check === name);
   // Owner round 15 follow-up: the owner's single CI artifact is the DEBUG
   // apk; the release/signing machinery is intentionally out of CI now.
   check(
-    "CI builds the debug variant as the single artifact",
-    ci.includes("assembleDebug") && !ci.includes("assembleRelease"),
+    "CI builds debug + release variants (owner r22: both APKs)",
+    ci.includes("assembleDebug assembleRelease") && ci.includes("apk/release/app-release.apk"),
   );
   const sh = (await import("node:fs")).readFileSync("scripts/ktlint-check.sh", "utf8");
   check(

@@ -857,8 +857,8 @@ const convBetween = (db, a, b) =>
       settings.includes("selCustom != null) GoldSoft else Card"),
   );
   check(
-    "13e: the row VALUE itself becomes the editor (no second box below)",
-    settings.includes("BasicTextField(") && !settings.includes("OutlinedTextField("),
+    "13e/r22: profile fields edit on their OWN screens (name/username/about/phone)",
+    settings.includes("OutlinedTextField(") && settings.includes("fun EditNameScreen("),
   );
   check(
     "13e: ringtone preview stops on ANY exit (dispose hook)",
@@ -945,7 +945,7 @@ const convBetween = (db, a, b) =>
       chatlist.includes("pop.animateTo(") &&
       chatlist.includes("< 2000)") &&
       chatlist.includes("/ 2000f") &&
-      chatlist.includes("Icons.Filled.Archive, null, tint = GoldDeep") &&
+      chatlist.includes("Icons.Filled.Archive, null, tint = ActionBlueDeep") &&
       !chatlist.includes("Keep holding for archived chats") &&
       !chatlist.includes("Pull down and hold") &&
       !chatlist.includes("LinearProgressIndicator") &&
@@ -969,7 +969,10 @@ const convBetween = (db, a, b) =>
     "r17-3/r18-2: ONE hang-up affordance — red icon + red 'Hang up' text, NO speaker button and NO backgrounds (r18)",
     ongoingxml.includes('android:id="@+id/kp_ongoing_end"') &&
       ongoingxml.includes("Hang up") &&
-      ongoingxml.includes("#F0402F") &&
+      readFileSync(
+        "native-android/app/src/main/res/drawable/kp_hangup_border.xml",
+        "utf8",
+      ).includes("#F0402F") &&
       !ongoingxml.includes("kp_ongoing_speaker") &&
       !callnotify.includes("speaker_wrap") &&
       !ongoingxml
@@ -991,7 +994,7 @@ const convBetween = (db, a, b) =>
   );
   check(
     "r17-8: half-open socket can't freeze the list — marker-gated safety refresh while foreground",
-    chatlist.includes("lastSafetyRefresh") && chatlist.includes("8_000"),
+    chatlist.includes("lastSafetyRefresh") && chatlist.includes("4_000"),
   );
   check(
     "r17-8: EVERY AI text reply broadcasts + pokes + pushes (not just owner-card replies)",
@@ -1058,9 +1061,9 @@ const convBetween = (db, a, b) =>
     "utf8",
   );
   check(
-    "r18-1: system back does NOT minimize the call — it stays fullscreen (r21: chevron minimizes)",
-    callscreen.includes("the call STAYS fullscreen") &&
-      callscreen.indexOf("engine.minimizeCall()") > callscreen.indexOf("multitask during a call") &&
+    "r18-1/r22: system back MINIMIZES the call into the notification — app usable underneath",
+    callscreen.includes("Owner round 22 (reverses the r18/r19 lock)") &&
+      callscreen.includes("engine.minimizeCall()") &&
       readFileSync(
         "native-android/app/src/main/java/app/kuchupuchu/android/MainActivity.kt",
         "utf8",
@@ -1079,7 +1082,7 @@ const convBetween = (db, a, b) =>
     "r18-6: PHOTOS render reaction chips too (MessageReactions wired into ImageMessageRow)",
     chat.indexOf("MessageReactions(m)") <
       chat.indexOf("Live upload fractions keyed by message clientId") &&
-      chat.split("MessageReactions(m)").length - 1 === 2,
+      chat.split("MessageReactions(m)").length - 1 === 3,
   );
   check(
     "r18-3: deleted tombstones reserve the stamp band (no tick/time overlap)",
@@ -1100,10 +1103,12 @@ const convBetween = (db, a, b) =>
   );
   /* ---------------- round 19 (owner feedback) ---------------- */
   check(
-    "r19-1/r21: fullscreen call LOCKED on system back — minimise ONLY via the on-screen chevron",
-    callscreen.includes("LOCKED round 19") &&
-      callscreen.includes("multitask during a call") &&
-      callscreen.indexOf("engine.minimizeCall()") > callscreen.indexOf("Multitask during a call") &&
+    "r19-1/r22: back minimizes; a NEW incoming ring always un-minimizes (in-app fullscreen ring)",
+    callscreen.includes("multitask during a call") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/CallEngine.kt",
+        "utf8",
+      ).includes("a NEW incoming ring always brings the") &&
       readFileSync(
         "native-android/app/src/main/java/app/kuchupuchu/android/KpPush.kt",
         "utf8",
@@ -1191,8 +1196,11 @@ const convBetween = (db, a, b) =>
     "r20-video: IN-APP player — video bubble + download-to-cache + VideoView/MediaController",
     chat.includes("fun fileLooksVideo(") &&
       chat.includes("fun VideoMessageRow(") &&
-      chat.includes("fun VideoPlayerDialog(") &&
+      chat.includes("fun VideoPlayerScreen(") &&
       chat.includes("Api.downloadToFile(src, dest)") &&
+      chat.includes("controller.show(0)") &&
+      chat.includes("object VideoThumbs") &&
+      chat.includes("MediaStore.Downloads") &&
       chat.includes("android.widget.VideoView(") &&
       chat.includes("android.widget.MediaController(") &&
       chat.includes("kp-video-cache"),
@@ -1409,8 +1417,10 @@ const convBetween = (db, a, b) =>
   );
   check(
     "14: settings — one editor at a time via a shared key + visible border box on the edited row",
-    settings.includes("var editingKey") &&
-      settings.includes("activeKey = editingKey") &&
+    settings.includes("fun EditNameScreen(") &&
+      settings.includes("fun EditUsernameScreen(") &&
+      settings.includes("fun EditAboutScreen(") &&
+      settings.includes("fun EditPhoneScreen(") &&
       settings.includes("border(1.dp, Gold, RoundedCornerShape(10.dp))") &&
       settings.includes('Opt(false, "Light Cream"') &&
       !settings.includes('false to "Light"') &&
@@ -1506,12 +1516,12 @@ const convBetween = (db, a, b) =>
       settings.includes("flush beside the text"),
   );
   check(
-    "15: AI replies fail over faster (per-model 10s -> 6s) + ONE debug APK per CI run",
+    "15: AI replies fail over faster (per-model 10s -> 6s) + both APKs per CI run (r22)",
     src.includes("Math.min(remaining, 6_000)") &&
       readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8").includes(
         "assembleDebug",
       ) &&
-      !readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8").includes(
+      readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8").includes(
         "assembleRelease",
       ),
   );

@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -131,6 +132,14 @@ fun SearchScreen(nav: NavController) {
             textStyle = androidx.compose.ui.text.TextStyle(fontSize = 15.sp),
             shape = RoundedCornerShape(14.dp),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            // Round 22: explicit border colours — the M3 default outline clashed
+            // with the dark-blue theme (owner: "global search bar border").
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = ActionBlue,
+                unfocusedBorderColor = Muted,
+                focusedLabelColor = ActionBlue,
+                cursorColor = ActionBlue,
+            ),
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)

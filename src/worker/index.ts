@@ -3753,6 +3753,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   if (path === "/api/me" && method === "GET") return json({ user: userSelf(me, true) });
 
+  // Owner round 22: username availability for the edit screen — same rules
+  // the PATCH itself enforces, so the tick mark never lies.
+  if (path === "/api/users/username-available" && method === "GET") {
+    const u = (url.searchParams.get("u") || "").trim().toLowerCase();
+    if (!/^[a-z0-9_]{3,30}$/.test(u)) return json({ available: false, reason: "invalid" });
+    const taken =
+      (await one(db, "SELECT id FROM users WHERE username = ? AND id != ?", u, uid)) != null;
+    return json({ available: !taken, reason: taken ? "taken" : "free" });
+  }
+
   if (path === "/api/me" && method === "PATCH") {
     const sets: string[] = [];
     const values: unknown[] = [];

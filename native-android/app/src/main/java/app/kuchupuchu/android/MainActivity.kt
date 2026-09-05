@@ -143,6 +143,9 @@ class MainActivity : ComponentActivity() {
         // background starter thread now (each is idempotent).
         Thread {
             runCatching { KpNotify.ensureChannels(this) }
+            // Owner round 22: preload the event-sound pool so the FIRST
+            // in-app message tone isn't silent while the pool loads.
+            runCatching { KpSounds.ensure(application) }
             if (CallEngine.instance == null) {
                 val engine = CallEngine(application)
                 engine.start(this)

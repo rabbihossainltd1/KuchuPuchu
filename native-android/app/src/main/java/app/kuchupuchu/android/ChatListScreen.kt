@@ -270,7 +270,7 @@ fun ChatListScreen(nav: NavController) {
                     if (justReturned || !KpSocket.userLive()) {
                         refresh()
                         lastSafetyRefresh = now
-                    } else if (now - lastSafetyRefresh >= 8_000) {
+                    } else if (now - lastSafetyRefresh >= 4_000) {
                         lastSafetyRefresh = now
                         refresh()
                     }
@@ -460,7 +460,7 @@ private fun ArchivePullArea(nav: NavController, state: ArchivePullState, content
                         trackColor = ActionBlueDeep.copy(alpha = 0.15f),
                         modifier = Modifier.size(46.dp),
                     )
-                    Icon(Icons.Filled.Archive, null, tint = GoldDeep, modifier = Modifier.size(22.dp))
+                    Icon(Icons.Filled.Archive, null, tint = ActionBlueDeep, modifier = Modifier.size(22.dp))
                 }
             } else {
                 Box(
@@ -477,7 +477,7 @@ private fun ArchivePullArea(nav: NavController, state: ArchivePullState, content
                         trackColor = ActionBlueDeep.copy(alpha = 0.15f),
                         modifier = Modifier.fillMaxSize(),
                     )
-                    Icon(Icons.Filled.Archive, null, tint = GoldDeep, modifier = Modifier.size(22.dp))
+                    Icon(Icons.Filled.Archive, null, tint = ActionBlueDeep, modifier = Modifier.size(22.dp))
                 }
             }
         }

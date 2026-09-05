@@ -567,6 +567,11 @@ class CallEngine(private val app: Application) {
         if (incoming && status == "RINGING" && !suppressed) {
             if (ringingId != ui.id) {
                 ringingId = ui.id
+                // Owner round 22: a NEW incoming ring always brings the
+                // fullscreen UI back — `minimized` used to survive from the
+                // previous call, so in-app the ring only ever showed as a
+                // notification ("app er vetor thakle fullscreen ashe na").
+                minimized = false
                 // Sweep the plain FCM payload card ONCE, immediately before our
                 // own ringing UI takes over. It used to run on EVERY poll tick
                 // (~2s) and `cancelSystemCallCards` also matches CATEGORY_CALL —

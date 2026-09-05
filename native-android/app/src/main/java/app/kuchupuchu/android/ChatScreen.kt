@@ -299,7 +299,6 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
     var viewerMsg by remember { mutableStateOf<JSONObject?>(null) }
-    var viewerVideo by remember { mutableStateOf<JSONObject?>(null) }
     var editing by remember { mutableStateOf<JSONObject?>(null) }
     var forwarding by remember { mutableStateOf(false) }
 
@@ -593,6 +592,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                         // is always SOMEONE ELSE's message (the recipient's own
                         // optimistic bubble lives in `pending`).
                         ev.optJSONObject("message")?.let { liveMsg ->
+                            // Owner round 22: the in-chat receive sound (his
+                            // pack) on every live bubble that lands.
+                            runCatching { KpSounds.receive(ctx) }
                             val liveId = liveMsg.optString("id")
                             val liveCid = liveMsg.optString("clientId")
                             val idxExisting = msgs.indexOfFirst { it.optString("id") == liveId }
@@ -1490,7 +1492,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-            KpAvatar(title, avatarUrl, 40.dp, avatarRef = avatarRef)
+            KpAvatar(title, avatarUrl, 46.dp, avatarRef = avatarRef) // Owner round 22: ektu zoom
             Spacer(Modifier.width(10.dp))
             // Owner round 4 (2026-09-04): the name sits at the avatar's
             // middle. A draw-time offset (not padding!) moves the text block
@@ -1752,7 +1754,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             .padding(horizontal = 10.dp)
                             .clip(RoundedCornerShape(18.dp))
                             .background(Card)
-                            .border(1.dp, GoldDeep, RoundedCornerShape(18.dp))
+                            .border(1.dp, ActionBlue, RoundedCornerShape(18.dp))
                             .padding(horizontal = 8.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceEvenly,
@@ -1877,7 +1879,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 }
                             },
                             onOpenImage = { msg -> viewerMsg = msg },
-                            onOpenVideo = { msg -> viewerVideo = msg },
+                            onOpenVideo = { msg ->
+                                val b64 = android.util.Base64.encodeToString(
+                                    msg.toString().toByteArray(),
+                                    android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP,
+                                )
+                                nav.navigate("videoplayer/$b64")
+                            },
                             revealChars = if (m.optString("id") == aiRevealId) aiRevealChars else null,
                             onReply = { haptics.tap(); replyTo = it; replyFocusNonce++ },
                             onLongPress = { msg ->
@@ -2120,9 +2128,6 @@ fun ChatScreen(nav: NavController, convId: String) {
             },
         )
 
-        viewerVideo?.let { m ->
-            VideoPlayerDialog(m = m, onClose = { viewerVideo = null })
-        }
         viewerMsg?.let { m ->
             ImageViewerDialog(
                 m = m,
@@ -3140,7 +3145,7 @@ private fun MessageRow(
     // Owner round 20: videos render as a tappable video bubble and play
     // IN-APP (the system player could never stream these auth-only files).
     if (kind == "FILE" && fileLooksVideo(m)) {
-        VideoMessageRow(m, mine, onOpen = onOpenVideo)
+        VideoMessageRow(m, mine, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo)
         return
     }
 
@@ -3199,7 +3204,9 @@ private fun MessageRow(
                                     if (mine) replyThreshold * 1.5f else replyThreshold
                                 val armed = kotlin.math.abs(replyDrag) >= need
                                 replyDrag = 0f
-                                if (armed) {
+                                // Owner round 22: deleted/unsent messages can
+                                // no longer be replied to.
+                                if (armed && m.optString("kind") != "DELETED") {
                                     // Owner round 21: his reply-swipe sound.
                                     runCatching { KpSounds.replySwipe(ctx) }
                                     onReply(m)
@@ -3367,18 +3374,12 @@ private fun MessageReactions(m: JSONObject) {
         Modifier.padding(start = 6.dp, top = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        // Owner round 22: bare emojis — no chip background, no border.
         grouped.forEach { (emoji, count) ->
-            Row(
-                Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(if (iHave) GoldSoft else Card)
-                    .border(1.dp, if (iHave) Gold else Line, RoundedCornerShape(10.dp))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(emoji, fontSize = 12.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(emoji, fontSize = 17.sp)
                 if (count > 1) {
-                    Spacer(Modifier.width(3.dp))
+                    Spacer(Modifier.width(2.dp))
                     Text("$count", fontSize = 10.sp, color = Muted)
                 }
             }
@@ -3432,138 +3433,222 @@ private fun EmojiSheetDialog(onPick: (String) -> Unit) {
 }
 
 /** True when a FILE message is really just a photo (image mime / extension). */
-/** Owner round 20: video message bubble — cached-frame thumbnail (when the
- *  file is already local), a play affordance and the duration. */
+/** Owner round 22: decoded-frame thumbnails cached in MEMORY — a chat's
+ *  videos stop re-decoding on every open. */
+private object VideoThumbs {
+    private val lru = object : LinkedHashMap<String, android.graphics.Bitmap>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, android.graphics.Bitmap>?): Boolean =
+            size > 48
+    }
+
+    @Synchronized
+    fun get(key: String): android.graphics.Bitmap? = lru[key]
+
+    @Synchronized
+    fun put(key: String, bmp: android.graphics.Bitmap) {
+        lru[key] = bmp
+    }
+}
+
+/** Owner round 20/22: video bubble — cached thumbnail at the video's OWN
+ *  aspect ratio, play affordance, duration (only when known). Selectable,
+ *  long-pressable (reactions) and swipe-replyable like photos. */
 @Composable
-private fun VideoMessageRow(m: JSONObject, mine: Boolean, onOpen: (JSONObject) -> Unit) {
+private fun VideoMessageRow(
+    m: JSONObject,
+    mine: Boolean,
+    selectedIds: List<String>,
+    onToggleSelect: (JSONObject) -> Unit,
+    onReply: (JSONObject) -> Unit,
+    onLongPress: (JSONObject) -> Unit,
+    onOpen: (JSONObject) -> Unit,
+) {
     val ctx = LocalContext.current
-    val fileName = m.optString("fileName").ifBlank { "Video" }
+    val haptics = rememberHaptics()
     val dest = remember(m.optString("id")) { videoCacheFile(ctx, m) }
-    val thumb by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(null, m.optString("id")) {
+    val cacheKey = remember(m.optString("id")) { dest.absolutePath }
+    var ratio by remember(m.optString("id")) { mutableStateOf(16f / 9f) }
+    var duration by remember(m.optString("id")) { mutableStateOf("") }
+    val thumb by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(VideoThumbs.get(cacheKey), m.optString("id")) {
+        if (value != null) return@produceState
         if (!dest.exists()) return@produceState
         value = withContext(Dispatchers.IO) {
-            // No .use{} here: MediaMetadataRetriever.close() only exists from
-            // API 29 — release() is the safe call on every level this app runs.
+            // No .use{}: close() is API 29+; release() is safe everywhere.
             val r = android.media.MediaMetadataRetriever()
             try {
                 r.setDataSource(dest.absolutePath)
-                r.getFrameAtTime(0L, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                val bmp = r.getFrameAtTime(0L, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                if (bmp != null) {
+                    val w = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toFloatOrNull() ?: 0f
+                    val h = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toFloatOrNull() ?: 0f
+                    if (w > 0f && h > 0f) ratio = (w / h).coerceIn(0.5f, 2.2f)
+                    val ms = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                    if (ms > 0L) duration = "%d:%02d".format(ms / 1000 / 60, ms / 1000 % 60)
+                }
+                bmp
             } catch (_: Exception) {
                 null
             } finally {
                 runCatching { r.release() }
             }
         }
+        value?.let { VideoThumbs.put(cacheKey, it) }
     }
-    val duration by androidx.compose.runtime.produceState("", m.optString("id")) {
-        if (!dest.exists()) return@produceState
-        value = withContext(Dispatchers.IO) {
-            runCatching {
-                val r = android.media.MediaMetadataRetriever()
-                val ms = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-                r.release()
-                "%d:%02d".format(ms / 1000 / 60, ms / 1000 % 60)
-            }.getOrDefault("")
-        }
-    }
-    Box(
+    // Owner round 22: photos-style reply drag on videos too.
+    var replyDrag by remember { mutableStateOf(0f) }
+    val replyOffset by animateFloatAsState(replyDrag, spring(stiffness = 1400f), label = "vidreplydrag")
+    val replyThreshold = with(LocalDensity.current) { 36.dp.toPx() }
+    val rowSelected = m.optString("id") in selectedIds
+    Row(
         Modifier
-            .widthIn(max = 235.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFF0B1220))
-            .border(1.dp, if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444), RoundedCornerShape(12.dp))
-            .clickable { onOpen(m) },
+            .fillMaxWidth()
+            .padding(vertical = 3.dp),
+        horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
+        Column {
         Box(
             Modifier
-                .fillMaxWidth()
-                .height(132.dp)
-                .background(Color(0xFF101A2E)),
-            contentAlignment = Alignment.Center,
+                .offset { IntOffset(replyOffset.roundToInt(), 0) }
+                .widthIn(max = 235.dp)
+                .shadow(2.dp, RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF0B1220))
+                .border(1.dp, if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444), RoundedCornerShape(12.dp))
+                .pointerInput(m.optString("id")) {
+                    detectHorizontalDragGestures(
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            replyDrag =
+                                if (mine) {
+                                    (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.4f, 0f)
+                                } else {
+                                    (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.4f)
+                                }
+                        },
+                        onDragEnd = {
+                            val armed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
+                            replyDrag = 0f
+                            if (armed && m.optString("kind") != "DELETED") {
+                                runCatching { KpSounds.replySwipe(ctx) }
+                                onReply(m)
+                            }
+                        },
+                        onDragCancel = { replyDrag = 0f },
+                    )
+                }
+                .combinedClickable(
+                    onClick = {
+                        if (selectedIds.isNotEmpty()) onToggleSelect(m) else onOpen(m)
+                    },
+                    onLongClick = {
+                        haptics.tap()
+                        onToggleSelect(m)
+                        onLongPress(m)
+                    },
+                ),
         ) {
-            val bmp = thumb
-            if (bmp != null) {
-                androidx.compose.foundation.Image(
-                    bitmap = bmp.asImageBitmap(),
-                    contentDescription = "Video",
-                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else {
-                Icon(
-                    Icons.Filled.Videocam,
-                    "Video",
-                    tint = Color.White.copy(alpha = 0.5f),
-                    modifier = Modifier.size(34.dp),
-                )
-            }
+            // the frame keeps the video's OWN aspect ratio (16:9 until known)
             Box(
                 Modifier
-                    .size(46.dp)
-                    .clip(CircleShape)
-                    .background(Color(0x99000000)),
+                    .fillMaxWidth(0.62f)
+                    .aspectRatio(ratio)
+                    .background(Color(0xFF101A2E)),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.PlayArrow, "Play video", tint = Color.White, modifier = Modifier.size(30.dp))
-            }
-            if (duration.isNotBlank()) {
-                Text(
-                    duration,
-                    color = Color.White,
-                    fontSize = 11.sp,
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(6.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color(0x88000000))
-                        .padding(horizontal = 5.dp, vertical = 1.dp),
-                )
+                val bmp = thumb
+                if (bmp != null) {
+                    androidx.compose.foundation.Image(
+                        bitmap = bmp.asImageBitmap(),
+                        contentDescription = "Video",
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    Icon(
+                        Icons.Filled.Videocam,
+                        "Video",
+                        tint = Color.White.copy(alpha = 0.5f),
+                        modifier = Modifier.size(34.dp),
+                    )
+                }
+                Box(
+                    Modifier
+                        .size(46.dp)
+                        .clip(CircleShape)
+                        .background(Color(0x99000000)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.PlayArrow, "Play video", tint = Color.White, modifier = Modifier.size(30.dp))
+                }
+                if (duration.isNotBlank()) {
+                    Text(
+                        duration,
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(6.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0x88000000))
+                            .padding(horizontal = 5.dp, vertical = 1.dp),
+                    )
+                }
+                if (rowSelected) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(ActionBlue.copy(alpha = 0.35f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.Check, "Selected", tint = Color.White, modifier = Modifier.size(28.dp))
+                    }
+                }
             }
         }
-        Text(
-            fileName,
-            color = Color.White,
-            fontSize = 12.sp,
-            maxLines = 1,
-            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-        )
+        MessageReactions(m)
+        }
     }
 }
 
-/** Owner round 20: the IN-APP video player — downloads (auth header) then
- *  plays locally with the full system controls: play/pause, seek bar and
- *  timestamps. No external player ever opens. */
+/** Owner round 22: the IN-APP video player as its OWN SCREEN (no popup):
+ *  download with the auth header, then VideoView + MediaController with
+ *  play/pause, seek bar and timestamps, kept visible. Save copies the file
+ *  into the system Downloads (API 29+). */
 @Composable
-private fun VideoPlayerDialog(m: JSONObject, onClose: () -> Unit) {
+fun VideoPlayerScreen(nav: NavController, b64: String) {
     val ctx = LocalContext.current
-    val src = remember(m.optString("id")) { videoSource(m) }
-    val dest = remember(m.optString("id")) { videoCacheFile(ctx, m) }
-    var state by remember(m.optString("id")) { mutableStateOf(if (dest.exists()) 1 else 0) } // 0 loading, 1 ready, -1 error
-    if (!dest.exists() && state == 0) {
-        LaunchedEffect(m.optString("id")) {
-            val ok = withContext(Dispatchers.IO) { runCatching { Api.downloadToFile(src, dest) }.getOrDefault(false) }
-            state = if (ok) 1 else -1
-        }
+    val m = remember(b64) {
+        runCatching {
+            JSONObject(
+                String(
+                    android.util.Base64.decode(b64, android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP),
+                    Charsets.UTF_8,
+                ),
+            )
+        }.getOrNull()
     }
-    androidx.compose.ui.window.Dialog(
-        onDismissRequest = onClose,
-        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Box(Modifier.fillMaxSize().background(Color(0xF2050A14))) {
-            when {
-                state == -1 -> Column(
-                    Modifier.align(Alignment.Center),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text("Could not load this video.", color = Color.White, fontSize = 14.sp)
-                    TextButton(onClick = onClose) { Text("Close", color = GoldDeep) }
+    var saved by remember { mutableStateOf(false) }
+    Box(Modifier.fillMaxSize().background(Color(0xF2050A14))) {
+        if (m == null) {
+            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Could not load this video.", color = Color.White, fontSize = 14.sp)
+            }
+        } else {
+            val src = remember(m.optString("id")) { videoSource(m) }
+            val dest = remember(m.optString("id")) { videoCacheFile(ctx, m) }
+            var state by remember(m.optString("id")) { mutableStateOf(if (dest.exists()) 1 else 0) }
+            if (!dest.exists() && state == 0) {
+                LaunchedEffect(m.optString("id")) {
+                    val ok = withContext(Dispatchers.IO) { runCatching { Api.downloadToFile(src, dest) }.getOrDefault(false) }
+                    state = if (ok) 1 else -1
                 }
-                state == 0 -> Column(
-                    Modifier.align(Alignment.Center),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    CircularProgressIndicator(color = GoldDeep)
+            }
+            when {
+                state == -1 -> Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Could not load this video.", color = Color.White, fontSize = 14.sp)
+                }
+                state == 0 -> Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = ActionBlue)
                     Spacer(Modifier.height(10.dp))
                     Text("Loading video…", color = Color.White, fontSize = 13.sp)
                 }
@@ -3574,19 +3659,59 @@ private fun VideoPlayerDialog(m: JSONObject, onClose: () -> Unit) {
                             val controller = android.widget.MediaController(it)
                             controller.setAnchorView(this)
                             setMediaController(controller)
-                            start()
+                            setOnPreparedListener { it.start(); controller.show(0) }
                         }
                     },
                     modifier = Modifier.fillMaxSize(),
                 )
             }
-            IconButton(
-                onClick = onClose,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .statusBarsPadding(),
-            ) {
-                Icon(Icons.Filled.Close, "Close video", tint = Color.White, modifier = Modifier.size(26.dp))
+        }
+        // top bar: back + save
+        Row(
+            Modifier
+                .align(Alignment.TopStart)
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = { nav.popBackStack() }) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Color.White, modifier = Modifier.size(28.dp))
+            }
+            Spacer(Modifier.weight(1f))
+            if (m != null) {
+                TextButton(onClick = {
+                    val dest = videoCacheFile(ctx, m)
+                    if (dest.exists()) {
+                        val ok = runCatching {
+                            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                                val name = m.optString("fileName").ifBlank { "KuchuPuchu video" }.let {
+                                    if (it.endsWith(".mp4")) it else "$it.mp4"
+                                }
+                                val values = android.content.ContentValues().apply {
+                                    put(android.provider.MediaStore.Downloads.DISPLAY_NAME, name)
+                                    put(android.provider.MediaStore.Downloads.MIME_TYPE, "video/mp4")
+                                }
+                                val uri = ctx.contentResolver.insert(
+                                    android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                                    values,
+                                ) ?: return@runCatching false
+                                ctx.contentResolver.openOutputStream(uri)?.use { out ->
+                                    dest.inputStream().use { it.copyTo(out) }
+                                }
+                                true
+                            } else {
+                                false
+                            }
+                        }.getOrDefault(false)
+                        saved = true
+                        android.widget.Toast.makeText(
+                            ctx,
+                            if (ok) "Saved to Downloads" else "Saving needs Android 10+",
+                            android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                }) { Text(if (saved) "Saved" else "Save", color = Color.White, fontSize = 14.sp) }
             }
         }
     }
@@ -3690,7 +3815,7 @@ private fun ImageMessageRow(
                         onDragEnd = {
                             val armed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
                             replyDrag = 0f
-                            if (armed) {
+                            if (armed && m.optString("kind") != "DELETED") {
                                 // Owner round 21: his reply-swipe sound.
                                 runCatching { KpSounds.replySwipe(ctx) }
                                 onReply(m)
@@ -3938,7 +4063,7 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendin
                 }
             }
             Spacer(Modifier.width(8.dp))
-            Column {
+            Column(Modifier.padding(end = if (mine) 46.dp else 30.dp)) {
                 Text("Voice message", fontSize = 14.sp, color = Ink)
                 val secs = m.optJSONObject("meta")?.optInt("seconds") ?: 0
                 val vFrac = UploadProgress.fracs[m.optString("clientId")]
@@ -4243,7 +4368,7 @@ private fun ChatSearchSheet(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(24.dp))
                 .background(Card)
-                .border(1.dp, GoldDeep, RoundedCornerShape(24.dp))
+                .border(1.dp, ActionBlue, RoundedCornerShape(24.dp))
                 .padding(horizontal = 16.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -4320,19 +4445,35 @@ private fun DisappearDialog(current: Int, onClose: () -> Unit, onPick: (Int) -> 
     val options = listOf(0 to "Off", 86400 to "24 hours", 604800 to "7 days", 7776000 to "90 days")
     AlertDialog(
         onDismissRequest = onClose,
-        title = { Text("Disappearing messages") },
+        containerColor = Card,
+        title = { Text("Disappearing messages", color = Ink) },
         text = {
             Column {
                 options.forEach { (sec, label) ->
-                    Text(
-                        if (sec == current) "●  $label" else "○  $label",
-                        modifier = Modifier.fillMaxWidth().clickable { onPick(sec) }.padding(vertical = 8.dp),
-                        color = Ink,
-                    )
+                    val on = sec == current
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (on) ActionBlue.copy(alpha = 0.18f) else Color.Transparent)
+                            .clickable { onPick(sec) }
+                            .padding(horizontal = 10.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            Modifier.size(18.dp).clip(CircleShape)
+                                .border(1.5.dp, if (on) ActionBlue else Line, CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (on) Box(Modifier.size(8.dp).clip(CircleShape).background(ActionBlue))
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Text(label, color = Ink, fontSize = 14.5.sp)
+                    }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onClose) { Text("Close", color = GoldDeep) } },
+        confirmButton = { TextButton(onClick = onClose) { Text("Close", color = ActionBlueDeep) } },
     )
 }
 

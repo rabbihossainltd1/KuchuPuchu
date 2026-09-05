@@ -123,6 +123,11 @@ fun KpApp() {
                     ChatScreen(nav, id)
                 }
                 composable("settings") { SettingsScreen(nav) }
+                // Owner round 22: per-field profile edit screens.
+                composable("editfield/name") { EditNameScreen(nav) }
+                composable("editfield/username") { EditUsernameScreen(nav) }
+                composable("editfield/about") { EditAboutScreen(nav) }
+                composable("editfield/phone") { EditPhoneScreen(nav) }
                 composable("status") { StatusScreen(nav) }
                 composable("calls") { CallsScreen(nav) }
                 composable("search") { SearchScreen(nav) }
@@ -131,6 +136,10 @@ fun KpApp() {
                     StatusViewerScreen(nav, whose)
                 }
                 composable("statusphoto") { StatusPhotoScreen(nav) }
+                // Owner round 22: the in-app video player is its own screen.
+                composable("videoplayer/{b64}") { entry ->
+                    VideoPlayerScreen(nav, entry.arguments?.getString("b64") ?: "")
+                }
                 composable("archive") { ArchiveScreen(nav) }
                 composable("profile/{id}") { entry ->
                     ProfileScreen(nav, entry.arguments?.getString("id") ?: "")

@@ -89,10 +89,10 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
                     modifier = Modifier
                         .padding(end = 8.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(if (on) GoldSoft else Card)
+                        .background(if (on) ActionBlue.copy(alpha = 0.18f) else Card)
                         .clickable { tab = i }
                         .padding(horizontal = 14.dp, vertical = 8.dp),
-                    color = if (on) GoldDeep else Muted,
+                    color = if (on) ActionBlueDeep else Muted,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 14.sp,
                 )
