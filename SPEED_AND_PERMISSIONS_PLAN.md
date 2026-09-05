@@ -479,3 +479,40 @@ the whole ChatScreen class, so it died on open with no error dialog.
 3. **Ringtone preview stops on exit** — a dispose hook stops the player on
    ANY exit path, system back included (it used to keep playing).
 Suite: 32/32.
+
+## Owner round 14 — polish sweep (v3.9.39 / 115, 2026-09-05)
+
+1. **Cold-open lag** — two causes removed: every skeleton row ran its own
+   infinite animation (now ONE shared alpha pulse per screen:
+   `rememberShimmerAlpha()` in Ui.kt; Profile/CallsTab/AI history/Chat all
+   switched), and the crash-report file was read synchronously at every
+   launch (now read off the main thread).
+2. **Realtime in an open chat** — the fallback poll only ran while
+   `chatLive()` was false, but mobile networks leave half-open sockets that
+   never fire onClose: live=true, no frames, silent freeze. A marker-gated
+   poll now also runs every 8s while the socket LOOKS connected (3s when
+   down, 10s rejoin unchanged) — near-free when nothing changed.
+3. **AI history** — newest row sat ~20px low (scrollToItem aligns the item's
+   top); a clamped top-up `scrollBy(24f)` lands it on the true bottom.
+4. **Chat themes restyle the WHOLE chat** — theme now sets wallpaper AND both
+   bubble fills (classic gold / mint / rose / night indigo), every wallpaper
+   has a dark-blue variant, and the picker is a themed dialog with colour
+   swatches (was a platform-light sheet with ● ○ glyphs).
+5. **Mic button** — visible rounded ring again (gold; red when cancel armed).
+6. **Archive pull chip** — animation ONLY: archive icon in a circular
+   progress ring + the ARCHIVED logo spring; no pill, border or instruction
+   text.
+7. **Call backdrop photo** — the real bug: avatars ride as inline `data:`
+   URIs; the backdrop blindly prefixed `Api.BASE` onto them → bogus request,
+   no photo. Data URIs now decode inline (same as KpAvatar/KpNetImage); the
+   ring-time warm only warms real http(s) URLs.
+8. **In-chat search** — stays scoped to this conversation; the bar is a
+   rounded pill (clear + close affordances) floating at the TOP of the
+   messages, results in a rounded card.
+9. **Forward** — full-screen picker (edge-to-edge sheet, back header, themed
+   rows) instead of a cramped popup with mismatched colours.
+10. **Themes** — light option renamed Cream (the palette it is); Dark blue
+    stays default.
+11. **Settings** — exactly one row editable at a time (shared editing key)
+    and the row being edited sits in a visible rounded gold border box.
+Suite: 32/32 = 1000 assertions.

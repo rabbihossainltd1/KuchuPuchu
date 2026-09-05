@@ -94,7 +94,8 @@ fun CallsScreen(nav: NavController) {
             // Owner round 13: Facebook-feed style skeletons while the history
             // loads — never a lone spinner on a blank screen.
             Column(Modifier.fillMaxSize()) {
-                repeat(7) { KpShimmerListItem() }
+                val sh = rememberShimmerAlpha()
+                repeat(7) { KpShimmerListItem(alpha = sh) }
             }
         } else if (calls.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

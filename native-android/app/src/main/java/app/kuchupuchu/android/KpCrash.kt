@@ -19,6 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.unit.sp
 
 /**
@@ -84,7 +86,12 @@ object KpCrash {
 @Composable
 fun KpCrashReportDialog() {
     val ctx = LocalContext.current
-    var report by remember { mutableStateOf(KpCrash.lastReport(ctx)) }
+    var report by remember { mutableStateOf<String?>(null) }
+    // Owner round 14: read the file OFF the main thread — a synchronous read
+    // at every app open was cold-start work.
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        report = withContext(Dispatchers.IO) { KpCrash.lastReport(ctx) }
+    }
     val rep = report ?: return
     AlertDialog(
         onDismissRequest = {},

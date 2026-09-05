@@ -706,6 +706,23 @@ private fun DarkCallScaffold(content: @Composable () -> Unit) {
 @Composable
 private fun BlurredAvatarBackdrop(avatarUrl: String?) {
     if (avatarUrl.isNullOrBlank()) return
+    // Owner round 14 — the real bug: avatars frequently ride as inline
+    // data: URIs (that is how KpAvatar/KpNetImage render them). The old
+    // code blindly prefixed Api.BASE onto EVERYTHING, so a data: avatar
+    // became a bogus https request and the backdrop never appeared.
+    if (avatarUrl.startsWith("data:")) {
+        val bmp = rememberBitmap(avatarUrl)
+        if (bmp != null) {
+            androidx.compose.foundation.Image(
+                bmp,
+                contentDescription = "Caller photo",
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().blur(28.dp),
+            )
+            Box(Modifier.fillMaxSize().background(Color(0x66000000)))
+        }
+        return
+    }
     // Owner round 13d: same memory-cache key the engine warms at ring time,
     // so the photo is usually already decoded when the screen composes. A
     // dark-blue placeholder (not plain black) covers the rare cache miss.

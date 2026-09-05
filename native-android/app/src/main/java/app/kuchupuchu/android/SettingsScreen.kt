@@ -82,6 +82,8 @@ fun SettingsScreen(nav: NavController) {
 
 
     var busy by remember { mutableStateOf(false) }
+    // Owner round 14: ONE editor open at a time across all setting rows.
+    var editingKey by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf("") }
     var confirmLogout by remember { mutableStateOf(false) }
     // Phone-auth: change-number dialog state.
@@ -249,6 +251,7 @@ fun SettingsScreen(nav: NavController) {
             EditableSettingRow(
                 Icons.Filled.Badge, "Name", me.value.optText("displayName").ifBlank { "—" },
                 busy = busy,
+                rowKey = "displayName", activeKey = editingKey, onActiveKey = { editingKey = it },
                 onSubmit = { v, done -> saveInline("displayName", v, done) },
             )
             EditableSettingRow(
@@ -256,12 +259,14 @@ fun SettingsScreen(nav: NavController) {
                 busy = busy,
                 maxLength = 30,
                 hint = "lowercase letters, numbers, underscores",
+                rowKey = "username", activeKey = editingKey, onActiveKey = { editingKey = it },
                 onSubmit = { v, done -> saveInline("username", v, done) },
             )
             EditableSettingRow(
                 Icons.Filled.Info, "About", me.value.optText("about").ifBlank { "Hey! I'm using KuchuPuchu" },
                 busy = busy,
                 maxLength = 200,
+                rowKey = "about", activeKey = editingKey, onActiveKey = { editingKey = it },
                 onSubmit = { v, done -> saveInline("about", v, done) },
             )
             // Phone auth: the login identity now. Change needs the new SIM
@@ -270,6 +275,7 @@ fun SettingsScreen(nav: NavController) {
             EditableSettingRow(
                 Icons.Filled.Call, "Phone number", me.value.optText("phone").ifBlank { "not set" },
                 busy = busy,
+                rowKey = "phone", activeKey = editingKey, onActiveKey = { editingKey = it },
                 hint = "new SIM must be in this phone",
                 onSubmit = { v, done ->
                     scope.launch {
@@ -323,7 +329,7 @@ fun SettingsScreen(nav: NavController) {
                     .padding(start = 51.dp, end = 16.dp, top = 6.dp, bottom = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                listOf(true to "Dark blue", false to "Light").forEach { (dark, label) ->
+                listOf(true to "Dark blue", false to "Cream").forEach { (dark, label) ->
                     val selected = KpThemeMode.darkBlue == dark
                     Row(
                         Modifier
@@ -470,9 +476,14 @@ private fun EditableSettingRow(
     busy: Boolean = false,
     maxLength: Int = 60,
     hint: String = "",
+    rowKey: String = "",
+    activeKey: String? = null,
+    onActiveKey: (String?) -> Unit = {},
     onSubmit: (String, (String?) -> Unit) -> Unit,
 ) {
-    var editing by remember { mutableStateOf(false) }
+    // Owner round 14: editing state is hoisted behind ONE key, so opening a
+    // row closes every other — exactly one editor on screen at any time.
+    val editing = activeKey == rowKey
     var draft by remember { mutableStateOf(value) }
     var err by remember { mutableStateOf("") }
     Column(Modifier.fillMaxWidth()) {
@@ -482,7 +493,7 @@ private fun EditableSettingRow(
                 .clickable(enabled = !busy && !editing) {
                     draft = value
                     err = ""
-                    editing = true
+                    onActiveKey(rowKey)
                 }
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -492,8 +503,18 @@ private fun EditableSettingRow(
             Column(Modifier.weight(1f)) {
                 Text(label, fontSize = 13.sp, color = Muted)
                 if (editing) {
-                    // The value itself is now the editor — same spot.
-                    androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+                    // The value itself is now the editor — same spot, and
+                    // (Owner round 14) inside a visible rounded border box so
+                    // the row being edited is unmistakable.
+                    androidx.compose.foundation.layout.Row(
+                        Modifier
+                            .padding(top = 4.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .border(1.dp, Gold, RoundedCornerShape(10.dp))
+                            .background(GoldSoft.copy(alpha = 0.30f))
+                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         BasicTextField(
                             draft,
                             { draft = it.take(maxLength); err = "" },
@@ -517,7 +538,7 @@ private fun EditableSettingRow(
                 Icon(Icons.Filled.Edit, contentDescription = "Edit", tint = Muted, modifier = Modifier.size(16.dp))
             } else {
                 IconButton(
-                    onClick = { editing = false; err = "" },
+                    onClick = { onActiveKey(null); err = "" },
                     enabled = !busy,
                     modifier = Modifier.size(32.dp),
                 ) { Icon(Icons.Filled.Close, "Cancel", tint = Muted, modifier = Modifier.size(16.dp)) }
@@ -526,7 +547,7 @@ private fun EditableSettingRow(
                         if (draft.isNotBlank()) {
                             onSubmit(draft.trim()) { e ->
                                 if (e == null) {
-                                    editing = false
+                                    onActiveKey(null)
                                 } else {
                                     err = e
                                 }

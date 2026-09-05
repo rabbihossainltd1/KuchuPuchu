@@ -240,6 +240,10 @@ class CallEngine(private val app: Application) {
     private var warmedAvatarFor: String? = null
 
     private fun warmAvatar(url: String) {
+        // Owner round 14: data: URIs have nothing to warm over the network —
+        // the backdrop decodes them inline. Warming a bogus Api.BASE+data
+        // request just poisons the cache slot.
+        if (url.startsWith("data:")) return
         runCatching {
             val full = if (url.startsWith("http")) url else Api.BASE + url
             coil.Coil.imageLoader(app).enqueue(

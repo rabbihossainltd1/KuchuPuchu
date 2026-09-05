@@ -75,6 +75,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Reply
 
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.GroupAdd
@@ -614,14 +615,23 @@ fun ChatScreen(nav: NavController, convId: String) {
                 if (!fg) continue
                 val onScreen = Store.route == "chat/$convId"
                 if (justReturned && onScreen) refreshMessages(forceNetwork = true)
-                else if (onScreen && !KpSocket.chatLive(convId)) {
+                else if (onScreen) {
                     // Owner round 6: socket down used to mean messages up to
                     // 10s late ("realtime update late"). Two changes: the
                     // fallback poll runs every 3s, and the socket gets an
                     // active rejoin every 10s (a dead channel used to stay
                     // dead until the screen was reopened).
+                    //
+                    // Owner round 14: the poll only ran while chatLive() was
+                    // false — but mobile networks leave HALF-OPEN sockets:
+                    // no close frame ever arrives, live stays true, and the
+                    // open chat silently stops updating ("reply arrives but
+                    // the chat doesn't move"). Now a marker-gated poll also
+                    // runs while the socket LOOKS connected (every 8s) as a
+                    // safety net; it is near-free when nothing changed.
                     val now = System.currentTimeMillis()
-                    if (now - lastFallbackRefresh >= 3_000) {
+                    val down = !KpSocket.chatLive(convId)
+                    if (now - lastFallbackRefresh >= (if (down) 3_000L else 8_000L)) {
                         lastFallbackRefresh = now
                         refreshMessages(forceNetwork = true)
                     }
@@ -1616,6 +1626,24 @@ fun ChatScreen(nav: NavController, convId: String) {
         /* ---------------- message list on coin wallpaper ---------------- */
         Box(Modifier.weight(1f).fillMaxWidth()) {
             CoinWallpaper()
+            /* ---------------- in-chat search (Owner round 14: moved to the
+               TOP of the screen, floating over the messages, with a rounded
+               pill input instead of a flat box strip) ---------------- */
+            if (showChatSearch) Box(Modifier.align(Alignment.TopCenter).fillMaxWidth()) {
+                ChatSearchSheet(
+                    convId = convId,
+                    query = searchQ,
+                    onQuery = { searchQ = it },
+                    hits = searchHits,
+                    onHits = { searchHits = it },
+                    onClose = { showChatSearch = false; searchQ = ""; searchHits = emptyList() },
+                    onPick = { id ->
+                        showChatSearch = false
+                        val i = msgs.indexOfFirst { it.optString("id") == id }
+                        if (i >= 0) scope.launch { listState.animateScrollToItem(i) }
+                    },
+                )
+            }
             if (msgs.isEmpty() && pending.isEmpty()) {
                 Box(Modifier.align(Alignment.Center)) {
                     EmptyState(
@@ -1647,8 +1675,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // Owner round 13: Facebook-feed style skeletons while the
                 // first page loads — never a blank, silent screen.
                 Column(Modifier.fillMaxSize().padding(10.dp)) {
+                    // Owner round 14: ONE shared pulse for all skeleton rows
+                    // (each row used to run its own infinite animation — that
+                    // read as cold-open jank).
+                    val sh = rememberShimmerAlpha()
                     repeat(7) { i ->
-                        KpShimmerRow(alignedEnd = i % 3 == 2, widthDp = 150 + (i % 4) * 55)
+                        KpShimmerRow(alignedEnd = i % 3 == 2, widthDp = 150 + (i % 4) * 55, alpha = sh)
                     }
                 }
             }
@@ -1690,6 +1722,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             onReply = { haptics.tap(); replyTo = it },
                             quoteFor = { rid -> (msgs + pending).firstOrNull { it.optString("id") == rid } },
                             onMessageOwner = { ownerId -> openChatWithUser(ownerId) },
+                            theme = chatTheme,
                         )
                     }
                 }
@@ -1700,7 +1733,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     },
                     key = { it.optString("clientId").ifBlank { it.optString("id") } },
                 ) { m ->
-                    MessageRow(m, isGroup, Store.myId(), otherReadAt, player, pendingEcho = true)
+                    MessageRow(m, isGroup, Store.myId(), otherReadAt, player, pendingEcho = true, theme = chatTheme)
                 }
                 // Owner round 4: one pretty bouncing-dots bubble whenever
                 // EITHER side is typing — the AI composing, or the other
@@ -1785,22 +1818,6 @@ fun ChatScreen(nav: NavController, convId: String) {
             }
         }
 
-        /* ---------------- in-chat search (above the composer so it sits at
-           the bottom edge WITH the input bar, never underneath it; the
-           composer's imePadding lifts both above the keyboard) ---------------- */
-        if (showChatSearch) ChatSearchSheet(
-            convId = convId,
-            query = searchQ,
-            onQuery = { searchQ = it },
-            hits = searchHits,
-            onHits = { searchHits = it },
-            onClose = { showChatSearch = false; searchQ = ""; searchHits = emptyList() },
-            onPick = { id ->
-                showChatSearch = false
-                val i = msgs.indexOfFirst { it.optString("id") == id }
-                if (i >= 0) scope.launch { listState.animateScrollToItem(i) }
-            },
-        )
 
         /* ---------------- composer (doubles as the recording bar) ---------------- */
         ReplyQuoteBar(replyTo) { replyTo = null }
@@ -2202,7 +2219,9 @@ private fun HoldMicButton(
             .shadow(2.dp, CircleShape, ambientColor = Color(0x22000000), spotColor = Color(0x22000000))
             .clip(CircleShape)
             .alpha(if (enabled) 1f else 0.4f)
-            .border(1.dp, if (cancelArmed) Red else Color.Transparent, CircleShape)
+            // Owner round 14: the ring was transparent unless cancel was
+            // armed — the owner read the bare icon as "no rounded border".
+            .border(1.5.dp, if (cancelArmed) Red else GoldDeep, CircleShape)
             .pointerInput(enabled) {
                 awaitEachGesture {
                     if (!enabled) return@awaitEachGesture
@@ -2536,17 +2555,42 @@ private fun EditDialog(original: String, onClose: () -> Unit, onSave: (String) -
 /** Pick a conversation to forward the selected message(s) to. */
 @Composable
 private fun ForwardDialog(onClose: () -> Unit, onPick: (String) -> Unit) {
+    // Owner round 14: forward was a cramped popup with mismatched colors —
+    // now a FULLSCREEN picker sheet: back arrow header, themed background,
+    // the whole conversation list to pick from.
     val convs = ScreenStore.convs
-    AlertDialog(
-        onDismissRequest = onClose,
-        title = { Text("Forward to") },
-        text = {
+    androidx.activity.compose.BackHandler { onClose() }
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .background(Cream)
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .imePadding(),
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onClose) {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Ink, modifier = Modifier.size(26.dp))
+                }
+                Text("Forward to", color = Ink, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Text(
+                "${convs.size} chats",
+                color = Muted,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(horizontal = 20.dp),
+            )
+            Spacer(Modifier.height(6.dp))
             LazyColumn(
-                Modifier.heightIn(max = 380.dp),
+                Modifier.fillMaxSize().padding(horizontal = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 if (convs.isEmpty()) {
-                    item { Text("No chats yet.", color = Muted, fontSize = 14.sp) }
+                    item { Text("No chats yet.", color = Muted, fontSize = 14.sp, modifier = Modifier.padding(16.dp)) }
                 }
                 items(convs, key = { it.optString("id") }) { c ->
                     val isGroup = c.optBoolean("isGroup")
@@ -2559,25 +2603,25 @@ private fun ForwardDialog(onClose: () -> Unit, onPick: (String) -> Unit) {
                         Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(14.dp))
-                            .background(Cream)
+                            .background(Card)
+                            .border(1.dp, Line, RoundedCornerShape(14.dp))
                             .clickable { onPick(c.optString("id")) }
-                            .padding(10.dp),
+                            .padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         KpAvatar(
                             name,
                             avatarUrl,
-                            40.dp,
+                            44.dp,
                             avatarRef = if (isGroup) null else other?.optIso("avatarRef"),
                         )
-                        Spacer(Modifier.width(10.dp))
+                        Spacer(Modifier.width(12.dp))
                         Text(name, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }
-        },
-        confirmButton = { TextButton(onClick = onClose) { Text("Cancel", color = Muted) } },
-    )
+        }
+    }
 }
 
 /** Snapshot of a chat list row → a pseudo conversation object for instant paint. */
@@ -2827,6 +2871,7 @@ private fun MessageRow(
     onMessageOwner: (String) -> Unit = {},
     onReply: (JSONObject) -> Unit = {},
     quoteFor: (String) -> JSONObject? = { null },
+    theme: String = "default",
 ) {
     val mine = m.optString("senderId") == myId
     val kind = m.optString("kind")
@@ -2927,8 +2972,10 @@ private fun MessageRow(
                             // Deleted tombstones sit in a flat, greyed bubble.
                             m.optString("kind") == "DELETED" ->
                                 Brush.linearGradient(listOf(Color(0xFFB9B3A9), Color(0xFFB9B3A9)))
-                            mine -> goldFill()
-                            else -> Brush.linearGradient(listOf(Card, Card))
+                            // Owner round 14: the chat theme now restyles the
+                            // bubbles, not just the wallpaper.
+                            mine -> chatMineFill(theme)
+                            else -> chatOtherFill(theme)
                         },
                     )
                     .combinedClickable(
@@ -3539,10 +3586,30 @@ private fun cTheme(c: JSONObject?) = c?.optString("theme")?.ifBlank { "default" 
 
 private fun chatWallpaper(theme: String) =
     when (theme) {
-        "mint" -> Color(0xFFECFDF5)
-        "night" -> Color(0xFF292524)
-        "rose" -> Color(0xFFFFF1F2)
+        // Owner round 14: hardcoded light tints glared inside the dark-blue
+        // app; every wallpaper now has a dark variant of its own.
+        "mint" -> if (KpThemeMode.darkBlue) Color(0xFF0C1A15) else Color(0xFFECFDF5)
+        "night" -> Color(0xFF0B1220)
+        "rose" -> if (KpThemeMode.darkBlue) Color(0xFF23141A) else Color(0xFFFFF1F2)
         else -> Cream
+    }
+
+/** My bubble per chat theme (Owner round 14: theme restyles bubbles too). */
+private fun chatMineFill(theme: String): Brush =
+    when (theme) {
+        "mint" -> Brush.linearGradient(listOf(Color(0xFF34D399), Color(0xFF059669)))
+        "rose" -> Brush.linearGradient(listOf(Color(0xFFFB7185), Color(0xFFE11D48)))
+        "night" -> Brush.linearGradient(listOf(Color(0xFF818CF8), Color(0xFF4F46E5)))
+        else -> goldFill()
+    }
+
+/** The other side's bubble per chat theme. */
+private fun chatOtherFill(theme: String): Brush =
+    when (theme) {
+        "mint" -> Brush.linearGradient(listOf(if (KpThemeMode.darkBlue) Color(0xFF14261F) else Color(0xFFE7F8F0), if (KpThemeMode.darkBlue) Color(0xFF14261F) else Color(0xFFE7F8F0)))
+        "rose" -> Brush.linearGradient(listOf(if (KpThemeMode.darkBlue) Color(0xFF2A1A21) else Color(0xFFFFE9EC), if (KpThemeMode.darkBlue) Color(0xFF2A1A21) else Color(0xFFFFE9EC)))
+        "night" -> Brush.linearGradient(listOf(Color(0xFF1E293B), Color(0xFF1E293B)))
+        else -> Brush.linearGradient(listOf(Card, Card))
     }
 
 @Composable
@@ -3571,37 +3638,82 @@ private fun ChatSearchSheet(
     Column(
         Modifier
             .fillMaxWidth()
-            .background(Card)
             .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // Owner round 14: rounded pill search bar (was a boxy full-width
+        // strip at the bottom edge of the screen).
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Card)
+                .border(1.dp, Line, RoundedCornerShape(24.dp))
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.Search, "Search", tint = Muted, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
             BasicTextField(
                 value = query,
                 onValueChange = onQuery,
+                singleLine = true,
                 textStyle = TextStyle(color = Ink, fontSize = 15.sp),
-                modifier = Modifier.weight(1f).padding(8.dp),
+                modifier = Modifier.weight(1f).padding(vertical = 10.dp),
                 decorationBox = { inner ->
                     if (query.isEmpty()) Text("Search this chat", color = Muted, fontSize = 15.sp)
                     inner()
                 },
             )
-            TextButton(onClick = onClose) { Text("Close", color = GoldDeep) }
-        }
-        hits.take(12).forEach { m ->
-            Text(
-                m.optString("body").ifBlank { m.optString("fileName").ifBlank { "Media" } },
+            if (query.isNotEmpty()) {
+                Icon(
+                    Icons.Filled.Close,
+                    "Clear",
+                    tint = Muted,
+                    modifier = Modifier
+                        .size(18.dp)
+                        .clip(CircleShape)
+                        .clickable { onQuery("") }
+                        .padding(2.dp),
+                )
+            }
+            Spacer(Modifier.width(6.dp))
+            Icon(
+                Icons.Filled.KeyboardArrowDown,
+                "Close search",
+                tint = GoldDeep,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onPick(m.optString("id")) }
-                    .padding(vertical = 8.dp, horizontal = 4.dp),
-                color = Ink,
-                fontSize = 14.sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .clickable { onClose() }
+                    .padding(2.dp),
             )
         }
-        if (query.trim().length >= 2 && hits.isEmpty()) {
-            Text("No matches", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(8.dp))
+        Spacer(Modifier.height(6.dp))
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .background(Card)
+                .border(1.dp, Line, RoundedCornerShape(18.dp))
+                .padding(horizontal = 14.dp, vertical = 6.dp),
+        ) {
+            hits.take(12).forEachIndexed { i, m ->
+                if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(Line))
+                Text(
+                    m.optString("body").ifBlank { m.optString("fileName").ifBlank { "Media" } },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onPick(m.optString("id")) }
+                        .padding(vertical = 10.dp, horizontal = 4.dp),
+                    color = Ink,
+                    fontSize = 14.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (query.trim().length >= 2 && hits.isEmpty()) {
+                Text("No matches in this chat", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(10.dp))
+            }
         }
     }
 }
@@ -3629,19 +3741,45 @@ private fun DisappearDialog(current: Int, onClose: () -> Unit, onPick: (Int) -> 
 
 @Composable
 private fun ThemeDialog(current: String, onClose: () -> Unit, onPick: (String) -> Unit) {
-    val options = listOf("default" to "Cream", "mint" to "Mint", "rose" to "Rose", "night" to "Night")
+    // Owner round 14: the old dialog used the platform default light sheet —
+    // colour mismatch in dark mode — and ● ○ glyphs instead of real swatches.
+    data class Opt(val id: String, val label: String, val swatch: Color)
+    val options = listOf(
+        Opt("default", "Classic", Gold),
+        Opt("mint", "Mint", Color(0xFF10B981)),
+        Opt("rose", "Rose", Color(0xFFFB7185)),
+        Opt("night", "Night", Color(0xFF6366F1)),
+    )
     AlertDialog(
         onDismissRequest = onClose,
-        title = { Text("Chat theme") },
+        containerColor = Card,
+        title = { Text("Chat theme", color = Ink) },
         text = {
             Column {
-                options.forEach { (id, label) ->
-                    Text(
-                        if (id == current) "●  $label" else "○  $label",
-                        modifier = Modifier.fillMaxWidth().clickable { onPick(id) }.padding(vertical = 8.dp),
-                        color = Ink,
-                    )
+                options.forEach { o ->
+                    val sel = o.id == current
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (sel) GoldSoft else Color.Transparent)
+                            .clickable { onPick(o.id) }
+                            .padding(horizontal = 10.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            Modifier
+                                .size(26.dp)
+                                .clip(CircleShape)
+                                .background(o.swatch)
+                                .border(1.5.dp, if (sel) GoldDeep else Line, CircleShape),
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text(o.label, color = Ink, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                        if (sel) Text("Applied", color = GoldDeep, fontSize = 12.sp)
+                    }
                 }
+                Text("Changes the wallpaper and bubbles of this chat.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
             }
         },
         confirmButton = { TextButton(onClick = onClose) { Text("Close", color = GoldDeep) } },
