@@ -249,7 +249,7 @@ private fun CallRow(call: JSONObject, onOpenChat: () -> Unit) {
                 Icon(
                     if (video) Icons.Filled.Videocam else Icons.Filled.Call,
                     contentDescription = "Call back ${if (video) "video" else "voice"}",
-                    tint = GoldDeep,
+                    tint = ActionBlueDeep,
                     modifier = Modifier.size(20.dp),
                 )
             }

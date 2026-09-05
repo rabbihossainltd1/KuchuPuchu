@@ -304,12 +304,20 @@ class KpPushService : FirebaseMessagingService() {
         // This closes the delayed-push race where Cancel wins on the server
         // while an already-delivered FCM callback is still pending locally.
         Thread {
-            val stillRinging = runCatching {
-                Api.get("/api/calls/active", force = true).arr("items").objects().any {
+            // Owner round 21: "majhe majhe" missed calls — a network hiccup on
+            // this revalidate used to read as "not ringing" and the whole call
+            // was silently dropped. Only a CONFIRMED "no longer ringing"
+            // (server answered) may drop it; a failed check still rings.
+            var stillRinging = true
+            var confirmed = false
+            runCatching {
+                stillRinging = Api.get("/api/calls/active", force = true).arr("items").objects().any {
                     it.optString("id") == callId && it.optString("status") == "RINGING"
                 }
-            }.getOrDefault(false)
-            if (!stillRinging || callId in CallEngine.ignoredCalls) return@Thread
+                confirmed = true
+            }
+            if (confirmed && !stillRinging) return@Thread
+            if (callId in CallEngine.ignoredCalls) return@Thread
             // Foreground: the app is already rendering the ring via CallGate /
             // the engine's poll — just nudge it so it doesn't wait a tick.
             if (Store.foreground) {

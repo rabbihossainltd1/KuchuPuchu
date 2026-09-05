@@ -755,3 +755,36 @@ the system player could never play them. New: video bubble (thumbnail via
 MediaMetadataRetriever when cached, play affordance, duration) + fullscreen
 in-app player (download with auth header to kp-video-cache, VideoView +
 MediaController: play/pause, seek bar, timestamps). No external player.
+
+## Round 21 — owner feedback pass (2026-09-06, v122 / 3.9.46)
+
+**OWNER SOUND PACK (26 files)** — 15 notification tones (kp_notif_01..15), call
+"Ringtone 8" (kp_in_ring_8), call end replaced with his file, in-chat receive
+replaced, and event sounds: photo send, voice send, voice send cancelled,
+reply swipe, reaction, status share, screen share, line busy.
+
+**Settings > Sounds flow** — the row no longer jumps to the incoming ringtone:
+first a type picker (Notification ringtone | Call ringtone, current labels
+shown), then the SAME picker as before — tap previews, Save keeps, leaving
+stops playback. Notification tone changes delete + rebuild the messages
+channel so the new tone actually rings (channel settings freeze at creation).
+
+**COLOUR SWEEP (dark-blue mode; cream untouched)** — Chats/Status/Calls tabs,
+unread badge, list double-ticks, archive progress rings, archived-row action
+chips, list loading spinner; global search (filter chips, results highlight,
+icons, spinners); profile screen call/video/search buttons; crash-reports row
+icon; status screen spinners/pencil/status+; calls-tab icons; chat 3-dot menu
+icons + reply-quote bar (now the chat accent); and avatar rings everywhere via
+a theme-aware goldRing() (blue gradient in dark mode).
+
+**Missed incoming calls ("majhe majhe")** — the FCM handler's /calls/active
+revalidate treated a NETWORK FAILURE as "not ringing" and silently dropped the
+call. Now only a confirmed server answer can drop it; a failed check still
+rings.
+
+**Multitask during calls** — a chevron button on every call screen shrinks the
+call to the ongoing notification (app usable underneath; notification tap
+restores it). System back remains LOCKED fullscreen.
+
+(Release-build question answered in chat: yes — faster + smaller, needs a
+signing keystore, functionality identical.)

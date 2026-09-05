@@ -455,9 +455,9 @@ private fun ArchivePullArea(nav: NavController, state: ArchivePullState, content
                 ) {
                     CircularProgressIndicator(
                         progress = { 1f },
-                        color = Gold,
+                        color = ActionBlue,
                         strokeWidth = 3.dp,
-                        trackColor = GoldDeep.copy(alpha = 0.15f),
+                        trackColor = ActionBlueDeep.copy(alpha = 0.15f),
                         modifier = Modifier.size(46.dp),
                     )
                     Icon(Icons.Filled.Archive, null, tint = GoldDeep, modifier = Modifier.size(22.dp))
@@ -472,9 +472,9 @@ private fun ArchivePullArea(nav: NavController, state: ArchivePullState, content
                 ) {
                     CircularProgressIndicator(
                         progress = { holdProgress },
-                        color = Gold,
+                        color = ActionBlue,
                         strokeWidth = 3.dp,
-                        trackColor = GoldDeep.copy(alpha = 0.15f),
+                        trackColor = ActionBlueDeep.copy(alpha = 0.15f),
                         modifier = Modifier.fillMaxSize(),
                     )
                     Icon(Icons.Filled.Archive, null, tint = GoldDeep, modifier = Modifier.size(22.dp))
@@ -569,14 +569,14 @@ private fun ListTicks(read: Boolean) {
         Icon(
             Icons.Filled.Done,
             null,
-            tint = if (read) GoldDeep else Muted,
+            tint = if (read) ActionBlueDeep else Muted,
             modifier = Modifier.size(14.dp),
         )
         if (read) {
             Icon(
                 Icons.Filled.Done,
                 null,
-                tint = GoldDeep,
+                tint = ActionBlueDeep,
                 modifier = Modifier.size(14.dp).offset(x = (-4).dp),
             )
         }
@@ -594,9 +594,10 @@ private fun TopTab(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    val tint = if (selected) GoldDeep else Muted
+    // Owner round 21: the tabs ride the blue action accent in dark-blue mode.
+    val tint = if (selected) ActionBlueDeep else Muted
     val bg =
-        if (selected) Modifier.background(GoldSoft, RoundedCornerShape(14.dp))
+        if (selected) Modifier.background(ActionBlue.copy(alpha = 0.16f), RoundedCornerShape(14.dp))
         else Modifier
     Row(
         modifier
@@ -635,7 +636,7 @@ private fun TopTab(
                 Modifier
                     .defaultMinSize(minWidth = 18.dp, minHeight = 18.dp)
                     .clip(CircleShape)
-                    .background(Gold)
+                    .background(ActionBlue)
                     .padding(horizontal = 4.dp, vertical = 2.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -674,7 +675,7 @@ private fun ChatListBody(
     if (visible.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             if (loading) {
-                CircularProgressIndicator(color = Gold)
+                CircularProgressIndicator(color = ActionBlue)
             } else {
                 EmptyState(
                     icon = Icons.Filled.Chat,
@@ -764,8 +765,8 @@ private fun SwipeConvRow(
                 if (offset < 0f && archivedMode) {
                     ActionSlot(
                         icon = if (conv.optBoolean("muted")) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
-                        bg = GoldSoft,
-                        tint = GoldDeep,
+                        bg = ActionBlue.copy(alpha = 0.18f),
+                        tint = ActionBlueDeep,
                         label = if (conv.optBoolean("muted")) "Unmute" else "Mute",
                     ) {
                         haptics.confirm()
@@ -844,8 +845,8 @@ private fun SwipeConvRow(
                 if (offset >= 0f && !archivedMode) {
                     ActionSlot(
                         icon = if (conv.optBoolean("muted")) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
-                        bg = GoldSoft,
-                        tint = GoldDeep,
+                        bg = ActionBlue.copy(alpha = 0.18f),
+                        tint = ActionBlueDeep,
                         label = if (conv.optBoolean("muted")) "Unmute" else "Mute",
                     ) {
                         haptics.confirm()

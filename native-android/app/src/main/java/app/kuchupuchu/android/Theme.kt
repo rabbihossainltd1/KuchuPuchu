@@ -70,8 +70,12 @@ val ActionBlueDeep: Color
 val ActionBlueInk: Color
     get() = if (KpThemeMode.darkBlue) Color(0xFFFFFFFF) else AmberInk
 
-/** The signature amber ring gradient around avatars / status circles. */
-fun goldRing(): Brush = Brush.linearGradient(listOf(GoldLight, Gold))
+/** The signature ring gradient around avatars / status circles. Owner
+ *  round 21: dark-blue mode gets the BLUE ring (profile-picture borders),
+ *  light-cream keeps the classic amber. */
+fun goldRing(): Brush =
+    if (KpThemeMode.darkBlue) Brush.linearGradient(listOf(Color(0xFF60A5FA), Color(0xFF2F6FED)))
+    else Brush.linearGradient(listOf(GoldLight, Gold))
 
 fun goldFill(): Brush = Brush.linearGradient(listOf(Gold, GoldDeep))
 

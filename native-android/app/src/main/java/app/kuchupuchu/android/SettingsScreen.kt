@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.foundation.layout.Arrangement
@@ -32,7 +33,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.Badge
-import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Palette
@@ -90,6 +91,10 @@ fun SettingsScreen(nav: NavController) {
     var confirmLogout by remember { mutableStateOf(false) }
     // Phone-auth: change-number dialog state.
     var showRingPicker by remember { mutableStateOf(false) }
+    // Owner round 21: the Sounds row first asks WHICH tone (notification vs
+    // call), then opens the same picker.
+    var showSoundType by remember { mutableStateOf(false) }
+    var soundKind by remember { mutableStateOf("call") }
     // Owner round 16: fullscreen theme picker.
     var showThemePicker by remember { mutableStateOf(false) }
     // Owner round 18: system back steps BACK one level — an open picker or
@@ -340,9 +345,9 @@ fun SettingsScreen(nav: NavController) {
             ) { showThemePicker = true }
             SettingRow(
                 Icons.Filled.NotificationsActive,
-                "Incoming ringtone",
-                SoundPrefs.currentLabel(ctx),
-            ) { showRingPicker = true }
+                "Sounds",
+                "Notification · " + SoundPrefs.notifLabel(ctx) + "  |  Call · " + SoundPrefs.currentLabel(ctx),
+            ) { showSoundType = true }
             // Owner round 15: crash detection on/off — capture stays until
             // the owner switches it off; off also clears the last report.
             var crashOn by remember { mutableStateOf(KpCrash.isEnabled(ctx)) }
@@ -352,7 +357,7 @@ fun SettingsScreen(nav: NavController) {
                     .padding(start = 16.dp, top = 12.dp, end = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Filled.BugReport, "Crash reports", tint = GoldDeep, modifier = Modifier.size(21.dp))
+                Icon(Icons.Filled.BugReport, "Crash reports", tint = ActionBlueDeep, modifier = Modifier.size(21.dp))
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     Text("Crash reports", fontSize = 13.sp, color = Muted)
@@ -454,8 +459,18 @@ fun SettingsScreen(nav: NavController) {
     if (showThemePicker) {
         ThemePickerScreen(onClose = { showThemePicker = false })
     }
+    if (showSoundType) {
+        SoundTypePickerScreen(
+            onClose = { showSoundType = false },
+            onPick = { kind ->
+                showSoundType = false
+                soundKind = kind
+                showRingPicker = true
+            },
+        )
+    }
     if (showRingPicker) {
-        RingtonePickerScreen(onClose = { showRingPicker = false })
+        RingtonePickerScreen(kind = soundKind, onClose = { showRingPicker = false })
     }
 
     if (confirmLogout) {
@@ -715,10 +730,16 @@ fun ThemePickerScreen(onClose: () -> Unit) {
 }
 
 @Composable
-fun RingtonePickerScreen(onClose: () -> Unit) {
+fun RingtonePickerScreen(kind: String = "call", onClose: () -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    val savedCustom = SoundPrefs.customRingPath(ctx)
-    var selRes by remember { mutableStateOf(if (savedCustom == null) SoundPrefs.ringRes[SoundPrefs.ringIndex(ctx)] else -1) }
+    val isNotif = kind == "notif"
+    val savedCustom = if (isNotif) null else SoundPrefs.customRingPath(ctx)
+    var selRes by remember {
+        mutableStateOf(
+            if (isNotif) SoundPrefs.notifRes[SoundPrefs.notifIndex(ctx)]
+            else if (savedCustom == null) SoundPrefs.ringRes[SoundPrefs.ringIndex(ctx)] else -1,
+        )
+    }
     var selCustom by remember { mutableStateOf(savedCustom) }
     var playingRes by remember { mutableStateOf(-2) } // -2 none, -1 custom
     var player by remember { mutableStateOf<android.media.MediaPlayer?>(null) }
@@ -805,7 +826,10 @@ fun RingtonePickerScreen(onClose: () -> Unit) {
                 Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Ink, modifier = Modifier.size(26.dp))
             }
             Column {
-                Text("Incoming ringtone", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+                Text(
+                    if (isNotif) "Notification ringtone" else "Call ringtone",
+                    fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = Ink,
+                )
                 Text("Tap to preview · Save to keep", fontSize = 11.5.sp, color = Muted)
             }
         }
@@ -817,8 +841,10 @@ fun RingtonePickerScreen(onClose: () -> Unit) {
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 10.dp),
         ) {
-            SoundPrefs.ringNames.forEachIndexed { idx, name ->
-                val res = SoundPrefs.ringRes[idx]
+            val names = if (isNotif) SoundPrefs.notifNames else SoundPrefs.ringNames.toList()
+            val resList = if (isNotif) SoundPrefs.notifRes.toList() else SoundPrefs.ringRes.toList()
+            names.forEachIndexed { idx, name ->
+                val res = resList[idx]
                 // Owner round 13: compact rows — tighter padding, smaller type.
                 Row(
                     Modifier
@@ -891,8 +917,12 @@ fun RingtonePickerScreen(onClose: () -> Unit) {
                 // Owner round 20: Save is BLUE in dark-blue mode.
                 .background(ActionBlue)
                 .clickable {
-                    if (selCustom != null) SoundPrefs.setCustomRing(ctx, selCustom!!)
-                    else if (selRes >= 0) SoundPrefs.setRingIndex(ctx, SoundPrefs.ringRes.indexOf(selRes))
+                    if (isNotif) {
+                        if (selRes >= 0) SoundPrefs.setNotifIndex(ctx, SoundPrefs.notifRes.indexOf(selRes))
+                    } else {
+                        if (selCustom != null) SoundPrefs.setCustomRing(ctx, selCustom!!)
+                        else if (selRes >= 0) SoundPrefs.setRingIndex(ctx, SoundPrefs.ringRes.indexOf(selRes))
+                    }
                     stopPreview()
                     onClose()
                 }
@@ -901,5 +931,64 @@ fun RingtonePickerScreen(onClose: () -> Unit) {
         ) {
             Text("Save", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
         }
+    }
+}
+
+
+/** Owner round 21: Settings > Sounds first asks WHICH tone kind, then opens
+ *  the shared picker (preview on tap, Save keeps, stops on exit). */
+@Composable
+fun SoundTypePickerScreen(onClose: () -> Unit, onPick: (String) -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Cream)
+            .statusBarsPadding()
+            .navigationBarsPadding(),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            androidx.compose.material3.IconButton(onClick = onClose) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Ink, modifier = Modifier.size(26.dp))
+            }
+            Column {
+                Text("Sounds", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+                Text("Pick which tone to change", fontSize = 11.5.sp, color = Muted)
+            }
+        }
+        @Composable
+        fun TypeRow(icon: ImageVector, title: String, value: String, pick: () -> Unit) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Card)
+                    .clickable { pick() }
+                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(icon, null, tint = ActionBlueDeep, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(title, fontSize = 14.5.sp, color = Ink, fontWeight = FontWeight.Medium)
+                    Text(value, fontSize = 12.sp, color = Muted)
+                }
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Muted, modifier = Modifier.size(20.dp))
+            }
+        }
+        TypeRow(
+            Icons.Filled.NotificationsActive,
+            "Notification ringtone",
+            SoundPrefs.notifLabel(ctx) + " · plays for messages",
+        ) { onPick("notif") }
+        TypeRow(
+            Icons.Filled.Call,
+            "Call ringtone",
+            SoundPrefs.currentLabel(ctx) + " · plays for calls",
+        ) { onPick("call") }
     }
 }

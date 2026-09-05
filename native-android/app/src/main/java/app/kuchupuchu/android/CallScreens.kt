@@ -12,6 +12,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowDown
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.drag
@@ -143,6 +144,28 @@ fun CallGate() {
                     }
                 },
         )
+        // Owner round 21: multitask during a call — this chevron shrinks the
+        // call to the ongoing notification so the app is usable underneath;
+        // tapping the notification brings the call straight back. System back
+        // stays LOCKED to fullscreen (owner round 19).
+        Box(
+            Modifier
+                .align(Alignment.TopStart)
+                .statusBarsPadding()
+                .padding(10.dp)
+                .size(38.dp)
+                .clip(CircleShape)
+                .background(Color(0x33000000))
+                .clickable { engine.minimizeCall() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowDown,
+                "Minimise call",
+                tint = Color.White,
+                modifier = Modifier.size(26.dp),
+            )
+        }
         when {
             connected ->
                 // hasRemoteVideo: the server row can still say AUDIO after the

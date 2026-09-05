@@ -214,6 +214,8 @@ fun ChatScreen(nav: NavController, convId: String) {
         // Owner round 17: reacting also clears that message's selection — it
         // used to stay selected after the emoji landed.
         if (mid in selected) selected.remove(mid)
+        // Owner round 21: his reaction sound.
+        runCatching { KpSounds.reaction(ctx) }
         // Local first — the bubble reacts instantly.
         val idx = msgs.indexOfFirst { it.optString("id") == mid }
         if (idx >= 0) {
@@ -919,7 +921,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                     if (shotW > 0 && shotH > 0) payload.put("meta", JSONObject().put("w", shotW).put("h", shotH))
                     withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
                     UploadProgress.done(clientId)
-                    runCatching { KpSounds.sent(ctx) }
+                    // Owner round 21: photo send has its own sound.
+                    if (payload.optString("kind") == "IMAGE") {
+                        runCatching { KpSounds.photoSend(ctx) }
+                    } else {
+                        runCatching { KpSounds.sent(ctx) }
+                    }
                     refreshMessages(forceScroll = true)
                 } catch (e2: Exception) {
                     UploadProgress.done(clientId)
@@ -979,6 +986,8 @@ fun ChatScreen(nav: NavController, convId: String) {
     }
 
     fun sendVoice(file: File, seconds: Int, name: String) {
+        // Owner round 21: his voice-send sound on the send itself.
+        runCatching { KpSounds.voiceSend(ctx) }
         val clientId = "c_${java.util.UUID.randomUUID()}"
         pending.add(
             JSONObject()
@@ -1126,6 +1135,8 @@ fun ChatScreen(nav: NavController, convId: String) {
         if (!recording) return
         recording = false
         if (cancelled) {
+            // Owner round 21: his voice-cancel sound.
+            runCatching { KpSounds.voiceCancel(ctx) }
             VoiceNote.cancel()
             return
         }
@@ -1558,12 +1569,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                         // options — nothing else.
                         DropdownMenuItem(
                             text = { Text("History", color = Ink) },
-                            leadingIcon = { Icon(Icons.Filled.Schedule, null, tint = GoldDeep) },
+                            leadingIcon = { Icon(Icons.Filled.Schedule, null, tint = ActionBlueDeep) },
                             onClick = { menuOpen = false; nav.navigate("aihistory") },
                         )
                         DropdownMenuItem(
                             text = { Text("New chat", color = Ink) },
-                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.Chat, null, tint = GoldDeep) },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.Chat, null, tint = ActionBlueDeep) },
                             onClick = { menuOpen = false; resetAiSession() },
                         )
                         DropdownMenuItem(
@@ -1573,7 +1584,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                                     color = Ink,
                                 )
                             },
-                            leadingIcon = { Icon(Icons.Filled.NotificationsOff, null, tint = GoldDeep) },
+                            leadingIcon = { Icon(Icons.Filled.NotificationsOff, null, tint = ActionBlueDeep) },
                             onClick = {
                                 menuOpen = false
                                 val snap = conv.value ?: c
@@ -1599,7 +1610,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         )
                         DropdownMenuItem(
                             text = { Text("Chat theme", color = Ink) },
-                            leadingIcon = { Icon(Icons.Filled.Palette, null, tint = GoldDeep) },
+                            leadingIcon = { Icon(Icons.Filled.Palette, null, tint = ActionBlueDeep) },
                             onClick = { menuOpen = false; showTheme = true },
                         )
                         DropdownMenuItem(
@@ -1645,18 +1656,18 @@ fun ChatScreen(nav: NavController, convId: String) {
                         )
                         DropdownMenuItem(
                             text = { Text("Search in chat", color = Ink) },
-                            leadingIcon = { Icon(Icons.Filled.Search, null, tint = GoldDeep) },
+                            leadingIcon = { Icon(Icons.Filled.Search, null, tint = ActionBlueDeep) },
                             onClick = { menuOpen = false; showChatSearch = true },
                         )
                     } else {
                     DropdownMenuItem(
                         text = { Text("New group", color = Ink) },
-                        leadingIcon = { Icon(Icons.Filled.GroupAdd, null, tint = GoldDeep) },
+                        leadingIcon = { Icon(Icons.Filled.GroupAdd, null, tint = ActionBlueDeep) },
                         onClick = { menuOpen = false; nav.navigate("newgroup") },
                     )
                     DropdownMenuItem(
                         text = { Text("View contact", color = Ink) },
-                        leadingIcon = { Icon(Icons.Filled.Person, null, tint = GoldDeep) },
+                        leadingIcon = { Icon(Icons.Filled.Person, null, tint = ActionBlueDeep) },
                         onClick = {
                             menuOpen = false
                             if (!isGroup && otherId.isNotBlank()) nav.navigate("profile/$otherId")
@@ -1666,7 +1677,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         // Owner round 15: this opened the GLOBAL search —
                         // in a chat, search means THIS conversation.
                         text = { Text("Search in chat", color = Ink) },
-                        leadingIcon = { Icon(Icons.Filled.Search, null, tint = GoldDeep) },
+                        leadingIcon = { Icon(Icons.Filled.Search, null, tint = ActionBlueDeep) },
                         onClick = { menuOpen = false; showChatSearch = true },
                     )
                     DropdownMenuItem(
@@ -1676,7 +1687,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     )
                     DropdownMenuItem(
                         text = { Text(if (c?.optBoolean("muted") == true) "Unmute notifications" else "Mute notifications", color = Ink) },
-                        leadingIcon = { Icon(Icons.Filled.NotificationsOff, null, tint = GoldDeep) },
+                        leadingIcon = { Icon(Icons.Filled.NotificationsOff, null, tint = ActionBlueDeep) },
                         onClick = {
                             menuOpen = false
                             val snap = conv.value ?: c
@@ -1706,7 +1717,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     )
                     DropdownMenuItem(
                         text = { Text("Chat theme", color = Ink) },
-                        leadingIcon = { Icon(Icons.Filled.Palette, null, tint = GoldDeep) },
+                        leadingIcon = { Icon(Icons.Filled.Palette, null, tint = ActionBlueDeep) },
                         onClick = { menuOpen = false; showTheme = true },
                     )
                     }
@@ -3184,7 +3195,11 @@ private fun MessageRow(
                                     if (mine) replyThreshold * 1.5f else replyThreshold
                                 val armed = kotlin.math.abs(replyDrag) >= need
                                 replyDrag = 0f
-                                if (armed) onReply(m)
+                                if (armed) {
+                                    // Owner round 21: his reply-swipe sound.
+                                    runCatching { KpSounds.replySwipe(ctx) }
+                                    onReply(m)
+                                }
                             },
                             onDragCancel = { replyDrag = 0f },
                         )
@@ -3235,7 +3250,8 @@ private fun MessageRow(
                                 .background(if (mine) Color(0x26FFFFFF) else GoldSoft)
                                 .padding(horizontal = 8.dp, vertical = 4.dp),
                         ) {
-                            Box(Modifier.width(2.5.dp).height(26.dp).clip(RoundedCornerShape(2.dp)).background(Gold))
+                            // Owner round 21: the quote bar takes the chat accent.
+                            Box(Modifier.width(2.5.dp).height(26.dp).clip(RoundedCornerShape(2.dp)).background(chatAccent(theme)))
                             Spacer(Modifier.width(6.dp))
                             Column {
                                 Text(
@@ -3668,7 +3684,11 @@ private fun ImageMessageRow(
                         onDragEnd = {
                             val armed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
                             replyDrag = 0f
-                            if (armed) onReply(m)
+                            if (armed) {
+                                // Owner round 21: his reply-swipe sound.
+                                runCatching { KpSounds.replySwipe(ctx) }
+                                onReply(m)
+                            }
                         },
                         onDragCancel = { replyDrag = 0f },
                     )

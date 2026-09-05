@@ -165,7 +165,7 @@ fun StatusScreen(nav: NavController) {
                                     Modifier
                                         .size(20.dp)
                                         .clip(CircleShape)
-                                        .background(Gold),
+                                        .background(ActionBlue),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Icon(
@@ -269,7 +269,7 @@ fun StatusScreen(nav: NavController) {
                 if (!ScreenStore.statusesLoaded) {
                     item(key = "loading") {
                         Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(color = Gold, modifier = Modifier.size(28.dp))
+                            CircularProgressIndicator(color = ActionBlue, modifier = Modifier.size(28.dp))
                         }
                     }
                 }
@@ -288,7 +288,7 @@ fun StatusScreen(nav: NavController) {
                 onClick = { haptics.tap(); composeText = true },
                 shape = CircleShape,
                 containerColor = Card,
-                contentColor = GoldDeep,
+                contentColor = ActionBlueDeep,
                 modifier = Modifier.padding(bottom = 14.dp).size(40.dp),
             ) {
                 Icon(Icons.Filled.Edit, contentDescription = "Text status", modifier = Modifier.size(19.dp))
@@ -439,6 +439,8 @@ fun StatusComposer(onDone: () -> Unit) {
                                     JSONObject().put("kind", "TEXT").put("text", text.trim()).put("bgStyle", style),
                                 )
                             }
+                            // Owner round 21: his status-share sound.
+                            runCatching { KpSounds.statusShare(ctx) }
                             onDone()
                         } catch (e: Exception) {
                             error = e.message ?: "Could not post."
@@ -702,7 +704,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 if (!fetched) {
-                    CircularProgressIndicator(color = Gold)
+                    CircularProgressIndicator(color = ActionBlue)
                 } else {
                     Icon(
                         Icons.Filled.RemoveRedEye,
@@ -719,7 +721,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                 // List shrank under us (deleted elsewhere): show the empty
                 // state instead of crashing with IndexOutOfBounds (white screen).
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = Gold)
+                    CircularProgressIndicator(color = ActionBlue)
                 }
                 return
             }
@@ -1011,7 +1013,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                             Icon(
                                 Icons.AutoMirrored.Filled.Send,
                                 "Send reply",
-                                tint = Gold,
+                                tint = ActionBlueDeep,
                             )
                         }
                     }
@@ -1113,7 +1115,7 @@ private fun ViewersSheet(
                         Modifier.padding(18.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        CircularProgressIndicator(color = Gold, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        CircularProgressIndicator(color = ActionBlue, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                         Spacer(Modifier.width(10.dp))
                         Text("Loading…", color = Muted)
                     }
@@ -1237,7 +1239,7 @@ private fun StatusVideoPlayer(
     val ready = path
     if (ready == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = Gold)
+            CircularProgressIndicator(color = ActionBlue)
         }
         return
     }

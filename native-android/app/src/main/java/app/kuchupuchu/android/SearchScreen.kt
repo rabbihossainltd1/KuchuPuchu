@@ -149,7 +149,7 @@ fun SearchScreen(nav: NavController) {
                 Box(
                     Modifier
                         .clip(RoundedCornerShape(16.dp))
-                        .background(if (selected) Gold else Card)
+                        .background(if (selected) ActionBlue else Card)
                         .clickable { filter = id }
                         .padding(horizontal = 13.dp, vertical = 7.dp),
                 ) {
@@ -187,7 +187,7 @@ fun SearchScreen(nav: NavController) {
             }
         } else if (searching && result == null) {
             Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                androidx.compose.material3.CircularProgressIndicator(color = Gold)
+                androidx.compose.material3.CircularProgressIndicator(color = ActionBlue)
             }
         } else {
             LazyColumn(
@@ -246,7 +246,7 @@ fun SearchScreen(nav: NavController) {
                         item { SectionLabel("Media") }
                         items(media, key = { "m" + it.optString("id") }) { m ->
                             ResultCard(onClick = { nav.navigate("chat/${m.optString("convoId")}") { popUpTo("main") } }) {
-                                Icon(Icons.Filled.Photo, "Photo", tint = Gold, modifier = Modifier.size(28.dp))
+                                Icon(Icons.Filled.Photo, "Photo", tint = ActionBlue, modifier = Modifier.size(28.dp))
                                 Spacer(Modifier.width(12.dp))
                                 Column {
                                     Text(m.optString("body").ifBlank { "Photo" }, fontSize = 13.5.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -265,7 +265,7 @@ fun SearchScreen(nav: NavController) {
                         item { SectionLabel("Documents") }
                         items(docs, key = { "d" + it.optString("id") }) { m ->
                             ResultCard(onClick = { nav.navigate("chat/${m.optString("convoId")}") { popUpTo("main") } }) {
-                                Icon(Icons.Filled.InsertDriveFile, "File", tint = GoldDeep, modifier = Modifier.size(26.dp))
+                                Icon(Icons.Filled.InsertDriveFile, "File", tint = ActionBlueDeep, modifier = Modifier.size(26.dp))
                                 Spacer(Modifier.width(12.dp))
                                 Column {
                                     Highlight(m.optString("fileName").ifBlank { m.optString("body").ifBlank { "File" } }, query)
@@ -318,7 +318,7 @@ private fun SectionLabel(label: String) {
         label,
         fontSize = 12.5.sp,
         fontWeight = FontWeight.SemiBold,
-        color = GoldDeep,
+        color = ActionBlueDeep,
         modifier = Modifier.padding(start = 8.dp, top = 10.dp, bottom = 2.dp),
     )
 }
@@ -351,7 +351,7 @@ private fun Highlight(text: String, query: String, fontSize: Float = 14f) {
                     val idx = lower.indexOf(q, start)
                     if (idx < 0 || q.isEmpty()) break
                     append(text.substring(start, idx))
-                    pushStyle(SpanStyle(color = GoldDeep, fontWeight = FontWeight.Bold, background = GoldSoft))
+                    pushStyle(SpanStyle(color = ActionBlueDeep, fontWeight = FontWeight.Bold, background = ActionBlue.copy(alpha = 0.18f)))
                     append(text.substring(idx, idx + q.length))
                     pop()
                     start = idx + q.length

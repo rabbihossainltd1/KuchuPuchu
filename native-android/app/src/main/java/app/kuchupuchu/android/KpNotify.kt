@@ -6,7 +6,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
 import androidx.core.app.RemoteInput
@@ -68,7 +67,14 @@ object KpNotify {
             NotificationChannel(CHAT_CHANNEL, "Messages", NotificationManager.IMPORTANCE_HIGH)
                 .apply {
                     description = "New chat messages"
-                    setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION), attrs)
+                    // Owner round 21: the channel rings the tone picked in
+                    // Settings > Sounds > Notification ringtone.
+                    setSound(
+                        android.net.Uri.parse(
+                            "android.resource://" + ctx.packageName + "/" + SoundPrefs.notificationRingRes(ctx),
+                        ),
+                        attrs,
+                    )
                     enableVibration(true)
                 },
         )
@@ -143,6 +149,16 @@ object KpNotify {
     }
 
     @SuppressLint("MissingPermission")
+    /** Owner round 21: the messages channel must re-ring when the user
+     *  changes the notification tone — channel settings freeze at creation,
+     *  so the old channel is deleted and recreated with the new sound. */
+    fun rebuildMessageChannel(ctx: Context) {
+        if (Build.VERSION.SDK_INT < 26) return
+        val mgr = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        runCatching { mgr.deleteNotificationChannel(CHAT_CHANNEL) }
+        ensureChannels(ctx)
+    }
+
     fun message(
         ctx: Context,
         from: String,

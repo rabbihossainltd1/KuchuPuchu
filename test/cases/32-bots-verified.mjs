@@ -673,7 +673,7 @@ const convBetween = (db, a, b) =>
       readFileSync(
         "native-android/app/src/main/java/app/kuchupuchu/android/SettingsScreen.kt",
         "utf8",
-      ).includes("Incoming ringtone"),
+      ).includes("Call ringtone"),
   );
   check(
     "BOTH sounds live: tap (send) + server-accept (sent) on every kind",
@@ -798,6 +798,10 @@ const convBetween = (db, a, b) =>
     "utf8",
   );
   // ---- Owner round 13 (2026-09-05): 20 reports ----
+  const feelkt = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/Feel.kt",
+    "utf8",
+  );
   const chatlist = readFileSync(
     "native-android/app/src/main/java/app/kuchupuchu/android/ChatListScreen.kt",
     "utf8",
@@ -1054,9 +1058,9 @@ const convBetween = (db, a, b) =>
     "utf8",
   );
   check(
-    "r18-1: system back does NOT minimize the call — it stays fullscreen (notification tap still restores)",
+    "r18-1: system back does NOT minimize the call — it stays fullscreen (r21: chevron minimizes)",
     callscreen.includes("the call STAYS fullscreen") &&
-      !callscreen.includes("engine.minimizeCall()") &&
+      callscreen.indexOf("engine.minimizeCall()") > callscreen.indexOf("multitask during a call") &&
       readFileSync(
         "native-android/app/src/main/java/app/kuchupuchu/android/MainActivity.kt",
         "utf8",
@@ -1096,8 +1100,14 @@ const convBetween = (db, a, b) =>
   );
   /* ---------------- round 19 (owner feedback) ---------------- */
   check(
-    "r19-1: fullscreen call LOCKED — no minimize on back, ever",
-    callscreen.includes("LOCKED round 19") && !callscreen.includes("engine.minimizeCall()"),
+    "r19-1/r21: fullscreen call LOCKED on system back — minimise ONLY via the on-screen chevron",
+    callscreen.includes("LOCKED round 19") &&
+      callscreen.includes("multitask during a call") &&
+      callscreen.indexOf("engine.minimizeCall()") > callscreen.indexOf("Multitask during a call") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/KpPush.kt",
+        "utf8",
+      ).includes("Only a CONFIRMED"),
   );
   check(
     "r19-2: Hang up = red border + WHITE label, explicit readable text colours",
@@ -1186,6 +1196,52 @@ const convBetween = (db, a, b) =>
       chat.includes("android.widget.VideoView(") &&
       chat.includes("android.widget.MediaController(") &&
       chat.includes("kp-video-cache"),
+  );
+  check(
+    "r21-sounds: owner pack wired — notification tones, event sounds, Sounds type picker, channel rebuild",
+    readFileSync(
+      "native-android/app/src/main/java/app/kuchupuchu/android/Feel.kt",
+      "utf8",
+    ).includes("kp_notif_01") &&
+      feelkt.includes("fun rebuildMessageChannel") === false &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/KpNotify.kt",
+        "utf8",
+      ).includes("SoundPrefs.notificationRingRes(ctx)") &&
+      settings.includes("fun SoundTypePickerScreen(") &&
+      settings.includes('"Sounds"') &&
+      chat.includes("KpSounds.reaction(ctx)") &&
+      chat.includes("KpSounds.replySwipe(ctx)") &&
+      chat.includes("KpSounds.photoSend(ctx)") &&
+      chat.includes("KpSounds.voiceSend(ctx)") &&
+      chat.includes("KpSounds.voiceCancel(ctx)") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/CallEngine.kt",
+        "utf8",
+      ).includes("KpSounds.lineBusy(app)") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/StatusScreens.kt",
+        "utf8",
+      ).includes("KpSounds.statusShare(ctx)") &&
+      existsSync("native-android/app/src/main/res/raw/kp_notif_15.mp3") &&
+      existsSync("native-android/app/src/main/res/raw/kp_in_ring_8.mp3"),
+  );
+  check(
+    "r21-colours: dark-blue sweep — tabs, ticks, search, profile, crash row, avatar rings",
+    chatlist.includes("val tint = if (selected) ActionBlueDeep else Muted") &&
+      chatlist.includes("tint = if (read) ActionBlueDeep else Muted") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/SearchScreen.kt",
+        "utf8",
+      ).includes("ActionBlue") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/ProfileScreen.kt",
+        "utf8",
+      ).includes("ActionBlueDeep") &&
+      settings.includes('Icon(Icons.Filled.BugReport, "Crash reports", tint = ActionBlueDeep') &&
+      theme.includes(
+        "if (KpThemeMode.darkBlue) Brush.linearGradient(listOf(Color(0xFF60A5FA), Color(0xFF2F6FED)))",
+      ),
   );
   check(
     "r20-update: the update popup re-checks on every resume (30-min throttle), push boot deferred",

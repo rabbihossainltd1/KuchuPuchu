@@ -687,6 +687,8 @@ class CallEngine(private val app: Application) {
                     // call — show "Line busy" ON the calling screen for a beat
                     // (no endless ringing) before it closes. 486 = LINE_BUSY
                     // from POST /api/calls.
+                    // Owner round 21: his line-busy sound.
+                    runCatching { KpSounds.lineBusy(app) }
                     CallSounds.stopRingback()
                     active = active?.copy(status = "BUSY")
                     publishChange()
@@ -947,6 +949,8 @@ class CallEngine(private val app: Application) {
     }
 
     private suspend fun startShare(data: Intent) {
+        // Owner round 21: his screen-share sound (plays when it really starts).
+        runCatching { KpSounds.screenShare(app) }
         // Android 14+: the foreground service must re-declare the
         // mediaProjection type BEFORE getMediaProjection() is called, so
         // restart the service with share=true and wait for it to be ready.
