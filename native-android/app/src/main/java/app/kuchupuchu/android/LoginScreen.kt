@@ -601,7 +601,7 @@ fun LoginScreen(onAuthed: () -> Unit) {
                             Spacer(Modifier.height(10.dp))
                             GoldBtn("Continue", Modifier.fillMaxWidth(), enabled = !busy) { onContinue() }
                             TextButton(onClick = { stage = LoginStage.RECOVERY; error = "" }) {
-                                Text("Recover account", color = ActionBlueDeep, maxLines = 1)
+                                Text("Recover account", color = GoldDeep, maxLines = 1)
                             }
                         }
 
@@ -767,10 +767,10 @@ fun LoginScreen(onAuthed: () -> Unit) {
                                     GoogleButton(text = "Verify with Google", busy = busy, enabled = !busy) { recoverWithGoogle() }
                                 } else {
                                     if (busy) {
-                                        CircularProgressIndicator(color = ActionBlue, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                                        CircularProgressIndicator(color = Gold, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
                                     } else if (!googlePressed) {
                                         TextButton(onClick = { googlePressed = true }) {
-                                            Text("Try another way", color = ActionBlueDeep, maxLines = 1)
+                                            Text("Try another way", color = GoldDeep, maxLines = 1)
                                         }
                                         TextButton(onClick = { cancelApproval() }) { Text("Try again", color = Muted, maxLines = 1) }
                                     } else {
@@ -848,7 +848,7 @@ private fun GoogleButton(text: String, busy: Boolean, enabled: Boolean, onClick:
         border = androidx.compose.foundation.BorderStroke(1.dp, Muted.copy(alpha = 0.35f)),
     ) {
         if (busy) {
-            CircularProgressIndicator(color = ActionBlue, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+            CircularProgressIndicator(color = Gold, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
         } else {
             Image(GoogleLogo, contentDescription = "Google", modifier = Modifier.size(18.dp))
         }
@@ -863,7 +863,7 @@ private fun Wordmark() {
     Text(
         buildAnnotatedString {
             withStyle(SpanStyle(color = Ink, fontWeight = FontWeight.ExtraBold)) { append("Kuchu") }
-            withStyle(SpanStyle(color = ActionBlueDeep, fontWeight = FontWeight.ExtraBold)) { append("Puchu") }
+            withStyle(SpanStyle(color = GoldDeep, fontWeight = FontWeight.ExtraBold)) { append("Puchu") }
         },
         fontSize = 34.sp,
         letterSpacing = (-0.5).sp,
@@ -1056,7 +1056,7 @@ private fun CountryPickerSheet(
                         Text(
                             "+${c.dial}",
                             fontSize = 13.sp,
-                            color = if (c.iso == current.iso) ActionBlueDeep else Muted,
+                            color = if (c.iso == current.iso) GoldDeep else Muted,
                             fontWeight = if (c.iso == current.iso) FontWeight.Bold else FontWeight.Normal,
                         )
                     }
@@ -1090,9 +1090,9 @@ private fun VerifyingPane(title: String, subtitle: String? = null) {
         Box(Modifier.size(84.dp), contentAlignment = Alignment.Center) {
             androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
                 val r = (size.minDimension / 2f) * ringScale
-                drawCircle(color = ActionBlue.copy(alpha = ringAlpha), radius = r, style = Stroke(width = 4f))
+                drawCircle(color = Gold.copy(alpha = ringAlpha), radius = r, style = Stroke(width = 4f))
             }
-            CircularProgressIndicator(color = ActionBlue, strokeWidth = 2.5.dp, modifier = Modifier.size(34.dp))
+            CircularProgressIndicator(color = Gold, strokeWidth = 2.5.dp, modifier = Modifier.size(34.dp))
         }
         Spacer(Modifier.height(12.dp))
         Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Ink, maxLines = 1)

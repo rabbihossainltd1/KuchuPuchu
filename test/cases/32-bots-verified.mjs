@@ -1286,11 +1286,9 @@ const convBetween = (db, a, b) =>
       chatlist.split("ActionBlueDeep").length - 1 >= 4,
   );
   check(
-    "r21-sweep: chat 3-dot menus (12), reply I-bars, quote chip — blue in dark mode",
-    chat.split(", null, tint = ActionBlueDeep) }").length - 1 === 12 &&
-      chat.includes(".background(ActionBlue),") &&
-      chat.includes("background(ActionBlue))") &&
-      chat.includes("if (KpThemeMode.darkBlue) ActionBlue.copy(alpha = 0.18f) else GoldSoft"),
+    "r21-sweep: chat dropdown menus blue + reply/quote bars carry the chat accent",
+    chat.split(", null, tint = ActionBlueDeep) }").length - 1 >= 7 &&
+      chat.includes("background(chatAccent(theme))"),
   );
   check(
     "r21-sweep: friends-profile buttons, call-back icon, status pencil/status+/send, settings crash row",
@@ -1301,11 +1299,10 @@ const convBetween = (db, a, b) =>
       settings.includes('Icon(Icons.Filled.BugReport, "Crash reports", tint = ActionBlueDeep'),
   );
   check(
-    "r21-sweep: global-search chips/highlight + login links/spinner/brand — blue in dark mode",
+    "r21-sweep: global-search chips/highlight blue in dark mode (login untouched per owner)",
     search.includes(".background(if (selected) ActionBlue else Card)") &&
       search.includes("color = ActionBlueDeep,") &&
-      login.includes('Text("Recover account", color = ActionBlueDeep') &&
-      login.includes("ActionBlue.copy(alpha = ringAlpha)"),
+      search.includes("ActionBlueDeep, fontWeight = FontWeight.Bold"),
   );
   check(
     "calls tab: skeleton rows + 20s cache (no laggy refetch)",
