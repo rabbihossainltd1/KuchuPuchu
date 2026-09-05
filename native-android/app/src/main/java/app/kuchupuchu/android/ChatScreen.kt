@@ -709,6 +709,7 @@ fun ChatScreen(nav: NavController, convId: String) {
     // "ViewTreeObserver is not alive" crash on navigation (chat open crash).
     // The official isImeVisible flag read IN composition + a keyed effect is
     // the safe form.
+    @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
     val imeVisible = WindowInsets.isImeVisible
     LaunchedEffect(imeVisible) {
         if (imeVisible) {
