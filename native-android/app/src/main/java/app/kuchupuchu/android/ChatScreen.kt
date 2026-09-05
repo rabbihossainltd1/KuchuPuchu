@@ -455,6 +455,7 @@ fun ChatScreen(nav: NavController, convId: String) {
 
     /* instant paint + first refresh */
     LaunchedEffect(convId) {
+        KpCrash.mark("chat-open")
         Store.route = "chat/$convId"
         // A new chat is a new history window: paging state must not leak across.
         olderIds.clear()
@@ -468,10 +469,12 @@ fun ChatScreen(nav: NavController, convId: String) {
             ScreenStore.pendingChatSearch = null
             showChatSearch = true
         }
+        KpCrash.mark("chat-paint:${msgs.size}")
         refreshMeta()
         refreshMessages(forceScroll = true, markRead = true)
         // First page landed (or failed) — the skeleton gives way.
         initialLoad = false
+        KpCrash.mark("chat-page:${msgs.size}")
         runCatching { Outbox.flushNow(force = true) }
     }
 

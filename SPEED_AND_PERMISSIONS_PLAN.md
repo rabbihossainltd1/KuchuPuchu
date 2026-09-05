@@ -444,3 +444,22 @@ pattern behind the known "ViewTreeObserver is not alive" IllegalStateException
 on navigation (it installs a view-tree listener that dies between screens).
 Replaced with the official `WindowInsets.isImeVisible` composition read + a
 recomposition-keyed effect. Suite: 32/32.
+
+## Owner round 13d — crash capture + settings polish (v3.9.37 / 113, 2026-09-05)
+
+1. **On-device crash capture** — the chat screen still exits silently. A
+   chained default-exception handler now writes the real stack + navigation
+   breadcrumbs to app storage, and the next launch shows a report dialog with
+   Copy (one screenshot = the exact line). Phase marks bracket the chat-open
+   path.
+2. **Settings inline editing** — Name / Username / About / Phone edit in place
+   (field + confirm/cancel under the row); theme is two inline chips (one tap,
+   applies instantly); all popups removed.
+3. **API link row removed** above Log out (version text stays).
+4. **Logout dialog colours pinned** (Card container, Ink/Muted/Red) so no text
+   hides in either theme.
+5. **Custom-ringtone picker row themed** (was hardcoded white).
+6. **Voice-call backdrop preloaded** — the caller photo is fetched at ring time
+   into a keyed cache (software bitmap for the blur) + placeholder; no late
+   pop-in on connect.
+Suite: 32/32.

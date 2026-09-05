@@ -40,8 +40,8 @@ android {
         applicationId = "app.kuchupuchu.android"
         minSdk = 24
         targetSdk = 35
-        versionCode = 112
-        versionName = "3.9.36"
+        versionCode = 113
+        versionName = "3.9.37"
     }
     signingConfigs {
         getByName("debug") {

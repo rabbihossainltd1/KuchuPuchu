@@ -4,6 +4,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,7 +36,6 @@ import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.AlertDialog
@@ -78,19 +78,15 @@ fun SettingsScreen(nav: NavController) {
     val scope = rememberCoroutineScope()
     // Paint instantly from the cached profile — no "…" flash on every open.
     val me = remember { mutableStateOf(Store.me ?: JSONObject()) }
-    var editField by remember { mutableStateOf<String?>(null) }
-    var editValue by remember { mutableStateOf("") }
+
+
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var confirmLogout by remember { mutableStateOf(false) }
     // Phone-auth: change-number dialog state.
-    var showChangePhone by remember { mutableStateOf(false) }
     var showRingPicker by remember { mutableStateOf(false) }
     // Owner round 13b: a proper two-option picker; applying recreates the
     // activity so every surface re-skins at once (no half-applied theme).
-    var showThemePicker by remember { mutableStateOf(false) }
-    var changePhone by remember { mutableStateOf("") }
-    var changePhoneError by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         runCatching {
@@ -129,18 +125,19 @@ fun SettingsScreen(nav: NavController) {
             }
         }
 
-    fun save(field: String, value: String) {
+    // Owner round 13d: rows edit INLINE now — done(null) closes the row,
+    // done(message) shows the error under the field. No popups.
+    fun saveInline(field: String, value: String, done: (String?) -> Unit) {
         scope.launch {
             busy = true
-            error = ""
             try {
                 val updated =
                     withContext(Dispatchers.IO) { Api.patch("/api/me", JSONObject().put(field, value.trim())) }
                 me.value = updated.optJSONObject("user") ?: me.value
                 Store.saveMe(me.value)
-                editField = null
+                done(null)
             } catch (e: Exception) {
-                error = e.message ?: "Could not save."
+                done(e.message ?: "Could not save.")
             } finally {
                 busy = false
             }
@@ -248,36 +245,107 @@ fun SettingsScreen(nav: NavController) {
                 .clip(RoundedCornerShape(16.dp))
                 .background(Card),
         ) {
-            SettingRow(Icons.Filled.Badge, "Name", me.value.optText("displayName").ifBlank { "—" }) {
-                editField = "displayName"; editValue = me.value.optText("displayName")
-            }
-            SettingRow(Icons.Filled.AlternateEmail, "Username", me.value.optText("username").ifBlank { "not set" }) {
-                editField = "username"; editValue = me.value.optText("username")
-            }
-            SettingRow(Icons.Filled.Info, "About", me.value.optText("about").ifBlank { "Hey! I'm using KuchuPuchu" }) {
-                editField = "about"; editValue = me.value.optText("about")
-            }
+            EditableSettingRow(
+                Icons.Filled.Badge, "Name", me.value.optText("displayName").ifBlank { "—" },
+                busy = busy,
+                onSubmit = { v, done -> saveInline("displayName", v, done) },
+            )
+            EditableSettingRow(
+                Icons.Filled.AlternateEmail, "Username", me.value.optText("username").ifBlank { "not set" },
+                busy = busy,
+                maxLength = 30,
+                hint = "lowercase letters, numbers, underscores",
+                onSubmit = { v, done -> saveInline("username", v, done) },
+            )
+            EditableSettingRow(
+                Icons.Filled.Info, "About", me.value.optText("about").ifBlank { "Hey! I'm using KuchuPuchu" },
+                busy = busy,
+                maxLength = 200,
+                onSubmit = { v, done -> saveInline("about", v, done) },
+            )
             // Phone auth: the login identity now. Change needs the new SIM
             // literally present on this device (MATCH) — the worker rejects
             // anything weaker for a number change (PHONE_AUTH_PLAN.md §5).
-            SettingRow(
-                Icons.Filled.Call,
-                "Phone number",
-                me.value.optText("phone").ifBlank { "not set" },
-            ) {
-                changePhone = ""
-                changePhoneError = ""
-                showChangePhone = true
-            }
+            EditableSettingRow(
+                Icons.Filled.Call, "Phone number", me.value.optText("phone").ifBlank { "not set" },
+                busy = busy,
+                hint = "new SIM must be in this phone",
+                onSubmit = { v, done ->
+                    scope.launch {
+                        busy = true
+                        try {
+                            val e164 = PhoneVerifier.normalize(v)
+                            if (e164 == null) {
+                                done("Enter a valid number, e.g. 01712345678.")
+                            } else {
+                                val sim =
+                                    withContext(Dispatchers.IO) {
+                                        PhoneVerifier.verify(ctx, e164).wire()
+                                    }
+                                val updated =
+                                    withContext(Dispatchers.IO) {
+                                        Api.post(
+                                            "/api/auth/phone/change",
+                                            JSONObject().put("phone", e164).put("sim", sim),
+                                        )
+                                    }
+                                me.value = updated.optJSONObject("user") ?: me.value
+                                Store.saveMe(me.value)
+                                done(null)
+                            }
+                        } catch (e: Exception) {
+                            done(e.message ?: "Could not change the number.")
+                        } finally {
+                            busy = false
+                        }
+                    }
+                },
+            )
             // Owner round 10 (2026-09-04): his incoming-ringtone pack — the
             // user picks which one rings for calls. Default is the app's
             // ORIGINAL tone again (owner round 13); his "calling ringing"
             // file stays as the caller-side ringback only.
-            SettingRow(
-                Icons.Filled.Palette,
-                "App theme",
-                if (KpThemeMode.darkBlue) "Dark blue" else "Light",
-            ) { showThemePicker = true }
+            // Owner round 13d: theme picked INLINE — one tap, applies at once.
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, top = 12.dp, end = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Palette, "App theme", tint = GoldDeep, modifier = Modifier.size(21.dp))
+                Spacer(Modifier.width(14.dp))
+                Text("App theme", fontSize = 13.sp, color = Muted)
+            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 51.dp, end = 16.dp, top = 6.dp, bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                listOf(true to "Dark blue", false to "Light").forEach { (dark, label) ->
+                    val selected = KpThemeMode.darkBlue == dark
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(if (selected) Gold else Card)
+                            .border(1.dp, if (selected) Gold else Line, RoundedCornerShape(20.dp))
+                            .clickable {
+                                if (!selected) {
+                                    KpThemeMode.set(ctx, dark)
+                                    (ctx as? android.app.Activity)?.recreate()
+                                }
+                            }
+                            .padding(horizontal = 16.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (selected) {
+                            Icon(Icons.Filled.Check, null, tint = AmberInk, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(5.dp))
+                        }
+                        Text(label, fontSize = 13.sp, color = if (selected) AmberInk else Ink, fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
             SettingRow(
                 Icons.Filled.NotificationsActive,
                 "Incoming ringtone",
@@ -324,7 +392,6 @@ fun SettingsScreen(nav: NavController) {
                             }.getOrDefault("?")
                         }
                     Text("KuchuPuchu $ver", fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, color = Ink)
-                    Text("kuchupuchu-api.kuchupuchu.workers.dev", fontSize = 12.sp, color = Muted)
                 }
             }
         }
@@ -350,162 +417,16 @@ fun SettingsScreen(nav: NavController) {
 
 
     // Owner round 11: FULLSCREEN ringtone picker — tap previews, Save keeps.
-    if (showThemePicker) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showThemePicker = false },
-            confirmButton = {},
-            dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { showThemePicker = false }) { Text("Close") }
-            },
-            title = { Text("App theme") },
-            text = {
-                Column {
-                    listOf(true to "Dark blue", false to "Light").forEach { (dark, label) ->
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (KpThemeMode.darkBlue == dark) GoldSoft else Color.Transparent)
-                                .clickable {
-                                    showThemePicker = false
-                                    if (KpThemeMode.darkBlue != dark) {
-                                        KpThemeMode.set(ctx, dark)
-                                        (ctx as? android.app.Activity)?.recreate()
-                                    }
-                                }
-                                .padding(horizontal = 12.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                if (KpThemeMode.darkBlue == dark) Icons.Filled.Check else Icons.Filled.Circle,
-                                null,
-                                tint = GoldDeep,
-                                modifier = Modifier.size(16.dp),
-                            )
-                            Spacer(Modifier.width(10.dp))
-                            Text(label, fontSize = 14.5.sp, color = Ink)
-                        }
-                    }
-                }
-            },
-        )
-    }
     if (showRingPicker) {
         RingtonePickerScreen(onClose = { showRingPicker = false })
     }
 
-    /* ---------- edit dialog ---------- */
-    if (editField != null) {
-        AlertDialog(
-            onDismissRequest = { editField = null },
-            title = {
-                Text(
-                    when (editField) {
-                        "displayName" -> "Your name"
-                        "username" -> "Username"
-                        else -> "About"
-                    },
-                )
-            },
-            text = {
-                Column {
-                    OutlinedTextField(
-                        editValue,
-                        { editValue = it.take(if (editField == "about") 200 else 60) },
-                        singleLine = true,
-                        shape = RoundedCornerShape(14.dp),
-                    )
-                    if (editField == "username") {
-                        Spacer(Modifier.height(6.dp))
-                        Text("People can find you by this username — use lowercase letters, numbers and underscores only.", fontSize = 12.sp, color = Muted)
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = { save(editField!!, editValue) },
-                    enabled = !busy && editValue.isNotBlank(),
-                ) { Text("Save", color = GoldDeep, fontWeight = FontWeight.SemiBold) }
-            },
-            dismissButton = {
-                TextButton(onClick = { editField = null }) { Text("Cancel", color = Muted) }
-            },
-        )
-    }
-
-    /* ---------- phone auth: change number ---------- */
-    if (showChangePhone) {
-        AlertDialog(
-            onDismissRequest = { showChangePhone = false },
-            title = { Text("Change phone number") },
-            text = {
-                Column {
-                    Text(
-                        "The new number must be present on this device's SIM — it only changes if it can be verified automatically.",
-                        fontSize = 12.sp,
-                        color = Muted,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        changePhone,
-                        { changePhone = it; changePhoneError = "" },
-                        singleLine = true,
-                        shape = RoundedCornerShape(14.dp),
-                    )
-                    if (changePhoneError.isNotBlank()) {
-                        Spacer(Modifier.height(6.dp))
-                        Text(changePhoneError, color = Red, fontSize = 12.sp)
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        scope.launch {
-                            busy = true
-                            changePhoneError = ""
-                            try {
-                                val e164 = PhoneVerifier.normalize(changePhone)
-                                if (e164 == null) {
-                                    changePhoneError = "Enter a valid number, e.g. 01712345678."
-                                } else {
-                                    val sim =
-                                        withContext(Dispatchers.IO) {
-                                            PhoneVerifier.verify(ctx, e164).wire()
-                                        }
-                                    val updated =
-                                        withContext(Dispatchers.IO) {
-                                            Api.post(
-                                                "/api/auth/phone/change",
-                                                JSONObject().put("phone", e164).put("sim", sim),
-                                            )
-                                        }
-                                    me.value = updated.optJSONObject("user") ?: me.value
-                                    Store.saveMe(me.value)
-                                    showChangePhone = false
-                                }
-                            } catch (e: Exception) {
-                                changePhoneError = e.message ?: "Could not change the number."
-                            } finally {
-                                busy = false
-                            }
-                        }
-                    },
-                    enabled = !busy && changePhone.isNotBlank(),
-                ) { Text("Change", color = GoldDeep, fontWeight = FontWeight.SemiBold) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showChangePhone = false }) { Text("Cancel", color = Muted) }
-            },
-        )
-    }
-
-    /* ---------- logout confirm ---------- */
     if (confirmLogout) {
         AlertDialog(
             onDismissRequest = { confirmLogout = false },
-            title = { Text("Log out?") },
-            text = { Text("You can sign in again anytime with your phone number.") },
+            containerColor = Card,
+            title = { Text("Log out?", color = Ink) },
+            text = { Text("You can sign in again anytime with your phone number.", color = Muted) },
             confirmButton = {
                 TextButton(onClick = {
                     confirmLogout = false
@@ -532,6 +453,97 @@ fun SettingsScreen(nav: NavController) {
                 TextButton(onClick = { confirmLogout = false }) { Text("Cancel", color = Muted) }
             },
         )
+    }
+}
+
+/**
+ * Owner round 13d (2026-09-05): rows edit INLINE — tap the row, the field and
+ * confirm/cancel appear under it; no popup dialogs (owner rule).
+ */
+@Composable
+private fun EditableSettingRow(
+    icon: ImageVector,
+    label: String,
+    value: String,
+    busy: Boolean = false,
+    maxLength: Int = 60,
+    hint: String = "",
+    onSubmit: (String, (String?) -> Unit) -> Unit,
+) {
+    var editing by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf(value) }
+    var err by remember { mutableStateOf("") }
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable(enabled = !busy) {
+                    draft = value
+                    err = ""
+                    editing = true
+                }
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(icon, contentDescription = label, tint = GoldDeep, modifier = Modifier.size(21.dp))
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(label, fontSize = 13.sp, color = Muted)
+                Text(value, fontSize = 14.5.sp, color = Ink, fontWeight = FontWeight.Medium)
+            }
+            Icon(Icons.Filled.Edit, contentDescription = "Edit", tint = Muted, modifier = Modifier.size(16.dp))
+        }
+        if (editing) {
+            Column(Modifier.padding(start = 51.dp, end = 16.dp, bottom = 10.dp)) {
+                androidx.compose.foundation.layout.Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedTextField(
+                        draft,
+                        { draft = it.take(maxLength); err = "" },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        enabled = !busy,
+                        modifier = Modifier.weight(1f),
+                        colors =
+                            androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Ink,
+                                unfocusedTextColor = Ink,
+                                cursorColor = Gold,
+                                focusedBorderColor = Gold,
+                                unfocusedBorderColor = Line,
+                            ),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    IconButton(
+                        onClick = { editing = false; err = "" },
+                        enabled = !busy,
+                        modifier = Modifier.size(34.dp),
+                    ) { Icon(Icons.Filled.Close, "Cancel", tint = Muted, modifier = Modifier.size(17.dp)) }
+                    IconButton(
+                        onClick = {
+                            if (draft.isNotBlank()) {
+                                onSubmit(draft.trim()) { e ->
+                                    if (e == null) {
+                                        editing = false
+                                    } else {
+                                        err = e
+                                    }
+                                }
+                            }
+                        },
+                        enabled = !busy && draft.isNotBlank(),
+                        modifier = Modifier.size(34.dp),
+                    ) { Icon(Icons.Filled.Check, "Save", tint = GoldDeep, modifier = Modifier.size(18.dp)) }
+                }
+                if (hint.isNotBlank() && err.isBlank()) {
+                    Text(hint, fontSize = 11.sp, color = Muted)
+                }
+                if (err.isNotBlank()) {
+                    Text(err, fontSize = 11.5.sp, color = Red)
+                }
+            }
+        }
     }
 }
 
@@ -707,7 +719,7 @@ fun RingtonePickerScreen(onClose: () -> Unit) {
                     .fillMaxWidth()
                     .padding(vertical = 2.dp)
                     .clip(RoundedCornerShape(14.dp))
-                    .background(if (selCustom != null) GoldSoft else Color.White)
+                    .background(if (selCustom != null) GoldSoft else Card)
                     .clickable { customPicker.launch(arrayOf("audio/*")) }
                     .padding(horizontal = 14.dp, vertical = 13.dp),
                 verticalAlignment = Alignment.CenterVertically,

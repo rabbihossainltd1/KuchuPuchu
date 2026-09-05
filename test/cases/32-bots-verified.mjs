@@ -845,6 +845,29 @@ const convBetween = (db, a, b) =>
       settings.includes("recreate()"),
   );
   check(
+    "13d: settings rows edit INLINE (no popups), API link row gone, custom-ring row themed",
+    settings.includes("EditableSettingRow") &&
+      !settings.includes("editField != null") &&
+      !settings.includes("workers.dev") &&
+      settings.includes("selCustom != null) GoldSoft else Card"),
+  );
+  check(
+    "13d: on-device crash capture installed (silent chat crash diagnosis)",
+    existsSync("native-android/app/src/main/java/app/kuchupuchu/android/KpCrash.kt") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/MainActivity.kt",
+        "utf8",
+      ).includes("KpCrash.install(this)") &&
+      kpapp.includes("KpCrashReportDialog()") &&
+      chat.includes("KpCrash.mark"),
+  );
+  check(
+    "13d: call avatar warmed at ring time + keyed backdrop (no late pop-in)",
+    engine.includes("warmAvatar") &&
+      engine.includes('memoryCacheKey("callbg:$full")') &&
+      calls.includes('memoryCacheKey("callbg:$full")'),
+  );
+  check(
     "13b hotfix: palette is STATIC (no per-read snapshot state), theme applies via activity recreate",
     !theme.includes("mutableStateOf") &&
       readFileSync(
