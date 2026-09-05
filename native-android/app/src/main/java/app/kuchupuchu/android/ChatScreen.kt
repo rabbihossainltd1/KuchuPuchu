@@ -25,7 +25,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -703,18 +703,19 @@ fun ChatScreen(nav: NavController, convId: String) {
             .collect { (idx, scrolling) -> if (idx == 0 && scrolling) loadOlder() }
     }
 
-    // Owner round 13 (2026-09-05): keyboard opening used to COVER the latest
-    // messages — the user had to swipe down manually every time. Ride the IME
-    // inset: when it grows, jump the list to its bottom.
-    val kpDensity = androidx.compose.ui.platform.LocalDensity.current
-    val kpIme = WindowInsets.ime
-    LaunchedEffect(Unit) {
-        snapshotFlow { kpIme.getBottom(kpDensity) }.collect { ime ->
-            if (ime > 0) {
-                delay(250)
-                val total = listState.layoutInfo.totalItemsCount
-                if (total > 0) listState.animateScrollToItem(total - 1)
-            }
+    // Owner round 13 (2026-09-05, fixed 13b): keyboard opening used to COVER
+    // the latest messages. The first cut read WindowInsets.ime.getBottom()
+    // inside a coroutine snapshotFlow — the exact pattern behind the known
+    // "ViewTreeObserver is not alive" crash on navigation (chat open crash).
+    // The official isImeVisible flag read IN composition + a keyed effect is
+    // the safe form.
+    @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+    val imeVisible = WindowInsets.isImeVisible
+    LaunchedEffect(imeVisible) {
+        if (imeVisible) {
+            delay(250)
+            val total = listState.layoutInfo.totalItemsCount
+            if (total > 0) listState.animateScrollToItem(total - 1)
         }
     }
 

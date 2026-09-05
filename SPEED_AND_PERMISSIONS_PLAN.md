@@ -435,3 +435,12 @@ broken. Root causes found and fixed:
    (Settings rows, Status composer, Attach sheet, red record panels, AI typing
    bubble) now ride the theme tokens.
 Suite: 32/32.
+
+## Owner round 13c — chat-open crash fix (v3.9.36 / 112, 2026-09-05)
+
+The chat screen crashed on open. Root cause: the keyboard-auto-scroll read
+`WindowInsets.ime.getBottom()` inside a coroutine `snapshotFlow` — the exact
+pattern behind the known "ViewTreeObserver is not alive" IllegalStateException
+on navigation (it installs a view-tree listener that dies between screens).
+Replaced with the official `WindowInsets.isImeVisible` composition read + a
+recomposition-keyed effect. Suite: 32/32.

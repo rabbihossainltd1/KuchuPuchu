@@ -885,8 +885,8 @@ const convBetween = (db, a, b) =>
       !chat.includes(".background(if (cancelArmed) Color.White else Gold)"),
   );
   check(
-    "keyboard opening jumps the list to the newest message",
-    chat.includes("WindowInsets.ime") && chat.includes("kpIme.getBottom(kpDensity)"),
+    "keyboard jump uses the safe isImeVisible flag (no ViewTreeObserver crash)",
+    chat.includes("WindowInsets.isImeVisible") && !chat.includes("snapshotFlow { kpIme"),
   );
   check(
     "swipe a bubble right to quote-reply",
