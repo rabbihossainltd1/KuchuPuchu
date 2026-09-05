@@ -2813,6 +2813,8 @@ private fun ReplyQuoteBar(replyTo: JSONObject?, onCancel: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
 private fun MessageRow(
     m: JSONObject,
     isGroup: Boolean,
