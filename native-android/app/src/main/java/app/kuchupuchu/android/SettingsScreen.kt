@@ -5,6 +5,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,7 +44,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -458,8 +458,9 @@ fun SettingsScreen(nav: NavController) {
 }
 
 /**
- * Owner round 13d (2026-09-05): rows edit INLINE — tap the row, the field and
- * confirm/cancel appear under it; no popup dialogs (owner rule).
+ * Owner round 13e (2026-09-05): the row's VALUE itself turns into the input
+ * on tap — right where it sits, no extra box below (owner rule). Confirm /
+ * cancel ride at the row's end.
  */
 @Composable
 private fun EditableSettingRow(
@@ -478,7 +479,7 @@ private fun EditableSettingRow(
         Row(
             Modifier
                 .fillMaxWidth()
-                .clickable(enabled = !busy) {
+                .clickable(enabled = !busy && !editing) {
                     draft = value
                     err = ""
                     editing = true
@@ -490,60 +491,58 @@ private fun EditableSettingRow(
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(label, fontSize = 13.sp, color = Muted)
-                Text(value, fontSize = 14.5.sp, color = Ink, fontWeight = FontWeight.Medium)
+                if (editing) {
+                    // The value itself is now the editor — same spot.
+                    androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+                        BasicTextField(
+                            draft,
+                            { draft = it.take(maxLength); err = "" },
+                            singleLine = true,
+                            textStyle =
+                                androidx.compose.ui.text.TextStyle(
+                                    fontSize = 14.5.sp,
+                                    color = Ink,
+                                    fontWeight = FontWeight.Medium,
+                                ),
+                            cursorBrush = androidx.compose.ui.graphics.SolidColor(Gold),
+                            enabled = !busy,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                } else {
+                    Text(value, fontSize = 14.5.sp, color = Ink, fontWeight = FontWeight.Medium)
+                }
             }
-            Icon(Icons.Filled.Edit, contentDescription = "Edit", tint = Muted, modifier = Modifier.size(16.dp))
-        }
-        if (editing) {
-            Column(Modifier.padding(start = 51.dp, end = 16.dp, bottom = 10.dp)) {
-                androidx.compose.foundation.layout.Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    OutlinedTextField(
-                        draft,
-                        { draft = it.take(maxLength); err = "" },
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
-                        enabled = !busy,
-                        modifier = Modifier.weight(1f),
-                        colors =
-                            androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Ink,
-                                unfocusedTextColor = Ink,
-                                cursorColor = Gold,
-                                focusedBorderColor = Gold,
-                                unfocusedBorderColor = Line,
-                            ),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    IconButton(
-                        onClick = { editing = false; err = "" },
-                        enabled = !busy,
-                        modifier = Modifier.size(34.dp),
-                    ) { Icon(Icons.Filled.Close, "Cancel", tint = Muted, modifier = Modifier.size(17.dp)) }
-                    IconButton(
-                        onClick = {
-                            if (draft.isNotBlank()) {
-                                onSubmit(draft.trim()) { e ->
-                                    if (e == null) {
-                                        editing = false
-                                    } else {
-                                        err = e
-                                    }
+            if (!editing) {
+                Icon(Icons.Filled.Edit, contentDescription = "Edit", tint = Muted, modifier = Modifier.size(16.dp))
+            } else {
+                IconButton(
+                    onClick = { editing = false; err = "" },
+                    enabled = !busy,
+                    modifier = Modifier.size(32.dp),
+                ) { Icon(Icons.Filled.Close, "Cancel", tint = Muted, modifier = Modifier.size(16.dp)) }
+                IconButton(
+                    onClick = {
+                        if (draft.isNotBlank()) {
+                            onSubmit(draft.trim()) { e ->
+                                if (e == null) {
+                                    editing = false
+                                } else {
+                                    err = e
                                 }
                             }
-                        },
-                        enabled = !busy && draft.isNotBlank(),
-                        modifier = Modifier.size(34.dp),
-                    ) { Icon(Icons.Filled.Check, "Save", tint = GoldDeep, modifier = Modifier.size(18.dp)) }
-                }
-                if (hint.isNotBlank() && err.isBlank()) {
-                    Text(hint, fontSize = 11.sp, color = Muted)
-                }
-                if (err.isNotBlank()) {
-                    Text(err, fontSize = 11.5.sp, color = Red)
-                }
+                        }
+                    },
+                    enabled = !busy && draft.isNotBlank(),
+                    modifier = Modifier.size(32.dp),
+                ) { Icon(Icons.Filled.Check, "Save", tint = GoldDeep, modifier = Modifier.size(17.dp)) }
             }
+        }
+        if (editing && hint.isNotBlank() && err.isBlank()) {
+            Text(hint, fontSize = 11.sp, color = Muted, modifier = Modifier.padding(start = 51.dp, bottom = 6.dp))
+        }
+        if (err.isNotBlank()) {
+            Text(err, fontSize = 11.5.sp, color = Red, modifier = Modifier.padding(start = 51.dp, bottom = 6.dp))
         }
     }
 }
@@ -594,6 +593,12 @@ fun RingtonePickerScreen(onClose: () -> Unit) {
         runCatching { player?.stop() }
         runCatching { player?.release() }
         player = null
+    }
+
+    // Owner round 13e: leaving the screen by ANY path (system back included)
+    // stops the preview — it used to keep playing after exit.
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose { stopPreview() }
     }
 
     fun preview(res: Int, customPath: String?) {

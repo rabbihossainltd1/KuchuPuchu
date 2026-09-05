@@ -712,15 +712,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     // "ViewTreeObserver is not alive" crash on navigation (chat open crash).
     // The official isImeVisible flag read IN composition + a keyed effect is
     // the safe form.
-    @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-    val imeVisible = WindowInsets.isImeVisible
-    LaunchedEffect(imeVisible) {
-        if (imeVisible) {
-            delay(250)
-            val total = listState.layoutInfo.totalItemsCount
-            if (total > 0) listState.animateScrollToItem(total - 1)
-        }
-    }
+    // Owner round 13e: extracted to KpImeAutoScroll below — a local @OptIn
+    // val inside this (huge) function produced a VerifyError on device ART.
+    KpImeAutoScroll(listState)
 
     fun sendText(body: String, kind: String = "TEXT") {
         if (body.isBlank()) return
@@ -1809,46 +1803,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         )
 
         /* ---------------- composer (doubles as the recording bar) ---------------- */
-        if (replyTo != null) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(GoldSoft)
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    Modifier
-                        .width(3.dp)
-                        .height(30.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(Gold),
-                )
-                Spacer(Modifier.width(8.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        if (replyTo?.optString("senderId") == Store.myId()) "You"
-                        else (replyTo?.optText("senderName") ?: "").ifBlank { "Reply" },
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = GoldDeep,
-                        maxLines = 1,
-                    )
-                    Text(
-                        ((replyTo?.optText("body") ?: "").ifBlank { "Media message" }).take(80),
-                        fontSize = 12.sp,
-                        color = Muted,
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                    )
-                }
-                IconButton(onClick = { replyTo = null }, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Filled.Close, "Cancel reply", tint = Muted, modifier = Modifier.size(16.dp))
-                }
-            }
-        }
+        ReplyQuoteBar(replyTo) { replyTo = null }
         if (noReply) {
             // Official security account: replies are off (owner rule).
             Text(
@@ -2789,6 +2744,69 @@ private fun LoginApprovalMessage(m: JSONObject) {
                 else -> "⏰ Expired" to Muted
             }
             Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = color, maxLines = 1)
+        }
+    }
+}
+
+/**
+ * Owner round 13e (2026-09-05): keyboard-open auto-jump extracted from the
+ * ChatScreen body. The inline `@OptIn val` inside that huge function made the
+ * device's ART verifier reject the whole class (VerifyError: copy-cat) — the
+ * chat screen died on open. Small function, annotation at function level.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun KpImeAutoScroll(listState: androidx.compose.foundation.lazy.LazyListState) {
+    val imeVisible = WindowInsets.isImeVisible
+    LaunchedEffect(imeVisible) {
+        if (imeVisible) {
+            delay(250)
+            val total = listState.layoutInfo.totalItemsCount
+            if (total > 0) listState.animateScrollToItem(total - 1)
+        }
+    }
+}
+
+/** Owner round 13e: the swipe-reply quote bar above the composer. */
+@Composable
+private fun ReplyQuoteBar(replyTo: JSONObject?, onCancel: () -> Unit) {
+    if (replyTo == null) return
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(GoldSoft)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .width(3.dp)
+                .height(30.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(Gold),
+        )
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                if (replyTo.optString("senderId") == Store.myId()) "You"
+                else (replyTo.optText("senderName") ?: "").ifBlank { "Reply" },
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = GoldDeep,
+                maxLines = 1,
+            )
+            Text(
+                ((replyTo.optText("body") ?: "").ifBlank { "Media message" }).take(80),
+                fontSize = 12.sp,
+                color = Muted,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+        }
+        IconButton(onClick = onCancel, modifier = Modifier.size(28.dp)) {
+            Icon(Icons.Filled.Close, "Cancel reply", tint = Muted, modifier = Modifier.size(16.dp))
         }
     }
 }
