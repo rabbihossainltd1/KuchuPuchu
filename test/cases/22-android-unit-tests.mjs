@@ -30,11 +30,13 @@ const ciFlat = ci.replace(/\s+/g, " ");
   );
   check(
     "the lint task runs before the APK builds, so findings are not an afterthought",
-    ci.indexOf("Unit tests + Android lint") < ci.indexOf("Build release APK (minify + shrink)"),
+    ci.indexOf("Unit tests + Android lint") < ci.indexOf("Build APK"),
   );
   check(
-    "round 15: CI builds exactly ONE APK artifact (signed release only)",
-    !ci.includes("assembleDebug") && ci.includes("kuchupuchu-apk-release"),
+    "round 15: CI builds exactly ONE APK artifact (owner pick: debug)",
+    ci.includes("assembleDebug") &&
+      ci.includes("kuchupuchu-apk") &&
+      !ci.includes("assembleRelease"),
   );
   check(
     "the style gate also lints test sources",

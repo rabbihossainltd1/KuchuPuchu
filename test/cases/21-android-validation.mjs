@@ -210,7 +210,12 @@ const has = (finds, name) => finds.some((f) => f.check === name);
   const ci = (await import("node:fs")).readFileSync(".github/workflows/ci.yml", "utf8");
   check("CI actually runs the android validator", ci.includes("npm run validate:android"));
   check("CI actually runs the pinned style gate", ci.includes("./scripts/ktlint-check.sh"));
-  check("CI actually builds the release variant", ci.includes("assembleRelease"));
+  // Owner round 15 follow-up: the owner's single CI artifact is the DEBUG
+  // apk; the release/signing machinery is intentionally out of CI now.
+  check(
+    "CI builds the debug variant as the single artifact",
+    ci.includes("assembleDebug") && !ci.includes("assembleRelease"),
+  );
   const sh = (await import("node:fs")).readFileSync("scripts/ktlint-check.sh", "utf8");
   check(
     "the style tool is pinned by version AND checksum (no floating gate)",

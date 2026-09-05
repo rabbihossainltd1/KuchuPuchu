@@ -1105,13 +1105,13 @@ const convBetween = (db, a, b) =>
       ).includes("fun setEnabled"),
   );
   check(
-    "15: AI replies fail over faster (per-model 10s -> 6s) + one APK per CI run",
+    "15: AI replies fail over faster (per-model 10s -> 6s) + ONE debug APK per CI run",
     src.includes("Math.min(remaining, 6_000)") &&
-      !readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8").includes(
+      readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8").includes(
         "assembleDebug",
       ) &&
-      readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8").includes(
-        "kuchupuchu-apk-release",
+      !readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8").includes(
+        "assembleRelease",
       ),
   );
 }

@@ -557,3 +557,9 @@ log and push again without waiting for the APK job.
     ONE changed conversation (ScreenStore.upsertConv): preview, badge and
     order move instantly, full refetch reconciles behind it.
 Suite: 32/32 = 1008 assertions.
+
+### Round 15 follow-up — single CI artifact = DEBUG apk (owner pick)
+
+The owner chose the DEBUG apk as the one artifact CI uploads: assembleDebug +
+`kuchupuchu-apk` artifact; release build, signing secrets and the certificate
+check are out of CI. Lint/unit tests still run before the build.
