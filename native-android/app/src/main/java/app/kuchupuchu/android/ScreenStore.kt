@@ -237,6 +237,12 @@ object ScreenStore {
     private val convDetail = LinkedHashMap<String, JSONObject>()
     val convDetailVersion = mutableStateOf(0)
 
+    /** Owner round 19: the last cached message of a chat — the list rows
+     *  draw their delivery tick from it. Read-only peek, never mutates. */
+    fun lastMsg(convId: String): JSONObject? = synchronized(this) {
+        msgs[convId]?.lastOrNull()
+    }
+
     fun hydrate(ctx: Context) {
         disk = File(ctx.filesDir, "kp-screens.json")
         hiddenFile = File(ctx.filesDir, "kp-hidden.json")
@@ -245,22 +251,37 @@ object ScreenStore {
         loadHidden()
         loadArchive()
         loadStatusHidden()
-        val raw = disk?.takeIf { it.exists() }?.readText() ?: return
-        runCatching {
-            val o = JSONObject(raw)
-            o.optJSONArray("convs")?.objects()?.let { setConvs(it) }
-            o.optJSONArray("calls")?.objects()?.let { setCalls(it) }
-            o.optJSONArray("statuses")?.objects()?.let { setStatuses(it) }
-            val msgsObj = o.optJSONObject("msgs") ?: JSONObject()
-            msgsObj.keys().forEach { k ->
-                msgs[k] = msgsObj.arr(k).objects().toMutableList()
+        // Owner round 19 (cold-reopen lag): this file grows with use (message
+        // caches for every chat ever opened), and parsing it on the MAIN
+        // thread was the "close + reopen feels laggy for a while" report.
+        // The read+parse now runs on a background thread; whatever lands
+        // from the network first simply wins (the disk state only applies
+        // when nothing fresher is loaded yet).
+        val file = disk ?: return
+        Thread {
+            val raw = runCatching { file.takeIf { it.exists() }?.readText() }.getOrNull() ?: return@Thread
+            runCatching {
+                val o = JSONObject(raw)
+                if (!convsLoaded && convs.isEmpty()) {
+                    o.optJSONArray("convs")?.objects()?.let { setConvs(it) }
+                }
+                if (calls.isEmpty()) o.optJSONArray("calls")?.objects()?.let { setCalls(it) }
+                if (statuses.isEmpty()) o.optJSONArray("statuses")?.objects()?.let { setStatuses(it) }
+                synchronized(this) {
+                    val msgsObj = o.optJSONObject("msgs") ?: JSONObject()
+                    msgsObj.keys().forEach { k ->
+                        if (msgs[k] == null) msgs[k] = msgsObj.arr(k).objects().toMutableList()
+                    }
+                    // Chat headers survive a restart too — every chat the user
+                    // had open paints its title/avatar instantly on frame one.
+                    o.optJSONObject("convDetails")?.let { d ->
+                        d.keys().forEach { k ->
+                            if (convDetail[k] == null) d.optJSONObject(k)?.let { convDetail[k] = it }
+                        }
+                    }
+                }
             }
-            // Chat headers survive a restart too — every chat the user had
-            // open paints its title/avatar instantly on the first frame.
-            o.optJSONObject("convDetails")?.let { d ->
-                d.keys().forEach { k -> d.optJSONObject(k)?.let { convDetail[k] = it } }
-            }
-        }
+        }.start()
     }
 
     /**
@@ -280,15 +301,21 @@ object ScreenStore {
      */
     /** Builds the cache snapshot. Callers must hold the ScreenStore lock. */
     private fun snapshotLocked(): JSONObject {
+        // Owner round 19: the snapshot is CAPPED — the last 40 messages of
+        // the 30 most recent chats, 150 rows for the lists. Without caps the
+        // file grew with every chat ever opened, and the cold-reopen parse
+        // cost grew with it.
         val msgsObj = JSONObject()
-        msgs.forEach { (k, v) ->
-            val arr = JSONArray()
-            v.toList().forEach { arr.put(it) }
-            msgsObj.put(k, arr)
-        }
-        val convArr = JSONArray(); convs.toList().forEach { convArr.put(it) }
-        val callArr = JSONArray(); calls.toList().forEach { callArr.put(it) }
-        val stArr = JSONArray(); statuses.toList().forEach { stArr.put(it) }
+        msgs.entries.sortedByDescending { (_, v) -> v.lastOrNull()?.optString("createdAt") ?: "" }
+            .take(30)
+            .forEach { (k, v) ->
+                val arr = JSONArray()
+                v.toList().takeLast(40).forEach { arr.put(it) }
+                msgsObj.put(k, arr)
+            }
+        val convArr = JSONArray(); convs.toList().take(150).forEach { convArr.put(it) }
+        val callArr = JSONArray(); calls.toList().take(100).forEach { callArr.put(it) }
+        val stArr = JSONArray(); statuses.toList().take(100).forEach { stArr.put(it) }
         val detObj = JSONObject(); convDetail.forEach { (k, v) -> detObj.put(k, v) }
         return JSONObject()
             .put("convs", convArr)

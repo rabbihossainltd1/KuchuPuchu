@@ -92,10 +92,10 @@ fun CallGate() {
     val call = engine.active ?: return
     if (engine.minimized) return
     androidx.activity.compose.BackHandler {
-        // Owner round 18: the call STAYS fullscreen — system back no longer
-        // minimizes it into the notification ("call er fullscreen remove kore
-        // only notification" bug). The red Hang up / on-screen End is the way
-        // out; tapping the ongoing notification still restores the UI.
+        // Owner round 18 — LOCKED round 19: the call STAYS fullscreen. System
+        // back must NEVER minimize it into the notification again; the red
+        // Hang up / on-screen End is the only way out. (The suite asserts the
+        // minimize entry point is never called from this file.)
     }
     // The gate only composes while a call exists, so this dispose is exactly
     // "the call ended" (hangup / decline / remote end / cancel) — play the

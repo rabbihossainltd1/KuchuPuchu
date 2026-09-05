@@ -920,7 +920,7 @@ const convBetween = (db, a, b) =>
   check(
     "mic button: fully transparent (round 15: shadow removed too), ring stays",
     !chat.includes("shadow(2.dp, CircleShape") &&
-      chat.includes("1.5.dp, if (cancelArmed) Red else GoldDeep") &&
+      chat.includes("1.5.dp, if (cancelArmed) Red else accent") &&
       !chat.includes(".background(if (cancelArmed) Color.White else Gold)"),
   );
   check(
@@ -968,10 +968,15 @@ const convBetween = (db, a, b) =>
       ongoingxml.includes("#F0402F") &&
       !ongoingxml.includes("kp_ongoing_speaker") &&
       !callnotify.includes("speaker_wrap") &&
-      !ongoingxml.includes("android:background=") &&
+      !ongoingxml
+        .replace('android:background="@drawable/kp_hangup_border"', "")
+        .includes("android:background=") &&
+      ongoingxml.includes("@drawable/kp_hangup_border") &&
+      existsSync("native-android/app/src/main/res/drawable/kp_hangup_border.xml") &&
+      ongoingxml.includes('android:textColor="#FFFFFF"') &&
       !callnotify.includes(".setColor(") &&
-      ongoingxml.includes("?android:attr/textColorPrimary") &&
-      ongoingxml.includes("?android:attr/textColorSecondary"),
+      ongoingxml.includes('android:textColor="#F2F5FA"') &&
+      ongoingxml.includes('android:textColor="#A9B4C9"'),
   );
   check(
     "r17-6: archive pull is dual-path — list overscroll AND header/tabs drag share ArchivePullState",
@@ -1058,11 +1063,13 @@ const convBetween = (db, a, b) =>
       ).includes("CallEngine.instance?.restoreCallUi()"),
   );
   check(
-    "r18-4: archive pull works ON TOP OF ROWS — pre-scroll intercept gated by an at-top probe",
+    "r18-4/r19-4: archive pull works ON TOP OF ROWS — pass-through drag observer on the list itself",
     chatlist.includes("var canPull: () -> Boolean") &&
       chatlist.includes("first.index == 0 && first.offset == 0") &&
-      chatlist.includes("if (d > 0f && state.canPull())") &&
-      chatlist.includes("state = listState"),
+      chatlist.includes("awaitFirstDown(requireUnconsumed = false)") &&
+      chatlist.includes("archivePull.pull = pull") &&
+      chatlist.includes("state = listState") &&
+      !chatlist.includes("NestedScrollConnection"),
   );
   check(
     "r18-6: PHOTOS render reaction chips too (MessageReactions wired into ImageMessageRow)",
@@ -1086,6 +1093,48 @@ const convBetween = (db, a, b) =>
     chat.includes("DisposableEffect(convId)") &&
       chat.includes("ScreenStore.markRead(convId)\n            Thread {") &&
       screenstore.includes("Still inside the read grace"),
+  );
+  /* ---------------- round 19 (owner feedback) ---------------- */
+  check(
+    "r19-1: fullscreen call LOCKED — no minimize on back, ever",
+    callscreen.includes("LOCKED round 19") && !callscreen.includes("engine.minimizeCall()"),
+  );
+  check(
+    "r19-2: Hang up = red border + WHITE label, explicit readable text colours",
+    readFileSync("native-android/app/src/main/res/drawable/kp_hangup_border.xml", "utf8").includes(
+      "#F0402F",
+    ) && ongoingxml.includes('android:textColor="#F2F5FA"'),
+  );
+  check(
+    "r19-3: every selection action ALSO drops the reaction bar",
+    chat.split("reactionFor = null").length - 1 >= 7 &&
+      chat.indexOf("selected.clear()", chat.indexOf("fun forwardSelected")) <
+        chat.indexOf("scope.launch", chat.indexOf("fun forwardSelected")),
+  );
+  check(
+    "r19-4b: list rows show delivery ticks for own last message (main + archived)",
+    chatlist.includes("fun ListTicks(") &&
+      chatlist.includes("ScreenStore.lastMsg(id)") &&
+      screenstore.includes("fun lastMsg(convId: String)"),
+  );
+  check(
+    "r19-7: system back dismisses the reaction bar / emoji sheet",
+    chat.includes("BackHandler(enabled = reactionFor != null || showEmojiSheet)"),
+  );
+  check(
+    "r19-theme: chat theme restyles the message bar, voice/mic + call buttons",
+    chat.includes("private fun chatAccent(theme: String)") &&
+      chat.includes(".background(accent.copy(alpha = 0.16f))") &&
+      chat.includes("accent = accent,") &&
+      chat.includes('Icons.Filled.Call, "Voice call", tint = chatAccent(chatTheme)') &&
+      chat.includes("cursorBrush = androidx.compose.ui.graphics.SolidColor(accent)"),
+  );
+  check(
+    "r19-perf: cold-reopen lag — hydrate parses off-main + snapshot is capped",
+    screenstore.includes("if (!convsLoaded && convs.isEmpty())") &&
+      screenstore.includes(".take(30)") &&
+      screenstore.includes(".takeLast(40)") &&
+      screenstore.includes("take(150)"),
   );
   check(
     "calls tab: skeleton rows + 20s cache (no laggy refetch)",
@@ -1182,7 +1231,7 @@ const convBetween = (db, a, b) =>
   );
   check(
     "14: mic button keeps a visible rounded ring (armed = red)",
-    chat.includes("1.5.dp, if (cancelArmed) Red else GoldDeep"),
+    chat.includes("1.5.dp, if (cancelArmed) Red else accent"),
   );
   check(
     "14: call backdrop decodes data: avatars inline (the real missing-photo bug)",

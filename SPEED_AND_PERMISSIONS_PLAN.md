@@ -691,3 +691,36 @@ straight to chat list). Dialogs/sheets already behaved.
 re-POSTs /read and re-zeros the badge (DisposableEffect onDispose); (b) the
 one-conversation poke merge (upsertConv) honors the same 10s read grace the full
 list uses, so a poke can no longer re-import the pre-read badge.
+
+## Round 19 — owner feedback pass (2026-09-05, v120 / 3.9.44)
+
+**PERF (first priority): cold-reopen lag** — kp-screens.json grows with every
+chat ever opened and was parsed on the MAIN thread at startup. Now: the read+
+parse runs on a background thread (network data wins if it lands first), and the
+snapshot is capped (30 chats x last 40 messages, 150 conv rows, 100 calls/
+statuses) so the file stops ballooning in the first place.
+
+**1 Fullscreen call — LOCKED** — comment + suite assertion: the minimize entry
+point is never called from CallScreens; back keeps the call fullscreen forever.
+
+**2 Notification** — explicit readable colours (#F2F5FA / #A9B4C9 — the theme
+attrs mismatched on the owner's ROM), Hang up = RED 1.5dp rounded border
+(kp_hangup_border.xml) + WHITE label, red icon.
+
+**3 Selection stuck after actions** — unsend / delete-for-me / forward / copy
+now also drop the reaction bar and close the emoji sheet.
+
+**4 Archive pull over ROWS — real fix** — nested scroll never reliably delivered
+row-top drags (ROM overscroll ate them); replaced with a PASS-THROUGH pointer
+observer on the list (awaitEachGesture, never consumes): scrolling + row swipes
+untouched, any downward drag at the list's top feeds the pull-hold. ALSO: list
+rows now show delivery ticks for your own last message (one tick sent, two
+read) — main AND archived lists.
+
+**7** System back now dismisses the floating reaction bar / emoji sheet too.
+
+**Chat theme everywhere** — new chatAccent(): the message bar pill (accent
+tint), caret, sticker/attach icons, send circle, mic ring/icon and the header
+call buttons all take the per-chat theme colour.
+
+(5 composer untouched per owner; 6 & 8 already fixed.)

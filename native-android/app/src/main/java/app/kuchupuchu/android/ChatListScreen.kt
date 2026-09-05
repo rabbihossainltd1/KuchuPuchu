@@ -7,6 +7,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,6 +40,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
@@ -68,8 +71,8 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -330,7 +333,7 @@ fun ChatListScreen(nav: NavController) {
 
             /* ---------- tab bodies ---------- */
             when (tab) {
-                0 -> ArchivePullArea(nav, archivePull) { ChatListBody(convs, loading, nav, ::refresh, chatsListState) }
+                0 -> ArchivePullArea(nav, archivePull) { ChatListBody(convs, loading, nav, ::refresh, chatsListState, archivePull) }
                 1 -> StatusScreen(nav)
                 2 -> CallsScreen(nav)
             }
@@ -395,46 +398,13 @@ private fun ArchivePullArea(nav: NavController, state: ArchivePullState, content
     // pull the list down past the mark and keep holding: a progress bar
     // fills over three seconds, then the ARCHIVED logo pops in (animated)
     // and the screen opens. Works from the blank area AND on top of rows.
-    val conn = remember {
-        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
-            override fun onPreScroll(
-                available: androidx.compose.ui.geometry.Offset,
-                source: androidx.compose.ui.input.nestedscroll.NestedScrollSource,
-            ): androidx.compose.ui.geometry.Offset {
-                // Owner round 18: the REAL fix for pulls on top of rows —
-                // Android 12+'s stretch/overscroll effect is a CHILD-side
-                // connection, so it consumed the leftover pull in post-scroll
-                // before this parent ever saw it. Taking the downward delta in
-                // PRE-scroll (only while the list sits at its very top) makes
-                // the archive pull work anywhere on the list — rows included.
-                val d = available.y
-                if (d > 0f && state.canPull()) {
-                    state.pull = (state.pull + d).coerceIn(0f, state.maxPx)
-                    return androidx.compose.ui.geometry.Offset(0f, d)
-                }
-                return androidx.compose.ui.geometry.Offset.Zero
-            }
-
-            override fun onPostScroll(
-                consumed: androidx.compose.ui.geometry.Offset,
-                available: androidx.compose.ui.geometry.Offset,
-                source: androidx.compose.ui.input.nestedscroll.NestedScrollSource,
-            ): androidx.compose.ui.geometry.Offset {
-                // Leftover downward scroll = the list is already at its top.
-                if (available.y > 0f) state.pull = (state.pull + available.y).coerceAtMost(state.maxPx)
-                return androidx.compose.ui.geometry.Offset.Zero
-            }
-
-            override suspend fun onPostFling(
-                consumed: androidx.compose.ui.unit.Velocity,
-                available: androidx.compose.ui.unit.Velocity,
-            ): androidx.compose.ui.unit.Velocity {
-                // Finger lifted: the hold resets (no more fling-to-open).
-                state.pull = 0f
-                return androidx.compose.ui.unit.Velocity.Zero
-            }
-        }
-    }
+    // Owner round 19: the nested-scroll feed is GONE — the ROM's overscroll
+    // and the list both got their hands on the delta before us on some
+    // devices, so pulls over ROWS never arrived ("user er upor diye swipe
+    // korle ashe na"). The feed is now a PASS-THROUGH pointer observer on
+    // the list itself (see ChatListBody): it watches drags without consuming
+    // them, so scrolling, row swipes and the stretch effect all still work,
+    // while any downward drag at the list's top feeds the archive pull.
     // Owner round 13b: keying the effect on `pull` restarted the coroutine
     // on EVERY overscroll pixel — coroutine churn read as main-screen jank.
     // The effect runs once; snapshotFlow fires only when the held/not-held
@@ -460,7 +430,7 @@ private fun ArchivePullArea(nav: NavController, state: ArchivePullState, content
             state.pull = 0f
         }
     }
-    Box(Modifier.fillMaxSize().nestedScroll(conn)) {
+    Box(Modifier.fillMaxSize()) {
         content()
         if (pull > threshold * 0.3f || logoShown) {
             // Owner round 14/15: animation ONLY — the archive icon with a
@@ -591,6 +561,27 @@ fun ArchiveScreen(nav: NavController) {
     }
 }
 
+/** Owner round 19: delivery ticks for a list row — one tick sent, two read. */
+@Composable
+private fun ListTicks(read: Boolean) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            Icons.Filled.Done,
+            null,
+            tint = if (read) GoldDeep else Muted,
+            modifier = Modifier.size(14.dp),
+        )
+        if (read) {
+            Icon(
+                Icons.Filled.Done,
+                null,
+                tint = GoldDeep,
+                modifier = Modifier.size(14.dp).offset(x = (-4).dp),
+            )
+        }
+    }
+}
+
 /** Big friendly tab pill with optional unread badge / new-status dot. */
 @Composable
 private fun TopTab(
@@ -675,6 +666,7 @@ private fun ChatListBody(
     nav: NavController,
     onChange: () -> Unit,
     listState: LazyListState,
+    archivePull: ArchivePullState,
 ) {
     // Archived chats live in their own list (pull down on this list to open).
     val visible = convs.filter { !ScreenStore.isArchived(it.optString("id")) }
@@ -693,7 +685,37 @@ private fun ChatListBody(
         return
     }
     LazyColumn(
-        Modifier.fillMaxSize(),
+        Modifier
+            .fillMaxSize()
+            // Owner round 19: THE archive feed — a non-consuming vertical
+            // drag observer. It sees drags that start ON TOP OF ROWS (the
+            // nested-scroll chain never reliably delivered those on the
+            // owner's ROM), never eats a pointer event, so the list scrolls
+            // and rows swipe exactly as before. Only a downward drag while
+            // the list sits at its very top feeds the pull-hold.
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    var pull = 0f
+                    var armed = false
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        var dy = 0f
+                        event.changes.forEach { dy += it.positionChange().y }
+                        if (dy != 0f && archivePull.canPull()) {
+                            armed = true
+                            pull = (pull + dy).coerceIn(0f, archivePull.maxPx)
+                            archivePull.pull = pull
+                        } else if (dy != 0f && armed) {
+                            pull = (pull + dy).coerceIn(0f, archivePull.maxPx)
+                            archivePull.pull = pull
+                        }
+                        if (event.changes.all { !it.pressed }) break
+                    }
+                    // Finger lifted: the hold loop's own condition resets it.
+                    if (armed) archivePull.pull = 0f
+                }
+            },
         state = listState,
         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -1028,6 +1050,17 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
                         modifier = Modifier.size(15.dp),
                     )
                     Spacer(Modifier.width(6.dp))
+                }
+                // Owner round 19: own last message gets its delivery tick in
+                // the list rows too (one tick = sent, two = read) — the
+                // archived list showed nothing at all.
+                val lastMsg = ScreenStore.lastMsg(id)
+                if (lastMsg != null && lastMsg.optString("senderId") == Store.myId() && lastMsg.optString("kind") != "DELETED") {
+                    val otherRead = conv.optJSONArray("members")?.objects()?.firstOrNull {
+                        it.optJSONObject("user")?.optString("id") != Store.myId()
+                    }?.optString("lastReadAt") ?: ""
+                    ListTicks(read = otherRead.isNotBlank() && otherRead >= lastMsg.optString("createdAt"))
+                    Spacer(Modifier.width(4.dp))
                 }
                 Text(stamp, fontSize = 12.sp, color = if (unread > 0) GoldDeep else Muted)
             }

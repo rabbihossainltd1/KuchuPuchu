@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Owner round 18: NO custom background — the system notification card
-     paints itself (light/dark follows the OS); text reads via theme attrs.
-     One red Hang up (icon + text), nothing else. -->
+<!-- Owner round 19: explicit readable colours (theme attrs mismatched on the
+     owner's ROM), a RED border around Hang up and WHITE label. The card
+     itself still paints the system background — no custom fill. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/kp_ongoing_root"
     android:layout_width="match_parent"
@@ -25,7 +25,7 @@
             android:layout_height="wrap_content"
             android:maxLines="1"
             android:ellipsize="end"
-            android:textColor="?android:attr/textColorPrimary"
+            android:textColor="#F2F5FA"
             android:textSize="15sp"
             android:textStyle="bold" />
 
@@ -34,7 +34,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:maxLines="1"
-            android:textColor="?android:attr/textColorSecondary"
+            android:textColor="#A9B4C9"
             android:textSize="12sp" />
     </LinearLayout>
 
@@ -48,10 +48,11 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingStart="10dp"
-        android:paddingEnd="10dp"
-        android:paddingTop="6dp"
-        android:paddingBottom="6dp"
+        android:background="@drawable/kp_hangup_border"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="7dp"
+        android:paddingBottom="7dp"
         android:clickable="true"
         android:focusable="true">
 
@@ -68,7 +69,7 @@
             android:layout_height="wrap_content"
             android:layout_marginStart="5dp"
             android:text="Hang up"
-            android:textColor="#F0402F"
+            android:textColor="#FFFFFF"
             android:textSize="13sp"
             android:textStyle="bold" />
     </LinearLayout>

@@ -276,6 +276,12 @@ fun ChatScreen(nav: NavController, convId: String) {
     androidx.activity.compose.BackHandler(enabled = showChatSearch) {
         showChatSearch = false
     }
+    // Owner round 19: back also dismisses the floating reaction bar / emoji
+    // sheet (registered last = checked first).
+    androidx.activity.compose.BackHandler(enabled = reactionFor != null || showEmojiSheet) {
+        reactionFor = null
+        showEmojiSheet = false
+    }
     // Owner round 18: leaving the chat re-marks it read server-side and
     // zeroes the badge NOW. The list used to show a stale unread count after
     // exiting (a poke merge carried the pre-read value back in) until the
@@ -1198,6 +1204,11 @@ fun ChatScreen(nav: NavController, convId: String) {
     fun unsendSelected() {
         val ids = selected.toList()
         selected.clear()
+        // Owner round 19: ANY performed action (unsend/delete/forward/copy)
+        // also drops the reaction bar — the message used to stay "armed"
+        // with the quick emojis still floating over it.
+        reactionFor = null
+        showEmojiSheet = false
         scope.launch {
             ids.forEach { id ->
                 runCatching { withContext(Dispatchers.IO) { Api.delete("/api/messages/$id") } }
@@ -1209,6 +1220,8 @@ fun ChatScreen(nav: NavController, convId: String) {
     fun deleteForMe() {
         val ids = selected.toList()
         selected.clear()
+        reactionFor = null
+        showEmojiSheet = false
         ids.forEach { ScreenStore.hideMessage(it) }
         paintFromStore()
     }
@@ -1216,6 +1229,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     fun forwardSelected(targetConvId: String) {
         val items = selectedMessages()
         forwarding = false
+        selected.clear()
+        reactionFor = null
+        showEmojiSheet = false
         scope.launch {
             for (m in items) {
                 runCatching {
@@ -1404,6 +1420,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         cm.setPrimaryClip(android.content.ClipData.newPlainText("KuchuPuchu", text))
                         android.widget.Toast.makeText(ctx, "Copied", android.widget.Toast.LENGTH_SHORT).show()
                         selected.clear()
+                        reactionFor = null
                     }) {
                         Icon(Icons.Filled.ContentCopy, "Copy", tint = Ink, modifier = Modifier.size(21.dp))
                     }
@@ -1511,14 +1528,14 @@ fun ChatScreen(nav: NavController, convId: String) {
                             CallEngine.instance?.startCall(otherId, "AUDIO", title, avatarUrl ?: "")
                         }
                     }) {
-                        Icon(Icons.Filled.Call, "Voice call", tint = GoldDeep, modifier = Modifier.size(19.dp))
+                        Icon(Icons.Filled.Call, "Voice call", tint = chatAccent(chatTheme), modifier = Modifier.size(19.dp))
                     }
                     HeaderCallBtn(onClick = {
                         gateMicCamera(video = true) {
                             CallEngine.instance?.startCall(otherId, "VIDEO", title, avatarUrl ?: "")
                         }
                     }) {
-                        Icon(Icons.Filled.Videocam, "Video call", tint = GoldDeep, modifier = Modifier.size(21.dp))
+                        Icon(Icons.Filled.Videocam, "Video call", tint = chatAccent(chatTheme), modifier = Modifier.size(21.dp))
                     }
                 }
             }
@@ -2021,6 +2038,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 startRecording()
             },
             micEnabled = !isAiChat,
+            theme = chatTheme,
             onFinishRecord = { cancelled -> finishRecording(cancelled) },
             selectCount = selected.size,
             onSendSelection = { sendSelectedMedia() },
@@ -2175,7 +2193,9 @@ private fun Composer(
     onSendSelection: () -> Unit = {},
     gridSelCount: Int = 0,
     onSendGrid: () -> Unit = {},
+    theme: String = "",
 ) {
+    val accent = chatAccent(theme)
     // Attach/sticker MUST close the keyboard first — otherwise both the IME
     // and the inline panel push the composer up at once, which read as a
     // layout "jump" ("upore uthe jai") instead of a clean keyboard->panel swap.
@@ -2210,10 +2230,10 @@ private fun Composer(
                     .weight(1f)
                     .heightIn(min = 38.dp)
                     // Owner round 18: the pill is BACK — only the recording
-                    // strip is transparent (that was the ask), the normal
-                    // composer keeps its card.
+                    // strip is transparent (that was the ask). Owner round 19:
+                    // the pill takes the chat theme's accent tint.
                     .clip(RoundedCornerShape(19.dp))
-                    .background(Card)
+                    .background(accent.copy(alpha = 0.16f))
                     .padding(horizontal = 2.dp, vertical = 1.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 34.dp)) {
@@ -2225,7 +2245,7 @@ private fun Composer(
                         },
                         Modifier.size(32.dp),
                     ) {
-                        Icon(Icons.Filled.Mood, "Stickers", tint = GoldDeep, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Filled.Mood, "Stickers", tint = accent, modifier = Modifier.size(20.dp))
                     }
                     Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                         if (input.isEmpty()) {
@@ -2248,6 +2268,8 @@ private fun Composer(
                             value = input,
                             onValueChange = onInput,
                             textStyle = TextStyle(color = Ink, fontSize = 14.sp, lineHeight = 20.sp),
+                            // Owner round 19: the caret follows the chat theme too.
+                            cursorBrush = androidx.compose.ui.graphics.SolidColor(accent),
                             maxLines = 4,
                             interactionSource = inputInteraction,
                             // min height pinned to the placeholder's own line
@@ -2271,7 +2293,7 @@ private fun Composer(
                         },
                         Modifier.size(32.dp),
                     ) {
-                        Icon(Icons.Filled.AttachFile, "Attach", tint = GoldDeep, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Filled.AttachFile, "Attach", tint = accent, modifier = Modifier.size(20.dp))
                     }
                 }
                 if (input.length > 800) {
@@ -2318,7 +2340,7 @@ private fun Composer(
                     // lift as the header call buttons now.
                     .shadow(4.dp, CircleShape)
                     .clip(CircleShape)
-                    .background(Gold)
+                    .background(accent)
                     .clickable(
                         interactionSource = sendInteraction,
                         indication = null,
@@ -2342,6 +2364,7 @@ private fun Composer(
             HoldMicButton(
                 recording = recording,
                 enabled = micEnabled,
+                accent = accent,
                 onStartRecord = onStartRecord,
                 onFinishRecord = onFinishRecord,
             )
@@ -2358,6 +2381,7 @@ private fun Composer(
 private fun HoldMicButton(
     recording: Boolean,
     enabled: Boolean = true,
+    accent: Color = Gold,
     onStartRecord: () -> Unit,
     onFinishRecord: (cancelled: Boolean) -> Unit,
 ) {
@@ -2379,7 +2403,7 @@ private fun HoldMicButton(
             .alpha(if (enabled) 1f else 0.4f)
             // Owner round 14: the ring was transparent unless cancel was
             // armed — the owner read the bare icon as "no rounded border".
-            .border(1.5.dp, if (cancelArmed) Red else GoldDeep, CircleShape)
+            .border(1.5.dp, if (cancelArmed) Red else accent, CircleShape)
             .pointerInput(enabled) {
                 awaitEachGesture {
                     if (!enabled) return@awaitEachGesture
@@ -2408,7 +2432,7 @@ private fun HoldMicButton(
         Icon(
             if (cancelArmed) Icons.Filled.Delete else Icons.Filled.Mic,
             contentDescription = if (cancelArmed) "Release to cancel" else "Hold to record",
-            tint = if (!enabled) Muted else if (cancelArmed) Red else GoldDeep,
+            tint = if (!enabled) Muted else if (cancelArmed) Red else accent,
             modifier = Modifier.size(20.dp),
         )
     }
@@ -3908,6 +3932,16 @@ private fun chatWallpaper(theme: String) =
         "night" -> Color(0xFF0B1220)
         "rose" -> if (KpThemeMode.darkBlue) Color(0xFF23141A) else Color(0xFFFFF1F2)
         else -> Cream
+    }
+
+/** Owner round 19: one accent per chat theme — the message bar, voice/mic
+ *  button and call buttons all take the chat's colour now. */
+private fun chatAccent(theme: String): Color =
+    when (theme) {
+        "mint" -> Color(0xFF10B981)
+        "rose" -> Color(0xFFF43F5E)
+        "night" -> Color(0xFF818CF8)
+        else -> Gold
     }
 
 /** My bubble per chat theme (Owner round 14: theme restyles bubbles too). */
