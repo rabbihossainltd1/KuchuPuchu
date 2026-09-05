@@ -1,6 +1,6 @@
 package app.kuchupuchu.android
 
-import android.app.PackageInstaller
+import android.content.pm.PackageInstaller
 import android.content.Context
 import android.content.Intent
 import androidx.compose.runtime.getValue

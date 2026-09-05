@@ -4304,12 +4304,14 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const row = await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", msgId);
     if (!row) fail(404, "Message not found.");
     await requireMember(db, row.conv_id, uid);
-    const emoji = String(body.emoji || "").trim().slice(0, 8);
+    const emoji = String(body.emoji || "")
+      .trim()
+      .slice(0, 8);
     let meta: Record<string, unknown> = {};
     if (row.meta_json) {
       meta = (JSON.parse(row.meta_json) as Record<string, unknown>) ?? {};
     }
-    const reactions = ((meta.reactions as Record<string, string>) ?? {});
+    const reactions = (meta.reactions as Record<string, string>) ?? {};
     const current = reactions[uid] ?? "";
     if (!emoji) {
       delete reactions[uid];
@@ -4319,12 +4321,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       reactions[uid] = emoji;
     }
     meta.reactions = reactions;
-    await run(
-      db,
-      "UPDATE messages SET meta_json = ? WHERE id = ?",
-      JSON.stringify(meta),
-      msgId,
-    );
+    await run(db, "UPDATE messages SET meta_json = ? WHERE id = ?", JSON.stringify(meta), msgId);
     const updated = msgFrom({ ...row, meta_json: JSON.stringify(meta) });
     ctx.waitUntil(
       broadcastRoomEvent(env, row.conv_id, {
