@@ -202,6 +202,8 @@ fun ChatScreen(nav: NavController, convId: String) {
     var reactionFor by remember { mutableStateOf<JSONObject?>(null) }
     var showEmojiSheet by remember { mutableStateOf(false) }
 
+    val selected = remember { mutableStateListOf<String>() }
+
     fun applyReaction(m: JSONObject, emoji: String) {
         val mid = m.optString("id")
         if (mid.isBlank()) return
@@ -260,7 +262,6 @@ fun ChatScreen(nav: NavController, convId: String) {
     var searchQ by remember { mutableStateOf("") }
     var searchHits by remember { mutableStateOf(listOf<JSONObject>()) }
     // Selection mode (long-press): delete-for-me / unsend / edit / forward.
-    val selected = remember { mutableStateListOf<String>() }
     // Attach-panel (gallery grid) selection, hoisted here so the COMPOSER's
     // mic turns into SEND while the panel has picks (WhatsApp behaviour) —
     // the panel itself no longer carries its own send button.
@@ -3296,6 +3297,7 @@ private fun MessageReactions(m: JSONObject) {
 
 /** Owner round 16/17: the full reaction sheet — a BOTTOM sheet, the same
  *  pattern as the login screen's country picker. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun EmojiSheetDialog(onPick: (String) -> Unit) {
     val emojis = listOf(
