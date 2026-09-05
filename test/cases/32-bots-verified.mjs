@@ -1198,6 +1198,59 @@ const convBetween = (db, a, b) =>
         "utf8",
       ).includes("postDelayed({ KpPush.boot(this) }, 1500)"),
   );
+  /* ---------------- round 21 (dark-blue sweep completion) ---------------- */
+  const ui = readFileSync("native-android/app/src/main/java/app/kuchupuchu/android/Ui.kt", "utf8");
+  const search = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/SearchScreen.kt",
+    "utf8",
+  );
+  const profile = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/ProfileScreen.kt",
+    "utf8",
+  );
+  const callstab = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/CallsTabScreen.kt",
+    "utf8",
+  );
+  const status = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/StatusScreens.kt",
+    "utf8",
+  );
+  const login = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/LoginScreen.kt",
+    "utf8",
+  );
+  check(
+    "r21-sweep: avatar ring, empty states, nav tabs, ticks, mute pills — blue in dark mode",
+    theme.includes("Brush.linearGradient(listOf(Color(0xFF60A5FA), Color(0xFF2F6FED)))") &&
+      ui.includes("tint = ActionBlueDeep, modifier = Modifier.size(34.dp)") &&
+      chatlist.includes("val tint = if (selected) ActionBlueDeep else Muted") &&
+      chatlist.includes("background(ActionBlue)") &&
+      chatlist.includes("tint = if (read) ActionBlueDeep else Muted") &&
+      chatlist.split("ActionBlueDeep").length - 1 >= 4,
+  );
+  check(
+    "r21-sweep: chat 3-dot menus (12), reply I-bars, quote chip — blue in dark mode",
+    chat.split(", null, tint = ActionBlueDeep) }").length - 1 === 12 &&
+      chat.includes(".background(ActionBlue),") &&
+      chat.includes("background(ActionBlue))") &&
+      chat.includes("if (KpThemeMode.darkBlue) ActionBlue.copy(alpha = 0.18f) else GoldSoft"),
+  );
+  check(
+    "r21-sweep: friends-profile buttons, call-back icon, status pencil/status+/send, settings crash row",
+    profile.includes("tint = ActionBlueDeep, modifier = Modifier.size(25.dp)") &&
+      callstab.includes("tint = ActionBlueDeep,") &&
+      status.includes("contentColor = ActionBlueDeep,") &&
+      status.includes("background(ActionBlue),") &&
+      settings.includes('Icon(Icons.Filled.BugReport, "Crash reports", tint = ActionBlueDeep'),
+  );
+  check(
+    "r21-sweep: global-search chips/highlight + login links/spinner/brand — blue in dark mode",
+    search.includes(".background(if (selected) ActionBlue else Card)") &&
+      search.includes("color = ActionBlueDeep,") &&
+      login.includes('Text("Recover account", color = ActionBlueDeep') &&
+      login.includes("ActionBlue.copy(alpha = ringAlpha)"),
+  );
   check(
     "calls tab: skeleton rows + 20s cache (no laggy refetch)",
     readFileSync(

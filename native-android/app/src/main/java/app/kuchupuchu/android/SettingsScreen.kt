@@ -352,7 +352,7 @@ fun SettingsScreen(nav: NavController) {
                     .padding(start = 16.dp, top = 12.dp, end = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Filled.BugReport, "Crash reports", tint = GoldDeep, modifier = Modifier.size(21.dp))
+                Icon(Icons.Filled.BugReport, "Crash reports", tint = ActionBlueDeep, modifier = Modifier.size(21.dp))
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     Text("Crash reports", fontSize = 13.sp, color = Muted)

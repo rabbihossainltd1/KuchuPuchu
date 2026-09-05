@@ -569,14 +569,14 @@ private fun ListTicks(read: Boolean) {
         Icon(
             Icons.Filled.Done,
             null,
-            tint = if (read) GoldDeep else Muted,
+            tint = if (read) ActionBlueDeep else Muted,
             modifier = Modifier.size(14.dp),
         )
         if (read) {
             Icon(
                 Icons.Filled.Done,
                 null,
-                tint = GoldDeep,
+                tint = ActionBlueDeep,
                 modifier = Modifier.size(14.dp).offset(x = (-4).dp),
             )
         }
@@ -594,9 +594,14 @@ private fun TopTab(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    val tint = if (selected) GoldDeep else Muted
+    // Owner round 21: the bottom-nav tabs ride the blue accent in dark-blue
+    // mode (selected pill, icon and label together).
+    val tint = if (selected) ActionBlueDeep else Muted
     val bg =
-        if (selected) Modifier.background(GoldSoft, RoundedCornerShape(14.dp))
+        if (selected) Modifier.background(
+            if (KpThemeMode.darkBlue) ActionBlue.copy(alpha = 0.18f) else GoldSoft,
+            RoundedCornerShape(14.dp),
+        )
         else Modifier
     Row(
         modifier
@@ -635,7 +640,7 @@ private fun TopTab(
                 Modifier
                     .defaultMinSize(minWidth = 18.dp, minHeight = 18.dp)
                     .clip(CircleShape)
-                    .background(Gold)
+                    .background(ActionBlue)
                     .padding(horizontal = 4.dp, vertical = 2.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -764,8 +769,8 @@ private fun SwipeConvRow(
                 if (offset < 0f && archivedMode) {
                     ActionSlot(
                         icon = if (conv.optBoolean("muted")) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
-                        bg = GoldSoft,
-                        tint = GoldDeep,
+                        bg = if (KpThemeMode.darkBlue) ActionBlue.copy(alpha = 0.18f) else GoldSoft,
+                        tint = ActionBlueDeep,
                         label = if (conv.optBoolean("muted")) "Unmute" else "Mute",
                     ) {
                         haptics.confirm()
@@ -844,8 +849,8 @@ private fun SwipeConvRow(
                 if (offset >= 0f && !archivedMode) {
                     ActionSlot(
                         icon = if (conv.optBoolean("muted")) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
-                        bg = GoldSoft,
-                        tint = GoldDeep,
+                        bg = if (KpThemeMode.darkBlue) ActionBlue.copy(alpha = 0.18f) else GoldSoft,
+                        tint = ActionBlueDeep,
                         label = if (conv.optBoolean("muted")) "Unmute" else "Mute",
                     ) {
                         haptics.confirm()
@@ -1088,7 +1093,7 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
                     ) {
                         Text(
                             if (unread > 99) "99+" else "$unread",
-                            color = AmberInk,
+                            color = ActionBlueInk,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                         )

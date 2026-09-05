@@ -1558,12 +1558,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                         // options — nothing else.
                         DropdownMenuItem(
                             text = { Text("History", color = Ink) },
-                            leadingIcon = { Icon(Icons.Filled.Schedule, null, tint = GoldDeep) },
+                            leadingIcon = { Icon(Icons.Filled.Schedule, null, tint = ActionBlueDeep) },
                             onClick = { menuOpen = false; nav.navigate("aihistory") },
                         )
                         DropdownMenuItem(
                             text = { Text("New chat", color = Ink) },
-                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.Chat, null, tint = GoldDeep) },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.Chat, null, tint = ActionBlueDeep) },
                             onClick = { menuOpen = false; resetAiSession() },
                         )
                         DropdownMenuItem(
@@ -1573,7 +1573,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                                     color = Ink,
                                 )
                             },
-                            leadingIcon = { Icon(Icons.Filled.NotificationsOff, null, tint = GoldDeep) },
+                            leadingIcon = { Icon(Icons.Filled.NotificationsOff, null, tint = ActionBlueDeep) },
                             onClick = {
                                 menuOpen = false
                                 val snap = conv.value ?: c
@@ -1599,7 +1599,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         )
                         DropdownMenuItem(
                             text = { Text("Chat theme", color = Ink) },
-                            leadingIcon = { Icon(Icons.Filled.Palette, null, tint = GoldDeep) },
+                            leadingIcon = { Icon(Icons.Filled.Palette, null, tint = ActionBlueDeep) },
                             onClick = { menuOpen = false; showTheme = true },
                         )
                         DropdownMenuItem(
@@ -1645,18 +1645,18 @@ fun ChatScreen(nav: NavController, convId: String) {
                         )
                         DropdownMenuItem(
                             text = { Text("Search in chat", color = Ink) },
-                            leadingIcon = { Icon(Icons.Filled.Search, null, tint = GoldDeep) },
+                            leadingIcon = { Icon(Icons.Filled.Search, null, tint = ActionBlueDeep) },
                             onClick = { menuOpen = false; showChatSearch = true },
                         )
                     } else {
                     DropdownMenuItem(
                         text = { Text("New group", color = Ink) },
-                        leadingIcon = { Icon(Icons.Filled.GroupAdd, null, tint = GoldDeep) },
+                        leadingIcon = { Icon(Icons.Filled.GroupAdd, null, tint = ActionBlueDeep) },
                         onClick = { menuOpen = false; nav.navigate("newgroup") },
                     )
                     DropdownMenuItem(
                         text = { Text("View contact", color = Ink) },
-                        leadingIcon = { Icon(Icons.Filled.Person, null, tint = GoldDeep) },
+                        leadingIcon = { Icon(Icons.Filled.Person, null, tint = ActionBlueDeep) },
                         onClick = {
                             menuOpen = false
                             if (!isGroup && otherId.isNotBlank()) nav.navigate("profile/$otherId")
@@ -1666,17 +1666,17 @@ fun ChatScreen(nav: NavController, convId: String) {
                         // Owner round 15: this opened the GLOBAL search —
                         // in a chat, search means THIS conversation.
                         text = { Text("Search in chat", color = Ink) },
-                        leadingIcon = { Icon(Icons.Filled.Search, null, tint = GoldDeep) },
+                        leadingIcon = { Icon(Icons.Filled.Search, null, tint = ActionBlueDeep) },
                         onClick = { menuOpen = false; showChatSearch = true },
                     )
                     DropdownMenuItem(
                         text = { Text("Media, links, and docs", color = Ink) },
-                        leadingIcon = { Icon(Icons.Filled.PermMedia, null, tint = GoldDeep) },
+                        leadingIcon = { Icon(Icons.Filled.PermMedia, null, tint = ActionBlueDeep) },
                         onClick = { menuOpen = false; nav.navigate("chatmedia/$convId") },
                     )
                     DropdownMenuItem(
                         text = { Text(if (c?.optBoolean("muted") == true) "Unmute notifications" else "Mute notifications", color = Ink) },
-                        leadingIcon = { Icon(Icons.Filled.NotificationsOff, null, tint = GoldDeep) },
+                        leadingIcon = { Icon(Icons.Filled.NotificationsOff, null, tint = ActionBlueDeep) },
                         onClick = {
                             menuOpen = false
                             val snap = conv.value ?: c
@@ -1701,12 +1701,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                     )
                     DropdownMenuItem(
                         text = { Text("Disappearing messages", color = Ink) },
-                        leadingIcon = { Icon(Icons.Filled.Timer, null, tint = GoldDeep) },
+                        leadingIcon = { Icon(Icons.Filled.Timer, null, tint = ActionBlueDeep) },
                         onClick = { menuOpen = false; showDisappear = true },
                     )
                     DropdownMenuItem(
                         text = { Text("Chat theme", color = Ink) },
-                        leadingIcon = { Icon(Icons.Filled.Palette, null, tint = GoldDeep) },
+                        leadingIcon = { Icon(Icons.Filled.Palette, null, tint = ActionBlueDeep) },
                         onClick = { menuOpen = false; showTheme = true },
                     )
                     }
@@ -3021,7 +3021,9 @@ private fun ReplyQuoteBar(replyTo: JSONObject?, onCancel: () -> Unit) {
                 .width(3.dp)
                 .height(30.dp)
                 .clip(RoundedCornerShape(2.dp))
-                .background(Gold),
+                // Owner round 21: the reply "I" bar rides the blue accent in
+                // dark-blue mode (it was the last gold stripe).
+                .background(ActionBlue),
         )
         Spacer(Modifier.width(8.dp))
         Column(Modifier.weight(1f)) {
@@ -3232,10 +3234,10 @@ private fun MessageRow(
                             Modifier
                                 .padding(bottom = 3.dp)
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(if (mine) Color(0x26FFFFFF) else GoldSoft)
+                                .background(if (mine) Color(0x26FFFFFF) else if (KpThemeMode.darkBlue) ActionBlue.copy(alpha = 0.18f) else GoldSoft)
                                 .padding(horizontal = 8.dp, vertical = 4.dp),
                         ) {
-                            Box(Modifier.width(2.5.dp).height(26.dp).clip(RoundedCornerShape(2.dp)).background(Gold))
+                            Box(Modifier.width(2.5.dp).height(26.dp).clip(RoundedCornerShape(2.dp)).background(ActionBlue))
                             Spacer(Modifier.width(6.dp))
                             Column {
                                 Text(

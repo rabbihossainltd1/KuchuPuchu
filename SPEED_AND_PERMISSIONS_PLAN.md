@@ -755,3 +755,22 @@ the system player could never play them. New: video bubble (thumbnail via
 MediaMetadataRetriever when cached, play affordance, duration) + fullscreen
 in-app player (download with auth header to kp-video-cache, VideoView +
 MediaController: play/pause, seek bar, timestamps). No external player.
+
+## Round 21 — dark-blue sweep completion (2026-09-05, v122 / 3.9.46)
+
+Every gold accent the owner listed now rides ActionBlue in dark-blue mode
+(light-cream keeps the classic gold everywhere):
+
+1. Settings: crash-reports row icon (the others were already blue via SettingRow).
+2. Chat: avatar ring (goldRing() is theme-aware now — fixes EVERY profile-photo
+   border: chat header, chat list, friends profile, status), all 12 three-dot
+   menu icons.
+3. Friends profile: voice/video/search buttons.
+4. Chat list: bottom-nav tabs (selected pill+icon+label+badge), double-tick,
+   swipe mute pills.
+5. Status: bottom text (tabs), pencil FAB, status+ circle, reply send.
+6. Calls: bottom tab, call-back icons.
+7. Global search: filter chips, section headers, file icons, match highlight.
+8. Empty states everywhere (No calls / No messages / new-chat) via EmptyState.
+9. Reply "I" bars: composer quote bar + in-bubble quote bar + quote chip.
+10. Login screen: links, spinners, ring, brand word, country highlight.

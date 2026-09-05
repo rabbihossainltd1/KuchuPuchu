@@ -165,7 +165,7 @@ fun StatusScreen(nav: NavController) {
                                     Modifier
                                         .size(20.dp)
                                         .clip(CircleShape)
-                                        .background(Gold),
+                                        .background(ActionBlue),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Icon(
@@ -288,7 +288,7 @@ fun StatusScreen(nav: NavController) {
                 onClick = { haptics.tap(); composeText = true },
                 shape = CircleShape,
                 containerColor = Card,
-                contentColor = GoldDeep,
+                contentColor = ActionBlueDeep,
                 modifier = Modifier.padding(bottom = 14.dp).size(40.dp),
             ) {
                 Icon(Icons.Filled.Edit, contentDescription = "Text status", modifier = Modifier.size(19.dp))
@@ -1011,7 +1011,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                             Icon(
                                 Icons.AutoMirrored.Filled.Send,
                                 "Send reply",
-                                tint = Gold,
+                                tint = ActionBlueDeep,
                             )
                         }
                     }

@@ -224,7 +224,7 @@ fun ProfileScreen(nav: NavController, userId: String) {
                         CallEngine.instance?.startCall(userId, "AUDIO", u.optText("displayName"), u.optText("avatarUrl"))
                     }
                 }) {
-                    Icon(Icons.Filled.Call, "Voice call", tint = GoldDeep, modifier = Modifier.size(25.dp))
+                    Icon(Icons.Filled.Call, "Voice call", tint = ActionBlueDeep, modifier = Modifier.size(25.dp))
                 }
             }
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
@@ -234,7 +234,7 @@ fun ProfileScreen(nav: NavController, userId: String) {
                         CallEngine.instance?.startCall(userId, "VIDEO", u.optText("displayName"), u.optText("avatarUrl"))
                     }
                 }) {
-                    Icon(Icons.Filled.Videocam, "Video call", tint = GoldDeep, modifier = Modifier.size(27.dp))
+                    Icon(Icons.Filled.Videocam, "Video call", tint = ActionBlueDeep, modifier = Modifier.size(27.dp))
                 }
             }
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
@@ -253,7 +253,7 @@ fun ProfileScreen(nav: NavController, userId: String) {
                         }
                     }
                 }) {
-                    Icon(Icons.Filled.Search, "Search", tint = GoldDeep, modifier = Modifier.size(25.dp))
+                    Icon(Icons.Filled.Search, "Search", tint = ActionBlueDeep, modifier = Modifier.size(25.dp))
                 }
             }
         }
