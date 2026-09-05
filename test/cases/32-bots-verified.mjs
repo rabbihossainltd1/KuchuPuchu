@@ -554,10 +554,11 @@ const convBetween = (db, a, b) =>
   );
   check("timestamp parsing memoized (scroll perf)", chat.includes("stampCache"));
   check(
-    "socket-down fallback poll 3s + active rejoin (realtime lateness)",
-    chat.includes(">= 3_000") &&
+    "round 14: 3s poll when socket down + 8s half-open safety net + 10s rejoin",
+    chat.includes("3_000L else 8_000L") &&
       chat.includes("KpSocket.joinChat(convId)") &&
-      chat.includes("lastRejoin"),
+      chat.includes("lastRejoin") &&
+      chat.includes("chatLive(convId)"),
   );
 
   // ---- Owner round 7 (2026-09-04) ----
@@ -934,17 +935,20 @@ const convBetween = (db, a, b) =>
       chat.includes("quoteFor = { rid ->"),
   );
   check(
-    "archive opens by pull + 3s hold with an animated logo",
-    chatlist.includes("Keep holding for archived chats") &&
+    "archive opens by pull + 3s hold — round 14: animation ONLY (icon + progress ring), no pill/text/border",
+    chatlist.includes("CircularProgressIndicator(") &&
       chatlist.includes("pop.animateTo(") &&
-      !chatlist.includes("Release for archived chats"),
+      !chatlist.includes("Keep holding for archived chats") &&
+      !chatlist.includes("Pull down and hold") &&
+      !chatlist.includes("LinearProgressIndicator") &&
+      !chatlist.includes(".background(GoldSoft)\n                    .padding(horizontal = 16.dp, vertical = 10.dp)"),
   );
   check(
     "calls tab: skeleton rows + 20s cache (no laggy refetch)",
     readFileSync(
       "native-android/app/src/main/java/app/kuchupuchu/android/CallsTabScreen.kt",
       "utf8",
-    ).includes("KpShimmerListItem()") &&
+    ).includes("KpShimmerListItem(alpha = sh)") &&
       readFileSync(
         "native-android/app/src/main/java/app/kuchupuchu/android/CallsTabScreen.kt",
         "utf8",
@@ -959,7 +963,11 @@ const convBetween = (db, a, b) =>
       readFileSync(
         "native-android/app/src/main/java/app/kuchupuchu/android/AIHistoryScreen.kt",
         "utf8",
-      ).includes("KpShimmerListItem()"),
+      ).includes("scrollBy(24f)") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/AIHistoryScreen.kt",
+        "utf8",
+      ).includes("KpShimmerListItem(alpha = sh)"),
   );
   check(
     "ringtone picker compacted",
@@ -976,10 +984,15 @@ const convBetween = (db, a, b) =>
       !chatlist.includes('return "🎤 Voice message"'),
   );
   check(
-    "loading skeletons exist (Ui.kt shimmer primitives)",
+    "loading skeletons exist (round 14: ONE shared alpha pulse per screen, not per-row animations)",
     readFileSync("native-android/app/src/main/java/app/kuchupuchu/android/Ui.kt", "utf8").includes(
-      "fun kpShimmerBrush",
-    ) && chat.includes("KpShimmerRow(alignedEnd"),
+      "fun rememberShimmerAlpha",
+    ) &&
+      chat.includes("KpShimmerRow(alignedEnd") &&
+      chat.includes("rememberShimmerAlpha()") &&
+      !readFileSync("native-android/app/src/main/java/app/kuchupuchu/android/Ui.kt", "utf8").includes(
+        "fun kpShimmerBrush",
+      ),
   );
 
   const voiceStart = calls.indexOf("fun VoiceCallScreen");
@@ -989,6 +1002,57 @@ const convBetween = (db, a, b) =>
     calls.includes(".blur(28.dp)") &&
       voiceBody.includes("BlurredAvatarBackdrop") &&
       !voiceBody.includes("PulseRing"),
+  );
+
+  // ---- Owner round 14 (2026-09-05) ----
+  check(
+    "14: chat theme restyles wallpaper AND bubbles, dark-aware, themed picker with swatches",
+    chat.includes("fun chatMineFill") &&
+      chat.includes("fun chatOtherFill") &&
+      chat.includes("chatMineFill(theme)") &&
+      chat.includes("chatOtherFill(theme)") &&
+      chat.includes('containerColor = Card') &&
+      !chat.includes('"default" to "Cream"') &&
+      chat.includes("KpThemeMode.darkBlue) Color(0xFF0C1A15)"),
+  );
+  check(
+    "14: in-chat search — rounded pill at the TOP of the screen, chat-scoped",
+    chat.includes("RoundedCornerShape(24.dp)") &&
+      chat.includes("Alignment.TopCenter") &&
+      chat.includes("Search this chat") &&
+      chat.includes("$convId/messages/search"),
+  );
+  check(
+    "14: forward picker is FULLSCREEN (no popup) with themed rows",
+    chat.includes("DialogProperties(usePlatformDefaultWidth = false)") &&
+      chat.includes("Forward to") &&
+      chat.includes(".background(Cream)") &&
+      chat.includes("BackHandler { onClose() }"),
+  );
+  check(
+    "14: mic button keeps a visible rounded ring (armed = red)",
+    chat.includes("1.5.dp, if (cancelArmed) Red else GoldDeep"),
+  );
+  check(
+    "14: call backdrop decodes data: avatars inline (the real missing-photo bug)",
+    calls.includes('avatarUrl.startsWith("data:")') &&
+      calls.includes("rememberBitmap(avatarUrl)") &&
+      engine.includes('if (url.startsWith("data:")) return'),
+  );
+  check(
+    "14: settings — one editor at a time via a shared key + visible border box on the edited row",
+    settings.includes("var editingKey") &&
+      settings.includes("activeKey = editingKey") &&
+      settings.includes("border(1.dp, Gold, RoundedCornerShape(10.dp))") &&
+      settings.includes('false to "Cream"') &&
+      !settings.includes('false to "Light"'),
+  );
+  check(
+    "14: crash-report file read moved off the main thread (cold-open)",
+    readFileSync(
+      "native-android/app/src/main/java/app/kuchupuchu/android/KpCrash.kt",
+      "utf8",
+    ).includes("withContext(Dispatchers.IO) { KpCrash.lastReport(ctx) }"),
   );
 }
 

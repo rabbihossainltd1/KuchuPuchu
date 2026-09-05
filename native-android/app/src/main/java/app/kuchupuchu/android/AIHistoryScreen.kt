@@ -102,7 +102,8 @@ fun AIHistoryScreen(nav: NavController) {
             if (loading) {
                 // Owner round 13: skeleton rows, not a dead "Loading…" page.
                 Column(Modifier.fillMaxSize()) {
-                    repeat(6) { KpShimmerListItem() }
+                    val sh = rememberShimmerAlpha()
+                    repeat(6) { KpShimmerListItem(alpha = sh) }
                 }
             } else if (sessions.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -156,7 +157,15 @@ fun AIHistoryScreen(nav: NavController) {
             // owner had to scroll "onek upore". Land on the newest messages.
             val sessionListState = androidx.compose.foundation.lazy.rememberLazyListState()
             LaunchedEffect(msgs.size) {
-                if (msgs.isNotEmpty()) sessionListState.scrollToItem(msgs.size - 1)
+                if (msgs.isNotEmpty()) {
+                    sessionListState.scrollToItem(msgs.size - 1)
+                    // Owner round 14: the newest row sat ~20px below where the
+                    // owner expects it — scrollToItem aligns the item's TOP
+                    // with the viewport top, so when the last item fits there
+                    // is dead space under it. A clamped top-up drag nudges the
+                    // content down onto the true bottom edge.
+                    runCatching { sessionListState.scrollBy(24f) }
+                }
             }
             LazyColumn(
                 Modifier.fillMaxSize(),

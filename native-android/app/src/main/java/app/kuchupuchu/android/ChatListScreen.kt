@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material.CircularProgressIndicator
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -46,7 +47,6 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
@@ -356,45 +356,43 @@ private fun ArchivePullArea(nav: NavController, content: @Composable () -> Unit)
     Box(Modifier.fillMaxSize().nestedScroll(conn)) {
         content()
         if (pull > threshold * 0.3f || logoShown) {
-            Column(
-                Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 10.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(GoldSoft)
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                if (logoShown) {
-                    // The ARCHIVED logo — springs in, never just text.
-                    val pop = remember { androidx.compose.animation.core.Animatable(0.35f) }
-                    LaunchedEffect(Unit) {
-                        pop.animateTo(
-                            1f,
-                            spring(dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy),
-                        )
-                    }
-                    Row(Modifier.scale(pop.value), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.Archive, null, tint = GoldDeep, modifier = Modifier.size(24.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Archived", fontSize = 16.sp, color = GoldDeep, fontWeight = FontWeight.Bold)
-                    }
-                } else {
-                    Icon(Icons.Filled.Archive, null, tint = GoldDeep, modifier = Modifier.size(22.dp))
-                    Spacer(Modifier.height(6.dp))
-                    LinearProgressIndicator(
+            // Owner round 14: the pill had a background, a border shape and
+            // instruction text — the owner wanted ANIMATION ONLY. What
+            // remains: the archive icon with a circular progress ring that
+            // fills while holding, and the ARCHIVED logo springing in when
+            // the hold completes. No pill, no border, no text.
+            if (logoShown) {
+                val pop = remember { androidx.compose.animation.core.Animatable(0.35f) }
+                LaunchedEffect(Unit) {
+                    pop.animateTo(
+                        1f,
+                        spring(dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy),
+                    )
+                }
+                Row(
+                    Modifier.align(Alignment.TopCenter).padding(top = 14.dp).scale(pop.value),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.Archive, null, tint = GoldDeep, modifier = Modifier.size(26.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Archived", fontSize = 17.sp, color = GoldDeep, fontWeight = FontWeight.Bold)
+                }
+            } else {
+                Box(
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 14.dp)
+                        .size(46.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(
                         progress = { holdProgress },
                         color = Gold,
-                        trackColor = GoldDeep.copy(alpha = 0.18f),
-                        modifier = Modifier.width(110.dp).height(4.dp).clip(RoundedCornerShape(2.dp)),
+                        strokeWidth = 3.dp,
+                        trackColor = GoldDeep.copy(alpha = 0.15f),
+                        modifier = Modifier.fillMaxSize(),
                     )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        if (pull >= threshold) "Keep holding for archived chats" else "Pull down and hold",
-                        fontSize = 11.sp,
-                        color = GoldDeep,
-                        fontWeight = FontWeight.SemiBold,
-                    )
+                    Icon(Icons.Filled.Archive, null, tint = GoldDeep, modifier = Modifier.size(22.dp))
                 }
             }
         }

@@ -763,31 +763,30 @@ fun VerifiedBadge(size: Dp = 16.dp) {
 /* ------------------------------------------------------------------ */
 /* Owner round 13 (2026-09-05): loading skeletons — Facebook-feed      */
 /* style placeholders so loading states never look dead.               */
+/* Owner round 14: the per-row moving gradient ran SEVERAL infinite   */
+/* animations per screen and read as cold-start lag; one shared alpha */
+/* pulse per screen is ~free.                                         */
 /* ------------------------------------------------------------------ */
 
-/** Animated shimmer brush — one soft light sweep across a placeholder. */
+/** One shared shimmer pulse — hoist once per screen, pass down. */
 @Composable
-fun kpShimmerBrush(): Brush {
+fun rememberShimmerAlpha(): Float {
     val t = rememberInfiniteTransition(label = "shimmer")
-    val x by t.animateFloat(
-        initialValue = 400f,
-        targetValue = 1400f,
+    val a by t.animateFloat(
+        initialValue = 0.45f,
+        targetValue = 0.95f,
         animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-            animation = androidx.compose.animation.core.tween(1400, easing = androidx.compose.animation.core.LinearEasing),
+            animation = androidx.compose.animation.core.tween(650, easing = androidx.compose.animation.core.LinearEasing),
             repeatMode = androidx.compose.animation.core.RepeatMode.Reverse,
         ),
-        label = "sx",
+        label = "sa",
     )
-    return Brush.linearGradient(
-        listOf(Line, Card.copy(alpha = 0.92f), Line),
-        start = Offset(x, 0f),
-        end = Offset(x + 320f, 90f),
-    )
+    return a
 }
 
 /** One chat-bubble-sized skeleton row (left or right aligned). */
 @Composable
-fun KpShimmerRow(alignedEnd: Boolean = false, widthDp: Int = 200, heightDp: Int = 44) {
+fun KpShimmerRow(alignedEnd: Boolean = false, widthDp: Int = 200, heightDp: Int = 44, alpha: Float = 0.6f) {
     Row(
         Modifier.fillMaxWidth().padding(vertical = 5.dp),
         horizontalArrangement = if (alignedEnd) Arrangement.End else Arrangement.Start,
@@ -797,31 +796,31 @@ fun KpShimmerRow(alignedEnd: Boolean = false, widthDp: Int = 200, heightDp: Int 
                 .width(widthDp.dp)
                 .height(heightDp.dp)
                 .clip(RoundedCornerShape(14.dp))
-                .background(kpShimmerBrush()),
+                .background(Line.copy(alpha = alpha)),
         )
     }
 }
 
 /** One list-item skeleton: avatar circle + two text lines. */
 @Composable
-fun KpShimmerListItem() {
+fun KpShimmerListItem(alpha: Float = 0.6f) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            Modifier.size(48.dp).clip(CircleShape).background(kpShimmerBrush()),
+            Modifier.size(48.dp).clip(CircleShape).background(Line.copy(alpha = alpha)),
         )
         Spacer(Modifier.width(12.dp))
         Column {
             Box(
                 Modifier.width(150.dp).height(15.dp)
-                    .clip(RoundedCornerShape(6.dp)).background(kpShimmerBrush()),
+                    .clip(RoundedCornerShape(6.dp)).background(Line.copy(alpha = alpha)),
             )
             Spacer(Modifier.height(7.dp))
             Box(
                 Modifier.width(96.dp).height(12.dp)
-                    .clip(RoundedCornerShape(6.dp)).background(kpShimmerBrush()),
+                    .clip(RoundedCornerShape(6.dp)).background(Line.copy(alpha = alpha)),
             )
         }
     }

@@ -114,29 +114,32 @@ fun ProfileScreen(nav: NavController, userId: String) {
                     Modifier.fillMaxWidth().padding(horizontal = 20.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
+                    // Owner round 14: one shared alpha pulse replaces the
+                    // moving-gradient brushes (several infinite animations).
+                    val sh = rememberShimmerAlpha()
                     Spacer(Modifier.height(18.dp))
                     Box(
                         Modifier.size(110.dp).clip(androidx.compose.foundation.shape.CircleShape)
-                            .background(kpShimmerBrush()),
+                            .background(Line.copy(alpha = sh)),
                     )
                     Spacer(Modifier.height(16.dp))
                     Box(
                         Modifier.width(170.dp).height(18.dp)
                             .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
-                            .background(kpShimmerBrush()),
+                            .background(Line.copy(alpha = sh)),
                     )
                     Spacer(Modifier.height(10.dp))
                     Box(
                         Modifier.width(120.dp).height(13.dp)
                             .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
-                            .background(kpShimmerBrush()),
+                            .background(Line.copy(alpha = sh)),
                     )
                     Spacer(Modifier.height(22.dp))
                     repeat(3) {
                         Box(
                             Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 6.dp, vertical = 6.dp)
                                 .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
-                                .background(kpShimmerBrush()),
+                                .background(Line.copy(alpha = sh)),
                         )
                     }
                 }
