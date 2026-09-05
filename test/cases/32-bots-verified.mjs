@@ -962,12 +962,16 @@ const convBetween = (db, a, b) =>
     "utf8",
   );
   check(
-    "r17-3: ONE hang-up affordance — red icon + red 'Hang up' text, no speaker button, no chip background",
+    "r17-3/r18-2: ONE hang-up affordance — red icon + red 'Hang up' text, NO speaker button and NO backgrounds (r18)",
     ongoingxml.includes('android:id="@+id/kp_ongoing_end"') &&
       ongoingxml.includes("Hang up") &&
       ongoingxml.includes("#F0402F") &&
       !ongoingxml.includes("kp_ongoing_speaker") &&
-      !callnotify.includes("speaker_wrap"),
+      !callnotify.includes("speaker_wrap") &&
+      !ongoingxml.includes("android:background=") &&
+      !callnotify.includes(".setColor(") &&
+      ongoingxml.includes("?android:attr/textColorPrimary") &&
+      ongoingxml.includes("?android:attr/textColorSecondary"),
   );
   check(
     "r17-6: archive pull is dual-path — list overscroll AND header/tabs drag share ArchivePullState",
@@ -987,9 +991,19 @@ const convBetween = (db, a, b) =>
       src.split("pushToUser(").length - 1 >= 4,
   );
   check(
-    "r17-10: composer input strip is fully transparent (last background(Card) removed)",
-    !chat.includes(".clip(RoundedCornerShape(19.dp))") &&
-      !chat.includes("heightIn(min = 38.dp)\n                    .background(Card)"),
+    "r18-5: composer pill is BACK; only the live recording panel is transparent",
+    chat.includes(
+      "heightIn(min = 38.dp)\n                    // Owner round 18: the pill is BACK",
+    ) &&
+      chat.includes("no card background — transparent like the bar") &&
+      !chat
+        .replace(
+          "/* live recording panel: timer + slide-to-cancel hint.\n               Owner round 16: no card background — transparent like the bar. */",
+          "",
+        )
+        .includes(
+          ".weight(1f)\n                    .padding(horizontal = 12.dp, vertical = 8.dp)\n                verticalAlignment",
+        ),
   );
   check(
     "r17-11: reply-quote sender names are full ink (white on own bubbles), not gold-on-gold",
@@ -1025,6 +1039,55 @@ const convBetween = (db, a, b) =>
   check(
     "r17-20: the uniform settings pencil is gone (only the avatar change-photo icon remains)",
     settings.split("Icons.Filled.Edit").length - 1 === 1,
+  );
+  const callscreen = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/CallScreens.kt",
+    "utf8",
+  );
+  const screenstore = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/ScreenStore.kt",
+    "utf8",
+  );
+  check(
+    "r18-1: system back does NOT minimize the call — it stays fullscreen (notification tap still restores)",
+    callscreen.includes("the call STAYS fullscreen") &&
+      !callscreen.includes("engine.minimizeCall()") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/MainActivity.kt",
+        "utf8",
+      ).includes("CallEngine.instance?.restoreCallUi()"),
+  );
+  check(
+    "r18-4: archive pull works ON TOP OF ROWS — pre-scroll intercept gated by an at-top probe",
+    chatlist.includes("var canPull: () -> Boolean") &&
+      chatlist.includes(
+        "firstVisibleItemIndex == 0 && chatsListState.firstVisibleItemOffset == 0",
+      ) &&
+      chatlist.includes("if (d > 0f && state.canPull())") &&
+      chatlist.includes("state = listState"),
+  );
+  check(
+    "r18-6: PHOTOS render reaction chips too (MessageReactions wired into ImageMessageRow)",
+    chat.indexOf("MessageReactions(m)") <
+      chat.indexOf("Live upload fractions keyed by message clientId") &&
+      chat.split("MessageReactions(m)").length - 1 === 2,
+  );
+  check(
+    "r18-3: deleted tombstones reserve the stamp band (no tick/time overlap)",
+    chat.includes('"This message was deleted" + if (mine)'),
+  );
+  check(
+    "r18-7: system back steps one level — chat search closes, settings pickers/editors close first",
+    chat.includes("BackHandler(enabled = showChatSearch)") &&
+      settings.includes(
+        "BackHandler(enabled = showThemePicker || showRingPicker || editingKey != null)",
+      ),
+  );
+  check(
+    "r18-8: leaving a chat re-marks read + poke merges honor the read grace (no stale unread badge)",
+    chat.includes("DisposableEffect(convId)") &&
+      chat.includes("ScreenStore.markRead(convId)\n            Thread {") &&
+      screenstore.includes("Still inside the read grace"),
   );
   check(
     "calls tab: skeleton rows + 20s cache (no laggy refetch)",

@@ -92,9 +92,10 @@ fun CallGate() {
     val call = engine.active ?: return
     if (engine.minimized) return
     androidx.activity.compose.BackHandler {
-        // Minimize only the call overlay; keep MainActivity and the underlying
-        // app navigation alive while CallService's ongoing notification stays.
-        engine.minimizeCall()
+        // Owner round 18: the call STAYS fullscreen — system back no longer
+        // minimizes it into the notification ("call er fullscreen remove kore
+        // only notification" bug). The red Hang up / on-screen End is the way
+        // out; tapping the ongoing notification still restores the UI.
     }
     // The gate only composes while a call exists, so this dispose is exactly
     // "the call ended" (hangup / decline / remote end / cancel) — play the

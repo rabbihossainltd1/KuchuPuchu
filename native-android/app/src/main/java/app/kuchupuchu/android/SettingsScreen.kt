@@ -92,6 +92,15 @@ fun SettingsScreen(nav: NavController) {
     var showRingPicker by remember { mutableStateOf(false) }
     // Owner round 16: fullscreen theme picker.
     var showThemePicker by remember { mutableStateOf(false) }
+    // Owner round 18: system back steps BACK one level — an open picker or
+    // editor closes first; it must never shoot straight out to the chat list.
+    androidx.activity.compose.BackHandler(enabled = showThemePicker || showRingPicker || editingKey != null) {
+        when {
+            showThemePicker -> showThemePicker = false
+            showRingPicker -> showRingPicker = false
+            else -> editingKey = null
+        }
+    }
     // Owner round 13b: a proper two-option picker; applying recreates the
     // activity so every surface re-skins at once (no half-applied theme).
 

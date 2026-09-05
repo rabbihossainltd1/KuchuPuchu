@@ -422,6 +422,20 @@ object ScreenStore {
     fun upsertConv(row: JSONObject) {
         val id = row.optString("id")
         if (id.isBlank()) return
+        // Owner round 18: the one-conversation poke merge honored NO read
+        // grace — right after leaving a chat, a poke (read receipt, reply…)
+        // could re-import the stale pre-read unread badge. Same 10s guard the
+        // full list uses.
+        val now = System.currentTimeMillis()
+        synchronized(pendingReadMarks) { pendingReadMarks.entries.removeAll { now - it.value > 10_000 } }
+        val markedAt = synchronized(pendingReadMarks) { pendingReadMarks[id] }
+        var row = row
+        if (markedAt != null && row.optInt("unread", 0) > 0) {
+            // Still inside the read grace: keep the row's preview/order but
+            // zero the badge — the full sync clears the mark when the server
+            // agrees.
+            row = JSONObject(row.toString()).put("unread", 0)
+        }
         val idx = convs.indexOfFirst { it.optString("id") == id }
         if (idx >= 0) convs[idx] = row else convs.add(row)
         // Newest activity floats to the top, newest-first like the server list.

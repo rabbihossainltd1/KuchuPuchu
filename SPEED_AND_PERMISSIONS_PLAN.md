@@ -656,3 +656,38 @@ swatches already paint those exact colours.
 
 **20** The uniform pencil on every settings row is gone — rows are the button
 (the avatar's change-photo pencil stays, it means "change photo").
+
+## Round 18 — owner feedback pass (2026-09-05, v119 / 3.9.43)
+
+**1 Call fullscreen** — system back no longer minimizes the call into the
+notification (CallGate's BackHandler is a no-op keep-fullscreen; Hang up / on-screen
+End is the exit). Notification tap still restores a hidden call UI.
+
+**2 Notification background** — gone completely: root `#16213A` background and
+builder `setColor` removed; title/status use system theme attrs so the card is
+the OS's own, red Hang up included.
+
+**3 NEW: deleted-message stamp overlap** — the tombstone now appends the same
+trailing reserve the text path uses, so time/ticks sit beside (not on) the text.
+Normal bubbles untouched.
+
+**4 Archive pull over ROWS** — root cause: Android 12+'s stretch overscroll is a
+child-side connection that consumed the leftover pull before our parent
+onPostScroll. The pull is now taken in onPreScroll, gated by an at-top probe
+(chatsListState index==0 && offset==0) — works dragging on rows and blank space.
+Header/tabs drag path kept.
+
+**5 Composer pill** — round 17 over-removed it; the pill (clip 19dp + Card) is
+back. Only the LIVE RECORDING panel is transparent (that was always the ask).
+
+**6 Photo reactions** — MessageReactions was only wired into the text path;
+photos now stack bubble + chips in a column and render reactions under the photo.
+
+**7 System back = one level** — in-chat search closes first (was: exits the
+chat); Settings pickers (theme/ringtone) and the inline editor close first (was:
+straight to chat list). Dialogs/sheets already behaved.
+
+**8 Stale unread after leaving a chat** — two races fixed: (a) leaving a chat now
+re-POSTs /read and re-zeros the badge (DisposableEffect onDispose); (b) the
+one-conversation poke merge (upsertConv) honors the same 10s read grace the full
+list uses, so a poke can no longer re-import the pre-read badge.

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Owner round 13 (2026-09-05): the in-call notification in the app's own
-     style — dark-blue card, app-styled speaker toggle (voice only) and a
-     BIG red End button. Video calls show End only (owner rule). -->
+<!-- Owner round 18: NO custom background — the system notification card
+     paints itself (light/dark follows the OS); text reads via theme attrs.
+     One red Hang up (icon + text), nothing else. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/kp_ongoing_root"
     android:layout_width="match_parent"
@@ -11,8 +11,7 @@
     android:paddingStart="14dp"
     android:paddingEnd="14dp"
     android:paddingTop="10dp"
-    android:paddingBottom="10dp"
-    android:background="#16213A">
+    android:paddingBottom="10dp">
 
     <LinearLayout
         android:layout_width="0dp"
@@ -26,7 +25,7 @@
             android:layout_height="wrap_content"
             android:maxLines="1"
             android:ellipsize="end"
-            android:textColor="#E9EDF6"
+            android:textColor="?android:attr/textColorPrimary"
             android:textSize="15sp"
             android:textStyle="bold" />
 
@@ -35,7 +34,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:maxLines="1"
-            android:textColor="#8A97B2"
+            android:textColor="?android:attr/textColorSecondary"
             android:textSize="12sp" />
     </LinearLayout>
 

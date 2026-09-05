@@ -28,6 +28,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -106,6 +108,12 @@ fun ChatListScreen(nav: NavController) {
     val density = LocalDensity.current
     archivePull.thresholdPx = with(density) { 90.dp.toPx() }
     archivePull.maxPx = archivePull.thresholdPx * 1.6f
+    // Owner round 18: the chats list's own state feeds the "am I at the top?"
+    // probe, so the pre-scroll interceptor only bites at the top edge.
+    val chatsListState = rememberLazyListState()
+    archivePull.canPull = {
+        chatsListState.firstVisibleItemIndex == 0 && chatsListState.firstVisibleItemOffset == 0
+    }
     val archiveDrag = Modifier.pointerInput(Unit) {
         detectVerticalDragGestures(
             onVerticalDrag = { change, dy ->
@@ -319,7 +327,7 @@ fun ChatListScreen(nav: NavController) {
 
             /* ---------- tab bodies ---------- */
             when (tab) {
-                0 -> ArchivePullArea(nav, archivePull) { ChatListBody(convs, loading, nav, ::refresh) }
+                0 -> ArchivePullArea(nav, archivePull) { ChatListBody(convs, loading, nav, ::refresh, chatsListState) }
                 1 -> StatusScreen(nav)
                 2 -> CallsScreen(nav)
             }
@@ -359,6 +367,12 @@ private class ArchivePullState {
     var logo by mutableStateOf(false)
     var thresholdPx = 0f
     var maxPx = 0f
+
+    /** True when the chats list sits at its very top — only then does a
+     *  downward drag mean "pull for archive" (Owner round 18: pulls on top of
+     *  ROWS never reached us because Android 12+'s stretch effect eats the
+     *  leftover BEFORE a parent's onPostScroll sees it). */
+    var canPull: () -> Boolean = { true }
 }
 
 /**
@@ -380,6 +394,24 @@ private fun ArchivePullArea(nav: NavController, state: ArchivePullState, content
     // and the screen opens. Works from the blank area AND on top of rows.
     val conn = remember {
         object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            override fun onPreScroll(
+                available: androidx.compose.ui.geometry.Offset,
+                source: androidx.compose.ui.input.nestedscroll.NestedScrollSource,
+            ): androidx.compose.ui.geometry.Offset {
+                // Owner round 18: the REAL fix for pulls on top of rows —
+                // Android 12+'s stretch/overscroll effect is a CHILD-side
+                // connection, so it consumed the leftover pull in post-scroll
+                // before this parent ever saw it. Taking the downward delta in
+                // PRE-scroll (only while the list sits at its very top) makes
+                // the archive pull work anywhere on the list — rows included.
+                val d = available.y
+                if (d > 0f && state.canPull()) {
+                    state.pull = (state.pull + d).coerceIn(0f, state.maxPx)
+                    return androidx.compose.ui.geometry.Offset(0f, d)
+                }
+                return androidx.compose.ui.geometry.Offset.Zero
+            }
+
             override fun onPostScroll(
                 consumed: androidx.compose.ui.geometry.Offset,
                 available: androidx.compose.ui.geometry.Offset,
@@ -639,6 +671,7 @@ private fun ChatListBody(
     loading: Boolean,
     nav: NavController,
     onChange: () -> Unit,
+    listState: LazyListState,
 ) {
     // Archived chats live in their own list (pull down on this list to open).
     val visible = convs.filter { !ScreenStore.isArchived(it.optString("id")) }
@@ -658,6 +691,7 @@ private fun ChatListBody(
     }
     LazyColumn(
         Modifier.fillMaxSize(),
+        state = listState,
         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {

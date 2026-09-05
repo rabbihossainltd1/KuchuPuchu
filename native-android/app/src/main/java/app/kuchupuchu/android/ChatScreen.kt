@@ -271,6 +271,23 @@ fun ChatScreen(nav: NavController, convId: String) {
     androidx.activity.compose.BackHandler(enabled = selected.isNotEmpty()) {
         selected.clear()
     }
+    // Owner round 18: system back steps BACK one level — the in-chat search
+    // closes first instead of leaving the whole chat.
+    androidx.activity.compose.BackHandler(enabled = showChatSearch) {
+        showChatSearch = false
+    }
+    // Owner round 18: leaving the chat re-marks it read server-side and
+    // zeroes the badge NOW. The list used to show a stale unread count after
+    // exiting (a poke merge carried the pre-read value back in) until the
+    // chat was opened a SECOND time.
+    androidx.compose.runtime.DisposableEffect(convId) {
+        onDispose {
+            ScreenStore.markRead(convId)
+            Thread {
+                runCatching { Api.post("/api/conversations/$convId/read") }
+            }.start()
+        }
+    }
     var viewerMsg by remember { mutableStateOf<JSONObject?>(null) }
     var editing by remember { mutableStateOf<JSONObject?>(null) }
     var forwarding by remember { mutableStateOf(false) }
@@ -2192,8 +2209,11 @@ private fun Composer(
                 Modifier
                     .weight(1f)
                     .heightIn(min = 38.dp)
-                    // Owner round 17: the last remaining card behind the
-                    // message input is gone — the bar is fully transparent.
+                    // Owner round 18: the pill is BACK — only the recording
+                    // strip is transparent (that was the ask), the normal
+                    // composer keeps its card.
+                    .clip(RoundedCornerShape(19.dp))
+                    .background(Card)
                     .padding(horizontal = 2.dp, vertical = 1.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 34.dp)) {
@@ -3203,7 +3223,10 @@ private fun MessageRow(
                         }
                         "FILE" -> FileBubble(m, mine, player, pendingEcho)
                         "DELETED" -> Text(
-                            "This message was deleted",
+                            // Owner round 18: the same trailing reserve the
+                            // text path uses — the stamp sat ON the deleted
+                            // text before (normal bubbles: untouched).
+                            "This message was deleted" + if (mine) "                  " else "            ",
                             fontSize = 13.5.sp,
                             fontStyle = FontStyle.Italic,
                             color = Color(0xFF4A463F),
@@ -3377,6 +3400,11 @@ private fun ImageMessageRow(
             .padding(vertical = 3.dp),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
+        // Owner round 18: the photo bubble + its reaction chips stack in a
+        // column, so a reaction on a PHOTO actually renders (the chips were
+        // only wired into the text path — reacting to a photo did nothing
+        // visible).
+        Column {
         Box(
             Modifier
                 .offset { IntOffset(replyOffset.roundToInt(), 0) }
@@ -3454,6 +3482,8 @@ private fun ImageMessageRow(
                     TickIcon(m, pendingEcho, otherReadAt)
                 }
             }
+        }
+        MessageReactions(m)
         }
     }
 }

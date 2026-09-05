@@ -386,7 +386,6 @@ object CallNotify {
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setOnlyAlertOnce(true)
             .setCustomContentView(views)
-            .setColor(0xFF16213A.toInt())
         if (startedAt > 0L) {
             builder.setWhen(startedAt).setUsesChronometer(true).setShowWhen(true)
         } else {
