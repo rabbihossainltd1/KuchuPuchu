@@ -39,36 +39,38 @@
             android:textSize="12sp" />
     </LinearLayout>
 
-    <!-- Owner round 16: compact, background-FREE action buttons — plain
-         icons, no circles, same for voice and video. -->
-    <FrameLayout
-        android:id="@+id/kp_ongoing_speaker_wrap"
-        android:layout_width="38dp"
-        android:layout_height="38dp"
-        android:layout_marginEnd="10dp"
-        android:clickable="true"
-        android:focusable="true">
 
-        <ImageView
-            android:layout_width="19dp"
-            android:layout_height="19dp"
-            android:layout_gravity="center"
-            android:src="@drawable/kp_ic_speaker"
-            android:contentDescription="@null" />
-    </FrameLayout>
 
-    <FrameLayout
+    <!-- Owner round 17: exactly ONE button for voice AND video — Hang up.
+         No background shape, just the red icon + red text. -->
+    <LinearLayout
         android:id="@+id/kp_ongoing_end"
-        android:layout_width="38dp"
-        android:layout_height="38dp"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="10dp"
+        android:paddingEnd="10dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
         android:clickable="true"
         android:focusable="true">
 
         <ImageView
-            android:layout_width="20dp"
-            android:layout_height="20dp"
+            android:layout_width="17dp"
+            android:layout_height="17dp"
             android:layout_gravity="center"
             android:src="@drawable/kp_ic_call_end"
+            android:tint="#F0402F"
             android:contentDescription="@null" />
-    </FrameLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="5dp"
+            android:text="Hang up"
+            android:textColor="#F0402F"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+    </LinearLayout>
 </LinearLayout>

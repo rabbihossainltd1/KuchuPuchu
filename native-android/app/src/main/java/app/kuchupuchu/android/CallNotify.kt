@@ -365,30 +365,17 @@ object CallNotify {
             Intent(ctx, CallActionReceiver::class.java).setAction(CALL_END),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val speaker = PendingIntent.getBroadcast(
-            ctx,
-            6,
-            Intent(ctx, CallActionReceiver::class.java).setAction(CALL_SPEAKER),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
         val call = CallEngine.instance?.active
         val startedAt = call?.startedAt ?: 0L
-        val isVideo = call?.kind == "VIDEO"
-        // Owner round 13 (2026-09-05): the in-call notification got the app's
-        // own look — dark-blue card, a BIG red End button, and the speaker
-        // toggle styled to match (voice calls only; video = End only, owner
-        // rule). Custom RemoteViews instead of bare system action chips.
+        // Owner round 17: ONE button only — red "Hang up" (icon + text, no
+        // background), identical for voice and video. The speaker toggle is
+        // gone from the notification; it lives on the call screen.
         val views = android.widget.RemoteViews(ctx.packageName, R.layout.kp_ongoing_call)
         views.setTextViewText(R.id.kp_ongoing_title, title)
         views.setTextViewText(
             R.id.kp_ongoing_status,
             if (startedAt > 0L) "Call in progress" else "Connecting…",
         )
-        views.setViewVisibility(
-            R.id.kp_ongoing_speaker_wrap,
-            if (isVideo) android.view.View.GONE else android.view.View.VISIBLE,
-        )
-        views.setOnClickPendingIntent(R.id.kp_ongoing_speaker_wrap, speaker)
         views.setOnClickPendingIntent(R.id.kp_ongoing_end, end)
         val builder = NotificationCompat.Builder(ctx, CH_FG)
             .setSmallIcon(R.mipmap.ic_stat_kp)

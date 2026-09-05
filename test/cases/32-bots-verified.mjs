@@ -896,7 +896,7 @@ const convBetween = (db, a, b) =>
   );
   check(
     "13b hotfix: archive pull-hold observes crossings (no per-pixel restarts)",
-    chatlist.includes("snapshotFlow { pull >= threshold }"),
+    chatlist.includes("snapshotFlow { state.pull >= state.thresholdPx }"),
   );
   check(
     "in-call notification is app-styled: big red End, speaker voice-only",
@@ -947,6 +947,84 @@ const convBetween = (db, a, b) =>
       !chatlist.includes("LinearProgressIndicator") &&
       !chatlist.includes('Text("Archived", fontSize = 17.sp') &&
       !chatlist.includes("tint = Green"),
+  );
+  /* ---------------- round 17 (owner feedback) ---------------- */
+  const mainactivity = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/MainActivity.kt",
+    "utf8",
+  );
+  const ongoingxml = readFileSync(
+    "native-android/app/src/main/res/layout/kp_ongoing_call.xml",
+    "utf8",
+  );
+  const callnotify = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/CallNotify.kt",
+    "utf8",
+  );
+  check(
+    "r17-3: ONE hang-up affordance — red icon + red 'Hang up' text, no speaker button, no chip background",
+    ongoingxml.includes('android:id="@+id/kp_ongoing_end"') &&
+      ongoingxml.includes("Hang up") &&
+      ongoingxml.includes("#F0402F") &&
+      !ongoingxml.includes("kp_ongoing_speaker") &&
+      !callnotify.includes("speaker_wrap"),
+  );
+  check(
+    "r17-6: archive pull is dual-path — list overscroll AND header/tabs drag share ArchivePullState",
+    chatlist.includes("class ArchivePullState") &&
+      chatlist.includes("val archivePull = remember { ArchivePullState() }") &&
+      chatlist.includes("detectVerticalDragGestures") &&
+      chatlist.includes(".then(archiveDrag)"),
+  );
+  check(
+    "r17-8: half-open socket can't freeze the list — marker-gated safety refresh while foreground",
+    chatlist.includes("lastSafetyRefresh") && chatlist.includes("8_000"),
+  );
+  check(
+    "r17-8: EVERY AI text reply broadcasts + pokes + pushes (not just owner-card replies)",
+    src.includes("THE real AI-visibility bug") &&
+      src.includes("senderId: AI_BOT_ID") &&
+      src.split("pushToUser(").length - 1 >= 4,
+  );
+  check(
+    "r17-10: composer input strip is fully transparent (last background(Card) removed)",
+    !chat.includes(".clip(RoundedCornerShape(19.dp))") &&
+      !chat.includes("heightIn(min = 38.dp)\n                    .background(Card)"),
+  );
+  check(
+    "r17-11: reply-quote sender names are full ink (white on own bubbles), not gold-on-gold",
+    chat.includes("color = if (mine) Color(0xE6FFFFFF) else Ink"),
+  );
+  check(
+    "r17-12/18: reply swipes calmer — text own-swipe 1.5x, photo 1.4x (no more 1.8x hair-trigger)",
+    chat.includes("replyThreshold * 1.5f") &&
+      chat.includes("if (mine) replyThreshold * 1.5f else replyThreshold") &&
+      chat.includes("replyThreshold * 1.4f") &&
+      !chat.includes("replyThreshold * 1.8f, 0f)\n                                    } else {"),
+  );
+  check(
+    "r17-13: reaction bar floats ABOVE the target message, deselects after reacting, '+' opens a bottom sheet",
+    chat.includes("listState.layoutInfo.visibleItemsInfo.firstOrNull") &&
+      chat.includes("if (mid in selected) selected.remove(mid)") &&
+      chat.includes("ModalBottomSheet(") &&
+      chat.includes("skipPartiallyExpanded = true"),
+  );
+  check(
+    "r17-14: restoreChrome follows the theme (dark-blue keeps light icons)",
+    mainactivity.includes("!KpThemeMode.darkBlue"),
+  );
+  check(
+    "r17-15: chat-search close is a real X",
+    chat.includes('Icons.Filled.Close,\n                "Close search"'),
+  );
+  check(
+    "r17-19: theme options read exactly Dark Blue / Light Cream",
+    settings.includes('"Light Cream"') &&
+      settings.includes('if (KpThemeMode.darkBlue) "Dark Blue" else "Light Cream"'),
+  );
+  check(
+    "r17-20: the uniform settings pencil is gone (only the avatar change-photo icon remains)",
+    settings.split("Icons.Filled.Edit").length - 1 === 1,
   );
   check(
     "calls tab: skeleton rows + 20s cache (no laggy refetch)",
@@ -1056,7 +1134,7 @@ const convBetween = (db, a, b) =>
     settings.includes("var editingKey") &&
       settings.includes("activeKey = editingKey") &&
       settings.includes("border(1.dp, Gold, RoundedCornerShape(10.dp))") &&
-      settings.includes('Opt(false, "Cream"') &&
+      settings.includes('Opt(false, "Light Cream"') &&
       !settings.includes('false to "Light"') &&
       settings.includes("fun ThemePickerScreen"),
   );
@@ -1120,10 +1198,10 @@ const convBetween = (db, a, b) =>
     src.includes("user:${userId}"),
   );
   check(
-    "16: own-message LEFT-swipe reply + photo reply drag + theme-aware photo border",
+    "16: own-message LEFT-swipe reply + photo reply drag + theme-aware photo border (r17: calmer 1.5x)",
     chat.includes("if (mine) {") &&
-      chat.includes("(replyDrag + dragAmount).coerceIn(-replyThreshold * 1.8f, 0f)") &&
-      chat.includes("kotlin.math.abs(replyDrag) >= replyThreshold") &&
+      chat.includes("(replyDrag + dragAmount).coerceIn(-replyThreshold * 1.5f, 0f)") &&
+      chat.includes("if (mine) replyThreshold * 1.5f else replyThreshold") &&
       chat.includes(
         "ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress)",
       ),

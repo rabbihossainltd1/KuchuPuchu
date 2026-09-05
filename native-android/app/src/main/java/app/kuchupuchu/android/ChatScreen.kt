@@ -76,7 +76,6 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Reply
 
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.GroupAdd
@@ -208,6 +207,9 @@ fun ChatScreen(nav: NavController, convId: String) {
         if (mid.isBlank()) return
         reactionFor = null
         showEmojiSheet = false
+        // Owner round 17: reacting also clears that message's selection — it
+        // used to stay selected after the emoji landed.
+        if (mid in selected) selected.remove(mid)
         // Local first — the bubble reacts instantly.
         val idx = msgs.indexOfFirst { it.optString("id") == mid }
         if (idx >= 0) {
@@ -1682,6 +1684,56 @@ fun ChatScreen(nav: NavController, convId: String) {
             /* ---------------- in-chat search (Owner round 14: moved to the
                TOP of the screen, floating over the messages, with a rounded
                pill input instead of a flat box strip) ---------------- */
+            // Owner round 17: the reaction bar floats right ABOVE the
+            // message it will react to (found via the list layout).
+            reactionFor?.let { target ->
+                val targetKey = target.optString("clientId").ifBlank { target.optString("id") }
+                val barHeightPx = with(LocalDensity.current) { 54.dp.toPx() }
+                val info = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == targetKey }
+                val y = (info?.offset?.toFloat() ?: 0f) - barHeightPx
+                Box(
+                    Modifier
+                        .align(Alignment.TopStart)
+                        .zIndex(8f)
+                        .offset { IntOffset(0, y.coerceAtLeast(0f).roundToInt()) }
+                        .fillMaxWidth(),
+                ) {
+                    Row(
+                        Modifier
+                            .padding(horizontal = 10.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Card)
+                            .border(1.dp, GoldDeep, RoundedCornerShape(18.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                    ) {
+                        listOf("👍", "❤️", "😂", "😮", "😢").forEach { e ->
+                            Text(
+                                e,
+                                fontSize = 22.sp,
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .clickable { applyReaction(target, e) }
+                                    .padding(6.dp),
+                            )
+                        }
+                        Icon(
+                            Icons.Filled.Add,
+                            "More emojis",
+                            tint = GoldDeep,
+                            modifier = Modifier
+                                .size(26.dp)
+                                .clip(CircleShape)
+                                .clickable { showEmojiSheet = true }
+                                .padding(4.dp),
+                        )
+                        IconButton(onClick = { reactionFor = null }, Modifier.size(28.dp)) {
+                            Icon(Icons.Filled.Close, "Close reactions", tint = Muted, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            }
             // Owner round 16: zIndex keeps the bar ABOVE the message list —
             // it was composited underneath, so taps landed on the messages.
             if (showChatSearch) Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().zIndex(6f)) {
@@ -1885,43 +1937,6 @@ fun ChatScreen(nav: NavController, convId: String) {
         /* ---------------- reaction quick bar (Owner round 16) ----------------
            Long-press selects the message (unchanged) and raises this bar:
            five quick emojis + "+" for the full sheet. */
-        reactionFor?.let { target ->
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(Card)
-                    .border(1.dp, Line, RoundedCornerShape(18.dp))
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceEvenly,
-            ) {
-                listOf("👍", "❤️", "😂", "😮", "😢").forEach { e ->
-                    Text(
-                        e,
-                        fontSize = 22.sp,
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .clickable { applyReaction(target, e) }
-                            .padding(6.dp),
-                    )
-                }
-                Icon(
-                    Icons.Filled.Add,
-                    "More emojis",
-                    tint = GoldDeep,
-                    modifier = Modifier
-                        .size(26.dp)
-                        .clip(CircleShape)
-                        .clickable { showEmojiSheet = true }
-                        .padding(4.dp),
-                )
-                IconButton(onClick = { reactionFor = null }, Modifier.size(28.dp)) {
-                    Icon(Icons.Filled.Close, "Close reactions", tint = Muted, modifier = Modifier.size(16.dp))
-                }
-            }
-        }
         if (showEmojiSheet && reactionFor != null) {
             EmojiSheetDialog { e -> reactionFor?.let { applyReaction(it, e) } }
         }
@@ -2176,8 +2191,8 @@ private fun Composer(
                 Modifier
                     .weight(1f)
                     .heightIn(min = 38.dp)
-                    .clip(RoundedCornerShape(19.dp))
-                    .background(Card)
+                    // Owner round 17: the last remaining card behind the
+                    // message input is gone — the bar is fully transparent.
                     .padding(horizontal = 2.dp, vertical = 1.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 34.dp)) {
@@ -2963,7 +2978,8 @@ private fun ReplyQuoteBar(replyTo: JSONObject?, onCancel: () -> Unit) {
                 else (replyTo.optText("senderName") ?: "").ifBlank { "Reply" },
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = GoldDeep,
+                // Owner round 17: gold-on-gold-soft was unreadable — full ink.
+                color = Ink,
                 maxLines = 1,
             )
             Text(
@@ -3084,15 +3100,20 @@ private fun MessageRow(
                                 change.consume()
                                 // Owner round 16: own messages reply by dragging
                                 // LEFT; other people's by dragging right.
+                                // Owner round 17: the left swipe was touchy —
+                                // it now needs half again as much distance and
+                                // barely overshoots.
                                 replyDrag =
                                     if (mine) {
-                                        (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.8f, 0f)
+                                        (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.5f, 0f)
                                     } else {
                                         (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.8f)
                                     }
                             },
                             onDragEnd = {
-                                val armed = kotlin.math.abs(replyDrag) >= replyThreshold
+                                val need =
+                                    if (mine) replyThreshold * 1.5f else replyThreshold
+                                val armed = kotlin.math.abs(replyDrag) >= need
                                 replyDrag = 0f
                                 if (armed) onReply(m)
                             },
@@ -3153,7 +3174,9 @@ private fun MessageRow(
                                     else (q?.optText("senderName") ?: "").ifBlank { "Original message" },
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = GoldDeep,
+                                    // Owner round 17: full ink — the name has to
+                                    // read clearly on every bubble.
+                                    color = if (mine) Color(0xE6FFFFFF) else Ink,
                                     maxLines = 1,
                                 )
                                 Text(
@@ -3271,46 +3294,48 @@ private fun MessageReactions(m: JSONObject) {
     }
 }
 
-/** Owner round 16: the full reaction sheet — a compact grid of everyday
- *  emojis (the "+" in the quick bar opens this). */
+/** Owner round 16/17: the full reaction sheet — a BOTTOM sheet, the same
+ *  pattern as the login screen's country picker. */
 @Composable
 private fun EmojiSheetDialog(onPick: (String) -> Unit) {
     val emojis = listOf(
         "👍", "👎", "❤️", "🩷", "😂", "🥰", "😮", "😢", "😡", "🙏",
         "🔥", "🎉", "😍", "😭", "😅", "🤔", "💯", "👏", "🤝", "😎",
-        "🥳", "😴", "🤯", "😱", "🤗", "😇", "😉", "🤫", "🤝", "✌️",
-        "🙏", "💪", "🌟", "⭐", "❤️‍🔥", "😊", "🙃", "😌", "😬", "🫡",
+        "🥳", "😴", "🤯", "😱", "🤗", "😇", "😉", "🤫", "✌️", "💪",
+        "🌟", "⭐", "❤️‍🔥", "😊", "🙃", "😌", "😬", "🫡", "🤩", "😴",
     )
-    AlertDialog(
+    androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = { onPick("") },
         containerColor = Card,
-        title = { Text("React", color = Ink) },
-        text = {
-            // A simple grid of tappable emojis.
-            Column {
-                emojis.chunked(5).forEach { row ->
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                    ) {
-                        row.forEach { e ->
-                            Text(
-                                e,
-                                fontSize = 24.sp,
-                                modifier = Modifier
-                                    .clip(CircleShape)
-                                    .clickable { onPick(e) }
-                                    .padding(6.dp),
-                            )
-                        }
+        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+        ) {
+            Text("React", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
+            emojis.chunked(5).forEach { row ->
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                ) {
+                    row.forEach { e ->
+                        Text(
+                            e,
+                            fontSize = 26.sp,
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .clickable { onPick(e) }
+                                .padding(8.dp),
+                        )
                     }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = { onPick("") }) { Text("Close", color = GoldDeep) }
-        },
-    )
+            Spacer(Modifier.height(10.dp))
+        }
+    }
 }
 
 /** True when a FILE message is really just a photo (image mime / extension). */
@@ -3369,15 +3394,17 @@ private fun ImageMessageRow(
                     detectHorizontalDragGestures(
                         onHorizontalDrag = { change, dragAmount ->
                             change.consume()
+                            // Owner round 17: calmer — needs a longer, more
+                            // deliberate drag and barely overshoots.
                             replyDrag =
                                 if (mine) {
-                                    (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.8f, 0f)
+                                    (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.4f, 0f)
                                 } else {
-                                    (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.8f)
+                                    (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.4f)
                                 }
                         },
                         onDragEnd = {
-                            val armed = kotlin.math.abs(replyDrag) >= replyThreshold
+                            val armed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
                             replyDrag = 0f
                             if (armed) onReply(m)
                         },
@@ -3934,8 +3961,9 @@ private fun ChatSearchSheet(
                 )
             }
             Spacer(Modifier.width(6.dp))
+            // Owner round 17: the close affordance is a clear X.
             Icon(
-                Icons.Filled.KeyboardArrowDown,
+                Icons.Filled.Close,
                 "Close search",
                 tint = GoldDeep,
                 modifier = Modifier

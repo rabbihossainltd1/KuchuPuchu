@@ -269,8 +269,10 @@ class MainActivity : ComponentActivity() {
         // Bars are transparent (edge-to-edge); only the icon appearance needs
         // flipping back after the dark call screens.
         WindowInsetsControllerCompat(window, window.decorView).apply {
-            isAppearanceLightStatusBars = true
-            isAppearanceLightNavigationBars = true
+            // Owner round 17: this ran after every call with hardcoded LIGHT
+            // icons — in dark-blue mode the status content turned invisible.
+            isAppearanceLightStatusBars = !KpThemeMode.darkBlue
+            isAppearanceLightNavigationBars = !KpThemeMode.darkBlue
         }
     }
 

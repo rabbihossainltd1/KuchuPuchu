@@ -1110,19 +1110,6 @@ async function sendAiReply(
     const botId = await ensureAiBot(db);
     const mid = id();
     const created = nowIso();
-    // Owner round 16: the reply was broadcast ONLY to the chat room — so the
-    // moment the user left the chat screen, nobody poked their list and the
-    // reply stayed invisible until they re-entered the chat ("AI er reply
-    // chat list e ashe na"). The user-channel poke is exactly what normal
-    // sends get; the AI chat now gets it too.
-    ctx.waitUntil(
-      broadcastRoomEvent(env, `user:${userId}`, {
-        type: "conv",
-        conversationId: convId,
-        msg: 1,
-        senderId: AI_BOT_ID,
-      }),
-    );
     await run(
       db,
       `INSERT INTO messages (id, conv_id, sender_id, kind, body, created_at)
@@ -1206,50 +1193,56 @@ async function sendAiReply(
             } as MsgRow),
           }),
         );
-        ctx.waitUntil(
-          broadcastRoomEvent(env, convId, {
-            type: "message",
-            conversationId: convId,
-            message: msgFrom({
-              id: mid,
-              conv_id: convId,
-              sender_id: botId,
-              kind: "TEXT",
-              body,
-              media: null,
-              meta_json: null,
-              created_at: created,
-              delivered_at: null,
-            } as MsgRow),
-          }),
-        );
-        ctx.waitUntil(
-          broadcastRoomEvent(env, `user:${userId}`, {
-            type: "conv",
-            conversationId: convId,
-            msg: 1,
-          }),
-        );
-        ctx.waitUntil(
-          pushToUser(
-            env,
-            db,
-            userId,
-            {
-              type: "message",
-              convoId: convId,
-              mid,
-              kind: "SOLO",
-              fromName: "KuchuPuchu AI",
-              body,
-              kp_chat: convId,
-              muted: "0",
-            },
-            { title: "KuchuPuchu AI", body, channel: "kp_messages_v2" },
-          ),
-        );
       }
     }
+    // Owner round 17 — THE real AI-visibility bug: the reply's broadcast,
+    // user poke AND FCM push all sat INSIDE the owner-card block, so they
+    // only fired when a card was attached. A normal reply reached nobody in
+    // realtime: no chat-room frame, no list poke, no push — just the polls.
+    // Every text reply now gets all three, unconditionally.
+    ctx.waitUntil(
+      broadcastRoomEvent(env, convId, {
+        type: "message",
+        conversationId: convId,
+        message: msgFrom({
+          id: mid,
+          conv_id: convId,
+          sender_id: botId,
+          kind: "TEXT",
+          body,
+          media: null,
+          meta_json: null,
+          created_at: created,
+          delivered_at: null,
+        } as MsgRow),
+      }),
+    );
+    ctx.waitUntil(
+      broadcastRoomEvent(env, `user:${userId}`, {
+        type: "conv",
+        conversationId: convId,
+        msg: 1,
+        senderId: AI_BOT_ID,
+      }),
+    );
+    ctx.waitUntil(
+      pushToUser(
+        env,
+        db,
+        userId,
+        {
+          type: "message",
+          convoId: convId,
+          mid,
+          kind: "SOLO",
+          fromName: "KuchuPuchu AI",
+          body,
+          kp_chat: convId,
+          muted: "0",
+        },
+        { title: "KuchuPuchu AI", body, channel: "kp_messages_v2" },
+      ),
+    );
   } catch {
     /* the user's message must never fail because the reply did */
   }

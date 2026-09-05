@@ -612,3 +612,47 @@ check are out of CI. Lint/unit tests still run before the build.
     REQUEST_INSTALL_PACKAGES. v117 released with its APK as the first asset.
 22. **Photo border colour** — gray-blue on dark-blue, gray-black on cream.
 Suite: 32/32 = 1013 assertions.
+
+## Round 17 — owner feedback pass (2026-09-05, v118 / 3.9.42)
+
+**3 Notification** — voice AND video ongoing notifications now have exactly ONE
+action: a red (#F0402F) call-end icon + bold red "Hang up" text, no background
+chip. The speaker button (view + PendingIntent) is deleted.
+
+**6 Archive regression** — the pull-hold itself was intact, but some ROMs never
+dispatch overscroll to the list header, so the gesture died. Dual-path fix:
+`ArchivePullState` (shared pull/hold/logo/threshold) is fed by BOTH the list
+overscroll AND a plain `detectVerticalDragGestures` on the header + tabs rows.
+
+**8 AI reply invisible in list — ROOT CAUSE** — the reply's chat-room
+broadcast, user-channel poke AND FCM push all sat INSIDE the owner-card
+`if (OWNER_INTENT && !cardAlready)` block: they only fired when a card was
+attached. Every text reply now gets all three unconditionally. Defense in
+depth: while foreground, the chat list runs a marker-gated safety refresh
+every ~8s even when the socket claims to be live (half-open protection).
+
+**10 Recording/input strip** — the last `background(Card)` behind the message
+input is removed; the bar is fully transparent.
+
+**11 Reply quote names** — sender names were gold-on-gold; now full ink on
+others' bubbles and white on own bubbles.
+
+**12/18 Swipe sensitivity** — own-message text reply swipe needs 1.5x the
+distance (barely overshoots); photo reply 1.4x both ways. No more 1.8x
+hair-trigger.
+
+**13 Reactions** — (a) the quick bar floats directly ABOVE the target message
+(found via `listState.layoutInfo`), not above the composer; (b) reacting
+clears the message's selection; (c) "+" opens a ModalBottomSheet
+(skipPartiallyExpanded) like the login country picker.
+
+**14 Status-bar icons in cream** — root cause: `restoreChrome()` hardcoded
+light icons; now follows `!KpThemeMode.darkBlue`.
+
+**15** Chat-search close icon is a real X (Close, not KeyboardArrowDown).
+
+**19** Theme options read exactly "Dark Blue" / "Light Cream" everywhere;
+swatches already paint those exact colours.
+
+**20** The uniform pencil on every settings row is gone — rows are the button
+(the avatar's change-photo pencil stays, it means "change photo").

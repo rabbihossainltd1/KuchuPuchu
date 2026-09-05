@@ -322,7 +322,7 @@ fun SettingsScreen(nav: NavController) {
             SettingRow(
                 Icons.Filled.Palette,
                 "App theme",
-                if (KpThemeMode.darkBlue) "Dark blue" else "Cream",
+                if (KpThemeMode.darkBlue) "Dark Blue" else "Light Cream",
             ) { showThemePicker = true }
             SettingRow(
                 Icons.Filled.NotificationsActive,
@@ -585,9 +585,6 @@ private fun EditableSettingRow(
                     Text(value, fontSize = 14.5.sp, color = Ink, fontWeight = FontWeight.Medium)
                 }
             }
-            if (!editing) {
-                Icon(Icons.Filled.Edit, contentDescription = "Edit", tint = Muted, modifier = Modifier.size(16.dp))
-            }
         }
         if (editing && hint.isNotBlank() && err.isBlank()) {
             Text(hint, fontSize = 11.sp, color = Muted, modifier = Modifier.padding(start = 51.dp, bottom = 6.dp))
@@ -619,9 +616,8 @@ private fun SettingRow(
             Text(label, fontSize = 13.sp, color = Muted)
             Text(value, fontSize = 14.5.sp, color = Ink, fontWeight = FontWeight.Medium)
         }
-        if (clickable) {
-            Icon(Icons.Filled.Edit, contentDescription = "Edit", tint = Color(0xFFD6D3D1), modifier = Modifier.size(16.dp))
-        }
+        // Owner round 17: the pencil affordance is gone — the row itself is
+        // the button (chat-screen chevrons remain where navigation happens).
     }
 }
 
@@ -659,8 +655,10 @@ fun ThemePickerScreen(onClose: () -> Unit) {
         }
         data class Opt(val dark: Boolean, val label: String, val note: String, val swatch: androidx.compose.ui.graphics.Color)
         listOf(
-            Opt(true, "Dark blue", "The signature deep-blue night theme", androidx.compose.ui.graphics.Color(0xFF0D1524)),
-            Opt(false, "Cream", "Soft warm light theme", androidx.compose.ui.graphics.Color(0xFFF7F6F4)),
+            // Owner round 17: exact theme colours — the deep dark-blue and
+            // the light cream the app actually paints.
+            Opt(true, "Dark Blue", "The signature deep-blue night theme", androidx.compose.ui.graphics.Color(0xFF0D1524)),
+            Opt(false, "Light Cream", "Soft warm light theme", androidx.compose.ui.graphics.Color(0xFFF7F6F4)),
         ).forEach { o ->
             val selected = KpThemeMode.darkBlue == o.dark
             Row(

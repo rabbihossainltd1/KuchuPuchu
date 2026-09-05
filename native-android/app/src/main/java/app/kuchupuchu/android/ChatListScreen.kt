@@ -7,6 +7,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -98,6 +99,23 @@ fun ChatListScreen(nav: NavController) {
     // tab instead of jumping to Chats every time.
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val haptics = rememberHaptics()
+    // Owner round 17: the archive pull has TWO triggers — the list overscroll
+    // (as before) AND a plain vertical drag on the header/tabs area, so a ROM
+    // with odd overscroll dispatch can't kill the gesture.
+    val archivePull = remember { ArchivePullState() }
+    val density = LocalDensity.current
+    archivePull.thresholdPx = with(density) { 90.dp.toPx() }
+    archivePull.maxPx = archivePull.thresholdPx * 1.6f
+    val archiveDrag = Modifier.pointerInput(Unit) {
+        detectVerticalDragGestures(
+            onVerticalDrag = { change, dy ->
+                change.consume()
+                archivePull.pull = (archivePull.pull + dy).coerceIn(0f, archivePull.maxPx)
+            },
+            onDragEnd = { archivePull.pull = 0f },
+            onDragCancel = { archivePull.pull = 0f },
+        )
+    }
 
     // FOUR things can ask for the same list at the same instant: the socket
     // "hello" on connect, the socket "conv" poke, the push path bumping
@@ -207,6 +225,7 @@ fun ChatListScreen(nav: NavController) {
             }
         }
         var lastForeground = Store.foreground
+        var lastSafetyRefresh = 0L
         try {
             while (true) {
                 // v3.9: the 2s tick was never a 2s REQUEST — `refresh()` below
@@ -226,7 +245,22 @@ fun ChatListScreen(nav: NavController) {
                 val fg = Store.foreground
                 val justReturned = fg && !lastForeground
                 lastForeground = fg
-                if (fg && (justReturned || !KpSocket.userLive())) refresh()
+                // Owner round 17: half-open sockets (no close frame, "live"
+                // forever) meant NO refresh AND NO fallback — the list froze
+                // until a chat was reopened (the AI-reply visibility bug that
+                // survived round 16). While foreground, a cheap marker-gated
+                // refresh runs every 8s no matter what the socket says; the
+                // events still do the instant updates.
+                if (fg) {
+                    val now = System.currentTimeMillis()
+                    if (justReturned || !KpSocket.userLive()) {
+                        refresh()
+                        lastSafetyRefresh = now
+                    } else if (now - lastSafetyRefresh >= 8_000) {
+                        lastSafetyRefresh = now
+                        refresh()
+                    }
+                }
             }
         } finally {
             removeListener()
@@ -247,7 +281,8 @@ fun ChatListScreen(nav: NavController) {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(start = 20.dp, end = 6.dp, top = 10.dp, bottom = 2.dp),
+                    .padding(start = 20.dp, end = 6.dp, top = 10.dp, bottom = 2.dp)
+                    .then(archiveDrag),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("KuchuPuchu", fontSize = 23.sp, fontWeight = FontWeight.Bold, color = Ink)
@@ -266,7 +301,8 @@ fun ChatListScreen(nav: NavController) {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                    .padding(horizontal = 6.dp, vertical = 4.dp)
+                    .then(archiveDrag),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 TopTab(Icons.Filled.Chat, "Chats", tab == 0, unreadTotal, modifier = Modifier.weight(1f)) { haptics.tap(); tab = 0 }
@@ -283,7 +319,7 @@ fun ChatListScreen(nav: NavController) {
 
             /* ---------- tab bodies ---------- */
             when (tab) {
-                0 -> ArchivePullArea(nav) { ChatListBody(convs, loading, nav, ::refresh) }
+                0 -> ArchivePullArea(nav, archivePull) { ChatListBody(convs, loading, nav, ::refresh) }
                 1 -> StatusScreen(nav)
                 2 -> CallsScreen(nav)
             }
@@ -313,21 +349,35 @@ fun ChatListScreen(nav: NavController) {
     }
 }
 
+/** Owner round 17: shared pull state — the HEADER/TABS drag and the list
+ *  overscroll both feed it, so the archive pull works even when the ROM's
+ *  overscroll dispatch behaves oddly (the list-only path silently died on
+ *  the owner's device). */
+private class ArchivePullState {
+    var pull by mutableStateOf(0f)
+    var hold by mutableStateOf(0f)
+    var logo by mutableStateOf(false)
+    var thresholdPx = 0f
+    var maxPx = 0f
+}
+
 /**
- * Pull-down gesture on the chats list: pulling past ~110dp at the top and
- * releasing opens the archived chats. A gold hint pill shows while pulling.
+ * Pull-down gesture on the chats list: pulling past ~90dp at the top and
+ * holding for 2s opens the archived chats.
  */
 @Composable
-private fun ArchivePullArea(nav: NavController, content: @Composable () -> Unit) {
+private fun ArchivePullArea(nav: NavController, state: ArchivePullState, content: @Composable () -> Unit) {
     val density = LocalDensity.current
     val threshold = with(density) { 90.dp.toPx() }
-    var pull by remember { mutableStateOf(0f) }
+    state.thresholdPx = threshold
+    state.maxPx = threshold * 1.6f
+    val pull = state.pull
+    val holdProgress = state.hold
+    val logoShown = state.logo
     // Owner round 13 (2026-09-05): the archive now opens by PULL + HOLD —
     // pull the list down past the mark and keep holding: a progress bar
     // fills over three seconds, then the ARCHIVED logo pops in (animated)
     // and the screen opens. Works from the blank area AND on top of rows.
-    var holdProgress by remember { mutableStateOf(0f) }
-    var logoShown by remember { mutableStateOf(false) }
     val conn = remember {
         object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
             override fun onPostScroll(
@@ -336,7 +386,7 @@ private fun ArchivePullArea(nav: NavController, content: @Composable () -> Unit)
                 source: androidx.compose.ui.input.nestedscroll.NestedScrollSource,
             ): androidx.compose.ui.geometry.Offset {
                 // Leftover downward scroll = the list is already at its top.
-                if (available.y > 0f) pull = (pull + available.y).coerceAtMost(threshold * 1.6f)
+                if (available.y > 0f) state.pull = (state.pull + available.y).coerceAtMost(state.maxPx)
                 return androidx.compose.ui.geometry.Offset.Zero
             }
 
@@ -345,7 +395,7 @@ private fun ArchivePullArea(nav: NavController, content: @Composable () -> Unit)
                 available: androidx.compose.ui.unit.Velocity,
             ): androidx.compose.ui.unit.Velocity {
                 // Finger lifted: the hold resets (no more fling-to-open).
-                pull = 0f
+                state.pull = 0f
                 return androidx.compose.ui.unit.Velocity.Zero
             }
         }
@@ -355,24 +405,24 @@ private fun ArchivePullArea(nav: NavController, content: @Composable () -> Unit)
     // The effect runs once; snapshotFlow fires only when the held/not-held
     // crossing actually changes.
     LaunchedEffect(Unit) {
-        snapshotFlow { pull >= threshold }.collect { held ->
+        snapshotFlow { state.pull >= state.thresholdPx }.collect { held ->
             if (held) {
                 // Owner round 15: hold time 3s -> 2s.
                 val start = System.currentTimeMillis()
-                while (pull >= threshold && System.currentTimeMillis() - start < 2000) {
-                    holdProgress = (System.currentTimeMillis() - start) / 2000f
+                while (state.pull >= state.thresholdPx && System.currentTimeMillis() - start < 2000) {
+                    state.hold = (System.currentTimeMillis() - start) / 2000f
                     delay(50)
                 }
-                if (pull >= threshold) {
-                    holdProgress = 1f
-                    logoShown = true
+                if (state.pull >= state.thresholdPx) {
+                    state.hold = 1f
+                    state.logo = true
                     delay(450)
                     nav.navigate("archive")
-                    logoShown = false
+                    state.logo = false
                 }
             }
-            holdProgress = 0f
-            pull = 0f
+            state.hold = 0f
+            state.pull = 0f
         }
     }
     Box(Modifier.fillMaxSize().nestedScroll(conn)) {
