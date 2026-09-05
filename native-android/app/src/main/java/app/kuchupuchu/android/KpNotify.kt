@@ -148,7 +148,6 @@ object KpNotify {
         return out
     }
 
-    @SuppressLint("MissingPermission")
     /** Owner round 21: the messages channel must re-ring when the user
      *  changes the notification tone — channel settings freeze at creation,
      *  so the old channel is deleted and recreated with the new sound. */
@@ -159,6 +158,7 @@ object KpNotify {
         ensureChannels(ctx)
     }
 
+    @SuppressLint("MissingPermission")
     fun message(
         ctx: Context,
         from: String,
