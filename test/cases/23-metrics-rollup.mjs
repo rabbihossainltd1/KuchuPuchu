@@ -217,15 +217,18 @@ const today = new Date().toISOString().slice(0, 10);
     `${before} -> ${after}`,
   );
 
-  // Calls and error breadcrumbs.
+  // Calls and error breadcrumbs. One shared base timestamp: three separate
+  // Date.now() calls shifted by machine jitter, and the rollup's epoch-second
+  // truncation turned 4 setup seconds into 5 on a slow CI runner.
+  const callBase = Date.now();
   await db
     .prepare(
       "INSERT INTO calls (id, conv_id, caller_id, callee_id, kind, status, started_at, ended_at, created_at) VALUES ('c1','x','y','z','VOICE','ENDED',?,?,?)",
     )
     .bind(
-      new Date(Date.now() + 4000).toISOString(),
-      new Date(Date.now() + 70_000).toISOString(),
-      nowIso,
+      new Date(callBase + 4000).toISOString(),
+      new Date(callBase + 70_000).toISOString(),
+      new Date(callBase).toISOString(),
     )
     .run();
   await db
