@@ -852,6 +852,20 @@ const convBetween = (db, a, b) =>
       settings.includes("selCustom != null) GoldSoft else Card"),
   );
   check(
+    "13e: the row VALUE itself becomes the editor (no second box below)",
+    settings.includes("BasicTextField(") && !settings.includes("OutlinedTextField("),
+  );
+  check(
+    "13e: ringtone preview stops on ANY exit (dispose hook)",
+    settings.includes("onDispose { stopPreview() }"),
+  );
+  check(
+    "13e: VerifyError fix — no @OptIn-annotated locals inside the ChatScreen body",
+    !chat.includes(
+      "@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)\n    val imeVisible",
+    ),
+  );
+  check(
     "13d: on-device crash capture installed (silent chat crash diagnosis)",
     existsSync("native-android/app/src/main/java/app/kuchupuchu/android/KpCrash.kt") &&
       readFileSync(
@@ -909,7 +923,9 @@ const convBetween = (db, a, b) =>
   );
   check(
     "keyboard jump uses the safe isImeVisible flag (no ViewTreeObserver crash)",
-    chat.includes("WindowInsets.isImeVisible") && !chat.includes("snapshotFlow { kpIme"),
+    chat.includes("WindowInsets.isImeVisible") &&
+      chat.includes("private fun KpImeAutoScroll") &&
+      !chat.includes("snapshotFlow { kpIme"),
   );
   check(
     "swipe a bubble right to quote-reply",

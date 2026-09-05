@@ -463,3 +463,19 @@ recomposition-keyed effect. Suite: 32/32.
    into a keyed cache (software bitmap for the blur) + placeholder; no late
    pop-in on connect.
 Suite: 32/32.
+
+## Owner round 13e — the chat crash, pinned by the crash report (v3.9.38 / 114, 2026-09-05)
+
+The 13d crash capture did its job: `VerifyError — Verifier rejected class
+ChatScreenKt (copy-cat, MutableState)` — the device's ART verifier rejected
+the whole ChatScreen class, so it died on open with no error dialog.
+1. **VerifyError fixed** — the keyboard-auto-scroll's `@OptIn`-annotated LOCAL
+   val inside the (huge) ChatScreen body was the trigger. The effect and the
+   reply-quote bar are now small standalone composables (KpImeAutoScroll /
+   ReplyQuoteBar); no annotated locals remain in the body.
+2. **Settings rows edit in place** — the row's VALUE itself becomes the input
+   on tap (same spot, confirm/cancel at the row's end); the extra field box
+   below is gone.
+3. **Ringtone preview stops on exit** — a dispose hook stops the player on
+   ANY exit path, system back included (it used to keep playing).
+Suite: 32/32.
