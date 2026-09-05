@@ -2748,8 +2748,6 @@ private fun LoginApprovalMessage(m: JSONObject) {
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
 /**
  * Owner round 13e (2026-09-05): keyboard-open auto-jump extracted from the
  * ChatScreen body. The inline `@OptIn val` inside that huge function made the
