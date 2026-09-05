@@ -1060,9 +1060,7 @@ const convBetween = (db, a, b) =>
   check(
     "r18-4: archive pull works ON TOP OF ROWS — pre-scroll intercept gated by an at-top probe",
     chatlist.includes("var canPull: () -> Boolean") &&
-      chatlist.includes(
-        "firstVisibleItemIndex == 0 && chatsListState.firstVisibleItemOffset == 0",
-      ) &&
+      chatlist.includes("first.index == 0 && first.offset == 0") &&
       chatlist.includes("if (d > 0f && state.canPull())") &&
       chatlist.includes("state = listState"),
   );

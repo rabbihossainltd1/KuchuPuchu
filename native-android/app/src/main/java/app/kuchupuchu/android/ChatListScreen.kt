@@ -111,8 +111,11 @@ fun ChatListScreen(nav: NavController) {
     // Owner round 18: the chats list's own state feeds the "am I at the top?"
     // probe, so the pre-scroll interceptor only bites at the top edge.
     val chatsListState = rememberLazyListState()
+    // layoutInfo (not firstVisibleItemOffset — that property is
+    // experimental-api in this compose version and CI rejected it).
     archivePull.canPull = {
-        chatsListState.firstVisibleItemIndex == 0 && chatsListState.firstVisibleItemOffset == 0
+        val first = chatsListState.layoutInfo.visibleItemsInfo.firstOrNull()
+        first == null || (first.index == 0 && first.offset == 0)
     }
     val archiveDrag = Modifier.pointerInput(Unit) {
         detectVerticalDragGestures(
