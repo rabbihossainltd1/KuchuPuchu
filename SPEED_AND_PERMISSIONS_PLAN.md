@@ -417,3 +417,21 @@ Suite: 32/32, 965 assertions.
    is untouched.
 20. **Workspace cleanup** — one repo + HANDOFF.md only.
 Suite: 32/32, 984 assertions.
+
+## Owner round 13b — hotfix (v3.9.35 / 111, 2026-09-05)
+
+Device feedback on 110: whole-app lag, chat crashing on open, dark mode looking
+broken. Root causes found and fixed:
+1. **Palette was state-backed** — every color read subscribed to snapshot
+   state; thousands of reads per frame = the whole-app lag. Now a static
+   @Volatile flag, loaded before the first frame in MainActivity.
+2. **Reply swipe fought the list** — a hand-rolled awaitEachGesture per bubble
+   consumed touch events the LazyColumn needed (chat jank + crash). Replaced
+   with the standard detectHorizontalDragGestures (touch-slop aware).
+3. **Archive pull-hold churn** — its timer effect restarted on every overscroll
+   pixel; now a single effect observing the held/not-held crossing.
+4. **Dark mode done properly** — theme picker dialog in Settings (Dark blue /
+   Light) applying via activity recreate; remaining hardcoded white surfaces
+   (Settings rows, Status composer, Attach sheet, red record panels, AI typing
+   bubble) now ride the theme tokens.
+Suite: 32/32.

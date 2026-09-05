@@ -154,7 +154,7 @@ fun StatusScreen(nav: NavController) {
                                     .align(Alignment.BottomEnd)
                                     .size(22.dp)
                                     .clip(CircleShape)
-                                    .background(Color.White)
+                                    .background(Card)
                                     .clickable {
                                         haptics.tap()
                                         if (myStatuses.isNotEmpty()) nav.navigate("statusview/mine") else nav.navigate("statusphoto")
@@ -803,7 +803,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                                 Modifier
                                     .fillMaxWidth(progressTo(i, idx, progress))
                                     .height(3.dp)
-                                    .background(Color.White),
+                                    .background(Card),
                             )
                         }
                     }

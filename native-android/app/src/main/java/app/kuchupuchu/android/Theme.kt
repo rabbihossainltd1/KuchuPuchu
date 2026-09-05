@@ -3,8 +3,6 @@ package app.kuchupuchu.android
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -14,12 +12,15 @@ import androidx.compose.ui.unit.Density
 /* ---- KuchuPuchu v3 design tokens (locked: Chat List #7 "Gradient Rings") ---- */
 
 /**
- * Owner round 13 (2026-09-05): a DARK BLUE app theme, on by default. The
- * palette below is state-backed, so flipping [KpThemeMode.darkBlue] live at
- * runtime re-skins every screen that reads these tokens — no restart needed.
+ * Owner round 13b hotfix (2026-09-05): the first dark-blue cut backed every
+ * color token with a SNAPSHOT state read — thousands of subscribed reads per
+ * frame read as whole-app lag on device. The palette is now STATIC: one plain
+ * @Volatile flag read at load, tokens are plain getters again, and switching
+ * the theme simply recreates the activity so every screen re-skins cleanly.
  */
 object KpThemeMode {
-    var darkBlue: Boolean by androidx.compose.runtime.mutableStateOf(true)
+    @Volatile
+    var darkBlue: Boolean = true
 
     private const val PREF = "app_theme"
 

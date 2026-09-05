@@ -25,10 +25,6 @@ fun KpApp() {
     val nav = rememberNavController()
     val authed by Store.authed
 
-    // Owner round 13: dark-blue theme, default. Loaded once per composition;
-    // KpThemeMode.set() flips it live from Settings.
-    val themeCtx = androidx.compose.ui.platform.LocalContext.current.applicationContext
-    androidx.compose.runtime.LaunchedEffect(Unit) { KpThemeMode.load(themeCtx) }
 
     // Owner rule (2026-09-04): the ONLY launch-time permission asks are
     // notification permission and the battery-optimization exemption dialog —
