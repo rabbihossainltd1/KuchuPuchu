@@ -78,6 +78,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Reply
 
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.GroupAdd
@@ -3453,6 +3454,7 @@ private object VideoThumbs {
 /** Owner round 20/22: video bubble — cached thumbnail at the video's OWN
  *  aspect ratio, play affordance, duration (only when known). Selectable,
  *  long-pressable (reactions) and swipe-replyable like photos. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun VideoMessageRow(
     m: JSONObject,
