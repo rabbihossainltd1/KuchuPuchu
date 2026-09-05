@@ -38,7 +38,9 @@ jobs:
       # Pinned + checksum-pinned (see scripts/ktlint-check.sh): a style gate that
       # downloads `latest` is how a green main branch starts failing by itself.
       - name: Kotlin import hygiene
-        run: ./scripts/ktlint-check.sh
+        # Called through bash: the repo's exec bit has twice been lost to a
+        # workspace snapshot restore, and `bash x.sh` never depends on it.
+        run: bash ./scripts/ktlint-check.sh
 
   apk:
     runs-on: ubuntu-22.04
