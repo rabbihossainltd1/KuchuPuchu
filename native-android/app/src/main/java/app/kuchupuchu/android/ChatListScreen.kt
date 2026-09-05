@@ -1089,7 +1089,7 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
                     ) {
                         Text(
                             if (unread > 99) "99+" else "$unread",
-                            color = AmberInk,
+                            color = ActionBlueInk,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                         )

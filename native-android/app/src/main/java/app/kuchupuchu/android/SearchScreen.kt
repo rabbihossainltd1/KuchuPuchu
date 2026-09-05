@@ -155,7 +155,7 @@ fun SearchScreen(nav: NavController) {
                 ) {
                     Text(
                         label,
-                        color = if (selected) AmberInk else Muted,
+                        color = if (selected) ActionBlueInk else Muted,
                         fontSize = 13.sp,
                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                         maxLines = 1,

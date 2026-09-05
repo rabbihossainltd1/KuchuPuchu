@@ -1682,7 +1682,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     )
                     DropdownMenuItem(
                         text = { Text("Media, links, and docs", color = Ink) },
-                        leadingIcon = { Icon(Icons.Filled.PermMedia, null, tint = GoldDeep) },
+                        leadingIcon = { Icon(Icons.Filled.PermMedia, null, tint = ActionBlueDeep) },
                         onClick = { menuOpen = false; nav.navigate("chatmedia/$convId") },
                     )
                     DropdownMenuItem(
@@ -1712,7 +1712,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     )
                     DropdownMenuItem(
                         text = { Text("Disappearing messages", color = Ink) },
-                        leadingIcon = { Icon(Icons.Filled.Timer, null, tint = GoldDeep) },
+                        leadingIcon = { Icon(Icons.Filled.Timer, null, tint = ActionBlueDeep) },
                         onClick = { menuOpen = false; showDisappear = true },
                     )
                     DropdownMenuItem(
@@ -3032,7 +3032,9 @@ private fun ReplyQuoteBar(replyTo: JSONObject?, onCancel: () -> Unit) {
                 .width(3.dp)
                 .height(30.dp)
                 .clip(RoundedCornerShape(2.dp))
-                .background(Gold),
+                // Owner round 21: the reply "I" bar rides the blue accent in
+                // dark-blue mode (it was the last gold stripe).
+                .background(ActionBlue),
         )
         Spacer(Modifier.width(8.dp))
         Column(Modifier.weight(1f)) {
@@ -3247,7 +3249,7 @@ private fun MessageRow(
                             Modifier
                                 .padding(bottom = 3.dp)
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(if (mine) Color(0x26FFFFFF) else GoldSoft)
+                                .background(if (mine) Color(0x26FFFFFF) else if (KpThemeMode.darkBlue) ActionBlue.copy(alpha = 0.18f) else GoldSoft)
                                 .padding(horizontal = 8.dp, vertical = 4.dp),
                         ) {
                             // Owner round 21: the quote bar takes the chat accent.

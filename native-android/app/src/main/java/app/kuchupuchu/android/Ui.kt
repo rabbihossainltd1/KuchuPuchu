@@ -563,10 +563,12 @@ fun EmptyState(
             Modifier
                 .size(76.dp)
                 .clip(CircleShape)
-                .background(GoldSoft),
+                // Owner round 21: empty states ("No calls", "No messages"…)
+                // ride the blue accent in dark-blue mode.
+                .background(if (KpThemeMode.darkBlue) ActionBlue.copy(alpha = 0.16f) else GoldSoft),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, contentDescription = title, tint = GoldDeep, modifier = Modifier.size(34.dp))
+            Icon(icon, contentDescription = title, tint = ActionBlueDeep, modifier = Modifier.size(34.dp))
         }
         Spacer(Modifier.height(12.dp))
         Text(title, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, color = Ink)
