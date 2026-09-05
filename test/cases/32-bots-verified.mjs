@@ -941,7 +941,9 @@ const convBetween = (db, a, b) =>
       !chatlist.includes("Keep holding for archived chats") &&
       !chatlist.includes("Pull down and hold") &&
       !chatlist.includes("LinearProgressIndicator") &&
-      !chatlist.includes(".background(GoldSoft)\n                    .padding(horizontal = 16.dp, vertical = 10.dp)"),
+      !chatlist.includes(
+        ".background(GoldSoft)\n                    .padding(horizontal = 16.dp, vertical = 10.dp)",
+      ),
   );
   check(
     "calls tab: skeleton rows + 20s cache (no laggy refetch)",
@@ -990,9 +992,10 @@ const convBetween = (db, a, b) =>
     ) &&
       chat.includes("KpShimmerRow(alignedEnd") &&
       chat.includes("rememberShimmerAlpha()") &&
-      !readFileSync("native-android/app/src/main/java/app/kuchupuchu/android/Ui.kt", "utf8").includes(
-        "fun kpShimmerBrush",
-      ),
+      !readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/Ui.kt",
+        "utf8",
+      ).includes("fun kpShimmerBrush"),
   );
 
   const voiceStart = calls.indexOf("fun VoiceCallScreen");
@@ -1011,7 +1014,7 @@ const convBetween = (db, a, b) =>
       chat.includes("fun chatOtherFill") &&
       chat.includes("chatMineFill(theme)") &&
       chat.includes("chatOtherFill(theme)") &&
-      chat.includes('containerColor = Card') &&
+      chat.includes("containerColor = Card") &&
       !chat.includes('"default" to "Cream"') &&
       chat.includes("KpThemeMode.darkBlue) Color(0xFF0C1A15)"),
   );
