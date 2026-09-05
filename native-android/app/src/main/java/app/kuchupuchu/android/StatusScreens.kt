@@ -324,6 +324,8 @@ fun StatusScreen(nav: NavController) {
  */
 @Composable
 fun StatusComposer(onDone: () -> Unit) {
+    // Owner round 21: his status-share sound plays after a successful post.
+    val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var text by remember { mutableStateOf("") }
     var style by remember { mutableStateOf("amber") }

@@ -3083,6 +3083,8 @@ private fun MessageRow(
 ) {
     val mine = m.optString("senderId") == myId
     val kind = m.optString("kind")
+    // Owner round 21: event sounds (reply swipe) play from the row itself.
+    val ctx = LocalContext.current
     // Owner round 15: the night theme's other-bubble is dark in BOTH app
     // themes — its text needs a light ink or it vanishes in light mode.
     // Owner round 20: the DARK-BLUE default chat has dark bubbles on both
@@ -3639,6 +3641,8 @@ private fun ImageMessageRow(
     onLongPress: (JSONObject) -> Unit = {},
 ) {
     val haptics = rememberHaptics()
+    // Owner round 21: the photo reply-swipe sound plays from the row.
+    val ctx = LocalContext.current
     // Owner round 16: photos reply with the same drag as text bubbles —
     // right for other people's, LEFT for your own.
     var replyDrag by remember { mutableStateOf(0f) }
