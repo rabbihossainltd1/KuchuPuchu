@@ -74,6 +74,14 @@ class MainActivity : ComponentActivity() {
         // anyway — setDecorFitsSystemWindows(true) and statusBarColor are
         // ignored there, which used to push the whole UI under the bars.)
         enableEdgeToEdge()
+        // Owner round 16: dark-blue theme needs LIGHT status-bar icons — the
+        // system default was dark-on-dark and the bar's content vanished.
+        window?.let { w ->
+            androidx.core.view.WindowCompat.getInsetsController(w, w.decorView).apply {
+                isAppearanceLightStatusBars = !KpThemeMode.darkBlue
+                isAppearanceLightNavigationBars = !KpThemeMode.darkBlue
+            }
+        }
         current = this
         Api.loadToken(this)
         Coil.setImageLoader(
@@ -139,6 +147,15 @@ class MainActivity : ComponentActivity() {
                 val engine = CallEngine(application)
                 engine.start(this)
             }
+            // Owner round 16: warm the chat list + call history at open, off
+            // the main thread — the Calls tab and the list are already full
+            // by the time the user reaches them ("age thekei shob ready").
+            // Cheap best-effort warms; failures are silent — the screens
+            // still fetch on their own if these didn't land.
+            runCatching { Api.get("/api/conversations", true) }
+            runCatching { Api.get("/api/calls/history", true) }
+            // Owner round 16: in-app update check (GitHub release).
+            runCatching { kotlinx.coroutines.runBlocking { KpUpdate.check(application) } }
         }.apply {
             isDaemon = true
             priority = Thread.MIN_PRIORITY
@@ -232,6 +249,11 @@ class MainActivity : ComponentActivity() {
         // is a network call), once per foreground, and the server only writes when the
         // expiry is actually near — so this costs a request, not a D1 row.
         Thread { runCatching { Api.refreshSession() } }.start()
+        // Owner round 16: a live call NEVER lives in just the notification —
+        // coming back to the app brings the fullscreen call UI with it.
+        CallEngine.instance?.let { engine ->
+            if (engine.active != null) engine.restoreCallUi()
+        }
         // Returning to the app triggers an instant re-sync of the open screens
         // (they observe ScreenStore.poke) — no waiting for the next poll.
         ScreenStore.pokeInbox()

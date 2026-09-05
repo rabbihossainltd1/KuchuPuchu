@@ -27,6 +27,9 @@ const PERMISSION_EVIDENCE: Record<string, RegExp> = {
   "android.permission.ACCESS_NETWORK_STATE": /ConnectivityManager/,
   "android.permission.CAMERA": /Manifest\.permission\.CAMERA|ImageCapture|MediaRecorder/,
   "android.permission.RECORD_AUDIO": /Manifest\.permission\.RECORD_AUDIO|AudioRecord/,
+  // Owner round 16: in-app updates — PackageInstaller installs the
+  // downloaded GitHub-release APK from inside the app.
+  "android.permission.REQUEST_INSTALL_PACKAGES": /PackageInstaller|KpUpdate/,
   "android.permission.MODIFY_AUDIO_SETTINGS": /AudioManager/,
   "android.permission.BLUETOOTH_CONNECT":
     /BluetoothAdapter|setCommunicationDevice|BluetoothHeadset/,

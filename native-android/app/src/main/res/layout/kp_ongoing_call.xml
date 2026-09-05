@@ -39,18 +39,19 @@
             android:textSize="12sp" />
     </LinearLayout>
 
+    <!-- Owner round 16: compact, background-FREE action buttons — plain
+         icons, no circles, same for voice and video. -->
     <FrameLayout
         android:id="@+id/kp_ongoing_speaker_wrap"
-        android:layout_width="52dp"
-        android:layout_height="52dp"
-        android:layout_marginEnd="12dp"
-        android:background="@drawable/kp_speaker_circle"
+        android:layout_width="38dp"
+        android:layout_height="38dp"
+        android:layout_marginEnd="10dp"
         android:clickable="true"
         android:focusable="true">
 
         <ImageView
-            android:layout_width="24dp"
-            android:layout_height="24dp"
+            android:layout_width="19dp"
+            android:layout_height="19dp"
             android:layout_gravity="center"
             android:src="@drawable/kp_ic_speaker"
             android:contentDescription="@null" />
@@ -58,15 +59,14 @@
 
     <FrameLayout
         android:id="@+id/kp_ongoing_end"
-        android:layout_width="60dp"
-        android:layout_height="60dp"
-        android:background="@drawable/kp_end_circle"
+        android:layout_width="38dp"
+        android:layout_height="38dp"
         android:clickable="true"
         android:focusable="true">
 
         <ImageView
-            android:layout_width="28dp"
-            android:layout_height="28dp"
+            android:layout_width="20dp"
+            android:layout_height="20dp"
             android:layout_gravity="center"
             android:src="@drawable/kp_ic_call_end"
             android:contentDescription="@null" />

@@ -15,6 +15,24 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
 
 /**
  * Root of the v3 app. Auth gate → main tabs (Chats / Status / Calls) with
@@ -123,6 +141,10 @@ fun KpApp() {
             }
             // Call screens float above everything while a call is live.
             CallGate()
+            // Owner round 16: in-app update — popup when a newer GitHub
+            // release exists, then an in-app download with live progress;
+            // the install confirm sheet opens right over the app.
+            KpUpdateGate()
         }
     }
 }
@@ -177,6 +199,76 @@ private fun askBatteryExemption(ctx: android.content.Context) {
                     android.net.Uri.parse("package:${ctx.packageName}"),
                 ),
             )
+        }
+    }
+}
+
+
+/**
+ * Owner round 16: the in-app update flow. Popup first; tapping Update stays
+ * INSIDE the app — progress bar + percentage — and hands the finished APK to
+ * the system installer when the bytes land.
+ */
+@Composable
+fun KpUpdateGate() {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val upd = KpUpdate.available
+    when {
+        upd != null && !KpUpdate.downloading -> {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { KpUpdate.available = null },
+                containerColor = Card,
+                title = { Text("Update available", color = Ink) },
+                text = {
+                    Text(
+                        "A new version (v${'$'}{upd.first}) is ready. Update now — it downloads right here, no browser.",
+                        color = Muted,
+                        fontSize = 13.5.sp,
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = { KpUpdate.available = null }) { Text("Later", color = Muted) }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        kotlinx.coroutines.GlobalScope.launch {
+                            KpUpdate.downloadAndInstall(ctx)
+                        }
+                    }) { Text("Update", color = GoldDeep, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold) }
+                },
+            )
+        }
+        KpUpdate.downloading -> {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color(0xB30D1524)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 26.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Card)
+                        .padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text("Downloading update", color = Ink, fontSize = 16.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+                    Spacer(Modifier.height(12.dp))
+                    LinearProgressIndicator(
+                        progress = { KpUpdate.progress },
+                        color = Gold,
+                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text("${'$'}{(KpUpdate.progress * 100).toInt()}%", color = GoldDeep, fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+                    if (KpUpdate.downloadError.isNotBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(KpUpdate.downloadError, color = Red, fontSize = 12.sp)
+                    }
+                }
+            }
         }
     }
 }

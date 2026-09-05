@@ -284,6 +284,10 @@ class KpPushService : FirebaseMessagingService() {
         val engine = CallEngine.instance
         if (callId.isNullOrBlank()) return
         if (callId in CallEngine.ignoredCalls) return
+        // Owner round 16: mount the FULLSCREEN call UI immediately — an
+        // instant poll beats waiting for the next timer tick, so the call
+        // screen pops instead of "just a notification".
+        engine?.kickPoll(callId)
         // Only skip the heads-up when the engine is actually alive and polling.
         // The old check bailed out whenever an engine had ever been constructed,
         // which is always true once MainActivity has run — so incoming-call

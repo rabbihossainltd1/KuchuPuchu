@@ -1110,6 +1110,19 @@ async function sendAiReply(
     const botId = await ensureAiBot(db);
     const mid = id();
     const created = nowIso();
+    // Owner round 16: the reply was broadcast ONLY to the chat room — so the
+    // moment the user left the chat screen, nobody poked their list and the
+    // reply stayed invisible until they re-entered the chat ("AI er reply
+    // chat list e ashe na"). The user-channel poke is exactly what normal
+    // sends get; the AI chat now gets it too.
+    ctx.waitUntil(
+      broadcastRoomEvent(env, `user:${userId}`, {
+        type: "conv",
+        conversationId: convId,
+        msg: 1,
+        senderId: AI_BOT_ID,
+      }),
+    );
     await run(
       db,
       `INSERT INTO messages (id, conv_id, sender_id, kind, body, created_at)
@@ -4279,6 +4292,48 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       await run(db, "UPDATE conversations SET theme = ? WHERE id = ?", theme, convId);
     }
     return json({ conversation: await conversationDetail(db, convId, uid) });
+  }
+
+  // Owner round 16: message reactions. Body { emoji }: setting the same
+  // emoji again REMOVES it (toggle). Stored in the message's meta under
+  // reactions[userId]; the updated row is broadcast so every open chat
+  // repaints live.
+  const reactMatch = path.match(/^\/api\/messages\/([^/]+)\/react$/);
+  if (reactMatch && method === "POST") {
+    const msgId = reactMatch[1]!;
+    const row = await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", msgId);
+    if (!row) fail(404, "Message not found.");
+    await requireMember(db, row.conv_id, uid);
+    const emoji = String(body.emoji || "").trim().slice(0, 8);
+    let meta: Record<string, unknown> = {};
+    if (row.meta_json) {
+      meta = (JSON.parse(row.meta_json) as Record<string, unknown>) ?? {};
+    }
+    const reactions = ((meta.reactions as Record<string, string>) ?? {});
+    const current = reactions[uid] ?? "";
+    if (!emoji) {
+      delete reactions[uid];
+    } else if (current === emoji) {
+      delete reactions[uid];
+    } else {
+      reactions[uid] = emoji;
+    }
+    meta.reactions = reactions;
+    await run(
+      db,
+      "UPDATE messages SET meta_json = ? WHERE id = ?",
+      JSON.stringify(meta),
+      msgId,
+    );
+    const updated = msgFrom({ ...row, meta_json: JSON.stringify(meta) });
+    ctx.waitUntil(
+      broadcastRoomEvent(env, row.conv_id, {
+        type: "message",
+        conversationId: row.conv_id,
+        message: updated,
+      }),
+    );
+    return json({ message: updated });
   }
 
   const convSearch = path.match(/^\/api\/conversations\/([^/]+)\/messages\/search$/);

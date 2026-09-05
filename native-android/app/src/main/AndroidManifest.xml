@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Owner round 16: in-app updates — installing the downloaded APK
+         from inside the app needs this. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Phone auth (OTP-less): SubscriptionManager.activeSubscriptionInfoList is
          gated on READ_PHONE_STATE at runtime. A denial is not fatal — the
          login flow reports PERMISSION_DENIED and the worker's grace path
@@ -124,7 +127,12 @@
                 <action android:name="android.telecom.ConnectionService" />
             </intent-filter>
         </service>
+                <!-- Owner round 16: in-app update installer result. -->
         <receiver
+            android:name=".KpUpdateReceiver"
+            android:exported="false" />
+
+<receiver
             android:name=".KpNotifActionReceiver"
             android:exported="false">
             <intent-filter>

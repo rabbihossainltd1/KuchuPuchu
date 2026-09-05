@@ -35,7 +35,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Chat
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
@@ -384,8 +383,9 @@ private fun ArchivePullArea(nav: NavController, content: @Composable () -> Unit)
             // icon turns into a green TICK and the archive opens. No pill,
             // no border, no text.
             if (logoShown) {
-                // Owner round 15: no text at the end — the ARCHIVED icon
-                // itself becomes a green TICK mark, then the screen opens.
+                // Owner round 16: no text, no green — the SAME archive icon,
+                // in the app's gold, with its full ring; springs once, then
+                // the archive opens.
                 val pop = remember { androidx.compose.animation.core.Animatable(0.35f) }
                 LaunchedEffect(Unit) {
                     pop.animateTo(
@@ -397,7 +397,14 @@ private fun ArchivePullArea(nav: NavController, content: @Composable () -> Unit)
                     Modifier.align(Alignment.TopCenter).padding(top = 14.dp).scale(pop.value),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Filled.Check, null, tint = Green, modifier = Modifier.size(30.dp))
+                    CircularProgressIndicator(
+                        progress = { 1f },
+                        color = Gold,
+                        strokeWidth = 3.dp,
+                        trackColor = GoldDeep.copy(alpha = 0.15f),
+                        modifier = Modifier.size(46.dp),
+                    )
+                    Icon(Icons.Filled.Archive, null, tint = GoldDeep, modifier = Modifier.size(22.dp))
                 }
             } else {
                 Box(

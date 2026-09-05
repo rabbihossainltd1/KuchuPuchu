@@ -637,8 +637,8 @@ const convBetween = (db, a, b) =>
       ).includes("Test OTP (beta)"),
   );
   check(
-    "photo bubbles have a 1dp border",
-    chat.includes(".border(1.dp, Color(0x2E000000), RoundedCornerShape(12.dp))"),
+    "photo bubbles have a 1dp border — round 16: gray-blue on dark, gray-black on cream",
+    chat.includes("if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444)"),
   );
   check("header block trimmed 2px more (offset 6->4)", chat.includes("offset(y = 4.dp)"));
 
@@ -936,16 +936,17 @@ const convBetween = (db, a, b) =>
       chat.includes("quoteFor = { rid ->"),
   );
   check(
-    "archive: 2s pull-hold, animation ONLY — ring fills, icon becomes a green tick, no pill/text/border",
+    "archive: 2s pull-hold, animation ONLY — ring fills, theme-gold ARCHIVE icon (no text/green/tick)",
     chatlist.includes("CircularProgressIndicator(") &&
       chatlist.includes("pop.animateTo(") &&
       chatlist.includes("< 2000)") &&
       chatlist.includes("/ 2000f") &&
-      chatlist.includes("Icons.Filled.Check, null, tint = Green") &&
+      chatlist.includes("Icons.Filled.Archive, null, tint = GoldDeep") &&
       !chatlist.includes("Keep holding for archived chats") &&
       !chatlist.includes("Pull down and hold") &&
       !chatlist.includes("LinearProgressIndicator") &&
-      !chatlist.includes('Text("Archived", fontSize = 17.sp'),
+      !chatlist.includes('Text("Archived", fontSize = 17.sp') &&
+      !chatlist.includes("tint = Green"),
   );
   check(
     "calls tab: skeleton rows + 20s cache (no laggy refetch)",
@@ -1055,8 +1056,9 @@ const convBetween = (db, a, b) =>
     settings.includes("var editingKey") &&
       settings.includes("activeKey = editingKey") &&
       settings.includes("border(1.dp, Gold, RoundedCornerShape(10.dp))") &&
-      settings.includes('false to "Cream"') &&
-      !settings.includes('false to "Light"'),
+      settings.includes('Opt(false, "Cream"') &&
+      !settings.includes('false to "Light"') &&
+      settings.includes("fun ThemePickerScreen"),
   );
   check(
     "14: crash-report file read moved off the main thread (cold-open)",
@@ -1103,6 +1105,49 @@ const convBetween = (db, a, b) =>
         "native-android/app/src/main/java/app/kuchupuchu/android/KpCrash.kt",
         "utf8",
       ).includes("fun setEnabled"),
+  );
+  check(
+    "16: message reactions — quick bar (5 emojis + more), full sheet, chips under bubbles, toggle endpoint",
+    chat.includes("applyReaction") &&
+      chat.includes("MessageReactions") &&
+      chat.includes("EmojiSheetDialog") &&
+      chat.includes('"/api/messages/$mid/react"') &&
+      chat.includes('"👍", "❤️", "😂", "😮", "😢"') &&
+      src.includes("/react"),
+  );
+  check(
+    "16: AI reply pokes the USER channel — visible in the chat list without entering the chat",
+    src.includes("user:${userId}"),
+  );
+  check(
+    "16: own-message LEFT-swipe reply + photo reply drag + theme-aware photo border",
+    chat.includes("if (mine) {") &&
+      chat.includes("(replyDrag + dragAmount).coerceIn(-replyThreshold * 1.8f, 0f)") &&
+      chat.includes("kotlin.math.abs(replyDrag) >= replyThreshold") &&
+      chat.includes(
+        "ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress)",
+      ),
+  );
+  check(
+    "16: in-app updates — GitHub release check, in-app progress %, PackageInstaller, settings row",
+    readFileSync(
+      "native-android/app/src/main/java/app/kuchupuchu/android/KpUpdate.kt",
+      "utf8",
+    ).includes("PackageInstaller") &&
+      readFileSync("native-android/app/src/main/AndroidManifest.xml", "utf8").includes(
+        "REQUEST_INSTALL_PACKAGES",
+      ) &&
+      kpapp.includes("KpUpdateGate") &&
+      settings.includes("Check for updates"),
+  );
+  check(
+    "16: fullscreen theme picker + settings back icon matches chat + save/cancel inside the edit box",
+    settings.includes("fun ThemePickerScreen") &&
+      settings.includes(
+        'Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Ink, modifier = Modifier.size(26.dp)',
+      ) &&
+      settings.includes('"Save",') &&
+      settings.includes("flush beside the text"),
   );
   check(
     "15: AI replies fail over faster (per-model 10s -> 6s) + ONE debug APK per CI run",

@@ -563,3 +563,52 @@ Suite: 32/32 = 1008 assertions.
 The owner chose the DEBUG apk as the one artifact CI uploads: assembleDebug +
 `kuchupuchu-apk` artifact; release build, signing secrets and the certificate
 check are out of CI. Lint/unit tests still run before the build.
+
+## Owner round 16 — 22 items, no extras (v3.9.41 / 117, 2026-09-05)
+
+1/2. **Fullscreen call UI** — returning to the app with a live call restores
+   the call screen (it never stays "notification-only"); incoming-call pushes
+   kick an immediate engine poll so the UI mounts at once (voice + video).
+3. **Notification buttons compact** — 38dp plain icons, circle backgrounds
+   removed (voice + video).
+4. **Chat placeholder vs "No messages"** — empty state only after the first
+   page lands; never together with the skeleton.
+5. **Settings editor** — save/cancel moved INSIDE the edit box, flush beside
+   the text.
+6. **Archive** — 2s hold confirmed; completion shows the theme-gold ARCHIVE
+   icon with a full ring (no text, no green tick).
+7. **Warm screens** — chat list + call history prefetched at open (background
+   thread); calls tab was already cached/memoized.
+8. **AI reply visibility — ROOT CAUSE** — sendAiReply broadcast only to the
+   CHAT room; once the user left the chat nothing poked their list (a healthy
+   user socket means the list ticker never refetches). The user-channel poke
+   now rides with every AI reply.
+9. **AI History header** — statusBarsPadding added (was flush under the bar).
+10. **Composer** — recording card strip removed (transparent); mic gets its
+    3D lift back.
+11. **Reply colours** — quote bar = Card + gold bar + full-ink text; in-bubble
+    quotes use ink/white, readable on every theme.
+12. **Own-message reply** — LEFT swipe on your own bubble arms the reply.
+13. **Reactions** — long-press still selects AND raises the quick bar (👍 ❤️ 😂
+    😮 😢 + "+"); "+" opens the full sheet; POST /api/messages/:id/react
+    toggles, meta.reactions storage, chips under bubbles, live via chat WS.
+14. **Status bar icons** — light in dark-blue, dark in cream (insets
+    controller by theme).
+15. **In-chat search** — zIndex puts the bar ABOVE the list (was underneath =
+    untouchable); gold border, solid surfaces.
+16. **AI same-message loop** — that text is the canned FALLBACK; the Gemini
+    key itself is live-healthy, so the worker secret was re-put with the
+    current working key.
+17. **Reply auto-scroll** — starting a reply jumps the thread up so the newest
+    rows clear the quote bar + keyboard.
+18. **Photo replies** — photos carry the same reply drag (right = theirs,
+    left = yours).
+19. **Fullscreen theme picker** — like the ringtone picker; swatches, instant
+    apply; inline chips removed.
+20. **Settings back icon** — the chat screen's KeyboardArrowLeft.
+21. **In-app updates** — GitHub releases/latest (tag v<versionCode> + debug
+    APK asset) checked at open and from Settings; popup → in-app download with
+    progress % → PackageInstaller confirm sheet over the app. Manifest gains
+    REQUEST_INSTALL_PACKAGES. v117 released with its APK as the first asset.
+22. **Photo border colour** — gray-blue on dark-blue, gray-black on cream.
+Suite: 32/32 = 1013 assertions.

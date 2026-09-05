@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Switch
 import androidx.compose.material3.CircularProgressIndicator
@@ -90,6 +91,8 @@ fun SettingsScreen(nav: NavController) {
     var confirmLogout by remember { mutableStateOf(false) }
     // Phone-auth: change-number dialog state.
     var showRingPicker by remember { mutableStateOf(false) }
+    // Owner round 16: fullscreen theme picker.
+    var showThemePicker by remember { mutableStateOf(false) }
     // Owner round 13b: a proper two-option picker; applying recreates the
     // activity so every surface re-skins at once (no half-applied theme).
 
@@ -165,7 +168,8 @@ fun SettingsScreen(nav: NavController) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = { nav.popBackStack() }) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink)
+                // Owner round 16: the same back icon the chat screens use.
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Ink, modifier = Modifier.size(26.dp))
             }
             Text("Settings", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
         }
@@ -314,47 +318,13 @@ fun SettingsScreen(nav: NavController) {
             // user picks which one rings for calls. Default is the app's
             // ORIGINAL tone again (owner round 13); his "calling ringing"
             // file stays as the caller-side ringback only.
-            // Owner round 13d: theme picked INLINE — one tap, applies at once.
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, top = 12.dp, end = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Filled.Palette, "App theme", tint = GoldDeep, modifier = Modifier.size(21.dp))
-                Spacer(Modifier.width(14.dp))
-                Text("App theme", fontSize = 13.sp, color = Muted)
-            }
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(start = 51.dp, end = 16.dp, top = 6.dp, bottom = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                listOf(true to "Dark blue", false to "Cream").forEach { (dark, label) ->
-                    val selected = KpThemeMode.darkBlue == dark
-                    Row(
-                        Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(if (selected) Gold else Card)
-                            .border(1.dp, if (selected) Gold else Line, RoundedCornerShape(20.dp))
-                            .clickable {
-                                if (!selected) {
-                                    KpThemeMode.set(ctx, dark)
-                                    (ctx as? android.app.Activity)?.recreate()
-                                }
-                            }
-                            .padding(horizontal = 16.dp, vertical = 7.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (selected) {
-                            Icon(Icons.Filled.Check, null, tint = AmberInk, modifier = Modifier.size(14.dp))
-                            Spacer(Modifier.width(5.dp))
-                        }
-                        Text(label, fontSize = 13.sp, color = if (selected) AmberInk else Ink, fontWeight = FontWeight.Medium)
-                    }
-                }
-            }
+            // Owner round 16: the theme has its own FULLSCREEN picker now
+            // (same pattern as the ringtone picker) — this row opens it.
+            SettingRow(
+                Icons.Filled.Palette,
+                "App theme",
+                if (KpThemeMode.darkBlue) "Dark blue" else "Cream",
+            ) { showThemePicker = true }
             SettingRow(
                 Icons.Filled.NotificationsActive,
                 "Incoming ringtone",
@@ -387,6 +357,20 @@ fun SettingsScreen(nav: NavController) {
                         KpCrash.setEnabled(ctx, on)
                     },
                 )
+            }
+            // Owner round 16: in-app updates — checks the GitHub release and
+            // the popup (or "already latest") takes it from there.
+            SettingRow(
+                Icons.Filled.SystemUpdate,
+                "Check for updates",
+                if (KpUpdate.checking) "Checking…" else "Latest release on GitHub",
+            ) {
+                scope.launch {
+                    withContext(Dispatchers.IO) { KpUpdate.check(ctx) }
+                    if (KpUpdate.available == null) {
+                        android.widget.Toast.makeText(ctx, "You are on the latest version", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
             // Which build am I running? This row ends the "ami ki notun APK
             // install korsi?" confusion — bug reports can quote it directly.
@@ -454,6 +438,9 @@ fun SettingsScreen(nav: NavController) {
 
 
     // Owner round 11: FULLSCREEN ringtone picker — tap previews, Save keeps.
+    if (showThemePicker) {
+        ThemePickerScreen(onClose = { showThemePicker = false })
+    }
     if (showRingPicker) {
         RingtonePickerScreen(onClose = { showRingPicker = false })
     }
@@ -562,6 +549,38 @@ private fun EditableSettingRow(
                             enabled = !busy,
                             modifier = Modifier.weight(1f),
                         )
+                        // Owner round 16: save/cancel ride INSIDE the box,
+                        // flush beside the text — they used to float above it.
+                        Spacer(Modifier.width(6.dp))
+                        Icon(
+                            Icons.Filled.Close,
+                            "Cancel",
+                            tint = Muted,
+                            modifier = Modifier
+                                .size(20.dp)
+                                .clip(CircleShape)
+                                .clickable(enabled = !busy) { onActiveKey(null); err = "" }
+                                .padding(3.dp),
+                        )
+                        Spacer(Modifier.width(2.dp))
+                        Icon(
+                            Icons.Filled.Check,
+                            "Save",
+                            tint = if (draft.isNotBlank() && !busy) GoldDeep else Muted,
+                            modifier = Modifier
+                                .size(20.dp)
+                                .clip(CircleShape)
+                                .clickable(enabled = !busy && draft.isNotBlank()) {
+                                    onSubmit(draft.trim()) { e ->
+                                        if (e == null) {
+                                            onActiveKey(null)
+                                        } else {
+                                            err = e
+                                        }
+                                    }
+                                }
+                                .padding(3.dp),
+                        )
                     }
                 } else {
                     Text(value, fontSize = 14.5.sp, color = Ink, fontWeight = FontWeight.Medium)
@@ -569,27 +588,6 @@ private fun EditableSettingRow(
             }
             if (!editing) {
                 Icon(Icons.Filled.Edit, contentDescription = "Edit", tint = Muted, modifier = Modifier.size(16.dp))
-            } else {
-                IconButton(
-                    onClick = { onActiveKey(null); err = "" },
-                    enabled = !busy,
-                    modifier = Modifier.size(32.dp),
-                ) { Icon(Icons.Filled.Close, "Cancel", tint = Muted, modifier = Modifier.size(16.dp)) }
-                IconButton(
-                    onClick = {
-                        if (draft.isNotBlank()) {
-                            onSubmit(draft.trim()) { e ->
-                                if (e == null) {
-                                    onActiveKey(null)
-                                } else {
-                                    err = e
-                                }
-                            }
-                        }
-                    },
-                    enabled = !busy && draft.isNotBlank(),
-                    modifier = Modifier.size(32.dp),
-                ) { Icon(Icons.Filled.Check, "Save", tint = GoldDeep, modifier = Modifier.size(17.dp)) }
             }
         }
         if (editing && hint.isNotBlank() && err.isBlank()) {
@@ -634,6 +632,77 @@ private fun SettingRow(
  * Tap a ringtone = select + instant preview; SAVE keeps the choice; the
  * device's own audio files can be picked as a CUSTOM ringtone.
  */
+/**
+ * Owner round 16: the FULLSCREEN app-theme picker — same pattern as the
+ * ringtone picker. Tap a theme to apply + save instantly.
+ */
+@Composable
+fun ThemePickerScreen(onClose: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Cream)
+            .statusBarsPadding()
+            .navigationBarsPadding(),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onClose) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Ink, modifier = Modifier.size(26.dp))
+            }
+            Column {
+                Text("App theme", color = Ink, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+                Text("Applies instantly, everywhere", color = Muted, fontSize = 12.sp)
+            }
+        }
+        data class Opt(val dark: Boolean, val label: String, val note: String, val swatch: androidx.compose.ui.graphics.Color)
+        listOf(
+            Opt(true, "Dark blue", "The signature deep-blue night theme", androidx.compose.ui.graphics.Color(0xFF0D1524)),
+            Opt(false, "Cream", "Soft warm light theme", androidx.compose.ui.graphics.Color(0xFFF7F6F4)),
+        ).forEach { o ->
+            val selected = KpThemeMode.darkBlue == o.dark
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 5.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(if (selected) GoldSoft else Card)
+                    .border(1.dp, if (selected) Gold else Line, RoundedCornerShape(16.dp))
+                    .clickable {
+                        if (!selected) {
+                            KpThemeMode.set(ctx, o.dark)
+                            onClose()
+                            (ctx as? android.app.Activity)?.recreate()
+                        } else {
+                            onClose()
+                        }
+                    }
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(o.swatch)
+                        .border(2.dp, if (selected) GoldDeep else Line, CircleShape),
+                )
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(o.label, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text(o.note, color = Muted, fontSize = 12.sp)
+                }
+                if (selected) {
+                    Icon(Icons.Filled.Check, "Selected", tint = GoldDeep, modifier = Modifier.size(20.dp))
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun RingtonePickerScreen(onClose: () -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
