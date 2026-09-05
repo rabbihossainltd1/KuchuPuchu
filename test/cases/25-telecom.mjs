@@ -213,7 +213,7 @@ check(
 );
 check(
   "publishing cannot end a call (the mirror is wrapped, not trusted)",
-  /private fun publishChange\(\) \{ onChange\?\.invoke\(active\) runCatching \{ KpTelecom\.syncNow\(app\) \} \}/.test(
+  /private fun publishChange\(\) \{ onChange\?\.invoke\(active\) runCatching \{ KpTelecom\.syncNow\(app\) \}/.test(
     engine,
   ),
 );

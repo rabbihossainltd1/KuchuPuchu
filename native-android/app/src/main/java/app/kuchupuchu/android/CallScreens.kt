@@ -706,7 +706,24 @@ private fun DarkCallScaffold(content: @Composable () -> Unit) {
 @Composable
 private fun BlurredAvatarBackdrop(avatarUrl: String?) {
     if (avatarUrl.isNullOrBlank()) return
-    KpNetImage(avatarUrl, "Caller photo", Modifier.fillMaxSize().blur(28.dp))
+    // Owner round 13d: same memory-cache key the engine warms at ring time,
+    // so the photo is usually already decoded when the screen composes. A
+    // dark-blue placeholder (not plain black) covers the rare cache miss.
+    val full = if (avatarUrl.startsWith("http")) avatarUrl else Api.BASE + avatarUrl
+    coil.compose.AsyncImage(
+        model =
+            coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                .data(full)
+                .memoryCacheKey("callbg:$full")
+                .diskCacheKey("callbg:$full")
+                .allowHardware(false)
+                .crossfade(220)
+                .build(),
+        contentDescription = "Caller photo",
+        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+        modifier = Modifier.fillMaxSize().blur(28.dp),
+        placeholder = androidx.compose.ui.graphics.painter.ColorPainter(Color(0xFF16213A)),
+    )
     Box(Modifier.fillMaxSize().background(Color(0x66000000)))
 }
 

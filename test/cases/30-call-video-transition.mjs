@@ -80,7 +80,7 @@ const screenFlat = flat(screen);
   );
   check(
     "publishChange is the one place onChange + Telecom sync are driven from",
-    /private fun publishChange\(\) \{ onChange\?\.invoke\(active\) runCatching \{ KpTelecom\.syncNow\(app\) \} \}/.test(
+    /private fun publishChange\(\) \{ onChange\?\.invoke\(active\) runCatching \{ KpTelecom\.syncNow\(app\) \}/.test(
       flat(eng),
     ),
   );

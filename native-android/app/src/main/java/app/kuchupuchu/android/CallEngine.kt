@@ -225,6 +225,33 @@ class CallEngine(private val app: Application) {
     private fun publishChange() {
         onChange?.invoke(active)
         runCatching { KpTelecom.syncNow(app) }
+        // Owner round 13d: the voice-call backdrop used to pop in LATE — the
+        // caller photo was only fetched when the call screen composed. Warm
+        // Coil's cache (software bitmap, the blur needs one) while the phone
+        // is still ringing, once per call.
+        active?.let {
+            if (it.otherAvatar.isNotBlank() && warmedAvatarFor != it.id) {
+                warmedAvatarFor = it.id
+                warmAvatar(it.otherAvatar)
+            }
+        }
+    }
+
+    private var warmedAvatarFor: String? = null
+
+    private fun warmAvatar(url: String) {
+        runCatching {
+            val full = if (url.startsWith("http")) url else Api.BASE + url
+            coil.Coil.imageLoader(app).enqueue(
+                coil.request.ImageRequest.Builder(app)
+                    .data(full)
+                    .memoryCacheKey("callbg:$full")
+                    .diskCacheKey("callbg:$full")
+                    .allowHardware(false)
+                    .size(coil.size.Size.ORIGINAL)
+                    .build(),
+            )
+        }
     }
 
     fun notify(message: String) {

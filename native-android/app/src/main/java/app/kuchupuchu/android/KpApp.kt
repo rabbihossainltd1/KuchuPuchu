@@ -25,6 +25,16 @@ fun KpApp() {
     val nav = rememberNavController()
     val authed by Store.authed
 
+    // Owner round 13d: if the previous launch crashed, surface the captured
+    // stack right away (Copy → paste to the developer).
+    KpCrashReportDialog()
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        KpCrash.mark("app-open")
+        nav.addOnDestinationChangedListener { _, d, _ ->
+            KpCrash.mark("nav:${d.route?.takeLast(28)}")
+        }
+    }
+
 
     // Owner rule (2026-09-04): the ONLY launch-time permission asks are
     // notification permission and the battery-optimization exemption dialog —

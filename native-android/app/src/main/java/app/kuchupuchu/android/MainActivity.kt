@@ -65,6 +65,9 @@ class MainActivity : ComponentActivity() {
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Owner round 13d: catch the silent chat-open crash on device — the
+        // handler must be in place before anything else runs.
+        KpCrash.install(this)
         super.onCreate(savedInstanceState)
         // Edge-to-edge on every API level, so the Compose-side insets are the
         // single source of truth. (targetSdk 35 forces this on Android 15+
