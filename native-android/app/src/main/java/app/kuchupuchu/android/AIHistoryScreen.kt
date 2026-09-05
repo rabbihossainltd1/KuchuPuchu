@@ -82,7 +82,11 @@ fun AIHistoryScreen(nav: NavController) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = { if (open != null) { open = null; msgs = emptyList() } else nav.popBackStack() }) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Ink, modifier = Modifier.padding(top = 12.dp))
+                // Owner round 15: the icon carried padding(top = 12.dp), which
+                // grew the header row and pushed the whole "AI History" block
+                // ~20px lower than every other screen's header. Standard
+                // 26dp icon, no offset.
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Ink, modifier = Modifier.size(26.dp))
             }
             Column(Modifier.padding(start = 4.dp)) {
                 Text(

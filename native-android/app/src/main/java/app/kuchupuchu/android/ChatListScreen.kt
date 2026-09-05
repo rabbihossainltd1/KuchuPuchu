@@ -35,6 +35,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
@@ -180,7 +181,29 @@ fun ChatListScreen(nav: NavController) {
         // cards. Here we only subscribe to events.
         val removeListener = KpSocket.onEvent { ev ->
             when (ev.optString("type")) {
-                "hello", "conv" -> refresh()
+                "hello" -> refresh()
+                "conv" -> {
+                    refresh()
+                    // Owner round 15: realtime list — don't wait for the full
+                    // refetch; fetch and merge the ONE changed conversation
+                    // so the preview, badge and order move the instant the
+                    // poke lands.
+                    val cid = ev.optString("conversationId")
+                    if (cid.isNotBlank()) {
+                        scope.launch {
+                            runCatching {
+                                val one =
+                                    withContext(Dispatchers.IO) {
+                                        Api.get("/api/conversations/$cid", true)
+                                    }.optJSONObject("conversation") ?: return@launch
+                                // The open chat marks itself read; never
+                                // flash a badge for what's on screen.
+                                if (Store.route == "chat/$cid") one.put("unread", 0)
+                                ScreenStore.upsertConv(one)
+                            }
+                        }
+                    }
+                }
                 // "call" pokes are CallEngine's business, not the list's.
             }
         }
@@ -335,9 +358,10 @@ private fun ArchivePullArea(nav: NavController, content: @Composable () -> Unit)
     LaunchedEffect(Unit) {
         snapshotFlow { pull >= threshold }.collect { held ->
             if (held) {
+                // Owner round 15: hold time 3s -> 2s.
                 val start = System.currentTimeMillis()
-                while (pull >= threshold && System.currentTimeMillis() - start < 3000) {
-                    holdProgress = (System.currentTimeMillis() - start) / 3000f
+                while (pull >= threshold && System.currentTimeMillis() - start < 2000) {
+                    holdProgress = (System.currentTimeMillis() - start) / 2000f
                     delay(50)
                 }
                 if (pull >= threshold) {
@@ -355,12 +379,13 @@ private fun ArchivePullArea(nav: NavController, content: @Composable () -> Unit)
     Box(Modifier.fillMaxSize().nestedScroll(conn)) {
         content()
         if (pull > threshold * 0.3f || logoShown) {
-            // Owner round 14: the pill had a background, a border shape and
-            // instruction text — the owner wanted ANIMATION ONLY. What
-            // remains: the archive icon with a circular progress ring that
-            // fills while holding, and the ARCHIVED logo springing in when
-            // the hold completes. No pill, no border, no text.
+            // Owner round 14/15: animation ONLY — the archive icon with a
+            // circular progress ring that fills over the 2s hold, then the
+            // icon turns into a green TICK and the archive opens. No pill,
+            // no border, no text.
             if (logoShown) {
+                // Owner round 15: no text at the end — the ARCHIVED icon
+                // itself becomes a green TICK mark, then the screen opens.
                 val pop = remember { androidx.compose.animation.core.Animatable(0.35f) }
                 LaunchedEffect(Unit) {
                     pop.animateTo(
@@ -368,13 +393,11 @@ private fun ArchivePullArea(nav: NavController, content: @Composable () -> Unit)
                         spring(dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy),
                     )
                 }
-                Row(
+                Box(
                     Modifier.align(Alignment.TopCenter).padding(top = 14.dp).scale(pop.value),
-                    verticalAlignment = Alignment.CenterVertically,
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Filled.Archive, null, tint = GoldDeep, modifier = Modifier.size(26.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Archived", fontSize = 17.sp, color = GoldDeep, fontWeight = FontWeight.Bold)
+                    Icon(Icons.Filled.Check, null, tint = Green, modifier = Modifier.size(30.dp))
                 }
             } else {
                 Box(

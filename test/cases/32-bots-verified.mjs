@@ -706,8 +706,8 @@ const convBetween = (db, a, b) =>
 
   // ---- Owner round 11 (2026-09-05) ----
   check(
-    "AI: each Gemini model capped at 10s so one 503 can't starve the rest",
-    src.includes("Math.min(remaining, 10_000)") && src.includes("gemini-3.8-flash"),
+    "AI: each Gemini model capped (round 15: 6s) so one 503 can't starve the rest",
+    src.includes("Math.min(remaining, 6_000)") && src.includes("gemini-3.8-flash"),
   );
   check("user-channel conv pokes carry msg:1 for the in-app sound", src.includes("msg: 1 }"));
   const kpapp = readFileSync(
@@ -918,8 +918,9 @@ const convBetween = (db, a, b) =>
     chat.includes("micEnabled = !isAiChat") && !chat.includes("at least 1 second to record"),
   );
   check(
-    "mic button: fill removed, faint 3D lift",
-    chat.includes("shadow(2.dp, CircleShape") &&
+    "mic button: fully transparent (round 15: shadow removed too), ring stays",
+    !chat.includes("shadow(2.dp, CircleShape") &&
+      chat.includes("1.5.dp, if (cancelArmed) Red else GoldDeep") &&
       !chat.includes(".background(if (cancelArmed) Color.White else Gold)"),
   );
   check(
@@ -930,20 +931,21 @@ const convBetween = (db, a, b) =>
   );
   check(
     "swipe a bubble right to quote-reply",
-    chat.includes("onReply = { haptics.tap(); replyTo = it }") &&
+    chat.includes("onReply = { haptics.tap(); replyTo = it; replyFocusNonce++ }") &&
       chat.includes('payload.put("replyTo", it)') &&
       chat.includes("quoteFor = { rid ->"),
   );
   check(
-    "archive opens by pull + 3s hold — round 14: animation ONLY (icon + progress ring), no pill/text/border",
+    "archive: 2s pull-hold, animation ONLY — ring fills, icon becomes a green tick, no pill/text/border",
     chatlist.includes("CircularProgressIndicator(") &&
       chatlist.includes("pop.animateTo(") &&
+      chatlist.includes("< 2000)") &&
+      chatlist.includes("/ 2000f") &&
+      chatlist.includes("Icons.Filled.Check, null, tint = Green") &&
       !chatlist.includes("Keep holding for archived chats") &&
       !chatlist.includes("Pull down and hold") &&
       !chatlist.includes("LinearProgressIndicator") &&
-      !chatlist.includes(
-        ".background(GoldSoft)\n                    .padding(horizontal = 16.dp, vertical = 10.dp)",
-      ),
+      !chatlist.includes('Text("Archived", fontSize = 17.sp'),
   );
   check(
     "calls tab: skeleton rows + 20s cache (no laggy refetch)",
@@ -969,7 +971,13 @@ const convBetween = (db, a, b) =>
       readFileSync(
         "native-android/app/src/main/java/app/kuchupuchu/android/AIHistoryScreen.kt",
         "utf8",
-      ).includes("KpShimmerListItem(alpha = sh)"),
+      ).includes("KpShimmerListItem(alpha = sh)") &&
+      // Round 15: the real ~20px offset was the back icon's top padding
+      // growing the header — not the scroll position.
+      !readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/AIHistoryScreen.kt",
+        "utf8",
+      ).includes("Modifier.padding(top = 12.dp)"),
   );
   check(
     "ringtone picker compacted",
@@ -1056,6 +1064,55 @@ const convBetween = (db, a, b) =>
       "native-android/app/src/main/java/app/kuchupuchu/android/KpCrash.kt",
       "utf8",
     ).includes("withContext(Dispatchers.IO) { KpCrash.lastReport(ctx) }"),
+  );
+
+  // ---- Owner round 15 (2026-09-05) ----
+  check(
+    "15: chat search — 3-dot Search opens the CHAT-scoped sheet everywhere (global nav gone)",
+    chat.includes('Text("Search in chat", color = Ink)') &&
+      !chat.includes('nav.navigate("search")') &&
+      chat.includes("showChatSearch = true"),
+  );
+  check(
+    "15: composer bar + mic fully transparent, header takes the chat theme",
+    !chat.includes(".shadow(2.dp, CircleShape") &&
+      chat.includes(".background(chatWallpaper(chatTheme))"),
+  );
+  check(
+    "15: reply auto-opens the keyboard (focus nonce drives the composer)",
+    chat.includes("replyFocusNonce") && chat.includes("inputFocus.requestFocus()"),
+  );
+  check(
+    "15: chat skeleton shows — cleared when the first page LANDS, not when it starts",
+    chat.includes("initialLoad = false") && chat.includes("} finally {"),
+  );
+  check(
+    "15: realtime chat list — one-conversation instant merge on every conv poke",
+    chatlist.includes("ScreenStore.upsertConv(one)") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/ScreenStore.kt",
+        "utf8",
+      ).includes("fun upsertConv"),
+  );
+  check(
+    "15: crash detection toggle in settings; handler + dialog honour the switch",
+    settings.includes("Crash reports") &&
+      settings.includes("Switch(") &&
+      settings.includes("KpCrash.setEnabled(ctx, on)") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/KpCrash.kt",
+        "utf8",
+      ).includes("fun setEnabled"),
+  );
+  check(
+    "15: AI replies fail over faster (per-model 10s -> 6s) + one APK per CI run",
+    src.includes("Math.min(remaining, 6_000)") &&
+      !readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8").includes(
+        "assembleDebug",
+      ) &&
+      readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8").includes(
+        "kuchupuchu-apk-release",
+      ),
   );
 }
 

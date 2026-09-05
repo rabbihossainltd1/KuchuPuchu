@@ -415,6 +415,25 @@ object ScreenStore {
         if (changed) persist()
     }
 
+    /** Owner round 15: realtime list — merge ONE conversation row (from the
+     *  single-conversation endpoint) without a full refetch: preview, badge
+     *  and order update the instant a poke lands. */
+    @Synchronized
+    fun upsertConv(row: JSONObject) {
+        val id = row.optString("id")
+        if (id.isBlank()) return
+        val idx = convs.indexOfFirst { it.optString("id") == id }
+        if (idx >= 0) convs[idx] = row else convs.add(row)
+        // Newest activity floats to the top, newest-first like the server list.
+        val sorted = convs.sortedByDescending { it.optString("lastMessageAt") }
+        if (sorted.isNotEmpty() && sorted != convs.toList()) {
+            convs.clear()
+            convs.addAll(sorted)
+        }
+        convsRaw = convSignature(convs)
+        persist()
+    }
+
     @Synchronized
     fun setMuted(convId: String, muted: Boolean) {
         val i = convs.indexOfFirst { it.optString("id") == convId }

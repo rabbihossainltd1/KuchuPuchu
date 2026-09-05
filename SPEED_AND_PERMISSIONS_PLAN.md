@@ -516,3 +516,44 @@ Suite: 32/32.
 11. **Settings** — exactly one row editable at a time (shared editing key)
     and the row being edited sits in a visible rounded gold border box.
 Suite: 32/32 = 1000 assertions.
+
+## Owner round 15 — direct-to-main, one APK, 13 fixes (v3.9.40 / 116, 2026-09-05)
+
+NEW STANDING RULES: (1) changes push DIRECTLY to main — no branch/PR ritual;
+(2) CI builds exactly ONE APK (signed release; debug compilation still covered
+by testDebugUnitTest + lintDebug); (3) if a CI job fails, fix from the error
+log and push again without waiting for the APK job.
+
+1. **Composer + mic transparent** — the message bar's background is gone (the
+   themed wallpaper spans the screen); the mic is a bare icon + ring (shadow
+   removed).
+2. **Reply auto-keyboard** — swipe-to-reply bumps a nonce; the composer grabs
+   focus and opens the IME by itself.
+3. **AI history offset — the real bug** — the back icon carried
+   `padding(top = 12.dp)`, growing the header and pushing "AI History" ~20px
+   lower than every other screen. Standard 26dp icon now (the round-14 scroll
+   nudge was aiming at the wrong thing).
+4. **AI latency** — per-model Gemini cap 10s → 6s: a stalling first model
+   fails over to the next alias twice as fast (flash replies land <4s).
+5. **AI chat search FIXED FOR REAL** — root cause: the /messages/search
+   endpoint existed in the repo but was NEVER DEPLOYED (live worker 404s).
+   This round ships the worker deploy.
+6. **Chat search entry** — the 3-dot "Search" item navigated to the GLOBAL
+   search; now every chat (AI and normal) opens the chat-scoped top bar.
+7. **Theme = whole screen** — header + selection bar take the chat wallpaper;
+   night-theme bubbles get a light ink so text stays readable in light mode.
+8. **Chat loading placeholder** — the skeleton flag was cleared in the same
+   frame the fetch STARTED, so it never showed; it now clears when the first
+   page lands.
+9. **Archive** — hold 3s → 2s; at completion there is no text: the icon turns
+   into a green TICK, then the archive opens.
+10. **Cold-open** — notification channels + Telecom binder + call-engine init
+    moved off the main thread (they ran between onCreate and the first frame).
+11. **Crash detection toggle** — Settings switch ("Crash reports"); off also
+    clears the stored report and disables the handler + dialog.
+12. **Settings edit alignment** — the edit box now hugs the value's line
+    (no top gap, 1dp vertical padding) so nothing shifts when editing starts.
+13. **Realtime chat list** — every "conv" poke now also fetches and merges the
+    ONE changed conversation (ScreenStore.upsertConv): preview, badge and
+    order move instantly, full refetch reconciles behind it.
+Suite: 32/32 = 1008 assertions.

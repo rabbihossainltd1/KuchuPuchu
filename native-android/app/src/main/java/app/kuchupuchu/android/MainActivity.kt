@@ -129,7 +129,21 @@ class MainActivity : ComponentActivity() {
         // is open: queued sends are the one thing the user cannot see working.
         Outbox.start(this)
         Store.authed.value = !Api.token.isNullOrBlank() && Store.me != null
-        KpNotify.ensureChannels(this)
+        // Owner round 15: cold-open lag — notification channels, the Telecom
+        // account binder call and the call engine all sat BETWEEN onCreate
+        // and the first frame. None of them is needed to draw; they run on a
+        // background starter thread now (each is idempotent).
+        Thread {
+            runCatching { KpNotify.ensureChannels(this) }
+            if (CallEngine.instance == null) {
+                val engine = CallEngine(application)
+                engine.start(this)
+            }
+        }.apply {
+            isDaemon = true
+            priority = Thread.MIN_PRIORITY
+            start()
+        }
 
         // Push mode is live on the v3 worker: init Firebase + register the
         // device token. No always-on service, no permanent notification.
@@ -153,11 +167,7 @@ class MainActivity : ComponentActivity() {
         // dropped - the first message after a cold start used to be mute).
         Thread { runCatching { KpSounds.ensure(this) } }.start()
 
-        // Call engine: polls active calls, rings, drives the call screens.
-        if (CallEngine.instance == null) {
-            val engine = CallEngine(application)
-            engine.start(this)
-        }
+
 
         handleIntent(intent)
         // Owner round 13b: the palette must be settled BEFORE the first frame —

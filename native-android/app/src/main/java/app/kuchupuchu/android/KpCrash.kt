@@ -33,12 +33,29 @@ import androidx.compose.ui.unit.sp
  */
 object KpCrash {
     private const val FILE = "crash_last.txt"
+    private const val PREF = "crash_capture"
     private val crumbs = ArrayDeque<String>()
+    private var enabled = true
+
+    /** Owner round 15: crash capture can be turned off from Settings. */
+    fun isEnabled(ctx: Context): Boolean =
+        ctx.getSharedPreferences("kp", 0).getBoolean(PREF, true)
+
+    fun setEnabled(ctx: Context, on: Boolean) {
+        enabled = on
+        ctx.getSharedPreferences("kp", 0).edit().putBoolean(PREF, on).apply()
+        if (!on) ctx.filesDir.resolve(FILE).delete()
+    }
 
     fun install(ctx: Context) {
         val appCtx = ctx.applicationContext
+        enabled = isEnabled(appCtx)
         val prev = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            if (!enabled) {
+                prev?.uncaughtException(t, e)
+                return@setDefaultUncaughtExceptionHandler
+            }
             runCatching {
                 appCtx.filesDir.resolve(FILE).writeText(
                     buildString {
@@ -86,6 +103,8 @@ object KpCrash {
 @Composable
 fun KpCrashReportDialog() {
     val ctx = LocalContext.current
+    // Owner round 15: nothing to show when capture is off.
+    if (!remember { KpCrash.isEnabled(ctx) }) return
     var report by remember { mutableStateOf<String?>(null) }
     // Owner round 14: read the file OFF the main thread — a synchronous read
     // at every app open was cold-start work.

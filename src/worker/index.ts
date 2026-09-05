@@ -667,7 +667,10 @@ async function geminiComplete(
       // Owner round 11 (2026-09-05): a 503ing model used to sit on the
       // ENTIRE budget, so the later (healthy) models were never tried and
       // the user got the canned fallback. Each model now gets at most 10s.
-      const timer = setTimeout(() => ctrl.abort(), Math.min(remaining, 10_000));
+      // Owner round 15 (2026-09-05): "ai ektu late reply dicche" — flash
+      // replies land well under 4s, so a stalling first model now fails
+      // over at 6s instead of eating 10 before the next alias is tried.
+      const timer = setTimeout(() => ctrl.abort(), Math.min(remaining, 6_000));
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
         {

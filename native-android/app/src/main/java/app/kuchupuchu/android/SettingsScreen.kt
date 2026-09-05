@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.foundation.layout.Arrangement
@@ -41,6 +42,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Switch
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -358,6 +360,34 @@ fun SettingsScreen(nav: NavController) {
                 "Incoming ringtone",
                 SoundPrefs.currentLabel(ctx),
             ) { showRingPicker = true }
+            // Owner round 15: crash detection on/off — capture stays until
+            // the owner switches it off; off also clears the last report.
+            var crashOn by remember { mutableStateOf(KpCrash.isEnabled(ctx)) }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, top = 12.dp, end = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.BugReport, "Crash reports", tint = GoldDeep, modifier = Modifier.size(21.dp))
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Crash reports", fontSize = 13.sp, color = Muted)
+                    Text(
+                        if (crashOn) "On — saves the last crash for debugging" else "Off",
+                        fontSize = 14.5.sp,
+                        color = Ink,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+                Switch(
+                    checked = crashOn,
+                    onCheckedChange = { on ->
+                        crashOn = on
+                        KpCrash.setEnabled(ctx, on)
+                    },
+                )
+            }
             // Which build am I running? This row ends the "ami ki notun APK
             // install korsi?" confusion — bug reports can quote it directly.
             SettingRow(
@@ -508,11 +538,14 @@ private fun EditableSettingRow(
                     // the row being edited is unmistakable.
                     androidx.compose.foundation.layout.Row(
                         Modifier
-                            .padding(top = 4.dp)
+                            // Owner round 15: the box used to push the text
+                            // off the value's position (top gap + thick
+                            // padding). It now hugs the same line the value
+                            // text occupied — same spot, same height.
                             .clip(RoundedCornerShape(10.dp))
                             .border(1.dp, Gold, RoundedCornerShape(10.dp))
                             .background(GoldSoft.copy(alpha = 0.30f))
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                            .padding(horizontal = 8.dp, vertical = 1.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         BasicTextField(

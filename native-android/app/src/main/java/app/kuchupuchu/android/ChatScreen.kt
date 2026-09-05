@@ -107,6 +107,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -192,6 +193,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     var recMs by remember { mutableStateOf(0) }
     // Owner round 13: swipe a bubble right to quote-reply to it.
     var replyTo by remember { mutableStateOf<JSONObject?>(null) }
+    // Owner round 15: swipe-to-reply now also OPENS the keyboard — a bump
+    // here drives the composer's focus+IME (0 = never).
+    var replyFocusNonce by remember { mutableStateOf(0) }
     // First page still in flight → skeleton bubbles instead of a blank void.
     var initialLoad by remember { mutableStateOf(true) }
     var uploading by remember { mutableStateOf(0) } // >0 = photo/file uploads in flight
@@ -341,6 +345,10 @@ fun ChatScreen(nav: NavController, convId: String) {
     ) {
         scope.launch {
             try {
+                // Owner round 15: the skeleton used to be cleared in the same
+                // frame the fetch STARTED (refreshMessages returns
+                // immediately), so the loading placeholder never showed.
+                // It gives way when the first page actually lands — here.
                 // Compose state is READ here, on Main, before Main is left
                 // behind — and written again only once the work below lands.
                 val m = msgsMarker
@@ -450,6 +458,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                     runCatching { KpNotify.cancelConversation(ctx, convId) }
                 }
             } catch (_: Exception) {
+            } finally {
+                // First page landed (or failed) — the skeleton gives way.
+                initialLoad = false
             }
         }
     }
@@ -473,8 +484,6 @@ fun ChatScreen(nav: NavController, convId: String) {
         KpCrash.mark("chat-paint:${msgs.size}")
         refreshMeta()
         refreshMessages(forceScroll = true, markRead = true)
-        // First page landed (or failed) — the skeleton gives way.
-        initialLoad = false
         KpCrash.mark("chat-page:${msgs.size}")
         runCatching { Outbox.flushNow(force = true) }
     }
@@ -1310,7 +1319,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .background(Cream)
+                    .background(chatWallpaper(chatTheme))
                     .padding(horizontal = 2.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -1360,7 +1369,9 @@ fun ChatScreen(nav: NavController, convId: String) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .background(Cream)
+                // Owner round 15: the header takes the chat's theme too —
+                // a theme change now restyles header, wallpaper and bubbles.
+                .background(chatWallpaper(chatTheme))
                 // Owner round 7: the blank strip under the header is gone.
                 .padding(horizontal = 4.dp, vertical = 0.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -1572,9 +1583,11 @@ fun ChatScreen(nav: NavController, convId: String) {
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text("Search", color = Ink) },
+                        // Owner round 15: this opened the GLOBAL search —
+                        // in a chat, search means THIS conversation.
+                        text = { Text("Search in chat", color = Ink) },
                         leadingIcon = { Icon(Icons.Filled.Search, null, tint = GoldDeep) },
-                        onClick = { menuOpen = false; nav.navigate("search") },
+                        onClick = { menuOpen = false; showChatSearch = true },
                     )
                     DropdownMenuItem(
                         text = { Text("Media, links, and docs", color = Ink) },
@@ -1719,7 +1732,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             },
                             onOpenImage = { msg -> viewerMsg = msg },
                             revealChars = if (m.optString("id") == aiRevealId) aiRevealChars else null,
-                            onReply = { haptics.tap(); replyTo = it },
+                            onReply = { haptics.tap(); replyTo = it; replyFocusNonce++ },
                             quoteFor = { rid -> (msgs + pending).firstOrNull { it.optString("id") == rid } },
                             onMessageOwner = { ownerId -> openChatWithUser(ownerId) },
                             theme = chatTheme,
@@ -1834,6 +1847,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         } else {
         Composer(
             input = input,
+            replyFocusNonce = replyFocusNonce,
             onInput = { v ->
                 input = v
                 Drafts.set(convId, v)
@@ -2019,6 +2033,7 @@ private fun CoinWallpaper() {
 @Composable
 private fun Composer(
     input: String,
+    replyFocusNonce: Int = 0,
     onInput: (String) -> Unit,
     onInputTap: () -> Unit = {},
     onAttach: () -> Unit,
@@ -2039,6 +2054,15 @@ private fun Composer(
     // layout "jump" ("upore uthe jai") instead of a clean keyboard->panel swap.
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
+    // Owner round 15: reply → the composer grabs focus and the keyboard
+    // opens by itself.
+    val inputFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(replyFocusNonce) {
+        if (replyFocusNonce > 0) {
+            runCatching { inputFocus.requestFocus() }
+            keyboard?.show()
+        }
+    }
     fun closeKeyboard() {
         keyboard?.hide()
         focusManager.clearFocus(force = true)
@@ -2046,7 +2070,9 @@ private fun Composer(
     Row(
         Modifier
             .fillMaxWidth()
-            .background(Cream)
+            // Owner round 15: the bar itself is TRANSPARENT — the themed
+            // wallpaper (which spans the whole screen) shows through; only
+            // the input pill and the send button keep their own surfaces.
             .imePadding()
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -2101,7 +2127,11 @@ private fun Composer(
                             // line metrics differed by a hair and the whole
                             // composer visibly "chepe" (squeezed) on the
                             // empty -> typing transition.
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 20.dp).padding(vertical = 6.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 20.dp)
+                                .padding(vertical = 6.dp)
+                                .focusRequester(inputFocus),
                         )
                     }
                     IconButton(
@@ -2213,10 +2243,8 @@ private fun HoldMicButton(
         Modifier
             .size(42.dp)
             .offset { IntOffset((if (recording) animX else 0f).roundToInt(), 0) }
-            // Owner round 13: background fill removed — just a faint 3D lift
-            // (very light shadow) behind the bare icon, and a disabled state
-            // for the AI chat (voice notes are off there).
-            .shadow(2.dp, CircleShape, ambientColor = Color(0x22000000), spotColor = Color(0x22000000))
+            // Owner round 15: fully transparent background — no fill, no
+            // shadow; just the bare icon with its rounded ring.
             .clip(CircleShape)
             .alpha(if (enabled) 1f else 0.4f)
             // Owner round 14: the ring was transparent unless cancel was
@@ -2875,6 +2903,10 @@ private fun MessageRow(
 ) {
     val mine = m.optString("senderId") == myId
     val kind = m.optString("kind")
+    // Owner round 15: the night theme's other-bubble is dark in BOTH app
+    // themes — its text needs a light ink or it vanishes in light mode.
+    val bodyInk = if (!mine && theme == "night") Color(0xFFE6EAF2) else Ink
+    val stampInk = if (!mine && theme == "night") Color(0xFFA9B4CC) else Muted
     val isSelected = m.optString("id") in selectedIds
     val haptics = rememberHaptics()
 
@@ -3056,10 +3088,10 @@ private fun MessageRow(
                                     full.take(revealChars) + " ▍",
                                     fontSize = 14.5.sp,
                                     lineHeight = 19.sp,
-                                    color = Ink,
+                                    color = bodyInk,
                                 )
                             } else {
-                                Text(full, fontSize = 14.5.sp, lineHeight = 19.sp, color = Ink)
+                                Text(full, fontSize = 14.5.sp, lineHeight = 19.sp, color = bodyInk)
                             }
                         }
                     }
@@ -3076,7 +3108,7 @@ private fun MessageRow(
                     Text(
                         msgStamp(m.optString("createdAt")),
                         fontSize = 10.sp,
-                        color = if (mine) Color(0xD9FFFFFF) else Muted,
+                        color = if (mine) Color(0xD9FFFFFF) else stampInk,
                     )
                     if (mine) {
                         Spacer(Modifier.width(3.dp))

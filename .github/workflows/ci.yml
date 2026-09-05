@@ -75,14 +75,11 @@ jobs:
         run: |
           find native-android/app/build/reports -name 'lint-results*.txt' -exec sh -c 'echo "--- $1"; cat "$1"' _ {} \; || true
           find native-android/app/build/test-results -name '*.xml' -exec sh -c 'echo "--- $1"; head -40 "$1"' _ {} \; || true
-      - name: Build APK
-        working-directory: native-android
-        run: |
-          ./gradlew assembleDebug --no-daemon --stacktrace \
-            -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
-      # §50 asks for the release build too, not just debug: R8 + resource shrinking
-      # is where missing keep rules and reflective lookups surface, and until now
-      # nothing ever ran it.
+      # Owner round 15: CI used to build BOTH debug and release APKs; the
+      # owner wants exactly ONE artifact. The release build is the signed,
+      # minified one — R8 + resource shrinking is where missing keep rules
+      # and reflective lookups surface. (Debug compilation itself is still
+      # covered above by testDebugUnitTest + lintDebug.)
       - name: Build release APK (minify + shrink)
         working-directory: native-android
         run: |
@@ -121,9 +118,4 @@ jobs:
           name: kuchupuchu-apk-release
           path: native-android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: kuchupuchu-apk
-          path: native-android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
+
