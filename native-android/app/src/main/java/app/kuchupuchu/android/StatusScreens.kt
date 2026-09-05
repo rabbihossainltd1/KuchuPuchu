@@ -296,8 +296,9 @@ fun StatusScreen(nav: NavController) {
             androidx.compose.material3.FloatingActionButton(
                 onClick = { haptics.tap(); nav.navigate("statusphoto") },
                 shape = CircleShape,
-                containerColor = Gold,
-                contentColor = AmberInk,
+                // Owner round 20: blue action accent in dark-blue mode.
+                containerColor = ActionBlue,
+                contentColor = ActionBlueInk,
                 modifier = Modifier.size(52.dp),
             ) {
                 Icon(Icons.Filled.PhotoCamera, contentDescription = "Photo or video status", modifier = Modifier.size(24.dp))

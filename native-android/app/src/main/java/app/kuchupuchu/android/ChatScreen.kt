@@ -66,6 +66,8 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Mood
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.MoreVert
@@ -295,6 +297,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
     var viewerMsg by remember { mutableStateOf<JSONObject?>(null) }
+    var viewerVideo by remember { mutableStateOf<JSONObject?>(null) }
     var editing by remember { mutableStateOf<JSONObject?>(null) }
     var forwarding by remember { mutableStateOf(false) }
 
@@ -1863,6 +1866,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 }
                             },
                             onOpenImage = { msg -> viewerMsg = msg },
+                            onOpenVideo = { msg -> viewerVideo = msg },
                             revealChars = if (m.optString("id") == aiRevealId) aiRevealChars else null,
                             onReply = { haptics.tap(); replyTo = it; replyFocusNonce++ },
                             onLongPress = { msg ->
@@ -2105,6 +2109,9 @@ fun ChatScreen(nav: NavController, convId: String) {
             },
         )
 
+        viewerVideo?.let { m ->
+            VideoPlayerDialog(m = m, onClose = { viewerVideo = null })
+        }
         viewerMsg?.let { m ->
             ImageViewerDialog(
                 m = m,
@@ -3058,14 +3065,25 @@ private fun MessageRow(
     onReply: (JSONObject) -> Unit = {},
     onLongPress: (JSONObject) -> Unit = {},
     quoteFor: (String) -> JSONObject? = { null },
-    theme: String = "default",
+    theme: String = "darkblue",
+    onOpenVideo: (JSONObject) -> Unit = {},
 ) {
     val mine = m.optString("senderId") == myId
     val kind = m.optString("kind")
     // Owner round 15: the night theme's other-bubble is dark in BOTH app
     // themes — its text needs a light ink or it vanishes in light mode.
-    val bodyInk = if (!mine && theme == "night") Color(0xFFE6EAF2) else Ink
-    val stampInk = if (!mine && theme == "night") Color(0xFFA9B4CC) else Muted
+    // Owner round 20: the DARK-BLUE default chat has dark bubbles on both
+    // sides, so both sides carry the light ink in either app theme.
+    val bodyInk = when {
+        theme == "darkblue" -> Color(0xFFE6EAF2)
+        !mine && theme == "night" -> Color(0xFFE6EAF2)
+        else -> Ink
+    }
+    val stampInk = when {
+        theme == "darkblue" -> Color(0xFFA9B4CC)
+        !mine && theme == "night" -> Color(0xFFA9B4CC)
+        else -> Muted
+    }
     val isSelected = m.optString("id") in selectedIds
     val haptics = rememberHaptics()
 
@@ -3102,6 +3120,12 @@ private fun MessageRow(
     // image uploads (picked as documents) get the same treatment.
     if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m))) {
         ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress)
+        return
+    }
+    // Owner round 20: videos render as a tappable video bubble and play
+    // IN-APP (the system player could never stream these auth-only files).
+    if (kind == "FILE" && fileLooksVideo(m)) {
+        VideoMessageRow(m, mine, onOpen = onOpenVideo)
         return
     }
 
@@ -3388,6 +3412,190 @@ private fun EmojiSheetDialog(onPick: (String) -> Unit) {
 }
 
 /** True when a FILE message is really just a photo (image mime / extension). */
+/** Owner round 20: video message bubble — cached-frame thumbnail (when the
+ *  file is already local), a play affordance and the duration. */
+@Composable
+private fun VideoMessageRow(m: JSONObject, mine: Boolean, onOpen: (JSONObject) -> Unit) {
+    val ctx = LocalContext.current
+    val fileName = m.optString("fileName").ifBlank { "Video" }
+    val dest = remember(m.optString("id")) { videoCacheFile(ctx, m) }
+    val thumb by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(null, m.optString("id")) {
+        if (!dest.exists()) return@produceState
+        value = withContext(Dispatchers.IO) {
+            // No .use{} here: MediaMetadataRetriever.close() only exists from
+            // API 29 — release() is the safe call on every level this app runs.
+            val r = android.media.MediaMetadataRetriever()
+            try {
+                r.setDataSource(dest.absolutePath)
+                r.getFrameAtTime(0L, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            } catch (_: Exception) {
+                null
+            } finally {
+                runCatching { r.release() }
+            }
+        }
+    }
+    val duration by androidx.compose.runtime.produceState("", m.optString("id")) {
+        if (!dest.exists()) return@produceState
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                val r = android.media.MediaMetadataRetriever()
+                val ms = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                r.release()
+                "%d:%02d".format(ms / 1000 / 60, ms / 1000 % 60)
+            }.getOrDefault("")
+        }
+    }
+    Box(
+        Modifier
+            .widthIn(max = 235.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF0B1220))
+            .border(1.dp, if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444), RoundedCornerShape(12.dp))
+            .clickable { onOpen(m) },
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(132.dp)
+                .background(Color(0xFF101A2E)),
+            contentAlignment = Alignment.Center,
+        ) {
+            val bmp = thumb
+            if (bmp != null) {
+                androidx.compose.foundation.Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = "Video",
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Icon(
+                    Icons.Filled.Videocam,
+                    "Video",
+                    tint = Color.White.copy(alpha = 0.5f),
+                    modifier = Modifier.size(34.dp),
+                )
+            }
+            Box(
+                Modifier
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .background(Color(0x99000000)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.PlayArrow, "Play video", tint = Color.White, modifier = Modifier.size(30.dp))
+            }
+            if (duration.isNotBlank()) {
+                Text(
+                    duration,
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(6.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0x88000000))
+                        .padding(horizontal = 5.dp, vertical = 1.dp),
+                )
+            }
+        }
+        Text(
+            fileName,
+            color = Color.White,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+        )
+    }
+}
+
+/** Owner round 20: the IN-APP video player — downloads (auth header) then
+ *  plays locally with the full system controls: play/pause, seek bar and
+ *  timestamps. No external player ever opens. */
+@Composable
+private fun VideoPlayerDialog(m: JSONObject, onClose: () -> Unit) {
+    val ctx = LocalContext.current
+    val src = remember(m.optString("id")) { videoSource(m) }
+    val dest = remember(m.optString("id")) { videoCacheFile(ctx, m) }
+    var state by remember(m.optString("id")) { mutableStateOf(if (dest.exists()) 1 else 0) } // 0 loading, 1 ready, -1 error
+    if (!dest.exists() && state == 0) {
+        LaunchedEffect(m.optString("id")) {
+            val ok = withContext(Dispatchers.IO) { runCatching { Api.downloadToFile(src, dest) }.getOrDefault(false) }
+            state = if (ok) 1 else -1
+        }
+    }
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onClose,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(Modifier.fillMaxSize().background(Color(0xF2050A14))) {
+            when {
+                state == -1 -> Column(
+                    Modifier.align(Alignment.Center),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text("Could not load this video.", color = Color.White, fontSize = 14.sp)
+                    TextButton(onClick = onClose) { Text("Close", color = GoldDeep) }
+                }
+                state == 0 -> Column(
+                    Modifier.align(Alignment.Center),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    CircularProgressIndicator(color = GoldDeep)
+                    Spacer(Modifier.height(10.dp))
+                    Text("Loading video…", color = Color.White, fontSize = 13.sp)
+                }
+                else -> AndroidView(
+                    factory = {
+                        android.widget.VideoView(it).apply {
+                            setVideoURI(android.net.Uri.fromFile(dest))
+                            val controller = android.widget.MediaController(it)
+                            controller.setAnchorView(this)
+                            setMediaController(controller)
+                            start()
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding(),
+            ) {
+                Icon(Icons.Filled.Close, "Close video", tint = Color.White, modifier = Modifier.size(26.dp))
+            }
+        }
+    }
+}
+
+private fun fileLooksVideo(m: JSONObject): Boolean {
+    val type = m.optString("fileType")
+    if (type.startsWith("video")) return true
+    val name = m.optString("fileName").lowercase()
+    return name.endsWith(".mp4") || name.endsWith(".mkv") || name.endsWith(".webm") ||
+        name.endsWith(".mov") || name.endsWith(".3gp") || name.endsWith(".avi")
+}
+
+/** Owner round 20: videos download to a local cache (files need the auth
+ *  header, so a raw URL can never work in a system player) and play in-app. */
+private fun videoCacheFile(ctx: android.content.Context, m: JSONObject): java.io.File {
+    val key = m.optText("fileKey").ifBlank {
+        m.optText("mediaUrl").replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "v" }
+    }
+    val safe = key.replace(Regex("[^A-Za-z0-9._-]"), "_").takeLast(80)
+    return java.io.File(java.io.File(ctx.filesDir, "kp-video-cache").apply { mkdirs() }, safe)
+}
+
+private fun videoSource(m: JSONObject): String {
+    val key = m.optText("fileKey")
+    if (key.isNotBlank()) return "/api/files/$key"
+    return m.optText("mediaUrl")
+}
+
 private fun fileLooksImage(m: JSONObject): Boolean {
     val type = m.optString("fileType")
     if (type.startsWith("image")) return true
@@ -3922,7 +4130,9 @@ private fun isReadByOther(otherReadAt: String?, createdAt: String): Boolean {
     return !read.isBefore(sent)
 }
 
-private fun cTheme(c: JSONObject?) = c?.optString("theme")?.ifBlank { "default" } ?: "default"
+// Owner round 20: a chat WITHOUT a theme gets the new DARK-BLUE default
+// ("darkblue"); "default" is the explicit classic-cream option.
+private fun cTheme(c: JSONObject?) = c?.optString("theme")?.ifBlank { "darkblue" } ?: "darkblue"
 
 private fun chatWallpaper(theme: String) =
     when (theme) {
@@ -3931,7 +4141,10 @@ private fun chatWallpaper(theme: String) =
         "mint" -> if (KpThemeMode.darkBlue) Color(0xFF0C1A15) else Color(0xFFECFDF5)
         "night" -> Color(0xFF0B1220)
         "rose" -> if (KpThemeMode.darkBlue) Color(0xFF23141A) else Color(0xFFFFF1F2)
-        else -> Cream
+        // Owner round 20: "default" keeps the classic cream chat; the DEFAULT
+        // for every chat without a theme is now DARK BLUE.
+        "default" -> Cream
+        else -> Color(0xFF0D1524)
     }
 
 /** Owner round 19: one accent per chat theme — the message bar, voice/mic
@@ -3941,7 +4154,9 @@ private fun chatAccent(theme: String): Color =
         "mint" -> Color(0xFF10B981)
         "rose" -> Color(0xFFF43F5E)
         "night" -> Color(0xFF818CF8)
-        else -> Gold
+        "default" -> Gold
+        // Owner round 20: dark-blue default chat — blue accent everywhere.
+        else -> Color(0xFF2F6FED)
     }
 
 /** My bubble per chat theme (Owner round 14: theme restyles bubbles too). */
@@ -3950,7 +4165,9 @@ private fun chatMineFill(theme: String): Brush =
         "mint" -> Brush.linearGradient(listOf(Color(0xFF34D399), Color(0xFF059669)))
         "rose" -> Brush.linearGradient(listOf(Color(0xFFFB7185), Color(0xFFE11D48)))
         "night" -> Brush.linearGradient(listOf(Color(0xFF818CF8), Color(0xFF4F46E5)))
-        else -> goldFill()
+        "default" -> goldFill()
+        // Owner round 20: dark-blue default chat — blue bubbles.
+        else -> Brush.linearGradient(listOf(Color(0xFF2F6FED), Color(0xFF1E40AF)))
     }
 
 /** The other side's bubble per chat theme. */
@@ -3959,7 +4176,10 @@ private fun chatOtherFill(theme: String): Brush =
         "mint" -> Brush.linearGradient(listOf(if (KpThemeMode.darkBlue) Color(0xFF14261F) else Color(0xFFE7F8F0), if (KpThemeMode.darkBlue) Color(0xFF14261F) else Color(0xFFE7F8F0)))
         "rose" -> Brush.linearGradient(listOf(if (KpThemeMode.darkBlue) Color(0xFF2A1A21) else Color(0xFFFFE9EC), if (KpThemeMode.darkBlue) Color(0xFF2A1A21) else Color(0xFFFFE9EC)))
         "night" -> Brush.linearGradient(listOf(Color(0xFF1E293B), Color(0xFF1E293B)))
-        else -> Brush.linearGradient(listOf(Card, Card))
+        "default" -> Brush.linearGradient(listOf(Card, Card))
+        // Owner round 20: dark-blue default chat — the other side sits on the
+        // app's dark navy card.
+        else -> Brush.linearGradient(listOf(Color(0xFF16213A), Color(0xFF16213A)))
     }
 
 @Composable
@@ -4095,8 +4315,11 @@ private fun ThemeDialog(current: String, onClose: () -> Unit, onPick: (String) -
     // Owner round 14: the old dialog used the platform default light sheet —
     // colour mismatch in dark mode — and ● ○ glyphs instead of real swatches.
     data class Opt(val id: String, val label: String, val swatch: Color)
+    // Owner round 20: DARK BLUE is the default chat theme; the classic
+    // cream chat is an explicit option now.
     val options = listOf(
-        Opt("default", "Classic", Gold),
+        Opt("darkblue", "Dark Blue", Color(0xFF2F6FED)),
+        Opt("default", "Cream", Gold),
         Opt("mint", "Mint", Color(0xFF10B981)),
         Opt("rose", "Rose", Color(0xFFFB7185)),
         Opt("night", "Night", Color(0xFF6366F1)),

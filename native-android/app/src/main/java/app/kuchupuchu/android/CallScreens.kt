@@ -646,7 +646,7 @@ fun InCallVideoScreen(call: CallUi) {
                     }
                     .size(width = 96.dp, height = 132.dp)
                     .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xFF33302B))
+                    .background(DarkCard)
                     .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(14.dp)),
                 ) {
                     VideoRenderer(engine, remote = effSwap, fit = true, pip = true)

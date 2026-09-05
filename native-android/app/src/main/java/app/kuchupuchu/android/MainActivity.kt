@@ -239,10 +239,25 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onResume() {
+        // Owner round 20: the update check only ran on COLD starts — a
+        // release published while the app sat alive in memory never popped
+        // the dialog. Re-check on every resume, throttled to 30 minutes.
+        if (System.currentTimeMillis() - lastUpdateCheck > 30 * 60_000L) {
+            lastUpdateCheck = System.currentTimeMillis()
+            Thread {
+                runCatching { kotlinx.coroutines.runBlocking { KpUpdate.check(application) } }
+            }.apply {
+                isDaemon = true
+                priority = Thread.MIN_PRIORITY
+                start()
+            }
+        }
         // A cold start that could not reach the worker (no network yet)
         // left push un-init'd for the whole run; re-arm whenever the app is
         // back in front. No-op once Firebase + registration have succeeded.
-        KpPush.boot(this)
+        // Owner round 20: deferred ~1.5s — Firebase's first init is heavy and
+        // it sat right in the cold-start window.
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ KpPush.boot(this) }, 1500)
         super.onResume()
         Store.foreground = true
         // §37: an app that is being used should not expire. Off the main thread (this
@@ -292,6 +307,9 @@ class MainActivity : ComponentActivity() {
     companion object {
         @Volatile
         var current: MainActivity? = null
+
+    /** Owner round 20: resume-throttle for the in-app update check. */
+    private var lastUpdateCheck = 0L
 
         /** Conversation to open from a notification tap.
          *

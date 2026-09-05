@@ -344,8 +344,9 @@ fun ChatListScreen(nav: NavController) {
             FloatingActionButton(
                 onClick = { haptics.tap(); nav.navigate("newchat") },
                 shape = CircleShape,
-                containerColor = Gold,
-                contentColor = AmberInk,
+                // Owner round 20: blue action accent in dark-blue mode.
+                containerColor = ActionBlue,
+                contentColor = ActionBlueInk,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .navigationBarsPadding()

@@ -6496,7 +6496,9 @@ function buildConvDetail(
     unread,
     isGroup: conv.kind === "GROUP",
     disappearSeconds: Number(conv.disappear_seconds || 0),
-    theme: conv.theme || "default",
+    // Owner round 20: chats that never picked a theme are DARK BLUE now —
+    // "default" stays the explicit classic-cream choice.
+    theme: conv.theme || "darkblue",
   };
 }
 

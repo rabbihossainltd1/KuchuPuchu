@@ -53,8 +53,22 @@ val GoldSoft: Color
 val AmberInk = Color(0xFFFFFBEB)   // on-gold text
 val Green = Color(0xFF16A34A)      // accept / online
 val Red = Color(0xFFDC2626)        // end / decline
-val Dark = Color(0xFF171412)       // call screens dark bg
-val DarkCard = Color(0xFF242019)   // call screens sheet
+// Owner round 20: the call screens ride the app's DARK-BLUE family now
+// (they were warm brown — "voice call er bubble gulo dark blue hobe").
+val Dark: Color
+    get() = if (KpThemeMode.darkBlue) Color(0xFF0D1524) else Color(0xFF171412) // call screens dark bg
+val DarkCard: Color
+    get() = if (KpThemeMode.darkBlue) Color(0xFF16213A) else Color(0xFF242019) // call screens sheet
+
+/** Owner round 20: dark-blue mode's ACTION accent — FABs, Save buttons, the
+ *  pencil, editor carets/ticks and picker icons go BLUE; light-cream keeps
+ *  the classic gold exactly as before. */
+val ActionBlue: Color
+    get() = if (KpThemeMode.darkBlue) Color(0xFF2F6FED) else Gold
+val ActionBlueDeep: Color
+    get() = if (KpThemeMode.darkBlue) Color(0xFF60A5FA) else GoldDeep
+val ActionBlueInk: Color
+    get() = if (KpThemeMode.darkBlue) Color(0xFFFFFFFF) else AmberInk
 
 /** The signature amber ring gradient around avatars / status circles. */
 fun goldRing(): Brush = Brush.linearGradient(listOf(GoldLight, Gold))

@@ -1136,6 +1136,68 @@ const convBetween = (db, a, b) =>
       screenstore.includes(".takeLast(40)") &&
       screenstore.includes("take(150)"),
   );
+  /* ---------------- round 20 (owner feedback) ---------------- */ check(
+    "r20-2: Hang up button is SOLID red with white text",
+    ongoingxml.includes('android:background="@drawable/kp_hangup_border"') &&
+      ongoingxml.includes('android:textColor="#FFFFFF"') &&
+      readFileSync(
+        "native-android/app/src/main/res/drawable/kp_hangup_border.xml",
+        "utf8",
+      ).includes("<solid"),
+  );
+  check(
+    "r20-theme: dark-blue action accent everywhere (FAB, Save, pencil, caret, ringtone icons, profile banner)",
+    theme.includes("val ActionBlue:") &&
+      chatlist.includes("containerColor = ActionBlue") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/StatusScreens.kt",
+        "utf8",
+      ).includes("containerColor = ActionBlue") &&
+      settings.includes(".background(ActionBlue)") &&
+      settings.includes("tint = ActionBlueDeep") &&
+      settings.includes("Brush.linearGradient(listOf(Color(0xFF1E3A8A), Color(0xFF16213A)))") &&
+      settings.includes("cursorBrush = androidx.compose.ui.graphics.SolidColor(ActionBlue)"),
+  );
+  check(
+    "r20-theme: voice-call bubbles ride the dark-blue family (Dark/DarkCard tokens)",
+    theme.includes("if (KpThemeMode.darkBlue) Color(0xFF0D1524) else Color(0xFF171412)") &&
+      theme.includes("if (KpThemeMode.darkBlue) Color(0xFF16213A) else Color(0xFF242019)") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/CallScreens.kt",
+        "utf8",
+      ).includes(".background(DarkCard)"),
+  );
+  check(
+    "r20-chat: DARK BLUE is the default chat theme — bubbles, wallpaper, accent; Cream is explicit",
+    chat.includes('ifBlank { "darkblue" }') &&
+      chat.includes('Opt("darkblue", "Dark Blue", Color(0xFF2F6FED))') &&
+      chat.includes('Opt("default", "Cream", Gold)') &&
+      chat.includes("Brush.linearGradient(listOf(Color(0xFF2F6FED), Color(0xFF1E40AF)))") &&
+      chat.includes('"default" -> Cream') &&
+      chat.includes('theme == "darkblue" -> Color(0xFFE6EAF2)') &&
+      src.includes('theme: conv.theme || "darkblue"'),
+  );
+  check(
+    "r20-video: IN-APP player — video bubble + download-to-cache + VideoView/MediaController",
+    chat.includes("fun fileLooksVideo(") &&
+      chat.includes("fun VideoMessageRow(") &&
+      chat.includes("fun VideoPlayerDialog(") &&
+      chat.includes("Api.downloadToFile(src, dest)") &&
+      chat.includes("android.widget.VideoView(") &&
+      chat.includes("android.widget.MediaController(") &&
+      chat.includes("kp-video-cache"),
+  );
+  check(
+    "r20-update: the update popup re-checks on every resume (30-min throttle), push boot deferred",
+    readFileSync(
+      "native-android/app/src/main/java/app/kuchupuchu/android/MainActivity.kt",
+      "utf8",
+    ).includes("30 * 60_000L") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/MainActivity.kt",
+        "utf8",
+      ).includes("postDelayed({ KpPush.boot(this) }, 1500)"),
+  );
   check(
     "calls tab: skeleton rows + 20s cache (no laggy refetch)",
     readFileSync(

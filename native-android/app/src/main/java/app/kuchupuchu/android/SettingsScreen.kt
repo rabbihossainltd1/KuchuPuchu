@@ -188,7 +188,12 @@ fun SettingsScreen(nav: NavController) {
                 .fillMaxWidth()
                 .padding(horizontal = 14.dp)
                 .clip(RoundedCornerShape(20.dp))
-                .background(Brush.linearGradient(listOf(GoldLight, Gold)))
+                // Owner round 20: the profile card goes DEEP BLUE in dark-blue
+                // mode (it stayed warm gold); cream keeps the classic banner.
+                .background(
+                    if (KpThemeMode.darkBlue) Brush.linearGradient(listOf(Color(0xFF1E3A8A), Color(0xFF16213A)))
+                    else Brush.linearGradient(listOf(GoldLight, Gold))
+                )
                 .padding(20.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -214,7 +219,7 @@ fun SettingsScreen(nav: NavController) {
                     ) {
                         if (busy) {
                             CircularProgressIndicator(
-                                color = GoldDeep,
+                                color = ActionBlueDeep,
                                 strokeWidth = 2.dp,
                                 modifier = Modifier.size(15.dp),
                             )
@@ -222,7 +227,7 @@ fun SettingsScreen(nav: NavController) {
                             Icon(
                                 Icons.Filled.Edit,
                                 contentDescription = "Change photo",
-                                tint = GoldDeep,
+                                tint = ActionBlueDeep,
                                 modifier = Modifier.size(15.dp),
                             )
                         }
@@ -523,7 +528,7 @@ private fun EditableSettingRow(
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(icon, contentDescription = label, tint = GoldDeep, modifier = Modifier.size(21.dp))
+            Icon(icon, contentDescription = label, tint = ActionBlueDeep, modifier = Modifier.size(21.dp))
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(label, fontSize = 13.sp, color = Muted)
@@ -553,7 +558,7 @@ private fun EditableSettingRow(
                                     color = Ink,
                                     fontWeight = FontWeight.Medium,
                                 ),
-                            cursorBrush = androidx.compose.ui.graphics.SolidColor(Gold),
+                            cursorBrush = androidx.compose.ui.graphics.SolidColor(ActionBlue),
                             enabled = !busy,
                             modifier = Modifier.weight(1f),
                         )
@@ -574,7 +579,7 @@ private fun EditableSettingRow(
                         Icon(
                             Icons.Filled.Check,
                             "Save",
-                            tint = if (draft.isNotBlank() && !busy) GoldDeep else Muted,
+                            tint = if (draft.isNotBlank() && !busy) ActionBlueDeep else Muted,
                             modifier = Modifier
                                 .size(20.dp)
                                 .clip(CircleShape)
@@ -832,7 +837,7 @@ fun RingtonePickerScreen(onClose: () -> Unit) {
                     Icon(
                         if (playingRes == res) Icons.Filled.PlayArrow else Icons.Filled.NotificationsActive,
                         null,
-                        tint = GoldDeep,
+                        tint = ActionBlueDeep,
                         modifier = Modifier.size(16.dp),
                     )
                     Spacer(Modifier.width(8.dp))
@@ -844,7 +849,7 @@ fun RingtonePickerScreen(onClose: () -> Unit) {
                         modifier = Modifier.weight(1f),
                     )
                     if (selRes == res) {
-                        Icon(Icons.Filled.Done, null, tint = GoldDeep, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Filled.Done, null, tint = ActionBlueDeep, modifier = Modifier.size(18.dp))
                     }
                 }
             }
@@ -859,7 +864,7 @@ fun RingtonePickerScreen(onClose: () -> Unit) {
                     .padding(horizontal = 14.dp, vertical = 13.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Filled.LibraryMusic, null, tint = GoldDeep, modifier = Modifier.size(20.dp))
+                Icon(Icons.Filled.LibraryMusic, null, tint = ActionBlueDeep, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -883,7 +888,8 @@ fun RingtonePickerScreen(onClose: () -> Unit) {
                 .fillMaxWidth()
                 .padding(10.dp)
                 .clip(RoundedCornerShape(10.dp))
-                .background(Gold)
+                // Owner round 20: Save is BLUE in dark-blue mode.
+                .background(ActionBlue)
                 .clickable {
                     if (selCustom != null) SoundPrefs.setCustomRing(ctx, selCustom!!)
                     else if (selRes >= 0) SoundPrefs.setRingIndex(ctx, SoundPrefs.ringRes.indexOf(selRes))

@@ -724,3 +724,34 @@ tint), caret, sticker/attach icons, send circle, mic ring/icon and the header
 call buttons all take the per-chat theme colour.
 
 (5 composer untouched per owner; 6 & 8 already fixed.)
+
+## Round 20 — owner feedback pass (2026-09-05, v121 / 3.9.45)
+
+**PERF (cold start)** — KpPush.boot (Firebase init) deferred 1.5s out of the
+cold-start window. (v120 already moved the state-cache parse off-main + capped
+the snapshot; this removes the last heavy main-thread item at startup.)
+
+**UPDATE POPUP** — the check only ran on COLD starts, so a release published
+while the app sat alive in memory never popped. It now re-checks on every
+onResume (30-minute throttle) — the dialog appears without a restart.
+
+**2 Hang up** — SOLID RED button (filled drawable) with the WHITE "Hang up"
+label + red icon.
+
+**CHAT DEFAULT THEME = DARK BLUE** — "" / "darkblue": dark-blue wallpaper,
+blue-gradient own bubbles, navy other-bubbles, blue accent (bar/mic/call
+buttons), light inks on both sides. "Cream" (old classic) is an explicit theme
+option; server returns "darkblue" for chats that never picked one.
+
+**APP DARK-BLUE SWEEP (owner's list)** — profile card banner (deep-blue
+gradient), settings row icons + inline editor caret/save-tick, ringtone screen
+icons + music icon, ringtone Save button, chat-list FAB + status FAB (new
+ActionBlue/ActionBlueDeep tokens — blue in dark mode, classic gold in cream),
+avatar-change pencil, and the voice-call screens' Dark/DarkCard tokens are now
+the dark-blue family. Light Cream mode keeps every previous colour.
+
+**IN-APP VIDEO PLAYER** — videos arrive as auth-only FILEs, which is exactly why
+the system player could never play them. New: video bubble (thumbnail via
+MediaMetadataRetriever when cached, play affordance, duration) + fullscreen
+in-app player (download with auth header to kp-video-cache, VideoView +
+MediaController: play/pause, seek bar, timestamps). No external player.
