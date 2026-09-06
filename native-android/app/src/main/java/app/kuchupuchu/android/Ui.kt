@@ -25,6 +25,9 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -642,6 +645,124 @@ fun CompactSearchBar(
                 tint = Muted,
                 modifier = Modifier.size(20.dp).clip(CircleShape).clickable { onValueChange("") }.padding(2.dp),
             )
+        }
+    }
+}
+
+/* ---------------- bottom sheets (owner round 31) ---------------- */
+
+/**
+ * Owner round 31: EVERY popup in the app is a bottom sheet on the theme
+ * surface — the status ⋮ sheet is the reference. `KpSheet` is that surface;
+ * `KpSheetRow` one tappable line; `KpConfirmSheet` the yes/no popup.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun KpSheet(
+    onDismiss: () -> Unit,
+    title: String? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = Card,
+        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 8.dp)
+                .padding(bottom = 10.dp),
+        ) {
+            if (title != null) {
+                Text(
+                    title,
+                    color = Ink,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                )
+            }
+            content()
+        }
+    }
+}
+
+@Composable
+fun KpSheetRow(
+    icon: ImageVector?,
+    label: String,
+    tint: Color = Ink,
+    selected: Boolean = false,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (selected) ActionBlue.copy(alpha = 0.14f) else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (icon != null) {
+            Icon(icon, null, tint = if (tint == Red) Red else ActionBlueDeep, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(14.dp))
+        }
+        Text(label, color = tint, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.weight(1f))
+        if (selected) Icon(Icons.Filled.Check, null, tint = ActionBlueDeep, modifier = Modifier.size(20.dp))
+    }
+}
+
+/** Yes/no popup as a sheet: title, optional one-liner, Cancel + action. */
+@Composable
+fun KpConfirmSheet(
+    title: String,
+    text: String? = null,
+    confirmLabel: String,
+    danger: Boolean = false,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    KpSheet(onDismiss = onDismiss) {
+        Column(Modifier.padding(horizontal = 14.dp)) {
+            Spacer(Modifier.height(4.dp))
+            Text(title, color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            if (!text.isNullOrBlank()) {
+                Spacer(Modifier.height(4.dp))
+                Text(text, color = Muted, fontSize = 13.5.sp)
+            }
+            Spacer(Modifier.height(16.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Line)
+                        .clickable(onClick = onDismiss)
+                        .padding(vertical = 12.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text("Cancel", color = Ink, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(if (danger) Red else ActionBlue)
+                        .clickable(onClick = onConfirm)
+                        .padding(vertical = 12.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        confirmLabel,
+                        color = if (danger) Color.White else ActionBlueInk,
+                        fontSize = 14.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
         }
     }
 }

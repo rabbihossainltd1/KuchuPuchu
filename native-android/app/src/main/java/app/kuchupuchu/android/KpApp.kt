@@ -124,8 +124,12 @@ fun KpApp() {
                     ChatScreen(nav, id)
                 }
                 composable("settings") { SettingsScreen(nav) }
-                // Owner round 30: profile fields edit here, settings stay app-only.
-                composable("myprofile") { MyProfileScreen(nav) }
+                // Owner round 31: Settings is a hub — each section is its own screen.
+                composable("settings/privacy") { PrivacySettingsScreen(nav) }
+                composable("settings/appearance") { AppearanceSettingsScreen(nav) }
+                composable("settings/devices") { DevicesSettingsScreen(nav) }
+                composable("settings/permissions") { PermissionsSettingsScreen(nav) }
+                composable("settings/app") { AppSettingsScreen(nav) }
                 // Owner round 28: home ⋮ menu destinations.
                 composable("about") { AboutScreen(nav) }
                 composable("contacts") { AllContactsScreen(nav) }

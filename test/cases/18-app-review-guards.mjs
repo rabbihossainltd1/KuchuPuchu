@@ -376,9 +376,8 @@ has(list, "Api.PollCadence.failed()", "…and a bad one starts it");
     !push.includes("BuildConfig") && push.includes("getPackageInfo(ctx.packageName, 0)"),
   );
   const settings = kt("SettingsScreen.kt");
-  const outStart = settings.indexOf(
-    'Api.post(\n                                    "/api/auth/logout"',
-  );
+  // r31: the logout confirm is a bottom sheet; the request still names the device.
+  const outStart = settings.indexOf('"/api/auth/logout"');
   check(
     "logout names the device it is signing out of, in the logout request itself",
     outStart > 0 &&

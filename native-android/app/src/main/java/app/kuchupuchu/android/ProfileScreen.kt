@@ -1,5 +1,11 @@
 package app.kuchupuchu.android
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.filled.AlternateEmail
+import androidx.compose.material.icons.filled.Badge
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -173,6 +179,38 @@ fun ProfileScreen(nav: NavController, userId: String) {
             // loaded" because the cached payload still had the old bytes.
             val avatarRef = u.optIso("avatarRef")
             val shownAvatar = rememberAvatarUrl(u.optText("avatarUrl").ifBlank { null }, avatarRef)
+            // Owner round 31: MY profile edits in place — tapping my photo picks
+            // a new one (no separate "Edit profile" screen in between).
+            val ctx = LocalContext.current
+            var photoBusy by remember { mutableStateOf(false) }
+            val avatarPicker =
+                rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+                    if (uri != null) {
+                        scope.launch {
+                            photoBusy = true
+                            // The worker stores avatars inline with a 200KB budget —
+                            // compress below it and show real errors instead of
+                            // failing silently.
+                            val dataUrl =
+                                withContext(Dispatchers.IO) { FilesUtil.imageToDataUrl(uri, ctx, maxSide = 512, maxChars = 190_000) }
+                            if (dataUrl == null) {
+                                error = "Could not read that photo."
+                            } else {
+                                runCatching {
+                                    val updated =
+                                        withContext(Dispatchers.IO) {
+                                            Api.patch("/api/me", JSONObject().put("avatarUrl", dataUrl))
+                                        }
+                                    updated.optJSONObject("user")?.let {
+                                        user = it
+                                        Store.saveMe(it)
+                                    }
+                                }.onFailure { error = it.message ?: "Could not set the photo." }
+                            }
+                            photoBusy = false
+                        }
+                    }
+                }
             Box {
                 KpAvatar(
                     u.optText("displayName").ifBlank { "?" },
@@ -185,8 +223,36 @@ fun ProfileScreen(nav: NavController, userId: String) {
                 Box(
                     Modifier
                         .matchParentSize()
-                        .clickable { shownAvatar?.takeIf { it.isNotBlank() }?.let { viewerUrl = it } },
+                        .clickable {
+                            if (isMe) {
+                                avatarPicker.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                                )
+                            } else {
+                                shownAvatar?.takeIf { it.isNotBlank() }?.let { viewerUrl = it }
+                            }
+                        },
                 )
+                if (isMe) {
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomEnd)
+                            .size(26.dp)
+                            .clip(CircleShape)
+                            .background(ActionBlue),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (photoBusy) {
+                            androidx.compose.material3.CircularProgressIndicator(
+                                color = ActionBlueInk,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(14.dp),
+                            )
+                        } else {
+                            Icon(Icons.Filled.Edit, "Change photo", tint = ActionBlueInk, modifier = Modifier.size(14.dp))
+                        }
+                    }
+                }
             }
             viewerUrl?.let { url ->
                 ProfilePhotoDialog(
@@ -213,30 +279,49 @@ fun ProfileScreen(nav: NavController, userId: String) {
             val uname = u.optText("username")
             if (uname.isNotBlank()) Text("@$uname", fontSize = 13.5.sp, color = Muted)
             val about = u.optText("about")
-            if (about.isNotBlank()) {
+            if (about.isNotBlank() && !isMe) {
                 Spacer(Modifier.height(6.dp))
-                Text(about, fontSize = 13.5.sp, color = Ink, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                // Owner round 31: full width + soft wrap — the text used to break
+                // early because the Column centred a narrow intrinsic width.
+                Text(
+                    about,
+                    fontSize = 13.5.sp,
+                    color = Ink,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    softWrap = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
         if (isMe) {
+            // Owner round 31: the profile fields edit RIGHT HERE (one screen per
+            // field) — no intermediate "Edit profile" screen.
             Spacer(Modifier.height(8.dp))
-            Row(
+            Column(
                 Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
                     .clip(RoundedCornerShape(14.dp))
-                    .background(Card)
-                    .clickable { haptics.tap(); nav.navigate("myprofile") }
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .background(Card),
             ) {
-                Icon(Icons.Filled.Edit, null, tint = ActionBlueDeep, modifier = Modifier.size(22.dp))
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Edit profile", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Ink)
-                    Text("Name, username, about, photo, phone", fontSize = 12.5.sp, color = Muted)
+                ProfileEditRow(Icons.Filled.Badge, "Name", u.optText("displayName").ifBlank { "—" }) {
+                    haptics.tap()
+                    nav.navigate("editfield/name")
                 }
-                Text(u.optText("phone").ifBlank { "" }, fontSize = 12.5.sp, color = Muted)
+                ProfileEditRow(Icons.Filled.AlternateEmail, "Username", u.optText("username").ifBlank { "not set" }) {
+                    haptics.tap()
+                    nav.navigate("editfield/username")
+                }
+                ProfileEditRow(Icons.Filled.Info, "About", u.optText("about").ifBlank { "Hey! I'm using KuchuPuchu" }) {
+                    haptics.tap()
+                    nav.navigate("editfield/about")
+                }
+                // Phone auth: the login identity now. Change needs the new SIM
+                // literally present on this device (MATCH).
+                ProfileEditRow(Icons.Filled.Call, "Phone", u.optText("phone").ifBlank { "not set" }) {
+                    haptics.tap()
+                    nav.navigate("editfield/phone")
+                }
             }
             Spacer(Modifier.height(12.dp))
         }
@@ -384,6 +469,37 @@ fun ProfileScreen(nav: NavController, userId: String) {
                 }
             }
         }
+    }
+}
+
+/** Owner round 31: one compact edit row — label left, current value right. */
+@Composable
+private fun ProfileEditRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    value: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = label, tint = ActionBlueDeep, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(12.dp))
+        Text(label, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, color = Ink, maxLines = 1)
+        Spacer(Modifier.width(12.dp))
+        Text(
+            value,
+            fontSize = 13.sp,
+            color = Muted,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 

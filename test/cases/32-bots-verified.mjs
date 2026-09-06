@@ -1052,8 +1052,12 @@ const convBetween = (db, a, b) =>
       settings.includes('if (KpThemeMode.darkBlue) "Dark Blue" else "Light Cream"'),
   );
   check(
-    "r17-20: the uniform settings pencil is gone (only the avatar change-photo icon remains)",
-    settings.split("Icons.Filled.Edit").length - 1 === 1,
+    "r17-20/r31: the uniform settings pencil is gone (the only pencil is the change-photo one on My profile)",
+    settings.split("Icons.Filled.Edit").length - 1 === 0 &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/ProfileScreen.kt",
+        "utf8",
+      ).includes('Icon(Icons.Filled.Edit, "Change photo"'),
   );
   const callscreen = readFileSync(
     "native-android/app/src/main/java/app/kuchupuchu/android/CallScreens.kt",
@@ -1097,7 +1101,7 @@ const convBetween = (db, a, b) =>
       // r30-2: the inline field editors left Settings (they live in My
       // profile now); the pickers still close first.
       settings.includes(
-        "BackHandler(enabled = showThemePicker || showRingPicker || showSoundType || picker != null)",
+        "BackHandler(enabled = showThemePicker || showRingPicker || showSoundType)",
       ),
   );
   check(
@@ -1175,7 +1179,6 @@ const convBetween = (db, a, b) =>
       ).includes("containerColor = ActionBlue") &&
       settings.includes(".background(ActionBlue)") &&
       settings.includes("tint = ActionBlueDeep") &&
-      settings.includes("Brush.linearGradient(listOf(Color(0xFF1E3A8A), Color(0xFF16213A)))") &&
       settings.includes("cursorColor = ActionBlue"),
   );
   check(
@@ -2245,11 +2248,20 @@ const convBetween = (db, a, b) =>
     "utf8",
   );
   check(
-    "r28-5: the settings cog is gone; the home ⋮ menu has exactly Settings, Profile, About Us, New group, New contact, All contacts — each a real route",
+    "r28-5/r31: the settings cog is gone; the home ⋮ menu is exactly My Profile, New contact, All contacts, New group, Settings, About Us — in that order, each a real route",
     !list.includes('Icon(Icons.Filled.Settings, "Settings"') &&
-      ["Settings", "Profile", "About Us", "New group", "New contact", "All contacts"].every((l) =>
-        list.includes(`"${l}")`),
-      ) &&
+      (() => {
+        const order = [
+          "My Profile",
+          "New contact",
+          "All contacts",
+          "New group",
+          "Settings",
+          "About Us",
+        ];
+        const idx = order.map((l) => list.indexOf(`"${l}")`));
+        return idx.every((i, n) => i > 0 && (n === 0 || i > idx[n - 1]));
+      })() &&
       (list.match(/HomeMenuItem\(Icons/g) || []).length === 6 &&
       list.includes('nav.navigate("profile/${Store.myId()}")') &&
       ["about", "contacts", "newgroup", "settings"].every((r) =>
@@ -2266,12 +2278,18 @@ const convBetween = (db, a, b) =>
     "utf8",
   );
   check(
-    "r28-5: my own profile shows Edit profile instead of call/search/block",
+    "r28-5/r31: my own profile edits IN PLACE (photo tap + Name/Username/About/Phone rows) instead of call/search/block — no intermediate edit screen",
     profile.includes("val isMe = userId.isNotBlank() && userId == Store.myId()") &&
       profile.includes(
         'if (!isMe && !isKpBot(userId) && u.optText("username") != "rabbihossainltd")',
       ) &&
-      profile.includes('Text("Edit profile"'),
+      !profile.includes('Text("Edit profile"') &&
+      !profile.includes('"myprofile"') &&
+      !kpapp.includes('composable("myprofile")') &&
+      ["editfield/name", "editfield/username", "editfield/about", "editfield/phone"].every((r) =>
+        profile.includes(`nav.navigate("${r}")`),
+      ) &&
+      profile.includes("PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)"),
   );
   check(
     "r28-5: About Us is a real screen (build, founder, links, update check)",
@@ -2434,37 +2452,48 @@ const convBetween = (db, a, b) =>
   );
   const settingsBody = settings.slice(
     settings.indexOf("fun SettingsScreen("),
-    settings.indexOf("fun DevicesSection("),
+    settings.indexOf("fun PrivacySettingsScreen("),
   );
-  const myProfile = settings.slice(settings.indexOf("fun MyProfileScreen("));
   check(
-    "r30-2: Settings = Privacy / Appearance / Devices / Permissions / App only — no profile fields; My profile owns them",
+    "r30-2/r31: Settings is a hub of five dedicated screens (Privacy / Appearance / Devices / Permissions / App); privacy picker + logout are bottom sheets; no profile fields anywhere in Settings",
     [
-      'SectionTitle("Privacy")',
-      'SectionTitle("Appearance")',
-      'SectionTitle("Devices")',
-      'SectionTitle("Permissions")',
-      '"Who can view my number"',
-      '"Who can view my profile picture"',
-      '"Who can send me messages"',
-      '"Who can see my last seen"',
-      '"Who can add me to groups"',
-      '"Read receipts"',
-      '"Private profile"',
-      '"Sounds"',
-      '"Themes"',
-      '"App version"',
-      '"Check for updates"',
-      '"About us"',
+      'HubRow(Icons.Filled.Lock, "Privacy")',
+      'HubRow(Icons.Filled.Palette, "Appearance")',
+      'HubRow(Icons.Filled.PhoneAndroid, "Devices")',
+      'HubRow(Icons.Filled.Shield, "Permissions")',
+      'HubRow(Icons.Filled.Info, "App")',
     ].every((l) => settingsBody.includes(l)) &&
-      !settingsBody.includes('"editfield/') &&
-      !settingsBody.includes("PickVisualMedia") &&
-      ["editfield/name", "editfield/username", "editfield/about", "editfield/phone"].every((r) =>
-        myProfile.includes(`nav.navigate("${r}")`),
+      ["privacy", "appearance", "devices", "permissions", "app"].every((r) =>
+        kpapp.includes(`composable("settings/${r}")`),
       ) &&
-      myProfile.includes("PickVisualMediaRequest(") &&
-      profile.includes('nav.navigate("myprofile")') &&
-      kpapp.includes('composable("myprofile")') &&
+      [
+        "fun PrivacySettingsScreen(",
+        "fun AppearanceSettingsScreen(",
+        "fun DevicesSettingsScreen(",
+        "fun PermissionsSettingsScreen(",
+        "fun AppSettingsScreen(",
+      ].every((f) => settings.includes(f)) &&
+      [
+        '"My number"',
+        '"Profile picture"',
+        '"Messages"',
+        '"Last seen"',
+        '"Add to groups"',
+        '"Read receipts"',
+        '"Private profile"',
+        '"Sounds"',
+        '"Themes"',
+        '"App version"',
+        '"Check for updates"',
+        '"About us"',
+      ].every((l) => settings.includes(l)) &&
+      !settings.includes("AlertDialog(") &&
+      !settings.includes("PrivacyPickerDialog") &&
+      settings.includes("KpConfirmSheet(") &&
+      (settings.match(/KpSheet\(/g) || []).length >= 1 &&
+      !settings.includes('"editfield/') &&
+      !settings.includes("PickVisualMedia") &&
+      !settings.includes("fun MyProfileScreen(") &&
       settings.includes('Api.get("/api/auth/devices", true)') &&
       settings.includes('"No one"') &&
       settings.includes('"Contacts only"') &&

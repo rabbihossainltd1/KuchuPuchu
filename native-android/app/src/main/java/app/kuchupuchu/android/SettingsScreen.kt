@@ -5,6 +5,9 @@ import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.ui.draw.scale
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.DoneAll
@@ -18,7 +21,6 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -48,17 +50,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
-import androidx.compose.material.icons.filled.AlternateEmail
-import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.SystemUpdate
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
@@ -67,7 +65,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -78,7 +75,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -95,18 +91,7 @@ import org.json.JSONObject
  * Settings — locked design #10 "Warm Banner":
  * amber gradient profile banner + white list-card rows + red logout.
  */
-/* ---------------- shared settings rows (owner round 30) ---------------- */
-
-@Composable
-private fun SectionTitle(text: String) {
-    Text(
-        text,
-        fontSize = 12.5.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = ActionBlueDeep,
-        modifier = Modifier.padding(start = 28.dp, top = 16.dp, bottom = 6.dp),
-    )
-}
+/* ---------------- shared settings rows (owner round 30/31) ---------------- */
 
 @Composable
 private fun SectionCard(content: @Composable () -> Unit) {
@@ -119,6 +104,7 @@ private fun SectionCard(content: @Composable () -> Unit) {
     ) { content() }
 }
 
+/** Owner round 31: compact — one line of label, value on the right, 12dp tall. */
 @Composable
 private fun SettingRow(
     icon: ImageVector,
@@ -131,17 +117,13 @@ private fun SettingRow(
         Modifier
             .fillMaxWidth()
             .let { m -> if (clickable) m.clickable { onClick() } else m }
-            .padding(16.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = label, tint = ActionBlueDeep, modifier = Modifier.size(21.dp))
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
-            Text(label, fontSize = 13.sp, color = Muted)
-            Text(value, fontSize = 14.5.sp, color = Ink, fontWeight = FontWeight.Medium)
-        }
-        // Owner round 17: the pencil affordance is gone — the row itself is
-        // the button (chat-screen chevrons remain where navigation happens).
+        Icon(icon, contentDescription = label, tint = ActionBlueDeep, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(12.dp))
+        Text(label, fontSize = 14.5.sp, color = Ink, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.weight(1f))
+        Text(value, fontSize = 13.sp, color = Muted, maxLines = 1, modifier = Modifier.padding(start = 8.dp))
     }
 }
 
@@ -158,13 +140,48 @@ private fun ToggleRow(icon: ImageVector, label: String, checked: Boolean, onChan
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, top = 6.dp, bottom = 6.dp, end = 12.dp),
+            .padding(start = 16.dp, top = 2.dp, bottom = 2.dp, end = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, label, tint = ActionBlueDeep, modifier = Modifier.size(21.dp))
+        Icon(icon, label, tint = ActionBlueDeep, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(12.dp))
+        Text(label, fontSize = 14.5.sp, color = Ink, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = onChange, colors = kpSwitchColors(), modifier = Modifier.scale(0.85f))
+    }
+}
+
+/** The hub entries: icon + name, chevron on the right. */
+@Composable
+private fun HubRow(icon: ImageVector, label: String, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = label, tint = ActionBlueDeep, modifier = Modifier.size(21.dp))
         Spacer(Modifier.width(14.dp))
-        Text(label, fontSize = 14.5.sp, color = Ink, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-        Switch(checked = checked, onCheckedChange = onChange, colors = kpSwitchColors())
+        Text(label, fontSize = 15.sp, color = Ink, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.weight(1f))
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Muted, modifier = Modifier.size(20.dp))
+    }
+}
+
+@Composable
+private fun SubScreenHeader(title: String, onBack: () -> Unit, trailing: @Composable () -> Unit = {}) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onBack) {
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Ink, modifier = Modifier.size(26.dp))
+        }
+        Text(title, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
+        Spacer(Modifier.weight(1f))
+        trailing()
+        Spacer(Modifier.width(16.dp))
     }
 }
 
@@ -172,72 +189,96 @@ private val PRIVACY_LEVELS = listOf("nobody" to "No one", "contacts" to "Contact
 
 private fun privacyLabel(level: String): String = PRIVACY_LEVELS.firstOrNull { it.first == level }?.second ?: "Public"
 
-/**
- * Owner round 30: the picker every privacy row opens — three choices on the
- * theme surface, tap = save.
- */
-@Composable
-private fun PrivacyPickerDialog(title: String, current: String, onPick: (String) -> Unit, onClose: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onClose,
-        containerColor = Card,
-        title = { Text(title, color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold) },
-        text = {
-            Column {
-                PRIVACY_LEVELS.forEach { (level, label) ->
-                    val selected = level == current
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (selected) ActionBlue.copy(alpha = 0.16f) else Color.Transparent)
-                            .clickable { onPick(level) }
-                            .padding(horizontal = 12.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(label, color = Ink, fontSize = 15.sp, modifier = Modifier.weight(1f))
-                        if (selected) Icon(Icons.Filled.Check, null, tint = ActionBlueDeep, modifier = Modifier.size(20.dp))
-                    }
-                }
-            }
-        },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onClose) { Text("Cancel", color = Muted) } },
-    )
-}
-
-/* ---------------- Settings (owner round 30: app settings only) ---------------- */
+/* ---------------- Settings hub (owner round 31) ---------------- */
 
 /**
- * Owner round 30: Settings is APP settings only — Privacy, Appearance,
- * Devices, Permissions, version, updates, About. Everything about the person
- * (photo, name, username, about, phone) lives in My profile now.
+ * Owner round 31: Settings is a HUB — five entries, each its own screen
+ * (Privacy / Appearance / Devices / Permissions / App). Nothing inline here.
  */
 @Composable
 fun SettingsScreen(nav: NavController) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    val me = remember { mutableStateOf(Store.me ?: JSONObject()) }
     var confirmLogout by remember { mutableStateOf(false) }
-    var showRingPicker by remember { mutableStateOf(false) }
-    // Owner round 21: the Sounds row first asks WHICH tone (notification vs
-    // call), then opens the same picker.
-    var showSoundType by remember { mutableStateOf(false) }
-    var soundKind by remember { mutableStateOf("call") }
-    // Owner round 16: fullscreen theme picker.
-    var showThemePicker by remember { mutableStateOf(false) }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Cream)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .verticalScroll(rememberScrollState()),
+    ) {
+        SubScreenHeader("Settings", onBack = { nav.popBackStack() })
+        SectionCard {
+            HubRow(Icons.Filled.Lock, "Privacy") { nav.navigate("settings/privacy") }
+            HubRow(Icons.Filled.Palette, "Appearance") { nav.navigate("settings/appearance") }
+            HubRow(Icons.Filled.PhoneAndroid, "Devices") { nav.navigate("settings/devices") }
+            HubRow(Icons.Filled.Shield, "Permissions") { nav.navigate("settings/permissions") }
+            HubRow(Icons.Filled.Info, "App") { nav.navigate("settings/app") }
+        }
+        Spacer(Modifier.height(18.dp))
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Red.copy(alpha = 0.12f))
+                .clickable { confirmLogout = true }
+                .padding(horizontal = 16.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Log out", tint = Red, modifier = Modifier.size(21.dp))
+            Spacer(Modifier.width(12.dp))
+            Text("Log out", color = Red, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        }
+        Spacer(Modifier.height(32.dp))
+    }
+
+    if (confirmLogout) {
+        KpConfirmSheet(
+            title = "Log out?",
+            confirmLabel = "Log out",
+            danger = true,
+            onDismiss = { confirmLogout = false },
+            onConfirm = {
+                confirmLogout = false
+                scope.launch {
+                    // deviceId travels with the logout so the worker removes
+                    // this install's push row in the same request: while the
+                    // bearer is still valid, and without touching the user's
+                    // other devices.
+                    // Owner round 28: the accepted FCM token travels too, so
+                    // the worker deletes exactly this push row even if the
+                    // session had already been revoked (a 401 here used to
+                    // leave the row behind = notifications after logout).
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            Api.post(
+                                "/api/auth/logout",
+                                org.json.JSONObject()
+                                    .put("deviceId", KpPush.deviceId(ctx))
+                                    .put("pushToken", KpPush.registeredToken(ctx) ?: ""),
+                            )
+                        }
+                    }
+                    KpPush.unregister()
+                    KpNotify.cancelAll(ctx)
+                    Store.signOut(ctx)
+                }
+            },
+        )
+    }
+}
+
+/* ---------------- Settings › Privacy ---------------- */
+
+@Composable
+fun PrivacySettingsScreen(nav: NavController) {
+    val scope = rememberCoroutineScope()
+    val me = remember { mutableStateOf(Store.me ?: JSONObject()) }
     var picker by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
-    // Owner round 18: system back steps BACK one level — an open picker
-    // closes first; it must never shoot straight out to the chat list.
-    androidx.activity.compose.BackHandler(enabled = showThemePicker || showRingPicker || showSoundType || picker != null) {
-        when {
-            showThemePicker -> showThemePicker = false
-            showRingPicker -> showRingPicker = false
-            showSoundType -> showSoundType = false
-            else -> picker = null
-        }
-    }
 
     LaunchedEffect(Unit) {
         runCatching {
@@ -248,22 +289,21 @@ fun SettingsScreen(nav: NavController) {
 
     val privacy = me.value.optJSONObject("privacy") ?: JSONObject()
     fun level(key: String, fallback: String) = privacy.optText(key).ifBlank { fallback }
+    fun keyOf(field: String) =
+        when (field) {
+            "privPhone" -> "phone"
+            "privAvatar" -> "avatar"
+            "privMessages" -> "messages"
+            "privLastSeen" -> "lastSeen"
+            "privGroups" -> "groups"
+            else -> field
+        }
 
     fun savePrivacy(field: String, value: Any) {
         // Optimistic: the row flips at once, the server answer replaces it.
         val next = JSONObject(me.value.toString())
         val p = next.optJSONObject("privacy") ?: JSONObject().also { next.put("privacy", it) }
-        p.put(
-            when (field) {
-                "privPhone" -> "phone"
-                "privAvatar" -> "avatar"
-                "privMessages" -> "messages"
-                "privLastSeen" -> "lastSeen"
-                "privGroups" -> "groups"
-                else -> field
-            },
-            value,
-        )
+        p.put(keyOf(field), value)
         me.value = next
         scope.launch {
             busy = true
@@ -284,176 +324,97 @@ fun SettingsScreen(nav: NavController) {
             .navigationBarsPadding()
             .verticalScroll(rememberScrollState()),
     ) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = { nav.popBackStack() }) {
-                // Owner round 16: the same back icon the chat screens use.
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Ink, modifier = Modifier.size(26.dp))
-            }
-            Text("Settings", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
-            Spacer(Modifier.weight(1f))
+        SubScreenHeader("Privacy", onBack = { nav.popBackStack() }) {
             if (busy) CircularProgressIndicator(color = ActionBlueDeep, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(16.dp))
         }
-
-        /* ---------- Privacy ---------- */
-        SectionTitle("Privacy")
         SectionCard {
-            SettingRow(Icons.Filled.Call, "Who can view my number", privacyLabel(level("phone", "contacts"))) { picker = "privPhone" }
-            SettingRow(Icons.Filled.AccountCircle, "Who can view my profile picture", privacyLabel(level("avatar", "public"))) {
-                picker = "privAvatar"
-            }
-            SettingRow(Icons.AutoMirrored.Filled.Chat, "Who can send me messages", privacyLabel(level("messages", "public"))) {
-                picker = "privMessages"
-            }
-            SettingRow(Icons.Filled.Schedule, "Who can see my last seen", privacyLabel(level("lastSeen", "public"))) {
-                picker = "privLastSeen"
-            }
-            SettingRow(Icons.Filled.GroupAdd, "Who can add me to groups", privacyLabel(level("groups", "public"))) {
-                picker = "privGroups"
-            }
+            SettingRow(Icons.Filled.Call, "My number", privacyLabel(level("phone", "contacts"))) { picker = "privPhone" }
+            SettingRow(Icons.Filled.AccountCircle, "Profile picture", privacyLabel(level("avatar", "public"))) { picker = "privAvatar" }
+            SettingRow(Icons.AutoMirrored.Filled.Chat, "Messages", privacyLabel(level("messages", "public"))) { picker = "privMessages" }
+            SettingRow(Icons.Filled.Schedule, "Last seen", privacyLabel(level("lastSeen", "public"))) { picker = "privLastSeen" }
+            SettingRow(Icons.Filled.GroupAdd, "Add to groups", privacyLabel(level("groups", "public"))) { picker = "privGroups" }
+        }
+        Spacer(Modifier.height(12.dp))
+        SectionCard {
             ToggleRow(Icons.Filled.DoneAll, "Read receipts", privacy.optBoolean("readReceipts", true)) { on ->
                 savePrivacy("readReceipts", on)
             }
             ToggleRow(Icons.Filled.VisibilityOff, "Private profile", privacy.optBoolean("privateProfile", false)) { on ->
                 savePrivacy("privateProfile", on)
             }
-            Spacer(Modifier.height(6.dp))
-        }
-
-        /* ---------- Appearance ---------- */
-        SectionTitle("Appearance")
-        SectionCard {
-            // Owner round 10 (2026-09-04): his incoming-ringtone pack — the
-            // user picks which one rings for calls. Default is the app's
-            // ORIGINAL tone again (owner round 13); his "calling ringing"
-            // file stays as the caller-side ringback only.
-            SettingRow(
-                Icons.Filled.NotificationsActive,
-                "Sounds",
-                // Owner round 25: just the section name — the tone names were
-                // stacking into a wall of text on the row.
-                "Calls & Notification",
-            ) { showSoundType = true }
-            // Owner round 16: the theme has its own FULLSCREEN picker now
-            // (same pattern as the ringtone picker) — this row opens it.
-            SettingRow(
-                Icons.Filled.Palette,
-                "Themes",
-                if (KpThemeMode.darkBlue) "Dark Blue" else "Light Cream",
-            ) { showThemePicker = true }
-        }
-
-        /* ---------- Devices ---------- */
-        SectionTitle("Devices")
-        SectionCard { DevicesSection() }
-
-        /* ---------- Permissions ---------- */
-        SectionTitle("Permissions")
-        SectionCard { PermissionsSection() }
-
-        /* ---------- App ---------- */
-        SectionTitle("App")
-        SectionCard {
-            // Which build am I running? This row ends the "ami ki notun APK
-            // install korsi?" confusion — bug reports can quote it directly.
-            SettingRow(
-                Icons.Filled.Info,
-                "App version",
-                runCatching {
-                    val pi = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
-                    "${pi.versionName} (${pi.versionCode})"
-                }.getOrDefault("?"),
-                clickable = false,
-            ) {}
-            // Owner round 16: in-app updates — checks the GitHub release and
-            // the popup (or "already latest") takes it from there.
-            SettingRow(
-                Icons.Filled.SystemUpdate,
-                "Check for updates",
-                if (KpUpdate.checking) "Checking…" else "Latest release on GitHub",
-            ) {
-                scope.launch {
-                    withContext(Dispatchers.IO) { KpUpdate.check(ctx) }
-                    if (KpUpdate.available == null) {
-                        android.widget.Toast.makeText(ctx, "You are on the latest version", android.widget.Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
-            SettingRow(Icons.Filled.Favorite, "About us", "KuchuPuchu") { nav.navigate("about") }
-            // Owner round 15: crash detection on/off — capture stays until
-            // the owner switches it off; off also clears the last report.
-            var crashOn by remember { mutableStateOf(KpCrash.isEnabled(ctx)) }
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, top = 6.dp, bottom = 6.dp, end = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Filled.BugReport, "Crash reports", tint = ActionBlueDeep, modifier = Modifier.size(21.dp))
-                Spacer(Modifier.width(14.dp))
-                Text("Crash reports", fontSize = 14.5.sp, color = Ink, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                Switch(
-                    checked = crashOn,
-                    onCheckedChange = { on ->
-                        crashOn = on
-                        KpCrash.setEnabled(ctx, on)
-                    },
-                    // Owner round 22: the toggle rides the blue accent.
-                    colors = kpSwitchColors(),
-                )
-            }
-        }
-
-        Spacer(Modifier.height(18.dp))
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(Red.copy(alpha = 0.12f))
-                .clickable { confirmLogout = true }
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Log out", tint = Red, modifier = Modifier.size(22.dp))
-            Spacer(Modifier.width(12.dp))
-            Text("Log out", color = Red, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         }
         Spacer(Modifier.height(32.dp))
     }
 
     picker?.let { field ->
-        val key =
-            when (field) {
-                "privPhone" -> "phone"
-                "privAvatar" -> "avatar"
-                "privMessages" -> "messages"
-                "privLastSeen" -> "lastSeen"
-                else -> "groups"
-            }
-        PrivacyPickerDialog(
+        val key = keyOf(field)
+        val current = level(key, if (key == "phone") "contacts" else "public")
+        // Owner round 31: the picker is a bottom sheet (the status ⋮ pattern),
+        // never a centred dialog.
+        KpSheet(
+            onDismiss = { picker = null },
             title =
                 when (field) {
                     "privPhone" -> "My number"
-                    "privAvatar" -> "My profile picture"
+                    "privAvatar" -> "Profile picture"
                     "privMessages" -> "Messages"
                     "privLastSeen" -> "Last seen"
-                    else -> "Groups"
+                    else -> "Add to groups"
                 },
-            current = level(key, if (key == "phone") "contacts" else "public"),
-            onPick = { lvl ->
-                picker = null
-                savePrivacy(field, lvl)
-            },
-            onClose = { picker = null },
-        )
+        ) {
+            PRIVACY_LEVELS.forEach { (lvl, label) ->
+                KpSheetRow(icon = null, label = label, selected = lvl == current) {
+                    picker = null
+                    if (lvl != current) savePrivacy(field, lvl)
+                }
+            }
+        }
     }
+}
 
+/* ---------------- Settings › Appearance ---------------- */
+
+@Composable
+fun AppearanceSettingsScreen(nav: NavController) {
+    var showRingPicker by remember { mutableStateOf(false) }
+    // Owner round 21: the Sounds row first asks WHICH tone (notification vs
+    // call), then opens the same picker.
+    var showSoundType by remember { mutableStateOf(false) }
+    var soundKind by remember { mutableStateOf("call") }
+    // Owner round 16: fullscreen theme picker.
+    var showThemePicker by remember { mutableStateOf(false) }
+    // Owner round 18: system back steps BACK one level — an open picker
+    // closes first; it must never shoot straight out to the chat list.
+    androidx.activity.compose.BackHandler(enabled = showThemePicker || showRingPicker || showSoundType) {
+        when {
+            showThemePicker -> showThemePicker = false
+            showRingPicker -> showRingPicker = false
+            else -> showSoundType = false
+        }
+    }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Cream)
+            .statusBarsPadding()
+            .navigationBarsPadding(),
+    ) {
+        SubScreenHeader("Appearance", onBack = { nav.popBackStack() })
+        SectionCard {
+            // Owner round 10 (2026-09-04): his incoming-ringtone pack — the
+            // user picks which one rings for calls. Default is the app's
+            // ORIGINAL tone again (owner round 13); his "calling ringing"
+            // file stays as the caller-side ringback only.
+            // Owner round 25: just the section name — the tone names were
+            // stacking into a wall of text on the row.
+            SettingRow(Icons.Filled.NotificationsActive, "Sounds", "Calls & Notification") { showSoundType = true }
+            // Owner round 16: the theme has its own FULLSCREEN picker now
+            // (same pattern as the ringtone picker) — this row opens it.
+            SettingRow(Icons.Filled.Palette, "Themes", if (KpThemeMode.darkBlue) "Dark Blue" else "Light Cream") {
+                showThemePicker = true
+            }
+        }
+    }
     // Owner round 11: FULLSCREEN ringtone picker — tap previews, Save keeps.
     if (showThemePicker) {
         ThemePickerScreen(onClose = { showThemePicker = false })
@@ -471,45 +432,107 @@ fun SettingsScreen(nav: NavController) {
     if (showRingPicker) {
         RingtonePickerScreen(kind = soundKind, onClose = { showRingPicker = false })
     }
+}
 
-    if (confirmLogout) {
-        AlertDialog(
-            onDismissRequest = { confirmLogout = false },
-            containerColor = Card,
-            title = { Text("Log out?", color = Ink) },
-            text = { Text("You can sign in again anytime with your phone number.", color = Muted) },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmLogout = false
-                    scope.launch {
-                        // deviceId travels with the logout so the worker removes
-                        // this install's push row in the same request: while the
-                        // bearer is still valid, and without touching the user's
-                        // other devices.
-                        // Owner round 28: the accepted FCM token travels too, so
-                        // the worker deletes exactly this push row even if the
-                        // session had already been revoked (a 401 here used to
-                        // leave the row behind = notifications after logout).
-                        runCatching {
-                            withContext(Dispatchers.IO) {
-                                Api.post(
-                                    "/api/auth/logout",
-                                    org.json.JSONObject()
-                                        .put("deviceId", KpPush.deviceId(ctx))
-                                        .put("pushToken", KpPush.registeredToken(ctx) ?: ""),
-                                )
-                            }
-                        }
-                        KpPush.unregister()
-                        KpNotify.cancelAll(ctx)
-                        Store.signOut(ctx)
+/* ---------------- Settings › Devices ---------------- */
+
+@Composable
+fun DevicesSettingsScreen(nav: NavController) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Cream)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .verticalScroll(rememberScrollState()),
+    ) {
+        SubScreenHeader("Devices", onBack = { nav.popBackStack() })
+        SectionCard { DevicesSection() }
+        Spacer(Modifier.height(32.dp))
+    }
+}
+
+/* ---------------- Settings › Permissions ---------------- */
+
+@Composable
+fun PermissionsSettingsScreen(nav: NavController) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Cream)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .verticalScroll(rememberScrollState()),
+    ) {
+        SubScreenHeader("Permissions", onBack = { nav.popBackStack() })
+        SectionCard { PermissionsSection() }
+        Spacer(Modifier.height(32.dp))
+    }
+}
+
+/* ---------------- Settings › App ---------------- */
+
+@Composable
+fun AppSettingsScreen(nav: NavController) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Cream)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .verticalScroll(rememberScrollState()),
+    ) {
+        SubScreenHeader("App", onBack = { nav.popBackStack() })
+        SectionCard {
+            // Which build am I running? This row ends the "ami ki notun APK
+            // install korsi?" confusion — bug reports can quote it directly.
+            SettingRow(
+                Icons.Filled.Info,
+                "App version",
+                runCatching {
+                    val pi = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+                    "${pi.versionName} (${pi.versionCode})"
+                }.getOrDefault("?"),
+                clickable = false,
+            ) {}
+            // Owner round 16: in-app updates — checks the GitHub release and
+            // the popup (or "already latest") takes it from there.
+            SettingRow(Icons.Filled.SystemUpdate, "Check for updates", if (KpUpdate.checking) "Checking…" else "") {
+                scope.launch {
+                    withContext(Dispatchers.IO) { KpUpdate.check(ctx) }
+                    if (KpUpdate.available == null) {
+                        android.widget.Toast.makeText(ctx, "You are on the latest version", android.widget.Toast.LENGTH_SHORT).show()
                     }
-                }) { Text("Log out", color = Red, fontWeight = FontWeight.SemiBold) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmLogout = false }) { Text("Cancel", color = Muted) }
-            },
-        )
+                }
+            }
+            SettingRow(Icons.Filled.Favorite, "About us", "") { nav.navigate("about") }
+            // Owner round 15: crash detection on/off — capture stays until
+            // the owner switches it off; off also clears the last report.
+            var crashOn by remember { mutableStateOf(KpCrash.isEnabled(ctx)) }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, top = 2.dp, bottom = 2.dp, end = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.BugReport, "Crash reports", tint = ActionBlueDeep, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(12.dp))
+                Text("Crash reports", fontSize = 14.5.sp, color = Ink, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                Switch(
+                    checked = crashOn,
+                    onCheckedChange = { on ->
+                        crashOn = on
+                        KpCrash.setEnabled(ctx, on)
+                    },
+                    // Owner round 22: the toggle rides the blue accent.
+                    colors = kpSwitchColors(),
+                    modifier = Modifier.scale(0.85f),
+                )
+            }
+        }
+        Spacer(Modifier.height(32.dp))
     }
 }
 
@@ -697,177 +720,6 @@ private fun openAppSettings(ctx: android.content.Context) {
                 android.net.Uri.parse("package:${ctx.packageName}"),
             ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
         )
-    }
-}
-
-/* ---------------- My profile (owner round 30) ---------------- */
-
-/**
- * Owner round 30: the profile things — photo, name, username, about, phone —
- * live HERE and only here. Opened from My profile's Edit row.
- */
-@Composable
-fun MyProfileScreen(nav: NavController) {
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    // Paint instantly from the cached profile — no "…" flash on every open.
-    val me = remember { mutableStateOf(Store.me ?: JSONObject()) }
-    var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf("") }
-
-    LaunchedEffect(Unit) {
-        runCatching {
-            me.value = withContext(Dispatchers.IO) { Api.get("/api/me", true).optJSONObject("user") ?: JSONObject() }
-            Store.saveMe(me.value)
-        }
-    }
-
-    val avatarPicker =
-        rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-            if (uri != null) {
-                scope.launch {
-                    busy = true
-                    error = ""
-                    // The worker stores avatars inline with a 200KB budget —
-                    // compress below it and show real errors instead of
-                    // failing silently.
-                    val dataUrl =
-                        withContext(Dispatchers.IO) { FilesUtil.imageToDataUrl(uri, ctx, maxSide = 512, maxChars = 190_000) }
-                    if (dataUrl == null) {
-                        error = "Could not read that photo. Pick another one."
-                    } else {
-                        try {
-                            val updated =
-                                withContext(Dispatchers.IO) {
-                                    Api.patch("/api/me", JSONObject().put("avatarUrl", dataUrl))
-                                }
-                            me.value = updated.optJSONObject("user") ?: me.value
-                            Store.saveMe(me.value)
-                        } catch (e: Exception) {
-                            error = e.message ?: "Could not set the photo."
-                        }
-                    }
-                    busy = false
-                }
-            }
-        }
-
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(Cream)
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .verticalScroll(rememberScrollState()),
-    ) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = { nav.popBackStack() }) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Ink, modifier = Modifier.size(26.dp))
-            }
-            Text("Edit profile", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
-        }
-
-        /* ---------- banner ---------- */
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp)
-                .clip(RoundedCornerShape(20.dp))
-                // Owner round 20: the profile card goes DEEP BLUE in dark-blue
-                // mode (it stayed warm gold); cream keeps the classic banner.
-                .background(
-                    if (KpThemeMode.darkBlue) Brush.linearGradient(listOf(Color(0xFF1E3A8A), Color(0xFF16213A)))
-                    else Brush.linearGradient(listOf(GoldLight, Gold))
-                )
-                .padding(20.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box {
-                    KpAvatar(
-                        me.value.optText("displayName"),
-                        me.value.optIso("avatarUrl"),
-                        76.dp,
-                        ring = false,
-                    )
-                    Box(
-                        Modifier
-                            .align(Alignment.BottomEnd)
-                            .size(26.dp)
-                            .clip(CircleShape)
-                            .background(Card)
-                            .clickable {
-                                avatarPicker.launch(
-                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                                )
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (busy) {
-                            CircularProgressIndicator(
-                                color = ActionBlueDeep,
-                                strokeWidth = 2.dp,
-                                modifier = Modifier.size(15.dp),
-                            )
-                        } else {
-                            Icon(
-                                Icons.Filled.Edit,
-                                contentDescription = "Change photo",
-                                tint = ActionBlueDeep,
-                                modifier = Modifier.size(15.dp),
-                            )
-                        }
-                    }
-                }
-                Spacer(Modifier.width(16.dp))
-                Column {
-                    Text(
-                        me.value.optText("displayName").ifBlank { "…" },
-                        color = Color.White,
-                        fontSize = 21.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    val un = me.value.optText("username")
-                    if (un.isNotBlank()) Text("@$un", color = Color(0xE6FFFFFF), fontSize = 13.sp)
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        me.value.optText("about").ifBlank { "Hey! I'm using KuchuPuchu" },
-                        color = Color(0xCCFFFFFF),
-                        fontSize = 12.5.sp,
-                        maxLines = 2,
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(14.dp))
-        SectionCard {
-            // Owner round 22: every profile field edits on its OWN screen.
-            SettingRow(Icons.Filled.Badge, "Name", me.value.optText("displayName").ifBlank { "—" }) {
-                nav.navigate("editfield/name")
-            }
-            SettingRow(Icons.Filled.AlternateEmail, "Username", me.value.optText("username").ifBlank { "not set" }) {
-                nav.navigate("editfield/username")
-            }
-            SettingRow(Icons.Filled.Info, "About", me.value.optText("about").ifBlank { "Hey! I'm using KuchuPuchu" }) {
-                nav.navigate("editfield/about")
-            }
-            // Phone auth: the login identity now. Change needs the new SIM
-            // literally present on this device (MATCH) — the worker rejects
-            // anything weaker for a number change (PHONE_AUTH_PLAN.md §5).
-            SettingRow(Icons.Filled.Call, "Phone number", me.value.optText("phone").ifBlank { "not set" }) {
-                nav.navigate("editfield/phone")
-            }
-        }
-        if (error.isNotBlank()) {
-            Text(error, color = Red, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
-        }
-        Spacer(Modifier.height(32.dp))
     }
 }
 

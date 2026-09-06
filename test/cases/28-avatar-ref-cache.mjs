@@ -78,10 +78,7 @@ const sites = avatarSites();
     "the resolution happens once and the circle + full-screen viewer share it",
     /val shownAvatar = rememberAvatarUrl\(u\.optText\("avatarUrl"\)\.ifBlank \{ null \}, avatarRef\)/.test(
       profile,
-    ) &&
-      /clickable \{ shownAvatar\?\.takeIf \{ it\.isNotBlank\(\) \}\?\.let \{ viewerUrl = it \} \}/.test(
-        profile,
-      ),
+    ) && /shownAvatar\?\.takeIf \{ it\.isNotBlank\(\) \}\?\.let \{ viewerUrl = it \}/.test(profile),
     profile.match(/viewerUrl = it[^)]*/)?.[0],
   );
   check(
@@ -207,9 +204,8 @@ const sites = avatarSites();
     "CallScreens.kt KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 108.dp, ring = fal",
     "CallScreens.kt KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 116.dp, ring = fal",
     "CallScreens.kt KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 84.dp, ring = fals",
-    // Own profile editor: this screen owns the value it just wrote (it PATCHes and
-    // installs the response), so the cache would add a hop, not fix a staleness.
-    'SettingsScreen.kt KpAvatar( me.value.optText("displayName"), me.value.optIso("avatarUrl"), 76.dp',
+    // (r31: the own-profile editor banner is gone — My profile edits in place
+    // through ProfileScreen's cached avatar.)
   ].sort();
   check(
     "no new avatar renders outside the cache, and none of the known ones silently got worse",
