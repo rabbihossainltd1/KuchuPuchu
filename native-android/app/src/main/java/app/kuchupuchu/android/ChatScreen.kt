@@ -3524,14 +3524,8 @@ private fun VideoMessageRow(
     val seedMeta = remember(m.optString("id")) { VideoThumbs.readMeta(cacheKey) }
     var ratio by remember(m.optString("id")) { mutableStateOf(seedMeta?.ratio ?: (16f / 9f)) }
     var duration by remember(m.optString("id")) {
-        mutableStateOf(
-            if ((seedMeta?.durationMs ?: 0L) > 0L) {
-                val ms = seedMeta.durationMs
-                "%d:%02d".format(ms / 1000 / 60, ms / 1000 % 60)
-            } else {
-                ""
-            },
-        )
+        val ms0 = seedMeta?.durationMs ?: 0L
+        mutableStateOf(if (ms0 > 0L) "%d:%02d".format(ms0 / 1000 / 60, ms0 / 1000 % 60) else "")
     }
     val thumb by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(
         VideoThumbs.get(cacheKey) ?: VideoThumbs.readThumb(cacheKey),
