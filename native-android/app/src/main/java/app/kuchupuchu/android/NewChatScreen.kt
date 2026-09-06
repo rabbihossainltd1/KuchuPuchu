@@ -16,13 +16,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PersonSearch
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -36,7 +34,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
@@ -107,17 +104,8 @@ fun NewChatScreen(nav: NavController) {
             Text("New chat", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
         }
 
-        OutlinedTextField(
-            query,
-            { query = it },
-            label = { Text("Name or username") },
-            singleLine = true,
-            shape = RoundedCornerShape(14.dp),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp),
-        )
+        // Owner round 30: compact pill, one-word placeholder.
+        CompactSearchBar(query, { query = it }, modifier = Modifier.padding(horizontal = 20.dp))
 
         if (query.trim().length < 2) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

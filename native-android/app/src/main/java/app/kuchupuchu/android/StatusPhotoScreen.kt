@@ -155,7 +155,7 @@ fun StatusPhotoScreen(nav: NavController) {
             OutlinedTextField(
                 caption,
                 { caption = it.take(200) },
-                label = { Text("Caption (optional)") },
+                label = { Text("Caption") },
                 singleLine = true,
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier

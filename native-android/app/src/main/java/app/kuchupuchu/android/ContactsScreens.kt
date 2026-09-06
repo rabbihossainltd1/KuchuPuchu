@@ -216,19 +216,8 @@ fun AllContactsScreen(nav: NavController) {
             return@Column
         }
 
-        OutlinedTextField(
-            query,
-            { query = it },
-            placeholder = { Text("Search contacts", fontSize = 14.sp, color = Muted.copy(alpha = 0.6f)) },
-            singleLine = true,
-            shape = RoundedCornerShape(14.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = ActionBlue,
-                cursorColor = ActionBlue,
-                focusedLabelColor = ActionBlue,
-            ),
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-        )
+        // Owner round 30: the shared compact pill.
+        CompactSearchBar(query, { query = it }, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
 
         if (entries.isEmpty() && syncing) {
             Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {

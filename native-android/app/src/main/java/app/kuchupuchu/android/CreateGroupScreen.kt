@@ -22,14 +22,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Group
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -43,7 +43,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -118,15 +117,15 @@ fun CreateGroupScreen(nav: NavController) {
             Text("New group", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
         }
 
-        OutlinedTextField(
+        // Owner round 30: compact pills, short placeholders (no thick
+        // outlined fields, no long label text).
+        CompactSearchBar(
             title,
             { title = it.take(50) },
-            label = { Text("Group name") },
-            singleLine = true,
-            shape = RoundedCornerShape(14.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp),
+            placeholder = "Group name",
+            icon = Icons.Filled.Group,
+            imeAction = ImeAction.Next,
+            modifier = Modifier.padding(horizontal = 20.dp),
         )
 
         /* picked member chips */
@@ -168,16 +167,11 @@ fun CreateGroupScreen(nav: NavController) {
             }
         }
 
-        OutlinedTextField(
+        CompactSearchBar(
             query,
             { query = it },
-            label = { Text("Add members — search by name or username") },
-            singleLine = true,
-            shape = RoundedCornerShape(14.dp),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp),
+            placeholder = "Search members",
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
         )
 
         if (query.trim().length < 2) {

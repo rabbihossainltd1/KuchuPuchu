@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -19,7 +18,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.InsertDriveFile
@@ -27,8 +25,6 @@ import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -44,7 +40,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -124,27 +119,8 @@ fun SearchScreen(nav: NavController) {
             Text("Search", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
         }
 
-        OutlinedTextField(
-            query,
-            { query = it },
-            placeholder = { Text("Search people, chats, messages", fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-            singleLine = true,
-            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 15.sp),
-            shape = RoundedCornerShape(14.dp),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            // Round 22: explicit border colours — the M3 default outline clashed
-            // with the dark-blue theme (owner: "global search bar border").
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = ActionBlue,
-                unfocusedBorderColor = Muted,
-                focusedLabelColor = ActionBlue,
-                cursorColor = ActionBlue,
-            ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .height(52.dp),
-        )
+        // Owner round 30: compact pill, one-word placeholder.
+        CompactSearchBar(query, { query = it }, modifier = Modifier.padding(horizontal = 20.dp))
 
         /* filter chips */
         Row(

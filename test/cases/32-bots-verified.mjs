@@ -2365,6 +2365,25 @@ const convBetween = (db, a, b) =>
       calls.includes("Icons.Filled.KeyboardArrowUp") &&
       !calls.includes("Swipe up"),
   );
+  const ui = readFileSync("native-android/app/src/main/java/app/kuchupuchu/android/Ui.kt", "utf8");
+  const kt = (f) =>
+    readFileSync(`native-android/app/src/main/java/app/kuchupuchu/android/${f}`, "utf8");
+  check(
+    "r30-5: one shared CompactSearchBar (24dp pill, 10dp vertical padding) on New chat / New group / Search / Contacts; short placeholders everywhere",
+    ui.includes("fun CompactSearchBar(") &&
+      ui.includes("modifier = Modifier.weight(1f).padding(vertical = 10.dp)") &&
+      ["NewChatScreen.kt", "CreateGroupScreen.kt", "SearchScreen.kt", "ContactsScreens.kt"].every(
+        (f) => kt(f).includes("CompactSearchBar("),
+      ) &&
+      !kt("NewChatScreen.kt").includes("OutlinedTextField(") &&
+      !kt("SearchScreen.kt").includes("OutlinedTextField(") &&
+      !kt("CreateGroupScreen.kt").includes("OutlinedTextField(") &&
+      kt("CreateGroupScreen.kt").includes('placeholder = "Search members"') &&
+      !kt("CreateGroupScreen.kt").includes("Add members — search by name or username") &&
+      !kt("SearchScreen.kt").includes("Search people, chats, messages") &&
+      !kt("NewChatScreen.kt").includes('"Name or username"') &&
+      kt("StatusPhotoScreen.kt").includes('label = { Text("Caption") }'),
+  );
   const settings = readFileSync(
     "native-android/app/src/main/java/app/kuchupuchu/android/SettingsScreen.kt",
     "utf8",

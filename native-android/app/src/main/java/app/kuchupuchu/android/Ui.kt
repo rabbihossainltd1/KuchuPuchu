@@ -10,6 +10,16 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Image
 import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -581,6 +591,58 @@ fun EmptyState(
         Text(title, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, color = Ink)
         Spacer(Modifier.height(6.dp))
         Text(note, fontSize = 14.sp, color = Muted, textAlign = TextAlign.Center)
+    }
+}
+
+/**
+ * Owner round 30: the ONE compact search / input pill every list screen uses
+ * (New chat, New group members, global Search, All contacts). Same shape as
+ * the in-chat search bar: 24dp radius, 1dp accent border, 10dp vertical
+ * padding — never a thick outlined field, never a long placeholder.
+ */
+@Composable
+fun CompactSearchBar(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    placeholder: String = "Search",
+    icon: ImageVector = Icons.Filled.Search,
+    imeAction: ImeAction = ImeAction.Search,
+    keyboardType: KeyboardType = KeyboardType.Text,
+) {
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(Card)
+            .border(1.dp, ActionBlue, RoundedCornerShape(24.dp))
+            .padding(horizontal = 16.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = Muted, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = true,
+            textStyle = TextStyle(color = Ink, fontSize = 15.sp),
+            cursorBrush = SolidColor(ActionBlue),
+            keyboardOptions = KeyboardOptions(imeAction = imeAction, keyboardType = keyboardType),
+            modifier = Modifier.weight(1f).padding(vertical = 10.dp),
+            decorationBox = { inner ->
+                if (value.isEmpty()) Text(placeholder, color = Muted, fontSize = 15.sp, maxLines = 1)
+                inner()
+            },
+        )
+        if (value.isNotEmpty()) {
+            Spacer(Modifier.width(6.dp))
+            Icon(
+                Icons.Filled.Close,
+                null,
+                tint = Muted,
+                modifier = Modifier.size(20.dp).clip(CircleShape).clickable { onValueChange("") }.padding(2.dp),
+            )
+        }
     }
 }
 
