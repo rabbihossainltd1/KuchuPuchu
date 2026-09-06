@@ -1732,6 +1732,12 @@ const convBetween = (db, a, b) =>
       !statusKt.includes("} else if (dur > 0 && cur > 0) {"),
   );
   check(
+    "r27: status viewer clock + clip PAUSE while the app is in the background",
+    statusKt.includes("if (showViewers || replyFocused || !Store.foreground) {") &&
+      statusKt.includes("player?.setPaused(paused || !Store.foreground)") &&
+      statusKt.includes("p?.setPaused(paused || bg)"),
+  );
+  check(
     "r27: status clip cache is READ (no re-download per view) + streamed to disk + 24h prune",
     statusKt.includes("if (!(f.exists() && f.length() > 0L)) {") &&
       statusKt.includes("Api.downloadToFile(url, tmp)") &&

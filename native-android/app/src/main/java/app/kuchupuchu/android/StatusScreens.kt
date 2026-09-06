@@ -575,7 +575,12 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
             var waited = 0L
             val maxWait = hold + 8_000L
             while (videoProgress < 0.99f && waited < maxWait) {
-                if (showViewers || replyFocused) {
+                // Round 27: the clock also PAUSES while the app is in the
+                // background (home button, screen off). It used to keep
+                // ticking: photos advanced every 5s and popBackStack() fired
+                // with nobody watching, so the user came back to a closed
+                // viewer several statuses further on.
+                if (showViewers || replyFocused || !Store.foreground) {
                     delay(100)
                     continue
                 }
@@ -585,7 +590,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
         } else {
             var elapsed = 0L
             while (elapsed < hold) {
-                if (showViewers || replyFocused) {
+                if (showViewers || replyFocused || !Store.foreground) {
                     delay(100)
                     continue
                 }
@@ -1298,10 +1303,21 @@ private fun StatusVideoPlayer(
 
     // The progress BAR follows the PLAYER's real position — the stored
     // `seconds` metadata used to drift 1-2s from the compressed clip.
+    // Round 27: the clip pauses in the background too (Store.foreground is a
+    // plain flag, not Compose state — so it is polled here, alongside the
+    // 50ms progress tick, rather than passed in as a parameter).
     LaunchedEffect(player, paused) {
+        // Local to the effect on purpose: a restart (new player / pause flip)
+        // re-evaluates the background state from scratch.
+        var bgPaused = false
         while (true) {
             val p = player
-            if (p != null && !paused) {
+            val bg = !Store.foreground
+            if (bg != bgPaused) {
+                bgPaused = bg
+                p?.setPaused(paused || bg)
+            }
+            if (p != null && !paused && !bg) {
                 p.snapshot()?.let { (cur, dur, playing) ->
                     if (dur > 0 && playing) {
                         onProgress((cur.toFloat() / dur).coerceIn(0f, 1f))
@@ -1330,7 +1346,7 @@ private fun StatusVideoPlayer(
     // The clip PAUSES exactly when the progress clock pauses (views sheet open /
     // reply focused) — video and bar stay in lock-step instead of the video
     // running on.
-    LaunchedEffect(player, paused) { player?.setPaused(paused) }
+    LaunchedEffect(player, paused) { player?.setPaused(paused || !Store.foreground) }
 
     val ready = path
     if (ready == null) {
