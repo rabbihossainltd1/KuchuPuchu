@@ -4371,6 +4371,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const msgId = reactMatch[1]!;
     const row = await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", msgId);
     if (!row) fail(404, "Message not found.");
+    // Round 27: an unsent message is gone (owner rule) — the app hides the
+    // bubble, but the API still took reactions on the row and the recipient's
+    // list then showed an emoji on nothing.
+    if (row.kind === "DELETED") fail(404, "Message not found.");
     await requireMember(db, row.conv_id, uid);
     const emoji = String(body.emoji || "")
       .trim()
@@ -5142,9 +5146,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     let replyTo: string | null = null;
     const rawReplyTo = String(body.replyTo || "").slice(0, 64);
     if (rawReplyTo) {
+      // Round 27: ... and must not be an unsent row — a quote of a vanished
+      // message would render an empty reply header.
       const target = await one<{ id: string }>(
         db,
-        "SELECT id FROM messages WHERE id = ? AND conv_id = ? LIMIT 1",
+        "SELECT id FROM messages WHERE id = ? AND conv_id = ? AND kind != 'DELETED' LIMIT 1",
         rawReplyTo,
         convId,
       );

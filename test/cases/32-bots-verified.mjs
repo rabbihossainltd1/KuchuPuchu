@@ -1858,6 +1858,28 @@ const convBetween = (db, a, b) =>
     row.unread === 1 && row.lastMessage === "unread",
     `unread=${row.unread} preview=${JSON.stringify(row.lastMessage)} m4=${m4.status}`,
   );
+
+  // The server refuses to hang anything on a vanished row (the app already hides it).
+  const gone = await k.call(`POST`, `/api/conversations/${cid}/messages`, { body: "bye" }, a.token);
+  const goneId = gone.json.message.id;
+  await k.call("DELETE", `/api/messages/${goneId}`, undefined, a.token);
+  const react = await k.call("POST", `/api/messages/${goneId}/react`, { emoji: "❤️" }, b.token);
+  check(
+    "r27: reacting to an unsent message is refused (404)",
+    react.status === 404,
+    `${react.status}`,
+  );
+  const reply = await k.call(
+    "POST",
+    `/api/conversations/${cid}/messages`,
+    { body: "re", replyTo: goneId },
+    b.token,
+  );
+  check(
+    "r27: a reply quoting an unsent message still sends, but the dead quote is dropped",
+    reply.status === 201 && !reply.json.message.replyTo,
+    `${reply.status} replyTo=${JSON.stringify(reply.json.message?.replyTo)}`,
+  );
 }
 
 console.log(lines.join("\n"));
