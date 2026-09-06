@@ -165,9 +165,12 @@ async function main() {
 
     const del = await h.call("DELETE", `/api/messages/${id}`, undefined, B.token);
     check("delete-for-everyone answers ok", del.status === 200, `${del.status}`);
+    // Round 27: a DELETED message VANISHES (owner rule r25) — the preview no
+    // longer says "Message deleted"; it falls back to the previous visible row
+    // (none here, so it clears) and never keeps the unsent text.
     check(
-      "the preview says it was deleted instead of keeping the text",
-      (await preview(A)) === "Message deleted",
+      "the preview drops the unsent text (falls back / clears, never 'Message deleted')",
+      (await preview(A)) !== "the corrected wording" && (await preview(A)) !== "Message deleted",
       JSON.stringify(await preview(A)),
     );
 

@@ -1803,6 +1803,63 @@ const convBetween = (db, a, b) =>
   );
 }
 
+// ---- round 27: an unsent message takes its unread count and its preview with it ----
+{
+  const k = await mk();
+  const a = await k.reg("uns-a@x.com", "unsa");
+  const b = await k.reg("uns-b@x.com", "unsb");
+  const cid = (await k.call("POST", "/api/conversations", { userId: b.user.id }, a.token)).json
+    .conversation.id;
+  const listB = async () =>
+    (await k.call("GET", "/api/conversations", undefined, b.token)).json.items.find(
+      (c) => c.id === cid,
+    );
+  const m1 = await k.call("POST", `/api/conversations/${cid}/messages`, { body: "first" }, a.token);
+  const m2 = await k.call("POST", `/api/conversations/${cid}/messages`, { body: "oops" }, a.token);
+  let row = await listB();
+  check(
+    "r27: two sends = badge 2, preview is the newest",
+    row.unread === 2 && row.lastMessage === "oops",
+  );
+  await k.call("DELETE", `/api/messages/${m2.json.message.id}`, undefined, a.token);
+  row = await listB();
+  check(
+    "r27: unsend the newest -> badge 1, preview falls back to the previous message (no 'Message deleted')",
+    row.unread === 1 &&
+      row.lastMessage === "first" &&
+      row.lastMessageAt === m1.json.message.createdAt,
+    `unread=${row.unread} preview=${JSON.stringify(row.lastMessage)}`,
+  );
+  await k.call("DELETE", `/api/messages/${m1.json.message.id}`, undefined, a.token);
+  row = await listB();
+  check(
+    "r27: unsend the last one too -> badge 0, preview empty",
+    row.unread === 0 && !row.lastMessage,
+    `unread=${row.unread} preview=${JSON.stringify(row.lastMessage)}`,
+  );
+  // Already-read messages must not be double-counted: B reads, A unsends.
+  const m3 = await k.call(
+    "POST",
+    `/api/conversations/${cid}/messages`,
+    { body: "read me" },
+    a.token,
+  );
+  await k.call("POST", `/api/conversations/${cid}/read`, {}, b.token);
+  const m4 = await k.call(
+    "POST",
+    `/api/conversations/${cid}/messages`,
+    { body: "unread" },
+    a.token,
+  );
+  await k.call("DELETE", `/api/messages/${m3.json.message.id}`, undefined, a.token);
+  row = await listB();
+  check(
+    "r27: unsending an already-READ message leaves the badge alone (still 1 for the unread one)",
+    row.unread === 1 && row.lastMessage === "unread",
+    `unread=${row.unread} preview=${JSON.stringify(row.lastMessage)} m4=${m4.status}`,
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`bots-verified: ${lines.length - broken} ok / ${broken} broken`);

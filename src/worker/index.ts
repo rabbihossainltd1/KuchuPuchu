@@ -6531,19 +6531,66 @@ async function syncPreviewAfterEdit(db: D1Database, msg: MsgRow, body: string) {
   );
 }
 
+/**
+ * Round 27: an unsent message VANISHES (owner rule) — so the chat list must
+ * not keep advertising it. Two things used to stick:
+ *  - the badge: `members.unread` was bumped on send and never taken back, so
+ *    "sent 2, unsent both" left the recipient with a 2 on a chat that opens
+ *    empty;
+ *  - the preview: the literal "Message deleted" stayed as the row's text.
+ * Now every member who has not read past the row gives the count back (floor
+ * 0), and when the row was the newest one the preview + order fall back to
+ * the previous visible message — or clear entirely when nothing is left.
+ */
 async function syncPreviewAfterDelete(db: D1Database, row: MsgRow) {
+  await run(
+    db,
+    `UPDATE members SET unread = MAX(unread - 1, 0)
+      WHERE conv_id = ? AND user_id != ? AND (last_read_at IS NULL OR last_read_at < ?)`,
+    row.conv_id,
+    row.sender_id,
+    row.created_at,
+  );
   const conv = await one<{ last_message_at: string | null }>(
     db,
     "SELECT last_message_at FROM conversations WHERE id = ?",
     row.conv_id,
   );
   if (!conv || conv.last_message_at !== row.created_at) return;
+  const prev = await one<MsgRow>(
+    db,
+    `SELECT * FROM messages
+      WHERE conv_id = ? AND kind != 'DELETED' AND created_at < ?
+      ORDER BY created_at DESC LIMIT 1`,
+    row.conv_id,
+    row.created_at,
+  );
   await run(
     db,
-    "UPDATE conversations SET last_message = ? WHERE id = ?",
-    "Message deleted",
+    "UPDATE conversations SET last_message = ?, last_message_at = ? WHERE id = ?",
+    prev ? previewOf(prev) : null,
+    prev ? prev.created_at : null,
     row.conv_id,
   );
+}
+
+/** Chat-list preview text for a stored row — mirrors what the send path writes. */
+function previewOf(row: MsgRow): string {
+  const meta = parseJson<{ name?: string; voice?: boolean }>(row.meta_json, {});
+  switch (row.kind) {
+    case "STICKER":
+      return "Sticker";
+    case "IMAGE":
+      return row.body || "Photo";
+    case "VIDEO":
+      return row.body || "Video";
+    case "FILE":
+      return row.body || (meta.voice ? "Voice message" : String(meta.name || "File"));
+    case "CALL":
+      return row.body || "Call";
+    default:
+      return (row.body || "Message").slice(0, 120);
+  }
 }
 
 /** Edit/delete fan-out: the room for the open chat, `user:<id>` for everyone's
