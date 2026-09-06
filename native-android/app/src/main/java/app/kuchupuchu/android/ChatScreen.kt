@@ -83,6 +83,7 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PermMedia
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.DropdownMenu
@@ -1707,14 +1708,28 @@ fun ChatScreen(nav: NavController, convId: String) {
                         leadingIcon = { Icon(Icons.Filled.GroupAdd, null, tint = ActionBlueDeep) },
                         onClick = { menuOpen = false; nav.navigate("newgroup") },
                     )
-                    DropdownMenuItem(
-                        text = { Text("View contact", color = Ink) },
-                        leadingIcon = { Icon(Icons.Filled.Person, null, tint = ActionBlueDeep) },
-                        onClick = {
-                            menuOpen = false
-                            if (!isGroup && otherId.isNotBlank()) nav.navigate("profile/$otherId")
-                        },
-                    )
+                    if (!isGroup && otherId.isNotBlank()) {
+                        // Owner round 30: "View contact" only when this person is
+                        // already in the phone book; otherwise offer to add them
+                        // (name — and number, when they share it — pre-filled).
+                        val inBook = PhoneBook.entries.any { it.user?.optString("id") == otherId }
+                        DropdownMenuItem(
+                            text = { Text(if (inBook) "View contact" else "Add contact", color = Ink) },
+                            leadingIcon = {
+                                Icon(if (inBook) Icons.Filled.Person else Icons.Filled.PersonAdd, null, tint = ActionBlueDeep)
+                            },
+                            onClick = {
+                                menuOpen = false
+                                if (inBook) {
+                                    nav.navigate("profile/$otherId")
+                                } else {
+                                    val n = android.net.Uri.encode(rawTitle.trim())
+                                    val p = android.net.Uri.encode(c?.optJSONObject("other")?.optText("phone").orEmpty())
+                                    nav.navigate("newcontact?name=$n&phone=$p")
+                                }
+                            },
+                        )
+                    }
                     DropdownMenuItem(
                         // Owner round 15: this opened the GLOBAL search —
                         // in a chat, search means THIS conversation.

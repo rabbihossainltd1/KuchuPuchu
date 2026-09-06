@@ -292,12 +292,12 @@ fun AllContactsScreen(nav: NavController) {
  * KuchuPuchu: a match offers Chat right here, otherwise Invite.
  */
 @Composable
-fun NewContactScreen(nav: NavController) {
+fun NewContactScreen(nav: NavController, initialName: String = "", initialPhone: String = "") {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val haptics = rememberHaptics()
-    var name by remember { mutableStateOf("") }
-    var phone by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf(initialName) }
+    var phone by remember { mutableStateOf(initialPhone) }
     var error by remember { mutableStateOf("") }
     var checking by remember { mutableStateOf(false) }
     var match by remember { mutableStateOf<JSONObject?>(null) }

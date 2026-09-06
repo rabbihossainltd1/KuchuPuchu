@@ -16,6 +16,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -126,7 +127,16 @@ fun KpApp() {
                 // Owner round 28: home ⋮ menu destinations.
                 composable("about") { AboutScreen(nav) }
                 composable("contacts") { AllContactsScreen(nav) }
-                composable("newcontact") { NewContactScreen(nav) }
+                composable(
+                    "newcontact?name={name}&phone={phone}",
+                    arguments = listOf(navArgument("name") { defaultValue = "" }, navArgument("phone") { defaultValue = "" }),
+                ) { entry ->
+                    NewContactScreen(
+                        nav,
+                        initialName = entry.arguments?.getString("name") ?: "",
+                        initialPhone = entry.arguments?.getString("phone") ?: "",
+                    )
+                }
                 // Owner round 22: per-field profile edit screens.
                 composable("editfield/name") { EditNameScreen(nav) }
                 composable("editfield/username") { EditUsernameScreen(nav) }

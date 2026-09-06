@@ -2240,9 +2240,11 @@ const convBetween = (db, a, b) =>
       ) &&
       (list.match(/HomeMenuItem\(Icons/g) || []).length === 6 &&
       list.includes('nav.navigate("profile/${Store.myId()}")') &&
-      ["about", "contacts", "newcontact", "newgroup", "settings"].every((r) =>
+      ["about", "contacts", "newgroup", "settings"].every((r) =>
         kpapp.includes(`composable("${r}")`),
       ) &&
+      // r30-1: the new-contact route takes optional prefill args (name, phone).
+      kpapp.includes('"newcontact?name={name}&phone={phone}"') &&
       list.includes(
         "containerColor = Card,\n                        shape = RoundedCornerShape(16.dp)",
       ),
