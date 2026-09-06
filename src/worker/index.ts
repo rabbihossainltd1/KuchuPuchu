@@ -3241,8 +3241,23 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       `SELECT device_id FROM auth_devices WHERE user_id = ? AND status = 'ACTIVE'`,
       user.id,
     );
+    // Owner round 28: an ACTIVE device row whose install holds NO live session
+    // any more is a signed-out phone (the logout request never reached the
+    // worker — offline, killed mid-request, app data cleared, reinstall). Only a
+    // device that can still open the app can approve, so such a row must not
+    // gate the login behind an approval nobody is able to give ("onno device
+    // login korte gele approval chai") — treat it exactly like a clean logout.
+    const activeDeviceLive =
+      !!activeDevice &&
+      !!(await one<{ n: number }>(
+        db,
+        `SELECT 1 AS n FROM sessions WHERE user_id = ? AND device_id = ? AND expires_at > ? LIMIT 1`,
+        user.id,
+        activeDevice.device_id,
+        nowIso(),
+      ));
 
-    if (!activeDevice || activeDevice.device_id === deviceId) {
+    if (!activeDevice || activeDevice.device_id === deviceId || !activeDeviceLive) {
       // Same install (or no active device anywhere — e.g. after logout):
       // restore/create the session directly (§13/§24).
       const { token, stmt } = await sessionStmt(db, user.id, deviceId);
@@ -3588,6 +3603,15 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   if (path === "/api/auth/logout" && method === "POST") {
     const token = bearerToken(request);
+    // Owner round 28: the install can name the exact push handle it is
+    // signing out. A token is a capability only its holder has (FCM hands it
+    // to that one app instance), so deleting BY TOKEN needs no session — this
+    // is what makes "logout while the session was already revoked/expired"
+    // stop pushing at the phone: the bearer is dead, but the device row is not.
+    const pushToken = String(body.pushToken || "")
+      .trim()
+      .slice(0, 512);
+    if (pushToken) await run(db, "DELETE FROM devices WHERE token = ?", pushToken);
     if (token) {
       const hash = await sha256Hex(token);
       // The session and the push handle die together — and ONLY this device's row.
@@ -3625,6 +3649,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           deviceId,
         );
       }
+      if (owner) await audit(db, "LOGOUT", owner.user_id, deviceId || null, {});
     }
     return json({ ok: true });
   }

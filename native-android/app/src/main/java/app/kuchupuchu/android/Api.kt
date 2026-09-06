@@ -58,7 +58,12 @@ object Api {
             .build()
     }
 
+    /** Application context, kept from the first loadToken() — the remote
+     *  sign-out path needs one even when no Activity is alive (FCM wake). */
+    @Volatile private var appCtx: Context? = null
+
     fun loadToken(ctx: Context) {
+        appCtx = ctx.applicationContext
         token = ctx.getSharedPreferences("kp", 0).getString(TOKEN_KEY, null)
     }
 
@@ -236,11 +241,23 @@ object Api {
                 }
                 // An expired/revoked session used to surface as empty screens with
                 // no way out. Flip the auth gate so the login screen comes back.
-                if (resp.code == 401 && !token.isNullOrBlank()) {
+                // Only when the rejected bearer IS the current one: a request
+                // that left before a fresh login landed must not sign the new
+                // session out when its stale 401 arrives late.
+                val current = token
+                if (resp.code == 401 && !current.isNullOrBlank() &&
+                    resp.request.header("Authorization") == "Bearer $current"
+                ) {
                     token = null
                     // Post to main thread: Compose state must be written on Main.
+                    // Owner round 28: this is a sign-out too (the session was
+                    // revoked elsewhere — a login on another phone, or expiry),
+                    // so the push handle and the live sockets go the same way
+                    // they do on a manual logout; otherwise the old account's
+                    // notifications kept landing on this phone.
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                         Store.authed.value = false
+                        (appCtx ?: MainActivity.current)?.let { Store.signOut(it, revokedRemotely = true) }
                     }
                 }
                 throw ApiException(resp.code, msg)
@@ -406,6 +423,16 @@ object KpSocket {
         if (c.want && (c.ws != null || c.connecting)) return
         c.want = true
         connect(c)
+    }
+
+    /**
+     * Owner round 28: sign-out closes EVERY channel. The user socket is owned by
+     * the process (MainActivity.joinUser) and used to stay open after logout —
+     * the old account's live "conv"/"message" frames kept arriving and played
+     * the in-app tone / repainted lists on a phone that had just signed out.
+     */
+    fun closeAll() {
+        conns.keys.toList().forEach { leave(it) }
     }
 
     fun leave(path: String) {

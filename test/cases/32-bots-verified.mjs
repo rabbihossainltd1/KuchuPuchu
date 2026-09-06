@@ -2130,6 +2130,98 @@ const convBetween = (db, a, b) =>
   );
 }
 
+// ── r28-4: sign-out really ends the account on that phone ─────────────────────
+// Owner: "logout korleo message notification ashe" + "onno device login korte
+// gele approval chai". Three server rules, each locked here:
+//  (a) logout may name the push token → that push row dies even WITHOUT a
+//      session (the app signs out locally after any 401; the bearer is gone by
+//      the time it can tell the server, the device row was not);
+//  (b) an ACTIVE auth_device whose install holds no live session is a signed-out
+//      phone: the next login on ANY device is a plain SESSION, no approval;
+//  (c) a device that still holds a session keeps its approval gate.
+{
+  const k = await mk();
+  const a = await k.reg("so@x.com", "so");
+  const devA = `dev-so`; // makeReg's deviceId for username "so"
+  await k.call("POST", "/api/devices", { token: "fcm-so-1", deviceId: devA }, a.token);
+  await k.call("POST", "/api/devices", { token: "fcm-so-2", deviceId: "dev-so-tablet" }, a.token);
+  // (a) no bearer at all, just the token
+  const lo = await k.call("POST", "/api/auth/logout", { pushToken: "fcm-so-1" });
+  const left = k.db._db
+    .prepare("SELECT token FROM devices WHERE user_id = ? ORDER BY token")
+    .all(a.user.id)
+    .map((r) => r.token);
+  check(
+    "r28-4a: logout by pushToken without a session deletes exactly that push row",
+    lo.status === 200 && left.length === 1 && left[0] === "fcm-so-2",
+    JSON.stringify(left),
+  );
+  // (c) session still alive on devA → another install still needs approval
+  const gate = await k.call("POST", "/api/auth/verify-phone", {
+    phone: a.user.phone,
+    sim: "MATCH",
+    deviceId: "dev-so-new",
+    deviceName: "Other phone",
+  });
+  check(
+    "r28-4c: a device that still holds a session keeps the approval gate",
+    gate.json.status === "APPROVAL_REQUIRED",
+    gate.json.status,
+  );
+  await k.call("POST", "/api/auth/login/cancel", {
+    requestId: gate.json.requestId,
+    deviceId: "dev-so-new",
+  });
+  // (b) the session dies without the logout request reaching the worker
+  // (killed mid-request / offline / data cleared) → the ACTIVE row is stale
+  k.db._db.prepare("DELETE FROM sessions WHERE user_id = ?").run(a.user.id);
+  const active = k.db._db
+    .prepare("SELECT status FROM auth_devices WHERE user_id = ? AND device_id = ?")
+    .get(a.user.id, devA);
+  const plain = await k.call("POST", "/api/auth/verify-phone", {
+    phone: a.user.phone,
+    sim: "MATCH",
+    deviceId: "dev-so-new",
+    deviceName: "Other phone",
+  });
+  check(
+    "r28-4b: a signed-out install (ACTIVE row, no live session) no longer demands an approval",
+    active?.status === "ACTIVE" && plain.json.status === "SESSION" && !!plain.json.token,
+    `row=${active?.status} status=${plain.json.status}`,
+  );
+  const audit = k.db._db
+    .prepare("SELECT event FROM auth_audit WHERE user_id = ? ORDER BY created_at DESC")
+    .all(a.user.id)
+    .map((r) => r.event);
+  check("r28-4: the new login is audited as LOGIN", audit.includes("LOGIN"), JSON.stringify(audit));
+  // app side: one teardown for every sign-out path
+  const store = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/Store.kt",
+    "utf8",
+  );
+  const api = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/Api.kt",
+    "utf8",
+  );
+  check(
+    "r28-4: app sign-out closes the sockets, releases push (token + FCM), clears the account, and the 401 path runs it too",
+    store.includes("fun signOut(ctx: Context, revokedRemotely: Boolean = false)") &&
+      store.includes("KpSocket.closeAll()") &&
+      store.includes("KpPush.unregister()") &&
+      store.includes("ScreenStore.clearAccount()") &&
+      store.includes('JSONObject().put("pushToken", pushToken)') &&
+      api.includes("Store.signOut(it, revokedRemotely = true)") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/SettingsScreen.kt",
+        "utf8",
+      ).includes('.put("pushToken", KpPush.registeredToken(ctx) ?: "")') &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/LoginScreen.kt",
+        "utf8",
+      ).includes("KpSocket.joinUser()"),
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`bots-verified: ${lines.length - broken} ok / ${broken} broken`);

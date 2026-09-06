@@ -168,6 +168,10 @@ fun LoginScreen(onAuthed: () -> Unit) {
         Store.saveMe(data.optJSONObject("user") ?: JSONObject())
         onAuthed()
         val appCtx = ctx.applicationContext
+        // Owner round 28: sign-out closes the process-level user socket, so a
+        // login in the same process has to open it again (MainActivity only
+        // joins it in onCreate).
+        KpSocket.joinUser()
         scope.launch(Dispatchers.IO) {
             runCatching { if (KpPush.tryInit(appCtx)) KpPush.registerToken(appCtx) }
         }

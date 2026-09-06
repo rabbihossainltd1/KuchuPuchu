@@ -426,10 +426,10 @@ has(list, "Api.PollCadence.failed()", "…and a bad one starts it");
   has(dr, "MAX_CHARS", "…and the cap mirrors the server's MESSAGE_MAX_LENGTH");
   has(kt("Store.kt"), "Drafts.init(ctx)", "the store is loaded at startup, not on first paint");
   const so = kt("Store.kt");
-  const soStart = so.indexOf("fun signOut(ctx: Context)");
+  const soStart = so.indexOf("fun signOut(ctx: Context, revokedRemotely: Boolean = false)");
   check(
     "sign-out clears drafts BEFORE wiping the caches",
-    soStart > 0 && so.slice(soStart, soStart + 400).includes("Drafts.clearAll()"),
+    soStart > 0 && so.slice(soStart, soStart + 1400).includes("Drafts.clearAll()"),
     `index=${soStart}`,
   );
   const chat = kt("ChatScreen.kt");

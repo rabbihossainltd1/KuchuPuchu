@@ -453,11 +453,17 @@ fun SettingsScreen(nav: NavController) {
                         // this install's push row in the same request: while the
                         // bearer is still valid, and without touching the user's
                         // other devices.
+                        // Owner round 28: the accepted FCM token travels too, so
+                        // the worker deletes exactly this push row even if the
+                        // session had already been revoked (a 401 here used to
+                        // leave the row behind = notifications after logout).
                         runCatching {
                             withContext(Dispatchers.IO) {
                                 Api.post(
                                     "/api/auth/logout",
-                                    org.json.JSONObject().put("deviceId", KpPush.deviceId(ctx)),
+                                    org.json.JSONObject()
+                                        .put("deviceId", KpPush.deviceId(ctx))
+                                        .put("pushToken", KpPush.registeredToken(ctx) ?: ""),
                                 )
                             }
                         }

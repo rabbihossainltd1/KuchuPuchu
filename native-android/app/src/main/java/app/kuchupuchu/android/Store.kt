@@ -59,11 +59,36 @@ object Store {
 
     fun myId(): String = me?.optString("id") ?: ""
 
-    fun signOut(ctx: Context) {
+    /**
+     * Local sign-out. `revokedRemotely` = the server already killed the session
+     * (401): there is no bearer left to send, but the push handle must still be
+     * released — by token, which the worker accepts without a session.
+     *
+     * Owner round 28 ("logout korleo notification ashe"): every path that ends a
+     * session runs the SAME teardown — push row + FCM token, live sockets, the
+     * cached screens of the old account, and its shown notifications.
+     */
+    fun signOut(ctx: Context, revokedRemotely: Boolean = false) {
+        if (revokedRemotely && me == null && Api.token.isNullOrBlank()) return
+        val app = ctx.applicationContext
+        val pushToken = KpPush.registeredToken(app)
+        if (revokedRemotely && !pushToken.isNullOrBlank()) {
+            // Session gone → an authenticated call is impossible; the token
+            // alone identifies the row. Fire-and-forget off the main thread.
+            Thread {
+                runCatching {
+                    Api.request("/api/auth/logout", "POST", JSONObject().put("pushToken", pushToken))
+                }
+            }.start()
+        }
         me = null
         route = ""
         authed.value = false
+        KpSocket.closeAll()
+        KpPush.unregister()
+        runCatching { KpNotify.cancelAll(app) }
         ScreenStore.clearMsgs()
+        ScreenStore.clearAccount()
         Drafts.clearAll()
         Cache.bustAll("")
         Cache.clearDisk()

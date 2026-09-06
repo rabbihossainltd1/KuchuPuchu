@@ -186,6 +186,14 @@ object KpPush {
         }.start()
     }
 
+    /**
+     * The FCM token the worker last ACCEPTED for this install (null when none
+     * got through). Sign-out sends it with the logout request so the worker can
+     * delete exactly this push row even when the session bearer is already dead.
+     */
+    fun registeredToken(ctx: Context): String? =
+        ctx.applicationContext.getSharedPreferences("kp_push", Context.MODE_PRIVATE).getString("registered", null)
+
     /** Removes this device from push delivery (logout). */
     fun unregister() {
         if (!enabled) return
@@ -197,6 +205,7 @@ object KpPush {
         }
         enabled = false
         decided = false
+        registered = false
     }
 
     /** Set once by ensure() so logout-side clean-up has a Context to work with. */

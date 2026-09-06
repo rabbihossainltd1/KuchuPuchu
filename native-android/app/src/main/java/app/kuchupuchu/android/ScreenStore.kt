@@ -520,6 +520,31 @@ object ScreenStore {
         convDetail.clear()
     }
 
+    /**
+     * Owner round 28: everything that belongs to the ACCOUNT (not the install)
+     * goes at sign-out — lists, markers, unread bumps, per-user chat ids, the
+     * approval decisions and the on-disk snapshot. The next account must not
+     * open on the previous one's chats for a frame, and a stale marker must
+     * not make its first list sync come back "unchanged".
+     */
+    @Synchronized
+    fun clearAccount() {
+        convs.clear()
+        convsRaw = ""
+        convsLoaded = false
+        convsMarker = ""
+        calls.clear()
+        callsRaw = ""
+        statuses.clear()
+        statusesRaw = ""
+        lastNotifiedAt.clear()
+        convIdForUser.clear()
+        loginApprovals.clear()
+        pendingChatSearch = null
+        runCatching { disk?.delete() }
+        dirty.set(false)
+    }
+
     @Synchronized
     fun setStatuses(list: List<JSONObject>) {
         val raw = list.joinToString(",") { it.optString("id") + ":" + (it.optJSONObject("user")?.optString("id") ?: "") + ":" + it.arr("statuses").length() }
