@@ -4748,51 +4748,50 @@ private fun CallLogBubble(m: JSONObject, mine: Boolean, pendingEcho: Boolean, th
             declined -> "Declined"
             missed -> "No answer"
             seconds > 0 -> "%d:%02d".format(seconds / 60, seconds % 60)
-            else -> body.substringAfter("·").trim().ifBlank { " " }
+            else -> body.substringAfter("·").trim()
         }
+    // Owner round 31: ONE compact line — icon · "Voice call · 2:31" · time.
+    // (The three-line 205dp card was "onek messy".)
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        Modifier.fillMaxWidth().padding(vertical = 3.dp),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
         Row(
             Modifier
-                // Owner round 26: compact call chip (was a wide 260dp bubble).
-                .widthIn(max = 205.dp)
-                .clip(RoundedCornerShape(16.dp))
-                // Owner round 31: the call bubble is a message bubble — it
-                // takes the CHAT theme's fills exactly like a text bubble
-                // (it used to ignore mint/rose/night/cream).
+                .clip(RoundedCornerShape(14.dp))
                 .background(if (mine) chatMineFill(theme) else chatOtherFill(theme))
-                .padding(horizontal = 10.dp, vertical = 8.dp),
+                .padding(start = 8.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
                 Modifier
-                    .size(30.dp)
+                    .size(24.dp)
                     .clip(CircleShape)
                     .background(if (mine) Color(0x33FFFFFF) else chatAccent(theme).copy(alpha = 0.18f)),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    if (missed || declined) Icons.Filled.CallMissed else Icons.Filled.Call,
+                    if (missed || declined) Icons.Filled.CallMissed else if (video) Icons.Filled.Videocam else Icons.Filled.Call,
                     contentDescription = title,
                     tint = if (missed) Red else if (mine) Color.White else chatAccent(theme),
-                    modifier = Modifier.size(17.dp),
+                    modifier = Modifier.size(14.dp),
                 )
             }
             Spacer(Modifier.width(8.dp))
-            Column(Modifier.weight(1f)) {
-                Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ink, maxLines = 1)
-                Text(sub, fontSize = 11.sp, color = if (mine) Color(0xCCFFFFFF) else Muted, maxLines = 1)
-                // Owner round 25: the time sits at the bubble's bottom-right,
-                // like every other bubble's stamp.
-                Text(
-                    msgStamp(m.optString("createdAt")),
-                    fontSize = 10.sp,
-                    color = if (mine) Color(0xD9FFFFFF) else Muted,
-                    modifier = Modifier.align(Alignment.End),
-                )
-            }
+            Text(
+                if (sub.isBlank()) title else "$title · $sub",
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.Medium,
+                color = if (mine) Color.White else Ink,
+                maxLines = 1,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                msgStamp(m.optString("createdAt")),
+                fontSize = 10.sp,
+                color = if (mine) Color(0xD9FFFFFF) else Muted,
+                maxLines = 1,
+            )
         }
     }
 }

@@ -1718,7 +1718,9 @@ const convBetween = (db, a, b) =>
         "utf8",
       ).includes("88.dp, // Owner round 26") &&
       !settings.includes("plays for messages") &&
-      chat.includes(".widthIn(max = 205.dp)"),
+      // r31-13: the call chip is ONE line now (icon · "Voice call · 2:31" · time).
+      chat.includes('if (sub.isBlank()) title else "$title · $sub",') &&
+      !chat.includes(".widthIn(max = 205.dp)"),
   );
   check(
     "r26: voice sending line clear of the stamp; no in-bar clear cross in chat search",
