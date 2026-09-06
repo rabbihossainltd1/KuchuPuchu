@@ -1761,9 +1761,8 @@ const convBetween = (db, a, b) =>
         "containerColor = Card,\n        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)",
       ) &&
       statusKt.includes("paused = showViewers || menuOpen || replyFocused || holding,") &&
-      /AlertDialog\(\n\s+onDismissRequest = \{ confirmDelete = false \},\n\s+containerColor = Card,/.test(
-        statusKt,
-      ),
+      // r31-7: the confirm is a bottom sheet too (KpConfirmSheet on the Card surface).
+      /KpConfirmSheet\(\n\s+title = "Delete status\?",/.test(statusKt),
   );
   check(
     "r28-2: the session bearer goes to the worker host ONLY (GitHub 401'd the update check) + conditional release check",
@@ -2449,6 +2448,58 @@ const convBetween = (db, a, b) =>
         worker.includes("UPDATE members SET role = 'owner' WHERE conv_id = ? AND user_id = ?") &&
         kt("Ui.kt").includes('if (ownerId.startsWith("g:"))') &&
         kt("ChatListScreen.kt").includes('if (isGroup) conv.optIso("avatarRef")'),
+    );
+  }
+  // r31-7/10: no AlertDialog anywhere in the app — every popup is a KpSheet /
+  // KpConfirmSheet; the update flow is one sheet (offer → blue progress → Install).
+  {
+    const dir = "native-android/app/src/main/java/app/kuchupuchu/android/";
+    const withAlert = readdirSync(dir)
+      .filter((f) => f.endsWith(".kt"))
+      .filter((f) => readFileSync(dir + f, "utf8").includes("AlertDialog("));
+    check(
+      "r31-7: zero AlertDialog( call sites in the Android sources; the sheet kit lives in Ui.kt",
+      withAlert.length === 0 &&
+        ui.includes("fun KpSheet(") &&
+        ui.includes("fun KpSheetRow(") &&
+        ui.includes("fun KpConfirmSheet(") &&
+        ui.includes(
+          "containerColor = Card,\n        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)",
+        ),
+      JSON.stringify(withAlert),
+    );
+    const update = kt("KpUpdate.kt");
+    check(
+      "r31-10: update = KpSheet with ActionBlue progress (no Gold bar) and an explicit Install step (ready APK kept, installReady on tap)",
+      kpapp.includes("fun KpUpdateGate()") &&
+        kpapp.includes("KpSheet(") &&
+        kpapp.includes(
+          "color = ActionBlue,\n                        trackColor = ActionBlue.copy(alpha = 0.18f)",
+        ) &&
+        !kpapp.includes("color = Gold,") &&
+        kpapp.includes(
+          'GoldBtn("Install", Modifier.fillMaxWidth()) { scope.launch { KpUpdate.installReady(ctx) } }',
+        ) &&
+        update.includes("var ready by mutableStateOf<File?>(null)") &&
+        update.includes("ready = apk") &&
+        update.includes("suspend fun installReady(ctx: Context)") &&
+        !update.includes(
+          "withContext(Dispatchers.IO) { install(ctx, apk) }\n            available = null",
+        ),
+    );
+    check(
+      "r31-7: chat popups are sheets — edit message, disappearing timer, chat theme, text-file viewer; crash report + status delete too",
+      (() => {
+        const chat = kt("ChatScreen.kt");
+        return (
+          chat.includes('KpSheet(onDismiss = onClose, title = "Edit message")') &&
+          chat.includes('KpSheet(onDismiss = onClose, title = "Disappearing messages")') &&
+          chat.includes('KpSheet(onDismiss = onClose, title = "Chat theme")') &&
+          chat.includes("KpSheet(onDismiss = { textDoc = null }, title = fileName)") &&
+          kt("KpCrash.kt").includes('title = "Last crash report"') &&
+          kt("StatusScreens.kt").includes('title = "Delete status?"')
+        );
+      })(),
     );
   }
   {

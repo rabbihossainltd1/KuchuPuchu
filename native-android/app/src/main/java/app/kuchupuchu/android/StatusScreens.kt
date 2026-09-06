@@ -39,12 +39,10 @@ import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.RemoveRedEye
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -1137,23 +1135,17 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
     }
 
     if (confirmDelete) {
-        // Same theme surface + text tokens as every other confirm in the app
-        // (Settings → Log out): the M3 defaults painted a tinted panel with
-        // near-black text over the dark-blue palette.
-        AlertDialog(
-            onDismissRequest = { confirmDelete = false },
-            containerColor = Card,
-            titleContentColor = Ink,
-            textContentColor = Muted,
-            title = { Text("Delete status?", color = Ink) },
-            text = { Text("This status will be removed for everyone. It cannot be undone.", color = Muted) },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmDelete = false
-                    deleteStatus()
-                }) { Text("Delete", color = Red, fontWeight = FontWeight.SemiBold) }
+        // Owner round 31: bottom-sheet confirm (the app's one popup shape).
+        KpConfirmSheet(
+            title = "Delete status?",
+            text = "Removed for everyone.",
+            confirmLabel = "Delete",
+            danger = true,
+            onDismiss = { confirmDelete = false },
+            onConfirm = {
+                confirmDelete = false
+                deleteStatus()
             },
-            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel", color = Muted) } },
         )
     }
 }

@@ -6,7 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -17,8 +17,6 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,14 +24,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 
 /**
@@ -244,63 +238,61 @@ private fun askBatteryExemption(ctx: android.content.Context) {
 @Composable
 fun KpUpdateGate() {
     val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
     val upd = KpUpdate.available
-    when {
-        upd != null && !KpUpdate.downloading -> {
-            androidx.compose.material3.AlertDialog(
-                onDismissRequest = { KpUpdate.available = null },
-                containerColor = Card,
-                title = { Text("Update available", color = Ink) },
-                text = {
-                    Text(
-                        "A new version (v${'$'}{upd.first}) is ready. Update now — it downloads right here, no browser.",
-                        color = Muted,
-                        fontSize = 13.5.sp,
-                    )
-                },
-                confirmButton = {
-                    TextButton(onClick = { KpUpdate.available = null }) { Text("Later", color = Muted) }
-                },
-                dismissButton = {
-                    TextButton(onClick = {
-                        kotlinx.coroutines.GlobalScope.launch {
-                            KpUpdate.downloadAndInstall(ctx)
-                        }
-                    }) { Text("Update", color = GoldDeep, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold) }
-                },
-            )
-        }
-        KpUpdate.downloading -> {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(Color(0xB30D1524)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 26.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(Card)
-                        .padding(20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text("Downloading update", color = Ink, fontSize = 16.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
-                    Spacer(Modifier.height(12.dp))
+    val ready = KpUpdate.ready
+    val downloading = KpUpdate.downloading
+    if (upd == null && ready == null && !downloading) return
+    // Owner round 31: ONE bottom sheet for the whole flow — offer → progress →
+    // Install. The accent is the theme's action blue (no cream/gold bar), and
+    // the sheet never hides itself after the download: the user taps Install.
+    KpSheet(
+        onDismiss = {
+            if (!downloading) {
+                KpUpdate.available = null
+                KpUpdate.ready = null
+            }
+        },
+        title =
+            when {
+                ready != null -> "Update ready"
+                downloading -> "Downloading update"
+                else -> "Update available"
+            },
+    ) {
+        Column(Modifier.padding(horizontal = 14.dp)) {
+            when {
+                ready != null -> {
+                    Text("v${upd?.first ?: ""} downloaded.", color = Muted, fontSize = 13.5.sp)
+                    Spacer(Modifier.height(14.dp))
+                    GoldBtn("Install", Modifier.fillMaxWidth()) { scope.launch { KpUpdate.installReady(ctx) } }
+                }
+                downloading -> {
                     LinearProgressIndicator(
                         progress = { KpUpdate.progress },
-                        color = Gold,
+                        color = ActionBlue,
+                        trackColor = ActionBlue.copy(alpha = 0.18f),
                         modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
                     )
                     Spacer(Modifier.height(8.dp))
-                    Text("${'$'}{(KpUpdate.progress * 100).toInt()}%", color = GoldDeep, fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
-                    if (KpUpdate.downloadError.isNotBlank()) {
-                        Spacer(Modifier.height(8.dp))
-                        Text(KpUpdate.downloadError, color = Red, fontSize = 12.sp)
-                    }
+                    Text(
+                        "${(KpUpdate.progress * 100).toInt()}%",
+                        color = ActionBlueDeep,
+                        fontSize = 14.sp,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                    )
+                }
+                else -> {
+                    Text("v${upd?.first} is ready to download.", color = Muted, fontSize = 13.5.sp)
+                    Spacer(Modifier.height(14.dp))
+                    GoldBtn("Update", Modifier.fillMaxWidth()) { scope.launch { KpUpdate.downloadAndInstall(ctx) } }
                 }
             }
+            if (KpUpdate.downloadError.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text(KpUpdate.downloadError, color = Red, fontSize = 12.sp)
+            }
+            Spacer(Modifier.height(6.dp))
         }
     }
 }

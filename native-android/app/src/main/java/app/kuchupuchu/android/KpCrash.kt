@@ -5,11 +5,12 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -112,10 +113,9 @@ fun KpCrashReportDialog() {
         report = withContext(Dispatchers.IO) { KpCrash.lastReport(ctx) }
     }
     val rep = report ?: return
-    AlertDialog(
-        onDismissRequest = {},
-        title = { Text("Last crash report", color = Ink) },
-        text = {
+    // Owner round 31: a bottom sheet like every popup in the app.
+    KpSheet(onDismiss = { KpCrash.clear(ctx); report = null }, title = "Last crash report") {
+        androidx.compose.foundation.layout.Column(Modifier.padding(horizontal = 14.dp)) {
             Text(
                 rep,
                 color = Muted,
@@ -126,20 +126,17 @@ fun KpCrashReportDialog() {
                         .heightIn(max = 340.dp)
                         .verticalScroll(rememberScrollState()),
             )
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    runCatching {
-                        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        cm.setPrimaryClip(ClipData.newPlainText("kp-crash", rep))
-                    }
-                    Toast.makeText(ctx, "Copied — paste it to the developer", Toast.LENGTH_SHORT).show()
-                },
-            ) { Text("Copy report", color = GoldDeep, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold) }
-        },
-        dismissButton = {
-            TextButton(onClick = { KpCrash.clear(ctx); report = null }) { Text("Dismiss", color = Muted) }
-        },
-    )
+            androidx.compose.foundation.layout.Spacer(Modifier.height(12.dp))
+            GoldBtn("Copy", Modifier.fillMaxWidth()) {
+                runCatching {
+                    val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(ClipData.newPlainText("kp-crash", rep))
+                }
+                Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show()
+                KpCrash.clear(ctx)
+                report = null
+            }
+            androidx.compose.foundation.layout.Spacer(Modifier.height(6.dp))
+        }
+    }
 }

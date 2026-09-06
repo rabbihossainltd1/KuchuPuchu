@@ -32,6 +32,10 @@ object KpUpdate {
     var progress by mutableStateOf(0f) // 0..1
     var downloadError by mutableStateOf("")
 
+    // Owner round 31: the downloaded APK waits here until the user taps
+    // Install — the sheet never vanishes on its own after the download.
+    var ready by mutableStateOf<File?>(null)
+
     fun installedVersionCode(ctx: Context): Int =
         runCatching {
                 val pi = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
@@ -100,14 +104,15 @@ object KpUpdate {
         }
     }
 
-    /** Streams the APK to app storage with progress, then hands it to the
-     *  system installer — the whole flow stays inside the app. */
+    /** Streams the APK to app storage with progress; the sheet then offers
+     *  Install (owner round 31 — it used to fire the installer and hide). */
     suspend fun downloadAndInstall(ctx: Context) {
         val pair = available ?: return
         val (_, url) = pair
         downloading = true
         progress = 0f
         downloadError = ""
+        ready = null
         try {
             val apk = withContext(Dispatchers.IO) {
                 val req = okhttp3.Request.Builder().url(url).build()
@@ -132,13 +137,19 @@ object KpUpdate {
                     out
                 }
             }
-            withContext(Dispatchers.IO) { install(ctx, apk) }
-            available = null
+            ready = apk
         } catch (e: Exception) {
             downloadError = e.message ?: "Download failed"
         } finally {
             downloading = false
         }
+    }
+
+    /** The Install tap: hands the downloaded APK to the system installer. */
+    suspend fun installReady(ctx: Context) {
+        val apk = ready ?: return
+        runCatching { withContext(Dispatchers.IO) { install(ctx, apk) } }
+            .onFailure { downloadError = it.message ?: "Install failed" }
     }
 
     /** PackageInstaller session — Android shows its confirm sheet ON TOP of

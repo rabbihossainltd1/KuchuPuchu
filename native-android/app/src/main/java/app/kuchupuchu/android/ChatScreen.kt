@@ -89,13 +89,11 @@ import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.foundation.layout.wrapContentWidth
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -142,6 +140,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.navigation.NavController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -2796,27 +2795,33 @@ private fun ImageViewerDialog(
 /** Edit window: one minute from send, text messages only (enforced server-side too). */
 @Composable
 private fun EditDialog(original: String, onClose: () -> Unit, onSave: (String) -> Unit) {
+    // Owner round 31: a bottom sheet, like every other popup in the app.
     var text by remember { mutableStateOf(original) }
-    AlertDialog(
-        onDismissRequest = onClose,
-        title = { Text("Edit message") },
-        text = {
+    KpSheet(onDismiss = onClose, title = "Edit message") {
+        Column(Modifier.padding(horizontal = 14.dp).imePadding()) {
             OutlinedTextField(
                 text,
                 { text = it.take(4000) },
                 singleLine = false,
-            shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(14.dp),
                 maxLines = 4,
+                colors =
+                    OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = ActionBlue,
+                        unfocusedBorderColor = Line,
+                        cursorColor = ActionBlue,
+                        focusedTextColor = Ink,
+                        unfocusedTextColor = Ink,
+                    ),
                 modifier = Modifier.fillMaxWidth(),
             )
-        },
-        confirmButton = {
-            TextButton(onClick = { if (text.isNotBlank()) onSave(text.trim()) }, enabled = text.isNotBlank()) {
-                Text("Save", color = GoldDeep, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(12.dp))
+            GoldBtn("Save", Modifier.fillMaxWidth(), enabled = text.isNotBlank() && text.trim() != original) {
+                onSave(text.trim())
             }
-        },
-        dismissButton = { TextButton(onClick = onClose) { Text("Cancel", color = Muted) } },
-    )
+            Spacer(Modifier.height(6.dp))
+        }
+    }
 }
 
 /** Pick a conversation to forward the selected message(s) to. */
@@ -4335,30 +4340,26 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendin
     }
     textDoc?.let { body ->
         val clipboard = LocalClipboardManager.current
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { textDoc = null },
-            confirmButton = {
-                TextButton(onClick = {
-                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(body))
-                    android.widget.Toast.makeText(ctx, "Copy kora holo", android.widget.Toast.LENGTH_SHORT).show()
-                }) { Text("Copy", color = GoldDeep, fontWeight = FontWeight.SemiBold) }
-            },
-            dismissButton = {
-                TextButton(onClick = { textDoc = null }) { Text("Close", color = Muted) }
-            },
-            title = { Text(fileName, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Ink, maxLines = 2) },
-            text = {
+        // Owner round 31: bottom sheet, not a centred dialog.
+        KpSheet(onDismiss = { textDoc = null }, title = fileName) {
+            Column(Modifier.padding(horizontal = 14.dp)) {
                 Text(
                     body.ifBlank { "(empty file)" },
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                     fontSize = 12.5.sp,
                     color = Ink,
                     modifier = Modifier
-                        .heightIn(max = 480.dp)
+                        .heightIn(max = 420.dp)
                         .verticalScroll(rememberScrollState()),
                 )
-            },
-        )
+                Spacer(Modifier.height(12.dp))
+                GoldBtn("Copy", Modifier.fillMaxWidth()) {
+                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(body))
+                    android.widget.Toast.makeText(ctx, "Copied", android.widget.Toast.LENGTH_SHORT).show()
+                }
+                Spacer(Modifier.height(6.dp))
+            }
+        }
     }
 }
 
@@ -4562,45 +4563,18 @@ private fun ChatSearchSheet(
 
 @Composable
 private fun DisappearDialog(current: Int, onClose: () -> Unit, onPick: (Int) -> Unit) {
+    // Owner round 31: bottom sheet with a check on the current choice.
     val options = listOf(0 to "Off", 86400 to "24 hours", 604800 to "7 days", 7776000 to "90 days")
-    AlertDialog(
-        onDismissRequest = onClose,
-        containerColor = Card,
-        title = { Text("Disappearing messages", color = Ink) },
-        text = {
-            Column {
-                options.forEach { (sec, label) ->
-                    val on = sec == current
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(if (on) ActionBlue.copy(alpha = 0.18f) else Color.Transparent)
-                            .clickable { onPick(sec) }
-                            .padding(horizontal = 10.dp, vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(
-                            Modifier.size(18.dp).clip(CircleShape)
-                                .border(1.5.dp, if (on) ActionBlue else Line, CircleShape),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (on) Box(Modifier.size(8.dp).clip(CircleShape).background(ActionBlue))
-                        }
-                        Spacer(Modifier.width(10.dp))
-                        Text(label, color = Ink, fontSize = 14.5.sp)
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onClose) { Text("Close", color = ActionBlueDeep) } },
-    )
+    KpSheet(onDismiss = onClose, title = "Disappearing messages") {
+        options.forEach { (sec, label) ->
+            KpSheetRow(icon = null, label = label, selected = sec == current) { onPick(sec) }
+        }
+    }
 }
 
 @Composable
 private fun ThemeDialog(current: String, onClose: () -> Unit, onPick: (String) -> Unit) {
-    // Owner round 14: the old dialog used the platform default light sheet —
-    // colour mismatch in dark mode — and ● ○ glyphs instead of real swatches.
+    // Owner round 14: real swatches. Owner round 31: a bottom sheet.
     data class Opt(val id: String, val label: String, val swatch: Color)
     // Owner round 20: DARK BLUE is the default chat theme; the classic
     // cream chat is an explicit option now.
@@ -4611,40 +4585,31 @@ private fun ThemeDialog(current: String, onClose: () -> Unit, onPick: (String) -
         Opt("rose", "Rose", Color(0xFFFB7185)),
         Opt("night", "Night", Color(0xFF6366F1)),
     )
-    AlertDialog(
-        onDismissRequest = onClose,
-        containerColor = Card,
-        title = { Text("Chat theme", color = Ink) },
-        text = {
-            Column {
-                options.forEach { o ->
-                    val sel = o.id == current
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (sel) GoldSoft else Color.Transparent)
-                            .clickable { onPick(o.id) }
-                            .padding(horizontal = 10.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(
-                            Modifier
-                                .size(26.dp)
-                                .clip(CircleShape)
-                                .background(o.swatch)
-                                .border(1.5.dp, if (sel) GoldDeep else Line, CircleShape),
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Text(o.label, color = Ink, fontSize = 15.sp, modifier = Modifier.weight(1f))
-                        if (sel) Text("Applied", color = GoldDeep, fontSize = 12.sp)
-                    }
-                }
-                Text("Changes the wallpaper and bubbles of this chat.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+    KpSheet(onDismiss = onClose, title = "Chat theme") {
+        options.forEach { o ->
+            val sel = o.id == current
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (sel) ActionBlue.copy(alpha = 0.14f) else Color.Transparent)
+                    .clickable { onPick(o.id) }
+                    .padding(horizontal = 14.dp, vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier
+                        .size(26.dp)
+                        .clip(CircleShape)
+                        .background(o.swatch)
+                        .border(1.5.dp, if (sel) ActionBlueDeep else Line, CircleShape),
+                )
+                Spacer(Modifier.width(14.dp))
+                Text(o.label, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                if (sel) Icon(Icons.Filled.Check, null, tint = ActionBlueDeep, modifier = Modifier.size(20.dp))
             }
-        },
-        confirmButton = { TextButton(onClick = onClose) { Text("Close", color = GoldDeep) } },
-    )
+        }
+    }
 }
 
 @Composable
