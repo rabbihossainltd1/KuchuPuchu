@@ -1284,10 +1284,23 @@ private fun StatusVideoPlayer(
                 p.snapshot()?.let { (cur, dur, playing) ->
                     if (dur > 0 && playing) {
                         onProgress((cur.toFloat() / dur).coerceIn(0f, 1f))
-                    } else if (dur > 0 && cur > 0) {
-                        // playback finished — close the bar
+                    } else if (dur > 0 && cur >= dur - 500) {
+                        // Genuinely at the end (MediaPlayer sits paused on the
+                        // last frame after completion) — close the bar.
                         onProgress(1f)
                     }
+                    // Round 27: a paused clip in the MIDDLE is not "finished".
+                    // This branch used to be `cur > 0`, and on every
+                    // un-pause (reply box unfocused, viewers sheet closed) this
+                    // effect restarts BEFORE the setPaused(false) effect below,
+                    // so its first tick saw playing=false, cur>0 -> jumped the
+                    // bar to 100% and the viewer advanced to the NEXT status —
+                    // the "progress bar and video out of sync" report. Same
+                    // trigger when the screen went dark (surface destroyed =
+                    // paused): every status was skipped while the screen was
+                    // off. Now the bar simply holds until playback resumes;
+                    // real completion is also covered by the completion and
+                    // error listeners.
                 }
             }
             delay(50)

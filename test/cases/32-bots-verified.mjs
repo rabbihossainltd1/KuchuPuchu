@@ -1717,6 +1717,17 @@ const convBetween = (db, a, b) =>
       settings.includes("buildE164(country, value)") &&
       !settings.includes('Text("New number (e.g. +8801712345678)")'),
   );
+
+  /* ---------------- round 27 (self-audit fixes) ---------------- */
+  const statusKt = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/StatusScreens.kt",
+    "utf8",
+  );
+  check(
+    "r27: a PAUSED status clip is not 'finished' — bar holds instead of jumping to 100% and skipping",
+    statusKt.includes("} else if (dur > 0 && cur >= dur - 500) {") &&
+      !statusKt.includes("} else if (dur > 0 && cur > 0) {"),
+  );
 }
 
 console.log(lines.join("\n"));
