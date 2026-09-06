@@ -159,6 +159,10 @@ class MainActivity : ComponentActivity() {
             runCatching { Api.get("/api/calls/history", true) }
             // Owner round 16: in-app update check (GitHub release).
             runCatching { kotlinx.coroutines.runBlocking { KpUpdate.check(application) } }
+            // Owner round 28: phone-book match, only once the user granted
+            // contacts (asked in-context on the contacts screen, never here);
+            // keeps search's "in your contacts" rows fresh. 10-min throttle.
+            if (!Api.token.isNullOrBlank()) runCatching { PhoneBook.sync(application) }
         }.apply {
             isDaemon = true
             priority = Thread.MIN_PRIORITY

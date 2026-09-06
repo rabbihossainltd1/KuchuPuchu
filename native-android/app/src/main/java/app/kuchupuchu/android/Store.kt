@@ -45,6 +45,7 @@ object Store {
         Outbox.init(ctx)
         Drafts.init(ctx)
         ScreenStore.hydrate(ctx)
+        PhoneBook.init(ctx)
     }
 
     fun saveMe(user: JSONObject?) {
@@ -89,6 +90,7 @@ object Store {
         runCatching { KpNotify.cancelAll(app) }
         ScreenStore.clearMsgs()
         ScreenStore.clearAccount()
+        PhoneBook.clear()
         Drafts.clearAll()
         Cache.bustAll("")
         Cache.clearDisk()

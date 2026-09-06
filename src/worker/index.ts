@@ -3966,6 +3966,55 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   /* ---------- users & discovery ---------- */
 
+  // Owner round 28: phone-book match. The app sends the numbers from the
+  // phone's contacts (already E.164, deduplicated) and learns which of them
+  // are KuchuPuchu accounts — nothing is stored server-side: the numbers are
+  // looked up in one IN() per chunk and forgotten (no contacts table, no
+  // audit of who has whom). Blocked users (either direction) stay invisible,
+  // PENDING signups are not accounts yet. Capped at 2000 numbers per call.
+  if (path === "/api/contacts/match" && method === "POST") {
+    rateLimit(`cm:${uid}`, 20, 10);
+    const raw = Array.isArray(body.phones) ? (body.phones as unknown[]) : [];
+    const phones = [
+      ...new Set(
+        raw
+          .map((p) => String(p ?? "").replace(/[^0-9+]/g, ""))
+          .filter((p) => /^\+[1-9]\d{7,14}$/.test(p)),
+      ),
+    ].slice(0, 2000);
+    const found: UserRow[] = [];
+    for (const group of chunked(phones, 80)) {
+      found.push(
+        ...(await all<UserRow>(
+          db,
+          `SELECT * FROM users WHERE phone_e164 IN (${inSql(group.length)})
+             AND auth_status = 'ACTIVE' AND id != ?`,
+          ...group,
+          uid,
+        )),
+      );
+    }
+    const blocked = new Set<string>();
+    for (const group of chunked(found.map((r) => r.id))) {
+      const hit = await all<{ owner_id: string; target_id: string }>(
+        db,
+        `SELECT owner_id, target_id FROM blocks
+          WHERE (owner_id = ? AND target_id IN (${inSql(group.length)}))
+             OR (target_id = ? AND owner_id IN (${inSql(group.length)}))`,
+        uid,
+        ...group,
+        uid,
+        ...group,
+      );
+      for (const b of hit) blocked.add(b.owner_id === uid ? b.target_id : b.owner_id);
+    }
+    return json({
+      users: found
+        .filter((row) => !blocked.has(row.id))
+        .map((row) => ({ ...userFrom(row, onlineNow(row), true), phone: row.phone_e164 })),
+    });
+  }
+
   if (path === "/api/users" && method === "GET") {
     const q = (url.searchParams.get("q") || "").trim().toLowerCase().replace(/^@/, "");
     const rows = q

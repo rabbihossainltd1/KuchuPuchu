@@ -56,6 +56,9 @@ const PERMISSION_EVIDENCE: Record<string, RegExp> = {
   // Phone auth (OTP-less): SubscriptionManager.activeSubscriptionInfoList is
   // what reads the SIM-exposed numbers for the verify step (PhoneVerifier.kt).
   "android.permission.READ_PHONE_STATE": /SubscriptionManager|READ_PHONE_STATE/,
+  // Owner round 28: the phone book is read for All contacts / search matching
+  // (PhoneBook.kt) — asked in-context on the contacts screen, never at launch.
+  "android.permission.READ_CONTACTS": /ContactsContract\.CommonDataKinds\.Phone/,
 };
 
 /** Service types and the permission each one requires (Android 14 rule). */

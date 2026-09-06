@@ -175,7 +175,16 @@ fun SearchScreen(nav: NavController) {
             }
         }
 
-        val users = result?.arr("users")?.objects() ?: emptyList()
+        // Owner round 28: KP users from the PHONE BOOK join the People section
+        // — matched by their contact name too (the server only knows display
+        // names/usernames), and listed first. Server rows for the same person
+        // are folded in by id.
+        val serverUsers = result?.arr("users")?.objects() ?: emptyList()
+        val bookHits = PhoneBook.search(query)
+        val bookIds = bookHits.map { it.user?.optString("id").orEmpty() }.toSet()
+        val users =
+            bookHits.mapNotNull { e -> e.user?.let { u -> JSONObject(u.toString()).put("contactName", e.name) } } +
+                serverUsers.filter { it.optString("id") !in bookIds }
         val chats = result?.arr("chats")?.objects() ?: emptyList()
         val allMessages = result?.arr("messages")?.objects() ?: emptyList()
         val media = allMessages.filter { it.optString("kind") == "IMAGE" }
@@ -194,7 +203,7 @@ fun SearchScreen(nav: NavController) {
                     note = "Find people, chats and messages",
                 )
             }
-        } else if (searching && result == null) {
+        } else if (searching && result == null && users.isEmpty()) {
             Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
                 androidx.compose.material3.CircularProgressIndicator(color = ActionBlue)
             }
@@ -212,7 +221,12 @@ fun SearchScreen(nav: NavController) {
                             Column {
                                 Highlight(u.optText("displayName"), query)
                                 val un = u.optString("username")
-                                if (un.isNotBlank()) Highlight("@$un", query, fontSize = 12f)
+                                val contact = u.optString("contactName")
+                                if (contact.isNotBlank() && contact != u.optText("displayName")) {
+                                    Highlight("$contact · in your contacts", query, fontSize = 12f)
+                                } else if (un.isNotBlank()) {
+                                    Highlight("@$un", query, fontSize = 12f)
+                                }
                             }
                         }
                     }

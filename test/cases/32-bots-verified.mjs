@@ -2222,6 +2222,108 @@ const convBetween = (db, a, b) =>
   );
 }
 
+// ── r28-5/6: home ⋮ menu + contacts ─────────────────────────────────────────
+{
+  const list = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/ChatListScreen.kt",
+    "utf8",
+  );
+  const kpapp = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/KpApp.kt",
+    "utf8",
+  );
+  check(
+    "r28-5: the settings cog is gone; the home ⋮ menu has exactly Settings, Profile, About Us, New group, New contact, All contacts — each a real route",
+    !list.includes('Icon(Icons.Filled.Settings, "Settings"') &&
+      ["Settings", "Profile", "About Us", "New group", "New contact", "All contacts"].every((l) =>
+        list.includes(`"${l}")`),
+      ) &&
+      (list.match(/HomeMenuItem\(Icons/g) || []).length === 6 &&
+      list.includes('nav.navigate("profile/${Store.myId()}")') &&
+      ["about", "contacts", "newcontact", "newgroup", "settings"].every((r) =>
+        kpapp.includes(`composable("${r}")`),
+      ) &&
+      list.includes(
+        "containerColor = Card,\n                        shape = RoundedCornerShape(16.dp)",
+      ),
+  );
+  const profile = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/ProfileScreen.kt",
+    "utf8",
+  );
+  check(
+    "r28-5: my own profile shows Edit profile instead of call/search/block",
+    profile.includes("val isMe = userId.isNotBlank() && userId == Store.myId()") &&
+      profile.includes(
+        'if (!isMe && !isKpBot(userId) && u.optText("username") != "rabbihossainltd")',
+      ) &&
+      profile.includes('Text("Edit profile"'),
+  );
+  check(
+    "r28-5: About Us is a real screen (build, founder, links, update check)",
+    existsSync("native-android/app/src/main/java/app/kuchupuchu/android/AboutScreen.kt") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/AboutScreen.kt",
+        "utf8",
+      ).includes("KpUpdate.check(ctx)"),
+  );
+  const manifest = readFileSync("native-android/app/src/main/AndroidManifest.xml", "utf8");
+  const contacts = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/PhoneBook.kt",
+    "utf8",
+  );
+  const screens = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/ContactsScreens.kt",
+    "utf8",
+  );
+  check(
+    "r28-6: READ_CONTACTS declared, asked in-context (not at launch); All contacts = KP users → Chat, others → Invite; search merges phone-book KP users",
+    manifest.includes("android.permission.READ_CONTACTS") &&
+      !kpapp.includes("READ_CONTACTS") &&
+      screens.includes("launcher.launch(Manifest.permission.READ_CONTACTS)") &&
+      screens.includes('ContactAction("Chat", primary = true)') &&
+      screens.includes('ContactAction("Invite", primary = false)') &&
+      contacts.includes('Api.post("/api/contacts/match"') &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/SearchScreen.kt",
+        "utf8",
+      ).includes("val bookHits = PhoneBook.search(query)") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/Store.kt",
+        "utf8",
+      ).includes("PhoneBook.clear()"),
+  );
+  // server: /api/contacts/match answers only ACTIVE accounts, never self, never across a block, stores nothing
+  const k = await mk();
+  const a = await k.reg("cm-a@x.com", "cma");
+  const b = await k.reg("cm-b@x.com", "cmb");
+  const c = await k.reg("cm-c@x.com", "cmc");
+  await k.call("POST", "/api/blocks", { userId: c.user.id }, a.token);
+  const junk = "+15550000001";
+  const m = await k.call(
+    "POST",
+    "/api/contacts/match",
+    { phones: [a.user.phone, b.user.phone, c.user.phone, junk, "017", "", null] },
+    a.token,
+  );
+  const ids = (m.json.users || []).map((u) => u.id);
+  check(
+    "r28-6: contacts/match → the KP users among the numbers (not me, not blocked, junk ignored) with their phone",
+    m.status === 200 &&
+      ids.length === 1 &&
+      ids[0] === b.user.id &&
+      m.json.users[0].phone === b.user.phone &&
+      m.json.users[0].avatarUrl === null,
+    JSON.stringify(m.json).slice(0, 200),
+  );
+  const tables = k.db._db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE '%contact%'")
+    .all();
+  check("r28-6: the server keeps NO contacts table (match-and-forget)", tables.length === 0);
+  const unauth = await k.call("POST", "/api/contacts/match", { phones: [b.user.phone] });
+  check("r28-6: contacts/match needs a session", unauth.status === 401, String(unauth.status));
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`bots-verified: ${lines.length - broken} ok / ${broken} broken`);
