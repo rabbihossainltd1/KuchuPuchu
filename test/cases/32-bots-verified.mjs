@@ -834,7 +834,10 @@ const convBetween = (db, a, b) =>
   check(
     "swipe-to-reply threads server-side (reply_to column + validated)",
     src.includes("ALTER TABLE messages ADD COLUMN reply_to") &&
-      src.includes("SELECT id FROM messages WHERE id = ? AND conv_id = ? LIMIT 1") &&
+      // r27: the lookup also refuses an unsent row as the quote target
+      src.includes(
+        "SELECT id FROM messages WHERE id = ? AND conv_id = ? AND kind != 'DELETED' LIMIT 1",
+      ) &&
       src.includes("replyTo: row.reply_to || undefined"),
   );
   check(
