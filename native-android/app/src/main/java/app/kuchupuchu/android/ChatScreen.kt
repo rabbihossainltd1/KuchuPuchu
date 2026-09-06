@@ -43,7 +43,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -249,7 +248,12 @@ fun ChatScreen(nav: NavController, convId: String) {
     val chatOpenedAtMs = remember { System.currentTimeMillis() }
     var aiRevealId by remember { mutableStateOf<String?>(null) }
     var aiRevealChars by remember { mutableStateOf(0) }
-    val listState = rememberLazyListState()
+    // Owner round 25: the Saver keeps the exact scroll position across
+    // navigation (video player and back) — with the no-yank rules this makes
+    // "back from a video returns where I was" guaranteed.
+    val listState = rememberSaveable(saver = androidx.compose.foundation.lazy.LazyListState.Saver) {
+        androidx.compose.foundation.lazy.LazyListState(0, 0)
+    }
     val player = remember { VoicePlayer() }
     var lastTopId by remember { mutableStateOf("") }
     // Freshness marker for this conversation message page (see refreshMessages).
@@ -285,8 +289,11 @@ fun ChatScreen(nav: NavController, convId: String) {
     // Owner round 19: back also dismisses the floating reaction bar / emoji
     // sheet (registered last = checked first).
     androidx.activity.compose.BackHandler(enabled = reactionFor != null || showEmojiSheet) {
+        // Owner round 25: ONE back closes the reaction bar AND the selection
+        // together — two presses felt broken.
         reactionFor = null
         showEmojiSheet = false
+        selected.clear()
     }
     // Owner round 18: leaving the chat re-marks it read server-side and
     // zeroes the badge NOW. The list used to show a stale unread count after
@@ -1513,7 +1520,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-            KpAvatar(title, avatarUrl, 46.dp, avatarRef = avatarRef) // Owner round 22: ektu zoom
+            KpAvatar(title, avatarUrl, 36.dp, avatarRef = avatarRef) // Owner round 25: choto header avatar
             Spacer(Modifier.width(10.dp))
             // Owner round 4 (2026-09-04): the name sits at the avatar's
             // middle. A draw-time offset (not padding!) moves the text block
@@ -1848,8 +1855,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                 androidx.compose.runtime.derivedStateOf {
                     val seenKeys = HashSet<String>()
                     msgs.filter { m ->
-                        val k = m.optString("clientId").ifBlank { m.optString("id") }
-                        k.isNotBlank() && seenKeys.add(k)
+                        // Owner round 25: unsent messages VANISH — no
+                        // "This message was deleted" tombstone any more.
+                        m.optString("kind") != "DELETED" && run {
+                            val k = m.optString("clientId").ifBlank { m.optString("id") }
+                            k.isNotBlank() && seenKeys.add(k)
+                        }
                     }
                 }
             }
@@ -3869,7 +3880,7 @@ private fun ImageMessageRow(
         Box(
             Modifier
                 .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                .widthIn(max = 225.dp)
+                .widthIn(max = 185.dp) // Owner round 25: choto photo bubble
                 // Owner round 10: photos float too — 3D lift + the round-8
                 // thin border.
                 .shadow(2.dp, RoundedCornerShape(12.dp))
@@ -4006,7 +4017,7 @@ private fun ImageBubble(m: JSONObject, mine: Boolean) {
     val dataBmp = if (url?.startsWith("data:") == true) rememberBitmap(url) else null
     Box(
         Modifier
-            .widthIn(max = 225.dp)
+            .widthIn(max = 185.dp) // Owner round 25: choto photo bubble
             .then(
                 if (ratio > 0f) {
                     Modifier
@@ -4145,7 +4156,9 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendin
                 }
             }
             Spacer(Modifier.width(8.dp))
-            Column(Modifier.padding(end = if (mine) 46.dp else 30.dp)) {
+            // Owner round 25: no side padding — the tick+time stamp sits in
+            // the bubble's bottom band, right corner, under this column.
+            Column {
                 Text("Voice message", fontSize = 14.sp, color = Ink)
                 val secs = m.optJSONObject("meta")?.optInt("seconds") ?: 0
                 val vFrac = UploadProgress.fracs[m.optString("clientId")]
@@ -4493,7 +4506,9 @@ private fun ChatSearchSheet(
             )
         }
         Spacer(Modifier.height(6.dp))
-        Column(
+        // Owner round 25: nothing renders before the first search — the old
+        // empty bordered card read as a stray line under the bar.
+        if (hits.isNotEmpty()) Column(
             Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(18.dp))
@@ -4686,12 +4701,18 @@ private fun CallLogBubble(m: JSONObject, mine: Boolean, pendingEcho: Boolean) {
                 )
             }
             Spacer(Modifier.width(10.dp))
-            Column {
+            Column(Modifier.weight(1f)) {
                 Text(title, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, color = Ink)
                 Text(sub, fontSize = 12.sp, color = if (mine) Color(0xCCFFFFFF) else Muted)
+                // Owner round 25: the time sits at the bubble's bottom-right,
+                // like every other bubble's stamp.
+                Text(
+                    msgStamp(m.optString("createdAt")),
+                    fontSize = 10.sp,
+                    color = if (mine) Color(0xD9FFFFFF) else Muted,
+                    modifier = Modifier.align(Alignment.End),
+                )
             }
-            Spacer(Modifier.width(12.dp))
-            Text(msgStamp(m.optString("createdAt")), fontSize = 10.sp, color = if (mine) Color(0xD9FFFFFF) else Muted)
         }
     }
 }

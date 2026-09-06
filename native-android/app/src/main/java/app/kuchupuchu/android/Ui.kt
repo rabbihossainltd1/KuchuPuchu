@@ -628,7 +628,9 @@ fun StatusRingAvatar(
     ringWidth: Dp = 2.5.dp,
     avatarRef: String? = null,
 ) {
-    val ringColor = if (seen) Color(0xFFD6D3D1) else Gold
+    // Owner round 25: unseen status ring is DARK BLUE on every theme; once
+    // the viewer has seen all of that user's statuses it turns gray.
+    val ringColor = if (seen) Color(0xFF9CA3AF) else Color(0xFF2F6FED)
     Box(Modifier.size(size), contentAlignment = Alignment.Center) {
         androidx.compose.foundation.Canvas(Modifier.size(size)) {
             val stroke = ringWidth.toPx()

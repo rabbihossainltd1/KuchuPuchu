@@ -167,7 +167,7 @@ fun ProfileScreen(nav: NavController, userId: String) {
                 KpAvatar(
                     u.optText("displayName").ifBlank { "?" },
                     shownAvatar,
-                    88.dp,
+                    64.dp, // Owner round 25: choto
                     avatarRef = avatarRef,
                 )
                 // Tapping the photo opens it full-screen (zoom + save) — the resolved

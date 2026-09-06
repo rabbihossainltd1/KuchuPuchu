@@ -198,7 +198,7 @@ private fun CallRow(call: JSONObject, onOpenChat: () -> Unit) {
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        KpAvatar(name, avatar, 48.dp, ring = false, avatarRef = avatarRef)
+        KpAvatar(name, avatar, 40.dp, ring = false, avatarRef = avatarRef) // Owner round 25: choto
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(

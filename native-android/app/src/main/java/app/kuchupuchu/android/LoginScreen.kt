@@ -50,6 +50,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -992,6 +993,9 @@ fun CountryPickerSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        // Owner round 25: explicit theme surface — the M3 default painted a
+        // mismatched panel in dark-blue ("colour missmatch").
+        containerColor = Card,
     ) {
         var query by remember { mutableStateOf("") }
         Column(
@@ -1010,6 +1014,11 @@ fun CountryPickerSheet(
                 shape = FieldShape,
                 keyboardOptions =
                     KeyboardOptions(keyboardType = KeyboardType.Ascii, imeAction = ImeAction.Search),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = ActionBlue,
+                    cursorColor = ActionBlue,
+                    focusedLabelColor = ActionBlue,
+                ),
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(8.dp))
@@ -1056,7 +1065,7 @@ fun CountryPickerSheet(
                         Text(
                             "+${c.dial}",
                             fontSize = 13.sp,
-                            color = if (c.iso == current.iso) GoldDeep else Muted,
+                            color = if (c.iso == current.iso) ActionBlueDeep else Muted, // Owner round 25: theme accent
                             fontWeight = if (c.iso == current.iso) FontWeight.Bold else FontWeight.Normal,
                         )
                     }

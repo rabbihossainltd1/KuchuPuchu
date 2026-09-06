@@ -208,7 +208,7 @@ object FilesUtil {
      * API 28+. `maxChars` defaults to the 420KB inline-photo budget; avatars
      * pass the worker's 200KB avatar budget.
      */
-    fun imageToJpeg(uri: Uri, ctx: Context, maxSide: Int = 960, maxBytes: Int = 220_000): ByteArray? = runCatching {
+    fun imageToJpeg(uri: Uri, ctx: Context, maxSide: Int = 960, maxBytes: Int = 360_000): ByteArray? = runCatching {
         var bmp: Bitmap? = null
         if (android.os.Build.VERSION.SDK_INT >= 28) {
             val source = android.graphics.ImageDecoder.createSource(ctx.contentResolver, uri)
@@ -247,14 +247,16 @@ object FilesUtil {
         var scale = 1
         while (picture.width / scale > maxSide || picture.height / scale > maxSide) scale *= 2
         if (scale > 1) picture = Bitmap.createScaledBitmap(picture, picture.width / scale, picture.height / scale, true)
-        var quality = 85
+        // Owner round 25: start at 90% (was 85) — photos were coming out
+        // softer than the original; the budget is bigger so 90 usually holds.
+        var quality = 90
         var out = ByteArray(0)
         while (true) {
             val buf = ByteArrayOutputStream()
             if (!picture.compress(Bitmap.CompressFormat.JPEG, quality, buf)) break
             out = buf.toByteArray()
-            if (out.size <= maxBytes || quality <= 28) break
-            quality -= 10
+            if (out.size <= maxBytes || quality <= 45) break
+            quality -= 5
         }
         out.takeIf { it.isNotEmpty() }
     }.getOrNull()

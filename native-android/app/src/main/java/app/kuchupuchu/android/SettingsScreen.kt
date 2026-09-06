@@ -38,8 +38,6 @@ import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.SystemUpdate
@@ -306,7 +304,9 @@ fun SettingsScreen(nav: NavController) {
             SettingRow(
                 Icons.Filled.NotificationsActive,
                 "Sounds",
-                "Notification · " + SoundPrefs.notifLabel(ctx) + "  |  Call · " + SoundPrefs.currentLabel(ctx),
+                // Owner round 25: just the section name — the tone names were
+                // stacking into a wall of text on the row.
+                "Calls & Notification",
             ) { showSoundType = true }
             // Owner round 15: crash detection on/off — capture stays until
             // the owner switches it off; off also clears the last report.
@@ -894,9 +894,9 @@ fun EditNameScreen(nav: NavController) {
     var busy by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf("") }
     EditFieldScaffold("Name", "First and last name", nav) {
-        OutlinedTextField(value = first, onValueChange = { first = it.take(40); err = "" }, label = { Text("First name") }, singleLine = true, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = ActionBlue, cursorColor = ActionBlue, focusedLabelColor = ActionBlue), modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value = first, onValueChange = { first = it.take(40); err = "" }, label = { Text("First name") }, singleLine = true, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = ActionBlue, cursorColor = ActionBlue, focusedLabelColor = ActionBlue), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(10.dp))
-        OutlinedTextField(value = last, onValueChange = { last = it.take(40); err = "" }, label = { Text("Last name") }, singleLine = true, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = ActionBlue, cursorColor = ActionBlue, focusedLabelColor = ActionBlue), modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value = last, onValueChange = { last = it.take(40); err = "" }, label = { Text("Last name") }, singleLine = true, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = ActionBlue, cursorColor = ActionBlue, focusedLabelColor = ActionBlue), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth())
         if (err.isNotBlank()) Text(err, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
         EditSaveButton(
             "Save",
@@ -924,56 +924,58 @@ fun EditNameScreen(nav: NavController) {
 /** USERNAME: live availability check with a tick when free. */
 @Composable
 fun EditUsernameScreen(nav: NavController) {
-    val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var value by remember { mutableStateOf(Store.me?.optText("username") ?: "") }
     var busy by remember { mutableStateOf(false) }
     var checking by remember { mutableStateOf(false) }
     var available by remember { mutableStateOf<Boolean?>(null) }
     var err by remember { mutableStateOf("") }
-    fun check() {
-        val v = value.trim().lowercase()
+    // Owner round 25: LIVE availability — typing checks by itself (debounced),
+    // the BORDER goes green when free / red when taken, and the only extra
+    // text is the red "not available" line. No buttons, no hints.
+    LaunchedEffect(value) {
+        val v = value.trim()
+        if (v == (Store.me?.optText("username") ?: "")) {
+            available = null; checking = false; return@LaunchedEffect
+        }
         if (!Regex("^[a-z0-9_]{3,30}$").matches(v)) {
-            available = false
-            return
+            available = false; checking = false; return@LaunchedEffect
         }
         checking = true
-        scope.launch {
-            try {
-                val res = withContext(Dispatchers.IO) { Api.get("/api/users/username-available?u=${android.net.Uri.encode(v)}") }
-                available = res.optBoolean("available")
-            } catch (_: Exception) {
-                available = null
-            } finally {
-                checking = false
-            }
+        kotlinx.coroutines.delay(500)
+        try {
+            val res = withContext(Dispatchers.IO) { Api.get("/api/users/username-available?u=${android.net.Uri.encode(v)}") }
+            available = res.optBoolean("available")
+        } catch (_: Exception) {
+            available = null
+        } finally {
+            checking = false
         }
     }
-    EditFieldScaffold("Username", "lowercase letters, numbers, underscores", nav) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = value,
-                onValueChange = { value = it.trim().lowercase().take(30); available = null; err = "" },
-                label = { Text("Username") },
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = ActionBlue, cursorColor = ActionBlue, focusedLabelColor = ActionBlue),
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(Modifier.width(8.dp))
-            // the CHECK button: green tick when the name is free
-            IconButton(
-                onClick = { check() },
-                enabled = !checking && value.isNotBlank(),
-            ) {
-                when {
-                    checking -> CircularProgressIndicator(color = ActionBlue, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
-                    available == true -> Icon(Icons.Filled.Check, "Available", tint = Color(0xFF16A34A), modifier = Modifier.size(26.dp))
-                    available == false -> Icon(Icons.Filled.Close, "Taken", tint = Red, modifier = Modifier.size(24.dp))
-                    else -> Icon(Icons.Filled.Search, "Check availability", tint = ActionBlueDeep, modifier = Modifier.size(24.dp))
-                }
-            }
+    val borderColor = when {
+        checking -> Muted
+        available == true -> Color(0xFF16A34A)
+        available == false -> Red
+        else -> Muted
+    }
+    EditFieldScaffold("Username", "", nav) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = { value = it.trim().lowercase().take(30); err = "" },
+            label = { Text("Username") },
+            singleLine = true,
+            shape = RoundedCornerShape(14.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = borderColor,
+                unfocusedBorderColor = borderColor,
+                cursorColor = ActionBlue,
+                focusedLabelColor = ActionBlue,
+            ),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (available == false && value.isNotBlank() && value != (Store.me?.optText("username") ?: "")) {
+            Text("this username not available", color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
         }
-        if (err.isNotBlank()) Text(err, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
         EditSaveButton("Save", available == true, busy) {
             scope.launch {
                 busy = true
@@ -1006,6 +1008,7 @@ fun EditAboutScreen(nav: NavController) {
             onValueChange = { value = it.take(150); err = "" },
             label = { Text("About") },
             colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = ActionBlue, cursorColor = ActionBlue, focusedLabelColor = ActionBlue),
+            shape = RoundedCornerShape(14.dp),
             modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp),
         )
         Text("${value.length}/150", fontSize = 11.sp, color = Muted, modifier = Modifier.padding(top = 4.dp))

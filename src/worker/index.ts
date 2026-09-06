@@ -1602,6 +1602,9 @@ async function ensureSchema(db: D1Database) {
   // deliberately outside the batch — a duplicate-column error must not roll the
   // whole batch back — and each one is individually tolerant.
   await runCatchingSql(db, `ALTER TABLE messages ADD COLUMN delivered_at TEXT`);
+  // Owner round 25: status reactions — stored on the view row (a reaction
+  // implies a view). No inbox message: the owner sees it in the viewer list.
+  await runCatchingSql(db, `ALTER TABLE status_views ADD COLUMN reaction TEXT`);
   await runCatchingSql(db, `ALTER TABLE calls ADD COLUMN answer_sdp TEXT`);
   await runCatchingSql(db, `ALTER TABLE calls ADD COLUMN reoffer_sdp TEXT`);
   await runCatchingSql(db, `ALTER TABLE calls ADD COLUMN reoffer_from TEXT`);
@@ -5648,6 +5651,37 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     return json({ ok: true });
   }
 
+  // Owner round 25: react to a status with an emoji. Records the reaction on
+  // the viewer's own view row — the status owner sees it beside their name in
+  // the viewer list. Deliberately does NOT create any chat/inbox message.
+  const statusReactMatch = path.match(/^\/api\/statuses\/([^/]+)\/react$/);
+  if (statusReactMatch && method === "POST") {
+    const sid = statusReactMatch[1]!;
+    const emoji = String(body.emoji || "")
+      .trim()
+      .slice(0, 16);
+    if (!emoji) fail(400, "Pick a reaction.");
+    const row = await one<{ user_id: string }>(
+      db,
+      "SELECT user_id FROM statuses WHERE id = ?",
+      sid,
+    );
+    if (!row) fail(404, "Status not found.");
+    if (row.user_id === uid) fail(400, "Can't react to your own status.");
+    // A reaction also counts as a view.
+    await run(
+      db,
+      `INSERT INTO status_views (status_id, viewer_id, viewed_at, reaction)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(status_id, viewer_id) DO UPDATE SET reaction = excluded.reaction`,
+      sid,
+      uid,
+      nowIso(),
+      emoji,
+    );
+    return json({ ok: true });
+  }
+
   const statusViewsMatch = path.match(/^\/api\/statuses\/([^/]+)\/viewers$/);
   if (statusViewsMatch && method === "GET") {
     const sid = statusViewsMatch[1]!;
@@ -5658,15 +5692,21 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     );
     if (!row) fail(404, "Status not found.");
     if (row.user_id !== uid) fail(403, "Not your status.");
-    const views = await all<{ viewer_id: string; viewed_at: string }>(
+    const views = await all<{ viewer_id: string; viewed_at: string; reaction: string | null }>(
       db,
-      "SELECT viewer_id, viewed_at FROM status_views WHERE status_id = ? ORDER BY viewed_at DESC",
+      "SELECT viewer_id, viewed_at, reaction FROM status_views WHERE status_id = ? ORDER BY viewed_at DESC",
       sid,
     );
     const list = [];
     for (const view of views) {
       const user = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", view.viewer_id);
-      if (user) list.push({ user: userFrom(user, onlineNow(user)), viewedAt: view.viewed_at });
+      if (user) {
+        list.push({
+          user: userFrom(user, onlineNow(user)),
+          viewedAt: view.viewed_at,
+          reaction: view.reaction ?? "",
+        });
+      }
     }
     return json({ viewers: list });
   }

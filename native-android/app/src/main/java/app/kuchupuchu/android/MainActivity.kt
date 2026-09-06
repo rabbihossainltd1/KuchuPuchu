@@ -270,7 +270,7 @@ class MainActivity : ComponentActivity() {
         // Owner round 16: a live call NEVER lives in just the notification —
         // coming back to the app brings the fullscreen call UI with it.
         CallEngine.instance?.let { engine ->
-            if (engine.active != null) engine.restoreCallUi()
+            if (engine.active != null) engine.restoreCallUi() else engine.syncNow()
         }
         // Returning to the app triggers an instant re-sync of the open screens
         // (they observe ScreenStore.poke) — no waiting for the next poll.

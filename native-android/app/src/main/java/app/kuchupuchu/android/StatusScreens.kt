@@ -133,7 +133,7 @@ fun StatusScreen(nav: NavController) {
                                 StatusRingAvatar(
                                     Store.myName(),
                                     Store.me?.optIso("avatarUrl"),
-                                    60.dp,
+                                    48.dp, // Owner round 25: choto
                                     segments = myStatuses.size,
                                     seen = false,
                                     avatarRef = Store.me?.optIso("avatarRef"),
@@ -142,7 +142,7 @@ fun StatusScreen(nav: NavController) {
                                 KpAvatar(
                                     Store.myName(),
                                     Store.me?.optIso("avatarUrl"),
-                                    60.dp,
+                                    48.dp, // Owner round 25: choto
                                     ring = false,
                                     avatarRef = Store.me?.optIso("avatarRef"),
                                 )
@@ -235,7 +235,7 @@ fun StatusScreen(nav: NavController) {
                             StatusRingAvatar(
                                 user.optText("displayName"),
                                 user.optText("avatarUrl"),
-                                60.dp,
+                                48.dp, // Owner round 25: choto
                                 segments = statuses.size,
                                 seen = allViewed,
                                 // The token, not just the snapshot: without it this row
@@ -548,7 +548,11 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
        the clock and re-fires the /view ping — the clock just PAUSES while
        they are up. For videos the clock only starts when the clip is
        actually PLAYING (buffering used to eat the bar). */
-    LaunchedEffect(idx, videoReady) {
+    // Owner round 25 (bug): if statuses were still fetching when this effect
+    // first ran, it returned with an EMPTY list and never re-ran — the photo
+    // then stayed on screen forever. The current status id is a key too, so
+    // the clock (re)starts the moment there is something to time.
+    LaunchedEffect(idx, videoReady, statuses.getOrNull(idx)?.optString("id")) {
         if (statuses.isEmpty() || idx >= statuses.size) return@LaunchedEffect
         val s = statuses[idx]
         if (!isMine) {
@@ -979,6 +983,39 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                         )
                     }
                 } else {
+                    // Owner round 25: quick reaction emojis above the reply
+                    // bar — a tap records the reaction for the status owner's
+                    // viewer list (it does NOT message their inbox).
+                    var reacted by remember(s.optString("id")) { mutableStateOf(s.optString("myReaction")) }
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .padding(horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        listOf("❤️", "😂", "😮", "😢", "🙏", "🔥", "👍").forEach { e ->
+                            Text(
+                                e,
+                                fontSize = if (reacted == e) 26.sp else 21.sp,
+                                modifier = Modifier
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    .clip(CircleShape)
+                                    .background(if (reacted == e) Color(0x33FFFFFF) else Color.Transparent)
+                                    .clickable {
+                                        reacted = e
+                                        scope.launch {
+                                            runCatching {
+                                                withContext(Dispatchers.IO) {
+                                                    Api.post("/api/statuses/${s.optString("id")}/react", JSONObject().put("emoji", e))
+                                                }
+                                            }
+                                        }
+                                    }
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -1153,6 +1190,9 @@ private fun ViewersSheet(
                                         Text(name, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, color = Ink)
                                         Text(listStamp(v.optString("viewedAt")), fontSize = 11.5.sp, color = Muted)
                                     }
+                                    // Owner round 25: this viewer's status reaction.
+                                    val reaction = v.optText("reaction").ifBlank { null }
+                                    if (reaction != null) Text(reaction, fontSize = 20.sp)
                                 }
                             }
                         }

@@ -1002,7 +1002,7 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box {
-            KpAvatar(name, avatarUrl, 54.dp, avatarRef = avatarRef)
+            KpAvatar(name, avatarUrl, 44.dp, avatarRef = avatarRef) // Owner round 25: choto
             if (online) {
                 Box(
                     Modifier

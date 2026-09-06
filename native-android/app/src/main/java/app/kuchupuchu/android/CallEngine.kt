@@ -214,6 +214,17 @@ class CallEngine(private val app: Application) {
      * instead of waiting for the next tick, so the caller's ringing screen
      * flips to connected the moment the callee accepts (push latency only).
      */
+    /**
+     * Owner round 25 (the recurring "app open thakle fullscreen call ashe na"):
+     * an unconditional tick from ANY trigger. onResume fires this so coming
+     * back to the app surfaces a ring that landed while the socket/push paths
+     * were mid-reconnect — the poll loop alone would still catch it, this
+     * just removes the wait.
+     */
+    fun syncNow() {
+        scope.launch { runCatching { tick() } }
+    }
+
     fun kickPoll(callId: String) {
         // Owner round 23: a NEW incoming call has active == null, so the old
         // `active?.id == callId` guard made every kick a NO-OP exactly when it

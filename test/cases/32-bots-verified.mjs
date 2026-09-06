@@ -1085,8 +1085,8 @@ const convBetween = (db, a, b) =>
       chat.split("MessageReactions(m)").length - 1 === 3,
   );
   check(
-    "r18-3: deleted tombstones reserve the stamp band (no tick/time overlap)",
-    chat.includes('"This message was deleted" + if (mine)'),
+    "r18-3/r25: unsent messages VANISH (no tombstone) — filtered before render",
+    chat.includes('m.optString("kind") != "DELETED" && run {'),
   );
   check(
     "r18-7: system back steps one level — chat search closes, settings pickers/editors close first",
@@ -1591,6 +1591,77 @@ const convBetween = (db, a, b) =>
       readFileSync("src/worker/durable-objects/CallSignal.ts", "utf8").includes(
         'url.pathname === "/live"',
       ),
+  );
+  check(
+    "r25: incoming call = blurred photo backdrop + SWIPE-UP accept/decline (bob hint, no tap)",
+    callscreen.includes("SwipeCallCircle(") &&
+      callscreen.includes("detectVerticalDragGestures") &&
+      callscreen.includes("Swipe up to accept") &&
+      callscreen.includes("BlurredAvatarBackdrop(call.otherAvatar.ifBlank { null })"),
+  );
+  check(
+    "r25: call-ui belt — syncNow() on resume so a foreground ring never waits for the timer",
+    engine23.includes("fun syncNow()") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/MainActivity.kt",
+        "utf8",
+      ).includes("else engine.syncNow()"),
+  );
+  check(
+    "r25: username editor = LIVE check, green/red border, no icons, no extra instructions",
+    settings.includes("LaunchedEffect(value)") &&
+      settings.includes("this username not available") &&
+      !settings.includes("Check availability") &&
+      settings.includes("focusedBorderColor = borderColor"),
+  );
+  check(
+    "r25: sounds row is just 'Calls & Notification' + country sheet theme colours",
+    settings.includes('"Calls & Notification"') &&
+      !settings.includes('"Notification · "') &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/LoginScreen.kt",
+        "utf8",
+      ).includes("containerColor = Card"),
+  );
+  check(
+    "r25: status ring DARK BLUE unseen / GRAY seen + status photo auto-closes (clock keyed on status id)",
+    readFileSync("native-android/app/src/main/java/app/kuchupuchu/android/Ui.kt", "utf8").includes(
+      "if (seen) Color(0xFF9CA3AF) else Color(0xFF2F6FED)",
+    ) &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/StatusScreens.kt",
+        "utf8",
+      ).includes('LaunchedEffect(idx, videoReady, statuses.getOrNull(idx)?.optString("id"))'),
+  );
+  check(
+    "r25: status reactions — emoji bar posts /react; viewer list shows the emoji; NO inbox message",
+    readFileSync(
+      "native-android/app/src/main/java/app/kuchupuchu/android/StatusScreens.kt",
+      "utf8",
+    ).includes("/react") &&
+      src.includes("/react$") &&
+      src.includes("ADD COLUMN reaction TEXT") &&
+      !src.includes("status_reaction_inbox"),
+  );
+  check(
+    "r25: photos smaller (185dp) + JPEG quality 90; voice/call stamps bottom-right; ONE back closes reaction+selection",
+    chat.includes(".widthIn(max = 185.dp)") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/Files.kt",
+        "utf8",
+      ).includes("var quality = 90") &&
+      chat.includes("Column {") &&
+      chat.includes("selected.clear()") &&
+      !chat.includes("padding(end = if (mine) 46.dp else 30.dp)"),
+  );
+  check(
+    "r25: in-chat search renders nothing before the first hit; scroll position saved across navigation",
+    chat.includes("if (hits.isNotEmpty()) Column(") && chat.includes("LazyListState.Saver"),
+  );
+  check(
+    "r25: chat avatars smaller everywhere (header 36, list 44, profile 64, calls 40, status 48)",
+    chat.includes("KpAvatar(title, avatarUrl, 36.dp") &&
+      chatlist.includes("KpAvatar(name, avatarUrl, 44.dp"),
   );
   check(
     "r24: phone change uses the login country picker (flag chip + searchable sheet + buildE164)",

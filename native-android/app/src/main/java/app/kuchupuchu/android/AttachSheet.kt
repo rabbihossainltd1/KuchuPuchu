@@ -363,10 +363,10 @@ fun AttachPanel(
            gallery grid takes the whole panel (WhatsApp behaviour) */
         val rows = listOf(
             listOf(
-                AttachAction(Icons.Filled.Image, Color(0xFF60A5FA), "Gallery") {
+                AttachAction(Icons.Filled.Image, if (KpThemeMode.darkBlue) ActionBlueDeep else Color(0xFF60A5FA), "Gallery") {
                     gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                 },
-                AttachAction(Icons.Filled.CameraAlt, Color(0xFFF472B6), "Camera") {
+                AttachAction(Icons.Filled.CameraAlt, if (KpThemeMode.darkBlue) ActionBlueDeep else Color(0xFFF472B6), "Camera") {
                     // Camera permission is asked HERE, entering the camera
                     // feature — never in a launch-time bulk dialog.
                     gateCamera {
@@ -379,7 +379,7 @@ fun AttachPanel(
                         camera.launch(cameraUri!!)
                     }
                 },
-                AttachAction(Icons.Filled.LocationOn, Color(0xFF34D399), "Location") {
+                AttachAction(Icons.Filled.LocationOn, if (KpThemeMode.darkBlue) ActionBlueDeep else Color(0xFF34D399), "Location") {
                     if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
                         ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
                     ) {
@@ -389,17 +389,17 @@ fun AttachPanel(
                         locationPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION)
                     }
                 },
-                AttachAction(Icons.Filled.ContactPage, Color(0xFF38BDF8), "Contact") {
+                AttachAction(Icons.Filled.ContactPage, if (KpThemeMode.darkBlue) ActionBlueDeep else Color(0xFF38BDF8), "Contact") {
                     contact.launch(null)
                 },
             ),
             listOf(
-                AttachAction(Icons.Filled.Description, Color(0xFFA78BFA), "Document") {
+                AttachAction(Icons.Filled.Description, if (KpThemeMode.darkBlue) ActionBlueDeep else Color(0xFFA78BFA), "Document") {
                     document.launch("*/*")
                 },
-                AttachAction(Icons.Filled.Poll, Color(0xFFFBBF24), "Poll") { comingSoon() },
-                AttachAction(Icons.Filled.Event, Color(0xFFF87171), "Event") { comingSoon() },
-                AttachAction(Icons.Filled.AutoAwesome, Color(0xFF818CF8), "AI images") { comingSoon() },
+                AttachAction(Icons.Filled.Poll, if (KpThemeMode.darkBlue) ActionBlueDeep else Color(0xFFFBBF24), "Poll") { comingSoon() },
+                AttachAction(Icons.Filled.Event, if (KpThemeMode.darkBlue) ActionBlueDeep else Color(0xFFF87171), "Event") { comingSoon() },
+                AttachAction(Icons.Filled.AutoAwesome, if (KpThemeMode.darkBlue) ActionBlueDeep else Color(0xFF818CF8), "AI images") { comingSoon() },
             ),
         )
         if (!fullscreen) {
@@ -451,7 +451,7 @@ fun AttachPanel(
                 Icon(
                     Icons.Filled.Close,
                     contentDescription = "Clear selection",
-                    tint = Color(0x801C1917),
+                    tint = Muted, // Owner round 25: theme token
                     modifier = Modifier
                         .clip(CircleShape)
                         .clickable {
@@ -503,11 +503,11 @@ fun AttachPanel(
                     ) {
                         Text(
                             name,
-                            color = if (selected) GoldDeep else Color(0x991C1917),
+                            color = if (selected) ActionBlueDeep else Muted, // Owner round 25
                             fontSize = 12.5.sp,
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                         )
-                        Text("  $count", color = Color(0x661C1917), fontSize = 11.sp)
+                        Text("  $count", color = Muted, fontSize = 11.sp) // Owner round 25
                     }
                 }
             }

@@ -5,6 +5,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
 import android.view.WindowManager
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -210,6 +211,9 @@ fun CallGate() {
 fun IncomingCallScreen(call: CallUi) {
     val engine = CallEngine.instance ?: return
     DarkCallScaffold {
+        // Owner round 25: the incoming ring gets the same blurred profile
+        // photo backdrop as connected calls ("connected er moto photo blur").
+        BlurredAvatarBackdrop(call.otherAvatar.ifBlank { null })
         Column(
             // navigationBarsPadding (not a fixed bottom padding) so the
             // Accept/Decline circles clear the bar on both gesture and
@@ -239,16 +243,25 @@ fun IncomingCallScreen(call: CallUi) {
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Owner round 13: Decline LEFT, Accept RIGHT — the universal
-                // phone convention.
-                CallCircle(Red, 70.dp, onClick = { if (engine.active?.incoming == true) engine.decline() else engine.hangup() }) {
+                // Owner round 25: Decline LEFT, Accept RIGHT — a plain tap no
+                // longer answers; each circle fires on an UPWARD swipe (the
+                // circles bob gently upward so the gesture is discoverable).
+                SwipeCallCircle(
+                    Red,
+                    "Swipe up to decline",
+                    onSwipe = { if (engine.active?.incoming == true) engine.decline() else engine.hangup() },
+                ) {
                     Icon(Icons.Filled.CallEnd, "Decline", tint = Color.White, modifier = Modifier.size(30.dp))
                 }
-                CallCircle(Green, 70.dp, onClick = {
-                    // Mic (and camera on a video call) asked at the moment of
-                    // answering — the contextual-permission rule.
-                    gateMicCamera(video = call.kind == "VIDEO") { engine.answer() }
-                }) {
+                SwipeCallCircle(
+                    Green,
+                    "Swipe up to accept",
+                    onSwipe = {
+                        // Mic (and camera on a video call) asked at the moment of
+                        // answering — the contextual-permission rule.
+                        gateMicCamera(video = call.kind == "VIDEO") { engine.answer() }
+                    },
+                ) {
                     Icon(
                         if (call.kind == "VIDEO") Icons.Filled.Videocam else Icons.Filled.Call,
                         "Accept",
@@ -282,6 +295,72 @@ fun IncomingCallScreen(call: CallUi) {
                 )
             }
         }
+    }
+}
+
+/**
+ * Owner round 25: the incoming Accept/Decline circles. A direct tap does
+ * nothing — the action fires on an upward swipe of ~40dp (pocket-touch
+ * safety). While idle the circle bobs up and back a few pixels on a slow
+ * loop: the minimal affordance that says "swipe up".
+ */
+@Composable
+fun SwipeCallCircle(
+    color: Color,
+    label: String,
+    onSwipe: () -> Unit,
+    icon: @Composable () -> Unit,
+) {
+    val haptics = rememberHaptics()
+    val bob by rememberInfiniteTransition(label = "swipebob").animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            tween(900, easing = LinearEasing),
+            RepeatMode.Reverse,
+        ),
+        label = "bob",
+    )
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        val circleSize = 70.dp
+        val threshold = with(androidx.compose.ui.platform.LocalDensity.current) { 40.dp.toPx() }
+        Box(
+            Modifier
+                .offset { androidx.compose.ui.unit.IntOffset(0, -(bob * 5.dp.toPx()).toInt()) }
+                .size(circleSize)
+                .shadow(7.dp, CircleShape)
+                .clip(CircleShape)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            androidx.compose.ui.graphics.lerp(color, Color.White, 0.28f),
+                            color,
+                        ),
+                    ),
+                )
+                .pointerInput(Unit) {
+                    // Swipe UP ~40dp to fire; a plain tap does nothing.
+                    var up = 0f
+                    androidx.compose.foundation.gestures.detectVerticalDragGestures(
+                        onDragStart = { up = 0f },
+                        onVerticalDrag = { change, dy ->
+                            change.consume()
+                            up += dy
+                        },
+                        onDragEnd = {
+                            if (up <= -threshold) {
+                                haptics.tap()
+                                onSwipe()
+                            }
+                        },
+                    )
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            icon()
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(label, color = Color(0x99FFFFFF), fontSize = 11.5.sp)
     }
 }
 
