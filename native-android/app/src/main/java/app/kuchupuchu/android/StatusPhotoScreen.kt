@@ -196,11 +196,15 @@ fun StatusPhotoScreen(nav: NavController) {
                                 // budget the server allows.
                                 val read = FilesUtil.readDocument(ctx, vUri)
                                     ?: throw Exception("Could not read that video.")
-                                val (name, bytes) = read
+                                // Round 27: readDocument returns (mime, bytes) — this
+                                // used to be destructured as (name, bytes), so the
+                                // "file name" sent up was the literal string
+                                // "video/mp4" and the R2 key ended in ".videomp4".
+                                val (mime, bytes) = read
                                 if (bytes.size > 25 * 1024 * 1024) {
                                     throw Exception("That video is over 25 MB.")
                                 }
-                                val up = Api.upload(name.ifBlank { "status.mp4" }, "video/mp4", bytes)
+                                val up = Api.upload("status.mp4", mime.ifBlank { "video/mp4" }, bytes)
                                 Api.post(
                                     "/api/statuses",
                                     JSONObject()

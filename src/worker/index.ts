@@ -5721,6 +5721,18 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       .trim()
       .slice(0, 16);
     if (!emoji) fail(400, "Pick a reaction.");
+    // Round 27: emoji ONLY. Any 16 chars used to be stored verbatim and echoed
+    // into the owner's viewer list (`<script>alert(1)` went straight through).
+    // One grapheme made of emoji / modifier / ZWJ / variation-selector code
+    // points — the same family the message reaction bar sends.
+    if (
+      !/^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Emoji_Component}|\u200d|\ufe0f)+$/u.test(
+        emoji,
+      ) ||
+      // digits/#/* are Emoji_Component (keycap bases) — a real pictograph or flag must be present
+      !/\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(emoji)
+    )
+      fail(400, "Pick a reaction.", "BAD_REACTION");
     const row = await one<{ user_id: string }>(
       db,
       "SELECT user_id FROM statuses WHERE id = ?",
@@ -5758,9 +5770,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       "SELECT viewer_id, viewed_at, reaction FROM status_views WHERE status_id = ? ORDER BY viewed_at DESC",
       sid,
     );
+    // Round 27: one IN (...) fetch for every viewer instead of a SELECT per
+    // row — a popular status was 1 + N statements every time the sheet opened
+    // (the same class of read-budget leak that hit the account on 09-01).
+    const viewerUsers = await usersById(
+      db,
+      views.map((v) => v.viewer_id),
+    );
     const list = [];
     for (const view of views) {
-      const user = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", view.viewer_id);
+      const user = viewerUsers.get(view.viewer_id);
       if (user) {
         list.push({
           user: userFrom(user, onlineNow(user)),

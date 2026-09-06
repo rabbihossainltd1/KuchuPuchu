@@ -1738,6 +1738,13 @@ const convBetween = (db, a, b) =>
       statusKt.includes("p?.setPaused(paused || bg)"),
   );
   check(
+    "r27: status composer uploads with the real mime + a proper name (readDocument = (mime, bytes))",
+    readFileSync(
+      "native-android/app/src/main/java/app/kuchupuchu/android/StatusPhotoScreen.kt",
+      "utf8",
+    ).includes('Api.upload("status.mp4", mime.ifBlank { "video/mp4" }, bytes)'),
+  );
+  check(
     "r27: status clip cache is READ (no re-download per view) + streamed to disk + 24h prune",
     statusKt.includes("if (!(f.exists() && f.length() > 0L)) {") &&
       statusKt.includes("Api.downloadToFile(url, tmp)") &&
@@ -1914,6 +1921,57 @@ const convBetween = (db, a, b) =>
     "r27: the blocker's own typing is not shown to the blocked side either",
     typ2.status === 200 && !pageB.json.typingAt,
     `typingAt=${JSON.stringify(pageB.json.typingAt)}`,
+  );
+}
+
+// ---- round 27: status reactions are emoji-only; viewer list is one query, not N+1 ----
+{
+  const k = await mk();
+  const a = await k.reg("emo-a@x.com", "emoa");
+  const b = await k.reg("emo-b@x.com", "emob");
+  await k.call("POST", "/api/conversations", { userId: b.user.id }, a.token);
+  const st = await k.call("POST", "/api/statuses", { kind: "TEXT", text: "hi" }, a.token);
+  const sid = st.json.status.id;
+  const bad = [];
+  for (const e of ["<script>alert(1)", "abc", "1", ":)", "👍 x"]) {
+    const r = await k.call("POST", `/api/statuses/${sid}/react`, { emoji: e }, b.token);
+    if (r.status !== 400) bad.push(`${JSON.stringify(e)}->${r.status}`);
+  }
+  check("r27: non-emoji status reactions are refused (400)", bad.length === 0, bad.join(" "));
+  const good = [];
+  for (const e of ["❤️", "😂", "😮", "😢", "🙏", "🔥", "👍", "👍🏽", "🇧🇩"]) {
+    const r = await k.call("POST", `/api/statuses/${sid}/react`, { emoji: e }, b.token);
+    if (r.status !== 200) good.push(`${JSON.stringify(e)}->${r.status}`);
+  }
+  check(
+    "r27: every emoji the reaction bar sends (plus skin tone / flag) is accepted",
+    good.length === 0,
+    good.join(" "),
+  );
+  const viewers = await k.call(`GET`, `/api/statuses/${sid}/viewers`, undefined, a.token);
+  check(
+    "r27: the stored reaction is the last emoji, verbatim",
+    viewers.json.viewers?.[0]?.reaction === "🇧🇩",
+    JSON.stringify(viewers.json.viewers?.[0]?.reaction),
+  );
+  // N+1: 12 viewers must not mean 12 user SELECTs
+  for (let i = 0; i < 12; i++) {
+    const v = await k.reg(`emo-v${i}@x.com`, `emov${i}`);
+    await k.call("POST", "/api/conversations", { userId: v.user.id }, a.token);
+    await k.call("POST", `/api/statuses/${sid}/view`, undefined, v.token);
+  }
+  let statements = 0;
+  const origPrepare = k.db.prepare.bind(k.db);
+  k.db.prepare = (sql) => {
+    statements++;
+    return origPrepare(sql);
+  };
+  const sheet = await k.call("GET", `/api/statuses/${sid}/viewers`, undefined, a.token);
+  k.db.prepare = origPrepare;
+  check(
+    "r27: viewer sheet for 13 viewers costs a handful of statements, not 1+N",
+    sheet.json.viewers?.length === 13 && statements <= 6,
+    `viewers=${sheet.json.viewers?.length} statements=${statements}`,
   );
 }
 
