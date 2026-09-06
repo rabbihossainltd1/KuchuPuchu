@@ -494,7 +494,7 @@ fun AttachPanel(
                     Row(
                         Modifier
                             .clip(RoundedCornerShape(16.dp))
-                            .background(if (selected) Color(0xFFFEF3C7) else Color(0x0F1C1917))
+                            .background(if (selected) ChipSelected else ChipIdle)
                             .clickable {
                                 if (name == "All") folder = null else folder = name
                             }
@@ -650,7 +650,7 @@ private fun MediaCell(
     Box(
         Modifier
             .aspectRatio(1f)
-            .background(Color(0xFFEAE6DF))
+            .background(Line)
             .clickable { onToggle() },
     ) {
         val bmp = thumb

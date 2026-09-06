@@ -147,20 +147,20 @@ fun CreateGroupScreen(nav: NavController) {
                     Row(
                         Modifier
                             .clip(RoundedCornerShape(18.dp))
-                            .background(GoldSoft)
+                            .background(if (KpThemeMode.darkBlue) ActionBlue.copy(alpha = 0.22f) else GoldSoft)
                             .padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
                             u.optString("displayName").ifBlank { "User" },
                             fontSize = 12.5.sp,
-                            color = GoldDeep,
+                            color = ActionBlueDeep,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.padding(end = 2.dp),
                         )
                         IconButton(onClick = { toggle(u) }, Modifier.size(24.dp)) {
-                            Icon(Icons.Filled.Close, "Remove ${u.optString("displayName")}", tint = GoldDeep, modifier = Modifier.size(14.dp))
+                            Icon(Icons.Filled.Close, "Remove ${u.optString("displayName")}", tint = ActionBlueDeep, modifier = Modifier.size(14.dp))
                         }
                     }
                 }
@@ -194,7 +194,7 @@ fun CreateGroupScreen(nav: NavController) {
                         Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(16.dp))
-                            .background(if (on) GoldSoft else Card)
+                            .background(if (on) (if (KpThemeMode.darkBlue) ActionBlue.copy(alpha = 0.18f) else GoldSoft) else Card)
                             .clickable { toggle(user) }
                             .padding(horizontal = 14.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -219,11 +219,11 @@ fun CreateGroupScreen(nav: NavController) {
                             Modifier
                                 .size(24.dp)
                                 .clip(CircleShape)
-                                .background(if (on) Gold else Line),
+                                .background(if (on) ActionBlue else Line),
                             contentAlignment = Alignment.Center,
                         ) {
                             if (on) {
-                                Text("✓", color = AmberInk, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                Text("✓", color = ActionBlueInk, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }

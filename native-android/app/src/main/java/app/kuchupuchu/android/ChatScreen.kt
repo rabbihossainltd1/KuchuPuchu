@@ -2552,8 +2552,8 @@ private fun HeaderCallBtn(onClick: () -> Unit, icon: @Composable () -> Unit) {
             .size(38.dp)
             .shadow(4.dp, CircleShape)
             .clip(CircleShape)
-            .background(Brush.verticalGradient(listOf(Color(0xFFFFFFFF), Color(0xFFF3E4C6))))
-            .border(1.dp, Color(0x24000000), CircleShape)
+            .background(circleButtonFill())
+            .border(1.dp, CircleButtonEdge, CircleShape)
             .clickable { haptics.tap(); onClick() },
         contentAlignment = Alignment.Center,
     ) { icon() }
@@ -3015,7 +3015,7 @@ private fun LoginApprovalMessage(m: JSONObject) {
                     },
                     enabled = !busy,
                     shape = RoundedCornerShape(10.dp),
-                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Gold, contentColor = Color.White),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = ActionBlueInk),
                     modifier = Modifier.weight(1f),
                 ) {
                     Text("Accept", maxLines = 1, fontWeight = FontWeight.SemiBold)
@@ -3039,7 +3039,7 @@ private fun LoginApprovalMessage(m: JSONObject) {
                     },
                     enabled = !busy,
                     shape = RoundedCornerShape(10.dp),
-                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Red),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Card, contentColor = Red),
                     modifier = Modifier.weight(1f),
                 ) {
                     Text("Decline", maxLines = 1, fontWeight = FontWeight.SemiBold)
@@ -4871,7 +4871,7 @@ private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
                     Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
-                        .background(if (ownerId.isNotBlank()) Gold else Color(0xFFE7E5E4))
+                        .background(if (ownerId.isNotBlank()) ActionBlue else Line)
                         .clickable(enabled = ownerId.isNotBlank()) { onMessageOwner(ownerId) }
                         .padding(vertical = 9.dp),
                     horizontalArrangement = Arrangement.Center,

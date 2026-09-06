@@ -79,6 +79,29 @@ fun goldRing(): Brush =
 
 fun goldFill(): Brush = Brush.linearGradient(listOf(Gold, GoldDeep))
 
+/** Owner round 30: the raised circle buttons (chat header calls, calls tab,
+ *  friend profile). Light-cream keeps the white→warm gradient; dark-blue
+ *  paints the card blue → deep blue so no cream leaks into that theme. */
+fun circleButtonFill(): Brush =
+    if (KpThemeMode.darkBlue) Brush.verticalGradient(listOf(Color(0xFF243B6B), Color(0xFF16213A)))
+    else Brush.verticalGradient(listOf(Color(0xFFFFFFFF), Color(0xFFF3E4C6)))
+val CircleButtonEdge: Color
+    get() = if (KpThemeMode.darkBlue) Color(0x3360A5FA) else Color(0x24000000)
+
+/** Owner round 30: selected chip fill in the attach / sticker sheets. */
+val ChipSelected: Color
+    get() = if (KpThemeMode.darkBlue) ActionBlue.copy(alpha = 0.28f) else Color(0xFFFEF3C7)
+val ChipIdle: Color
+    get() = if (KpThemeMode.darkBlue) Color(0x1AFFFFFF) else Color(0x0F1C1917)
+
+/** Owner round 30: swipe-action backgrounds on chat rows. */
+val SwipeDeleteBg: Color
+    get() = if (KpThemeMode.darkBlue) Red.copy(alpha = 0.22f) else Color(0xFFFEE2E2)
+val SwipeArchiveBg: Color
+    get() = if (KpThemeMode.darkBlue) Green.copy(alpha = 0.22f) else Color(0xFFE7F0E7)
+val SwipeArchiveInk: Color
+    get() = if (KpThemeMode.darkBlue) Color(0xFF4ADE80) else Color(0xFF2E7D32)
+
 @Composable
 fun KpTheme(content: @Composable () -> Unit) {
     val d = LocalDensity.current

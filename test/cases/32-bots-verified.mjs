@@ -3,7 +3,7 @@
 // avatar, the login-approval card carrying the attempt's origin (IP, place,
 // time), and the official notification account being strictly one-way.
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { makeD1, makeR2, makeCtx } from "../d1shim.mjs";
 import { makeReg, installGoogleStub, phoneFrom, fakeIdToken } from "../helpers/phoneauth.mjs";
 
@@ -2384,6 +2384,34 @@ const convBetween = (db, a, b) =>
       !kt("NewChatScreen.kt").includes('"Name or username"') &&
       kt("StatusPhotoScreen.kt").includes('label = { Text("Caption") }'),
   );
+  {
+    // Every cream / warm-white literal outside Theme.kt and the login screen
+    // (which the owner excluded from theme work) must be gone from the
+    // screens: dark-blue may not paint any light-cream colour.
+    const creamLiterals = [
+      "0xFFF3E4C6",
+      "0xFFFEF3C7",
+      "0xFFFEE2E2",
+      "0xFFE7F0E7",
+      "0xFFEAE6DF",
+      "0xFFE7E5E4",
+    ];
+    const leaks = [];
+    for (const f of readdirSync("native-android/app/src/main/java/app/kuchupuchu/android")) {
+      if (!f.endsWith(".kt") || f === "Theme.kt" || f === "LoginScreen.kt") continue;
+      const src = kt(f);
+      for (const lit of creamLiterals) if (src.includes(lit)) leaks.push(`${f}:${lit}`);
+    }
+    check(
+      "r30-6: no light-cream literal left on any screen — circle buttons, chips, swipe slots, ticks are themed tokens",
+      leaks.length === 0 &&
+        kt("Theme.kt").includes("fun circleButtonFill(): Brush") &&
+        kt("Theme.kt").includes("val ChipSelected: Color") &&
+        kt("Theme.kt").includes("val SwipeDeleteBg: Color") &&
+        kt("CreateGroupScreen.kt").includes(".background(if (on) ActionBlue else Line),"),
+      leaks.join(" "),
+    );
+  }
   const settings = readFileSync(
     "native-android/app/src/main/java/app/kuchupuchu/android/SettingsScreen.kt",
     "utf8",

@@ -117,7 +117,7 @@ fun StickerPanel(
                     Box(
                         Modifier
                             .clip(RoundedCornerShape(12.dp))
-                            .background(if (sel) Color(0xFFFEF3C7) else Color.Transparent)
+                            .background(if (sel) ChipSelected else Color.Transparent)
                             .clickable {
                                 haptics.tap()
                                 tab = i
@@ -192,7 +192,7 @@ fun StickerPanel(
                     Box(
                         Modifier
                             .clip(RoundedCornerShape(14.dp))
-                            .background(if (selected) Color(0xFFFEF3C7) else Color(0x0F1C1917))
+                            .background(if (selected) ChipSelected else ChipIdle)
                             .clickable {
                                 haptics.tap()
                                 pack = i
@@ -312,7 +312,7 @@ fun StickerPanel(
                     Box(
                         Modifier
                             .clip(RoundedCornerShape(14.dp))
-                            .background(if (selected) Color(0xFFFEF3C7) else Color(0x0F1C1917))
+                            .background(if (selected) ChipSelected else ChipIdle)
                             .clickable {
                                 haptics.tap()
                                 emojiCat = cat

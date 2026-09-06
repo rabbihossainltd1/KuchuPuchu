@@ -813,7 +813,7 @@ private fun SwipeConvRow(
                     }
                     ActionSlot(
                         icon = Icons.Filled.Delete,
-                        bg = Color(0xFFFEE2E2),
+                        bg = SwipeDeleteBg,
                         tint = Red,
                         label = "Delete",
                     ) {
@@ -837,8 +837,8 @@ private fun SwipeConvRow(
                 if (offset < 0f && !archivedMode) {
                     ActionSlot(
                         icon = Icons.Filled.Archive,
-                        bg = Color(0xFFE7F0E7),
-                        tint = Color(0xFF2E7D32),
+                        bg = SwipeArchiveBg,
+                        tint = SwipeArchiveInk,
                         label = "Archive",
                     ) {
                         haptics.confirm()
@@ -860,8 +860,8 @@ private fun SwipeConvRow(
                 if (offset >= 0f && archivedMode) {
                     ActionSlot(
                         icon = Icons.Filled.Unarchive,
-                        bg = Color(0xFFE7F0E7),
-                        tint = Color(0xFF2E7D32),
+                        bg = SwipeArchiveBg,
+                        tint = SwipeArchiveInk,
                         label = "Unarchive",
                     ) {
                         haptics.confirm()
@@ -893,7 +893,7 @@ private fun SwipeConvRow(
                     }
                     ActionSlot(
                         icon = Icons.Filled.Delete,
-                        bg = Color(0xFFFEE2E2),
+                        bg = SwipeDeleteBg,
                         tint = Red,
                         label = "Delete",
                     ) {

@@ -43,7 +43,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -397,8 +396,8 @@ private fun ProfileHeaderCallBtn(onClick: () -> Unit, icon: @Composable () -> Un
             .size(50.dp)
             .shadow(5.dp, CircleShape)
             .clip(CircleShape)
-            .background(Brush.verticalGradient(listOf(Color(0xFFFFFFFF), Color(0xFFF3E4C6))))
-            .border(1.dp, Color(0x24000000), CircleShape)
+            .background(circleButtonFill())
+            .border(1.dp, CircleButtonEdge, CircleShape)
             .clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) { icon() }
