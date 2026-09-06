@@ -1256,9 +1256,30 @@ private fun StatusVideoPlayer(
     LaunchedEffect(url) {
         val p = withContext(Dispatchers.IO) {
             runCatching {
-                val bytes = Api.download(url)
+                // Round 27: the clip was written to this cache file on every
+                // view but the file was never READ — going back/forward, or
+                // re-opening the viewer, downloaded the whole clip again (up to
+                // 25 MB on mobile data, spinner each time). Serve the cached
+                // copy when it is there; fetch straight to disk otherwise
+                // (streamed, not a 25 MB byte array on the heap). A status
+                // lives 24h, so clips older than a day are pruned while here.
                 val f = java.io.File(ctx.cacheDir, "status_${url.hashCode()}.mp4")
-                f.writeBytes(bytes)
+                if (!(f.exists() && f.length() > 0L)) {
+                    val tmp = java.io.File(ctx.cacheDir, "status_${url.hashCode()}.part")
+                    if (!Api.downloadToFile(url, tmp) || tmp.length() == 0L) {
+                        tmp.delete()
+                        error("download failed")
+                    }
+                    if (!tmp.renameTo(f)) {
+                        tmp.copyTo(f, overwrite = true)
+                        tmp.delete()
+                    }
+                }
+                f.setLastModified(System.currentTimeMillis())
+                val cutoff = System.currentTimeMillis() - 24 * 60 * 60_000L
+                ctx.cacheDir.listFiles()
+                    ?.filter { (it.name.startsWith("status_")) && it.lastModified() < cutoff }
+                    ?.forEach { it.delete() }
                 f.absolutePath
             }.getOrNull()
         }

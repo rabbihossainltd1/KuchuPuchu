@@ -1728,6 +1728,12 @@ const convBetween = (db, a, b) =>
     statusKt.includes("} else if (dur > 0 && cur >= dur - 500) {") &&
       !statusKt.includes("} else if (dur > 0 && cur > 0) {"),
   );
+  check(
+    "r27: status clip cache is READ (no re-download per view) + streamed to disk + 24h prune",
+    statusKt.includes("if (!(f.exists() && f.length() > 0L)) {") &&
+      statusKt.includes("Api.downloadToFile(url, tmp)") &&
+      !statusKt.includes("val bytes = Api.download(url)"),
+  );
 }
 
 console.log(lines.join("\n"));
