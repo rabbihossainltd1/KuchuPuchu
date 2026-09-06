@@ -1851,6 +1851,27 @@ async function blockedBetween(db: D1Database, a: string, b: string) {
 }
 
 /**
+ * Round 27: may `uid` look at `ownerId`'s status? The feed applies this rule
+ * in its query; the per-status routes (/view, /react, /media) used to apply
+ * NONE of it — a blocked contact could still ping a view, land a reaction in
+ * the owner's viewer list, and pull the media by id. One rule, one place:
+ * the owner themself, or a contact (shares a conversation) who is not blocked
+ * in either direction.
+ */
+async function canSeeStatusOf(db: D1Database, uid: string, ownerId: string): Promise<boolean> {
+  if (ownerId === uid) return true;
+  const isContact = !!(await one(
+    db,
+    `SELECT m1.conv_id FROM members m1 JOIN members m2 ON m1.conv_id = m2.conv_id
+       WHERE m1.user_id = ? AND m2.user_id = ? LIMIT 1`,
+    uid,
+    ownerId,
+  ));
+  if (!isContact) return false;
+  return !(await blockedBetween(db, uid, ownerId));
+}
+
+/**
  * Data-only pushes are what let our rich card (Reply / Like / Mark-as-read)
  * render at all — but on MIUI/Xiaomi and friends the OS freezes or kills the
  * process, and a data-only message arriving then is never handed to the app.
@@ -5564,6 +5585,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       "SELECT * FROM statuses WHERE user_id = ? ORDER BY created_at ASC",
       uid,
     );
+    // Round 27: a block hides statuses in BOTH directions. This query had no
+    // blocks filter at all — a contact you blocked still saw every status you
+    // posted (and could react to it, see /react below). Same two-sided shape
+    // as blockedBetween(), folded into the one statement so the poll stays at
+    // one row-read pass.
     const others = await all<StatusRow>(
       db,
       `SELECT s.* FROM statuses s
@@ -5573,8 +5599,15 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
               JOIN members m2 ON m2.conv_id = m1.conv_id
              WHERE m1.user_id = ? AND m2.user_id <> ?
           )
+          AND s.user_id NOT IN (
+            SELECT target_id FROM blocks WHERE owner_id = ?
+            UNION
+            SELECT owner_id FROM blocks WHERE target_id = ?
+          )
         ORDER BY s.user_id, s.created_at ASC`,
       now,
+      uid,
+      uid,
       uid,
       uid,
     );
@@ -5639,7 +5672,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       "SELECT user_id FROM statuses WHERE id = ?",
       sid,
     );
-    if (row && row.user_id !== uid) {
+    // Round 27: silently ignored (not 403) for a non-contact/blocked caller —
+    // the client fires this ping optimistically and must not surface an error.
+    if (row && row.user_id !== uid && (await canSeeStatusOf(db, uid, row.user_id))) {
       await run(
         db,
         "INSERT OR IGNORE INTO status_views (status_id, viewer_id, viewed_at) VALUES (?, ?, ?)",
@@ -5668,6 +5703,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     );
     if (!row) fail(404, "Status not found.");
     if (row.user_id === uid) fail(400, "Can't react to your own status.");
+    if (!(await canSeeStatusOf(db, uid, row.user_id))) fail(403, "Not allowed.", "BLOCKED");
     // A reaction also counts as a view.
     await run(
       db,
@@ -5719,14 +5755,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       statusMediaMatch[1]!,
     );
     if (!row || !row.media) fail(404, "Media not found.");
-    const isContact = !!(await one(
-      db,
-      `SELECT m1.conv_id FROM members m1 JOIN members m2 ON m1.conv_id = m2.conv_id
-       WHERE m1.user_id = ? AND m2.user_id = ?`,
-      uid,
-      row.user_id,
-    ));
-    if (row.user_id !== uid && !isContact) fail(403, "Not allowed.");
+    if (!(await canSeeStatusOf(db, uid, row.user_id))) fail(403, "Not allowed.");
     return storedMediaResponse(env, row.media, row.kind === "VIDEO" ? "video/mp4" : "image/jpeg");
   }
 

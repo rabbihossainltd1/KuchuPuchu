@@ -1736,6 +1736,73 @@ const convBetween = (db, a, b) =>
   );
 }
 
+// ---- round 27: a block hides statuses BOTH ways, and /view /react /media honour it ----
+{
+  const k = await mk();
+  const a = await k.reg("blk-a@x.com", "blka");
+  const b = await k.reg("blk-b@x.com", "blkb");
+  await k.call("POST", "/api/conversations", { userId: b.user.id }, a.token);
+  const sa = await k.call("POST", "/api/statuses", { kind: "TEXT", text: "a" }, a.token);
+  const sb = await k.call(
+    "POST",
+    "/api/statuses",
+    {
+      kind: "IMAGE",
+      imageData: `data:image/jpeg;base64,${Buffer.from("jpeg").toString("base64")}`,
+    },
+    b.token,
+  );
+  const before = await k.call("GET", "/api/statuses", undefined, b.token);
+  check(
+    "r27: before the block B sees A's status (contacts)",
+    (before.json.items || []).some((g) => g.user?.id === a.user.id),
+  );
+  const blk = await k.call("POST", "/api/blocks", { userId: b.user.id }, a.token);
+  check("r27: A blocks B", blk.status === 200, `${blk.status}`);
+  const feedB = await k.call("GET", "/api/statuses", undefined, b.token);
+  const feedA = await k.call("GET", "/api/statuses", undefined, a.token);
+  check(
+    "r27: blocked B no longer sees A's status in the feed",
+    !(feedB.json.items || []).some((g) => g.user?.id === a.user.id),
+  );
+  check(
+    "r27: blocker A no longer sees B's status either",
+    !(feedA.json.items || []).some((g) => g.user?.id === b.user.id),
+  );
+  const react = await k.call(
+    "POST",
+    `/api/statuses/${sa.json.status.id}/react`,
+    { emoji: "😂" },
+    b.token,
+  );
+  check("r27: blocked B cannot react to A's status", react.status === 403, `${react.status}`);
+  const view = await k.call("POST", `/api/statuses/${sa.json.status.id}/view`, undefined, b.token);
+  const viewers = await k.call(
+    "GET",
+    `/api/statuses/${sa.json.status.id}/viewers`,
+    undefined,
+    a.token,
+  );
+  check(
+    "r27: blocked B's /view ping is swallowed (200, no row in A's viewer list)",
+    view.status === 200 && (viewers.json.viewers || []).length === 0,
+    `${view.status} viewers=${(viewers.json.viewers || []).length}`,
+  );
+  const media = await k.call("GET", `/api/statuses/${sb.json.status.id}/media`, undefined, a.token);
+  check("r27: status media route refuses across a block", media.status === 403, `${media.status}`);
+  await k.call(
+    "DELETE",
+    `/api/blocks/${b.user.id}`,
+    a.token === undefined ? undefined : undefined,
+    a.token,
+  );
+  const after = await k.call("GET", "/api/statuses", undefined, b.token);
+  check(
+    "r27: unblock restores the status feed",
+    (after.json.items || []).some((g) => g.user?.id === a.user.id),
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`bots-verified: ${lines.length - broken} ok / ${broken} broken`);
