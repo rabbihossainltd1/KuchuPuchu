@@ -72,7 +72,7 @@ fun StickerPanel(
     Column(
         Modifier
             .fillMaxWidth()
-            .background(Cream)
+            .background(Card)
             .padding(top = 6.dp, bottom = 4.dp),
     ) {
         /* top row: search, segmented tabs (emoji | GIF | stickers), edit */
@@ -85,7 +85,7 @@ fun StickerPanel(
             Icon(
                 Icons.Filled.Search,
                 contentDescription = "Search",
-                tint = Color(0x991C1917),
+                tint = Muted,
                 modifier = Modifier.size(16.dp),
             )
             Spacer(Modifier.width(8.dp))
@@ -93,12 +93,12 @@ fun StickerPanel(
                 value = query,
                 onValueChange = { query = it },
                 singleLine = true,
-                textStyle = TextStyle(color = Color.White, fontSize = 13.sp),
+                textStyle = TextStyle(color = Ink, fontSize = 13.sp),
                 modifier = Modifier.weight(1f),
                 decorationBox = { inner ->
                     Box {
                         if (query.isEmpty()) {
-                            Text("Search stickers", color = Color(0x661C1917), fontSize = 13.sp)
+                            Text("Search stickers", color = Muted.copy(alpha = 0.7f), fontSize = 13.sp)
                         }
                         inner()
                     }
@@ -109,7 +109,7 @@ fun StickerPanel(
             Row(
                 Modifier
                     .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0x141C1917))
+                    .background(ChipIdle)
                     .padding(2.dp),
             ) {
                 listOf("🙂", "GIF", "⬜", "KP").forEachIndexed { i, label ->
@@ -126,7 +126,7 @@ fun StickerPanel(
                     ) {
                         Text(
                             label,
-                            color = if (sel) GoldDeep else Color(0x991C1917),
+                            color = if (sel) ActionBlueDeep else Muted,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
@@ -138,7 +138,7 @@ fun StickerPanel(
             Icon(
                 Icons.Filled.Edit,
                 contentDescription = "Create",
-                tint = Color(0x991C1917),
+                tint = Muted,
                 modifier = Modifier
                     .size(15.dp)
                     .clickable {
@@ -201,7 +201,7 @@ fun StickerPanel(
                     ) {
                         Text(
                             name,
-                            color = if (selected) GoldDeep else Color(0x991C1917),
+                            color = if (selected) ActionBlueDeep else Muted,
                             fontSize = 11.5.sp,
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                             maxLines = 1,
@@ -237,7 +237,7 @@ fun StickerPanel(
                             .fillMaxWidth()
                             .height(36.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(if (pressed) Color(0x1A1C1917) else Color.Transparent)
+                            .background(if (pressed) ChipIdle else Color.Transparent)
                             .clickable(interactionSource = interaction, indication = null) {
                                 haptics.confirm()
                                 saveStickerRecent(sticker)
@@ -321,7 +321,7 @@ fun StickerPanel(
                     ) {
                         Text(
                             label,
-                            color = if (selected) GoldDeep else Color(0x991C1917),
+                            color = if (selected) ActionBlueDeep else Muted,
                             fontSize = 11.5.sp,
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                             maxLines = 1,
@@ -353,7 +353,7 @@ fun StickerPanel(
                             .fillMaxWidth()
                             .height(36.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(if (pressed) Color(0x1A1C1917) else Color.Transparent)
+                            .background(if (pressed) ChipIdle else Color.Transparent)
                             .clickable(interactionSource = interaction, indication = null) {
                                 haptics.confirm()
                                 EmojiRepo.recordRecent(ctx, e.id)
@@ -383,7 +383,7 @@ fun StickerPanel(
                     .height(152.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("GIFs are coming in a future update", color = Color(0x801C1917), fontSize = 13.sp)
+                Text("GIFs coming soon", color = Muted, fontSize = 13.sp)
             }
         }
 
@@ -398,13 +398,13 @@ fun StickerPanel(
             Icon(
                 Icons.Filled.Schedule,
                 contentDescription = "Recent",
-                tint = Color(0x991C1917),
+                tint = Muted,
                 modifier = Modifier.size(18.dp),
             )
             Icon(
                 Icons.Filled.Star,
                 contentDescription = "Favourites",
-                tint = Color(0x991C1917),
+                tint = Muted,
                 modifier = Modifier.size(18.dp),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -413,7 +413,7 @@ fun StickerPanel(
                         Modifier
                             .size(6.dp)
                             .clip(CircleShape)
-                            .background(if (pack == i) Gold else Color(0x331C1917)),
+                            .background(if (pack == i) ActionBlue else Line),
                     )
                 }
             }
@@ -421,10 +421,10 @@ fun StickerPanel(
                 Modifier
                     .size(24.dp)
                     .clip(CircleShape)
-                    .background(Color(0x141C1917)),
+                    .background(ChipIdle),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("+", color = Color(0xB31C1917), fontSize = 14.sp)
+                Text("+", color = Muted, fontSize = 14.sp)
             }
         }
     }

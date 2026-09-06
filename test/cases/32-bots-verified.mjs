@@ -492,7 +492,9 @@ const convBetween = (db, a, b) =>
   );
   check(
     "stamp reserves its width INLINE at the last line (rounds 12→13)",
-    chat.includes("\u00A0\u00A0") && chat.includes('bottom = if (kind == "TEXT") 0.dp else 15.dp'),
+    chat.includes("\u00A0\u00A0") &&
+      // r31-12: emoji-only texts keep the bottom band instead (stamp under the emoji).
+      chat.includes('bottom = if (kind == "TEXT" && emojiOnly == 0) 0.dp else 15.dp'),
   );
   check(
     "worker: decline also enforces the 5-minute window",
@@ -790,7 +792,7 @@ const convBetween = (db, a, b) =>
   check(
     "timestamp + tick pinned to the bubble's bottom-end, never its own line",
     chat.includes("Alignment.BottomEnd") &&
-      chat.includes('bottom = if (kind == "TEXT") 0.dp else 15.dp') &&
+      chat.includes('bottom = if (kind == "TEXT" && emojiOnly == 0) 0.dp else 15.dp') &&
       !chat.includes("appendInlineContent"),
   );
   const calls = readFileSync(
@@ -2546,6 +2548,20 @@ const convBetween = (db, a, b) =>
       kt("ChatScreen.kt").includes("ReplyQuoteBar(replyTo, chatTheme) { replyTo = null }") &&
       kt("ProfileScreen.kt").includes("val peerAccent = chatAccent(cTheme(peerConv))") &&
       (kt("ProfileScreen.kt").match(/tint = peerAccent/g) || []).length === 3,
+  );
+  // r31-12: sticker/emoji panel in theme tokens (no fixed brown/gold, no white
+  // text on cream); emoji-only texts render big with the stamp underneath.
+  check(
+    "r31-12: StickerPanel uses Card/Ink/Muted/ActionBlue tokens only; emoji-only (1–3) TEXT bubbles render 44/34sp with the stamp in the bottom band",
+    !/0x[0-9A-F]{2}1C1917/.test(kt("StickerSheet.kt")) &&
+      !kt("StickerSheet.kt").includes("GoldDeep") &&
+      !kt("StickerSheet.kt").includes("color = Color.White") &&
+      kt("StickerSheet.kt").includes("if (sel) ActionBlueDeep else Muted") &&
+      kt("ChatScreen.kt").includes("internal fun emojiOnlyCount(body: String): Int") &&
+      kt("ChatScreen.kt").includes("fontSize = if (emojiOnly == 1) 44.sp else 34.sp") &&
+      kt("ChatScreen.kt").includes(
+        'Icon(Icons.Filled.Mood, "Stickers", tint = accent, modifier = Modifier.size(20.dp))',
+      ),
   );
   {
     // Every cream / warm-white literal outside Theme.kt and the login screen

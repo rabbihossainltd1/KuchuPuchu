@@ -3294,6 +3294,8 @@ private fun MessageRow(
             // uses as much room as there actually is.
             val bubbleMax =
                 maxOf(280.dp, minOf(420.dp, (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp * 0.82f).dp))
+            // Owner round 31: emoji-only texts (1–3) render big, stamp underneath.
+            val emojiOnly = if (kind == "TEXT" && !m.optBoolean("edited")) emojiOnlyCount(m.optText("body")) else 0
             val bubbleShape =
                 RoundedCornerShape(
                     topStart = 16.dp,
@@ -3374,7 +3376,7 @@ private fun MessageRow(
                     // word — the WhatsApp trick), so the overlay can never
                     // overlap a glyph and never leaves a blank strip under
                     // the text. Other kinds keep the small bottom band.
-                    .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (kind == "TEXT") 0.dp else 15.dp),
+                    .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (kind == "TEXT" && emojiOnly == 0) 0.dp else 15.dp),
             ) {
                 val senderName = m.optText("senderName")
                 Column {
@@ -3433,7 +3435,14 @@ private fun MessageRow(
                             fontStyle = FontStyle.Italic,
                             color = Color(0xFF4A463F),
                         )
-                        else -> {
+                        else -> if (emojiOnly > 0) {
+                            Text(
+                                m.optText("body").trim(),
+                                fontSize = if (emojiOnly == 1) 44.sp else 34.sp,
+                                lineHeight = if (emojiOnly == 1) 52.sp else 40.sp,
+                                modifier = Modifier.padding(end = 2.dp, bottom = 2.dp),
+                            )
+                        } else {
                             //   runs glue to the last word, so the stamp's
                             // spot travels WITH the final line — no separate
                             // line, no overlap, no drifting left.
@@ -3460,7 +3469,7 @@ private fun MessageRow(
                 // scrim), always at the bottom-END corner, never on its own
                 // text line.
                 Row(
-                    Modifier.align(Alignment.BottomEnd).padding(end = 2.dp, bottom = if (kind == "TEXT") 3.dp else 1.dp),
+                    Modifier.align(Alignment.BottomEnd).padding(end = 2.dp, bottom = if (kind == "TEXT" && emojiOnly == 0) 3.dp else 1.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
@@ -4691,6 +4700,38 @@ private fun TickIcon(m: JSONObject, pendingEcho: Boolean, otherReadAt: String?) 
  * a Missed voice call bubble.
  */
 private fun isCallLog(m: JSONObject): Boolean = m.optString("kind") == "CALL"
+
+/**
+ * Owner round 31: a TEXT body that is ONLY emoji (1–3 of them, no letters)
+ * renders big, with the stamp under it instead of over it — the inline
+ * reserve trick can't glue spaces to an emoji glyph, so the tick/time used to
+ * sit on the emoji.
+ */
+internal fun emojiOnlyCount(body: String): Int {
+    val t = body.trim()
+    if (t.isEmpty() || t.length > 24) return 0
+    var count = 0
+    var i = 0
+    while (i < t.length) {
+        val cp = t.codePointAt(i)
+        val n = Character.charCount(cp)
+        val type = Character.getType(cp)
+        val isEmojiish =
+            type == Character.OTHER_SYMBOL.toInt() ||
+                cp in 0x1F000..0x1FAFF ||
+                cp in 0x2600..0x27BF ||
+                cp in 0x1F1E6..0x1F1FF
+        val isJoiner = cp == 0x200D || cp == 0xFE0F || cp in 0x1F3FB..0x1F3FF || type == Character.NON_SPACING_MARK.toInt()
+        when {
+            isEmojiish -> count++
+            isJoiner -> Unit
+            cp == ' '.code -> Unit
+            else -> return 0
+        }
+        i += n
+    }
+    return if (count in 1..3) count else 0
+}
 
 @Composable
 private fun CallLogBubble(m: JSONObject, mine: Boolean, pendingEcho: Boolean, theme: String) {
