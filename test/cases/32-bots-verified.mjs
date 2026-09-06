@@ -2516,6 +2516,14 @@ const convBetween = (db, a, b) =>
       })(),
     );
   }
+  // r31-9: a Public (or contacts-visible) number is RENDERED on the other person's
+  // profile — the worker already sent it (r30-2 above); the screen never showed it.
+  check(
+    "r31-9: ProfileScreen renders the peer's phone from the server answer (tap = dialer), only when the server allowed it",
+    kt("ProfileScreen.kt").includes('val peerPhone = if (isMe) "" else u.optText("phone")') &&
+      kt("ProfileScreen.kt").includes("if (peerPhone.isNotBlank()) {") &&
+      kt("ProfileScreen.kt").includes('android.net.Uri.parse("tel:$peerPhone")'),
+  );
   {
     // Every cream / warm-white literal outside Theme.kt and the login screen
     // (which the owner excluded from theme work) must be gone from the

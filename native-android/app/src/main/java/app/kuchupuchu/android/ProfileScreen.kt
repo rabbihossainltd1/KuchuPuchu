@@ -278,6 +278,33 @@ fun ProfileScreen(nav: NavController, userId: String) {
             }
             val uname = u.optText("username")
             if (uname.isNotBlank()) Text("@$uname", fontSize = 13.5.sp, color = Muted)
+            // Owner round 31 (item 9): the number the server lets me see — a
+            // Public number (or Contacts-only when we are contacts). The screen
+            // simply never rendered it before; the worker was already right.
+            val peerPhone = if (isMe) "" else u.optText("phone")
+            if (peerPhone.isNotBlank()) {
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable {
+                            runCatching {
+                                ctx.startActivity(
+                                    android.content.Intent(
+                                        android.content.Intent.ACTION_DIAL,
+                                        android.net.Uri.parse("tel:$peerPhone"),
+                                    ),
+                                )
+                            }
+                        }
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.Call, null, tint = ActionBlueDeep, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(peerPhone, fontSize = 13.5.sp, color = ActionBlueDeep, fontWeight = FontWeight.Medium, maxLines = 1)
+                }
+            }
             val about = u.optText("about")
             if (about.isNotBlank() && !isMe) {
                 Spacer(Modifier.height(6.dp))
