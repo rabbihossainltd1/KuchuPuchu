@@ -5437,6 +5437,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       row.id,
     );
     await syncPreviewAfterDelete(db, row);
+    // Round 27: the object behind an unsent photo/video/file goes with it
+    // (unless another row still references the key).
+    if (row.media) ctx.waitUntil(collectOrphanedMedia(env, db, [row.media]).then(() => undefined));
     // Reuse the frame the client already knows how to paint: a "message" event
     // carrying the full row replaces the bubble by id (see ChatScreen's fast
     // paint), so a deleted message disappears on the other devices without a new
@@ -5589,9 +5592,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // one client's poll wrote to the whole statuses table for everybody.
     if (Date.now() > nextStatusSweep) {
       nextStatusSweep = Date.now() + 60_000;
-      ctx.waitUntil(
-        run(db, "DELETE FROM statuses WHERE expires_at < ?", nowIso()).then(() => undefined),
-      );
+      ctx.waitUntil(sweepExpiredStatuses(env, db).then(() => undefined));
     }
     // ONE statement per concern, for every contact at once.
     //
@@ -5813,7 +5814,18 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   const statusMatch = path.match(/^\/api\/statuses\/([^/]+)$/);
   if (statusMatch && method === "DELETE") {
+    const gone = await one<{ media: string | null }>(
+      db,
+      "SELECT media FROM statuses WHERE id = ? AND user_id = ?",
+      statusMatch[1]!,
+      uid,
+    );
     await run(db, "DELETE FROM statuses WHERE id = ? AND user_id = ?", statusMatch[1]!, uid);
+    // Round 27: view rows of a deleted status are dead weight; the media
+    // object is collected once nothing else references it.
+    await run(db, "DELETE FROM status_views WHERE status_id = ?", statusMatch[1]!);
+    if (gone?.media)
+      ctx.waitUntil(collectOrphanedMedia(env, db, [gone.media]).then(() => undefined));
     return json({ ok: true });
   }
 
@@ -6616,6 +6628,64 @@ async function syncPreviewAfterDelete(db: D1Database, row: MsgRow) {
     prev ? prev.created_at : null,
     row.conv_id,
   );
+}
+
+/**
+ * Round 27: R2 garbage collection. Nothing in the worker ever called
+ * `MEDIA.delete` — an unsent photo, a deleted status and every one of the
+ * 24h-expired video statuses (25 MB each) stayed in the bucket forever.
+ *
+ * A key may be referenced from more than one row (forwarded file, the same
+ * upload attached twice), so an object is removed only when NO live message
+ * and NO status still points at it. Data-URL media (`data:`) is inline in the
+ * row and has nothing to collect. Best-effort: a failed delete is a leak, not
+ * an error for the user — callers run this inside `ctx.waitUntil`.
+ */
+async function collectOrphanedMedia(env: Env, db: D1Database, keys: Array<string | null>) {
+  const bucket = env.MEDIA;
+  if (!bucket) return 0;
+  const candidates = [...new Set(keys.filter((k): k is string => !!k && !k.startsWith("data:")))];
+  let removed = 0;
+  for (const key of candidates) {
+    try {
+      const inMessages = await one(db, "SELECT 1 AS x FROM messages WHERE media = ? LIMIT 1", key);
+      if (inMessages) continue;
+      const inStatuses = await one(db, "SELECT 1 AS x FROM statuses WHERE media = ? LIMIT 1", key);
+      if (inStatuses) continue;
+      await bucket.delete(key);
+      await run(db, "DELETE FROM files WHERE key = ?", key);
+      removed++;
+    } catch {
+      // leave it for the next pass
+    }
+  }
+  return removed;
+}
+
+/**
+ * Round 27: expired statuses used to be a bare `DELETE FROM statuses`, which
+ * left their view rows and — for photo/video statuses — the R2 object behind
+ * forever. Collect the keys first, then drop rows + views, then GC the bucket.
+ * Bounded per pass (the sweep runs at most once a minute per isolate).
+ */
+async function sweepExpiredStatuses(env: Env, db: D1Database): Promise<number> {
+  const now = nowIso();
+  const expired = await all<{ id: string; media: string | null }>(
+    db,
+    "SELECT id, media FROM statuses WHERE expires_at < ? LIMIT 200",
+    now,
+  );
+  if (!expired.length) return 0;
+  for (const group of chunked(expired.map((s) => s.id))) {
+    await run(db, `DELETE FROM status_views WHERE status_id IN (${inSql(group.length)})`, ...group);
+    await run(db, `DELETE FROM statuses WHERE id IN (${inSql(group.length)})`, ...group);
+  }
+  await collectOrphanedMedia(
+    env,
+    db,
+    expired.map((s) => s.media),
+  );
+  return expired.length;
 }
 
 /** Chat-list preview text for a stored row — mirrors what the send path writes. */

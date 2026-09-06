@@ -1975,6 +1975,121 @@ const convBetween = (db, a, b) =>
   );
 }
 
+// ---- round 27: R2 garbage collection — unsend / status delete / 24h expiry free the object ----
+{
+  const worker = await freshWorker();
+  const db = makeD1();
+  const r2 = makeR2();
+  const env = { DB: db, MEDIA: r2, GOOGLE_WEB_CLIENT_ID: "kp-test-web-client" };
+  const ctx = makeCtx();
+  let ipSeq = 0;
+  const call = async (method, path, body, token, raw) => {
+    const headers = { "content-type": "application/json" };
+    if (path.startsWith("/api/auth/"))
+      headers["cf-connecting-ip"] = `203.10.${Math.floor(ipSeq / 250)}.${(ipSeq++ % 250) + 1}`;
+    if (token) headers.authorization = `Bearer ${token}`;
+    let init = { method, headers };
+    if (raw) {
+      init = {
+        method,
+        headers: { ...raw.headers, authorization: `Bearer ${token}` },
+        body: raw.body,
+      };
+    } else if (body !== undefined && method !== "GET") init.body = JSON.stringify(body);
+    const res = await worker.fetch(new Request(`https://kp.test${path}`, init), env, ctx);
+    const t = await res.text();
+    await ctx.drain();
+    let j = {};
+    try {
+      j = t ? JSON.parse(t) : {};
+    } catch {
+      j = {};
+    }
+    return { status: res.status, json: j };
+  };
+  const reg = makeReg(call);
+  const a = await reg("gc-a@x.com", "gca");
+  const b = await reg("gc-b@x.com", "gcb");
+  const c = await reg("gc-c@x.com", "gcc");
+  const cab = (await call("POST", "/api/conversations", { userId: b.user.id }, a.token)).json
+    .conversation.id;
+  const cac = (await call("POST", "/api/conversations", { userId: c.user.id }, a.token)).json
+    .conversation.id;
+  const upload = async (name, type) =>
+    (
+      await call("POST", `/api/files?name=${name}&type=${type}`, undefined, a.token, {
+        headers: { "content-type": "application/octet-stream" },
+        body: Buffer.from(`bytes-of-${name}`),
+      })
+    ).json.fileKey;
+  const inBucket = async (key) => !!(await r2.get(key));
+
+  // 1. unsend frees the object
+  const k1 = await upload("one.jpg", "image/jpeg");
+  const m1 = await call(
+    "POST",
+    `/api/conversations/${cab}/messages`,
+    { fileKey: k1, kind: "FILE" },
+    a.token,
+  );
+  await call("DELETE", `/api/messages/${m1.json.message.id}`, undefined, a.token);
+  check("r27-gc: unsending a file message deletes its R2 object", !(await inBucket(k1)));
+
+  // 2. a key still referenced elsewhere (same upload sent to two chats) SURVIVES the first unsend
+  const k2 = await upload("two.jpg", "image/jpeg");
+  const m2a = await call(
+    "POST",
+    `/api/conversations/${cab}/messages`,
+    { fileKey: k2, kind: "FILE" },
+    a.token,
+  );
+  await call("POST", `/api/conversations/${cac}/messages`, { fileKey: k2, kind: "FILE" }, a.token);
+  await call("DELETE", `/api/messages/${m2a.json.message.id}`, undefined, a.token);
+  check("r27-gc: an object still referenced by another message is NOT deleted", await inBucket(k2));
+
+  // 3. status delete frees the object + its view rows
+  const k3 = await upload("st.mp4", "video/mp4");
+  const st = await call(
+    "POST",
+    "/api/statuses",
+    { kind: "VIDEO", fileKey: k3, seconds: 9 },
+    a.token,
+  );
+  await call("POST", `/api/statuses/${st.json.status.id}/view`, undefined, b.token);
+  await call("DELETE", `/api/statuses/${st.json.status.id}`, undefined, a.token);
+  const views = db._db
+    .prepare("SELECT COUNT(*) AS n FROM status_views WHERE status_id = ?")
+    .get(st.json.status.id);
+  check(
+    "r27-gc: deleting a video status deletes its R2 object and its view rows",
+    !(await inBucket(k3)) && views.n === 0,
+    `inBucket=${await inBucket(k3)} views=${views.n}`,
+  );
+
+  // 4. the 24h expiry sweep frees objects too (age the row, force the once-a-minute gate)
+  const k4 = await upload("old.mp4", "video/mp4");
+  const old = await call(
+    "POST",
+    "/api/statuses",
+    { kind: "VIDEO", fileKey: k4, seconds: 5 },
+    a.token,
+  );
+  db._db
+    .prepare("UPDATE statuses SET expires_at = ? WHERE id = ?")
+    .run(new Date(Date.now() - 60_000).toISOString(), old.json.status.id);
+  // the sweep gate is module state; a fresh worker import starts with it open
+  await call("GET", "/api/statuses", undefined, b.token);
+  await ctx.drain();
+  const rowLeft = db._db
+    .prepare("SELECT 1 AS x FROM statuses WHERE id = ?")
+    .get(old.json.status.id);
+  check(
+    "r27-gc: an expired status is swept together with its R2 object",
+    !rowLeft && !(await inBucket(k4)),
+    `row=${!!rowLeft} inBucket=${await inBucket(k4)}`,
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`bots-verified: ${lines.length - broken} ok / ${broken} broken`);
