@@ -123,6 +123,10 @@ fun KpApp() {
                     ChatScreen(nav, id)
                 }
                 composable("settings") { SettingsScreen(nav) }
+                // Owner round 28: home ⋮ menu destinations.
+                composable("about") { AboutScreen(nav) }
+                composable("contacts") { AllContactsScreen(nav) }
+                composable("newcontact") { NewContactScreen(nav) }
                 // Owner round 22: per-field profile edit screens.
                 composable("editfield/name") { EditNameScreen(nav) }
                 composable("editfield/username") { EditUsernameScreen(nav) }

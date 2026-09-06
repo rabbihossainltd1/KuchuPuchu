@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Search
@@ -63,7 +64,11 @@ fun ProfileScreen(nav: NavController, userId: String) {
     // Paint INSTANTLY from the cached conversation data (name/avatar/username/
     // about all ride along with the chat list) — the network call only
     // refreshes. First open used to sit on "Loading…" like a web page.
-    var user by remember { mutableStateOf(profileSnapshot(userId)) }
+    // Owner round 28: the home ⋮ menu opens MY profile through this same
+    // screen — calls/search/block make no sense against yourself, so the
+    // action rows give way to an "Edit profile" row that opens Settings.
+    val isMe = userId.isNotBlank() && userId == Store.myId()
+    var user by remember { mutableStateOf(if (isMe) Store.me else profileSnapshot(userId)) }
     var error by remember { mutableStateOf("") }
     // The API answers `blocked` on the profile now (it has to, so the profile can
     // be shown at all to someone who blocked this user). Starting from `false`
@@ -73,6 +78,12 @@ fun ProfileScreen(nav: NavController, userId: String) {
 
     LaunchedEffect(userId) {
         runCatching {
+            if (isMe) {
+                val fresh = withContext(Dispatchers.IO) { Api.get("/api/me", true) }
+                fresh.optJSONObject("user")?.let { user = it; Store.saveMe(it) }
+                error = ""
+                return@runCatching
+            }
             val cached = withContext(Dispatchers.IO) { Api.get("/api/users/$userId") }
             user = cached.optJSONObject("user") ?: user
             error = ""
@@ -101,7 +112,7 @@ fun ProfileScreen(nav: NavController, userId: String) {
             IconButton(onClick = { nav.popBackStack() }) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink)
             }
-            Text("Contact", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
+            Text(if (isMe) "My profile" else "Contact", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
         }
         val u = user
         if (u == null) {
@@ -208,8 +219,30 @@ fun ProfileScreen(nav: NavController, userId: String) {
                 Text(about, fontSize = 13.5.sp, color = Ink, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             }
         }
+        if (isMe) {
+            Spacer(Modifier.height(8.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Card)
+                    .clickable { haptics.tap(); nav.navigate("settings") }
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Edit, null, tint = ActionBlueDeep, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Edit profile", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Ink)
+                    Text("Name, username, about, photo, phone", fontSize = 12.5.sp, color = Muted)
+                }
+                Text(u.optText("phone").ifBlank { "" }, fontSize = 12.5.sp, color = Muted)
+            }
+            Spacer(Modifier.height(12.dp))
+        }
         // Owner round 7: the owner's account can never be blocked.
-        if (!isKpBot(userId) && u.optText("username") != "rabbihossainltd") {
+        if (!isMe && !isKpBot(userId) && u.optText("username") != "rabbihossainltd") {
         Row(
             Modifier
                 .fillMaxWidth()
@@ -269,7 +302,7 @@ fun ProfileScreen(nav: NavController, userId: String) {
             }
         }
         Spacer(Modifier.height(16.dp))
-        Column(Modifier.padding(horizontal = 16.dp)) {
+        if (!isMe) Column(Modifier.padding(horizontal = 16.dp)) {
             // Real shared-media strip: recent photos from this user's chat.
             // (The card here used to be a dead placeholder.)
             val convId0 = ScreenStore.convs
@@ -320,7 +353,7 @@ fun ProfileScreen(nav: NavController, userId: String) {
             Spacer(Modifier.height(10.dp))
         }
         }
-        if (!isKpBot(userId)) {
+        if (!isMe && !isKpBot(userId)) {
             androidx.compose.foundation.layout.Box(
                 Modifier
                     .fillMaxWidth()

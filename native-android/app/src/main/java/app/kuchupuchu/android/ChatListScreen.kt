@@ -50,6 +50,12 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Contacts
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.GroupAdd
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -102,6 +108,7 @@ fun ChatListScreen(nav: NavController) {
     var loading by remember { mutableStateOf(!ScreenStore.convsLoaded) }
     // Saveable: coming back from a chat / status viewer returns to the SAME
     // tab instead of jumping to Chats every time.
+    var homeMenu by remember { mutableStateOf(false) }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val haptics = rememberHaptics()
     // Owner round 17: the archive pull has TWO triggers — the list overscroll
@@ -304,8 +311,30 @@ fun ChatListScreen(nav: NavController) {
                 IconButton(onClick = { nav.navigate("search") }) {
                     Icon(Icons.Filled.Search, "Search", tint = Ink, modifier = Modifier.size(26.dp))
                 }
-                IconButton(onClick = { nav.navigate("settings") }) {
-                    Icon(Icons.Filled.Settings, "Settings", tint = Ink, modifier = Modifier.size(26.dp))
+                // Owner round 28: the settings cog is gone — a ⋮ menu carries
+                // Settings, Profile, About Us, New group, New contact, All
+                // contacts. Every entry is a real screen, nothing is a demo.
+                Box {
+                    IconButton(onClick = { haptics.tap(); homeMenu = true }) {
+                        Icon(Icons.Filled.MoreVert, "Menu", tint = Ink, modifier = Modifier.size(26.dp))
+                    }
+                    androidx.compose.material3.DropdownMenu(
+                        expanded = homeMenu,
+                        onDismissRequest = { homeMenu = false },
+                        // Theme surface, not the M3 default tint (the mismatch
+                        // the owner flagged on the status menu).
+                        containerColor = Card,
+                        shape = RoundedCornerShape(16.dp),
+                        tonalElevation = 0.dp,
+                        shadowElevation = 6.dp,
+                    ) {
+                        HomeMenuItem(Icons.Filled.Settings, "Settings") { homeMenu = false; nav.navigate("settings") }
+                        HomeMenuItem(Icons.Filled.Person, "Profile") { homeMenu = false; nav.navigate("profile/${Store.myId()}") }
+                        HomeMenuItem(Icons.Filled.Info, "About Us") { homeMenu = false; nav.navigate("about") }
+                        HomeMenuItem(Icons.Filled.GroupAdd, "New group") { homeMenu = false; nav.navigate("newgroup") }
+                        HomeMenuItem(Icons.Filled.PersonAdd, "New contact") { homeMenu = false; nav.navigate("newcontact") }
+                        HomeMenuItem(Icons.Filled.Contacts, "All contacts") { homeMenu = false; nav.navigate("contacts") }
+                    }
                 }
             }
 
@@ -1121,4 +1150,14 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
             }
         }
     }
+}
+
+/** Owner round 28: one row of the home ⋮ menu — theme ink + blue icon. */
+@Composable
+private fun HomeMenuItem(icon: ImageVector, label: String, onClick: () -> Unit) {
+    androidx.compose.material3.DropdownMenuItem(
+        text = { Text(label, color = Ink, fontSize = 15.sp) },
+        leadingIcon = { Icon(icon, null, tint = ActionBlueDeep, modifier = Modifier.size(22.dp)) },
+        onClick = onClick,
+    )
 }

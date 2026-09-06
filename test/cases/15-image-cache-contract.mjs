@@ -117,7 +117,7 @@ has(
 );
 has(
   profile,
-  "mutableStateOf(profileSnapshot(userId))",
+  "mutableStateOf(if (isMe) Store.me else profileSnapshot(userId))",
   "the profile screen paints the snapshot first",
 );
 const load = profile.slice(
