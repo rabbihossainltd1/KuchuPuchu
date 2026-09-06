@@ -1094,8 +1094,10 @@ const convBetween = (db, a, b) =>
   check(
     "r18-7: system back steps one level — chat search closes, settings pickers/editors close first",
     chat.includes("BackHandler(enabled = showChatSearch)") &&
+      // r30-2: the inline field editors left Settings (they live in My
+      // profile now); the pickers still close first.
       settings.includes(
-        "BackHandler(enabled = showThemePicker || showRingPicker || editingKey != null)",
+        "BackHandler(enabled = showThemePicker || showRingPicker || showSoundType || picker != null)",
       ),
   );
   check(
@@ -2324,6 +2326,264 @@ const convBetween = (db, a, b) =>
   check("r28-6: the server keeps NO contacts table (match-and-forget)", tables.length === 0);
   const unauth = await k.call("POST", "/api/contacts/match", { phones: [b.user.phone] });
   check("r28-6: contacts/match needs a session", unauth.status === 401, String(unauth.status));
+}
+
+// ── r30: owner list ──────────────────────────────────────────────────────────
+{
+  const chat = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/ChatScreen.kt",
+    "utf8",
+  );
+  const kpapp = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/KpApp.kt",
+    "utf8",
+  );
+  check(
+    "r30-1: chat ⋮ says View contact only for a phone-book person, else Add contact (prefilled)",
+    chat.includes('if (inBook) "View contact" else "Add contact"') &&
+      chat.includes('PhoneBook.entries.any { it.user?.optString("id") == otherId }') &&
+      chat.includes('nav.navigate("newcontact?name=$n&phone=$p")') &&
+      kpapp.includes('"newcontact?name={name}&phone={phone}"'),
+  );
+  const settings = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/SettingsScreen.kt",
+    "utf8",
+  );
+  const profile = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/ProfileScreen.kt",
+    "utf8",
+  );
+  const settingsBody = settings.slice(
+    settings.indexOf("fun SettingsScreen("),
+    settings.indexOf("fun DevicesSection("),
+  );
+  const myProfile = settings.slice(settings.indexOf("fun MyProfileScreen("));
+  check(
+    "r30-2: Settings = Privacy / Appearance / Devices / Permissions / App only — no profile fields; My profile owns them",
+    [
+      'SectionTitle("Privacy")',
+      'SectionTitle("Appearance")',
+      'SectionTitle("Devices")',
+      'SectionTitle("Permissions")',
+      '"Who can view my number"',
+      '"Who can view my profile picture"',
+      '"Who can send me messages"',
+      '"Who can see my last seen"',
+      '"Who can add me to groups"',
+      '"Read receipts"',
+      '"Private profile"',
+      '"Sounds"',
+      '"Themes"',
+      '"App version"',
+      '"Check for updates"',
+      '"About us"',
+    ].every((l) => settingsBody.includes(l)) &&
+      !settingsBody.includes('"editfield/') &&
+      !settingsBody.includes("PickVisualMedia") &&
+      ["editfield/name", "editfield/username", "editfield/about", "editfield/phone"].every((r) =>
+        myProfile.includes(`nav.navigate("${r}")`),
+      ) &&
+      myProfile.includes("PickVisualMediaRequest(") &&
+      profile.includes('nav.navigate("myprofile")') &&
+      kpapp.includes('composable("myprofile")') &&
+      settings.includes('Api.get("/api/auth/devices", true)') &&
+      settings.includes('"No one"') &&
+      settings.includes('"Contacts only"') &&
+      settings.includes('"Public"'),
+  );
+  // server: privacy stored via PATCH /api/me and ENFORCED
+  const k = await mk();
+  const a = await k.reg("pv-a@x.com", "pva");
+  const b = await k.reg("pv-b@x.com", "pvb");
+  const s0 = await k.reg("pv-s@x.com", "pvs"); // stranger: no chat with a
+  const shape = await k.call("GET", "/api/me", undefined, a.token);
+  check(
+    "r30-2: /api/me carries the privacy block with the pre-round defaults (number contacts-only, rest public)",
+    shape.json.user?.privacy?.phone === "contacts" &&
+      shape.json.user?.privacy?.avatar === "public" &&
+      shape.json.user?.privacy?.messages === "public" &&
+      shape.json.user?.privacy?.lastSeen === "public" &&
+      shape.json.user?.privacy?.groups === "public" &&
+      shape.json.user?.privacy?.readReceipts === true &&
+      shape.json.user?.privacy?.privateProfile === false,
+    JSON.stringify(shape.json.user?.privacy),
+  );
+  const bad = await k.call("PATCH", "/api/me", { privPhone: "friends" }, a.token);
+  check("r30-2: an unknown privacy level is refused", bad.status === 400, String(bad.status));
+  // a <-> b are contacts (1:1 chat); s0 is a stranger
+  const cid = (await k.call("POST", "/api/conversations", { userId: b.user.id }, a.token)).json
+    .conversation.id;
+  await k.call(
+    "PATCH",
+    "/api/me",
+    { privPhone: "public", privAvatar: "contacts", privLastSeen: "nobody" },
+    a.token,
+  );
+  await k.call("PATCH", "/api/me", { avatarUrl: "data:image/png;base64,iVBORw0KGgo=" }, a.token);
+  const byContact = (await k.call("GET", `/api/users/${a.user.id}`, undefined, b.token)).json.user;
+  const byStranger = (await k.call("GET", `/api/users/${a.user.id}`, undefined, s0.token)).json
+    .user;
+  check(
+    "r30-2: number public → both see it; picture contacts-only → only the contact gets bytes+ref; last seen nobody → hidden from both",
+    byContact.phone === a.user.phone &&
+      byStranger.phone === a.user.phone &&
+      typeof byContact.avatarUrl === "string" &&
+      byContact.avatarRef &&
+      byStranger.avatarUrl == null &&
+      byStranger.avatarRef == null &&
+      byContact.lastActiveAt == null &&
+      byContact.online === false &&
+      byStranger.lastActiveAt == null,
+    JSON.stringify({ c: byContact, s: byStranger }).slice(0, 300),
+  );
+  const avStranger = await k.call("GET", `/api/users/${a.user.id}/avatar`, undefined, s0.token);
+  const avContact = await k.call("GET", `/api/users/${a.user.id}/avatar`, undefined, b.token);
+  check(
+    "r30-2: the avatar blob route obeys the same picture rule",
+    avStranger.status === 404 && avContact.status === 200,
+    `${avStranger.status}/${avContact.status}`,
+  );
+  await k.call("PATCH", "/api/me", { privPhone: "contacts" }, a.token);
+  const numHidden = (await k.call("GET", `/api/users/${a.user.id}`, undefined, s0.token)).json.user;
+  check(
+    "r30-2: number back to contacts-only → a stranger gets null, and the light discovery list never carries it",
+    numHidden.phone == null &&
+      (await k.call("GET", "/api/users?q=pva", undefined, s0.token)).json.users.every(
+        (u) => u.phone == null,
+      ),
+    JSON.stringify(numHidden).slice(0, 120),
+  );
+  // messages: contacts only → a stranger cannot open a chat or call; the contact still can
+  await k.call("PATCH", "/api/me", { privMessages: "contacts" }, a.token);
+  const strangerChat = await k.call("POST", "/api/conversations", { userId: a.user.id }, s0.token);
+  const strangerCall = await k.call(
+    "POST",
+    "/api/calls",
+    { userId: a.user.id, kind: "AUDIO" },
+    s0.token,
+  );
+  const contactMsg = await k.call(
+    "POST",
+    `/api/conversations/${cid}/messages`,
+    { kind: "TEXT", body: "hi", clientId: "pv1" },
+    b.token,
+  );
+  check(
+    "r30-2: messages = contacts only → stranger's new chat AND call refused (MSG_PRIVACY), the contact still sends",
+    strangerChat.status === 403 &&
+      strangerChat.json.error?.code === "MSG_PRIVACY" &&
+      strangerCall.status === 403 &&
+      contactMsg.status === 201,
+    `${strangerChat.status}/${strangerCall.status}/${contactMsg.status}`,
+  );
+  await k.call("PATCH", "/api/me", { privMessages: "nobody" }, a.token);
+  const contactBlockedMsg = await k.call(
+    "POST",
+    `/api/conversations/${cid}/messages`,
+    { kind: "TEXT", body: "hi2", clientId: "pv2" },
+    b.token,
+  );
+  const selfStill = await k.call(
+    "POST",
+    `/api/conversations/${cid}/messages`,
+    { kind: "TEXT", body: "me", clientId: "pv3" },
+    a.token,
+  );
+  check(
+    "r30-2: messages = no one → even the existing chat refuses the peer; the owner can still write",
+    contactBlockedMsg.status === 403 && selfStill.status === 201,
+    `${contactBlockedMsg.status}/${selfStill.status}`,
+  );
+  await k.call("PATCH", "/api/me", { privMessages: "public" }, a.token);
+  // groups: contacts only → a stranger's group silently skips a; the contact's group includes a
+  await k.call("PATCH", "/api/me", { privGroups: "contacts" }, a.token);
+  const gStranger = await k.call(
+    "POST",
+    "/api/conversations/group",
+    { title: "g1", memberIds: [a.user.id] },
+    s0.token,
+  );
+  const gContact = await k.call(
+    "POST",
+    "/api/conversations/group",
+    { title: "g2", memberIds: [a.user.id] },
+    b.token,
+  );
+  const gid = gContact.json.conversation?.id;
+  const addByStranger = await k.call(
+    "POST",
+    `/api/conversations/${gid}/members`,
+    { userId: a.user.id },
+    s0.token,
+  );
+  void addByStranger; // not the owner → 403 FORBIDDEN before privacy; covered below via s0's own group
+  const gOwn = (
+    await k.call(
+      "POST",
+      "/api/conversations/group",
+      { title: "g3", memberIds: [b.user.id] },
+      s0.token,
+    )
+  ).json.conversation;
+  const addA = await k.call(
+    "POST",
+    `/api/conversations/${gOwn.id}/members`,
+    { userId: a.user.id },
+    s0.token,
+  );
+  check(
+    "r30-2: groups = contacts only → stranger's create gets NO_MEMBERS, add-member gets GROUP_PRIVACY; the contact's group includes me",
+    gStranger.status === 400 &&
+      gStranger.json.error?.code === "NO_MEMBERS" &&
+      gContact.status === 201 &&
+      addA.status === 403 &&
+      addA.json.error?.code === "GROUP_PRIVACY",
+    `${gStranger.status}/${gContact.status}/${addA.status}`,
+  );
+  // private profile: gone from search + discovery + username lookup, still reachable by id (existing chat)
+  await k.call("PATCH", "/api/me", { privateProfile: true }, a.token);
+  const search = await k.call("GET", "/api/search?q=pva", undefined, s0.token);
+  const disc = await k.call("GET", "/api/users?q=pva", undefined, b.token);
+  const byName = await k.call("GET", "/api/users/username/pva", undefined, b.token);
+  const byId = await k.call("GET", `/api/users/${a.user.id}`, undefined, b.token);
+  check(
+    "r30-2: private profile → not in search, not in discovery (even for a contact), username lookup 404, id lookup still works",
+    (search.json.users ?? []).every((u) => u.id !== a.user.id) &&
+      (disc.json.users ?? []).every((u) => u.id !== a.user.id) &&
+      byName.status === 404 &&
+      byId.status === 200 &&
+      byId.json.user.id === a.user.id,
+    `${search.status}/${disc.status}/${byName.status}/${byId.status}`,
+  );
+  // read receipts off → the peer never gets my read mark (poll + list + live frame)
+  await k.call("PATCH", "/api/me", { readReceipts: false }, a.token);
+  await k.call("POST", `/api/conversations/${cid}/read`, {}, a.token);
+  const peerPage = await k.call("GET", `/api/conversations/${cid}/messages`, undefined, b.token);
+  const peerList = await k.call("GET", "/api/conversations", undefined, b.token);
+  const peerConv = (peerList.json.items ?? []).find((c) => c.id === cid);
+  const aRow = (peerConv?.members ?? []).find((m) => m.user?.id === a.user.id);
+  check(
+    "r30-2: read receipts off → readAt null on the peer's poll and lastReadAt null in their list; unread still resets",
+    peerPage.json.readAt == null &&
+      aRow &&
+      aRow.lastReadAt == null &&
+      k.db._db
+        .prepare("SELECT unread FROM members WHERE conv_id = ? AND user_id = ?")
+        .get(cid, a.user.id).unread === 0,
+    JSON.stringify({ readAt: peerPage.json.readAt, aRow }).slice(0, 160),
+  );
+  // devices list
+  const devs = await k.call("GET", "/api/auth/devices", undefined, a.token);
+  check(
+    "r30-2: /api/auth/devices lists the ACTIVE install and marks it current",
+    devs.status === 200 &&
+      devs.json.items.length === 1 &&
+      devs.json.items[0].active === true &&
+      devs.json.items[0].current === true &&
+      devs.json.items[0].deviceId === "dev-pva" &&
+      typeof devs.json.items[0].name === "string",
+    JSON.stringify(devs.json).slice(0, 200),
+  );
 }
 
 console.log(lines.join("\n"));

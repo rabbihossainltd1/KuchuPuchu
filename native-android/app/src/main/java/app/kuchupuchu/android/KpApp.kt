@@ -124,6 +124,8 @@ fun KpApp() {
                     ChatScreen(nav, id)
                 }
                 composable("settings") { SettingsScreen(nav) }
+                // Owner round 30: profile fields edit here, settings stay app-only.
+                composable("myprofile") { MyProfileScreen(nav) }
                 // Owner round 28: home ⋮ menu destinations.
                 composable("about") { AboutScreen(nav) }
                 composable("contacts") { AllContactsScreen(nav) }

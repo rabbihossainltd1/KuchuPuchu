@@ -227,7 +227,7 @@ fun ProfileScreen(nav: NavController, userId: String) {
                     .padding(horizontal = 16.dp)
                     .clip(RoundedCornerShape(14.dp))
                     .background(Card)
-                    .clickable { haptics.tap(); nav.navigate("settings") }
+                    .clickable { haptics.tap(); nav.navigate("myprofile") }
                     .padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

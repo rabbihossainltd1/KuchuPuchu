@@ -1653,6 +1653,17 @@ async function ensureSchema(db: D1Database) {
   // Moderator badge (owner round 2026-09-04): @fsleader carries the crossed-
   // tools badge; independent of verified so the two never collide.
   await runCatchingSql(db, `ALTER TABLE users ADD COLUMN moderator INTEGER`);
+  // Owner round 30: privacy settings. Each visibility column is one of
+  // 'nobody' | 'contacts' | 'public' ("contact" = the two share a 1:1
+  // conversation — see isContact). The number defaults to contacts, the rest
+  // to public, which is exactly what the app did before the settings existed.
+  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN priv_phone TEXT`);
+  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN priv_avatar TEXT`);
+  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN priv_messages TEXT`);
+  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN priv_last_seen TEXT`);
+  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN priv_groups TEXT`);
+  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN read_receipts INTEGER`);
+  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN private_profile INTEGER`);
   await runCatchingSql(db, `ALTER TABLE sessions ADD COLUMN device_id TEXT`);
   await runCatchingSql(db, `ALTER TABLE login_requests ADD COLUMN new_device_name TEXT`);
   // Uniqueness the legacy schema cannot express: one phone → one account,
@@ -1739,7 +1750,85 @@ type UserRow = {
   auth_status: string;
   verified: number | null;
   moderator: number | null;
+  priv_phone: string | null;
+  priv_avatar: string | null;
+  priv_messages: string | null;
+  priv_last_seen: string | null;
+  priv_groups: string | null;
+  read_receipts: number | null;
+  private_profile: number | null;
 };
+
+/* ---------------- privacy (owner round 30) ---------------- */
+
+const PRIVACY_LEVELS = new Set(["nobody", "contacts", "public"]);
+const PRIVACY_DEFAULTS = {
+  phone: "contacts",
+  avatar: "public",
+  messages: "public",
+  lastSeen: "public",
+  groups: "public",
+} as const;
+
+/** Who is looking. `self` sees everything; `contact` = shares a 1:1 chat. */
+type Viewer = { contact?: boolean; self?: boolean };
+const SELF_VIEW: Viewer = { self: true, contact: true };
+const CONTACT_VIEW: Viewer = { contact: true };
+
+function privLevel(setting: string | null | undefined, fallback: string) {
+  return setting && PRIVACY_LEVELS.has(setting) ? setting : fallback;
+}
+
+function privAllows(setting: string | null | undefined, fallback: string, viewer?: Viewer) {
+  if (viewer?.self) return true;
+  const level = privLevel(setting, fallback);
+  return level === "public" || (level === "contacts" && viewer?.contact === true);
+}
+
+function privacyOf(row: UserRow) {
+  return {
+    phone: privLevel(row.priv_phone, PRIVACY_DEFAULTS.phone),
+    avatar: privLevel(row.priv_avatar, PRIVACY_DEFAULTS.avatar),
+    messages: privLevel(row.priv_messages, PRIVACY_DEFAULTS.messages),
+    lastSeen: privLevel(row.priv_last_seen, PRIVACY_DEFAULTS.lastSeen),
+    groups: privLevel(row.priv_groups, PRIVACY_DEFAULTS.groups),
+    readReceipts: Number(row.read_receipts ?? 1) !== 0,
+    privateProfile: Number(row.private_profile ?? 0) !== 0,
+  };
+}
+
+const receiptsOn = (row: { read_receipts?: number | null } | undefined) =>
+  Number(row?.read_receipts ?? 1) !== 0;
+
+/** "Contact" for privacy purposes: the two share a 1:1 conversation. One
+ *  primary-key lookup — the pair id is deterministic. */
+async function isContact(db: D1Database, uid: string, otherId: string) {
+  if (uid === otherId) return true;
+  return !!(await one(db, "SELECT id FROM conversations WHERE id = ?", pairId(uid, otherId)));
+}
+
+/** Same rule for a whole list at once (one statement per 44 ids). */
+async function contactSet(db: D1Database, uid: string, ids: string[]) {
+  const out = new Set<string>();
+  const byPair = new Map<string, string>();
+  for (const other of new Set(ids.filter((x) => x && x !== uid)))
+    byPair.set(pairId(uid, other), other);
+  const pairs = [...byPair.keys()];
+  for (const group of chunked(pairs)) {
+    for (const r of await all<{ id: string }>(
+      db,
+      `SELECT id FROM conversations WHERE id IN (${inSql(group.length)})`,
+      ...group,
+    )) {
+      const other = byPair.get(r.id);
+      if (other) out.add(other);
+    }
+  }
+  return out;
+}
+
+const viewFor = (contacts: Set<string>, id: string, uid: string): Viewer =>
+  id === uid ? SELF_VIEW : contacts.has(id) ? CONTACT_VIEW : {};
 
 /**
  * Public shape for *other* people. Deliberately has no `email`: it is embedded
@@ -1753,35 +1842,42 @@ type UserRow = {
 // hundreds of KB that almost never changed. `light` keeps only a stable
 // reference; clients fetch the bytes once from /api/users/:id/avatar and cache
 // them (see Android Bitmaps cache). Detail/profile endpoints stay full.
-function userFrom(row: UserRow, online = false, light = false) {
+function userFrom(row: UserRow, online = false, light = false, viewer?: Viewer) {
+  // Owner round 30: the row's privacy settings decide what THIS viewer gets.
+  // No viewer = an unknown relationship (a list of strangers): contacts-only
+  // fields are withheld and the phone is never attached.
+  const showSeen = privAllows(row.priv_last_seen, PRIVACY_DEFAULTS.lastSeen, viewer);
+  const showAvatar = privAllows(row.priv_avatar, PRIVACY_DEFAULTS.avatar, viewer);
   const base = {
     id: row.id,
     username: row.username,
     displayName: row.display_name,
     about: row.about,
-    online,
-    lastActiveAt: row.last_active_at,
+    online: showSeen ? online : false,
+    lastActiveAt: showSeen ? row.last_active_at : null,
     verified: !!row.verified,
     moderator: !!row.moderator,
+    ...(viewer
+      ? {
+          phone: privAllows(row.priv_phone, PRIVACY_DEFAULTS.phone, viewer) ? row.phone_e164 : null,
+        }
+      : {}),
   };
+  // Stable per-avatar token; bumped on every profile-photo change, so a
+  // client can cache the avatar data-URI forever keyed by this ref and
+  // only re-fetch when it actually changes.
+  const avatarRef = showAvatar && row.avatar_url ? `${row.id}@v${row.avatar_version ?? 0}` : null;
   if (light) {
-    return {
-      ...base,
-      avatarUrl: null,
-      // Stable per-avatar token; bumped on every profile-photo change, so a
-      // client can cache the avatar data-URI forever keyed by this ref and
-      // only re-fetch when it actually changes.
-      avatarRef: row.avatar_url ? `${row.id}@v${row.avatar_version ?? 0}` : null,
-    };
+    return { ...base, avatarUrl: null, avatarRef };
   }
   return {
     ...base,
-    avatarUrl: row.avatar_url,
+    avatarUrl: showAvatar ? row.avatar_url : null,
     // Also expose the stable per-version ref on the FULL shape, so clients can
     // render an avatar from its persistent cache even when a detail/profile
     // response brings the data-URI along (which re-transfers hundreds of KB on
     // every screen open — the "profile picture reloads every launch" bug).
-    avatarRef: row.avatar_url ? `${row.id}@v${row.avatar_version ?? 0}` : null,
+    avatarRef,
   };
 }
 
@@ -1793,11 +1889,12 @@ function userFrom(row: UserRow, online = false, light = false) {
 function userSelf(row: UserRow, online = false) {
   const legacyEmail = row.email && !row.email.endsWith(PHONE_EMAIL_SUFFIX) ? row.email : null;
   return {
-    ...userFrom(row, online),
+    ...userFrom(row, online, false, SELF_VIEW),
     email: legacyEmail,
     phone: row.phone_e164,
     googleEmail: row.google_email,
     googleLinked: !!row.google_subject,
+    privacy: privacyOf(row),
   };
 }
 
@@ -1814,9 +1911,9 @@ async function requireUser(db: D1Database, request: Request) {
   // Session + user in ONE statement. The two separate SELECTs used to sit on
   // every authenticated request — two D1 round trips each caller always paid,
   // which on a poll-every-second chat screen was pure added latency.
-  const row = await one<UserRow & { session_expires_at: string }>(
+  const row = await one<UserRow & { session_expires_at: string; session_device_id: string | null }>(
     db,
-    `SELECT u.*, s.expires_at AS session_expires_at
+    `SELECT u.*, s.expires_at AS session_expires_at, s.device_id AS session_device_id
        FROM sessions s JOIN users u ON u.id = s.user_id
       WHERE s.token_hash = ?`,
     hash,
@@ -1951,10 +2048,16 @@ function recipientAlert(
 async function membersOf(db: D1Database, convId: string) {
   // `muted` rides along: the send handler needs each recipient's mute flag
   // to route their push to a silent channel (one extra column, same query).
-  return all<{ user_id: string; muted: number; last_active: string | null }>(
+  return all<{
+    user_id: string;
+    muted: number;
+    last_active: string | null;
+    priv_messages: string | null;
+  }>(
     db,
     `SELECT user_id, muted,
-            (SELECT last_active_at FROM users WHERE id = members.user_id) AS last_active
+            (SELECT last_active_at FROM users WHERE id = members.user_id) AS last_active,
+            (SELECT priv_messages FROM users WHERE id = members.user_id) AS priv_messages
        FROM members WHERE conv_id = ?`,
     convId,
   );
@@ -3682,6 +3785,48 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     return json({ ok: true, expiresAt: until, extended: true });
   }
 
+  // Owner round 30: Settings → Devices. The authoritative registry
+  // (auth_devices) plus, when the install ever registered for push, its app
+  // version and freshest heartbeat. `current` is the row this session's
+  // bearer was minted on.
+  if (path === "/api/auth/devices" && method === "GET") {
+    const rows = await all<{
+      device_id: string;
+      device_name: string | null;
+      status: string;
+      created_at: string;
+      last_seen_at: string;
+      revoked_at: string | null;
+      app_version: string | null;
+      push_seen_at: string | null;
+    }>(
+      db,
+      `SELECT a.device_id, a.device_name, a.status, a.created_at, a.last_seen_at, a.revoked_at,
+              (SELECT d.app_version FROM devices d
+                 WHERE d.user_id = a.user_id AND d.device_id = a.device_id
+                 ORDER BY d.last_seen_at DESC LIMIT 1) AS app_version,
+              (SELECT MAX(d.last_seen_at) FROM devices d
+                 WHERE d.user_id = a.user_id AND d.device_id = a.device_id) AS push_seen_at
+         FROM auth_devices a
+        WHERE a.user_id = ?
+        ORDER BY (a.status = 'ACTIVE') DESC, a.last_seen_at DESC
+        LIMIT 20`,
+      uid,
+    );
+    const items = rows.map((r) => ({
+      deviceId: r.device_id,
+      name: r.device_name || "Android",
+      active: r.status === "ACTIVE",
+      current: !!me.session_device_id && r.device_id === me.session_device_id,
+      appVersion: r.app_version,
+      firstSeenAt: r.created_at,
+      lastSeenAt:
+        r.push_seen_at && r.push_seen_at > r.last_seen_at ? r.push_seen_at : r.last_seen_at,
+      revokedAt: r.revoked_at,
+    }));
+    return json({ items });
+  }
+
   /* ---------- phone auth: current-device approval + phone change ---------- */
 
   if (path === "/api/auth/login/approve" && method === "POST") {
@@ -3891,6 +4036,29 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       // Bump the cache token so every client refreshes this avatar once.
       sets.push("avatar_version = avatar_version + 1");
     }
+    // Owner round 30: privacy. Levels are validated, booleans coerced.
+    const levelFields: [string, string][] = [
+      ["privPhone", "priv_phone"],
+      ["privAvatar", "priv_avatar"],
+      ["privMessages", "priv_messages"],
+      ["privLastSeen", "priv_last_seen"],
+      ["privGroups", "priv_groups"],
+    ];
+    for (const [field, column] of levelFields) {
+      if (body[field] === undefined) continue;
+      const level = String(body[field]);
+      if (!PRIVACY_LEVELS.has(level)) fail(400, "Bad privacy value.", "BAD_PRIVACY");
+      sets.push(`${column} = ?`);
+      values.push(level);
+    }
+    if (body.readReceipts !== undefined) {
+      sets.push("read_receipts = ?");
+      values.push(body.readReceipts ? 1 : 0);
+    }
+    if (body.privateProfile !== undefined) {
+      sets.push("private_profile = ?");
+      values.push(body.privateProfile ? 1 : 0);
+    }
     if (sets.length) {
       values.push(uid);
       await run(db, `UPDATE users SET ${sets.join(", ")} WHERE id = ?`, ...values);
@@ -4008,26 +4176,37 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       );
       for (const b of hit) blocked.add(b.owner_id === uid ? b.target_id : b.owner_id);
     }
+    // The number comes back because the caller SUPPLIED it (it is in their
+    // phone book) — the phone privacy level governs discovery, not an echo.
+    const matchContacts = await contactSet(
+      db,
+      uid,
+      found.map((r) => r.id),
+    );
     return json({
       users: found
         .filter((row) => !blocked.has(row.id))
-        .map((row) => ({ ...userFrom(row, onlineNow(row), true), phone: row.phone_e164 })),
+        .map((row) => ({
+          ...userFrom(row, onlineNow(row), true, viewFor(matchContacts, row.id, uid)),
+          phone: row.phone_e164,
+        })),
     });
   }
 
   if (path === "/api/users" && method === "GET") {
     const q = (url.searchParams.get("q") || "").trim().toLowerCase().replace(/^@/, "");
+    // Owner round 30: a private profile is not discoverable by anyone.
     const rows = q
       ? await all<UserRow>(
           db,
-          `SELECT * FROM users WHERE (${instrLike("username")} OR ${instrLike("display_name")}) AND id != ? ORDER BY last_active_at DESC LIMIT 20`,
+          `SELECT * FROM users WHERE (${instrLike("username")} OR ${instrLike("display_name")}) AND id != ? AND COALESCE(private_profile, 0) = 0 ORDER BY last_active_at DESC LIMIT 20`,
           instrTerm(q),
           instrTerm(q),
           uid,
         )
       : await all<UserRow>(
           db,
-          "SELECT * FROM users WHERE id != ? ORDER BY last_active_at DESC LIMIT 20",
+          "SELECT * FROM users WHERE id != ? AND COALESCE(private_profile, 0) = 0 ORDER BY last_active_at DESC LIMIT 20",
           uid,
         );
     // Block filtering in one two-sided query instead of a blockedBetween()
@@ -4046,11 +4225,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       );
       for (const b of hit) blocked.add(b.owner_id === uid ? b.target_id : b.owner_id);
     }
+    const contacts = await contactSet(
+      db,
+      uid,
+      rows.map((r) => r.id),
+    );
     const list = rows
       .filter((row) => !blocked.has(row.id))
       // Light: discovery pages render rows of 54dp avatars — the data-URI
       // for every result is fetched once per avatarRef by the client.
-      .map((row) => userFrom(row, onlineNow(row), true));
+      .map((row) => userFrom(row, onlineNow(row), true, viewFor(contacts, row.id, uid)));
     return json({ users: list });
   }
 
@@ -4059,14 +4243,29 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   // make this one fetch per avatar *change* — not per poll.
   const avatarMatch = path.match(/^\/api\/users\/([^/]+)\/avatar$/);
   if (avatarMatch && method === "GET") {
-    const row = await one<{ avatar_url: string | null; avatar_version: number | null }>(
+    const row = await one<{
+      avatar_url: string | null;
+      avatar_version: number | null;
+      priv_avatar: string | null;
+    }>(
       db,
-      "SELECT avatar_url, avatar_version FROM users WHERE id = ?",
+      "SELECT avatar_url, avatar_version, priv_avatar FROM users WHERE id = ?",
       avatarMatch[1]!,
     );
     // The profile route scrubs the blob when blocked; this is the same blob, so
     // it has to refuse too — otherwise the guard is one URL away.
     if (await blockedBetween(db, uid, avatarMatch[1]!)) fail(404, "Not found.", "NOT_FOUND");
+    // Owner round 30: same for a photo the owner limited to contacts / nobody.
+    if (
+      row &&
+      avatarMatch[1] !== uid &&
+      !privAllows(
+        row.priv_avatar,
+        PRIVACY_DEFAULTS.avatar,
+        (await isContact(db, uid, avatarMatch[1]!)) ? CONTACT_VIEW : {},
+      )
+    )
+      fail(404, "Not found.", "NOT_FOUND");
     const version = row?.avatar_version ?? 0;
     const etag = `"av-${avatarMatch[1]!.slice(0, 8)}-v${version}"`;
     if (request.headers.get("if-none-match") === etag) {
@@ -4097,8 +4296,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   if (userNameMatch && method === "GET") {
     const row = await one<UserRow>(db, "SELECT * FROM users WHERE username = ?", userNameMatch[1]!);
     if (!row) fail(404, "User not found.");
+    // Owner round 30: a private profile cannot be looked up by name either.
+    if (row.id !== uid && Number(row.private_profile ?? 0) !== 0) fail(404, "User not found.");
     if (await blockedBetween(db, uid, row.id)) fail(403, "You can't reach this user.", "BLOCKED");
-    return json({ user: userFrom(row, onlineNow(row)) });
+    const view =
+      row.id === uid ? SELF_VIEW : (await isContact(db, uid, row.id)) ? CONTACT_VIEW : {};
+    return json({ user: userFrom(row, onlineNow(row), false, view) });
   }
 
   const userMatch = path.match(/^\/api\/users\/([^/]+)$/);
@@ -4128,7 +4331,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         },
       });
     }
-    return json({ user: { ...userFrom(row, onlineNow(row)), blocked: false } });
+    const view =
+      row.id === uid ? SELF_VIEW : (await isContact(db, uid, row.id)) ? CONTACT_VIEW : {};
+    return json({ user: { ...userFrom(row, onlineNow(row), false, view), blocked: false } });
   }
 
   // Profile lookups embedded by the search/chats screens were full
@@ -4179,11 +4384,20 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // minted a conversation plus a member row that no one can ever read — and
     // `userFrom(null)` downstream is exactly the kind of ghost that shows up as
     // an empty chat card forever.
-    if (!(await one<{ id: string }>(db, "SELECT id FROM users WHERE id = ?", other)))
-      fail(404, "User not found.");
+    const target = await one<{ id: string; priv_messages: string | null }>(
+      db,
+      "SELECT id, priv_messages FROM users WHERE id = ?",
+      other,
+    );
+    if (!target) fail(404, "User not found.");
     if (await blockedBetween(db, uid, other)) fail(403, "You can't reach this user.", "BLOCKED");
     const convId = pairId(uid, other);
     if (!(await one(db, "SELECT id FROM conversations WHERE id = ?", convId))) {
+      // Owner round 30: "Who can send me messages". A new 1:1 chat is the
+      // moment a stranger becomes a contact, so the gate lives here: contacts
+      // -only refuses anyone without an existing chat, nobody refuses all.
+      if (!privAllows(target.priv_messages, PRIVACY_DEFAULTS.messages, {}))
+        fail(403, "This user isn't accepting new messages.", "MSG_PRIVACY");
       const created = nowIso();
       await run(
         db,
@@ -4239,8 +4453,22 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       // System accounts live in 1:1 chats only (owner rule): they deliver
       // security notices / AI help, not group chatter.
       if (candidate === OFFICIAL_BOT_ID || candidate === AI_BOT_ID) continue;
-      if (!(await one(db, "SELECT id FROM users WHERE id = ?", candidate))) continue;
+      const row = await one<{ id: string; priv_groups: string | null }>(
+        db,
+        "SELECT id, priv_groups FROM users WHERE id = ?",
+        candidate,
+      );
+      if (!row) continue;
       if (await blockedBetween(db, uid, candidate)) continue;
+      // Owner round 30: "Who can add me to groups" — skipped, like a block.
+      if (
+        !privAllows(
+          row.priv_groups,
+          PRIVACY_DEFAULTS.groups,
+          (await isContact(db, uid, candidate)) ? CONTACT_VIEW : {},
+        )
+      )
+        continue;
       memberIds.push(candidate);
     }
     if (!memberIds.length) fail(400, "None of those players can be added.", "NO_MEMBERS");
@@ -4536,6 +4764,15 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (target === OFFICIAL_BOT_ID || target === AI_BOT_ID)
       fail(400, "Official accounts can't be added to groups.", "BOT_ACCOUNT");
     if (await blockedBetween(db, uid, target)) fail(403, "You can't add this player.", "BLOCKED");
+    // Owner round 30: "Who can add me to groups".
+    if (
+      !privAllows(
+        targetUser.priv_groups,
+        PRIVACY_DEFAULTS.groups,
+        (await isContact(db, uid, target)) ? CONTACT_VIEW : {},
+      )
+    )
+      fail(403, "This user can't be added to groups.", "GROUP_PRIVACY");
     await run(
       db,
       "INSERT OR IGNORE INTO members (conv_id, user_id, joined_at) VALUES (?, ?, ?)",
@@ -4571,7 +4808,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   const readMatch = path.match(/^\/api\/conversations\/([^/]+)\/read$/);
   if (readMatch && method === "POST") {
-    await requireMember(db, readMatch[1]!, uid);
+    const { conv: readConv } = await requireMember(db, readMatch[1]!, uid);
     const at = nowIso();
     await run(
       db,
@@ -4580,6 +4817,19 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       readMatch[1]!,
       uid,
     );
+    // Owner round 30: read receipts off (mine, or the other side's — whoever
+    // switches them off loses them both ways, so they cannot be abused) means
+    // no live "read" frame in a 1:1 chat; the poll path hides readAt too.
+    if (readConv.kind === "SOLO") {
+      const peer = await one<{ read_receipts: number | null }>(
+        db,
+        `SELECT u.read_receipts FROM members m JOIN users u ON u.id = m.user_id
+          WHERE m.conv_id = ? AND m.user_id != ? LIMIT 1`,
+        readMatch[1]!,
+        uid,
+      );
+      if (!receiptsOn(me) || !receiptsOn(peer ?? undefined)) return json({ ok: true });
+    }
     // Realtime: the sender's ticks flip blue the moment this lands, not on
     // their next poll. (WS only — the poll fallback still reads it from the
     // messages endpoint.)
@@ -5159,15 +5409,23 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // Read receipts for the sender. In a group this is the *oldest* read time
     // and only when every other member has read something — MAX() used to flip
     // everyone's ticks blue as soon as one person out of five opened the chat.
-    const readRow = await one<{ r: string | null; unreadMembers: number }>(
+    // Owner round 30: `receipts` rides along in the same statement — 0 when
+    // the (1:1) peer switched read receipts off; then readAt stays null, as
+    // it does when the requester themself has them off.
+    const readRow = await one<{ r: string | null; unreadMembers: number; receipts: number }>(
       db,
-      `SELECT MIN(last_read_at) AS r,
-              SUM(CASE WHEN last_read_at IS NULL THEN 1 ELSE 0 END) AS unreadMembers
-       FROM members WHERE conv_id = ? AND user_id != ?`,
+      `SELECT MIN(m.last_read_at) AS r,
+              SUM(CASE WHEN m.last_read_at IS NULL THEN 1 ELSE 0 END) AS unreadMembers,
+              MIN(COALESCE(u.read_receipts, 1)) AS receipts
+       FROM members m JOIN users u ON u.id = m.user_id
+       WHERE m.conv_id = ? AND m.user_id != ?`,
       convId,
       uid,
     );
-    const readAt = readRow && Number(readRow.unreadMembers || 0) === 0 ? readRow.r : null;
+    const receiptsHidden =
+      conv.kind === "SOLO" && (!receiptsOn(me) || Number(readRow?.receipts ?? 1) === 0);
+    const readAt =
+      readRow && !receiptsHidden && Number(readRow.unreadMembers || 0) === 0 ? readRow.r : null;
     // Typing indicator: the OTHER members' freshest ping, if any. The client
     // treats it as typing while it is younger than ~6s.
     const typingRow = await one<{ at: string }>(
@@ -5209,6 +5467,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // reply into it, in-app or via the API.
     if (conv.kind === "SOLO" && members.some((m) => m.user_id === OFFICIAL_BOT_ID))
       fail(403, "This account doesn't accept replies.", "NO_REPLIES");
+    // Owner round 30: "Who can send me messages" = No one — an existing 1:1
+    // chat stops accepting too (the two are contacts, so only this level bites).
+    if (
+      conv.kind === "SOLO" &&
+      members.some(
+        (m) =>
+          m.user_id !== uid && privLevel(m.priv_messages, PRIVACY_DEFAULTS.messages) === "nobody",
+      )
+    )
+      fail(403, "This user isn't accepting messages.", "MSG_PRIVACY");
     // Block check for the whole member list in ONE statement (either
     // direction), instead of a blockedBetween() round trip per member.
     const others = members.map((m) => m.user_id).filter((mid) => mid !== uid);
@@ -5739,7 +6007,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     });
     if (mine.length) {
       out.push({
-        user: userFrom(me, true),
+        user: userFrom(me, true, false, SELF_VIEW),
         mine: true,
         statuses: mine.map((row) => ({ ...shape(row), viewers: viewersByStatus.get(row.id) ?? 0 })),
       });
@@ -5751,11 +6019,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       byContact.set(row.user_id, list);
     }
     const users = await usersById(db, [...byContact.keys()]);
+    const soloContacts = await contactSet(db, uid, [...byContact.keys()]);
     for (const [contactId, rows] of byContact) {
       const userRow = users.get(contactId);
       if (!userRow) continue;
       out.push({
-        user: userFrom(userRow, onlineNow(userRow)),
+        user: userFrom(userRow, onlineNow(userRow), false, viewFor(soloContacts, contactId, uid)),
         mine: false,
         allViewed: rows.every((r) => iViewed.has(r.id)),
         statuses: rows.map(shape),
@@ -5857,7 +6126,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       const user = viewerUsers.get(view.viewer_id);
       if (user) {
         list.push({
-          user: userFrom(user, onlineNow(user)),
+          // Viewers are contacts by construction (canSeeStatusOf).
+          user: userFrom(user, onlineNow(user), false, CONTACT_VIEW),
           viewedAt: view.viewed_at,
           reaction: view.reaction ?? "",
         });
@@ -5916,6 +6186,18 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (other === OFFICIAL_BOT_ID || other === AI_BOT_ID)
       fail(403, "This account can't be called.", "BOT_ACCOUNT");
     if (await blockedBetween(db, uid, other)) fail(403, "You can't call this user.", "BLOCKED");
+    // Owner round 30: a call opens the 1:1 chat, so it obeys the same
+    // "who can message me" gate as a new chat would.
+    {
+      const callee = await one<{ priv_messages: string | null }>(
+        db,
+        "SELECT priv_messages FROM users WHERE id = ?",
+        other,
+      );
+      const level = privLevel(callee?.priv_messages, PRIVACY_DEFAULTS.messages);
+      if (level === "nobody" || (level === "contacts" && !(await isContact(db, uid, other))))
+        fail(403, "This user isn't accepting calls.", "MSG_PRIVACY");
+    }
     // Owner round 12 (2026-09-05): the callee is already on another call →
     // the caller sees "Line busy" instantly instead of endless ringing.
     // NOTE the pair-exclusion: an orphaned ACTIVE call between THESE two
@@ -6059,7 +6341,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           calleeId: other,
           offerSdp: body.offerSdp ?? null,
           incoming: false,
-          other: otherUser ? userFrom(otherUser, onlineNow(otherUser)) : null,
+          other: otherUser ? userFrom(otherUser, onlineNow(otherUser), false, CONTACT_VIEW) : null,
         },
       },
       201,
@@ -6330,16 +6612,23 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   if (path === "/api/search" && method === "GET") {
     const q = (url.searchParams.get("q") || "").trim().toLowerCase().replace(/^@/, "");
     if (q.length < 2) return json({ users: [], messages: [], chats: [] });
+    // Owner round 30: private profiles are not searchable by anyone.
     const userRows = await all<UserRow>(
       db,
-      `SELECT * FROM users WHERE (${instrLike("username")} OR ${instrLike("display_name")}) AND id != ? LIMIT 10`,
+      `SELECT * FROM users WHERE (${instrLike("username")} OR ${instrLike("display_name")}) AND id != ? AND COALESCE(private_profile, 0) = 0 LIMIT 10`,
       instrTerm(q),
       instrTerm(q),
       uid,
     );
+    const searchContacts = await contactSet(
+      db,
+      uid,
+      userRows.map((r) => r.id),
+    );
     const users = [];
     for (const row of userRows) {
-      if (!(await blockedBetween(db, uid, row.id))) users.push(userFrom(row, onlineNow(row)));
+      if (!(await blockedBetween(db, uid, row.id)))
+        users.push(userFrom(row, onlineNow(row), false, viewFor(searchContacts, row.id, uid)));
     }
     const msgRows = await all<MsgRow & { title: string | null; kind_c: string }>(
       db,
@@ -6519,7 +6808,7 @@ function callFrom(row: CallRow, uid: string, other: UserRow | null, light = fals
     startedAt: row.started_at,
     endedAt: row.ended_at,
     createdAt: row.created_at,
-    other: other ? userFrom(other, onlineNow(other), light) : null,
+    other: other ? userFrom(other, onlineNow(other), light, CONTACT_VIEW) : null,
   };
 }
 
@@ -6827,15 +7116,22 @@ function buildConvDetail(
   let other = null;
   let meMuted = false;
   let unread = 0;
+  // Owner round 30: in a 1:1 chat the two ARE contacts (privacy view), and a
+  // switched-off read receipt (either side) hides the peer's read mark.
+  const solo = conv.kind === "SOLO";
+  const meReceipts = receiptsOn(users.get(uid));
   for (const row of memberRows) {
     const user = users.get(row.user_id);
     if (!user) continue;
+    const view: Viewer = row.user_id === uid ? SELF_VIEW : solo ? CONTACT_VIEW : {};
+    const shaped = userFrom(user, onlineNow(user), light, view);
     members.push({
-      user: userFrom(user, onlineNow(user), light),
+      user: shaped,
       role: row.role,
-      lastReadAt: row.last_read_at,
+      lastReadAt:
+        solo && row.user_id !== uid && (!meReceipts || !receiptsOn(user)) ? null : row.last_read_at,
     });
-    if (row.user_id !== uid && conv.kind === "SOLO") other = userFrom(user, onlineNow(user), light);
+    if (row.user_id !== uid && solo) other = shaped;
     if (row.user_id === uid) {
       meMuted = row.muted === 1;
       unread = row.unread;
