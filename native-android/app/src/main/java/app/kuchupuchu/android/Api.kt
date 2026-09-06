@@ -41,7 +41,10 @@ object Api {
 
     val http: OkHttpClient by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(20, TimeUnit.SECONDS)
+            // Round 23: 20s let a dead cellular handshake pin a request;
+            // 10s fails over to a fresh connection (new radio bearer) twice
+            // as fast — visibly snappier on flaky mobile data.
+            .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(45, TimeUnit.SECONDS)
             .writeTimeout(45, TimeUnit.SECONDS)
             .connectionPool(ConnectionPool(8, 5, TimeUnit.MINUTES))

@@ -212,7 +212,12 @@ class CallEngine(private val app: Application) {
      * flips to connected the moment the callee accepts (push latency only).
      */
     fun kickPoll(callId: String) {
-        if (active?.id == callId) scope.launch { runCatching { tick() } }
+        // Owner round 23: a NEW incoming call has active == null, so the old
+        // `active?.id == callId` guard made every kick a NO-OP exactly when it
+        // mattered — an in-app ring then depended purely on the 1.5-2s poll
+        // timer, and on a slow mobile-data link that window stretched out
+        // ("app open thakle call screen e ashe na"). Kick for NEW calls too.
+        if (active?.id == callId || active == null) scope.launch { runCatching { tick() } }
     }
 
     /**
@@ -341,7 +346,12 @@ class CallEngine(private val app: Application) {
                                 // low enough that a dropped frame is bounded.
                                 wsId != null && KpSocket.callLive(wsId) -> 5_000L
                                 active != null -> 500L
-                                Store.foreground -> 1500L
+                                // Owner round 23: with kickPoll + the live
+                                // socket both able to raise a ring instantly,
+                                // the idle foreground net runs at 2s instead of
+                                // 1.5s — a third less call-poll chatter on
+                                // mobile data, same worst-case ring latency.
+                                Store.foreground -> 2000L
                                 else -> 4000L
                             },
                         )
@@ -445,8 +455,10 @@ class CallEngine(private val app: Application) {
         // A hung request must not stall the whole poll loop: on slow networks
         // the 45s read timeout meant the caller sat on "Ringing…" forever even
         // after the other side had answered.
+        // Owner round 23: 6s held the whole loop hostage on one slow
+        // mobile-data request; 4.5s fails faster and retries sooner.
         val data =
-            withTimeout(6_000) {
+            withTimeout(4_500) {
                 withContext(Dispatchers.IO) {
                     runCatching { Api.get("/api/calls/active", true) }.getOrNull()
                 }

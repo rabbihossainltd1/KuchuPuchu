@@ -103,6 +103,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -556,7 +557,11 @@ fun ChatScreen(nav: NavController, convId: String) {
 
     // Opening a chat ALWAYS lands on the newest message (instant, not animated,
     // so it never lags behind a fast paint on a slow device).
-    var didInitialScroll by remember { mutableStateOf(false) }
+    // rememberSaveable, not remember: navigating to the video player pops
+    // this composable out of composition, and plain remember lost the flag —
+    // coming BACK re-ran the jump and the chat landed on the latest message
+    // instead of where the video was ("video play kore back korle").
+    var didInitialScroll by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(msgs.size, pending.size) {
         if (!didInitialScroll && msgs.isNotEmpty()) {
             listState.scrollToItem(msgs.size + pending.size - 1)
@@ -3437,17 +3442,61 @@ private fun EmojiSheetDialog(onPick: (String) -> Unit) {
 /** Owner round 22: decoded-frame thumbnails cached in MEMORY — a chat's
  *  videos stop re-decoding on every open. */
 private object VideoThumbs {
+    /** Memory net for the CURRENT process. */
     private val lru = object : LinkedHashMap<String, android.graphics.Bitmap>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, android.graphics.Bitmap>?): Boolean =
             size > 48
     }
 
+    /**
+     * Owner round 23: the LRU died with the process, so every app open
+     * re-decoded every video and the bubble flashed the wrong (16:9)
+     * placeholder ratio until the retriever finished ("prottekbar app open
+     * placeholder a oi ratio te dekhai, catch thake na"). The ratio/duration
+     * meta and a small JPEG thumb now persist next to the cached video file —
+     * key is the cache file path, so the meta survives restarts and is read
+     * synchronously (a few bytes) to size the bubble correctly on the FIRST
+     * frame.
+     */
+    data class Meta(val ratio: Float, val durationMs: Long)
+
+    private fun metaFile(key: String) = java.io.File(key + ".meta")
+    private fun thumbFile(key: String) = java.io.File(key + ".thumb.jpg")
+
     @Synchronized
     fun get(key: String): android.graphics.Bitmap? = lru[key]
 
+    /** Tiny synchronous read — cheap enough for the composition path. */
+    fun readMeta(key: String): Meta? = runCatching {
+        val p = metaFile(key).takeIf { it.exists() }?.readText()?.split(",") ?: return null
+        if (p.size < 3) return null
+        val w = p[0].toFloatOrNull() ?: return null
+        val h = p[1].toFloatOrNull() ?: return null
+        if (w <= 0f || h <= 0f) return null
+        Meta((w / h).coerceIn(0.5f, 2.2f), p[2].toLongOrNull() ?: 0L)
+    }.getOrNull()
+
+    fun readThumb(key: String): android.graphics.Bitmap? = runCatching {
+        val f = thumbFile(key).takeIf { it.exists() } ?: return null
+        android.graphics.BitmapFactory.decodeFile(f.absolutePath)
+    }.getOrNull()
+
     @Synchronized
-    fun put(key: String, bmp: android.graphics.Bitmap) {
+    fun put(key: String, bmp: android.graphics.Bitmap, w: Float = 0f, h: Float = 0f, ms: Long = 0L) {
         lru[key] = bmp
+        runCatching {
+            if (w > 0f && h > 0f) metaFile(key).writeText("$w,$h,$ms")
+            val maxW = 480
+            val scaled =
+                if (bmp.width > maxW) {
+                    android.graphics.Bitmap.createScaledBitmap(bmp, maxW, (bmp.height * maxW / bmp.width).toInt(), true)
+                } else {
+                    bmp
+                }
+            thumbFile(key).outputStream().use { out ->
+                scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, out)
+            }
+        }
     }
 }
 
@@ -3469,11 +3518,31 @@ private fun VideoMessageRow(
     val haptics = rememberHaptics()
     val dest = remember(m.optString("id")) { videoCacheFile(ctx, m) }
     val cacheKey = remember(m.optString("id")) { dest.absolutePath }
-    var ratio by remember(m.optString("id")) { mutableStateOf(16f / 9f) }
-    var duration by remember(m.optString("id")) { mutableStateOf("") }
-    val thumb by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(VideoThumbs.get(cacheKey), m.optString("id")) {
+    // Round 23: seed ratio/duration from the PERSISTENT meta when it exists,
+    // so the first frame already carries the video's own aspect ratio instead
+    // of flashing 16:9 and jumping once the decoder reports the real size.
+    val seedMeta = remember(m.optString("id")) { VideoThumbs.readMeta(cacheKey) }
+    var ratio by remember(m.optString("id")) { mutableStateOf(seedMeta?.ratio ?: (16f / 9f)) }
+    var duration by remember(m.optString("id")) {
+        mutableStateOf(
+            if ((seedMeta?.durationMs ?: 0L) > 0L) {
+                val ms = seedMeta.durationMs
+                "%d:%02d".format(ms / 1000 / 60, ms / 1000 % 60)
+            } else {
+                ""
+            },
+        )
+    }
+    val thumb by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(
+        VideoThumbs.get(cacheKey) ?: VideoThumbs.readThumb(cacheKey),
+        m.optString("id"),
+    ) {
         if (value != null) return@produceState
         if (!dest.exists()) return@produceState
+        // w, h, durationMs captured out of the IO block for the disk meta.
+        var w0 = 0f
+        var h0 = 0f
+        var ms0 = 0L
         value = withContext(Dispatchers.IO) {
             // No .use{}: close() is API 29+; release() is safe everywhere.
             val r = android.media.MediaMetadataRetriever()
@@ -3481,11 +3550,11 @@ private fun VideoMessageRow(
                 r.setDataSource(dest.absolutePath)
                 val bmp = r.getFrameAtTime(0L, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                 if (bmp != null) {
-                    val w = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toFloatOrNull() ?: 0f
-                    val h = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toFloatOrNull() ?: 0f
-                    if (w > 0f && h > 0f) ratio = (w / h).coerceIn(0.5f, 2.2f)
-                    val ms = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-                    if (ms > 0L) duration = "%d:%02d".format(ms / 1000 / 60, ms / 1000 % 60)
+                    w0 = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toFloatOrNull() ?: 0f
+                    h0 = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toFloatOrNull() ?: 0f
+                    if (w0 > 0f && h0 > 0f) ratio = (w0 / h0).coerceIn(0.5f, 2.2f)
+                    ms0 = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                    if (ms0 > 0L) duration = "%d:%02d".format(ms0 / 1000 / 60, ms0 / 1000 % 60)
                 }
                 bmp
             } catch (_: Exception) {
@@ -3494,7 +3563,9 @@ private fun VideoMessageRow(
                 runCatching { r.release() }
             }
         }
-        value?.let { VideoThumbs.put(cacheKey, it) }
+        // Persist thumb + meta so the NEXT cold start renders this bubble
+        // correctly on the first frame, without re-decoding (round 23).
+        value?.let { VideoThumbs.put(cacheKey, it, w0, h0, ms0) }
     }
     // Owner round 22: photos-style reply drag on videos too.
     var replyDrag by remember { mutableStateOf(0f) }
@@ -4576,18 +4647,32 @@ private fun CallLogBubble(m: JSONObject, mine: Boolean, pendingEcho: Boolean) {
             Modifier
                 .widthIn(max = 260.dp)
                 .clip(RoundedCornerShape(16.dp))
-                .background(if (mine) goldFill() else Brush.linearGradient(listOf(Card, Card)))
+                // Owner round 23: the call bubble kept the amber gradient in
+                // dark-blue ("call massage bubble ekhono cream colour") — my
+                // side now rides the same blue the default dark chat uses.
+                .background(
+                    if (mine && KpThemeMode.darkBlue) Brush.linearGradient(listOf(Color(0xFF2F6FED), Color(0xFF1E40AF)))
+                    else if (mine) goldFill()
+                    else Brush.linearGradient(listOf(Card, Card)),
+                )
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
-                Modifier.size(36.dp).clip(CircleShape).background(if (mine) Color(0x33FFFFFF) else GoldSoft),
+                Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (mine) Color(0x33FFFFFF)
+                        else if (KpThemeMode.darkBlue) ActionBlue.copy(alpha = 0.18f)
+                        else GoldSoft,
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     if (missed || declined) Icons.Filled.CallMissed else Icons.Filled.Call,
                     contentDescription = title,
-                    tint = if (missed) Red else if (mine) Ink else GoldDeep,
+                    tint = if (missed) Red else if (mine) Ink else if (KpThemeMode.darkBlue) ActionBlueDeep else GoldDeep,
                     modifier = Modifier.size(20.dp),
                 )
             }

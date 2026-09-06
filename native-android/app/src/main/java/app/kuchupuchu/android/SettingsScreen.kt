@@ -5,7 +5,6 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,6 +45,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -473,122 +473,6 @@ fun SettingsScreen(nav: NavController) {
     }
 }
 
-/**
- * Owner round 13e (2026-09-05): the row's VALUE itself turns into the input
- * on tap — right where it sits, no extra box below (owner rule). Confirm /
- * cancel ride at the row's end.
- */
-@Composable
-private fun EditableSettingRow(
-    icon: ImageVector,
-    label: String,
-    value: String,
-    busy: Boolean = false,
-    maxLength: Int = 60,
-    hint: String = "",
-    rowKey: String = "",
-    activeKey: String? = null,
-    onActiveKey: (String?) -> Unit = {},
-    onSubmit: (String, (String?) -> Unit) -> Unit,
-) {
-    // Owner round 14: editing state is hoisted behind ONE key, so opening a
-    // row closes every other — exactly one editor on screen at any time.
-    val editing = activeKey == rowKey
-    var draft by remember { mutableStateOf(value) }
-    var err by remember { mutableStateOf("") }
-    Column(Modifier.fillMaxWidth()) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clickable(enabled = !busy && !editing) {
-                    draft = value
-                    err = ""
-                    onActiveKey(rowKey)
-                }
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(icon, contentDescription = label, tint = ActionBlue, modifier = Modifier.size(21.dp))
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text(label, fontSize = 13.sp, color = Muted)
-                if (editing) {
-                    // The value itself is now the editor — same spot, and
-                    // (Owner round 14) inside a visible rounded border box so
-                    // the row being edited is unmistakable.
-                    androidx.compose.foundation.layout.Row(
-                        Modifier
-                            // Owner round 15: the box used to push the text
-                            // off the value's position (top gap + thick
-                            // padding). It now hugs the same line the value
-                            // text occupied — same spot, same height.
-                            .clip(RoundedCornerShape(10.dp))
-                            .border(1.dp, Gold, RoundedCornerShape(10.dp))
-                            .background(GoldSoft.copy(alpha = 0.30f))
-                            .padding(horizontal = 8.dp, vertical = 1.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        BasicTextField(
-                            draft,
-                            { draft = it.take(maxLength); err = "" },
-                            singleLine = true,
-                            textStyle =
-                                androidx.compose.ui.text.TextStyle(
-                                    fontSize = 14.5.sp,
-                                    color = Ink,
-                                    fontWeight = FontWeight.Medium,
-                                ),
-                            cursorBrush = androidx.compose.ui.graphics.SolidColor(ActionBlue),
-                            enabled = !busy,
-                            modifier = Modifier.weight(1f),
-                        )
-                        // Owner round 16: save/cancel ride INSIDE the box,
-                        // flush beside the text — they used to float above it.
-                        Spacer(Modifier.width(6.dp))
-                        Icon(
-                            Icons.Filled.Close,
-                            "Cancel",
-                            tint = Muted,
-                            modifier = Modifier
-                                .size(20.dp)
-                                .clip(CircleShape)
-                                .clickable(enabled = !busy) { onActiveKey(null); err = "" }
-                                .padding(3.dp),
-                        )
-                        Spacer(Modifier.width(2.dp))
-                        Icon(
-                            Icons.Filled.Check,
-                            "Save",
-                            tint = if (draft.isNotBlank() && !busy) ActionBlueDeep else Muted,
-                            modifier = Modifier
-                                .size(20.dp)
-                                .clip(CircleShape)
-                                .clickable(enabled = !busy && draft.isNotBlank()) {
-                                    onSubmit(draft.trim()) { e ->
-                                        if (e == null) {
-                                            onActiveKey(null)
-                                        } else {
-                                            err = e
-                                        }
-                                    }
-                                }
-                                .padding(3.dp),
-                        )
-                    }
-                } else {
-                    Text(value, fontSize = 14.5.sp, color = Ink, fontWeight = FontWeight.Medium)
-                }
-            }
-        }
-        if (editing && hint.isNotBlank() && err.isBlank()) {
-            Text(hint, fontSize = 11.sp, color = Muted, modifier = Modifier.padding(start = 51.dp, bottom = 6.dp))
-        }
-        if (err.isNotBlank()) {
-            Text(err, fontSize = 11.5.sp, color = Red, modifier = Modifier.padding(start = 51.dp, bottom = 6.dp))
-        }
-    }
-}
-
 @Composable
 private fun SettingRow(
     icon: ImageVector,
@@ -604,7 +488,7 @@ private fun SettingRow(
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = label, tint = GoldDeep, modifier = Modifier.size(21.dp))
+        Icon(icon, contentDescription = label, tint = ActionBlueDeep, modifier = Modifier.size(21.dp))
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(label, fontSize = 13.sp, color = Muted)
@@ -687,7 +571,7 @@ fun ThemePickerScreen(onClose: () -> Unit) {
                     Text(o.note, color = Muted, fontSize = 12.sp)
                 }
                 if (selected) {
-                    Icon(Icons.Filled.Check, "Selected", tint = GoldDeep, modifier = Modifier.size(20.dp))
+                    Icon(Icons.Filled.Check, "Selected", tint = ActionBlueDeep, modifier = Modifier.size(20.dp))
                 }
             }
         }
@@ -867,7 +751,7 @@ fun RingtonePickerScreen(kind: String = "call", onClose: () -> Unit) {
                     Text("Pick any audio from this phone", fontSize = 11.sp, color = Muted)
                 }
                 if (selCustom != null) {
-                    Icon(Icons.Filled.Done, null, tint = GoldDeep, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Filled.Done, null, tint = ActionBlueDeep, modifier = Modifier.size(18.dp))
                 }
             }
             Spacer(Modifier.height(8.dp))
@@ -1009,9 +893,9 @@ fun EditNameScreen(nav: NavController) {
     var busy by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf("") }
     EditFieldScaffold("Name", "First and last name", nav) {
-        OutlinedTextField(value = first, onValueChange = { first = it.take(40); err = "" }, label = { Text("First name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value = first, onValueChange = { first = it.take(40); err = "" }, label = { Text("First name") }, singleLine = true, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = ActionBlue, cursorColor = ActionBlue, focusedLabelColor = ActionBlue), modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(10.dp))
-        OutlinedTextField(value = last, onValueChange = { last = it.take(40); err = "" }, label = { Text("Last name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value = last, onValueChange = { last = it.take(40); err = "" }, label = { Text("Last name") }, singleLine = true, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = ActionBlue, cursorColor = ActionBlue, focusedLabelColor = ActionBlue), modifier = Modifier.fillMaxWidth())
         if (err.isNotBlank()) Text(err, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
         EditSaveButton(
             "Save",
@@ -1071,6 +955,7 @@ fun EditUsernameScreen(nav: NavController) {
                 onValueChange = { value = it.trim().lowercase().take(30); available = null; err = "" },
                 label = { Text("Username") },
                 singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = ActionBlue, cursorColor = ActionBlue, focusedLabelColor = ActionBlue),
                 modifier = Modifier.weight(1f),
             )
             Spacer(Modifier.width(8.dp))
@@ -1119,6 +1004,7 @@ fun EditAboutScreen(nav: NavController) {
             value = value,
             onValueChange = { value = it.take(150); err = "" },
             label = { Text("About") },
+            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = ActionBlue, cursorColor = ActionBlue, focusedLabelColor = ActionBlue),
             modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp),
         )
         Text("${value.length}/150", fontSize = 11.sp, color = Muted, modifier = Modifier.padding(top = 4.dp))
@@ -1156,6 +1042,7 @@ fun EditPhoneScreen(nav: NavController) {
             onValueChange = { value = it; err = "" },
             label = { Text("New number (e.g. +8801712345678)") },
             singleLine = true,
+            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = ActionBlue, cursorColor = ActionBlue, focusedLabelColor = ActionBlue),
             modifier = Modifier.fillMaxWidth(),
         )
         if (err.isNotBlank()) Text(err, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))

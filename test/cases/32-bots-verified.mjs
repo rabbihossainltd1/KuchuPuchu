@@ -850,8 +850,8 @@ const convBetween = (db, a, b) =>
       settings.includes("recreate()"),
   );
   check(
-    "13d: settings rows edit INLINE (no popups), API link row gone, custom-ring row themed",
-    settings.includes("EditableSettingRow") &&
+    "13d/r23: settings rows navigate to edit screens, API link row gone, custom-ring row themed",
+    settings.includes("fun EditPhoneScreen(") &&
       !settings.includes("editField != null") &&
       !settings.includes("workers.dev") &&
       settings.includes("selCustom != null) GoldSoft else Card"),
@@ -1171,7 +1171,7 @@ const convBetween = (db, a, b) =>
       settings.includes(".background(ActionBlue)") &&
       settings.includes("tint = ActionBlueDeep") &&
       settings.includes("Brush.linearGradient(listOf(Color(0xFF1E3A8A), Color(0xFF16213A)))") &&
-      settings.includes("cursorBrush = androidx.compose.ui.graphics.SolidColor(ActionBlue)"),
+      settings.includes("cursorColor = ActionBlue"),
   );
   check(
     "r20-theme: voice-call bubbles ride the dark-blue family (Dark/DarkCard tokens)",
@@ -1416,12 +1416,13 @@ const convBetween = (db, a, b) =>
       engine.includes('if (url.startsWith("data:")) return'),
   );
   check(
-    "14: settings — one editor at a time via a shared key + visible border box on the edited row",
+    "14/r23: one edit screen per field + NO cream icon anywhere in settings (except crash switch)",
     settings.includes("fun EditNameScreen(") &&
       settings.includes("fun EditUsernameScreen(") &&
       settings.includes("fun EditAboutScreen(") &&
       settings.includes("fun EditPhoneScreen(") &&
-      settings.includes("border(1.dp, Gold, RoundedCornerShape(10.dp))") &&
+      settings.includes("Icon(icon, contentDescription = label, tint = ActionBlueDeep") &&
+      !settings.includes("tint = GoldDeep") &&
       settings.includes('Opt(false, "Light Cream"') &&
       !settings.includes('false to "Light"') &&
       settings.includes("fun ThemePickerScreen"),
@@ -1507,13 +1508,13 @@ const convBetween = (db, a, b) =>
       settings.includes("Check for updates"),
   );
   check(
-    "16: fullscreen theme picker + settings back icon matches chat + save/cancel inside the edit box",
+    "16/r22: fullscreen theme picker + settings back icon matches chat + Save on the edit screens",
     settings.includes("fun ThemePickerScreen") &&
       settings.includes(
         'Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Ink, modifier = Modifier.size(26.dp)',
       ) &&
       settings.includes('"Save",') &&
-      settings.includes("flush beside the text"),
+      settings.includes("fun EditFieldScaffold("),
   );
   check(
     "15: AI replies fail over faster (per-model 10s -> 6s) + both APKs per CI run (r22)",
@@ -1524,6 +1525,45 @@ const convBetween = (db, a, b) =>
       readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8").includes(
         "assembleRelease",
       ),
+  );
+  const engine23 = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/CallEngine.kt",
+    "utf8",
+  );
+  const api23 = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/Api.kt",
+    "utf8",
+  );
+  check(
+    "r23: in-app incoming ring is INSTANT — kickPoll fires for NEW calls (active==null), not just the live one",
+    engine23.includes("if (active?.id == callId || active == null)") &&
+      engine23.includes("withTimeout(4_500)") &&
+      engine23.includes("Store.foreground -> 2000L"),
+  );
+  check(
+    "r23: call bubble matches the theme — no amber mine-bubble in dark-blue, incoming icon circle ActionBlue-tinted",
+    chat.includes(
+      "if (mine && KpThemeMode.darkBlue) Brush.linearGradient(listOf(Color(0xFF2F6FED), Color(0xFF1E40AF)))",
+    ) &&
+      chat.includes("else if (KpThemeMode.darkBlue) ActionBlue.copy(alpha = 0.18f)") &&
+      chat.includes("if (KpThemeMode.darkBlue) ActionBlueDeep else GoldDeep"),
+  );
+  check(
+    "r23: video placeholder keeps its OWN ratio across restarts — meta+thumb persist to disk",
+    chat.includes("fun readMeta(key: String): Meta?") &&
+      chat.includes("fun readThumb(key: String)") &&
+      chat.includes("VideoThumbs.readMeta(cacheKey)") &&
+      chat.includes('metaFile(key).writeText("$w,$h,$ms")') &&
+      chat.includes("compressed(compress") === false &&
+      chat.includes("scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, out)"),
+  );
+  check(
+    "r23: back from the video player KEEPS the chat position (didInitialScroll survives navigation)",
+    chat.includes("var didInitialScroll by rememberSaveable { mutableStateOf(false) }"),
+  );
+  check(
+    "r23: mobile-data networking — faster connect failover (10s) + worker call relay 1.8s->0.7s",
+    api23.includes(".connectTimeout(10, TimeUnit.SECONDS)") && src.includes("setTimeout(r, 700)"),
   );
 }
 

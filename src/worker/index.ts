@@ -5739,7 +5739,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // phone anyway ("call cut korleo call chole gelo").
     ctx.waitUntil(
       (async () => {
-        await new Promise((r) => setTimeout(r, 1_800));
+        // Round 23: was 1.8s — that delay sat ON the callee's first hint of
+        // the call (WS relay AND the fallback system notification alike).
+        // 700ms still catches near-instant cancels (the anti-phantom gate)
+        // while cutting the ring's worst-case latency by more than a second.
+        await new Promise((r) => setTimeout(r, 700));
         const fresh = await one<{ status: string }>(
           db,
           "SELECT status FROM calls WHERE id = ?",
