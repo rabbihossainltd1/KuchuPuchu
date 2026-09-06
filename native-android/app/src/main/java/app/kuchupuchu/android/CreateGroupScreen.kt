@@ -70,17 +70,32 @@ fun CreateGroupScreen(nav: NavController) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
 
+    // Owner round 31: the list is never blank — everyone I already chat with
+    // (the 1:1 peers of the chat list) shows at once; typing filters them and
+    // adds server matches for people not in my list yet.
+    val known =
+        remember {
+            ScreenStore.convs
+                .filter { !it.optBoolean("isGroup") }
+                .mapNotNull { it.optJSONObject("other") }
+                .filter { it.optString("id").isNotBlank() && !isKpBot(it.optString("id")) }
+                .distinctBy { it.optString("id") }
+        }
     LaunchedEffect(query) {
-        if (query.trim().length < 2) {
+        val q = query.trim()
+        if (q.length < 2) {
             found.clear()
+            found.addAll(known)
             return@LaunchedEffect
         }
+        found.clear()
+        found.addAll(known.filter { it.optString("displayName").contains(q, true) || it.optString("username").contains(q, true) })
         delay(250)
         searching = true
         try {
-            val data = withContext(Dispatchers.IO) { Api.get("/api/users?q=${Api.q(query.trim())}", true) }
-            found.clear()
-            found.addAll(data.arr("users").objects())
+            val data = withContext(Dispatchers.IO) { Api.get("/api/users?q=${Api.q(q)}", true) }
+            val extra = data.arr("users").objects().filter { u -> found.none { it.optString("id") == u.optString("id") } }
+            found.addAll(extra)
         } catch (_: Exception) {
         } finally {
             searching = false
@@ -170,16 +185,16 @@ fun CreateGroupScreen(nav: NavController) {
         CompactSearchBar(
             query,
             { query = it },
-            placeholder = "Search members",
+            placeholder = "Search",
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
         )
 
-        if (query.trim().length < 2) {
+        if (found.isEmpty() && query.trim().length < 2) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 EmptyState(
                     icon = Icons.Filled.GroupAdd,
-                    title = "Add members",
-                    note = "Pick at least one person, name the group, and create it",
+                    title = "No contacts yet",
+                    note = "Search a name to add members",
                 )
             }
         } else {
@@ -209,11 +224,7 @@ fun CreateGroupScreen(nav: NavController) {
                                 color = Ink,
                             )
                             val uname = user.optString("username")
-                            Text(
-                                if (uname.isNotBlank()) "@$uname" else "Tap to ${if (on) "remove" else "add"}",
-                                fontSize = 12.5.sp,
-                                color = Muted,
-                            )
+                            if (uname.isNotBlank()) Text("@$uname", fontSize = 12.5.sp, color = Muted, maxLines = 1)
                         }
                         Box(
                             Modifier
@@ -228,10 +239,10 @@ fun CreateGroupScreen(nav: NavController) {
                         }
                     }
                 }
-                if (found.isEmpty() && !searching) {
+                if (found.isEmpty() && !searching && query.trim().length >= 2) {
                     item {
                         Text(
-                            "No one found for \"$query\"",
+                            "No one found",
                             Modifier
                                 .fillMaxWidth()
                                 .padding(24.dp),
@@ -253,7 +264,7 @@ fun CreateGroupScreen(nav: NavController) {
         }
 
         GoldBtn(
-            if (busy) "Creating…" else "Create group",
+            if (busy) "Creating…" else "Create",
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 12.dp),

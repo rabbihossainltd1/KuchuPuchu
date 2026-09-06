@@ -184,6 +184,133 @@ async function mk() {
   );
 }
 
+// ---- 4. r31-5: real group admin — rename / picture / avatar route / handover ----
+{
+  const k = await mk();
+  const admin = await k.reg("ga@x.com", "ga");
+  const m1 = await k.reg("gb@x.com", "gb");
+  const m2 = await k.reg("gc@x.com", "gc");
+  const made = await k.call(
+    "POST",
+    "/api/conversations/group",
+    { title: "Crew", memberIds: [m1.user.id, m2.user.id] },
+    admin.token,
+  );
+  const gid = made.json.conversation.id;
+  check(
+    "r31-5: the creator is the admin (ownerId + myRole owner)",
+    made.json.conversation.ownerId === admin.user.id && made.json.conversation.myRole === "owner",
+    JSON.stringify({ o: made.json.conversation.ownerId, r: made.json.conversation.myRole }),
+  );
+  const asMember = await k.call("GET", `/api/conversations/${gid}`, undefined, m1.token);
+  check(
+    "r31-5: a plain member sees myRole member",
+    asMember.json.conversation.myRole === "member",
+    String(asMember.json.conversation.myRole),
+  );
+  const denied = await k.call("PATCH", `/api/conversations/${gid}`, { title: "Nope" }, m1.token);
+  check(
+    "r31-5: a member cannot rename the group (403)",
+    denied.status === 403,
+    String(denied.status),
+  );
+  const renamed = await k.call(
+    "PATCH",
+    `/api/conversations/${gid}`,
+    { title: "  Crew 2  " },
+    admin.token,
+  );
+  check(
+    "r31-5: the admin renames (trimmed) and the detail comes back",
+    renamed.status === 200 && renamed.json.conversation.title === "Crew 2",
+    JSON.stringify(renamed.json.conversation?.title),
+  );
+  const png =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+  const badPic = await k.call(
+    "PATCH",
+    `/api/conversations/${gid}`,
+    { avatarUrl: "data:text/html,<b>x</b>" },
+    admin.token,
+  );
+  check(
+    "r31-5: a non-image data-URI is refused as the group picture",
+    badPic.status === 400,
+    String(badPic.status),
+  );
+  const pic = await k.call("PATCH", `/api/conversations/${gid}`, { avatarUrl: png }, admin.token);
+  const ref = pic.json.conversation?.avatarRef;
+  check(
+    "r31-5: the admin sets the picture; the detail carries avatarUrl + a g:<id>@vN ref",
+    pic.status === 200 && pic.json.conversation.avatarUrl === png && ref === `g:${gid}@v1`,
+    JSON.stringify({ s: pic.status, ref }),
+  );
+  const list = await k.call("GET", "/api/conversations", undefined, m1.token);
+  const row = (list.json.items || []).find((c) => c.id === gid);
+  check(
+    "r31-5: the LIGHT chat-list row carries the ref only (no inline bytes)",
+    row && row.avatarRef === `g:${gid}@v1` && row.avatarUrl === null,
+    JSON.stringify({ ref: row?.avatarRef, url: row?.avatarUrl }),
+  );
+  const av = await k.call("GET", `/api/conversations/${gid}/avatar`, undefined, m2.token);
+  check(
+    "r31-5: GET /api/conversations/:id/avatar serves the picture to a member",
+    av.status === 200 && av.json.avatarUrl === png && av.json.avatarRef === `g:${gid}@v1`,
+    JSON.stringify({ s: av.status, ref: av.json.avatarRef }),
+  );
+  const outsider = await k.reg("gd@x.com", "gd");
+  const avNo = await k.call("GET", `/api/conversations/${gid}/avatar`, undefined, outsider.token);
+  check("r31-5: …and refuses a non-member", avNo.status >= 400, String(avNo.status));
+  const kickDenied = await k.call(
+    "DELETE",
+    `/api/conversations/${gid}/members/${m2.user.id}`,
+    undefined,
+    m1.token,
+  );
+  check(
+    "r31-5: a member cannot kick another member",
+    kickDenied.status === 403,
+    String(kickDenied.status),
+  );
+  const kicked = await k.call(
+    "DELETE",
+    `/api/conversations/${gid}/members/${m2.user.id}`,
+    undefined,
+    admin.token,
+  );
+  const afterKick = await k.call("GET", `/api/conversations/${gid}`, undefined, admin.token);
+  check(
+    "r31-5: the admin kicks; the member list shrinks",
+    kicked.status === 200 && afterKick.json.conversation.members.length === 2,
+    String(afterKick.json.conversation?.members?.length),
+  );
+  const left = await k.call(
+    "DELETE",
+    `/api/conversations/${gid}/members/${admin.user.id}`,
+    undefined,
+    admin.token,
+  );
+  const handed = await k.call("GET", `/api/conversations/${gid}`, undefined, m1.token);
+  check(
+    "r31-5: the admin leaving hands the group to the remaining member (ownerId + role)",
+    left.status === 200 &&
+      handed.json.conversation.ownerId === m1.user.id &&
+      handed.json.conversation.myRole === "owner",
+    JSON.stringify({ o: handed.json.conversation?.ownerId, r: handed.json.conversation?.myRole }),
+  );
+  const nowAdmin = await k.call(
+    "PATCH",
+    `/api/conversations/${gid}`,
+    { title: "Mine now" },
+    m1.token,
+  );
+  check(
+    "r31-5: …and the new admin can rename",
+    nowAdmin.status === 200 && nowAdmin.json.conversation.title === "Mine now",
+    String(nowAdmin.status),
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`\n--- ${lines.length - broken} ok / ${broken} broken ---`);

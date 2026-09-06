@@ -1612,6 +1612,13 @@ async function ensureSchema(db: D1Database) {
   await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN disappear_seconds INTEGER`);
   await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN theme TEXT`);
   await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN disappear_since TEXT`);
+  // Owner round 31: real groups — a group picture (same inline data-URI shape
+  // as a profile photo) with a per-version cache token like user avatars.
+  await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN avatar_url TEXT`);
+  await runCatchingSql(
+    db,
+    `ALTER TABLE conversations ADD COLUMN avatar_version INTEGER NOT NULL DEFAULT 0`,
+  );
   await runCatchingSql(db, `ALTER TABLE messages ADD COLUMN client_id TEXT`);
   // Bumped whenever the profile photo changes; it backs the lightweight
   // avatarRef token in list responses so clients cache avatars per version.
@@ -4241,6 +4248,37 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   // Avatar bytes keyed by the user id; the data-URI only (the list endpoints
   // send a tiny avatarRef instead). ETag/If-None-Match plus a long CDN lifetime
   // make this one fetch per avatar *change* — not per poll.
+  // Owner round 31: the group picture, members only, same ETag/cache shape as
+  // a user avatar so the client's per-version cache handles both.
+  const groupAvatarMatch = path.match(/^\/api\/conversations\/([^/]+)\/avatar$/);
+  if (groupAvatarMatch && method === "GET") {
+    const gid = groupAvatarMatch[1]!;
+    await requireMember(db, gid, uid);
+    const row = await one<{ avatar_url: string | null; avatar_version: number | null }>(
+      db,
+      "SELECT avatar_url, avatar_version FROM conversations WHERE id = ?",
+      gid,
+    );
+    const version = row?.avatar_version ?? 0;
+    const etag = `"gav-${gid.slice(0, 8)}-v${version}"`;
+    if (request.headers.get("if-none-match") === etag) {
+      return new Response(null, { status: 304, headers: { etag } });
+    }
+    return new Response(
+      JSON.stringify({
+        avatarUrl: row?.avatar_url || null,
+        avatarRef: row?.avatar_url ? `g:${gid}@v${version}` : null,
+      }),
+      {
+        headers: {
+          "content-type": "application/json",
+          etag,
+          "cache-control": row?.avatar_url ? "private, max-age=86400" : "private, max-age=300",
+        },
+      },
+    );
+  }
+
   const avatarMatch = path.match(/^\/api\/users\/([^/]+)\/avatar$/);
   if (avatarMatch && method === "GET") {
     const row = await one<{
@@ -4639,9 +4677,43 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // The disappearing timer deletes messages for *everyone* in the chat, so in
     // a group only the owner may change it (or the theme). Any member being
     // able to set it meant any member could wipe the whole group's history.
-    const changesSharedSettings = body.disappearSeconds !== undefined || body.theme !== undefined;
+    const changesSharedSettings =
+      body.disappearSeconds !== undefined ||
+      body.theme !== undefined ||
+      body.title !== undefined ||
+      body.avatarUrl !== undefined;
     if (conv.kind === "GROUP" && changesSharedSettings && conv.owner_id !== uid) {
       fail(403, "Only the group owner can change these settings.", "FORBIDDEN");
+    }
+    // Owner round 31: group name + picture (groups only, owner only — the
+    // gate above). Same data-URI safety + size rules as a profile photo.
+    if (body.title !== undefined) {
+      if (conv.kind !== "GROUP") fail(400, "Only groups have a name.");
+      const title = String(body.title || "")
+        .trim()
+        .slice(0, 50);
+      if (!title) fail(400, "Group name required.");
+      await run(db, "UPDATE conversations SET title = ? WHERE id = ?", title, convId);
+      await systemMessage(db, convId, `${me.display_name} renamed the group to "${title}"`);
+    }
+    if (body.avatarUrl !== undefined) {
+      if (conv.kind !== "GROUP") fail(400, "Only groups have a picture.");
+      const avatar = String(body.avatarUrl || "");
+      if (avatar && !isSafeDataUrl(avatar)) fail(400, "Bad avatar.", "BAD_MEDIA");
+      if (avatar.length > 80_000) fail(400, "Avatar too large — pick a smaller image.");
+      await run(
+        db,
+        "UPDATE conversations SET avatar_url = ?, avatar_version = avatar_version + 1 WHERE id = ?",
+        avatar || null,
+        convId,
+      );
+      await systemMessage(
+        db,
+        convId,
+        avatar
+          ? `${me.display_name} changed the group picture`
+          : `${me.display_name} removed the group picture`,
+      );
     }
     if (body.disappearSeconds !== undefined) {
       const sec = Math.max(0, Number(body.disappearSeconds) || 0);
@@ -4794,6 +4866,24 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       fail(403, "Only the group owner can remove others.");
     const targetUser = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", targetId);
     await run(db, "DELETE FROM members WHERE conv_id = ? AND user_id = ?", convId, targetId);
+    // Owner round 31: the admin leaving hands the group to the longest-standing
+    // member (a group must always have an admin who can manage it).
+    if (targetId === uid && conv.owner_id === uid) {
+      const heir = await one<{ user_id: string }>(
+        db,
+        "SELECT user_id FROM members WHERE conv_id = ? ORDER BY joined_at ASC, rowid ASC LIMIT 1",
+        convId,
+      );
+      if (heir) {
+        await run(db, "UPDATE conversations SET owner_id = ? WHERE id = ?", heir.user_id, convId);
+        await run(
+          db,
+          "UPDATE members SET role = 'owner' WHERE conv_id = ? AND user_id = ?",
+          convId,
+          heir.user_id,
+        );
+      }
+    }
     if (targetUser) {
       await systemMessage(
         db,
@@ -6851,6 +6941,8 @@ type ConvRow = {
   disappear_seconds: number | null;
   theme: string | null;
   hidden_json?: string | null;
+  avatar_url?: string | null;
+  avatar_version?: number | null;
   /** Newest messages rowid in the conversation; only the list query selects it. */
   max_row?: number | null;
 };
@@ -6905,7 +6997,7 @@ type ConvMemberRow = {
 };
 
 const CONV_COLS =
-  "id, kind, title, owner_id, created_at, last_message_at, last_message, disappear_seconds, theme, hidden_json";
+  "id, kind, title, owner_id, created_at, last_message_at, last_message, disappear_seconds, theme, hidden_json, avatar_url, avatar_version";
 const MEMBER_COLS = "conv_id, user_id, role, muted, unread, last_read_at";
 
 /** Placeholder list for an IN(...) clause. */
@@ -7150,6 +7242,15 @@ function buildConvDetail(
     muted: meMuted,
     unread,
     isGroup: conv.kind === "GROUP",
+    // Owner round 31: group picture. Token `g:<convId>@v<n>` — the "g:" prefix
+    // routes the client's cache fill to /api/conversations/:id/avatar.
+    avatarRef:
+      conv.kind === "GROUP" && conv.avatar_url ? `g:${conv.id}@v${conv.avatar_version ?? 0}` : null,
+    avatarUrl: conv.kind === "GROUP" && !light ? conv.avatar_url || null : null,
+    // The caller's own role — the client shows admin actions from this.
+    myRole:
+      memberRows.find((m) => m.user_id === uid)?.role ||
+      (conv.owner_id === uid ? "owner" : "member"),
     disappearSeconds: Number(conv.disappear_seconds || 0),
     // Owner round 20: chats that never picked a theme are DARK BLUE now —
     // "default" stays the explicit classic-cream choice.

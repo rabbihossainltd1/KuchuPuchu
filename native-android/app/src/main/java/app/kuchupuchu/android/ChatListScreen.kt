@@ -1014,8 +1014,9 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
         else other?.optText("displayName")?.takeIf { it.isNotBlank() } ?: "Chat"
     // optIso, not optString: the list rows are LIGHT, so avatarUrl is JSON null
     // there, and "null" as a string defeats the avatarRef lookup (see KpAvatar).
-    val avatarUrl = if (isGroup) null else other?.optIso("avatarUrl")
-    val avatarRef = if (isGroup) null else other?.optIso("avatarRef")
+    // Owner round 31: a group row shows the group picture (own cache token).
+    val avatarUrl = if (isGroup) conv.optIso("avatarUrl") else other?.optIso("avatarUrl")
+    val avatarRef = if (isGroup) conv.optIso("avatarRef") else other?.optIso("avatarRef")
     val preview = friendlyPreview(conv.optText("lastMessage"))
     val stamp = listStamp(conv.optString("lastMessageAt"))
     val unread = conv.optInt("unread", 0)

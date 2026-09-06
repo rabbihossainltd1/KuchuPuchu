@@ -130,6 +130,8 @@ fun KpApp() {
                 composable("settings/devices") { DevicesSettingsScreen(nav) }
                 composable("settings/permissions") { PermissionsSettingsScreen(nav) }
                 composable("settings/app") { AppSettingsScreen(nav) }
+                // Owner round 31: the group profile (members / admin actions).
+                composable("group/{id}") { GroupInfoScreen(nav, it.arguments?.getString("id") ?: "") }
                 // Owner round 28: home ⋮ menu destinations.
                 composable("about") { AboutScreen(nav) }
                 composable("contacts") { AllContactsScreen(nav) }

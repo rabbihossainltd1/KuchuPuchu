@@ -1363,9 +1363,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                 w.equals("MD", true) || w.equals("M.D", true) || w.equals("Md.", true) ||
                     w.equals("Mohammad", true) || w.equals("Muhammad", true) || w == "মোঃ"
             }.firstOrNull() ?: rawTitle
-    val avatarUrl = if (isGroup) null else c?.optJSONObject("other")?.optIso("avatarUrl")
+    // Owner round 31: groups carry their own picture (avatarRef "g:<id>@vN").
+    val avatarUrl = if (isGroup) c?.optIso("avatarUrl") else c?.optJSONObject("other")?.optIso("avatarUrl")
     // The ref is what makes the header paint without re-fetching: pass it too.
-    val avatarRef = if (isGroup) null else c?.optJSONObject("other")?.optIso("avatarRef")
+    val avatarRef = if (isGroup) c?.optIso("avatarRef") else c?.optJSONObject("other")?.optIso("avatarRef")
     val online = !isGroup && c?.optJSONObject("other")?.optBoolean("online") == true
     val verified = !isGroup && c?.optJSONObject("other")?.optBoolean("verified") == true
     val moderator = !isGroup && c?.optJSONObject("other")?.optBoolean("moderator") == true
@@ -1529,7 +1530,9 @@ fun ChatScreen(nav: NavController, convId: String) {
             val otherId = c?.optJSONObject("other")?.optString("id") ?: ""
             Row(
                 Modifier.weight(1f).clickable {
-                    if (!isGroup && otherId.isNotBlank()) nav.navigate("profile/$otherId")
+                    // Owner round 31: a group header opens the group profile.
+                    if (isGroup) nav.navigate("group/$convId")
+                    else if (otherId.isNotBlank()) nav.navigate("profile/$otherId")
                 },
                 verticalAlignment = Alignment.CenterVertically,
             ) {

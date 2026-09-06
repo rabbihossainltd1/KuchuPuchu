@@ -112,7 +112,7 @@ const sites = avatarSites();
   );
   check(
     "a miss costs one forced fetch, not a stale answer",
-    /Api\.get\("\/api\/users\/\$userId\/avatar", force = true\)/.test(body),
+    /Api\.get\("\/api\/users\/\$ownerId\/avatar", force = true\)/.test(body),
   );
   check(
     'the org.json "null" string is treated as absent at the choke point',

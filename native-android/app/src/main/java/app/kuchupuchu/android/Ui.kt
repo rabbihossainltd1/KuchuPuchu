@@ -404,8 +404,15 @@ fun rememberAvatarUrl(url: String?, avatarRef: String?): String? {
         val fetched =
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 runCatching {
-                    val userId = ref.substringBefore("@v")
-                    val data = Api.get("/api/users/$userId/avatar", force = true)
+                    val ownerId = ref.substringBefore("@v")
+                    // Owner round 31: `g:<convId>@v<n>` is a GROUP picture — same
+                    // cache, different endpoint.
+                    val data =
+                        if (ownerId.startsWith("g:")) {
+                            Api.get("/api/conversations/${ownerId.removePrefix("g:")}/avatar", force = true)
+                        } else {
+                            Api.get("/api/users/$ownerId/avatar", force = true)
+                        }
                     data.optString("avatarUrl").takeIf { it.startsWith("data:") }
                 }.getOrNull()
             }

@@ -2398,12 +2398,59 @@ const convBetween = (db, a, b) =>
       !kt("NewChatScreen.kt").includes("OutlinedTextField(") &&
       !kt("SearchScreen.kt").includes("OutlinedTextField(") &&
       !kt("CreateGroupScreen.kt").includes("OutlinedTextField(") &&
-      kt("CreateGroupScreen.kt").includes('placeholder = "Search members"') &&
+      kt("CreateGroupScreen.kt").includes('placeholder = "Search"') &&
       !kt("CreateGroupScreen.kt").includes("Add members — search by name or username") &&
       !kt("SearchScreen.kt").includes("Search people, chats, messages") &&
       !kt("NewChatScreen.kt").includes('"Name or username"') &&
       kt("StatusPhotoScreen.kt").includes('label = { Text("Caption") }'),
   );
+  // r31-5: real groups — group profile screen, admin = creator, add/kick/rename/picture,
+  // the create screen lists chat-list peers immediately, group avatar cache token "g:".
+  {
+    const groupInfo = kt("GroupInfoScreen.kt");
+    const worker = readFileSync("src/worker/index.ts", "utf8");
+    check(
+      "r31-5: group profile = GroupInfoScreen (route group/{id}) opened from the group chat header; members, Admin badge, add/remove/rename/picture (admin), leave",
+      kpapp.includes('composable("group/{id}")') &&
+        kt("ChatScreen.kt").includes('if (isGroup) nav.navigate("group/$convId")') &&
+        groupInfo.includes("val isAdmin = ownerId.isNotBlank() && ownerId == myId") &&
+        [
+          '"Add members"',
+          '"Remove from group"',
+          '"Leave group"',
+          '"Group name"',
+          '"Admin"',
+          '"View profile"',
+        ].every((l) => groupInfo.includes(l)) &&
+        groupInfo.includes('Api.post("/api/conversations/$convId/members"') &&
+        groupInfo.includes(
+          'Api.delete("/api/conversations/$convId/members/${u.optString("id")}")',
+        ) &&
+        groupInfo.includes('Api.delete("/api/conversations/$convId/members/$myId")') &&
+        groupInfo.includes('patch(JSONObject().put("title", draft.trim()))') &&
+        groupInfo.includes('patch(JSONObject().put("avatarUrl", dataUrl))') &&
+        !groupInfo.includes("AlertDialog(") &&
+        groupInfo.includes("KpConfirmSheet(") &&
+        groupInfo.includes("KpSheet("),
+    );
+    check(
+      "r31-5: New group lists everyone from the chat list at once (search filters + extends); Create button is one word",
+      kt("CreateGroupScreen.kt").includes("ScreenStore.convs") &&
+        kt("CreateGroupScreen.kt").includes("found.addAll(known)") &&
+        kt("CreateGroupScreen.kt").includes('if (busy) "Creating…" else "Create"'),
+    );
+    check(
+      "r31-5 worker: PATCH /api/conversations/:id takes title + avatarUrl (group, owner only); GET /api/conversations/:id/avatar; detail carries avatarRef g:<id>@vN + myRole; admin leaving hands the group to the oldest member",
+      worker.includes("ALTER TABLE conversations ADD COLUMN avatar_url TEXT") &&
+        worker.includes("body.title !== undefined ||\n      body.avatarUrl !== undefined") &&
+        worker.includes("/^\\/api\\/conversations\\/([^/]+)\\/avatar$/") &&
+        worker.includes("`g:${conv.id}@v${conv.avatar_version ?? 0}`") &&
+        worker.includes("myRole:") &&
+        worker.includes("UPDATE members SET role = 'owner' WHERE conv_id = ? AND user_id = ?") &&
+        kt("Ui.kt").includes('if (ownerId.startsWith("g:"))') &&
+        kt("ChatListScreen.kt").includes('if (isGroup) conv.optIso("avatarRef")'),
+    );
+  }
   {
     // Every cream / warm-white literal outside Theme.kt and the login screen
     // (which the owner excluded from theme work) must be gone from the
