@@ -49,6 +49,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
@@ -78,6 +79,7 @@ import androidx.compose.material.icons.filled.Reply
 
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.GroupAdd
@@ -204,6 +206,10 @@ fun ChatScreen(nav: NavController, convId: String) {
     // AND raises the quick-emoji bar; "+" opens the full emoji sheet.
     var reactionFor by remember { mutableStateOf<JSONObject?>(null) }
     var showEmojiSheet by remember { mutableStateOf(false) }
+    // Owner round 31: long-press opens ONE bottom sheet — the reaction emoji
+    // row on top, every message action under it. (No floating bar, no
+    // system-style icon strip.) Multi-select is the sheet's "Select" action.
+    var actionFor by remember { mutableStateOf<JSONObject?>(null) }
 
     val selected = remember { mutableStateListOf<String>() }
 
@@ -293,6 +299,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         // together — two presses felt broken.
         reactionFor = null
         showEmojiSheet = false
+        actionFor = null
         selected.clear()
     }
     // Owner round 18: leaving the chat re-marks it read server-side and
@@ -1792,56 +1799,6 @@ fun ChatScreen(nav: NavController, convId: String) {
             /* ---------------- in-chat search (Owner round 14: moved to the
                TOP of the screen, floating over the messages, with a rounded
                pill input instead of a flat box strip) ---------------- */
-            // Owner round 17: the reaction bar floats right ABOVE the
-            // message it will react to (found via the list layout).
-            reactionFor?.let { target ->
-                val targetKey = target.optString("clientId").ifBlank { target.optString("id") }
-                val barHeightPx = with(LocalDensity.current) { 54.dp.toPx() }
-                val info = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == targetKey }
-                val y = (info?.offset?.toFloat() ?: 0f) - barHeightPx
-                Box(
-                    Modifier
-                        .align(Alignment.TopStart)
-                        .zIndex(8f)
-                        .offset { IntOffset(0, y.coerceAtLeast(0f).roundToInt()) }
-                        .fillMaxWidth(),
-                ) {
-                    Row(
-                        Modifier
-                            .padding(horizontal = 10.dp)
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(Card)
-                            .border(1.dp, ActionBlue, RoundedCornerShape(18.dp))
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                    ) {
-                        listOf("👍", "❤️", "😂", "😮", "😢").forEach { e ->
-                            Text(
-                                e,
-                                fontSize = 22.sp,
-                                modifier = Modifier
-                                    .clip(CircleShape)
-                                    .clickable { applyReaction(target, e) }
-                                    .padding(6.dp),
-                            )
-                        }
-                        Icon(
-                            Icons.Filled.Add,
-                            "More emojis",
-                            tint = GoldDeep,
-                            modifier = Modifier
-                                .size(26.dp)
-                                .clip(CircleShape)
-                                .clickable { showEmojiSheet = true }
-                                .padding(4.dp),
-                        )
-                        IconButton(onClick = { reactionFor = null }, Modifier.size(28.dp)) {
-                            Icon(Icons.Filled.Close, "Close reactions", tint = Muted, modifier = Modifier.size(16.dp))
-                        }
-                    }
-                }
-            }
             // Owner round 16: zIndex keeps the bar ABOVE the message list —
             // it was composited underneath, so taps landed on the messages.
             if (showChatSearch) Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().zIndex(6f)) {
@@ -1950,9 +1907,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                             revealChars = if (m.optString("id") == aiRevealId) aiRevealChars else null,
                             onReply = { haptics.tap(); replyTo = it; replyFocusNonce++ },
                             onLongPress = { msg ->
-                                // Select stays exactly as it was (owner: "thik
-                                // ache") — the emoji bar is the EXTRA action.
-                                if (msg.optString("kind") != "DELETED") reactionFor = msg
+                                // Owner round 31: the action sheet (reactions on
+                                // top). In multi-select mode a long-press just
+                                // toggles, like a tap.
+                                if (msg.optString("kind") != "DELETED" && selected.isEmpty()) {
+                                    actionFor = msg
+                                    reactionFor = msg
+                                }
                             },
                             quoteFor = { rid -> (msgs + pending).firstOrNull { it.optString("id") == rid } },
                             onMessageOwner = { ownerId -> openChatWithUser(ownerId) },
@@ -2058,6 +2019,103 @@ fun ChatScreen(nav: NavController, convId: String) {
            five quick emojis + "+" for the full sheet. */
         if (showEmojiSheet && reactionFor != null) {
             EmojiSheetDialog { e -> reactionFor?.let { applyReaction(it, e) } }
+        }
+
+        /* ---------------- message action sheet (Owner round 31) ----------------
+           Long-press → this sheet: quick reactions on top ("+" = full emoji
+           sheet), then Reply / Copy / Forward / Edit / Unsend / Delete / Select. */
+        actionFor?.let { m ->
+            val mid = m.optString("id")
+            val mineMsg = m.optString("senderId") == Store.myId()
+            val kindM = m.optString("kind")
+            val isText = kindM == "TEXT" && m.optText("body").isNotBlank()
+            val echo = pendingEchoOf(m)
+            fun close() {
+                actionFor = null
+                reactionFor = null
+            }
+            KpSheet(onDismiss = { close() }) {
+                if (!showEmojiSheet) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                    ) {
+                        val myReaction = m.optJSONObject("meta")?.optJSONObject("reactions")?.optString(Store.myId()).orEmpty()
+                        listOf("👍", "❤️", "😂", "😮", "😢", "🙏").forEach { e ->
+                            Text(
+                                e,
+                                fontSize = 26.sp,
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .background(if (myReaction == e) ActionBlue.copy(alpha = 0.18f) else Color.Transparent)
+                                    .clickable {
+                                        applyReaction(m, e)
+                                        actionFor = null
+                                    }
+                                    .padding(7.dp),
+                            )
+                        }
+                        Box(
+                            Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(ActionBlue.copy(alpha = 0.14f))
+                                .clickable { showEmojiSheet = true },
+                            contentAlignment = Alignment.Center,
+                        ) { Icon(Icons.Filled.Add, "More emojis", tint = ActionBlueDeep, modifier = Modifier.size(22.dp)) }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                }
+                KpSheetRow(Icons.AutoMirrored.Filled.Reply, "Reply") {
+                    close()
+                    haptics.tap()
+                    replyTo = m
+                    replyFocusNonce++
+                }
+                if (isText) {
+                    KpSheetRow(Icons.Filled.ContentCopy, "Copy") {
+                        close()
+                        val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        cm.setPrimaryClip(android.content.ClipData.newPlainText("KuchuPuchu", m.optText("body")))
+                        android.widget.Toast.makeText(ctx, "Copied", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+                if (!echo) {
+                    KpSheetRow(Icons.AutoMirrored.Filled.Send, "Forward") {
+                        close()
+                        selected.clear()
+                        selected.add(mid)
+                        forwarding = true
+                    }
+                }
+                if (canEdit(m)) {
+                    KpSheetRow(Icons.Filled.Edit, "Edit") {
+                        close()
+                        editing = m
+                    }
+                }
+                if (mineMsg && !echo) {
+                    KpSheetRow(Icons.Filled.DeleteForever, "Unsend", tint = Red) {
+                        close()
+                        selected.clear()
+                        selected.add(mid)
+                        unsendSelected()
+                    }
+                }
+                KpSheetRow(Icons.Filled.Delete, "Delete for me", tint = Red) {
+                    close()
+                    selected.clear()
+                    selected.add(mid)
+                    deleteForMe()
+                }
+                KpSheetRow(Icons.Filled.CheckCircle, "Select") {
+                    close()
+                    if (mid !in selected) selected.add(mid)
+                }
+            }
         }
 
         /* ---------------- composer (doubles as the recording bar) ---------------- */
@@ -3304,8 +3362,9 @@ private fun MessageRow(
                         onLongClick = {
                             if (!pendingEcho) {
                                 haptics.tap()
-                                onToggleSelect(m)
-                                onLongPress(m)
+                                // Owner round 31: selection only while selecting;
+                                // otherwise the action sheet takes over.
+                                if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)
                             }
                         },
                     )
@@ -3670,8 +3729,7 @@ private fun VideoMessageRow(
                     },
                     onLongClick = {
                         haptics.tap()
-                        onToggleSelect(m)
-                        onLongPress(m)
+                        if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)
                     },
                 ),
         ) {
@@ -3960,8 +4018,7 @@ private fun ImageMessageRow(
                     onLongClick = {
                         if (!pendingEcho) {
                             haptics.tap()
-                            onToggleSelect(m)
-                            onLongPress(m)
+                            if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)
                         }
                     },
                 ),

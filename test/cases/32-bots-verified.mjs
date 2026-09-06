@@ -1032,11 +1032,25 @@ const convBetween = (db, a, b) =>
       !chat.includes("replyThreshold * 1.8f, 0f)\n                                    } else {"),
   );
   check(
-    "r17-13: reaction bar floats ABOVE the target message, deselects after reacting, '+' opens a bottom sheet",
-    chat.includes("listState.layoutInfo.visibleItemsInfo.firstOrNull") &&
+    "r17-13/r31-8: long-press opens ONE action sheet — reaction row on top ('+' = full emoji sheet), then Reply/Copy/Forward/Edit/Unsend/Delete/Select; reacting deselects; no floating bar",
+    !chat.includes("listState.layoutInfo.visibleItemsInfo.firstOrNull") &&
       chat.includes("if (mid in selected) selected.remove(mid)") &&
       chat.includes("ModalBottomSheet(") &&
-      chat.includes("skipPartiallyExpanded = true"),
+      chat.includes("skipPartiallyExpanded = true") &&
+      chat.includes("var actionFor by remember { mutableStateOf<JSONObject?>(null) }") &&
+      chat.includes("actionFor?.let { m ->") &&
+      chat.includes('listOf("👍", "❤️", "😂", "😮", "😢", "🙏").forEach { e ->') &&
+      ['"Reply"', '"Copy"', '"Forward"', '"Edit"', '"Unsend"', '"Delete for me"', '"Select"'].every(
+        (l) =>
+          chat.includes(
+            `KpSheetRow(Icons.${l === '"Reply"' ? "AutoMirrored.Filled.Reply" : l === '"Forward"' ? "AutoMirrored.Filled.Send" : l === '"Copy"' ? "Filled.ContentCopy" : l === '"Edit"' ? "Filled.Edit" : l === '"Unsend"' ? "Filled.DeleteForever" : l === '"Delete for me"' ? "Filled.Delete" : "Filled.CheckCircle"}, ${l}`,
+          ),
+      ) &&
+      (
+        chat.match(
+          /if \(selectedIds\.isNotEmpty\(\)\) onToggleSelect\(m\) else onLongPress\(m\)/g,
+        ) || []
+      ).length === 3,
   );
   check(
     "r17-14: restoreChrome follows the theme (dark-blue keeps light icons)",
@@ -1487,7 +1501,7 @@ const convBetween = (db, a, b) =>
       chat.includes("MessageReactions") &&
       chat.includes("EmojiSheetDialog") &&
       chat.includes('"/api/messages/$mid/react"') &&
-      chat.includes('"👍", "❤️", "😂", "😮", "😢"') &&
+      chat.includes('"👍", "❤️", "😂", "😮", "😢", "🙏"') &&
       src.includes("/react"),
   );
   check(
