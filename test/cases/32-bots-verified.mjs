@@ -1743,7 +1743,9 @@ const convBetween = (db, a, b) =>
   );
   check(
     "r27: status viewer clock + clip PAUSE while the app is in the background",
-    statusKt.includes("if (showViewers || menuOpen || replyFocused || !Store.foreground) {") &&
+    statusKt.includes(
+      "if (showViewers || menuOpen || replyFocused || !Store.foreground || holding) {",
+    ) &&
       statusKt.includes("player?.setPaused(paused || !Store.foreground)") &&
       statusKt.includes("p?.setPaused(paused || bg)"),
   );
@@ -1755,7 +1757,7 @@ const convBetween = (db, a, b) =>
       statusKt.includes(
         "containerColor = Card,\n        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)",
       ) &&
-      statusKt.includes("paused = showViewers || menuOpen || replyFocused,") &&
+      statusKt.includes("paused = showViewers || menuOpen || replyFocused || holding,") &&
       /AlertDialog\(\n\s+onDismissRequest = \{ confirmDelete = false \},\n\s+containerColor = Card,/.test(
         statusKt,
       ),
@@ -2412,6 +2414,16 @@ const convBetween = (db, a, b) =>
       leaks.join(" "),
     );
   }
+  check(
+    "r30-7: press-and-hold pauses the status viewer (clock, bar, clip) until release; tap still steps",
+    kt("StatusScreens.kt").includes(
+      "onPress = {\n                                    holding = true\n                                    tryAwaitRelease()\n                                    holding = false",
+    ) &&
+      kt("StatusScreens.kt").includes("|| !Store.foreground || holding) {") &&
+      kt("StatusScreens.kt").includes(
+        "paused = showViewers || menuOpen || replyFocused || holding,",
+      ),
+  );
   const settings = readFileSync(
     "native-android/app/src/main/java/app/kuchupuchu/android/SettingsScreen.kt",
     "utf8",

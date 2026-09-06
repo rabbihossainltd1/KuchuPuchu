@@ -478,6 +478,8 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
     var viewersLoading by remember { mutableStateOf(false) }
     var fetched by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
+    // Owner round 30: finger held on the status = paused (clock, bar and clip).
+    var holding by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var videoReady by remember { mutableStateOf(false) }
     var videoProgress by remember { mutableStateOf(0f) }
@@ -579,7 +581,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                 // ticking: photos advanced every 5s and popBackStack() fired
                 // with nobody watching, so the user came back to a closed
                 // viewer several statuses further on.
-                if (showViewers || menuOpen || replyFocused || !Store.foreground) {
+                if (showViewers || menuOpen || replyFocused || !Store.foreground || holding) {
                     delay(100)
                     continue
                 }
@@ -589,7 +591,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
         } else {
             var elapsed = 0L
             while (elapsed < hold) {
-                if (showViewers || menuOpen || replyFocused || !Store.foreground) {
+                if (showViewers || menuOpen || replyFocused || !Store.foreground || holding) {
                     delay(100)
                     continue
                 }
@@ -746,7 +748,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                     // in lock-step instead of the video running on.
                     StatusVideoPlayer(
                         "${Api.BASE}/api/statuses/${s.optString("id")}/media",
-                        paused = showViewers || menuOpen || replyFocused,
+                        paused = showViewers || menuOpen || replyFocused || holding,
                         onReady = { videoReady = true },
                         onProgress = { p ->
                             videoProgress = p
@@ -904,7 +906,16 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                             }
                         }
                         .pointerInput("tapzone") {
-                            detectTapGestures { pos ->
+                            detectTapGestures(
+                                // Owner round 30: press-and-hold pauses the status
+                                // (and its progress bar) until the finger lifts;
+                                // a plain tap still steps back / forward.
+                                onPress = {
+                                    holding = true
+                                    tryAwaitRelease()
+                                    holding = false
+                                },
+                            ) { pos ->
                                 progress = 0f
                                 if (pos.x < size.width / 2f) {
                                     if (idx > 0) idx--
