@@ -23,10 +23,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.Contacts
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
@@ -34,8 +35,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -50,6 +49,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -346,39 +346,26 @@ fun NewContactScreen(nav: NavController, initialName: String = "", initialPhone:
             Text("New contact", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
         }
         Column(Modifier.padding(horizontal = 20.dp)) {
-            OutlinedTextField(
+            // Owner round 31: compact pills + one-word buttons (nothing wraps).
+            CompactSearchBar(
                 name,
                 { name = it },
-                label = { Text("Name") },
-                singleLine = true,
-                shape = RoundedCornerShape(14.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = ActionBlue,
-                    cursorColor = ActionBlue,
-                    focusedLabelColor = ActionBlue,
-                ),
-                modifier = Modifier.fillMaxWidth(),
+                placeholder = "Name",
+                icon = Icons.Filled.Person,
+                imeAction = ImeAction.Next,
             )
             Spacer(Modifier.height(10.dp))
-            OutlinedTextField(
+            CompactSearchBar(
                 phone,
                 { phone = it; match = null; checkedPhone = "" },
-                label = { Text("Phone number") },
-                placeholder = { Text("01712345678", color = Muted.copy(alpha = 0.45f)) },
-                singleLine = true,
-                shape = RoundedCornerShape(14.dp),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                isError = phone.isNotBlank() && e164 == null,
-                supportingText = {
-                    if (e164 != null) Text(e164, color = Muted, fontSize = 12.sp)
-                },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = ActionBlue,
-                    cursorColor = ActionBlue,
-                    focusedLabelColor = ActionBlue,
-                ),
-                modifier = Modifier.fillMaxWidth(),
+                placeholder = "Phone",
+                icon = Icons.Filled.Call,
+                imeAction = ImeAction.Done,
+                keyboardType = KeyboardType.Phone,
             )
+            if (e164 != null) {
+                Text(e164, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(start = 16.dp, top = 4.dp))
+            }
             if (error.isNotBlank()) {
                 Spacer(Modifier.height(6.dp))
                 Text(error, color = Red, fontSize = 12.5.sp)
@@ -390,18 +377,20 @@ fun NewContactScreen(nav: NavController, initialName: String = "", initialPhone:
                     enabled = e164 != null && !checking,
                     colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = ActionBlueInk),
                     shape = RoundedCornerShape(14.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                     modifier = Modifier.weight(1f),
                 ) {
                     if (checking) CircularProgressIndicator(color = ActionBlueInk, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
-                    else Text("Check on KuchuPuchu", fontWeight = FontWeight.SemiBold)
+                    else Text("Check", fontWeight = FontWeight.SemiBold, maxLines = 1)
                 }
                 Button(
                     onClick = { haptics.tap(); saveToPhone() },
                     enabled = e164 != null,
                     colors = ButtonDefaults.buttonColors(containerColor = Card, contentColor = Ink),
                     shape = RoundedCornerShape(14.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                     modifier = Modifier.weight(1f),
-                ) { Text("Save to phone", fontWeight = FontWeight.SemiBold) }
+                ) { Text("Save", fontWeight = FontWeight.SemiBold, maxLines = 1) }
             }
             Spacer(Modifier.height(18.dp))
             val m = match
