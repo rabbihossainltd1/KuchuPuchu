@@ -1883,6 +1883,32 @@ const convBetween = (db, a, b) =>
     reply.status === 201 && !reply.json.message.replyTo,
     `${reply.status} replyTo=${JSON.stringify(reply.json.message?.replyTo)}`,
   );
+
+  // Typing dots across a block: swallowed, never shown to the blocker.
+  const typ0 = await k.call("POST", `/api/conversations/${cid}/typing`, {}, b.token);
+  const pageBefore = await k.call("GET", `/api/conversations/${cid}/messages`, undefined, a.token);
+  check(
+    "r27: (control) B's typing ping reaches A while not blocked",
+    typ0.status === 200 && !!pageBefore.json.typingAt,
+    `typingAt=${JSON.stringify(pageBefore.json.typingAt)}`,
+  );
+  await k.call("POST", "/api/blocks", { userId: b.user.id }, a.token);
+  // clear the earlier ping so the check below sees only what happens after the block
+  k.db._db.prepare("DELETE FROM typing WHERE conv_id = ?").run(cid);
+  const typ1 = await k.call("POST", `/api/conversations/${cid}/typing`, {}, b.token);
+  const pageAfter = await k.call("GET", `/api/conversations/${cid}/messages`, undefined, a.token);
+  check(
+    "r27: after A blocks B, B's typing ping is swallowed (200) and A sees no typingAt",
+    typ1.status === 200 && !pageAfter.json.typingAt,
+    `typingAt=${JSON.stringify(pageAfter.json.typingAt)}`,
+  );
+  const typ2 = await k.call("POST", `/api/conversations/${cid}/typing`, {}, a.token);
+  const pageB = await k.call("GET", `/api/conversations/${cid}/messages`, undefined, b.token);
+  check(
+    "r27: the blocker's own typing is not shown to the blocked side either",
+    typ2.status === 200 && !pageB.json.typingAt,
+    `typingAt=${JSON.stringify(pageB.json.typingAt)}`,
+  );
 }
 
 console.log(lines.join("\n"));

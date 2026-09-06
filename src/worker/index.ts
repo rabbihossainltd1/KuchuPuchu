@@ -4876,6 +4876,25 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   if (typingMatch && method === "POST") {
     const convId = typingMatch[1]!;
     await requireMember(db, convId, uid);
+    // Round 27: a block silences the typing dots too. Messages and calls were
+    // already refused across a block, but this ping went through — the
+    // blocker's chat header still lit up "typing…" for the person they had
+    // blocked. Swallowed (200, no write, no broadcast) rather than 403: the
+    // client fires this on a keystroke timer and must not surface an error.
+    // One statement, scoped to this conversation's members.
+    const blockedHere = await one(
+      db,
+      `SELECT b.owner_id FROM blocks b
+        JOIN members m ON m.conv_id = ? AND m.user_id != ?
+       WHERE (b.owner_id = ? AND b.target_id = m.user_id)
+          OR (b.target_id = ? AND b.owner_id = m.user_id)
+       LIMIT 1`,
+      convId,
+      uid,
+      uid,
+      uid,
+    );
+    if (blockedHere) return json({ ok: true });
     const at = nowIso();
     await run(
       db,
