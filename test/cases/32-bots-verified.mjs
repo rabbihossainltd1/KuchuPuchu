@@ -2345,6 +2345,18 @@ const convBetween = (db, a, b) =>
       chat.includes('nav.navigate("newcontact?name=$n&phone=$p")') &&
       kpapp.includes('"newcontact?name={name}&phone={phone}"'),
   );
+  const calls = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/CallScreens.kt",
+    "utf8",
+  );
+  check(
+    "r30-3: rising-chevron swipe hint above Accept only (motion, no label); the drag path is untouched",
+    calls.includes("private fun SwipeUpChevrons(visible: Boolean)") &&
+      calls.includes("if (hint) SwipeUpChevrons(visible = dragUpPx == 0f)") &&
+      (calls.match(/hint = true,/g) || []).length === 1 &&
+      calls.includes("Icons.Filled.KeyboardArrowUp") &&
+      !calls.includes("Swipe up"),
+  );
   const settings = readFileSync(
     "native-android/app/src/main/java/app/kuchupuchu/android/SettingsScreen.kt",
     "utf8",

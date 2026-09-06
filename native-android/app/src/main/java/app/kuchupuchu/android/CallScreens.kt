@@ -17,6 +17,7 @@ import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.drag
@@ -244,7 +245,9 @@ fun IncomingCallScreen(call: CallUi) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 48.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically,
+                // Owner round 30: bottoms aligned — the Accept column carries
+                // the chevron lane above its circle.
+                verticalAlignment = Alignment.Bottom,
             ) {
                 // Owner round 25: Decline LEFT, Accept RIGHT — a plain tap no
                 // longer answers; each circle fires on an UPWARD swipe (the
@@ -262,6 +265,7 @@ fun IncomingCallScreen(call: CallUi) {
                         // answering — the contextual-permission rule.
                         gateMicCamera(video = call.kind == "VIDEO") { engine.answer() }
                     },
+                    hint = true,
                 ) {
                     Icon(
                         if (call.kind == "VIDEO") Icons.Filled.Videocam else Icons.Filled.Call,
@@ -310,6 +314,10 @@ fun IncomingCallScreen(call: CallUi) {
 fun SwipeCallCircle(
     color: Color,
     onSwipe: () -> Unit,
+    // Owner round 30: the Accept circle shows a rising-chevron hint above it
+    // (three chevrons that fade in low and travel up, one after another) —
+    // motion only, no instruction text.
+    hint: Boolean = false,
     icon: @Composable () -> Unit,
 ) {
     val haptics = rememberHaptics()
@@ -331,43 +339,79 @@ fun SwipeCallCircle(
     )
     val density = androidx.compose.ui.platform.LocalDensity.current
     val threshold = with(density) { 40.dp.toPx() }
-    Box(
-        Modifier
-            .offset {
-                val idleBob = if (dragUpPx == 0f) -(bob * 5.dp.toPx()) else 0f
-                androidx.compose.ui.unit.IntOffset(0, (-(settle) + idleBob).toInt())
-            }
-            .size(70.dp)
-            .shadow(7.dp, CircleShape)
-            .clip(CircleShape)
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        androidx.compose.ui.graphics.lerp(color, Color.White, 0.28f),
-                        color,
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        if (hint) SwipeUpChevrons(visible = dragUpPx == 0f)
+        Box(
+            Modifier
+                .offset {
+                    val idleBob = if (dragUpPx == 0f) -(bob * 5.dp.toPx()) else 0f
+                    androidx.compose.ui.unit.IntOffset(0, (-(settle) + idleBob).toInt())
+                }
+                .size(70.dp)
+                .shadow(7.dp, CircleShape)
+                .clip(CircleShape)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            androidx.compose.ui.graphics.lerp(color, Color.White, 0.28f),
+                            color,
+                        ),
                     ),
-                ),
-            )
-            .pointerInput(Unit) {
-                detectVerticalDragGestures(
-                    onDragStart = { dragUpPx = 0f },
-                    onVerticalDrag = { change, dy ->
-                        change.consume()
-                        dragUpPx = (dragUpPx - dy).coerceIn(0f, threshold * 1.6f)
-                    },
-                    onDragEnd = {
-                        if (dragUpPx >= threshold) {
-                            haptics.tap()
-                            onSwipe()
-                        }
-                        dragUpPx = 0f
-                    },
-                    onDragCancel = { dragUpPx = 0f },
                 )
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        icon()
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onDragStart = { dragUpPx = 0f },
+                        onVerticalDrag = { change, dy ->
+                            change.consume()
+                            dragUpPx = (dragUpPx - dy).coerceIn(0f, threshold * 1.6f)
+                        },
+                        onDragEnd = {
+                            if (dragUpPx >= threshold) {
+                                haptics.tap()
+                                onSwipe()
+                            }
+                            dragUpPx = 0f
+                        },
+                        onDragCancel = { dragUpPx = 0f },
+                    )
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            icon()
+        }
+    }
+}
+
+/**
+ * Owner round 30: the swipe-up affordance — a 44dp-tall lane above the Accept
+ * circle in which three chevrons rise in sequence (each fades in near the
+ * circle, climbs, and fades out at the top). Pauses while the finger is down
+ * so the ride-the-finger circle stays the only thing moving.
+ */
+@Composable
+private fun SwipeUpChevrons(visible: Boolean) {
+    val phase by rememberInfiniteTransition(label = "chevrons").animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1400, easing = LinearEasing), RepeatMode.Restart),
+        label = "chevronPhase",
+    )
+    Box(Modifier.height(44.dp).width(70.dp).alpha(if (visible) 1f else 0f), contentAlignment = Alignment.BottomCenter) {
+        repeat(3) { i ->
+            // Each chevron runs the same 0→1 climb, offset by a third of a cycle.
+            val t = ((phase + i / 3f) % 1f)
+            val a = (if (t < 0.25f) t / 0.25f else 1f - (t - 0.25f) / 0.75f).coerceIn(0f, 1f)
+            Icon(
+                Icons.Filled.KeyboardArrowUp,
+                null,
+                tint = Color.White,
+                modifier =
+                    Modifier
+                        .offset { androidx.compose.ui.unit.IntOffset(0, (-(t * 30.dp.toPx())).toInt()) }
+                        .size(26.dp)
+                        .alpha(a * 0.95f),
+            )
+        }
     }
 }
 
