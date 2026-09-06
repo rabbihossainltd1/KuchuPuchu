@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import android.view.WindowManager
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -249,14 +250,12 @@ fun IncomingCallScreen(call: CallUi) {
                 // circles bob gently upward so the gesture is discoverable).
                 SwipeCallCircle(
                     Red,
-                    "Swipe up to decline",
                     onSwipe = { if (engine.active?.incoming == true) engine.decline() else engine.hangup() },
                 ) {
                     Icon(Icons.Filled.CallEnd, "Decline", tint = Color.White, modifier = Modifier.size(30.dp))
                 }
                 SwipeCallCircle(
                     Green,
-                    "Swipe up to accept",
                     onSwipe = {
                         // Mic (and camera on a video call) asked at the moment of
                         // answering — the contextual-permission rule.
@@ -300,15 +299,15 @@ fun IncomingCallScreen(call: CallUi) {
 }
 
 /**
- * Owner round 25: the incoming Accept/Decline circles. A direct tap does
- * nothing — the action fires on an upward swipe of ~40dp (pocket-touch
- * safety). While idle the circle bobs up and back a few pixels on a slow
- * loop: the minimal affordance that says "swipe up".
+ * Owner round 25/26: the incoming Accept/Decline circles. A direct tap does
+ * nothing; an UPWARD swipe of ~40dp fires. Round 26: the circle now RIDES the
+ * finger while dragging (rises from its own position, springs back when
+ * released under the threshold) and there is no instruction label — the
+ * motion itself is the affordance (plus the gentle idle bob).
  */
 @Composable
 fun SwipeCallCircle(
     color: Color,
-    label: String,
     onSwipe: () -> Unit,
     icon: @Composable () -> Unit,
 ) {
@@ -322,46 +321,52 @@ fun SwipeCallCircle(
         ),
         label = "bob",
     )
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        val circleSize = 70.dp
-        val threshold = with(androidx.compose.ui.platform.LocalDensity.current) { 40.dp.toPx() }
-        Box(
-            Modifier
-                .offset { androidx.compose.ui.unit.IntOffset(0, -(bob * 5.dp.toPx()).toInt()) }
-                .size(circleSize)
-                .shadow(7.dp, CircleShape)
-                .clip(CircleShape)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            androidx.compose.ui.graphics.lerp(color, Color.White, 0.28f),
-                            color,
-                        ),
+    // Upward drag in px (positive number). Animates back to 0 on a short release.
+    var dragUpPx by remember { mutableStateOf(0f) }
+    val settle by animateFloatAsState(
+        targetValue = dragUpPx,
+        animationSpec = spring(stiffness = 900f, dampingRatio = 0.7f),
+        label = "settle",
+    )
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val threshold = with(density) { 40.dp.toPx() }
+    Box(
+        Modifier
+            .offset {
+                val idleBob = if (dragUpPx == 0f) -(bob * 5.dp.toPx()) else 0f
+                androidx.compose.ui.unit.IntOffset(0, (-(settle) + idleBob).toInt())
+            }
+            .size(70.dp)
+            .shadow(7.dp, CircleShape)
+            .clip(CircleShape)
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        androidx.compose.ui.graphics.lerp(color, Color.White, 0.28f),
+                        color,
                     ),
+                ),
+            )
+            .pointerInput(Unit) {
+                detectVerticalDragGestures(
+                    onDragStart = { dragUpPx = 0f },
+                    onVerticalDrag = { change, dy ->
+                        change.consume()
+                        dragUpPx = (dragUpPx - dy).coerceIn(0f, threshold * 1.6f)
+                    },
+                    onDragEnd = {
+                        if (dragUpPx >= threshold) {
+                            haptics.tap()
+                            onSwipe()
+                        }
+                        dragUpPx = 0f
+                    },
+                    onDragCancel = { dragUpPx = 0f },
                 )
-                .pointerInput(Unit) {
-                    // Swipe UP ~40dp to fire; a plain tap does nothing.
-                    var up = 0f
-                    detectVerticalDragGestures(
-                        onDragStart = { up = 0f },
-                        onVerticalDrag = { change, dy ->
-                            change.consume()
-                            up += dy
-                        },
-                        onDragEnd = {
-                            if (up <= -threshold) {
-                                haptics.tap()
-                                onSwipe()
-                            }
-                        },
-                    )
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            icon()
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(label, color = Color(0x99FFFFFF), fontSize = 11.5.sp)
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        icon()
     }
 }
 

@@ -966,6 +966,15 @@ fun PhoneField(
         OutlinedTextField(
             phone,
             { raw -> onPhone(raw.filter { it.isDigit() }.take(maxDigits)) },
+            // Owner round 26: themed outline — the M3 default painted the
+            // cream/gold border ("phone number input border colour ekhono
+            // cream"). ActionBlue is gold on light-cream, blue on dark-blue.
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = ActionBlue,
+                unfocusedBorderColor = Muted,
+                cursorColor = ActionBlue,
+                focusedLabelColor = ActionBlue,
+            ),
             label = { Text("Phone number") },
             placeholder = {
                 Text(

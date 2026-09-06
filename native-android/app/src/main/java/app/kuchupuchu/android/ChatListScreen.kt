@@ -1002,7 +1002,30 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box {
-            KpAvatar(name, avatarUrl, 44.dp, avatarRef = avatarRef) // Owner round 25: choto
+            // Owner round 26: a contact with a live status wears the status
+            // ring right in the chat list ("user status share korleo chat
+            // list a profile border ashe na"). Dark blue while unseen, gray
+            // once everything of theirs has been viewed.
+            val statusGroup =
+                if (!isGroup) {
+                    ScreenStore.statuses.firstOrNull {
+                        !it.optBoolean("mine") && it.optJSONObject("user")?.optString("id") == other?.optString("id")
+                    }
+                } else {
+                    null
+                }
+            if (statusGroup != null) {
+                StatusRingAvatar(
+                    name,
+                    avatarUrl,
+                    48.dp,
+                    segments = statusGroup.arr("statuses").objects().size,
+                    seen = statusGroup.optBoolean("allViewed"),
+                    avatarRef = avatarRef,
+                )
+            } else {
+                KpAvatar(name, avatarUrl, 44.dp, avatarRef = avatarRef) // Owner round 25: choto
+            }
             if (online) {
                 Box(
                     Modifier

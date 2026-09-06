@@ -833,12 +833,12 @@ fun SoundTypePickerScreen(onClose: () -> Unit, onPick: (String) -> Unit) {
         TypeRow(
             Icons.Filled.NotificationsActive,
             "Notification ringtone",
-            SoundPrefs.notifLabel(ctx) + " · plays for messages",
+            SoundPrefs.notifLabel(ctx), // Owner round 26: no plays-for text
         ) { onPick("notif") }
         TypeRow(
             Icons.Filled.Call,
             "Call ringtone",
-            SoundPrefs.currentLabel(ctx) + " · plays for calls",
+            SoundPrefs.currentLabel(ctx),
         ) { onPick("call") }
     }
 }

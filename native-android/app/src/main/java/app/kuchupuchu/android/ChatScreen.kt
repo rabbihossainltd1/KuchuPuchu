@@ -563,7 +563,14 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
         KpCrash.mark("chat-paint:${msgs.size}")
         refreshMeta()
-        refreshMessages(forceScroll = true, markRead = true)
+        // Owner round 26 (the STILL-broken auto-jump): this opening refresh
+        // used forceScroll = true, which bypasses the no-yank guards and
+        // yanks to the bottom the moment the first fetch lands — right when
+        // the user is already scrolling up, and again on RETURN from the
+        // video player (this effect re-runs on every fresh composition).
+        // Landing on the newest is didInitialScroll's job; the nearBottom
+        // rule handles everything after.
+        refreshMessages(markRead = true)
         KpCrash.mark("chat-page:${msgs.size}")
         runCatching { Outbox.flushNow(force = true) }
     }
@@ -4171,6 +4178,9 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendin
                     },
                     fontSize = 11.sp,
                     color = if (mine) Color(0x99FFFFFF) else Muted,
+                    // Owner round 26: keep the sending/duration line clear of
+                    // the bottom-right stamp ("voice sending er somoy overlap").
+                    modifier = Modifier.padding(end = if (mine) 50.dp else 34.dp),
                 )
             }
         }
@@ -4480,18 +4490,8 @@ private fun ChatSearchSheet(
                     inner()
                 },
             )
-            if (query.isNotEmpty()) {
-                Icon(
-                    Icons.Filled.Close,
-                    "Clear",
-                    tint = Muted,
-                    modifier = Modifier
-                        .size(18.dp)
-                        .clip(CircleShape)
-                        .clickable { onQuery("") }
-                        .padding(2.dp),
-                )
-            }
+            // Owner round 26: the extra in-bar clear cross is gone — the X on
+            // the right closes the whole search, backspace clears the text.
             Spacer(Modifier.width(6.dp))
             // Owner round 17: the close affordance is a clear X.
             Icon(
@@ -4669,7 +4669,8 @@ private fun CallLogBubble(m: JSONObject, mine: Boolean, pendingEcho: Boolean) {
     ) {
         Row(
             Modifier
-                .widthIn(max = 260.dp)
+                // Owner round 26: compact call chip (was a wide 260dp bubble).
+                .widthIn(max = 205.dp)
                 .clip(RoundedCornerShape(16.dp))
                 // Owner round 23: the call bubble kept the amber gradient in
                 // dark-blue ("call massage bubble ekhono cream colour") — my
@@ -4679,12 +4680,12 @@ private fun CallLogBubble(m: JSONObject, mine: Boolean, pendingEcho: Boolean) {
                     else if (mine) goldFill()
                     else Brush.linearGradient(listOf(Card, Card)),
                 )
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
                 Modifier
-                    .size(36.dp)
+                    .size(30.dp)
                     .clip(CircleShape)
                     .background(
                         if (mine) Color(0x33FFFFFF)
@@ -4697,13 +4698,13 @@ private fun CallLogBubble(m: JSONObject, mine: Boolean, pendingEcho: Boolean) {
                     if (missed || declined) Icons.Filled.CallMissed else Icons.Filled.Call,
                     contentDescription = title,
                     tint = if (missed) Red else if (mine) Ink else if (KpThemeMode.darkBlue) ActionBlueDeep else GoldDeep,
-                    modifier = Modifier.size(20.dp),
+                    modifier = Modifier.size(17.dp),
                 )
             }
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
-                Text(title, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, color = Ink)
-                Text(sub, fontSize = 12.sp, color = if (mine) Color(0xCCFFFFFF) else Muted)
+                Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ink, maxLines = 1)
+                Text(sub, fontSize = 11.sp, color = if (mine) Color(0xCCFFFFFF) else Muted, maxLines = 1)
                 // Owner round 25: the time sits at the bubble's bottom-right,
                 // like every other bubble's stamp.
                 Text(

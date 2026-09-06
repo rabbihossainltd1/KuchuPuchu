@@ -1593,10 +1593,11 @@ const convBetween = (db, a, b) =>
       ),
   );
   check(
-    "r25: incoming call = blurred photo backdrop + SWIPE-UP accept/decline (bob hint, no tap)",
+    "r25/26: incoming call = blurred photo backdrop + swipe circles that RIDE the finger (no labels)",
     callscreen.includes("SwipeCallCircle(") &&
       callscreen.includes("detectVerticalDragGestures") &&
-      callscreen.includes("Swipe up to accept") &&
+      callscreen.includes("dragUpPx") &&
+      !callscreen.includes("Swipe up to accept") &&
       callscreen.includes("BlurredAvatarBackdrop(call.otherAvatar.ifBlank { null })"),
   );
   check(
@@ -1662,6 +1663,52 @@ const convBetween = (db, a, b) =>
     "r25: chat avatars smaller everywhere (header 36, list 44, profile 64, calls 40, status 48)",
     chat.includes("KpAvatar(title, avatarUrl, 36.dp") &&
       chatlist.includes("KpAvatar(name, avatarUrl, 44.dp"),
+  );
+  check(
+    "r26: opening refresh NEVER force-scrolls (the still-broken auto-jump root cause)",
+    !chat.includes("refreshMessages(forceScroll = true, markRead = true)") &&
+      chat.includes("refreshMessages(markRead = true)"),
+  );
+  check(
+    "r26: friend-profile search opens INSTANTLY via the conv cache (no network wait)",
+    readFileSync(
+      "native-android/app/src/main/java/app/kuchupuchu/android/ProfileScreen.kt",
+      "utf8",
+    ).includes("ScreenStore.convIdForUser[userId]"),
+  );
+  check(
+    "r26: chat-list rows wear the status ring (dark blue unseen / gray seen)",
+    chatlist.includes("StatusRingAvatar(") &&
+      chatlist.includes('it.optJSONObject("user")?.optString("id") == other?.optString("id")'),
+  );
+  check(
+    "r26: phone input border themed; profile avatar big again; no plays-for text; compact call chip",
+    readFileSync(
+      "native-android/app/src/main/java/app/kuchupuchu/android/LoginScreen.kt",
+      "utf8",
+    ).includes("unfocusedBorderColor = Muted") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/ProfileScreen.kt",
+        "utf8",
+      ).includes("88.dp, // Owner round 26") &&
+      !settings.includes("plays for messages") &&
+      chat.includes(".widthIn(max = 205.dp)"),
+  );
+  check(
+    "r26: voice sending line clear of the stamp; no in-bar clear cross in chat search",
+    chat.includes("modifier = Modifier.padding(end = if (mine) 50.dp else 34.dp),") &&
+      !chat.includes('"Clear"'),
+  );
+  check(
+    "r26: status reactions FLY up (Animatable, repeatable, nothing selected)",
+    readFileSync(
+      "native-android/app/src/main/java/app/kuchupuchu/android/StatusScreens.kt",
+      "utf8",
+    ).includes("flight.animateTo") &&
+      !readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/StatusScreens.kt",
+        "utf8",
+      ).includes('mutableStateOf(s.optString("myReaction"))'),
   );
   check(
     "r24: phone change uses the login country picker (flag chip + searchable sheet + buildE164)",

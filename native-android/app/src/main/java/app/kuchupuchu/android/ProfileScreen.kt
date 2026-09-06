@@ -167,7 +167,7 @@ fun ProfileScreen(nav: NavController, userId: String) {
                 KpAvatar(
                     u.optText("displayName").ifBlank { "?" },
                     shownAvatar,
-                    64.dp, // Owner round 25: choto
+                    88.dp, // Owner round 26: profile e ager motoi boro
                     avatarRef = avatarRef,
                 )
                 // Tapping the photo opens it full-screen (zoom + save) — the resolved
@@ -240,6 +240,16 @@ fun ProfileScreen(nav: NavController, userId: String) {
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                 ProfileHeaderCallBtn(onClick = {
                     haptics.tap()
+                    // Owner round 26 (bug): this button used to WAIT on a
+                    // network create-conversation round trip before navigating
+                    // — that was the "friend profile theke search a jete late".
+                    // Cache-first: an existing chat opens the SAME frame.
+                    val cached = ScreenStore.convIdForUser[userId]
+                    if (cached != null) {
+                        ScreenStore.pendingChatSearch = cached
+                        nav.navigate("chat/$cached")
+                        return@ProfileHeaderCallBtn
+                    }
                     scope.launch {
                         runCatching {
                             val data = withContext(Dispatchers.IO) {
@@ -247,6 +257,7 @@ fun ProfileScreen(nav: NavController, userId: String) {
                             }
                             val cid = data.optJSONObject("conversation")?.optString("id").orEmpty()
                             if (cid.isNotBlank()) {
+                                ScreenStore.convIdForUser[userId] = cid
                                 ScreenStore.pendingChatSearch = cid
                                 nav.navigate("chat/$cid")
                             }

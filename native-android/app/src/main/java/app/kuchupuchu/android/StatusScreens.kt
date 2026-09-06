@@ -983,10 +983,19 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                         )
                     }
                 } else {
-                    // Owner round 25: quick reaction emojis above the reply
-                    // bar — a tap records the reaction for the status owner's
-                    // viewer list (it does NOT message their inbox).
-                    var reacted by remember(s.optString("id")) { mutableStateOf(s.optString("myReaction")) }
+                    // Owner round 25/26: quick reaction emojis above the reply
+                    // bar. Owner round 26: tapping an emoji makes it FLY UP and
+                    // fade (nothing stays selected) — and every tap flies
+                    // again. Each tap still records the reaction for the
+                    // status owner's viewer list (never their inbox).
+                    var flyingEmoji by remember(s.optString("id")) { mutableStateOf("") }
+                    var flightNo by remember(s.optString("id")) { mutableStateOf(0) }
+                    val flight = remember(s.optString("id")) { androidx.compose.animation.core.Animatable(1f) }
+                    LaunchedEffect(flightNo) {
+                        if (flightNo == 0) return@LaunchedEffect
+                        flight.snapTo(0f)
+                        flight.animateTo(1f, tween(650, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+                    }
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -995,15 +1004,24 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                         horizontalArrangement = Arrangement.Center,
                     ) {
                         listOf("❤️", "😂", "😮", "😢", "🙏", "🔥", "👍").forEach { e ->
+                            val isFlying = flyingEmoji == e && flight.value < 1f
                             Text(
                                 e,
-                                fontSize = if (reacted == e) 26.sp else 21.sp,
+                                fontSize = 21.sp,
                                 modifier = Modifier
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    .graphicsLayer {
+                                        if (isFlying) {
+                                            translationY = -90.dp.toPx() * flight.value
+                                            alpha = 1f - flight.value
+                                            scaleX = 1f + 0.35f * flight.value
+                                            scaleY = 1f + 0.35f * flight.value
+                                        }
+                                    }
                                     .clip(CircleShape)
-                                    .background(if (reacted == e) Color(0x33FFFFFF) else Color.Transparent)
                                     .clickable {
-                                        reacted = e
+                                        flyingEmoji = e
+                                        flightNo++
                                         scope.launch {
                                             runCatching {
                                                 withContext(Dispatchers.IO) {
