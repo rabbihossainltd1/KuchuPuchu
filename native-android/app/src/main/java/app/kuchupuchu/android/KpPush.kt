@@ -322,6 +322,12 @@ class KpPushService : FirebaseMessagingService() {
             // the engine's poll — just nudge it so it doesn't wait a tick.
             if (Store.foreground) {
                 CallEngine.instance?.kickPoll(callId)
+                // Round 24: a kick inside the server's 1.6s anti-phantom
+                // window sees nothing; re-kick once after the gate so the
+                // fullscreen ring never depends on the poll timer.
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    CallEngine.instance?.kickPoll(callId)
+                }, 1_700)
                 return@Thread
             }
             // Background (process alive, engine not in front): post a full-screen

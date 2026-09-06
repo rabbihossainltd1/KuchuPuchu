@@ -499,12 +499,23 @@ fun ChatScreen(nav: NavController, convId: String) {
                     }
                 }
                 val total = msgs.size + pending.size
-                // Only scroll when it matters: initial load, explicit send,
-                // or a NEW message landed while we're already near the bottom.
+                // Only scroll when it matters: explicit send, or a NEW
+                // message landed while we're already near the bottom.
+                // Round 24: an EMPTY layout (just recomposed — e.g. returning
+                // from the video player) used to default nearBottom to TRUE,
+                // so any message that arrived during playback yanked the list
+                // to the bottom ("play seshe back korle last message e chole
+                // jai"). Empty layout now means "unknown, do NOT scroll". The
+                // initial landing is owned by didInitialScroll below.
                 val nearBottom = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index?.let {
                     it >= total - 2
-                } ?: true
-                val newMessage = newTop.isNotBlank() && newTop != prevTop
+                } ?: false
+                // Round 24: the FIRST fetch of a session had prevTop == "",
+                // which made "newMessage" true for a plain load — scrolling
+                // right after entering yanked the user to the bottom
+                // ("first time scroll korle last message e niye jai").
+                // A real new message needs a known previous top.
+                val newMessage = prevTop.isNotBlank() && newTop.isNotBlank() && newTop != prevTop
                 if (total > 0 && (forceScroll || (newMessage && nearBottom))) {
                     listState.animateScrollToItem(total - 1)
                 }
@@ -564,8 +575,12 @@ fun ChatScreen(nav: NavController, convId: String) {
     var didInitialScroll by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(msgs.size, pending.size) {
         if (!didInitialScroll && msgs.isNotEmpty()) {
-            listState.scrollToItem(msgs.size + pending.size - 1)
             didInitialScroll = true
+            // Round 24: never fight an in-progress user scroll — if the list
+            // filled while the user was already dragging it, leave it alone.
+            if (!listState.isScrollInProgress) {
+                listState.scrollToItem(msgs.size + pending.size - 1)
+            }
         }
     }
 

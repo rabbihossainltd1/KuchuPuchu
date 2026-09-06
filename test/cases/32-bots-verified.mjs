@@ -1537,8 +1537,7 @@ const convBetween = (db, a, b) =>
   check(
     "r23: in-app incoming ring is INSTANT — kickPoll fires for NEW calls (active==null), not just the live one",
     engine23.includes("if (active?.id == callId || active == null)") &&
-      engine23.includes("withTimeout(4_500)") &&
-      engine23.includes("Store.foreground -> 2000L"),
+      engine23.includes("withTimeout(4_500)"),
   );
   check(
     "r23: call bubble matches the theme — no amber mine-bubble in dark-blue, incoming icon circle ActionBlue-tinted",
@@ -1564,6 +1563,41 @@ const convBetween = (db, a, b) =>
   check(
     "r23: mobile-data networking — faster connect failover (10s) + worker call relay 1.8s->0.7s",
     api23.includes(".connectTimeout(10, TimeUnit.SECONDS)") && src.includes("setTimeout(r, 700)"),
+  );
+  check(
+    "r24: caller never blocked by a zombie call — startCall clears a 2min+ medialess stuck active",
+    engine23.includes("System.currentTimeMillis() - activeSince > 2 * 60_000L") &&
+      engine23.includes("if (current?.id != ui.id) activeSince = System.currentTimeMillis()"),
+  );
+  check(
+    "r24: in-app ring is gate-proof — re-kick after the 1.6s anti-phantom window (WS + FCM paths)",
+    engine23.includes("delay(1_200); pokeTick()") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/KpPush.kt",
+        "utf8",
+      ).includes("postDelayed({") &&
+      engine23.includes("Store.foreground -> 1500L"),
+  );
+  check(
+    "r24: no scroll yank — empty layout is NOT near-bottom and the first load is not a new message",
+    chat.includes("} ?: false") &&
+      chat.includes("prevTop.isNotBlank() && newTop.isNotBlank() && newTop != prevTop") &&
+      chat.includes("if (!listState.isScrollInProgress)"),
+  );
+  check(
+    "r24: stale ACTIVE calls are reaped server-side when the signalling room is empty",
+    src.includes("call-signal/live") &&
+      src.includes("status = 'ACTIVE' AND COALESCE(started_at, created_at) < ?") &&
+      readFileSync("src/worker/durable-objects/CallSignal.ts", "utf8").includes(
+        'url.pathname === "/live"',
+      ),
+  );
+  check(
+    "r24: phone change uses the login country picker (flag chip + searchable sheet + buildE164)",
+    settings.includes("CountryPickerSheet(") &&
+      settings.includes("PhoneField(") &&
+      settings.includes("buildE164(country, value)") &&
+      !settings.includes('Text("New number (e.g. +8801712345678)")'),
   );
 }
 

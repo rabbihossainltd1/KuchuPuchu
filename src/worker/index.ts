@@ -2653,6 +2653,47 @@ async function reapStaleCalls(env: Env, db: D1Database, ctx: ExecutionContext): 
     "SELECT id, caller_id, callee_id, kind FROM calls WHERE status = 'RINGING' AND created_at < ?",
     cutoff,
   );
+  // Round 24: a call that went ACTIVE and then had BOTH processes frozen or
+  // killed stayed ACTIVE forever — the row blocked every future call between
+  // the pair (LINE_BUSY on create) and the client restored it as a ghost
+  // "in call" at every open. An ACTIVE call older than 3 minutes whose
+  // signalling room has no live, heartbeating participant is over: end it.
+  const activeCutoff = new Date(Date.now() - 3 * 60_000).toISOString();
+  const maybeDead = await all<{ id: string; caller_id: string; callee_id: string; kind: string }>(
+    db,
+    "SELECT id, caller_id, callee_id, kind FROM calls WHERE status = 'ACTIVE' AND COALESCE(started_at, created_at) < ?",
+    activeCutoff,
+  );
+  for (const row of maybeDead) {
+    let live = 1; // conservative default: if the DO can't be asked, keep the call
+    try {
+      if (!env.CALL_SIGNAL) continue;
+      const stub = env.CALL_SIGNAL.get(env.CALL_SIGNAL.idFromName(row.id));
+      const res = await stub.fetch("https://call-signal/live");
+      const body = (await res.json()) as { live?: number };
+      live = body.live ?? 1;
+    } catch {
+      /* keep the call — never end a possibly-live call on an internal error */
+    }
+    if (live > 0) continue;
+    const changed = await run(
+      db,
+      "UPDATE calls SET status = 'ENDED', ended_at = ? WHERE id = ? AND status = 'ACTIVE'",
+      nowIso(),
+      row.id,
+    );
+    if (changed > 0) {
+      await logCallEvent(db, row.caller_id, row.callee_id, row.kind, "ENDED");
+      // Both sides hear it instantly; a frozen phone clears on its next poll.
+      ctx.waitUntil(
+        broadcastCallEvent(env, row.id, {
+          type: "state",
+          callId: row.id,
+          status: "ENDED",
+        }),
+      );
+    }
+  }
   let reaped = 0;
   for (const row of stale) {
     // Conditional UPDATE + row count: this endpoint is polled by every client,

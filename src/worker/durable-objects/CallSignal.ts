@@ -69,6 +69,19 @@ export class CallSignal {
       return Response.json({ ok: true, sent });
     }
 
+    // Internal: how many participants are CURRENTLY connected and heartbeating.
+    // reapStaleCalls() asks this before declaring an ACTIVE call dead — a
+    // call whose signalling room is empty for minutes is over, no matter what
+    // the row says (both processes frozen/killed mid-call).
+    if (url.pathname === "/live") {
+      const now = Date.now();
+      let live = 0;
+      for (const ws of this.ctx.getWebSockets()) {
+        if ((this.lastSeen.get(ws) ?? 0) >= now - STALE_MS) live++;
+      }
+      return Response.json({ live });
+    }
+
     // Participant upgrade. The worker route has ALREADY authenticated the
     // token and verified the socket's user is the caller or the callee.
     if (url.pathname === "/connect") {

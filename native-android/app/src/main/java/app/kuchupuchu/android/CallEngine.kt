@@ -78,6 +78,9 @@ class CallEngine(private val app: Application) {
     var minimized by mutableStateOf(false)
         private set
 
+    /** When `active` last CHANGED identity — zombie detection for startCall. */
+    private var activeSince = 0L
+
     fun minimizeCall() { minimized = true }
     fun restoreCallUi() { minimized = false }
 
@@ -314,7 +317,15 @@ class CallEngine(private val app: Application) {
                 val cid = ev.optString("callId")
                 val mine = active?.id
                 when {
-                    t == "call" && mine == null && cid.isNotBlank() -> pokeTick()
+                    t == "call" && mine == null && cid.isNotBlank() -> {
+                        pokeTick()
+                        // Round 24: the server hides a RINGING call from the
+                        // callee for its first 1.6s (anti-phantom gate). A
+                        // tick inside that window sees NOTHING — one more tick
+                        // after the window so the ring never waits for the
+                        // poll timer.
+                        scope.launch { delay(1_200); pokeTick() }
+                    }
                     cid.isNotBlank() && cid == mine -> pokeTick()
                 }
             }
@@ -346,12 +357,11 @@ class CallEngine(private val app: Application) {
                                 // low enough that a dropped frame is bounded.
                                 wsId != null && KpSocket.callLive(wsId) -> 5_000L
                                 active != null -> 500L
-                                // Owner round 23: with kickPoll + the live
-                                // socket both able to raise a ring instantly,
-                                // the idle foreground net runs at 2s instead of
-                                // 1.5s — a third less call-poll chatter on
-                                // mobile data, same worst-case ring latency.
-                                Store.foreground -> 2000L
+                                // Round 24: back to 1.5s — the r23 2s cadence
+                                // added up to half a second of ring latency;
+                                // calls must feel instant, data savings come
+                                // from the WS path instead.
+                                Store.foreground -> 1500L
                                 else -> 4000L
                             },
                         )
@@ -561,6 +571,7 @@ class CallEngine(private val app: Application) {
                         // transition from Connecting to the running timer.
                         current?.connecting == true,
             )
+        if (current?.id != ui.id) activeSince = System.currentTimeMillis()
         if (current?.id?.startsWith("pending") == true) {
             active = ui.copy(otherName = current.otherName, otherAvatar = current.otherAvatar)
         } else {
@@ -634,7 +645,18 @@ class CallEngine(private val app: Application) {
     }
 
     fun startCall(userId: String, kind: String, name: String, avatar: String = "") {
-        if (active != null) return
+        if (active != null) {
+            // Owner round 24: a call that died server-side while this process
+            // was frozen left `active` set forever — every NEW call then hit
+            // this return and the caller's screen never came up ("je user call
+            // dei se call screen dekhte pai na"). A stuck call with no media
+            // for 2+ minutes is a zombie: clear it and take the new call.
+            if (!hasRemote && System.currentTimeMillis() - activeSince > 2 * 60_000L) {
+                hangupLocal()
+            } else {
+                return
+            }
+        }
         minimized = false
         left.set(false)
         hasRemote = false
@@ -649,6 +671,7 @@ class CallEngine(private val app: Application) {
         audioRoute = start
         speaker = start == AudioRoute.SPEAKER
         ensureFactory(app)
+        activeSince = System.currentTimeMillis()
         active = CallUi("pending", kind, "RINGING", false, name, userId, otherAvatar = avatar)
         CallService.start(app, if (kind == "VIDEO") "Video calling $name" else "Calling $name")
         scope.launch {

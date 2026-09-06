@@ -51,6 +51,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -1033,17 +1034,31 @@ fun EditAboutScreen(nav: NavController) {
 fun EditPhoneScreen(nav: NavController) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    // Round 24: exactly like the login screen — pick the country (flag +
+    // dial code chip), type only the national number.
+    var country by remember { mutableStateOf(DEFAULT_COUNTRY) }
+    var showCountries by remember { mutableStateOf(false) }
     var value by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf("") }
+    if (showCountries) {
+        CountryPickerSheet(
+            current = country,
+            onPick = {
+                country = it
+                showCountries = false
+            },
+            onDismiss = { showCountries = false },
+        )
+    }
     EditFieldScaffold("Phone number", "The new SIM must be in this phone", nav) {
-        OutlinedTextField(
-            value = value,
-            onValueChange = { value = it; err = "" },
-            label = { Text("New number (e.g. +8801712345678)") },
-            singleLine = true,
-            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = ActionBlue, cursorColor = ActionBlue, focusedLabelColor = ActionBlue),
-            modifier = Modifier.fillMaxWidth(),
+        PhoneField(
+            phone = value,
+            onPhone = { value = it; err = "" },
+            country = country,
+            onPickCountry = { showCountries = true },
+            imeAction = ImeAction.Done,
+            onDone = {},
         )
         if (err.isNotBlank()) Text(err, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
         Text(
@@ -1054,9 +1069,14 @@ fun EditPhoneScreen(nav: NavController) {
             scope.launch {
                 busy = true
                 try {
-                    val e164 = PhoneVerifier.normalize(value)
+                    val e164 = buildE164(country, value)
                     if (e164 == null) {
-                        err = "Enter a valid number, e.g. 01712345678."
+                        err =
+                            if (country.iso == "BD") {
+                                "Enter a valid Bangladeshi mobile number, e.g. 1792929202."
+                            } else {
+                                "Enter a valid phone number."
+                            }
                     } else {
                         val sim = withContext(Dispatchers.IO) { PhoneVerifier.verify(ctx, e164).wire() }
                         val updated = withContext(Dispatchers.IO) {

@@ -915,7 +915,7 @@ private fun AuthHeader(
  * only, capped at E.164 length.
  */
 @Composable
-private fun PhoneField(
+fun PhoneField(
     phone: String,
     onPhone: (String) -> Unit,
     country: KpCountry,
@@ -984,7 +984,7 @@ private fun PhoneField(
 /** Country picker sheet: searchable A→Z list with flags, names and codes. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CountryPickerSheet(
+fun CountryPickerSheet(
     current: KpCountry,
     onPick: (KpCountry) -> Unit,
     onDismiss: () -> Unit,
