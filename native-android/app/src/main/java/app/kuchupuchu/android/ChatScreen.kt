@@ -623,14 +623,19 @@ fun ChatScreen(nav: NavController, convId: String) {
                         // trip. The marker-gated reconcile below confirms order
                         // + advances the marker; if the fast-paint ever guessed
                         // wrong (a delete/our own echo racing in), the GET
-                        // self-corrects. The worker skips the sender, so this
-                        // is always SOMEONE ELSE's message (the recipient's own
-                        // optimistic bubble lives in `pending`).
+                        // self-corrects. NOTE: the room broadcast reaches EVERY
+                        // socket in the chat — our own included — so our own
+                        // sends (and our reactions/edits) echo back here too.
                         ev.optJSONObject("message")?.let { liveMsg ->
-                            // Owner round 22: the in-chat receive sound (his
-                            // pack) on every live bubble that lands.
-                            runCatching { KpSounds.receive(ctx) }
+                            // Owner round 22/28: the in-chat receive sound (his
+                            // pack) only for a bubble SOMEONE ELSE sent. The
+                            // echo of our own send used to play it on every
+                            // message we typed ("message send korlei receive
+                            // sound"); the send/sent tones already cover ours.
+                            val fromOther = liveMsg.optString("senderId").let { it.isNotBlank() && it != Store.myId() }
                             val liveId = liveMsg.optString("id")
+                            val fresh = msgs.none { it.optString("id") == liveId }
+                            if (fromOther && fresh) runCatching { KpSounds.receive(ctx) }
                             val liveCid = liveMsg.optString("clientId")
                             val idxExisting = msgs.indexOfFirst { it.optString("id") == liveId }
                             when {

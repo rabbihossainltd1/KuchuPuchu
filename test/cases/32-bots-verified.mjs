@@ -1765,6 +1765,19 @@ const convBetween = (db, a, b) =>
       ).includes('header("If-None-Match", etag)'),
   );
   check(
+    "r28-3: the in-chat receive tone plays only for a NEW bubble from someone else (own-send echo was ringing it)",
+    readFileSync(
+      "native-android/app/src/main/java/app/kuchupuchu/android/ChatScreen.kt",
+      "utf8",
+    ).includes("if (fromOther && fresh) runCatching { KpSounds.receive(ctx) }") &&
+      (
+        readFileSync(
+          "native-android/app/src/main/java/app/kuchupuchu/android/ChatScreen.kt",
+          "utf8",
+        ).match(/KpSounds\.receive\(/g) || []
+      ).length === 1,
+  );
+  check(
     "r27: status composer uploads with the real mime + a proper name (readDocument = (mime, bytes))",
     readFileSync(
       "native-android/app/src/main/java/app/kuchupuchu/android/StatusPhotoScreen.kt",
