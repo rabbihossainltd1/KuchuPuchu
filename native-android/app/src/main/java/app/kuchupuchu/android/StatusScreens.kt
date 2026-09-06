@@ -948,17 +948,25 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                     }
                 } else {
                     // Owner round 25/26: quick reaction emojis above the reply
-                    // bar. Owner round 26: tapping an emoji makes it FLY UP and
-                    // fade (nothing stays selected) — and every tap flies
-                    // again. Each tap still records the reaction for the
-                    // status owner's viewer list (never their inbox).
+                    // bar. Owner round 30: the tapped emoji STAYS in its place
+                    // and pulses (with a haptic) while four copies burst
+                    // upward and fade — and every tap bursts again. Each tap
+                    // still records the reaction for the status owner's viewer
+                    // list (never their inbox).
+                    val reactHaptics = rememberHaptics()
                     var flyingEmoji by remember(s.optString("id")) { mutableStateOf("") }
                     var flightNo by remember(s.optString("id")) { mutableStateOf(0) }
                     val flight = remember(s.optString("id")) { androidx.compose.animation.core.Animatable(1f) }
+                    val pulse = remember(s.optString("id")) { androidx.compose.animation.core.Animatable(1f) }
                     LaunchedEffect(flightNo) {
                         if (flightNo == 0) return@LaunchedEffect
                         flight.snapTo(0f)
-                        flight.animateTo(1f, tween(650, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+                        launch {
+                            pulse.snapTo(1f)
+                            pulse.animateTo(1.45f, tween(130, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+                            pulse.animateTo(1f, tween(220, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+                        }
+                        flight.animateTo(1f, tween(800, easing = androidx.compose.animation.core.FastOutSlowInEasing))
                     }
                     Row(
                         Modifier
@@ -968,34 +976,60 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                         horizontalArrangement = Arrangement.Center,
                     ) {
                         listOf("❤️", "😂", "😮", "😢", "🙏", "🔥", "👍").forEach { e ->
-                            val isFlying = flyingEmoji == e && flight.value < 1f
-                            Text(
-                                e,
-                                fontSize = 21.sp,
-                                modifier = Modifier
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                                    .graphicsLayer {
-                                        if (isFlying) {
-                                            translationY = -90.dp.toPx() * flight.value
-                                            alpha = 1f - flight.value
-                                            scaleX = 1f + 0.35f * flight.value
-                                            scaleY = 1f + 0.35f * flight.value
+                            val isActive = flyingEmoji == e && flight.value < 1f
+                            Box(Modifier.padding(horizontal = 6.dp, vertical = 2.dp), contentAlignment = Alignment.Center) {
+                                // The burst: four copies with their own delay, drift
+                                // and height, drawn behind the original.
+                                if (isActive) {
+                                    val t0 = flight.value
+                                    listOf(
+                                        Triple(0f, -22f, 150f),
+                                        Triple(0.12f, 14f, 190f),
+                                        Triple(0.24f, -6f, 230f),
+                                        Triple(0.36f, 26f, 175f),
+                                    ).forEach { (delay, driftDp, riseDp) ->
+                                        val t = ((t0 - delay) / (1f - delay)).coerceIn(0f, 1f)
+                                        if (t > 0f) {
+                                            Text(
+                                                e,
+                                                fontSize = 21.sp,
+                                                modifier = Modifier.graphicsLayer {
+                                                    translationY = -riseDp.dp.toPx() * t
+                                                    translationX = driftDp.dp.toPx() * t
+                                                    alpha = 1f - t
+                                                    scaleX = 0.9f + 0.4f * t
+                                                    scaleY = 0.9f + 0.4f * t
+                                                },
+                                            )
                                         }
                                     }
-                                    .clip(CircleShape)
-                                    .clickable {
-                                        flyingEmoji = e
-                                        flightNo++
-                                        scope.launch {
-                                            runCatching {
-                                                withContext(Dispatchers.IO) {
-                                                    Api.post("/api/statuses/${s.optString("id")}/react", JSONObject().put("emoji", e))
+                                }
+                                Text(
+                                    e,
+                                    fontSize = 21.sp,
+                                    modifier = Modifier
+                                        .graphicsLayer {
+                                            if (isActive) {
+                                                scaleX = pulse.value
+                                                scaleY = pulse.value
+                                            }
+                                        }
+                                        .clip(CircleShape)
+                                        .clickable {
+                                            reactHaptics.tap()
+                                            flyingEmoji = e
+                                            flightNo++
+                                            scope.launch {
+                                                runCatching {
+                                                    withContext(Dispatchers.IO) {
+                                                        Api.post("/api/statuses/${s.optString("id")}/react", JSONObject().put("emoji", e))
+                                                    }
                                                 }
                                             }
                                         }
-                                    }
-                                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                            )
+                                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                                )
+                            }
                         }
                     }
                     Row(

@@ -1705,11 +1705,19 @@ const convBetween = (db, a, b) =>
       !chat.includes('"Clear"'),
   );
   check(
-    "r26: status reactions FLY up (Animatable, repeatable, nothing selected)",
+    "r26/r30: status reactions burst up (Animatable, repeatable, nothing selected); the original stays and pulses",
     readFileSync(
       "native-android/app/src/main/java/app/kuchupuchu/android/StatusScreens.kt",
       "utf8",
     ).includes("flight.animateTo") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/StatusScreens.kt",
+        "utf8",
+      ).includes("pulse.animateTo(1.45f") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/StatusScreens.kt",
+        "utf8",
+      ).includes("reactHaptics.tap()") &&
       !readFileSync(
         "native-android/app/src/main/java/app/kuchupuchu/android/StatusScreens.kt",
         "utf8",
