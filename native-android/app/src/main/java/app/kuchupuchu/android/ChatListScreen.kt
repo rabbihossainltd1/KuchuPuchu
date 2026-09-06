@@ -328,12 +328,13 @@ fun ChatListScreen(nav: NavController) {
                         tonalElevation = 0.dp,
                         shadowElevation = 6.dp,
                     ) {
-                        HomeMenuItem(Icons.Filled.Settings, "Settings") { homeMenu = false; nav.navigate("settings") }
-                        HomeMenuItem(Icons.Filled.Person, "Profile") { homeMenu = false; nav.navigate("profile/${Store.myId()}") }
-                        HomeMenuItem(Icons.Filled.Info, "About Us") { homeMenu = false; nav.navigate("about") }
-                        HomeMenuItem(Icons.Filled.GroupAdd, "New group") { homeMenu = false; nav.navigate("newgroup") }
+                        // Owner round 31: this exact order.
+                        HomeMenuItem(Icons.Filled.Person, "My Profile") { homeMenu = false; nav.navigate("profile/${Store.myId()}") }
                         HomeMenuItem(Icons.Filled.PersonAdd, "New contact") { homeMenu = false; nav.navigate("newcontact") }
                         HomeMenuItem(Icons.Filled.Contacts, "All contacts") { homeMenu = false; nav.navigate("contacts") }
+                        HomeMenuItem(Icons.Filled.GroupAdd, "New group") { homeMenu = false; nav.navigate("newgroup") }
+                        HomeMenuItem(Icons.Filled.Settings, "Settings") { homeMenu = false; nav.navigate("settings") }
+                        HomeMenuItem(Icons.Filled.Info, "About Us") { homeMenu = false; nav.navigate("about") }
                     }
                 }
             }
