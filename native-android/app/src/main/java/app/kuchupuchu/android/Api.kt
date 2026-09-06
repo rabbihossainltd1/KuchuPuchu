@@ -9,6 +9,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import okhttp3.ConnectionPool
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Interceptor
 import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
@@ -321,12 +322,24 @@ object Api {
     private class AuthInterceptor : Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response {
             val t = token
+            // Owner round 28: the bearer is OUR session, so it goes to OUR
+            // worker only. This client is shared (Coil, the GitHub release
+            // check, asset downloads), and the KuchuPuchu token was being sent
+            // to api.github.com too — GitHub answers 401 "Bad credentials" to
+            // a bearer it does not know, so the in-app update check silently
+            // saw nothing and Settings kept saying "latest version" while a
+            // newer release sat on GitHub.
             val req =
-                if (t.isNullOrBlank()) chain.request()
+                if (t.isNullOrBlank() || !isOwnHost(chain.request().url.host)) chain.request()
                 else chain.request().newBuilder().header("Authorization", "Bearer $t").build()
             return chain.proceed(req)
         }
     }
+
+    /** True for the worker's own host (the only place the session bearer belongs). */
+    private val ownHost: String by lazy { BASE.toHttpUrlOrNull()?.host.orEmpty() }
+
+    fun isOwnHost(host: String): Boolean = host.equals(ownHost, ignoreCase = true)
 
 }
 

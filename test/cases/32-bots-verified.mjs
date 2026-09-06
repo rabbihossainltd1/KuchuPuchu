@@ -1751,6 +1751,20 @@ const convBetween = (db, a, b) =>
       ),
   );
   check(
+    "r28-2: the session bearer goes to the worker host ONLY (GitHub 401'd the update check) + conditional release check",
+    readFileSync("native-android/app/src/main/java/app/kuchupuchu/android/Api.kt", "utf8").includes(
+      "if (t.isNullOrBlank() || !isOwnHost(chain.request().url.host)) chain.request()",
+    ) &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/KpUpdate.kt",
+        "utf8",
+      ).includes('.removeHeader("Authorization")') &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/KpUpdate.kt",
+        "utf8",
+      ).includes('header("If-None-Match", etag)'),
+  );
+  check(
     "r27: status composer uploads with the real mime + a proper name (readDocument = (mime, bytes))",
     readFileSync(
       "native-android/app/src/main/java/app/kuchupuchu/android/StatusPhotoScreen.kt",

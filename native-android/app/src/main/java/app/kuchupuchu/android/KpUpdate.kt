@@ -47,24 +47,47 @@ object KpUpdate {
         try {
             withContext(Dispatchers.IO) {
                 runCatching {
+                    // Owner round 28: conditional request. GitHub's anonymous
+                    // API budget is 60/hour per IP and a 304 does not count
+                    // against it — carrier NAT puts many phones behind one IP,
+                    // so every check that can be a 304 should be one.
+                    val prefs = ctx.getSharedPreferences("kp_update", Context.MODE_PRIVATE)
+                    val etag = prefs.getString("etag", null)
                     val req = okhttp3.Request.Builder()
                         .url(API)
                         .header("Accept", "application/vnd.github+json")
+                        // Belt and braces with Api.isOwnHost(): whatever the
+                        // shared client does, GitHub must never see a bearer.
+                        .removeHeader("Authorization")
+                        .apply { if (!etag.isNullOrBlank()) header("If-None-Match", etag) }
                         .build()
                     Api.http.newCall(req).execute().use { res ->
-                        if (!res.isSuccessful) return@runCatching
-                        val body = res.body?.string() ?: return@runCatching
-                        val rel = JSONObject(body)
-                        val tag = rel.optString("tag_name").trimStart('v', 'V')
-                        val remoteCode = tag.toIntOrNull() ?: return@runCatching
-                        val assets = rel.optJSONArray("assets") ?: return@runCatching
-                        var apkUrl: String? = null
-                        for (i in 0 until assets.length()) {
-                            val a = assets.getJSONObject(i)
-                            val name = a.optString("name")
-                            if (name.endsWith(".apk")) apkUrl = a.optString("browser_download_url")
+                        val remoteCode: Int
+                        val apkUrl: String
+                        if (res.code == 304 && prefs.contains("code")) {
+                            remoteCode = prefs.getInt("code", 0)
+                            apkUrl = prefs.getString("url", "") ?: ""
+                        } else {
+                            if (!res.isSuccessful) return@runCatching
+                            val body = res.body?.string() ?: return@runCatching
+                            val rel = JSONObject(body)
+                            val tag = rel.optString("tag_name").trimStart('v', 'V')
+                            remoteCode = tag.toIntOrNull() ?: return@runCatching
+                            val assets = rel.optJSONArray("assets") ?: return@runCatching
+                            var url: String? = null
+                            for (i in 0 until assets.length()) {
+                                val a = assets.getJSONObject(i)
+                                val name = a.optString("name")
+                                if (name.endsWith(".apk")) url = a.optString("browser_download_url")
+                            }
+                            apkUrl = url ?: return@runCatching
+                            prefs.edit()
+                                .putString("etag", res.header("ETag"))
+                                .putInt("code", remoteCode)
+                                .putString("url", apkUrl)
+                                .apply()
                         }
-                        if (apkUrl != null && remoteCode > installedVersionCode(ctx)) {
+                        if (apkUrl.isNotBlank() && remoteCode > installedVersionCode(ctx)) {
                             available = remoteCode to apkUrl
                         } else {
                             available = null
