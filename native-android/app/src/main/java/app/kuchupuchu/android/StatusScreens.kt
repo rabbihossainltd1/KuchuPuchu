@@ -41,8 +41,6 @@ import androidx.compose.material.icons.filled.RemoveRedEye
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -66,6 +64,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -580,7 +579,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                 // ticking: photos advanced every 5s and popBackStack() fired
                 // with nobody watching, so the user came back to a closed
                 // viewer several statuses further on.
-                if (showViewers || replyFocused || !Store.foreground) {
+                if (showViewers || menuOpen || replyFocused || !Store.foreground) {
                     delay(100)
                     continue
                 }
@@ -590,7 +589,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
         } else {
             var elapsed = 0L
             while (elapsed < hold) {
-                if (showViewers || replyFocused || !Store.foreground) {
+                if (showViewers || menuOpen || replyFocused || !Store.foreground) {
                     delay(100)
                     continue
                 }
@@ -747,7 +746,7 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                     // in lock-step instead of the video running on.
                     StatusVideoPlayer(
                         "${Api.BASE}/api/statuses/${s.optString("id")}/media",
-                        paused = showViewers || replyFocused,
+                        paused = showViewers || menuOpen || replyFocused,
                         onReady = { videoReady = true },
                         onProgress = { p ->
                             videoProgress = p
@@ -880,49 +879,8 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                     IconButton(onClick = { nav.popBackStack() }) {
                         Icon(Icons.Filled.Close, "Close", tint = Color.White)
                     }
-                    Box {
-                        IconButton(onClick = { menuOpen = true }) {
-                            Icon(Icons.Filled.MoreVert, "Menu", tint = Color.White)
-                        }
-                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                            if (isMine) {
-                                DropdownMenuItem(
-                                    text = { Text("Delete status") },
-                                    leadingIcon = { Icon(Icons.Filled.Delete, null, tint = Ink) },
-                                    onClick = {
-                                        menuOpen = false
-                                        confirmDelete = true
-                                    },
-                                )
-                            } else {
-                                DropdownMenuItem(
-                                    text = { Text("Message") },
-                                    leadingIcon = { Icon(Icons.Filled.Chat, null, tint = Ink) },
-                                    onClick = {
-                                        menuOpen = false
-                                        openChatWith(user?.optString("id") ?: "")
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Hide status") },
-                                    leadingIcon = { Icon(Icons.Filled.HideSource, null, tint = Ink) },
-                                    onClick = {
-                                        menuOpen = false
-                                        ScreenStore.hideStatusUser(user?.optString("id") ?: "")
-                                        android.widget.Toast.makeText(ctx, "Status hidden", android.widget.Toast.LENGTH_SHORT).show()
-                                        nav.popBackStack()
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Report") },
-                                    leadingIcon = { Icon(Icons.Filled.Flag, null, tint = Ink) },
-                                    onClick = {
-                                        menuOpen = false
-                                        android.widget.Toast.makeText(ctx, "Reported. Thank you.", android.widget.Toast.LENGTH_SHORT).show()
-                                    },
-                                )
-                            }
-                        }
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Filled.MoreVert, "Menu", tint = Color.White)
                     }
                 }
                 /* tap zones: left = previous, right = next — they fill the
@@ -1105,19 +1063,113 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
         )
     }
 
+    // Owner round 28: the ⋮ menu is a theme BOTTOM SHEET (the app's own
+    // pattern — country picker / emoji sheet), not the M3 anchored popup menu
+    // whose default surface tint never matched either palette ("colour missmatch").
+    if (menuOpen) {
+        StatusMenuSheet(
+            isMine = isMine,
+            onDismiss = { menuOpen = false },
+            onDelete = {
+                menuOpen = false
+                confirmDelete = true
+            },
+            onMessage = {
+                menuOpen = false
+                openChatWith(user?.optString("id") ?: "")
+            },
+            onHide = {
+                menuOpen = false
+                ScreenStore.hideStatusUser(user?.optString("id") ?: "")
+                android.widget.Toast.makeText(ctx, "Status hidden", android.widget.Toast.LENGTH_SHORT).show()
+                nav.popBackStack()
+            },
+            onReport = {
+                menuOpen = false
+                android.widget.Toast.makeText(ctx, "Reported. Thank you.", android.widget.Toast.LENGTH_SHORT).show()
+            },
+        )
+    }
+
     if (confirmDelete) {
+        // Same theme surface + text tokens as every other confirm in the app
+        // (Settings → Log out): the M3 defaults painted a tinted panel with
+        // near-black text over the dark-blue palette.
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
-            title = { Text("Delete status?") },
-            text = { Text("This status will be removed for everyone. It cannot be undone.") },
+            containerColor = Card,
+            titleContentColor = Ink,
+            textContentColor = Muted,
+            title = { Text("Delete status?", color = Ink) },
+            text = { Text("This status will be removed for everyone. It cannot be undone.", color = Muted) },
             confirmButton = {
                 TextButton(onClick = {
                     confirmDelete = false
                     deleteStatus()
-                }) { Text("Delete", color = Red) }
+                }) { Text("Delete", color = Red, fontWeight = FontWeight.SemiBold) }
             },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel", color = Muted) } },
         )
+    }
+}
+
+/**
+ * Owner round 28: the status viewer's ⋮ menu as a bottom sheet in the app's
+ * own palette. Own status → Delete; someone else's → Message / Hide / Report.
+ * The viewer's clock keeps pausing while it is up (menuOpen is part of the
+ * pause condition), so nothing advances behind the sheet.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun StatusMenuSheet(
+    isMine: Boolean,
+    onDismiss: () -> Unit,
+    onDelete: () -> Unit,
+    onMessage: () -> Unit,
+    onHide: () -> Unit,
+    onReport: () -> Unit,
+) {
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = Card,
+        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 8.dp)
+                .padding(bottom = 10.dp),
+        ) {
+            if (isMine) {
+                StatusMenuRow(Icons.Filled.Delete, "Delete status", Red, onDelete)
+            } else {
+                StatusMenuRow(Icons.Filled.Chat, "Message", Ink, onMessage)
+                StatusMenuRow(Icons.Filled.HideSource, "Hide status", Ink, onHide)
+                StatusMenuRow(Icons.Filled.Flag, "Report", Ink, onReport)
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusMenuRow(
+    icon: ImageVector,
+    label: String,
+    tint: Color,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = if (tint == Red) Red else ActionBlueDeep, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(16.dp))
+        Text(label, color = tint, fontSize = 15.5.sp, fontWeight = FontWeight.Medium)
     }
 }
 

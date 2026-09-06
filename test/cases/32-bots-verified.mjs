@@ -1733,9 +1733,22 @@ const convBetween = (db, a, b) =>
   );
   check(
     "r27: status viewer clock + clip PAUSE while the app is in the background",
-    statusKt.includes("if (showViewers || replyFocused || !Store.foreground) {") &&
+    statusKt.includes("if (showViewers || menuOpen || replyFocused || !Store.foreground) {") &&
       statusKt.includes("player?.setPaused(paused || !Store.foreground)") &&
       statusKt.includes("p?.setPaused(paused || bg)"),
+  );
+  check(
+    "r28-1: status ⋮ menu is a theme bottom sheet (no M3 DropdownMenu) + confirm dialog on the Card surface + clock pauses under the sheet",
+    !statusKt.includes("DropdownMenu(") &&
+      !statusKt.includes("import androidx.compose.material3.DropdownMenu") &&
+      statusKt.includes("private fun StatusMenuSheet(") &&
+      statusKt.includes(
+        "containerColor = Card,\n        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)",
+      ) &&
+      statusKt.includes("paused = showViewers || menuOpen || replyFocused,") &&
+      /AlertDialog\(\n\s+onDismissRequest = \{ confirmDelete = false \},\n\s+containerColor = Card,/.test(
+        statusKt,
+      ),
   );
   check(
     "r27: status composer uploads with the real mime + a proper name (readDocument = (mime, bytes))",
