@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Email
@@ -35,7 +36,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -108,67 +111,90 @@ fun AboutScreen(nav: NavController) {
             Text("About Us", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
         }
 
-        /* ---------- app card ---------- */
+        // Owner round 31: "About Us ta khub chapa" — a hero block with real
+        // air, the founder card with a centred portrait, and the links spaced
+        // out (18dp rows, 22dp gaps between the blocks).
+        Spacer(Modifier.height(10.dp))
+
+        /* ---------- app hero ---------- */
         Column(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(Card)
-                .padding(20.dp),
+                .padding(horizontal = 16.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            if (KpThemeMode.darkBlue) ActionBlue.copy(alpha = 0.22f) else GoldSoft,
+                            Card,
+                        ),
+                    ),
+                )
+                .padding(horizontal = 24.dp, vertical = 30.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Image(
                 painter = painterResource(R.drawable.icon_gold),
                 contentDescription = "KuchuPuchu",
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.size(84.dp).clip(RoundedCornerShape(22.dp)),
+                modifier = Modifier.size(96.dp).clip(RoundedCornerShape(26.dp)),
             )
-            Spacer(Modifier.height(12.dp))
-            Text("KuchuPuchu", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Ink)
+            Spacer(Modifier.height(18.dp))
+            Text("KuchuPuchu", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Ink)
+            Spacer(Modifier.height(6.dp))
             Text(
-                "Version $versionName (build $versionCode)",
+                "Version $versionName · build $versionCode",
                 fontSize = 13.sp,
-                color = Muted,
+                color = ActionBlueDeep,
+                fontWeight = FontWeight.Medium,
+                modifier =
+                    Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(ActionBlue.copy(alpha = 0.14f))
+                        .padding(horizontal = 12.dp, vertical = 5.dp),
             )
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(18.dp))
             Text(
                 "A fast, private messenger made in Bangladesh — chats, voice & video calls, " +
                     "status updates and an AI assistant, with your phone number as your identity.",
-                fontSize = 13.5.sp,
+                fontSize = 14.sp,
                 color = Ink,
                 textAlign = TextAlign.Center,
-                lineHeight = 19.sp,
+                lineHeight = 22.sp,
             )
         }
 
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(22.dp))
 
         /* ---------- founder card ---------- */
         Column(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp)
-                .clip(RoundedCornerShape(20.dp))
+                .padding(horizontal = 16.dp)
+                .clip(RoundedCornerShape(24.dp))
                 .background(Card)
-                .padding(16.dp),
+                .padding(horizontal = 20.dp, vertical = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Image(
-                    painter = painterResource(R.drawable.owner_avatar),
-                    contentDescription = "Rabbi Hossain",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.size(64.dp).clip(CircleShape),
-                )
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("MD Rabbi Hossain", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Ink)
-                    Text("Founder & Developer of KuchuPuchu", fontSize = 12.5.sp, color = GoldDeep, fontWeight = FontWeight.Medium)
-                    Text("Kaliganj, Jhenaidah, Khulna, Bangladesh", fontSize = 11.5.sp, color = Muted)
-                }
-            }
-            Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Image(
+                painter = painterResource(R.drawable.owner_avatar),
+                contentDescription = "Rabbi Hossain",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.size(84.dp).clip(CircleShape),
+            )
+            Spacer(Modifier.height(14.dp))
+            Text("MD Rabbi Hossain", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Founder & Developer",
+                fontSize = 13.sp,
+                color = if (KpThemeMode.darkBlue) ActionBlueDeep else GoldDeep,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text("Kaliganj, Jhenaidah, Khulna, Bangladesh", fontSize = 12.5.sp, color = Muted)
+            Spacer(Modifier.height(18.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 AboutBrandIcon(R.drawable.ic_brand_facebook, "Facebook") { open("https://facebook.com/Rabbihossainltd") }
                 AboutBrandIcon(R.drawable.ic_brand_instagram, "Instagram") { open("https://instagram.com/Rabbihossainltd1") }
                 AboutBrandIcon(R.drawable.ic_brand_telegram, "Telegram") { open("https://t.me/Rabbihossainltd0") }
@@ -176,29 +202,30 @@ fun AboutScreen(nav: NavController) {
             }
         }
 
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(22.dp))
 
         /* ---------- links ---------- */
         Column(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(Card),
+                .padding(horizontal = 16.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(Card)
+                .padding(vertical = 6.dp),
         ) {
-            AboutRow(Icons.Filled.Chat, "Message the founder", "Chat with @rabbihossainltd on KuchuPuchu") {
+            AboutRow(Icons.Filled.Chat, "Message the founder", "@rabbihossainltd") {
                 haptics.tap()
                 messageOwner()
             }
             AboutRow(Icons.Filled.Language, "Website", "rabbihossainltd.online") { open("https://rabbihossainltd.online") }
             AboutRow(Icons.Filled.Email, "Contact", "info@rabbihossainltd.online") { open("mailto:info@rabbihossainltd.online") }
-            AboutRow(Icons.Filled.Code, "Source & releases", "github.com/rabbihossainltd1/KuchuPuchu") {
+            AboutRow(Icons.Filled.Code, "Source & releases", "GitHub") {
                 open("https://github.com/rabbihossainltd1/KuchuPuchu/releases")
             }
             AboutRow(
                 Icons.Filled.SystemUpdate,
                 "Check for updates",
-                if (KpUpdate.checking) "Checking…" else "Latest release on GitHub",
+                if (KpUpdate.checking) "Checking…" else "GitHub release",
             ) {
                 scope.launch {
                     withContext(Dispatchers.IO) { KpUpdate.check(ctx) }
@@ -209,7 +236,7 @@ fun AboutScreen(nav: NavController) {
             }
         }
 
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(28.dp))
         Text(
             "© ${java.time.Year.now().value} KuchuPuchu · Made with care in Bangladesh",
             fontSize = 12.sp,
@@ -217,7 +244,7 @@ fun AboutScreen(nav: NavController) {
             modifier = Modifier.fillMaxWidth(),
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(28.dp))
     }
 }
 
@@ -225,13 +252,13 @@ fun AboutScreen(nav: NavController) {
 private fun AboutBrandIcon(res: Int, label: String, onClick: () -> Unit) {
     Box(
         Modifier
-            .size(36.dp)
+            .size(44.dp)
             .clip(CircleShape)
-            .background(GoldSoft)
+            .background(if (KpThemeMode.darkBlue) ActionBlue.copy(alpha = 0.16f) else GoldSoft)
             .clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(painterResource(res), label, tint = Color.Unspecified, modifier = Modifier.size(18.dp))
+        Icon(painterResource(res), label, tint = Color.Unspecified, modifier = Modifier.size(21.dp))
     }
 }
 
@@ -241,14 +268,22 @@ private fun AboutRow(icon: ImageVector, label: String, value: String, onClick: (
         Modifier
             .fillMaxWidth()
             .clickable { onClick() }
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = 18.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, null, tint = ActionBlueDeep, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.width(14.dp))
+        Box(
+            Modifier
+                .size(38.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(ActionBlue.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center,
+        ) { Icon(icon, null, tint = ActionBlueDeep, modifier = Modifier.size(20.dp)) }
+        Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f)) {
-            Text(label, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Ink)
-            Text(value, fontSize = 12.5.sp, color = Muted)
+            Text(label, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Ink, maxLines = 1)
+            Spacer(Modifier.height(2.dp))
+            Text(value, fontSize = 12.5.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Muted, modifier = Modifier.size(20.dp))
     }
 }
