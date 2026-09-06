@@ -352,6 +352,10 @@ fun ProfileScreen(nav: NavController, userId: String) {
             }
             Spacer(Modifier.height(12.dp))
         }
+        // Owner round 31: the call / search buttons take this chat's theme
+        // accent (the in-chat theme used to stop at the chat screen).
+        val peerConv = ScreenStore.convs.firstOrNull { !it.optBoolean("isGroup") && it.optJSONObject("other")?.optString("id") == userId }
+        val peerAccent = chatAccent(cTheme(peerConv))
         // Owner round 7: the owner's account can never be blocked.
         if (!isMe && !isKpBot(userId) && u.optText("username") != "rabbihossainltd") {
         Row(
@@ -368,7 +372,7 @@ fun ProfileScreen(nav: NavController, userId: String) {
                         CallEngine.instance?.startCall(userId, "AUDIO", u.optText("displayName"), u.optText("avatarUrl"))
                     }
                 }) {
-                    Icon(Icons.Filled.Call, "Voice call", tint = ActionBlueDeep, modifier = Modifier.size(25.dp))
+                    Icon(Icons.Filled.Call, "Voice call", tint = peerAccent, modifier = Modifier.size(25.dp))
                 }
             }
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
@@ -378,7 +382,7 @@ fun ProfileScreen(nav: NavController, userId: String) {
                         CallEngine.instance?.startCall(userId, "VIDEO", u.optText("displayName"), u.optText("avatarUrl"))
                     }
                 }) {
-                    Icon(Icons.Filled.Videocam, "Video call", tint = ActionBlueDeep, modifier = Modifier.size(27.dp))
+                    Icon(Icons.Filled.Videocam, "Video call", tint = peerAccent, modifier = Modifier.size(27.dp))
                 }
             }
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
@@ -408,7 +412,7 @@ fun ProfileScreen(nav: NavController, userId: String) {
                         }
                     }
                 }) {
-                    Icon(Icons.Filled.Search, "Search", tint = ActionBlueDeep, modifier = Modifier.size(25.dp))
+                    Icon(Icons.Filled.Search, "Search", tint = peerAccent, modifier = Modifier.size(25.dp))
                 }
             }
         }

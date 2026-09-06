@@ -2120,7 +2120,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
 
         /* ---------------- composer (doubles as the recording bar) ---------------- */
-        ReplyQuoteBar(replyTo) { replyTo = null }
+        ReplyQuoteBar(replyTo, chatTheme) { replyTo = null }
         if (noReply) {
             // Official security account: replies are off (owner rule).
             Text(
@@ -3144,7 +3144,7 @@ private fun KpImeAutoScroll(listState: androidx.compose.foundation.lazy.LazyList
 
 /** Owner round 13e: the swipe-reply quote bar above the composer. */
 @Composable
-private fun ReplyQuoteBar(replyTo: JSONObject?, onCancel: () -> Unit) {
+private fun ReplyQuoteBar(replyTo: JSONObject?, theme: String, onCancel: () -> Unit) {
     if (replyTo == null) return
     // Owner round 16: the old GoldSoft card + Muted text was unreadable —
     // a card surface with a gold bar and full-ink text.
@@ -3163,9 +3163,9 @@ private fun ReplyQuoteBar(replyTo: JSONObject?, onCancel: () -> Unit) {
                 .width(3.dp)
                 .height(30.dp)
                 .clip(RoundedCornerShape(2.dp))
-                // Owner round 21: the reply "I" bar rides the blue accent in
-                // dark-blue mode (it was the last gold stripe).
-                .background(ActionBlue),
+                // Owner round 31: the reply "I" bar takes the CHAT's accent
+                // (it stayed app-blue under a mint/rose/cream chat).
+                .background(chatAccent(theme)),
         )
         Spacer(Modifier.width(8.dp))
         Column(Modifier.weight(1f)) {
@@ -3251,7 +3251,7 @@ private fun MessageRow(
         return
     }
     if (kind == "CALL" || isCallLog(m)) {
-        CallLogBubble(m, mine, pendingEcho)
+        CallLogBubble(m, mine, pendingEcho, theme)
         return
     }
     // The owner profile card (dropped in by the worker right after the AI
@@ -4470,7 +4470,7 @@ private fun isReadByOther(otherReadAt: String?, createdAt: String): Boolean {
 
 // Owner round 20: a chat WITHOUT a theme gets the new DARK-BLUE default
 // ("darkblue"); "default" is the explicit classic-cream option.
-private fun cTheme(c: JSONObject?) = c?.optString("theme")?.ifBlank { "darkblue" } ?: "darkblue"
+internal fun cTheme(c: JSONObject?) = c?.optString("theme")?.ifBlank { "darkblue" } ?: "darkblue"
 
 private fun chatWallpaper(theme: String) =
     when (theme) {
@@ -4487,7 +4487,7 @@ private fun chatWallpaper(theme: String) =
 
 /** Owner round 19: one accent per chat theme — the message bar, voice/mic
  *  button and call buttons all take the chat's colour now. */
-private fun chatAccent(theme: String): Color =
+internal fun chatAccent(theme: String): Color =
     when (theme) {
         "mint" -> Color(0xFF10B981)
         "rose" -> Color(0xFFF43F5E)
@@ -4693,7 +4693,7 @@ private fun TickIcon(m: JSONObject, pendingEcho: Boolean, otherReadAt: String?) 
 private fun isCallLog(m: JSONObject): Boolean = m.optString("kind") == "CALL"
 
 @Composable
-private fun CallLogBubble(m: JSONObject, mine: Boolean, pendingEcho: Boolean) {
+private fun CallLogBubble(m: JSONObject, mine: Boolean, pendingEcho: Boolean, theme: String) {
     val meta = m.optJSONObject("meta")
     val body = m.optString("body")
     val video = body.contains("Video", true) || meta?.optString("callKind") == "VIDEO"
@@ -4718,14 +4718,10 @@ private fun CallLogBubble(m: JSONObject, mine: Boolean, pendingEcho: Boolean) {
                 // Owner round 26: compact call chip (was a wide 260dp bubble).
                 .widthIn(max = 205.dp)
                 .clip(RoundedCornerShape(16.dp))
-                // Owner round 23: the call bubble kept the amber gradient in
-                // dark-blue ("call massage bubble ekhono cream colour") — my
-                // side now rides the same blue the default dark chat uses.
-                .background(
-                    if (mine && KpThemeMode.darkBlue) Brush.linearGradient(listOf(Color(0xFF2F6FED), Color(0xFF1E40AF)))
-                    else if (mine) goldFill()
-                    else Brush.linearGradient(listOf(Card, Card)),
-                )
+                // Owner round 31: the call bubble is a message bubble — it
+                // takes the CHAT theme's fills exactly like a text bubble
+                // (it used to ignore mint/rose/night/cream).
+                .background(if (mine) chatMineFill(theme) else chatOtherFill(theme))
                 .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -4733,17 +4729,13 @@ private fun CallLogBubble(m: JSONObject, mine: Boolean, pendingEcho: Boolean) {
                 Modifier
                     .size(30.dp)
                     .clip(CircleShape)
-                    .background(
-                        if (mine) Color(0x33FFFFFF)
-                        else if (KpThemeMode.darkBlue) ActionBlue.copy(alpha = 0.18f)
-                        else GoldSoft,
-                    ),
+                    .background(if (mine) Color(0x33FFFFFF) else chatAccent(theme).copy(alpha = 0.18f)),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     if (missed || declined) Icons.Filled.CallMissed else Icons.Filled.Call,
                     contentDescription = title,
-                    tint = if (missed) Red else if (mine) Ink else if (KpThemeMode.darkBlue) ActionBlueDeep else GoldDeep,
+                    tint = if (missed) Red else if (mine) Color.White else chatAccent(theme),
                     modifier = Modifier.size(17.dp),
                 )
             }

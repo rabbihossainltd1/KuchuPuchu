@@ -1161,7 +1161,7 @@ const convBetween = (db, a, b) =>
   );
   check(
     "r19-theme: chat theme restyles the message bar, voice/mic + call buttons",
-    chat.includes("private fun chatAccent(theme: String)") &&
+    chat.includes("fun chatAccent(theme: String)") &&
       chat.includes(".background(accent.copy(alpha = 0.16f))") &&
       chat.includes("accent = accent,") &&
       chat.includes('Icons.Filled.Call, "Voice call", tint = chatAccent(chatTheme)') &&
@@ -1322,7 +1322,9 @@ const convBetween = (db, a, b) =>
   );
   check(
     "r21-sweep: friends-profile buttons, call-back icon, status pencil/status+/send, settings crash row",
-    profile.includes("tint = ActionBlueDeep, modifier = Modifier.size(25.dp)") &&
+    // r31-11: the friend-profile buttons now take the peer chat's accent
+    // (chatAccent("darkblue") IS the blue; a themed chat brings its own).
+    profile.includes("tint = peerAccent, modifier = Modifier.size(25.dp)") &&
       callstab.includes("tint = ActionBlueDeep,") &&
       status.includes("contentColor = ActionBlueDeep,") &&
       status.includes("background(ActionBlue),") &&
@@ -1562,12 +1564,12 @@ const convBetween = (db, a, b) =>
       engine23.includes("withTimeout(4_500)"),
   );
   check(
-    "r23: call bubble matches the theme — no amber mine-bubble in dark-blue, incoming icon circle ActionBlue-tinted",
-    chat.includes(
-      "if (mine && KpThemeMode.darkBlue) Brush.linearGradient(listOf(Color(0xFF2F6FED), Color(0xFF1E40AF)))",
-    ) &&
-      chat.includes("else if (KpThemeMode.darkBlue) ActionBlue.copy(alpha = 0.18f)") &&
-      chat.includes("if (KpThemeMode.darkBlue) ActionBlueDeep else GoldDeep"),
+    "r23/r31-11: call bubble matches the CHAT theme — the same fills as a text bubble (dark-blue default = blue, never amber), icon circle in the chat accent",
+    chat.includes(".background(if (mine) chatMineFill(theme) else chatOtherFill(theme))") &&
+      chat.includes(
+        ".background(if (mine) Color(0x33FFFFFF) else chatAccent(theme).copy(alpha = 0.18f))",
+      ) &&
+      chat.includes("else -> Brush.linearGradient(listOf(Color(0xFF2F6FED), Color(0xFF1E40AF)))"),
   );
   check(
     "r23: video placeholder keeps its OWN ratio across restarts — meta+thumb persist to disk",
@@ -2523,6 +2525,27 @@ const convBetween = (db, a, b) =>
     kt("ProfileScreen.kt").includes('val peerPhone = if (isMe) "" else u.optText("phone")') &&
       kt("ProfileScreen.kt").includes("if (peerPhone.isNotBlank()) {") &&
       kt("ProfileScreen.kt").includes('android.net.Uri.parse("tel:$peerPhone")'),
+  );
+  // r31-11: the in-chat theme reaches the call bubble, the reply bar and the
+  // profile's call/search buttons.
+  check(
+    "r31-11: CallLogBubble uses chatMineFill/chatOtherFill/chatAccent(theme); ReplyQuoteBar stripe = chatAccent(theme); profile call/search icons = the peer chat's accent",
+    kt("ChatScreen.kt").includes(
+      "private fun CallLogBubble(m: JSONObject, mine: Boolean, pendingEcho: Boolean, theme: String)",
+    ) &&
+      kt("ChatScreen.kt").includes(
+        ".background(if (mine) chatMineFill(theme) else chatOtherFill(theme))",
+      ) &&
+      kt("ChatScreen.kt").includes(
+        "tint = if (missed) Red else if (mine) Color.White else chatAccent(theme)",
+      ) &&
+      kt("ChatScreen.kt").includes(
+        "private fun ReplyQuoteBar(replyTo: JSONObject?, theme: String, onCancel: () -> Unit)",
+      ) &&
+      kt("ChatScreen.kt").includes(".background(chatAccent(theme)),") &&
+      kt("ChatScreen.kt").includes("ReplyQuoteBar(replyTo, chatTheme) { replyTo = null }") &&
+      kt("ProfileScreen.kt").includes("val peerAccent = chatAccent(cTheme(peerConv))") &&
+      (kt("ProfileScreen.kt").match(/tint = peerAccent/g) || []).length === 3,
   );
   {
     // Every cream / warm-white literal outside Theme.kt and the login screen
