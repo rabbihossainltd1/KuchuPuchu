@@ -22,6 +22,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -42,6 +43,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
@@ -173,11 +176,19 @@ fun CallGate() {
             )
         }
         when {
+            // Owner round 31 item 19: the other phone's shared screen, opened
+            // from the preview card on the voice UI. System back or the
+            // corner button returns to the voice screen.
+            connected && engine.shareFull && engine.peerScreen -> ShareFullscreen(call)
             connected ->
-                // hasRemoteVideo: the server row can still say AUDIO after the
-                // other phone upgraded to video mid-call — follow the actual
-                // media so both sides always render the SAME in-call screen.
-                if (call.kind == "VIDEO" || engine.hasRemoteVideo) InCallVideoScreen(call) else VoiceCallScreen(call)
+                // `kind` alone decides (owner round 31 item 19): the engine
+                // re-labels the call VIDEO when either camera comes on — the
+                // server row carries it to both phones, so both render the
+                // SAME in-call screen — while a shared SCREEN on a voice call
+                // never converts: that stays on the voice UI with a small
+                // preview card. (The old `hasRemoteVideo` shortcut here could
+                // not tell the two apart.)
+                if (call.kind == "VIDEO") InCallVideoScreen(call) else VoiceCallScreen(call)
             // Incoming ringing needs its own Accept/Decline screen; everything
             // else voice (outgoing ringing, connecting, in-call) is THE SAME
             // screen on caller and receiver — one UI, per design.
@@ -518,7 +529,76 @@ fun VoiceCallScreen(call: CallUi) {
                     enabled = true,
                 ) { haptics.heavy(); engine.hangup() }
             }
+            // Owner round 31 item 19: the other phone is sharing its screen on
+            // this voice call — a small live preview under the buttons; tap it
+            // for fullscreen. The call itself stays a voice call.
+            if (engine.peerScreen) {
+                Spacer(Modifier.height(6.dp))
+                Box(
+                    Modifier
+                        .fillMaxWidth(0.62f)
+                        .aspectRatio(4f / 3f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(DarkCard)
+                        .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(14.dp))
+                        .clickable { engine.openShareFullscreen() },
+                ) {
+                    VideoRenderer(engine, remote = true, fit = true, pip = true)
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(6.dp)
+                            .size(26.dp)
+                            .clip(CircleShape)
+                            .background(Color(0x66000000)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.Fullscreen, "Fullscreen", tint = Color.White, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
             Spacer(Modifier.weight(0.25f))
+        }
+    }
+}
+
+/**
+ * Owner round 31 item 19: the peer's shared screen filling the display on a
+ * VOICE call. Leaves with system back or the corner button — back to the
+ * voice UI, the call untouched.
+ */
+@Composable
+private fun ShareFullscreen(call: CallUi) {
+    val engine = CallEngine.instance ?: return
+    val secs = rememberTick(call.startedAt, call.connecting)
+    androidx.activity.compose.BackHandler { engine.exitShareFullscreen() }
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        VideoRenderer(engine, remote = true, fit = true)
+        Row(
+            Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 60.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(call.otherName, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.width(10.dp))
+            Text(clockText(secs), color = Color(0xB3FFFFFF), fontSize = 13.sp)
+        }
+        Box(
+            Modifier
+                .align(Alignment.TopEnd)
+                .statusBarsPadding()
+                .padding(10.dp)
+                .size(38.dp)
+                .clip(CircleShape)
+                .background(Color(0x66000000))
+                .clickable { engine.exitShareFullscreen() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.FullscreenExit, "Exit fullscreen", tint = Color.White, modifier = Modifier.size(24.dp))
         }
     }
 }

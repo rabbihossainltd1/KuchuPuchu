@@ -1676,6 +1676,8 @@ async function ensureSchema(db: D1Database) {
   await runCatchingSql(db, `ALTER TABLE calls ADD COLUMN reoffer_sdp TEXT`);
   await runCatchingSql(db, `ALTER TABLE calls ADD COLUMN reoffer_from TEXT`);
   await runCatchingSql(db, `ALTER TABLE calls ADD COLUMN reanswer_sdp TEXT`);
+  // Owner round 31 item 19: per-user live media flags ({ [userId]: { camera, screen } }).
+  await runCatchingSql(db, `ALTER TABLE calls ADD COLUMN media_json TEXT`);
   await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN disappear_seconds INTEGER`);
   await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN theme TEXT`);
   await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN disappear_since TEXT`);
@@ -6778,6 +6780,49 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     return json({ ok: true }, 201);
   }
 
+  // Owner round 31 item 19: live media flags. A phone that switches its camera
+  // on or starts/stops a screen share says so here; the row remembers it per
+  // user and the call room gets a `media` frame, so the OTHER phone can tell a
+  // screen share (small preview card on the voice screen) from a camera
+  // (both sides switch to the video-call UI). A camera switched on also
+  // converts the CALL: `kind` becomes VIDEO on the row, which is what both
+  // phones' polls, the ongoing notification and the call log read — before,
+  // the conversion lived only in one phone's memory and the next poll undid
+  // it. A screen share never changes the kind: an audio call stays audio.
+  const mediaMatch = path.match(/^\/api\/calls\/([^/]+)\/media$/);
+  if (mediaMatch && method === "POST") {
+    const callId = mediaMatch[1]!;
+    const row = await one<CallRow>(db, "SELECT * FROM calls WHERE id = ?", callId);
+    if (!row) fail(404, "Call not found.");
+    if (row.caller_id !== uid && row.callee_id !== uid) fail(403, "Not your call.", "FORBIDDEN");
+    const media = parseJson<Record<string, { camera?: boolean; screen?: boolean }>>(
+      row.media_json ?? null,
+      {},
+    );
+    const mine = { ...(media[uid] ?? {}) };
+    if (typeof body.camera === "boolean") mine.camera = body.camera;
+    if (typeof body.screen === "boolean") mine.screen = body.screen;
+    media[uid] = mine;
+    const kind = mine.camera === true ? "VIDEO" : row.kind;
+    await run(
+      db,
+      "UPDATE calls SET media_json = ?, kind = ? WHERE id = ?",
+      JSON.stringify(media),
+      kind,
+      callId,
+    );
+    const frame = {
+      type: "media",
+      callId,
+      userId: uid,
+      camera: mine.camera === true,
+      screen: mine.screen === true,
+      kind,
+    };
+    ctx.waitUntil(broadcastCallEvent(env, callId, frame));
+    return json({ ok: true, media, kind });
+  }
+
   /* ---------- search ---------- */
 
   if (path === "/api/search" && method === "GET") {
@@ -6961,6 +7006,7 @@ type CallRow = {
   reoffer_sdp?: string | null;
   reoffer_from?: string | null;
   reanswer_sdp?: string | null;
+  media_json?: string | null;
   ended_at: string | null;
   created_at: string;
 };
@@ -6978,6 +7024,10 @@ function callFrom(row: CallRow, uid: string, other: UserRow | null, light = fals
     reofferSdp: row.reoffer_sdp ?? undefined,
     reofferFrom: row.reoffer_from ?? undefined,
     reanswerSdp: row.reanswer_sdp ?? undefined,
+    // Owner round 31 item 19: what each side is sending right now —
+    // { [userId]: { camera: boolean, screen: boolean } }. The other phone
+    // reads its peer's entry to tell a screen share from a camera.
+    media: parseJson<Record<string, unknown>>(row.media_json ?? null, {}),
     startedAt: row.started_at,
     endedAt: row.ended_at,
     createdAt: row.created_at,
@@ -6995,7 +7045,7 @@ function callFrom(row: CallRow, uid: string, other: UserRow | null, light = fals
 // scroll" bug). Live /api/calls/active + start-call responses keep the full
 // shape (light=false).
 function callHistoryFrom(row: CallRow, uid: string, other: UserRow | null) {
-  const { offerSdp, answerSdp, reofferSdp, reofferFrom, reanswerSdp, ...history } = callFrom(
+  const { offerSdp, answerSdp, reofferSdp, reofferFrom, reanswerSdp, media, ...history } = callFrom(
     row,
     uid,
     other,

@@ -94,6 +94,111 @@ class CallEngine(private val app: Application) {
     var sharing by mutableStateOf(false)
     var hasRemote by mutableStateOf(false)
 
+    /**
+     * Owner round 31 item 19: the OTHER phone is sharing its screen (from the
+     * call's `media` flags — a WS frame and the /active poll both carry them).
+     * On a voice call this draws the small preview card under the buttons
+     * instead of flipping the call to the video UI; a camera, by contrast,
+     * converts the call for both sides (the server re-labels it VIDEO).
+     */
+    var peerScreen by mutableStateOf(false)
+        private set
+
+    /** The preview card was tapped: the shared screen fills the display. */
+    var shareFull by mutableStateOf(false)
+        private set
+
+    fun openShareFullscreen() { if (peerScreen) shareFull = true }
+    fun exitShareFullscreen() { shareFull = false }
+
+    private fun resetPeerMedia() {
+        peerScreen = false
+        shareFull = false
+    }
+
+    /** Our own camera is live (not off, not replaced by a screen share). */
+    private val cameraLive: Boolean get() = videoTrack != null && !cameraOff && !sharing
+
+    /**
+     * Tell the server (and through it the other phone) what this side sends
+     * now. Camera on = the call becomes VIDEO on the row, so BOTH phones'
+     * polls, the ongoing notification and the call log agree; a screen share
+     * never changes the kind — an audio call with a shared screen is still an
+     * audio call. Fire-and-forget: the poll re-reads the flags either way.
+     */
+    private fun postMedia(camera: Boolean? = null, screen: Boolean? = null) {
+        val id = active?.id?.takeIf { it.isNotBlank() && !it.startsWith("pending") } ?: return
+        val body = JSONObject()
+        camera?.let { body.put("camera", it) }
+        screen?.let { body.put("screen", it) }
+        scope.launch {
+            withContext(Dispatchers.IO) { runCatching { Api.post("/api/calls/$id/media", body) } }
+        }
+    }
+
+    /**
+     * A `media` frame / poll entry about the OTHER side. `kind` is the server
+     * row's label (VIDEO once anyone's camera is on, never for a screen).
+     */
+    private fun applyPeerMedia(camera: Boolean, screen: Boolean, kind: String) {
+        val cur = active ?: return
+        if (peerScreen != screen) {
+            peerScreen = screen
+            if (!screen) {
+                shareFull = false
+                if (!camera) {
+                    // Their screen is gone and no camera replaced it: the
+                    // remote video is over. Forget the frame we saw (else a
+                    // stale "remote video seen" pulls the voice UI to the
+                    // video screen) and re-arm the gate after the last
+                    // in-flight frames have landed.
+                    hasRemote = false
+                    scope.launch {
+                        delay(1_500)
+                        if (!peerScreen && !hasRemote) rearmRemoteGate()
+                    }
+                }
+            }
+        }
+        when {
+            // Their camera came on: this side switches to the video-call UI
+            // too (own camera stays as it is — the strip's button turns it on).
+            kind == "VIDEO" && cur.kind != "VIDEO" -> {
+                active = cur.copy(kind = "VIDEO")
+                markVideoRoute()
+                publishChange()
+                if (camera) autoJoinCamera()
+            }
+            // The server says AUDIO (a screen share on a voice call) while a
+            // first frame already promoted this side: undo — only a camera
+            // converts, the screen gets the preview card.
+            kind == "AUDIO" && cur.kind == "VIDEO" && !cameraLive -> {
+                active = cur.copy(kind = "AUDIO")
+                publishChange()
+            }
+        }
+    }
+
+    /**
+     * TRUE audio→video conversion (R25, kept): the other side turned their
+     * camera on — join with ours too, otherwise they sit on "Waiting for
+     * video…" until we find the button. Camera off is one tap away.
+     */
+    private fun autoJoinCamera() {
+        if (!sharing && videoTrack == null && !cameraOff) {
+            markVideoRoute()
+            notify("Video call…")
+            toggleCamera()
+        }
+    }
+
+    private fun rearmRemoteGate() {
+        remoteVideo?.let { v ->
+            frameGate?.let { runCatching { v.removeSink(it) } }
+            frameGate = FirstFrameGate().also { runCatching { v.addSink(it) } }
+        }
+    }
+
     private var proximityLock: android.os.PowerManager.WakeLock? = null
 
     private fun updateProximityLock() {
@@ -337,6 +442,17 @@ class CallEngine(private val app: Application) {
                         // poll timer.
                         scope.launch { delay(1_200); pokeTick() }
                     }
+                    t == "media" && cid.isNotBlank() && cid == mine -> {
+                        // Socket callbacks arrive off the main thread; the
+                        // flags are Compose state, so hop over (scope = Main).
+                        if (ev.optString("userId") != Store.myId()) {
+                            val camera = ev.optBoolean("camera")
+                            val screen = ev.optBoolean("screen")
+                            val kind = ev.optString("kind")
+                            scope.launch { applyPeerMedia(camera, screen, kind) }
+                        }
+                        pokeTick()
+                    }
                     cid.isNotBlank() && cid == mine -> pokeTick()
                 }
             }
@@ -542,10 +658,23 @@ class CallEngine(private val app: Application) {
         }
         val suppressed = isIncomingSuppressed()
         val autoAnswer = incoming && status == "RINGING" && (pendingAccept || suppressed)
+        // Owner round 31 item 19: our camera just came on and the row has not
+        // been re-labelled yet (or the peer's camera frames arrived from an
+        // app that does not announce them) — keep VIDEO for that window
+        // instead of letting one poll bounce the screen back to the voice UI.
+        val sameCall = current?.id == next.optString("id")
+        val kind =
+            if (sameCall && current?.kind == "VIDEO" && next.optString("kind") != "VIDEO" &&
+                (cameraLive || (hasRemoteVideo && !peerScreen))
+            ) {
+                "VIDEO"
+            } else {
+                next.optString("kind")
+            }
         val ui =
             CallUi(
                 id = next.optString("id"),
-                kind = next.optString("kind"),
+                kind = kind,
                 status = status,
                 incoming = incoming,
                 otherName = other.optString("displayName").ifBlank { current?.otherName ?: "KuchuPuchu" },
@@ -587,6 +716,23 @@ class CallEngine(private val app: Application) {
             active = ui.copy(otherName = current.otherName, otherAvatar = current.otherAvatar)
         } else {
             active = ui
+        }
+        // The other side's live media flags ride the same row — the safety net
+        // for a `media` frame that arrived while this process was asleep.
+        next.optJSONObject("media")?.optJSONObject(ui.otherId)?.let { m ->
+            if (m.optBoolean("screen") != peerScreen) {
+                applyPeerMedia(m.optBoolean("camera"), m.optBoolean("screen"), next.optString("kind"))
+            }
+        }
+        // The row went VIDEO under us (their camera): speaker becomes the
+        // default, the ongoing notification and Telecom follow — and, as
+        // before (R25), our camera joins so they are not left waiting.
+        if (sameCall && current?.kind != "VIDEO" && ui.kind == "VIDEO" && status == "ACTIVE") {
+            markVideoRoute()
+            publishChange()
+            if (next.optJSONObject("media")?.optJSONObject(ui.otherId)?.optBoolean("camera") == true) {
+                autoJoinCamera()
+            }
         }
         // v3.7: hold the call's realtime signalling socket while it lives.
         if (!ui.id.startsWith("pending") && wsCallId != ui.id) {
@@ -671,6 +817,7 @@ class CallEngine(private val app: Application) {
         minimized = false
         left.set(false)
         hasRemote = false
+        resetPeerMedia()
         onHold = false
         // Fresh call, fresh relay-retry budget (see the ICE FAILED branch).
         relayRetryUsed = false
@@ -756,6 +903,7 @@ class CallEngine(private val app: Application) {
         // A stale true from a previous call would drop this side straight
         // onto the in-call screen instead of ringing.
         hasRemote = false
+        resetPeerMedia()
         val rec = active
         if (rec == null || rec.id.startsWith("pending")) {
             pendingAccept = true
@@ -948,6 +1096,9 @@ class CallEngine(private val app: Application) {
                 // tap, so the call "never converted" locally while the frames were
                 // already flowing to the peer.
                 publishChange()
+                // Owner round 31 item 19: the row becomes VIDEO server-side, so
+                // the other phone converts too (not just this one's memory).
+                postMedia(camera = true)
             }
             return
         }
@@ -958,6 +1109,7 @@ class CallEngine(private val app: Application) {
             markVideoRoute()
         }
         publishChange()
+        postMedia(camera = !cameraOff)
     }
 
     fun toggleShare() {
@@ -987,9 +1139,14 @@ class CallEngine(private val app: Application) {
                                     android.widget.Toast.LENGTH_LONG,
                                 ).show()
                                 MainActivity.current?.moveTaskToBack(true)
+                            } else {
+                                // Announced early, never started: take it back
+                                // or the other phone keeps an empty preview.
+                                postMedia(screen = false)
                             }
                         }
                         .onFailure {
+                        postMedia(screen = false)
                         // Named so the user's next report tells us exactly
                         // which stage broke (service/FGS/projection/capturer).
                         notify("Screen share failed (${it.javaClass.simpleName}). Please try again.")
@@ -999,9 +1156,18 @@ class CallEngine(private val app: Application) {
         }
     }
 
+    private var cameraBeforeShare = false
+    private var routeBeforeShare = AudioRoute.EARPIECE
+
     private suspend fun startShare(data: Intent) {
         // Owner round 21: his screen-share sound (plays when it really starts).
         runCatching { KpSounds.screenShare(app) }
+        // Owner round 31 item 19: announce BEFORE the first frame can leave, so
+        // the other phone knows this video is a screen (preview card on its
+        // voice UI) and not a camera (which would switch it to the video UI).
+        cameraBeforeShare = cameraLive
+        routeBeforeShare = audioRoute
+        postMedia(camera = false, screen = true)
         // Android 14+: the foreground service must re-declare the
         // mediaProjection type BEFORE getMediaProjection() is called, so
         // restart the service with share=true and wait for it to be ready.
@@ -1044,7 +1210,9 @@ class CallEngine(private val app: Application) {
         cameraOff = false
         localView?.setMirror(false)
         localView?.let { runCatching { track.addSink(it) } }
-        active = active?.copy(kind = "VIDEO")
+        // The call's KIND is not touched here (owner round 31 item 19): a
+        // shared screen on a voice call keeps the voice UI on both phones —
+        // the other side gets the preview card. Only a camera converts.
         markVideoRoute()
         // stopShare published and startShare did not, so a screen shared on a
         // voice call left the other phone on its voice screen — no renderer, no
@@ -1066,17 +1234,30 @@ class CallEngine(private val app: Application) {
         helper?.dispose()
         helper = null
         videoTrack = null
-        capture(true)
-        videoTrack?.let { track ->
-            val sender = pc?.senders?.find { it.track()?.kind() == "video" }
-                ?: pc?.transceivers
-                    ?.firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO }
-                    ?.sender
+        // Owner round 31 item 19: the camera comes back only if it was on
+        // before the share. On a voice call it was not — re-opening it here
+        // used to turn "stop sharing" into a video call nobody asked for.
+        capture(cameraBeforeShare)
+        val sender = pc?.senders?.find { it.track()?.kind() == "video" }
+            ?: pc?.transceivers
+                ?.firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO }
+                ?.sender
+        val track = videoTrack
+        if (track != null) {
             if (sender != null) sender.setTrack(track, true) else pc?.addTrack(track)
             localView?.setMirror(currentFacingFront)
             localView?.let { runCatching { track.addSink(it) } }
+        } else {
+            runCatching { sender?.setTrack(null, false) }
+            if (active?.kind != "VIDEO") {
+                // Still a voice call: the share moved the sound to the speaker
+                // (markVideoRoute); put it back where it was before the share.
+                AudioRouter.setVideoCall(false)
+                if (audioRoute != routeBeforeShare) selectAudioRoute(routeBeforeShare)
+            }
         }
         publishChange()
+        postMedia(camera = track != null, screen = false)
     }
 
     fun attachLocal(view: SurfaceViewRenderer) {
@@ -1158,6 +1339,7 @@ class CallEngine(private val app: Application) {
         sharing = false
         onHold = false
         hasRemote = false
+        resetPeerMedia()
         frameGate = null
         netFailStreak = 0
         outgoingRingAt = 0L
@@ -1570,24 +1752,26 @@ override fun onRenegotiationNeeded() {
             seen = true
             Handler(Looper.getMainLooper()).post {
                 hasRemote = true
-                // Remote video arrived on a call this side still labels AUDIO
-                // (the other phone shared its screen / turned the camera on):
-                // promote this side too, otherwise one phone shows the video
-                // screen and the other the voice screen for the same call.
-                if (active?.kind != "VIDEO") {
-                    active = active?.copy(kind = "VIDEO")
-                    publishChange()
-                    // TRUE audio→video conversion: the other side just turned
-                    // their camera on — join with OURS too, otherwise they sit
-                    // on "Waiting for video…" forever ("stuck" bug). They can
-                    // still tap the camera off if they don't want to send.
-                    if (!sharing && videoTrack == null && !cameraOff) {
-                        markVideoRoute()
-                        notify("Video call…")
-                        toggleCamera()
+                publishChange()
+                // Remote video arrived on a call this side still labels AUDIO.
+                // A phone on THIS build announces what it sends before the
+                // first frame leaves (the `media` route): a camera already
+                // re-labelled the row VIDEO, a screen never will — owner round
+                // 31 item 19: that one stays on the voice UI with the preview
+                // card. So this promotion is only the fallback for a peer that
+                // announces nothing (an older build), and it waits a moment
+                // for an announcement that may still be in flight; otherwise
+                // a shared screen could flip the voice call to video for the
+                // 300ms until the frame arrived, and take our camera with it.
+                if (active?.kind != "VIDEO" && !peerScreen) {
+                    scope.launch {
+                        delay(1_000)
+                        if (hasRemote && active?.kind != "VIDEO" && !peerScreen) {
+                            active = active?.copy(kind = "VIDEO")
+                            publishChange()
+                            autoJoinCamera()
+                        }
                     }
-                } else {
-                    publishChange()
                 }
             }
         }

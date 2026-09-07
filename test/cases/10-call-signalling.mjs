@@ -193,6 +193,94 @@ async function mk(withDo) {
   );
 }
 
+// ---- 2b. owner round 31 item 19: live media flags (camera converts, screen does not) ----
+{
+  const k = await mk(true);
+  const a = await k.reg("cs2ba@x.com", "cs2ba");
+  const b = await k.reg("cs2bb@x.com", "cs2bb");
+  const c = await k.reg("cs2bc@x.com", "cs2bc");
+  const created = await k.call(
+    "POST",
+    "/api/calls",
+    { userId: b.user.id, kind: "AUDIO", offerSdp: "o" },
+    a.token,
+  );
+  const callId = created.json.call.id;
+  await k.call("POST", `/api/calls/${callId}/answer`, { answerSdp: "a" }, b.token);
+  k.callFrames.length = 0;
+
+  const share = await k.call("POST", `/api/calls/${callId}/media`, { screen: true }, b.token);
+  check("media: screen share accepted", share.status === 200, String(share.status));
+  check(
+    "media: a screen share does NOT convert the call (kind stays AUDIO)",
+    share.json.kind === "AUDIO" && share.json.media?.[b.user.id]?.screen === true,
+    JSON.stringify(share.json),
+  );
+  const shareFrame = k.callFrames.find((f) => f.body.type === "media");
+  check(
+    "media: frame on the call room says who + screen + kind",
+    !!shareFrame &&
+      shareFrame.room === callId &&
+      shareFrame.body.userId === b.user.id &&
+      shareFrame.body.screen === true &&
+      shareFrame.body.camera === false &&
+      shareFrame.body.kind === "AUDIO",
+    shareFrame ? JSON.stringify(shareFrame.body) : "none",
+  );
+  const activeA = await k.call("GET", "/api/calls/active", undefined, a.token);
+  const rowA = activeA.json.items?.find((it) => it.id === callId);
+  check(
+    "media: /active carries the per-user flags for the poll safety net",
+    rowA && rowA.kind === "AUDIO" && rowA.media?.[b.user.id]?.screen === true,
+    rowA ? JSON.stringify(rowA.media) : "none",
+  );
+
+  const cam = await k.call("POST", `/api/calls/${callId}/media`, { camera: true }, a.token);
+  check(
+    "media: a camera converts the call — row kind becomes VIDEO for both sides",
+    cam.status === 200 && cam.json.kind === "VIDEO",
+    JSON.stringify(cam.json),
+  );
+  const camFrame = k.callFrames.filter((f) => f.body.type === "media").pop();
+  check(
+    "media: the frame carries kind VIDEO + camera true (peer switches to the video UI)",
+    camFrame &&
+      camFrame.body.userId === a.user.id &&
+      camFrame.body.camera === true &&
+      camFrame.body.kind === "VIDEO",
+  );
+  const activeB = await k.call("GET", "/api/calls/active", undefined, b.token);
+  const rowB = activeB.json.items?.find((it) => it.id === callId);
+  check(
+    "media: the other phone's poll now sees VIDEO + both users' flags",
+    rowB &&
+      rowB.kind === "VIDEO" &&
+      rowB.media?.[a.user.id]?.camera === true &&
+      rowB.media?.[b.user.id]?.screen === true,
+    rowB ? JSON.stringify(rowB) : "none",
+  );
+
+  const stop = await k.call("POST", `/api/calls/${callId}/media`, { screen: false }, b.token);
+  check(
+    "media: stopping the share clears only that flag; VIDEO stays (the camera is still on)",
+    stop.json.kind === "VIDEO" && stop.json.media?.[b.user.id]?.screen === false,
+  );
+
+  const outsider = await k.call("POST", `/api/calls/${callId}/media`, { camera: true }, c.token);
+  check("media: a third user is refused", outsider.status === 403, String(outsider.status));
+  const missing = await k.call("POST", `/api/calls/nope/media`, { camera: true }, a.token);
+  check("media: unknown call is 404", missing.status === 404, String(missing.status));
+
+  await k.call("POST", `/api/calls/${callId}/end`, {}, a.token);
+  const history = await k.call("GET", "/api/calls/history", undefined, a.token);
+  const historyRow = history.json.items?.find((item) => item.id === callId);
+  check(
+    "media: history strips the live flags, and logs the call as VIDEO",
+    historyRow && !("media" in historyRow) && historyRow.kind === "VIDEO",
+    historyRow ? JSON.stringify(historyRow) : "none",
+  );
+}
+
 // ---- 3. /ws/call/:id — participants only ----
 {
   const k = await mk(true);

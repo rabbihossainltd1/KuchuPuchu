@@ -2679,6 +2679,47 @@ const convBetween = (db, a, b) =>
         ),
     );
 
+    check(
+      "r31-19: audio call — a camera converts the call for BOTH sides through the server row (POST /media, kind→VIDEO); a screen share never converts: the peer's voice UI draws a small preview card under the buttons, tap = fullscreen with system back / Exit fullscreen; stop-share does not re-open a camera that was off",
+      kt("CallEngine.kt").includes("var peerScreen by mutableStateOf(false)") &&
+        kt("CallEngine.kt").includes("var shareFull by mutableStateOf(false)") &&
+        kt("CallEngine.kt").includes(
+          "private fun postMedia(camera: Boolean? = null, screen: Boolean? = null) {",
+        ) &&
+        kt("CallEngine.kt").includes('Api.post("/api/calls/$id/media", body)') &&
+        kt("CallEngine.kt").includes(
+          "private fun applyPeerMedia(camera: Boolean, screen: Boolean, kind: String) {",
+        ) &&
+        kt("CallEngine.kt").includes('t == "media" && cid.isNotBlank() && cid == mine -> {') &&
+        kt("CallEngine.kt").includes("postMedia(camera = false, screen = true)") &&
+        kt("CallEngine.kt").includes("capture(cameraBeforeShare)") &&
+        kt("CallEngine.kt").includes("postMedia(camera = track != null, screen = false)") &&
+        kt("CallEngine.kt").includes('if (active?.kind != "VIDEO" && !peerScreen) {') &&
+        // startShare no longer flips the kind (only toggleCamera / the peer's camera do)
+        !kt("CallEngine.kt").includes(
+          'localView?.let { runCatching { track.addSink(it) } }\n        active = active?.copy(kind = "VIDEO")',
+        ) &&
+        kt("CallScreens.kt").includes(
+          "connected && engine.shareFull && engine.peerScreen -> ShareFullscreen(call)",
+        ) &&
+        kt("CallScreens.kt").includes(
+          'if (call.kind == "VIDEO") InCallVideoScreen(call) else VoiceCallScreen(call)',
+        ) &&
+        kt("CallScreens.kt").includes("if (engine.peerScreen) {") &&
+        kt("CallScreens.kt").includes(".clickable { engine.openShareFullscreen() },") &&
+        kt("CallScreens.kt").includes("private fun ShareFullscreen(call: CallUi) {") &&
+        kt("CallScreens.kt").includes(
+          "androidx.activity.compose.BackHandler { engine.exitShareFullscreen() }",
+        ) &&
+        kt("CallScreens.kt").includes('Icon(Icons.Filled.FullscreenExit, "Exit fullscreen"') &&
+        readFileSync("src/worker/index.ts", "utf8").includes(
+          "const mediaMatch = path.match(/^\\/api\\/calls\\/([^/]+)\\/media$/);",
+        ) &&
+        readFileSync("src/worker/index.ts", "utf8").includes(
+          'const kind = mine.camera === true ? "VIDEO" : row.kind;',
+        ),
+    );
+
     // Every cream / warm-white literal outside Theme.kt and the login screen
     // (which the owner excluded from theme work) must be gone from the
     // screens: dark-blue may not paint any light-cream colour.
