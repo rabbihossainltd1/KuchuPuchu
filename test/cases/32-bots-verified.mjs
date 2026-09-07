@@ -3568,6 +3568,38 @@ const convBetween = (db, a, b) =>
       );
     }
 
+    // r31-28: attach panel — swiping up only grows the panel (the folder
+    // chips no longer auto-open; the chevron is the one way in), the bigger
+    // page follows the panel size, and the numbered selection badge is the
+    // action accent (blue in dark-blue, gold in light) — no fixed amber disc.
+    {
+      const at = kt("AttachSheet.kt");
+      const setFs = at.slice(
+        at.indexOf("fun setFullscreen(value: Boolean) {"),
+        at.indexOf("val dragTotal = remember"),
+      );
+      check(
+        "r31-28: swipe-up / handle tap never opens the folder chips — setFullscreen only ever CLOSES them (on shrink); the chevron toggles foldersOpen on its own",
+        setFs.includes("fullscreen = value") &&
+          !setFs.includes("foldersOpen = value") &&
+          setFs.includes(
+            "if (!value) {\n            foldersOpen = false\n            folder = null\n        }",
+          ) &&
+          at.includes("foldersOpen = !foldersOpen") &&
+          at.includes("!fullscreen && !foldersOpen -> pool.take(24)") &&
+          !at.includes("Swiping up IS the expand"),
+      );
+      check(
+        "r31-28: the selected-photo count badge is ActionBlue/ActionBlueInk with a white rim — no Gold disc, no fixed near-black ink on the panel's empty states",
+        at.includes(
+          ".background(ActionBlue)\n                    .border(1.5.dp, Color.White, CircleShape),",
+        ) &&
+          at.includes("color = ActionBlueInk,") &&
+          !at.includes(".background(Gold)") &&
+          !at.includes("Color(0x801C1917)"),
+      );
+    }
+
     // Every cream / warm-white literal outside Theme.kt and the login screen
     // (which the owner excluded from theme work) must be gone from the
     // screens: dark-blue may not paint any light-cream colour.

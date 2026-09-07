@@ -130,21 +130,21 @@ fun AttachPanel(
     var fullscreen by remember { mutableStateOf(false) }
     var foldersOpen by remember { mutableStateOf(false) }
     var folder by remember { mutableStateOf<String?>(null) }
-    // Swiping up IS the expand: fullscreen automatically reveals the folder
-    // chips (Camera / Screenshots / Download…) — no chevron tap needed.
-    // All three flags are set TOGETHER, synchronously, from one place —
-    // they used to be linked only via a LaunchedEffect(fullscreen), which
-    // runs a frame AFTER the state change instead of atomically with it.
-    // That gap was the "swipe down doesn't go back to normal until you
-    // manually shrink folders first" bug: if the chevron had opened/closed
-    // folders independently, swiping down flipped `fullscreen` immediately
-    // but `foldersOpen` only caught up on the NEXT frame, so the panel
-    // briefly (or visibly) rendered the wrong layout instead of always
-    // collapsing folders in the same beat as the panel shrinking.
+    // Owner round 31 (item 28): swiping up ONLY grows the panel — the folder
+    // chips (Camera / Screenshots / Download…) no longer pop open by
+    // themselves ("swipe up korle folder/recent auto expand hoy"); the
+    // chevron next to "Recent" is the one way to open them, like WhatsApp.
+    // Shrinking still folds the chips in the same beat, synchronously —
+    // the flags used to be linked via a LaunchedEffect(fullscreen), which
+    // runs a frame AFTER the state change, and that gap was the "swipe
+    // down doesn't go back to normal until you manually shrink folders
+    // first" bug.
     fun setFullscreen(value: Boolean) {
         fullscreen = value
-        foldersOpen = value
-        if (!value) folder = null
+        if (!value) {
+            foldersOpen = false
+            folder = null
+        }
     }
     val dragTotal = remember { mutableStateOf(0f) }
     // Actively dragging: track height directly (dragTotal), no animation
@@ -256,9 +256,12 @@ fun AttachPanel(
                 .map { (name, items) -> Triple(name, items.size, items.maxOf { it.added }) }
                 .sortedByDescending { it.third }
         }
+    // Owner round 31 (item 28): the bigger page follows the PANEL size, not
+    // the chips — a fullscreen grid with the chips closed still scrolls
+    // through the recent pool instead of stopping at the compact 24.
     val shown =
         when {
-            !foldersOpen -> pool.take(24)
+            !fullscreen && !foldersOpen -> pool.take(24)
             folder == null -> pool.take(80)
             else -> pool.filter { it.bucket == folder }.take(80)
         }
@@ -323,7 +326,7 @@ fun AttachPanel(
             .background(Cream),
     ) {
         /* drag handle — tap OR swipe up = fullscreen; swipe down = back.
-           This is the ONLY fullscreen trigger, like WhatsApp. */
+           (The grid's own swipe-up does the same; see gridScroll.) */
         Box(
             Modifier
                 .fillMaxWidth()
@@ -416,7 +419,7 @@ fun AttachPanel(
         if (!canRead) {
             Text(
                 "Gallery permission is off — other actions still work. Allow it to see recent photos.",
-                color = Color(0x801C1917),
+                color = Muted, // Owner round 31: theme token (the fixed ink vanished in dark-blue)
                 fontSize = 12.sp,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             )
@@ -517,7 +520,7 @@ fun AttachPanel(
         if (shown.isEmpty()) {
             Text(
                 if (foldersOpen) "This folder is empty — try another folder" else "No recent media",
-                color = Color(0x801C1917),
+                color = Muted, // Owner round 31: theme token (the fixed ink vanished in dark-blue)
                 fontSize = 13.sp,
                 modifier = Modifier
                     .padding(vertical = 14.dp)
@@ -682,7 +685,10 @@ private fun MediaCell(
             )
         }
         /* selection badge — appears ONLY once the item is tapped;
-           unselected cells stay clean (no checkbox clutter) */
+           unselected cells stay clean (no checkbox clutter).
+           Owner round 31 (item 28): the action accent — blue in dark-blue,
+           the classic gold in light-cream — instead of a fixed amber disc
+           ("count badge er background cream-light"). */
         if (selected) {
             Box(
                 Modifier
@@ -690,12 +696,13 @@ private fun MediaCell(
                     .padding(5.dp)
                     .size(22.dp)
                     .clip(CircleShape)
-                    .background(Gold),
+                    .background(ActionBlue)
+                    .border(1.5.dp, Color.White, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     "$selectIndex",
-                    color = Color(0xFFFFFFFF),
+                    color = ActionBlueInk,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                 )
