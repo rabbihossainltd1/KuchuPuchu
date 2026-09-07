@@ -44,6 +44,12 @@ object KpNotify {
     // the bell icon — every message still rang on the loud channel above.
     private const val SILENT_CHANNEL = "kp_silent_v1"
     private const val CALL_CHANNEL = "kp_calls_v5"
+    // Owner round 31 (item 24): missed-call cards used to ride the incoming-
+    // call channel above, which RINGS (alarm stream, DND bypass, ring
+    // vibration) — a missed call sounded like a second call and on several
+    // ROMs got swept with the ring cards. Its own channel: normal notification
+    // sound, no DND bypass. The worker's payload fallback names the same id.
+    private const val MISSED_CHANNEL = "kp_missed_v1"
     private const val GROUP = "kp_chats"
 
     fun ensureChannels(ctx: Context) {
@@ -105,6 +111,20 @@ object KpNotify {
                     enableVibration(true)
                     vibrationPattern = longArrayOf(0, 500, 400, 500)
                     setBypassDnd(true)
+                    lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+                },
+        )
+        mgr.createNotificationChannel(
+            NotificationChannel(MISSED_CHANNEL, "Missed calls", NotificationManager.IMPORTANCE_HIGH)
+                .apply {
+                    description = "Missed call alerts"
+                    setSound(
+                        android.net.Uri.parse(
+                            "android.resource://" + ctx.packageName + "/" + SoundPrefs.notificationRingRes(ctx),
+                        ),
+                        attrs,
+                    )
+                    enableVibration(true)
                     lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
                 },
         )
@@ -366,16 +386,23 @@ object KpNotify {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
         val n =
-            NotificationCompat.Builder(ctx, CALL_CHANNEL)
+            NotificationCompat.Builder(ctx, MISSED_CHANNEL)
                 .setSmallIcon(R.mipmap.ic_stat_kp)
+                .setLargeIcon(roundLogo(ctx))
                 .setContentTitle("Missed call · $from")
                 .setContentText(if (video) "Missed video call" else "Missed voice call")
                 .setAutoCancel(true)
+                .setWhen(System.currentTimeMillis())
+                .setShowWhen(true)
                 .setContentIntent(message)
                 .addAction(0, "Call back", callBack)
                 .addAction(0, "Message", message)
-                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                // Owner round 31 (item 24): HIGH = a heads-up like a message
+                // card; DEFAULT sat silently in the shade (pre-26 the priority
+                // is what decides, 26+ the channel importance above does).
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_MISSED_CALL)
+                .apply { if (Build.VERSION.SDK_INT < 26) setSound(defaultSound()) }
                 .build()
         runCatching { NotificationManagerCompat.from(ctx).notify(("missed$otherId").hashCode(), n) }
     }

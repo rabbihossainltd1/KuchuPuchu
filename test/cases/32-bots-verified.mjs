@@ -2897,6 +2897,196 @@ const convBetween = (db, a, b) =>
       );
     }
 
+    // Owner round 31 item 24: a caller who hangs up on an unanswered ring
+    // used to end the call as a plain ENDED row — no missed-call push, no
+    // "Missed voice call" bubble, no red history row for the callee. Real
+    // worker, FCM captured through a global-fetch intercept.
+    {
+      const { generateKeyPairSync } = await import("node:crypto");
+      const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+      const worker = await freshWorker();
+      const db = makeD1();
+      const sent = [];
+      const pokes = [];
+      const env = {
+        DB: db,
+        MEDIA: makeR2(),
+        GOOGLE_WEB_CLIENT_ID: "kp-test-web-client",
+        FCM_CREDENTIALS: JSON.stringify({
+          project_id: "kp-test-proj",
+          client_email: "svc@kp-test-proj.iam.gserviceaccount.com",
+          private_key: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+          token_uri: "https://oauth2.googleapis.com/token",
+        }),
+        // Callee swiped away: no live socket → the guaranteed payload branch.
+        CHAT_ROOM: {
+          idFromName: (name) => ({ toString: () => name, name }),
+          get: (id) => ({
+            fetch: async (_u, init) => {
+              pokes.push({ room: id.name, body: JSON.parse(init.body) });
+              return new Response(JSON.stringify({ ok: true, sent: 0 }), { status: 200 });
+            },
+          }),
+        },
+        CALL_SIGNAL: {
+          idFromName: (name) => ({ toString: () => name, name }),
+          get: () => ({
+            fetch: async () => new Response(JSON.stringify({ ok: true, sent: 0 }), { status: 200 }),
+          }),
+        },
+      };
+      const realFetch = globalThis.fetch;
+      globalThis.fetch = async (input, init) => {
+        const url = typeof input === "string" ? input : input.url;
+        if (url.includes("oauth2.googleapis.com/token") && !url.includes("tokeninfo")) {
+          return new Response(JSON.stringify({ access_token: "fake-at", expires_in: 3600 }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (url.includes("fcm.googleapis.com/v1/projects")) {
+          sent.push(JSON.parse(init.body));
+          return new Response(JSON.stringify({ name: "projects/1/messages/1" }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return realFetch(input, init);
+      };
+      try {
+        const ctx = makeCtx();
+        let ipSeq = 0;
+        const call = async (method, path, body, token) => {
+          const headers = { "content-type": "application/json" };
+          if (path.startsWith("/api/auth/"))
+            headers["cf-connecting-ip"] =
+              `203.24.${Math.floor(ipSeq / 250)}.${(ipSeq++ % 250) + 1}`;
+          if (token) headers.authorization = `Bearer ${token}`;
+          const init = { method, headers };
+          if (body !== undefined && method !== "GET") init.body = JSON.stringify(body);
+          const res = await worker.fetch(new Request(`https://kp.test${path}`, init), env, ctx);
+          const t = await res.text();
+          await ctx.drain();
+          let j = {};
+          try {
+            j = t ? JSON.parse(t) : {};
+          } catch {
+            j = { _raw: t.slice(0, 80) };
+          }
+          return { status: res.status, json: j };
+        };
+        const reg = makeReg(call);
+        const caller = await reg("mc-a@x.com", "mca");
+        const callee = await reg("mc-b@x.com", "mcb");
+        await call("POST", "/api/devices", { token: "fcm-device-token-mcb" }, callee.token);
+        const age = (id, ms) =>
+          db._db
+            .prepare("UPDATE calls SET created_at = ? WHERE id = ?")
+            .run(new Date(Date.now() - ms).toISOString(), id);
+        const place = async () => {
+          const r = await call(
+            "POST",
+            "/api/calls",
+            { userId: callee.user.id, kind: "AUDIO", offerSdp: "v=0" },
+            caller.token,
+          );
+          return r.json.call?.id ?? r.json.id;
+        };
+        // (a) caller gives up after the ring has been on the callee's screen
+        const c1 = await place();
+        age(c1, 8_000);
+        sent.length = 0;
+        await call("POST", `/api/calls/${c1}/end`, {}, caller.token);
+        const row1 = db._db.prepare("SELECT status FROM calls WHERE id = ?").get(c1);
+        const push1 = sent.find((m) => m.message?.android?.data?.type === "missed_call");
+        const log1 = db._db
+          .prepare(
+            "SELECT body, meta_json FROM messages WHERE conv_id = ? AND kind = 'CALL' ORDER BY rowid DESC",
+          )
+          .get(`c_${[caller.user.id, callee.user.id].sort().join("_")}`);
+        const histB = await call("GET", "/api/calls/history", undefined, callee.token);
+        check(
+          "r31-24: caller hangs up on an unanswered ring → the row is MISSED (not ENDED), the callee gets the missed_call push with Call back / Message deep links on the dedicated missed-call channel, a 'Missed voice call' bubble lands, and the callee's history shows it as missed",
+          row1?.status === "MISSED" &&
+            !!push1 &&
+            push1.message.android.data.callId === c1 &&
+            push1.message.android.data.kp_callback === caller.user.id &&
+            !!push1.message.android.data.kp_chat &&
+            push1.message.android.notification?.channel_id === "kp_missed_v1" &&
+            push1.message.android.notification?.body === "Missed voice call" &&
+            log1?.body === "Missed voice call" &&
+            JSON.parse(log1?.meta_json ?? "{}").status === "MISSED" &&
+            histB.json.items?.find((c) => c.id === c1)?.status === "MISSED",
+          JSON.stringify({ row: row1, push: push1?.message?.android, log: log1 }).slice(0, 400),
+        );
+        // (b) cut inside the anti-phantom window: the callee never saw it → quiet ENDED
+        const c2 = await place();
+        sent.length = 0;
+        await call("POST", `/api/calls/${c2}/end`, {}, caller.token);
+        const row2 = db._db.prepare("SELECT status FROM calls WHERE id = ?").get(c2);
+        check(
+          "r31-24: a ring cut inside the 1.6 s anti-phantom window (never reached the callee) still ends quietly — no MISSED row, no push",
+          row2?.status === "ENDED" &&
+            !sent.some((m) => m.message?.android?.data?.type === "missed_call"),
+          JSON.stringify({ row: row2, sends: sent.length }),
+        );
+        // (c) the callee's own decline is still a DECLINED row, never a missed call
+        const c3 = await place();
+        age(c3, 8_000);
+        sent.length = 0;
+        await call("POST", `/api/calls/${c3}/decline`, {}, callee.token);
+        const row3 = db._db.prepare("SELECT status FROM calls WHERE id = ?").get(c3);
+        check(
+          "r31-24: the callee declining stays DECLINED (no missed-call push to themself); an answered call ending is still ENDED",
+          row3?.status === "DECLINED" &&
+            !sent.some((m) => m.message?.android?.data?.type === "missed_call") &&
+            (await (async () => {
+              const c4 = await place();
+              age(c4, 8_000);
+              await call("POST", `/api/calls/${c4}/answer`, { answerSdp: "v=0 a" }, callee.token);
+              await call("POST", `/api/calls/${c4}/end`, {}, caller.token);
+              return (
+                db._db.prepare("SELECT status FROM calls WHERE id = ?").get(c4)?.status === "ENDED"
+              );
+            })()),
+          JSON.stringify({ row: row3, sends: sent.length }),
+        );
+        check(
+          "r31-24: the stale-ring reaper and the caller hang-up share ONE missed-call sender (notifyMissedCall) — the missed-call channel id matches the app's",
+          (
+            readFileSync("src/worker/index.ts", "utf8").match(
+              /notifyMissedCall\(env, db, row\)/g,
+            ) || []
+          ).length === 2 &&
+            readFileSync("src/worker/index.ts", "utf8").includes(
+              'const MISSED_CALL_CHANNEL = "kp_missed_v1";',
+            ) &&
+            kt("KpNotify.kt").includes('private const val MISSED_CHANNEL = "kp_missed_v1"') &&
+            kt("KpNotify.kt").includes(
+              'NotificationChannel(MISSED_CHANNEL, "Missed calls", NotificationManager.IMPORTANCE_HIGH)',
+            ) &&
+            kt("KpNotify.kt").includes("NotificationCompat.Builder(ctx, MISSED_CHANNEL)") &&
+            kt("KpNotify.kt").includes(".setCategory(NotificationCompat.CATEGORY_MISSED_CALL)"),
+        );
+        const mh = kt("KpPush.kt");
+        const handler = mh.slice(
+          mh.indexOf("private fun handleMissedCall(data: Map<String, String>) {"),
+          mh.indexOf("private fun handleCallAnswer("),
+        );
+        check(
+          "r31-24: the app posts the missed-call card in the foreground too (only the live ring/call screen for that call is exempt) and retracts the stuck ring card first",
+          !handler.includes("if (Store.foreground) {\n            return") &&
+            handler.includes("val onCallScreen =") &&
+            handler.includes("if (onCallScreen) {") &&
+            handler.includes("CallNotify.cancelIncoming(this)") &&
+            handler.includes("KpNotify.missedCall(") &&
+            handler.includes("ScreenStore.pokeInbox()"),
+        );
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+    }
+
     // Every cream / warm-white literal outside Theme.kt and the login screen
     // (which the owner excluded from theme work) must be gone from the
     // screens: dark-blue may not paint any light-cream colour.

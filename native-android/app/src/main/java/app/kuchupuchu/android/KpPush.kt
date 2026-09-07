@@ -288,11 +288,19 @@ class KpPushService : FirebaseMessagingService() {
      */
     /** Missed-call alert with Call back / Message actions (app alive). */
     private fun handleMissedCall(data: Map<String, String>) {
-        // Foreground: the incoming-call ring UI already showed this call, so a
-        // redundant "missed call" banner is noise — skip it. It only fires in
-        // background (process alive), where the rich Call back / Message action
-        // card is the desired behaviour.
-        if (Store.foreground) {
+        // Owner round 31 (item 24): the card is posted in the FOREGROUND too.
+        // "The ring UI already showed the call" only held while the user was
+        // looking at the phone — a ring that ended while they were on another
+        // screen (or the caller gave up while the callee was mid-tap) left no
+        // trace anywhere except the chat bubble. Only the call screen itself
+        // is exempt: a ring still on screen for THIS call is retracted by the
+        // engine's own sync, and a ring UI for this call is what the user is
+        // looking at. The call list / chat list refresh through the "conv" poke.
+        val callId = data["callId"].orEmpty()
+        val onCallScreen =
+            Store.foreground && CallEngine.instance?.active?.let { it.id == callId || it.status == "RINGING" } == true
+        ScreenStore.pokeInbox()
+        if (onCallScreen) {
             return
         }
         // Retract the stuck "incoming / X is calling" card for THIS call before

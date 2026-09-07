@@ -94,6 +94,12 @@ function fail(status: number, message: string, code?: string, retryAfter?: strin
 const nowIso = () => new Date().toISOString();
 const id = () => crypto.randomUUID();
 const pairId = (a: string, b: string) => (a < b ? `c_${a}_${b}` : `c_${b}_${a}`);
+/** Anti-phantom grace: a RINGING call younger than this never reached the
+ *  callee's screen (hidden from /active, the push waits it out), so a caller
+ *  who hangs up inside it did not leave a missed call behind. */
+const PHANTOM_RING_MS = 1_600;
+/** Android channel for missed-call cards (KpNotify.MISSED_CHANNEL). */
+const MISSED_CALL_CHANNEL = "kp_missed_v1";
 
 function bytesToHex(bytes: Uint8Array) {
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -2919,53 +2925,58 @@ async function reapStaleCalls(env: Env, db: D1Database, ctx: ExecutionContext): 
     if (changed > 0) {
       reaped++;
       await logCallEvent(db, row.caller_id, row.callee_id, row.kind, "MISSED");
-      // Missed-call push to the callee with Call back / Message deep links.
-      const caller = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row.caller_id);
-      const video = row.kind === "VIDEO";
-      ctx.waitUntil(
-        (async () => {
-          // Same rule as the message path (recipientAlert):
-          //   - NO live socket (swiped-away / killed / frozen) => system
-          //     notification payload (guaranteed card). A high-priority
-          //     data-only missed-call message is NOT delivered on MIUI &
-          //     similar once the process is gone — the user's exact report
-          //     ("background swipe — missed call no notification"). The system
-          //     card has no actions on a dead process, but silence is worse.
-          //   - Live socket (process alive, background) => DATA-ONLY so
-          //     onMessageReceived draws our OWN rich card (Call back / Message).
-          const live = await pokeUserConversation(
-            env,
-            row.callee_id,
-            pairId(row.caller_id, row.callee_id),
-            nowIso(),
-          );
-          const note =
-            live <= 0
-              ? {
-                  title: `Missed call · ${caller?.display_name ?? "KuchuPuchu"}`,
-                  body: video ? "📹 Missed video call" : "📞 Missed voice call",
-                  channel: "kp_calls_v5",
-                }
-              : undefined;
-          await pushToUser(
-            env,
-            db,
-            row.callee_id,
-            {
-              type: "missed_call",
-              callId: row.id,
-              kind: row.kind,
-              fromName: caller?.display_name ?? "KuchuPuchu",
-              kp_callback: row.caller_id,
-              kp_chat: pairId(row.caller_id, row.callee_id),
-            },
-            note,
-          );
-        })(),
-      );
+      ctx.waitUntil(notifyMissedCall(env, db, row));
     }
   }
   return reaped;
+}
+
+/**
+ * Missed-call push to the callee (Call back / Message deep links). Shared by
+ * the stale-ring reaper and — owner round 31 item 24 — the caller's own
+ * hang-up on an unanswered ring, which used to end the row as a plain ENDED
+ * call: no push, no "Missed voice call" bubble, no red row in the callee's
+ * call history, i.e. the common "missed call notification ashe na" case.
+ *
+ * Delivery rule (same as messages):
+ *   - NO live socket (swiped-away / killed / frozen) => system notification
+ *     payload (guaranteed card). A high-priority data-only missed-call
+ *     message is NOT delivered on MIUI & similar once the process is gone;
+ *     the system card has no actions on a dead process, but silence is worse.
+ *   - Live socket (process alive, background) => DATA-ONLY so
+ *     onMessageReceived draws our OWN rich card (Call back / Message).
+ * The payload rides the app's dedicated missed-call channel — the incoming-
+ * call channel it used before RINGS (alarm stream, DND bypass), so a missed
+ * call card sounded like a second call.
+ */
+async function notifyMissedCall(
+  env: Env,
+  db: D1Database,
+  row: { id: string; caller_id: string; callee_id: string; kind: string },
+) {
+  const caller = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row.caller_id);
+  const name = caller?.display_name ?? "KuchuPuchu";
+  const body = row.kind === "VIDEO" ? "Missed video call" : "Missed voice call";
+  const live = await pokeUserConversation(
+    env,
+    row.callee_id,
+    pairId(row.caller_id, row.callee_id),
+    nowIso(),
+  );
+  await pushToUser(
+    env,
+    db,
+    row.callee_id,
+    {
+      type: "missed_call",
+      callId: row.id,
+      kind: row.kind,
+      fromName: name,
+      kp_callback: row.caller_id,
+      kp_chat: pairId(row.caller_id, row.callee_id),
+    },
+    live <= 0 ? { title: `Missed call · ${name}`, body, channel: MISSED_CALL_CHANNEL } : undefined,
+  );
 }
 
 /* ---------------- system messages + call log ---------------- */
@@ -6554,7 +6565,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       if (
         row.status === "RINGING" &&
         row.callee_id === uid &&
-        Date.now() - Date.parse(row.created_at) < 1_600
+        Date.now() - Date.parse(row.created_at) < PHANTOM_RING_MS
       ) {
         continue;
       }
@@ -6653,16 +6664,36 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             -1000,
         ),
       );
+      // Owner round 31 (item 24): the CALLER hanging up on a still-ringing
+      // call is a MISSED call for the callee — the same outcome as the 60 s
+      // reaper, just sooner. It used to land as ENDED: no missed-call push, no
+      // "Missed voice call" bubble, a plain "Voice call" row in the callee's
+      // history — the everyday "missed call notification ashe na". A ring cut
+      // inside the anti-phantom window never showed on the callee's phone, so
+      // that one still ends quietly. The callee ending its own ring goes
+      // through /decline (Telecom + engine), so /end from the callee stays ENDED.
+      const gaveUp =
+        row.status === "RINGING" &&
+        row.caller_id === uid &&
+        Date.now() - Date.parse(row.created_at) >= PHANTOM_RING_MS;
+      const nextStatus = gaveUp ? "MISSED" : "ENDED";
       // Guarded on the current status so two clients ending at once cannot both
       // write an "ENDED" call-log bubble.
       const changed = await run(
         db,
-        "UPDATE calls SET status = 'ENDED', ended_at = ? WHERE id = ? AND status IN ('ACTIVE','RINGING')",
+        "UPDATE calls SET status = ?, ended_at = ? WHERE id = ? AND status IN ('ACTIVE','RINGING')",
+        nextStatus,
         nowIso(),
         callId,
       );
       if (changed > 0) {
-        ctx.waitUntil(broadcastCallEvent(env, callId, { type: "call", callId, status: "ENDED" }));
+        ctx.waitUntil(
+          broadcastCallEvent(env, callId, { type: "call", callId, status: nextStatus }),
+        );
+      }
+      if (changed > 0 && nextStatus === "MISSED") {
+        await logCallEvent(db, row.caller_id, row.callee_id, row.kind, "MISSED");
+        ctx.waitUntil(notifyMissedCall(env, db, row));
       }
       if (changed > 0 && row.started_at) {
         await logCallEvent(db, row.caller_id, row.callee_id, row.kind, "ENDED", seconds);
