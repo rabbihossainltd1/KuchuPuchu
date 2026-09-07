@@ -1,6 +1,8 @@
 package app.kuchupuchu.android
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioPlaybackCaptureConfiguration
@@ -103,6 +105,10 @@ object SystemAudioTap {
     fun start(ctx: Context, projection: MediaProjection) {
         if (!supported || !isEnabled(ctx) || session.get() != null) return
         if (Build.VERSION.SDK_INT < 29) return
+        // Playback capture is an AudioRecord, so it needs the microphone
+        // permission like any recorder; a call is already holding it, but
+        // the check keeps this safe (and lint honest) if it ever runs without.
+        if (ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
         val config =
             AudioPlaybackCaptureConfiguration.Builder(projection)
                 .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
