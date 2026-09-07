@@ -5652,6 +5652,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             size: Number(body.fileSize || 0),
             voice: incomingMeta.voice === true,
             seconds: Math.max(0, Math.min(600, Number(incomingMeta.seconds || 0))),
+            // Owner round 31 (item 16): picked through "Document" — render as
+            // a file row even when the bytes are a photo / video / audio.
+            ...(incomingMeta.document === true ? { document: true } : {}),
           }
         : {}),
       ...(Object.keys(dims).length ? dims : {}),
@@ -6824,10 +6827,12 @@ function msgFrom(row: MsgRow) {
     voice?: boolean;
     seconds?: number;
     edited?: boolean;
+    document?: boolean;
     w?: number;
     h?: number;
   }>(row.meta_json, {});
-  const imageFile = row.kind === "FILE" && String(meta.type || "").startsWith("image/");
+  const imageFile =
+    row.kind === "FILE" && String(meta.type || "").startsWith("image/") && meta.document !== true;
   return {
     id: row.id,
     senderId: row.sender_id,

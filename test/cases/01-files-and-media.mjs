@@ -283,6 +283,69 @@ async function mk() {
   );
 }
 
+// ============ 7b. r31-16: a photo picked through "Document" stays a document =
+{
+  const { call, reg } = await mk();
+  const A = await reg("da@x.com", "da");
+  const B = await reg("db@x.com", "db");
+  const up = await call("POST", "/api/files?name=scan.jpg&type=image/jpeg", undefined, A.token, {
+    headers: { "content-type": "application/octet-stream" },
+    body: Buffer.from("jpegbytes!"),
+  });
+  const conv = await call("POST", "/api/conversations", { userId: B.user.id }, A.token);
+  const cid = conv.json.conversation.id;
+  const doc = await call(
+    "POST",
+    `/api/conversations/${cid}/messages`,
+    {
+      kind: "FILE",
+      fileKey: up.json.fileKey,
+      fileName: "scan.jpg",
+      fileType: "image/jpeg",
+      fileSize: 10,
+      clientId: "d1",
+      meta: { document: true },
+    },
+    A.token,
+  );
+  check(
+    "meta.document=true → NOT an image message (hasImage false, meta.document echoed)",
+    doc.status === 201 &&
+      doc.json.message.hasImage === false &&
+      doc.json.message.meta?.document === true &&
+      doc.json.message.fileName === "scan.jpg",
+    JSON.stringify(doc.json.message),
+  );
+  const plain = await call(
+    "POST",
+    `/api/conversations/${cid}/messages`,
+    {
+      kind: "FILE",
+      fileKey: up.json.fileKey,
+      fileName: "scan.jpg",
+      fileType: "image/jpeg",
+      fileSize: 10,
+      clientId: "d2",
+      meta: { document: "yes" },
+    },
+    A.token,
+  );
+  check(
+    "anything but boolean true is ignored (photo path unchanged)",
+    plain.status === 201 &&
+      plain.json.message.hasImage === true &&
+      plain.json.message.meta?.document === undefined,
+    JSON.stringify(plain.json.message?.meta),
+  );
+  const list = await call("GET", "/api/conversations", undefined, B.token);
+  const row = (list.json.items || list.json.conversations || []).find((c) => c.id === cid);
+  check(
+    "chat-list preview of the document is its file name",
+    !!row && /scan\.jpg/.test(JSON.stringify(row)),
+    JSON.stringify(row).slice(0, 200),
+  );
+}
+
 // ============ 8. presence is not written on every request =================
 {
   const { db, call, reg } = await mk();

@@ -2604,6 +2604,35 @@ const convBetween = (db, a, b) =>
       ),
   );
   {
+    check(
+      "r31-16: a photo/video/audio picked through Document is SENT and SHOWN as a document (meta.document), opening in the app's own viewer/player or playing inline",
+      chat.includes("fun handleDocumentPicked(uri: Uri, asDocument: Boolean = false)") &&
+        chat.includes(
+          "fun sendFile(name: String, mime: String, bytes: ByteArray, asDocument: Boolean = false)",
+        ) &&
+        chat.includes(
+          'val docMeta = if (asDocument) JSONObject().put("document", true) else null',
+        ) &&
+        chat.includes(
+          "onDocumentPicked = { uri -> handleDocumentPicked(uri, asDocument = true) },",
+        ) &&
+        chat.includes("internal fun sentAsDocument(m: JSONObject): Boolean") &&
+        chat.includes(
+          'if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {',
+        ) &&
+        chat.includes('if (kind == "FILE" && fileLooksVideo(m) && !sentAsDocument(m)) {') &&
+        chat.includes("if (isImage && !asDocument) {") &&
+        chat.includes(
+          '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo)',
+        ) &&
+        readFileSync("src/worker/index.ts", "utf8").includes(
+          "...(incomingMeta.document === true ? { document: true } : {}),",
+        ) &&
+        readFileSync("src/worker/index.ts", "utf8").includes(
+          'String(meta.type || "").startsWith("image/") && meta.document !== true',
+        ),
+    );
+
     // Every cream / warm-white literal outside Theme.kt and the login screen
     // (which the owner excluded from theme work) must be gone from the
     // screens: dark-blue may not paint any light-cream colour.

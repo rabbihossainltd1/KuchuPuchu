@@ -59,7 +59,9 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Mood
 import androidx.compose.material.icons.filled.Pause
@@ -981,8 +983,12 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
-    fun sendFile(name: String, mime: String, bytes: ByteArray) {
+    fun sendFile(name: String, mime: String, bytes: ByteArray, asDocument: Boolean = false) {
         val clientId = "c_${java.util.UUID.randomUUID()}"
+        // Owner round 31 (item 16): a photo/video/audio picked through
+        // "Document" travels as a document — meta.document keeps it out of the
+        // photo / video bubbles on both sides.
+        val docMeta = if (asDocument) JSONObject().put("document", true) else null
         pending.add(
             JSONObject()
                 .put("id", clientId)
@@ -992,7 +998,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .put("fileName", name)
                 .put("fileType", mime)
                 .put("fileSize", bytes.size)
-                .put("createdAt", java.time.Instant.now().toString()),
+                .put("createdAt", java.time.Instant.now().toString())
+                .also { if (docMeta != null) it.put("meta", docMeta) },
         )
         scope.launch {
             runCatching { KpSounds.send(ctx) }
@@ -1010,7 +1017,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                             .put("fileName", name)
                             .put("fileType", mime)
                             .put("fileSize", bytes.size)
-                            .put("clientId", clientId),
+                            .put("clientId", clientId)
+                            .also { if (docMeta != null) it.put("meta", docMeta) },
                     )
                 }
                 UploadProgress.done(clientId)
@@ -1106,7 +1114,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
-    fun handleDocumentPicked(uri: Uri) {
+    fun handleDocumentPicked(uri: Uri, asDocument: Boolean = false) {
         scope.launch {
             val name = withContext(Dispatchers.IO) { queryName(ctx, uri) }
             val pair = withContext(Dispatchers.IO) { FilesUtil.readDocument(ctx, uri) }
@@ -1120,7 +1128,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 return@launch
             }
             error = ""
-            sendFile(name, mime, bytes)
+            sendFile(name, mime, bytes, asDocument)
         }
     }
 
@@ -2195,7 +2203,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 onSendBatch = { sendAttachSelection() },
                 onDismiss = { showAttach = false },
                 onImagePicked = ::handleImagePicked,
-                onDocumentPicked = ::handleDocumentPicked,
+                onDocumentPicked = { uri -> handleDocumentPicked(uri, asDocument = true) },
                 onContactPicked = ::handleContactPicked,
                 onLocationRequested = ::handleLocationRequested,
             )
@@ -3157,13 +3165,13 @@ private fun MessageRow(
     // Photos skip the chat bubble entirely: the image IS the bubble, with the
     // timestamp and ticks overlaid on the photo (WhatsApp-style). FILE-kind
     // image uploads (picked as documents) get the same treatment.
-    if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m))) {
+    if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {
         ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress)
         return
     }
     // Owner round 20: videos render as a tappable video bubble and play
     // IN-APP (the system player could never stream these auth-only files).
-    if (kind == "FILE" && fileLooksVideo(m)) {
+    if (kind == "FILE" && fileLooksVideo(m) && !sentAsDocument(m)) {
         VideoMessageRow(m, mine, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo)
         return
     }
@@ -3318,7 +3326,7 @@ private fun MessageRow(
                             if (EmojiRepo.isCustomId(st)) CustomEmojiOrFallback(st)
                             else Text(st, fontSize = 56.sp)
                         }
-                        "FILE" -> FileBubble(m, mine, player, pendingEcho)
+                        "FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo)
                         "DELETED" -> Text(
                             // Owner round 18: the same trailing reserve the
                             // text path uses — the stamp sat ON the deleted
@@ -3699,6 +3707,9 @@ private fun VideoMessageRow(
     }
 }
 
+/** Owner round 31 (item 16): picked via "Document" — never the photo/video bubble. */
+internal fun sentAsDocument(m: JSONObject): Boolean = m.optJSONObject("meta")?.optBoolean("document") == true
+
 internal fun fileLooksVideo(m: JSONObject): Boolean {
     val type = m.optString("fileType")
     if (type.startsWith("video")) return true
@@ -3981,7 +3992,14 @@ private fun ImageBubble(m: JSONObject, mine: Boolean) {
 }
 
 @Composable
-private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendingEcho: Boolean = false) {
+private fun FileBubble(
+    m: JSONObject,
+    mine: Boolean,
+    player: VoicePlayer,
+    pendingEcho: Boolean = false,
+    onOpenImage: (JSONObject) -> Unit = {},
+    onOpenVideo: (JSONObject) -> Unit = {},
+) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val id = m.optString("id")
@@ -3992,14 +4010,19 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendin
     val fileKey =
         m.optText("fileKey").takeIf { it.isNotBlank() }
             ?: m.optText("mediaUrl").takeIf { it.startsWith("/") || it.startsWith("http") } ?: ""
+    val asDocument = sentAsDocument(m)
     val isImage = fileType.startsWith("image") || fileName.endsWith(".jpg") || fileName.endsWith(".jpeg") || fileName.endsWith(".png")
-    if (isImage) {
+    if (isImage && !asDocument) {
         val url = if (fileKey.isNotBlank()) "/api/files/$fileKey" else m.optString("mediaUrl")
         ImageBubble(JSONObject().put("mediaUrl", url), mine)
         return
     }
-    val isVoice = fileType.startsWith("audio") || fileName.endsWith(".m4a") || fileName.endsWith(".mp3") ||
-        m.optJSONObject("meta")?.optBoolean("voice") == true
+    val isVoice =
+        !asDocument &&
+            (
+                fileType.startsWith("audio") || fileName.endsWith(".m4a") || fileName.endsWith(".mp3") ||
+                    m.optJSONObject("meta")?.optBoolean("voice") == true
+            )
     val playing = player.playingId == id
     val loading = player.loadingId == id
 
@@ -4096,6 +4119,23 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendin
                         android.widget.Toast.makeText(ctx, "This file is no longer available.", android.widget.Toast.LENGTH_SHORT).show()
                         return@clickable
                     }
+                    // Owner round 31: media sent AS a document still opens in
+                    // KuchuPuchu's own viewer / player (never a system app);
+                    // audio documents play inline through the voice player.
+                    when {
+                        isImage -> {
+                            onOpenImage(m)
+                            return@clickable
+                        }
+                        fileLooksVideo(m) -> {
+                            onOpenVideo(m)
+                            return@clickable
+                        }
+                        fileType.startsWith("audio") -> {
+                            if (player.playingId == id) player.stop() else player.toggle(ctx, id, fileKey)
+                            return@clickable
+                        }
+                    }
                     scope.launch {
                         opening = true
                         try {
@@ -4136,7 +4176,12 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendin
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                Icons.Filled.InsertDriveFile,
+                when {
+                    isImage -> Icons.Filled.Image
+                    fileLooksVideo(m) -> Icons.Filled.Videocam
+                    fileType.startsWith("audio") -> if (playing) Icons.Filled.Pause else Icons.Filled.MusicNote
+                    else -> Icons.Filled.InsertDriveFile
+                },
                 contentDescription = "File",
                 tint = if (mine) AmberInk else GoldDeep,
                 modifier = Modifier.size(22.dp),
@@ -4176,7 +4221,7 @@ private fun FileBubble(m: JSONObject, mine: Boolean, player: VoicePlayer, pendin
                     modifier = Modifier.size(22.dp),
                 )
                 ready -> Text(
-                    "Open",
+                    if (isImage) "View" else if (fileLooksVideo(m) || fileType.startsWith("audio")) (if (playing) "Stop" else "Play") else "Open",
                     color = if (mine) Color.White else GoldDeep,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 12.5.sp,
