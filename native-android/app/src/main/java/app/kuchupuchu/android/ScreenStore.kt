@@ -63,6 +63,27 @@ object ScreenStore {
 
     fun isArchived(id: String): Boolean = id in archivedConvIds
 
+    /**
+     * Owner round 31 (item 26): "Hide chat" — the SERVER flag (members.hidden,
+     * `hidden` on every list row) so the worker never pushes for it. A hidden
+     * chat is gone from the main list, never alerts (no card, no in-app tone)
+     * and lives behind the three-finger double-tap screen. Optimistic local
+     * flip; the list poll confirms.
+     */
+    fun isHidden(id: String): Boolean {
+        val i = convs.indexOfFirst { it.optString("id") == id }
+        return i >= 0 && convs[i].optBoolean("hidden", false)
+    }
+
+    fun setHidden(convId: String, hidden: Boolean) {
+        val i = convs.indexOfFirst { it.optString("id") == convId }
+        if (i >= 0) convs[i] = JSONObject(convs[i].toString()).put("hidden", hidden)
+        persist()
+    }
+
+    /** True when the chat must stay silent: muted OR hidden. */
+    fun isSilenced(convId: String): Boolean = isMuted(convId) || isHidden(convId)
+
     private fun saveArchive() {
         runCatching { archiveFile?.writeText(JSONObject().put("ids", JSONArray(archivedConvIds.toList())).toString()) }
     }
@@ -213,8 +234,8 @@ object ScreenStore {
         if (unread <= 0 || lastAt.isBlank()) return false
         // Muted chats: no in-app alert either. (The push path checks the same
         // flag; before this, Mute only changed the bell icon and everything
-        // still buzzed.)
-        if (isMuted(convId)) return false
+        // still buzzed.) Hidden chats (round 31 item 26) are silent too.
+        if (isSilenced(convId)) return false
         if (Store.route == "chat/$convId") {
             lastNotifiedAt[convId] = lastAt
             return false
@@ -402,6 +423,7 @@ object ScreenStore {
             append(c.optString("lastMessageAt")).append('|')
             append(c.optInt("unread")).append('|')
             append(c.optBoolean("muted")).append('|')
+            append(c.optBoolean("hidden")).append('|')
             append(other?.optString("displayName")).append('|')
             append(other?.optString("avatarUrl")).append('|')
             append(other?.optBoolean("online"))

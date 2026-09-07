@@ -45,6 +45,8 @@ import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Unarchive
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
@@ -340,7 +342,9 @@ fun ChatListScreen(nav: NavController) {
             }
 
             /* ---------- big top tabs ---------- */
-            val unreadTotal = convs.sumOf { it.optInt("unread", 0) }
+            // Owner round 31 (item 26): hidden chats do not count — a badge
+            // nobody can trace to a visible row is just confusing.
+            val unreadTotal = convs.filter { !it.optBoolean("hidden") }.sumOf { it.optInt("unread", 0) }
             val unseenStatus = ScreenStore.statuses.any { !it.optBoolean("mine") && !it.optBoolean("allViewed") }
             Row(
                 Modifier
@@ -519,7 +523,9 @@ private fun ArchivePullArea(nav: NavController, state: ArchivePullState, content
 fun ArchiveScreen(nav: NavController) {
     val convs = ScreenStore.convs
     var rev by remember { mutableStateOf(0) }
-    val archived = remember(rev, convs.size) { convs.filter { ScreenStore.isArchived(it.optString("id")) } }
+    // A hidden chat vanishes from here too (round 31 item 26) — it lives only
+    // behind the three-finger double-tap.
+    val archived = remember(rev, convs.size) { convs.filter { ScreenStore.isArchived(it.optString("id")) && !it.optBoolean("hidden") } }
     val ctx = LocalContext.current
     LaunchedEffect(Unit) {
         // The archive screen has no chat-list poll behind it — deleted/unarchived
@@ -591,6 +597,85 @@ fun ArchiveScreen(nav: NavController) {
         }
     }
 }
+
+/**
+ * Owner round 31 (item 26): hidden chats — swipe a chat right in the main
+ * list and tap Hide. Reached ONLY by a three-finger double-tap on the chat
+ * list (no menu entry, no hint). Same swipe language: left = Unhide, right
+ * = Mute / Delete. Rows come from the same list cache; the flag is the
+ * server's `hidden` (members.hidden), so no push ever fires for them.
+ */
+@Composable
+fun HiddenChatsScreen(nav: NavController) {
+    val convs = ScreenStore.convs
+    var rev by remember { mutableStateOf(0) }
+    val hidden = remember(rev, convs.size, ScreenStore.convsRaw) { convs.filter { it.optBoolean("hidden") } }
+    Column(Modifier.fillMaxSize().background(Cream).statusBarsPadding()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = { nav.popBackStack() }) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink)
+            }
+            Text("Hidden", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
+            Spacer(Modifier.width(8.dp))
+            Text("(${hidden.size})", fontSize = 15.sp, color = Muted)
+        }
+        if (hidden.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                EmptyState(
+                    icon = Icons.Filled.VisibilityOff,
+                    title = "No hidden chats",
+                    note = "Swipe a chat right to hide it",
+                )
+            }
+        } else {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(hidden, key = { it.optString("id") }) { conv ->
+                    SwipeConvRow(conv, nav, { rev++ }, hiddenMode = true)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Owner round 31 (item 26): THREE fingers down together, twice within 400ms
+ * — the only way into the hidden chats. A pass-through observer (nothing is
+ * consumed), so scrolling, row swipes and the archive pull are untouched;
+ * a normal one- or two-finger gesture can never trigger it.
+ */
+private fun threeFingerDoubleTap(onTrigger: () -> Unit): Modifier =
+    Modifier.pointerInput(Unit) {
+        var lastTripleUp = 0L
+        awaitEachGesture {
+            awaitFirstDown(requireUnconsumed = false)
+            var maxFingers = 1
+            val downAt = System.currentTimeMillis()
+            while (true) {
+                val event = awaitPointerEvent()
+                maxFingers = maxOf(maxFingers, event.changes.count { it.pressed })
+                if (event.changes.all { !it.pressed }) break
+            }
+            val now = System.currentTimeMillis()
+            // A tap, not a hold or a drag: all three fingers up within 350ms.
+            if (maxFingers >= 3 && now - downAt < 350) {
+                if (now - lastTripleUp < 400) {
+                    lastTripleUp = 0L
+                    onTrigger()
+                } else {
+                    lastTripleUp = now
+                }
+            } else {
+                lastTripleUp = 0L
+            }
+        }
+    }
 
 /** Owner round 19: delivery ticks for a list row — one tick sent, two read. */
 @Composable
@@ -701,9 +786,11 @@ private fun ChatListBody(
     archivePull: ArchivePullState,
 ) {
     // Archived chats live in their own list (pull down on this list to open).
-    val visible = convs.filter { !ScreenStore.isArchived(it.optString("id")) }
+    // Owner round 31 (item 26): hidden chats leave the list as well — they
+    // sit behind the three-finger double-tap (see the detector below).
+    val visible = convs.filter { !ScreenStore.isArchived(it.optString("id")) && !it.optBoolean("hidden") }
     if (visible.isEmpty()) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxSize().then(threeFingerDoubleTap { nav.navigate("hidden") }), contentAlignment = Alignment.Center) {
             if (loading) {
                 CircularProgressIndicator(color = ActionBlue)
             } else {
@@ -719,6 +806,7 @@ private fun ChatListBody(
     LazyColumn(
         Modifier
             .fillMaxSize()
+            .then(threeFingerDoubleTap { nav.navigate("hidden") })
             // Owner round 19: THE archive feed — a non-consuming vertical
             // drag observer. It sees drags that start ON TOP OF ROWS (the
             // nested-scroll chain never reliably delivered those on the
@@ -769,13 +857,32 @@ private fun SwipeConvRow(
     nav: NavController,
     onChange: () -> Unit,
     archivedMode: Boolean = false,
+    hiddenMode: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
     val haptics = rememberHaptics()
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val density = LocalDensity.current
     val actionWidth = with(density) { 136.dp.toPx() }
+    // Owner round 31 (item 26): flip the server flag optimistically; the row
+    // leaves (or re-enters) the main list at once, the worker stops (or
+    // resumes) pushing for it, and the list poll confirms.
     var dragged by remember { mutableStateOf(0f) }
+    fun setHidden(hidden: Boolean) {
+        haptics.confirm()
+        val id = conv.optString("id")
+        ScreenStore.setHidden(id, hidden)
+        android.widget.Toast.makeText(ctx, if (hidden) "Chat hidden" else "Chat unhidden", android.widget.Toast.LENGTH_SHORT).show()
+        dragged = 0f
+        onChange()
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    Api.post("/api/conversations/$id/hide", JSONObject().put("hidden", hidden))
+                }
+            }.onFailure { ScreenStore.setHidden(id, !hidden) }
+        }
+    }
     val offset by animateFloatAsState(dragged, tween(160), label = "swipe")
     val revealedLeft = offset > actionWidth / 2   // card slid left → actions on the right
     val revealedRight = offset < -actionWidth / 2 // card slid right → archive on the left
@@ -835,7 +942,7 @@ private fun SwipeConvRow(
                         }
                     }
                 }
-                if (offset < 0f && !archivedMode) {
+                if (offset < 0f && !archivedMode && !hiddenMode) {
                     ActionSlot(
                         icon = Icons.Filled.Archive,
                         bg = SwipeArchiveBg,
@@ -848,6 +955,21 @@ private fun SwipeConvRow(
                         dragged = 0f
                         onChange()
                     }
+                    // Owner round 31 (item 26): Hide sits beside Archive.
+                    ActionSlot(
+                        icon = Icons.Filled.VisibilityOff,
+                        bg = ActionBlue.copy(alpha = 0.18f),
+                        tint = ActionBlueDeep,
+                        label = "Hide",
+                    ) { setHidden(true) }
+                }
+                if (offset < 0f && hiddenMode) {
+                    ActionSlot(
+                        icon = Icons.Filled.Visibility,
+                        bg = ActionBlue.copy(alpha = 0.18f),
+                        tint = ActionBlueDeep,
+                        label = "Unhide",
+                    ) { setHidden(false) }
                 }
             }
             // right slot (revealed by swiping left)

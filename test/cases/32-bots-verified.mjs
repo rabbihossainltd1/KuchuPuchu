@@ -3105,6 +3105,222 @@ const convBetween = (db, a, b) =>
       }
     }
 
+    // Owner round 31 item 26: "Hide chat". Server flag per member; a hidden
+    // chat gets NO message push (even the dead-process tray fallback), the
+    // other member is unaffected, the list marker moves so the app's list
+    // re-syncs, and unhide restores pushes. Real worker + captured FCM.
+    {
+      const { generateKeyPairSync } = await import("node:crypto");
+      const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+      const worker = await freshWorker();
+      const db = makeD1();
+      const sent = [];
+      const env = {
+        DB: db,
+        MEDIA: makeR2(),
+        GOOGLE_WEB_CLIENT_ID: "kp-test-web-client",
+        FCM_CREDENTIALS: JSON.stringify({
+          project_id: "kp-test-proj",
+          client_email: "svc@kp-test-proj.iam.gserviceaccount.com",
+          private_key: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+          token_uri: "https://oauth2.googleapis.com/token",
+        }),
+        // Nobody connected → the worker would normally attach the tray payload.
+        CHAT_ROOM: {
+          idFromName: (name) => ({ toString: () => name, name }),
+          get: () => ({
+            fetch: async () => new Response(JSON.stringify({ ok: true, sent: 0 }), { status: 200 }),
+          }),
+        },
+      };
+      const realFetch = globalThis.fetch;
+      globalThis.fetch = async (input, init) => {
+        const url = typeof input === "string" ? input : input.url;
+        if (url.includes("oauth2.googleapis.com/token") && !url.includes("tokeninfo")) {
+          return new Response(JSON.stringify({ access_token: "fake-at", expires_in: 3600 }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (url.includes("fcm.googleapis.com/v1/projects")) {
+          sent.push(JSON.parse(init.body));
+          return new Response(JSON.stringify({ name: "projects/1/messages/1" }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return realFetch(input, init);
+      };
+      try {
+        const ctx = makeCtx();
+        let ipSeq = 0;
+        const call = async (method, path, body, token) => {
+          const headers = { "content-type": "application/json" };
+          if (path.startsWith("/api/auth/"))
+            headers["cf-connecting-ip"] =
+              `203.26.${Math.floor(ipSeq / 250)}.${(ipSeq++ % 250) + 1}`;
+          if (token) headers.authorization = `Bearer ${token}`;
+          const init = { method, headers };
+          if (body !== undefined && method !== "GET") init.body = JSON.stringify(body);
+          const res = await worker.fetch(new Request(`https://kp.test${path}`, init), env, ctx);
+          const t = await res.text();
+          await ctx.drain();
+          let j = {};
+          try {
+            j = t ? JSON.parse(t) : {};
+          } catch {
+            j = { _raw: t.slice(0, 80) };
+          }
+          return { status: res.status, json: j };
+        };
+        const reg = makeReg(call);
+        const a = await reg("hide-a@x.com", "hidea");
+        const b = await reg("hide-b@x.com", "hideb");
+        const c = await reg("hide-c@x.com", "hidec");
+        await call("POST", "/api/devices", { token: "fcm-hide-a" }, a.token);
+        await call("POST", "/api/devices", { token: "fcm-hide-b" }, b.token);
+        const conv = await call("POST", "/api/conversations", { userId: b.user.id }, a.token);
+        const cid = conv.json.conversation.id;
+        const pushesTo = (token) =>
+          sent.filter(
+            (m) => m.message?.token === token && m.message?.android?.data?.type === "message",
+          ).length;
+        // baseline: b's message pushes a
+        sent.length = 0;
+        await call(
+          "POST",
+          `/api/conversations/${cid}/messages`,
+          { kind: "TEXT", body: "one" },
+          b.token,
+        );
+        const before = pushesTo("fcm-hide-a");
+        const list0 = await call("GET", "/api/conversations", undefined, a.token);
+        const marker0 = list0.json.marker;
+        // a hides the chat
+        const hide = await call(
+          "POST",
+          `/api/conversations/${cid}/hide`,
+          { hidden: true },
+          a.token,
+        );
+        const listA = await call("GET", "/api/conversations", undefined, a.token);
+        const rowA = (listA.json.items ?? []).find((x) => x.id === cid);
+        const listB = await call("GET", "/api/conversations", undefined, b.token);
+        const rowB = (listB.json.items ?? []).find((x) => x.id === cid);
+        sent.length = 0;
+        await call(
+          "POST",
+          `/api/conversations/${cid}/messages`,
+          { kind: "TEXT", body: "two" },
+          b.token,
+        );
+        const whileHidden = pushesTo("fcm-hide-a");
+        // b still gets pushes for a's messages while a has it hidden
+        await call(
+          "POST",
+          `/api/conversations/${cid}/messages`,
+          { kind: "TEXT", body: "reply" },
+          a.token,
+        );
+        const bStill = pushesTo("fcm-hide-b");
+        const outsider = await call(
+          "POST",
+          `/api/conversations/${cid}/hide`,
+          { hidden: true },
+          c.token,
+        );
+        // unhide → pushes resume
+        await call("POST", `/api/conversations/${cid}/hide`, { hidden: false }, a.token);
+        sent.length = 0;
+        await call(
+          "POST",
+          `/api/conversations/${cid}/messages`,
+          { kind: "TEXT", body: "three" },
+          b.token,
+        );
+        const after = pushesTo("fcm-hide-a");
+        const listA2 = await call("GET", "/api/conversations", undefined, a.token);
+        const rowA2 = (listA2.json.items ?? []).find((x) => x.id === cid);
+        check(
+          "r31-26: POST /api/conversations/:id/hide flips the caller's own `hidden` flag (list row + marker change), the OTHER member's row is untouched, a non-member is refused",
+          hide.status === 200 &&
+            hide.json.hidden === true &&
+            rowA?.hidden === true &&
+            rowB?.hidden === false &&
+            listA.json.marker !== marker0 &&
+            outsider.status >= 400 &&
+            rowA2?.hidden === false,
+          JSON.stringify({
+            hide: hide.json,
+            a: rowA?.hidden,
+            b: rowB?.hidden,
+            outsider: outsider.status,
+          }),
+        );
+        check(
+          "r31-26: a hidden chat gets NO message push for that member (not even the dead-process tray card) while the other member keeps theirs; unhide restores pushes",
+          before === 1 && whileHidden === 0 && bStill === 1 && after === 1,
+          JSON.stringify({ before, whileHidden, bStill, after }),
+        );
+        check(
+          "r31-26: bot/system pushes honour the flag too (login-attempt + AI replies go through pushMessageUnlessHidden) and the flag is in the list's freshness marker",
+          (readFileSync("src/worker/index.ts", "utf8").match(/pushMessageUnlessHidden\(/g) || [])
+            .length >= 4 &&
+            readFileSync("src/worker/index.ts", "utf8").includes(
+              "if (Number(memberId.hidden ?? 0) === 1) return;",
+            ) &&
+            readFileSync("src/worker/index.ts", "utf8").includes("          c.hidden,\n"),
+        );
+        const cl = kt("ChatListScreen.kt");
+        const row = cl.slice(
+          cl.indexOf("private fun SwipeConvRow("),
+          cl.indexOf("private fun RowScope.ActionSlot("),
+        );
+        check(
+          "r31-26: app — swipe right shows Hide beside Archive (main list), Unhide on the hidden screen; hidden rows leave the main list AND the archive; the badge ignores them",
+          row.includes('label = "Hide",') &&
+            row.includes('label = "Unhide",') &&
+            row.includes(
+              'Api.post("/api/conversations/$id/hide", JSONObject().put("hidden", hidden))',
+            ) &&
+            row.includes("if (offset < 0f && !archivedMode && !hiddenMode) {") &&
+            cl.includes(
+              'val visible = convs.filter { !ScreenStore.isArchived(it.optString("id")) && !it.optBoolean("hidden") }',
+            ) &&
+            cl.includes(
+              'convs.filter { ScreenStore.isArchived(it.optString("id")) && !it.optBoolean("hidden") }',
+            ) &&
+            cl.includes(
+              'convs.filter { !it.optBoolean("hidden") }.sumOf { it.optInt("unread", 0) }',
+            ),
+        );
+        check(
+          "r31-26: app — hidden chats screen opens ONLY by a three-finger double-tap on the chat list (pass-through detector, no menu entry); route `hidden`",
+          cl.includes("fun HiddenChatsScreen(nav: NavController) {") &&
+            cl.includes("private fun threeFingerDoubleTap(onTrigger: () -> Unit): Modifier =") &&
+            cl.includes("if (maxFingers >= 3 && now - downAt < 350) {") &&
+            cl.includes("if (now - lastTripleUp < 400) {") &&
+            (cl.match(/threeFingerDoubleTap \{ nav\.navigate\("hidden"\) \}/g) || []).length ===
+              2 &&
+            kt("KpApp.kt").includes('composable("hidden") { HiddenChatsScreen(nav) }') &&
+            !cl.includes('"Hidden chats"') &&
+            !cl.includes("HomeMenuItem(Icons.Filled.VisibilityOff"),
+        );
+        check(
+          "r31-26: app — no notification card, no in-app tone, no list alert for a hidden chat (push handler drops it; the tone + list paths use isSilenced = muted || hidden)",
+          kt("KpPush.kt").includes("if (ScreenStore.isHidden(convoId)) {") &&
+            kt("KpApp.kt").includes("!ScreenStore.isSilenced(cid)") &&
+            kt("ScreenStore.kt").includes(
+              "fun isSilenced(convId: String): Boolean = isMuted(convId) || isHidden(convId)",
+            ) &&
+            kt("ScreenStore.kt").includes("if (isSilenced(convId)) return false") &&
+            kt("ScreenStore.kt").includes("append(c.optBoolean(\"hidden\")).append('|')"),
+        );
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+    }
+
     // Every cream / warm-white literal outside Theme.kt and the login screen
     // (which the owner excluded from theme work) must be gone from the
     // screens: dark-blue may not paint any light-cream colour.

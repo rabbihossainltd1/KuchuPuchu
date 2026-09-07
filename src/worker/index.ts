@@ -506,10 +506,11 @@ async function sendApprovalMessage(
     broadcastRoomEvent(env, `user:${userId}`, { type: "conv", conversationId: convId, msg: 1 }),
   );
   ctx.waitUntil(
-    pushToUser(
+    pushMessageUnlessHidden(
       env,
       db,
       userId,
+      convId,
       {
         type: "message",
         convoId: convId,
@@ -1156,10 +1157,11 @@ async function sendAiReply(
             }),
           );
           ctx.waitUntil(
-            pushToUser(
+            pushMessageUnlessHidden(
               env,
               db,
               userId,
+              convId,
               {
                 type: "message",
                 convoId: convId,
@@ -1299,10 +1301,11 @@ async function sendAiReply(
       }),
     );
     ctx.waitUntil(
-      pushToUser(
+      pushMessageUnlessHidden(
         env,
         db,
         userId,
+        convId,
         {
           type: "message",
           convoId: convId,
@@ -1686,6 +1689,8 @@ async function ensureSchema(db: D1Database) {
   await runCatchingSql(db, `ALTER TABLE calls ADD COLUMN media_json TEXT`);
   await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN disappear_seconds INTEGER`);
   await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN theme TEXT`);
+  // Owner round 31 (item 26): "Hide chat" — per-member, like `muted`.
+  await runCatchingSql(db, `ALTER TABLE members ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`);
   await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN disappear_since TEXT`);
   // Owner round 31: real groups — a group picture (same inline data-URI shape
   // as a profile photo) with a per-version cache token like user avatars.
@@ -2137,11 +2142,12 @@ async function membersOf(db: D1Database, convId: string) {
   return all<{
     user_id: string;
     muted: number;
+    hidden: number | null;
     last_active: string | null;
     priv_messages: string | null;
   }>(
     db,
-    `SELECT user_id, muted,
+    `SELECT user_id, muted, hidden,
             (SELECT last_active_at FROM users WHERE id = members.user_id) AS last_active,
             (SELECT priv_messages FROM users WHERE id = members.user_id) AS priv_messages
        FROM members WHERE conv_id = ?`,
@@ -2413,6 +2419,29 @@ async function pokeUserConversation(
     );
     return -1;
   }
+}
+
+/**
+ * Message push that honours "Hide chat" (owner round 31 item 26) for the
+ * bot/system senders, which do not go through the member loop of the main
+ * send route: a recipient who hid the conversation gets nothing.
+ */
+async function pushMessageUnlessHidden(
+  env: Env,
+  db: D1Database,
+  userId: string,
+  convId: string,
+  data: Record<string, string>,
+  note?: { title: string; body: string; channel: string },
+): Promise<boolean> {
+  const m = await one<{ hidden: number | null }>(
+    db,
+    "SELECT hidden FROM members WHERE conv_id = ? AND user_id = ?",
+    convId,
+    userId,
+  );
+  if (Number(m?.hidden ?? 0) === 1) return false;
+  return pushToUser(env, db, userId, data, note);
 }
 
 /**
@@ -4744,6 +4773,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           c.lastMessage,
           c.unread,
           c.muted,
+          c.hidden,
           c.title,
           c.other
             ? [
@@ -5031,6 +5061,33 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       }),
     );
     return json({ ok: true });
+  }
+
+  // Owner round 31 (item 26): "Hide chat" — a per-member flag like mute. A
+  // hidden chat leaves the main list (the app keeps it behind the three-finger
+  // double-tap screen) and gets NO message push from this server, so it stays
+  // silent even while the app process is dead.
+  const hideMatch = path.match(/^\/api\/conversations\/([^/]+)\/hide$/);
+  if (hideMatch && method === "POST") {
+    const convId = hideMatch[1]!;
+    await requireMember(db, convId, uid);
+    const hidden = body.hidden ? 1 : 0;
+    await run(
+      db,
+      "UPDATE members SET hidden = ? WHERE conv_id = ? AND user_id = ?",
+      hidden,
+      convId,
+      uid,
+    );
+    // The account's other devices re-sync their lists (no `msg` flag: no tone).
+    ctx.waitUntil(
+      broadcastRoomEvent(env, `user:${uid}`, {
+        type: "conv",
+        conversationId: convId,
+        at: nowIso(),
+      }),
+    );
+    return json({ ok: true, hidden: hidden === 1 });
   }
 
   const muteMatch = path.match(/^\/api\/conversations\/([^/]+)\/mute$/);
@@ -5859,6 +5916,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       ctx.waitUntil(
         (async () => {
           const live = await pokeUserConversation(env, memberId.user_id, convId, created, uid);
+          // Owner round 31 (item 26): a chat this member HID is silent — no
+          // push at all (not even the tray-card fallback for a dead process).
+          // The list poke above still lands so the hidden screen stays current.
+          if (Number(memberId.hidden ?? 0) === 1) return;
           await pushMessageToMember(memberId, live);
         })(),
       );
@@ -7166,11 +7227,12 @@ type ConvMemberRow = {
   muted: number;
   unread: number;
   last_read_at: string | null;
+  hidden?: number | null;
 };
 
 const CONV_COLS =
   "id, kind, title, owner_id, created_at, last_message_at, last_message, disappear_seconds, theme, hidden_json, avatar_url, avatar_version";
-const MEMBER_COLS = "conv_id, user_id, role, muted, unread, last_read_at";
+const MEMBER_COLS = "conv_id, user_id, role, muted, unread, last_read_at, hidden";
 
 /** Placeholder list for an IN(...) clause. */
 const inSql = (n: number) => Array.from({ length: n }, () => "?").join(",");
@@ -7415,6 +7477,7 @@ function buildConvDetail(
   const members = [];
   let other = null;
   let meMuted = false;
+  let meHidden = false;
   let unread = 0;
   // Owner round 30: in a 1:1 chat the two ARE contacts (privacy view), and a
   // switched-off read receipt (either side) hides the peer's read mark.
@@ -7434,6 +7497,7 @@ function buildConvDetail(
     if (row.user_id !== uid && solo) other = shaped;
     if (row.user_id === uid) {
       meMuted = row.muted === 1;
+      meHidden = Number(row.hidden ?? 0) === 1;
       unread = row.unread;
     }
   }
@@ -7448,6 +7512,8 @@ function buildConvDetail(
     other,
     members,
     muted: meMuted,
+    // Owner round 31 (item 26): the caller hid this chat (their flag only).
+    hidden: meHidden,
     unread,
     isGroup: conv.kind === "GROUP",
     // Owner round 31: group picture. Token `g:<convId>@v<n>` — the "g:" prefix

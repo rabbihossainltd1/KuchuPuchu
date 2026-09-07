@@ -410,6 +410,13 @@ class KpPushService : FirebaseMessagingService() {
         // conversation (covers a push sent between the user tapping Mute and
         // the next list refresh — the flag the server saw was already stale).
         val muted = data["muted"] == "1" || ScreenStore.isMuted(convoId)
+        // Owner round 31 (item 26): a HIDDEN chat is silent on this device —
+        // no card, no tone, no badge flash (the worker already skips the push
+        // once it knows; this covers a push racing the hide).
+        if (ScreenStore.isHidden(convoId)) {
+            ScreenStore.pokeInbox()
+            return
+        }
         // A query/arg on the route (chat/<id>?media=1 style) used to defeat the
         // exact match, so a notification card appeared over the OPEN chat.
         // Boundary-checked startsWith — a bare startsWith would also suppress on

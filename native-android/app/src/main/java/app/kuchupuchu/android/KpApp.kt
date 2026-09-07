@@ -95,7 +95,8 @@ fun KpApp() {
                 }
                 val cid = ev.optString("conversationId")
                 val inChat = Store.route == "chat/$cid" || Store.route.startsWith("chat/$cid?")
-                if (cid.isNotBlank() && !inChat && !ScreenStore.isMuted(cid)) {
+                // Owner round 31 (item 26): hidden chats never sound either.
+                if (cid.isNotBlank() && !inChat && !ScreenStore.isSilenced(cid)) {
                     runCatching { KpSounds.inApp(appCtx) }
                 }
             }
@@ -173,6 +174,7 @@ fun KpApp() {
                     VideoPlayerScreen(nav, entry.arguments?.getString("b64") ?: "")
                 }
                 composable("archive") { ArchiveScreen(nav) }
+                composable("hidden") { HiddenChatsScreen(nav) }
                 composable("profile/{id}") { entry ->
                     ProfileScreen(nav, entry.arguments?.getString("id") ?: "")
                 }
