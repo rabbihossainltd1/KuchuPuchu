@@ -1398,6 +1398,11 @@ fun ChatScreen(nav: NavController, convId: String) {
     val moderator = !isGroup && c?.optJSONObject("other")?.optBoolean("moderator") == true
     // Official notification account: one-way (owner rule) — no composer.
     val noReply = !isGroup && otherUserId == "kp_official_bot"
+    // Owner round 31 item 21: a private profile's chat (theirs, or mine when
+    // I am private) is screenshot-blocked, and their photos / videos carry no
+    // Save / Forward.
+    val privateChat = KpSecure.privatePeer(c) || KpSecure.selfPrivate()
+    KpSecure.Guard(privateChat)
     // Recompose exactly when the six-second typing lease expires. Computing
     // directly from currentTimeMillis() left the label visible indefinitely
     // on an otherwise idle screen because time passing is not Compose state.
@@ -1509,8 +1514,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                         Icon(Icons.Filled.ContentCopy, "Copy", tint = Ink, modifier = Modifier.size(21.dp))
                     }
                 }
-                IconButton(onClick = { forwarding = true }) {
-                    Icon(Icons.AutoMirrored.Filled.Send, "Forward", tint = GoldDeep, modifier = Modifier.size(21.dp))
+                if (!privateChat) {
+                    IconButton(onClick = { forwarding = true }) {
+                        Icon(Icons.AutoMirrored.Filled.Send, "Forward", tint = GoldDeep, modifier = Modifier.size(21.dp))
+                    }
                 }
                 if (single && singleMsg != null && canEdit(singleMsg)) {
                     IconButton(onClick = { editing = singleMsg; selected.clear() }) {
@@ -1923,7 +1930,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 val who =
                                     if (msg.optString("senderId") == Store.myId()) "You"
                                     else msg.optText("senderName").ifBlank { rawTitle }
-                                val arg = JSONObject(msg.toString()).put("kpTitle", who)
+                                val arg = JSONObject(msg.toString()).put("kpTitle", who).put("kpPrivate", privateChat)
                                 nav.navigate("videoplayer/${mediaArg(arg)}")
                             },
                             revealChars = if (m.optString("id") == aiRevealId) aiRevealChars else null,
@@ -2105,7 +2112,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                         android.widget.Toast.makeText(ctx, "Copied", android.widget.Toast.LENGTH_SHORT).show()
                     }
                 }
-                if (!echo) {
+                // Owner round 31 item 21: no forwarding out of a private chat.
+                if (!echo && !privateChat) {
                     KpSheetRow(Icons.AutoMirrored.Filled.Send, "Forward") {
                         close()
                         selected.clear()
@@ -2281,12 +2289,19 @@ fun ChatScreen(nav: NavController, convId: String) {
                 title = who,
                 subtitle = viewerStamp(m.optText("createdAt")),
                 onClose = { viewerMsg = null },
-                onForward = {
-                    viewerMsg = null
-                    if (m.optString("id") !in selected) selected.clear()
-                    selected.add(m.optString("id"))
-                    forwarding = true
-                },
+                onForward =
+                    if (privateChat) {
+                        null
+                    } else {
+                        {
+                            viewerMsg = null
+                            if (m.optString("id") !in selected) selected.clear()
+                            selected.add(m.optString("id"))
+                            forwarding = true
+                        }
+                    },
+                canSave = !privateChat,
+                secure = privateChat,
             )
         }
         editing?.let { m ->
@@ -2895,6 +2910,9 @@ private fun convRowSnapshot(convId: String): JSONObject? {
         // avatar only appeared after the conversation fetch (the reload flash).
         .put("avatarRef", row.optJSONObject("other")?.optIso("avatarRef").orEmpty())
         .put("online", row.optJSONObject("other")?.optBoolean("online") ?: false)
+        // Owner round 31 item 21: the capture guard must hold from the first
+        // frame, not only after the detail fetch.
+        .put("privateProfile", row.optJSONObject("other")?.optBoolean("privateProfile") ?: false)
     return JSONObject()
         .put("id", convId)
         .put("isGroup", row.optBoolean("isGroup"))

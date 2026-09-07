@@ -60,6 +60,8 @@ data class CallUi(
     val otherAvatar: String = "",
     val startedAt: Long = 0L,
     val connecting: Boolean = false,
+    /** Owner round 31 item 21: the other side is a private profile → no capture. */
+    val otherPrivate: Boolean = false,
 )
 
 /**
@@ -687,6 +689,7 @@ class CallEngine(private val app: Application) {
                 otherId = other.optString("id").ifBlank { current?.otherId.orEmpty() },
                 otherOnline = other.optBoolean("online"),
                 otherAvatar = other.optIso("avatarUrl").orEmpty().ifBlank { current?.otherAvatar.orEmpty() },
+                otherPrivate = other.optBoolean("privateProfile") || current?.otherPrivate == true,
                 startedAt =
                     when {
                         status != "ACTIVE" -> 0L

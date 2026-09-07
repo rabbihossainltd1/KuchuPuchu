@@ -164,6 +164,7 @@ fun KpPhotoViewer(
     onClose: () -> Unit,
     onForward: (() -> Unit)? = null,
     canSave: Boolean = true,
+    secure: Boolean = false,
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -177,6 +178,10 @@ fun KpPhotoViewer(
         onDismissRequest = onClose,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
+        // Owner round 31 item 21: a private person's picture — the viewer's
+        // own window is the one a screenshot would capture, so guard THAT
+        // (Save / Forward are already withheld by the caller).
+        KpSecure.Guard(secure || !canSave)
         // White status icons over the black viewer, whatever the app theme.
         val dialogWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
         SideEffect {
@@ -426,6 +431,10 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
     val dest = remember(b64) { m?.let { videoCacheFile(ctx, it) } }
     val src = remember(b64) { m?.let { videoSource(it) } ?: "" }
     val title = m?.optText("kpTitle")?.ifBlank { null } ?: "Video"
+    // Owner round 31 item 21: a video from / with a private profile — no
+    // capture, no Save (the chat passes `kpPrivate` along in the argument).
+    val privateClip = m?.optBoolean("kpPrivate") == true
+    KpSecure.Guard(privateClip)
     val sub = m?.let { viewerStamp(it.optText("createdAt")) } ?: ""
     // 0 loading · 1 ready · -1 failed
     var state by remember(b64) { mutableIntStateOf(if (dest != null && dest.exists() && dest.length() > 0L) 1 else 0) }
@@ -578,7 +587,7 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
                 IconButton(onClick = { setLandscape(!landscape) }) {
                     Icon(Icons.Filled.ScreenRotation, "Rotate", tint = if (landscape) accent else Color.White, modifier = Modifier.size(22.dp))
                 }
-                if (m != null && dest != null && state == 1) {
+                if (m != null && dest != null && state == 1 && !privateClip) {
                     IconButton(onClick = {
                         if (savingClip || saved) return@IconButton
                         scope.launch {

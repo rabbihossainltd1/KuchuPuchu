@@ -59,12 +59,19 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
     // Owner round 31: photos open in the app's own viewer, videos in the
     // app's own player — never a system app.
     var viewer by remember { mutableStateOf<JSONObject?>(null) }
+    // Owner round 31 item 21: a private peer's media — no capture, no Save.
+    val privateChat =
+        KpSecure.privatePeer(ScreenStore.convDetailOf(convId) ?: ScreenStore.convs.firstOrNull { it.optString("id") == convId }) ||
+            KpSecure.selfPrivate()
+    KpSecure.Guard(privateChat)
     viewer?.let { m ->
         KpPhotoViewer(
             url = messageMediaUrl(m),
             title = "Photo",
             subtitle = viewerStamp(m.optString("createdAt")),
             onClose = { viewer = null },
+            canSave = !privateChat,
+            secure = privateChat,
         )
     }
 
@@ -159,7 +166,7 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
                             .clip(RoundedCornerShape(14.dp))
                             .background(Card)
                             .let { mod ->
-                                if (isVideo) mod.clickable { nav.navigate("videoplayer/${mediaArg(JSONObject(m.toString()).put("kpTitle", "Video"))}") }
+                                if (isVideo) mod.clickable { nav.navigate("videoplayer/${mediaArg(JSONObject(m.toString()).put("kpTitle", "Video").put("kpPrivate", privateChat))}") }
                                 else mod
                             }
                             .padding(12.dp),

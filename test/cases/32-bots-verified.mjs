@@ -2741,6 +2741,33 @@ const convBetween = (db, a, b) =>
           kt("SettingsScreen.kt").indexOf('"Share audio via screen share"'),
     );
 
+    check(
+      "r31-21: private profile → FLAG_SECURE (ref-counted KpSecure.Guard) on their chat, calls, profile picture, photo viewer and video player; Save / Forward hidden on their pictures and videos (sheet, selection bar, viewer, player)",
+      kt("KpSecure.kt").includes("WindowManager.LayoutParams.FLAG_SECURE") &&
+        kt("KpSecure.kt").includes("fun Guard(on: Boolean) {") &&
+        kt("KpSecure.kt").includes("fun privatePeer(conv: JSONObject?): Boolean =") &&
+        chat.includes("val privateChat = KpSecure.privatePeer(c) || KpSecure.selfPrivate()") &&
+        chat.includes("KpSecure.Guard(privateChat)") &&
+        chat.includes("if (!echo && !privateChat) {") &&
+        chat.includes("canSave = !privateChat,") &&
+        chat.includes('.put("kpPrivate", privateChat)') &&
+        kt("CallScreens.kt").includes(
+          "KpSecure.Guard(call.otherPrivate || KpSecure.selfPrivate())",
+        ) &&
+        kt("CallEngine.kt").includes('otherPrivate = other.optBoolean("privateProfile")') &&
+        kt("ProfileScreen.kt").includes("KpSecure.Guard(privatePerson)") &&
+        kt("ProfileScreen.kt").includes("canSave = !privatePerson,") &&
+        kt("MediaViewer.kt").includes("KpSecure.Guard(secure || !canSave)") &&
+        kt("MediaViewer.kt").includes('val privateClip = m?.optBoolean("kpPrivate") == true') &&
+        kt("MediaViewer.kt").includes(
+          "if (m != null && dest != null && state == 1 && !privateClip) {",
+        ) &&
+        kt("ChatMediaScreen.kt").includes("KpSecure.Guard(privateChat)") &&
+        readFileSync("src/worker/index.ts", "utf8").includes(
+          "privateProfile: Number(row.private_profile ?? 0) !== 0,\n    ...(viewer",
+        ),
+    );
+
     // Every cream / warm-white literal outside Theme.kt and the login screen
     // (which the owner excluded from theme work) must be gone from the
     // screens: dark-blue may not paint any light-cream colour.
@@ -2998,6 +3025,20 @@ const convBetween = (db, a, b) =>
       byId.status === 200 &&
       byId.json.user.id === a.user.id,
     `${search.status}/${disc.status}/${byName.status}/${byId.status}`,
+  );
+  // Owner round 31 item 21: the PEER's app must know the profile is private
+  // (screenshot block + no save/forward on their side) — id lookup, chat
+  // list `other` and the call's `other` all say so.
+  const listB = await k.call("GET", "/api/conversations", undefined, b.token);
+  const rowB = (listB.json.items ?? []).find((c) => c.id === cid);
+  check(
+    "r31-21: privateProfile is exposed on every peer shape (user lookup + chat-list other), false by default",
+    byId.json.user.privateProfile === true &&
+      rowB?.other?.privateProfile === true &&
+      (listB.json.items ?? []).every(
+        (c) => typeof (c.other?.privateProfile ?? false) === "boolean",
+      ),
+    JSON.stringify({ byId: byId.json.user.privateProfile, row: rowB?.other?.privateProfile }),
   );
   // read receipts off → the peer never gets my read mark (poll + list + live frame)
   await k.call("PATCH", "/api/me", { readReceipts: false }, a.token);

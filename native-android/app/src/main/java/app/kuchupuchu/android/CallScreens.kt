@@ -133,6 +133,9 @@ fun CallGate() {
     }
 
     val connected = call.status == "ACTIVE" || engine.hasRemote
+    // Owner round 31 item 21: a call with (or as) a private profile cannot be
+    // screenshotted or screen-recorded — voice and video alike.
+    KpSecure.Guard(call.otherPrivate || KpSecure.selfPrivate())
     Box(Modifier.fillMaxSize()) {
         // Tap shield: the call overlay's root Box carries only a background,
         // which is not a pointer hit-target, so a tap on its empty region fell

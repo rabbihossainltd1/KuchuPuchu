@@ -1933,6 +1933,10 @@ function userFrom(row: UserRow, online = false, light = false, viewer?: Viewer) 
     lastActiveAt: showSeen ? row.last_active_at : null,
     verified: !!row.verified,
     moderator: !!row.moderator,
+    // Owner round 31 item 21: peers need to know — a private profile's chat,
+    // calls, pictures and videos are screenshot-blocked and not saveable /
+    // forwardable on the OTHER phone too.
+    privateProfile: Number(row.private_profile ?? 0) !== 0,
     ...(viewer
       ? {
           phone: privAllows(row.priv_phone, PRIVACY_DEFAULTS.phone, viewer) ? row.phone_e164 : null,
