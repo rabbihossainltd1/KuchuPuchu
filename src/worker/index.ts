@@ -5811,6 +5811,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             // Owner round 31 (item 16): picked through "Document" — render as
             // a file row even when the bytes are a photo / video / audio.
             ...(incomingMeta.document === true ? { document: true } : {}),
+            // Owner round 31 (item 27): the recorder's waveform (bars 0..100)
+            // is stored with a voice note so every device draws the same wave.
+            ...voiceWaveform(incomingMeta),
           }
         : {}),
       ...(Object.keys(dims).length ? dims : {}),
@@ -7013,6 +7016,21 @@ type MsgRow = {
   reply_to?: string | null;
 };
 
+/** Owner round 31 (item 27): a voice note's bars. Only with `voice: true`,
+ *  integers clamped to 0..100, at most VOICE_WAVEFORM_MAX of them — anything
+ *  else (a document, a string, a 10k-entry array) is dropped, not stored. */
+const VOICE_WAVEFORM_MAX = 64;
+function voiceWaveform(
+  meta: Record<string, unknown>,
+): { waveform: number[] } | Record<string, never> {
+  if (meta.voice !== true || !Array.isArray(meta.waveform) || meta.waveform.length === 0) return {};
+  const waveform = meta.waveform.slice(0, VOICE_WAVEFORM_MAX).map((v) => {
+    const n = Math.round(Number(v));
+    return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0;
+  });
+  return { waveform };
+}
+
 /**
  * Pixel size of an uploaded image, as told by the sender.
  *
@@ -7049,6 +7067,7 @@ function msgFrom(row: MsgRow) {
     clientId?: string;
     voice?: boolean;
     seconds?: number;
+    waveform?: number[];
     edited?: boolean;
     document?: boolean;
     w?: number;

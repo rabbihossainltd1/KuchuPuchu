@@ -2642,8 +2642,9 @@ const convBetween = (db, a, b) =>
         ) &&
         chat.includes('if (kind == "FILE" && fileLooksVideo(m) && !sentAsDocument(m)) {') &&
         chat.includes("if (isImage && !asDocument) {") &&
+        // r31-27: the call site now also hands the chat theme down (voice bars).
         chat.includes(
-          '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo)',
+          '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme)',
         ) &&
         readFileSync("src/worker/index.ts", "utf8").includes(
           "...(incomingMeta.document === true ? { document: true } : {}),",
@@ -3319,6 +3320,252 @@ const convBetween = (db, a, b) =>
       } finally {
         globalThis.fetch = realFetch;
       }
+    }
+
+    // r31-27: voice messages carry a real waveform (meta.waveform) that the
+    // server stores — clamped to 0..100 and 64 bars, voice-only — and the
+    // bubble paints playback progress on those bars. Real worker + R2 shim.
+    {
+      const worker = await freshWorker();
+      const db = makeD1();
+      const env = { DB: db, MEDIA: makeR2(), GOOGLE_WEB_CLIENT_ID: "kp-test-web-client" };
+      const ctx = makeCtx();
+      let ipSeq = 0;
+      const call = async (method, path, body, token, raw) => {
+        const headers = { "content-type": "application/json" };
+        if (path.startsWith("/api/auth/"))
+          headers["cf-connecting-ip"] = `203.27.${Math.floor(ipSeq / 250)}.${(ipSeq++ % 250) + 1}`;
+        if (token) headers.authorization = `Bearer ${token}`;
+        let init = { method, headers };
+        if (raw)
+          init = {
+            method,
+            headers: { ...raw.headers, authorization: `Bearer ${token}` },
+            body: raw.body,
+          };
+        else if (body !== undefined && method !== "GET") init.body = JSON.stringify(body);
+        const res = await worker.fetch(new Request(`https://kp.test${path}`, init), env, ctx);
+        const t = await res.text();
+        await ctx.drain();
+        let j = {};
+        try {
+          j = t ? JSON.parse(t) : {};
+        } catch {
+          j = {};
+        }
+        return { status: res.status, json: j };
+      };
+      const reg = makeReg(call);
+      const a = await reg("wave-a@x.com", "wavea");
+      const b = await reg("wave-b@x.com", "waveb");
+      const conv = await call("POST", "/api/conversations", { userId: b.user.id }, a.token);
+      const cid = conv.json.conversation.id;
+      const upload = async () => {
+        const up = await call(
+          "POST",
+          "/api/files?name=voice.m4a&type=audio/mp4",
+          undefined,
+          a.token,
+          {
+            headers: { "content-type": "application/octet-stream" },
+            body: Buffer.from("m4abytes"),
+          },
+        );
+        return up.json.fileKey;
+      };
+      const k1 = await upload();
+      const bars = Array.from({ length: 36 }, (_, i) => (i * 7) % 101);
+      const m1 = await call(
+        "POST",
+        `/api/conversations/${cid}/messages`,
+        {
+          kind: "FILE",
+          fileKey: k1,
+          fileName: "voice.m4a",
+          fileType: "audio/mp4",
+          fileSize: 8,
+          clientId: "wv-1",
+          meta: { voice: true, seconds: 4, waveform: bars },
+        },
+        a.token,
+      );
+      const listB = await call("GET", `/api/conversations/${cid}/messages`, undefined, b.token);
+      const seenByB = (listB.json.items || []).find((m) => m.clientId === "wv-1");
+      check(
+        "r31-27: a voice note's waveform (36 bars) is stored with the message and comes back to the OTHER side inside meta.waveform, next to voice + seconds",
+        m1.status === 201 &&
+          JSON.stringify(m1.json.message?.meta?.waveform) === JSON.stringify(bars) &&
+          m1.json.message?.meta?.voice === true &&
+          m1.json.message?.meta?.seconds === 4 &&
+          JSON.stringify(seenByB?.meta?.waveform) === JSON.stringify(bars),
+        `status=${m1.status} meta=${JSON.stringify(m1.json.message?.meta).slice(0, 120)}`,
+      );
+      const k2 = await upload();
+      const junk = [-20, 250, "77", null, 1e9, 33.6, NaN, ...Array(100).fill(50)];
+      const m2 = await call(
+        "POST",
+        `/api/conversations/${cid}/messages`,
+        {
+          kind: "FILE",
+          fileKey: k2,
+          fileName: "voice.m4a",
+          fileType: "audio/mp4",
+          fileSize: 8,
+          clientId: "wv-2",
+          meta: { voice: true, seconds: 9, waveform: junk },
+        },
+        a.token,
+      );
+      const w2 = m2.json.message?.meta?.waveform;
+      check(
+        "r31-27: junk bars are clamped, never trusted — ints 0..100 only, at most 64 entries (negative→0, 250→100, '77'→77, null/NaN→0, 33.6→34)",
+        m2.status === 201 &&
+          Array.isArray(w2) &&
+          w2.length === 64 &&
+          w2.every((v) => Number.isInteger(v) && v >= 0 && v <= 100) &&
+          w2[0] === 0 &&
+          w2[1] === 100 &&
+          w2[2] === 77 &&
+          w2[3] === 0 &&
+          w2[4] === 100 &&
+          w2[5] === 34 &&
+          w2[6] === 0,
+        `len=${w2?.length} head=${JSON.stringify(w2?.slice(0, 8))}`,
+      );
+      const k3 = await upload();
+      const m3 = await call(
+        "POST",
+        `/api/conversations/${cid}/messages`,
+        {
+          kind: "FILE",
+          fileKey: k3,
+          fileName: "song.m4a",
+          fileType: "audio/mp4",
+          fileSize: 8,
+          clientId: "wv-3",
+          meta: { document: true, waveform: bars },
+        },
+        a.token,
+      );
+      const k4 = await upload();
+      const m4 = await call(
+        "POST",
+        `/api/conversations/${cid}/messages`,
+        {
+          kind: "FILE",
+          fileKey: k4,
+          fileName: "voice.m4a",
+          fileType: "audio/mp4",
+          fileSize: 8,
+          clientId: "wv-4",
+          meta: { voice: true, seconds: 3, waveform: "not-an-array" },
+        },
+        a.token,
+      );
+      const k5 = await upload();
+      const m5 = await call(
+        "POST",
+        `/api/conversations/${cid}/messages`,
+        {
+          kind: "FILE",
+          fileKey: k5,
+          fileName: "voice.m4a",
+          fileType: "audio/mp4",
+          fileSize: 8,
+          clientId: "wv-5",
+          meta: { voice: true, seconds: 3 },
+        },
+        a.token,
+      );
+      check(
+        "r31-27: no waveform is stored for a document (even an audio one), for a non-array value, or when the sender did not sample one (old app) — the field is simply absent, the note still sends",
+        m3.status === 201 &&
+          m3.json.message?.meta?.waveform === undefined &&
+          m3.json.message?.meta?.document === true &&
+          m4.status === 201 &&
+          m4.json.message?.meta?.waveform === undefined &&
+          m4.json.message?.meta?.voice === true &&
+          m5.status === 201 &&
+          m5.json.message?.meta?.waveform === undefined,
+        `m3=${JSON.stringify(m3.json.message?.meta)} m4=${JSON.stringify(m4.json.message?.meta)}`,
+      );
+      const src = readFileSync("src/worker/index.ts", "utf8");
+      check(
+        "r31-27: worker — ONE whitelist helper (voiceWaveform) feeds the FILE meta; the cap is a named constant",
+        src.includes("const VOICE_WAVEFORM_MAX = 64;") &&
+          src.includes("...voiceWaveform(incomingMeta),") &&
+          src.includes(
+            "if (meta.voice !== true || !Array.isArray(meta.waveform) || meta.waveform.length === 0) return {};",
+          ) &&
+          src.includes("waveform?: number[];"),
+      );
+    }
+    {
+      const vn = kt("VoiceNote.kt");
+      check(
+        "r31-27: app — the recorder samples maxAmplitude every 100 ms and squashes the peaks into 36 bars (0..100, sqrt curve, scaled to the take's own peak); stop() hands back a VoiceTake(file, seconds, waveform)",
+        vn.includes("const val SAMPLE_MS = 100L") &&
+          vn.includes("amps.add(runCatching { recorder?.maxAmplitude ?: 0 }.getOrDefault(0))") &&
+          vn.includes("handler.postDelayed(sampler, SAMPLE_MS)") &&
+          vn.includes("fun stop(): VoiceTake? {") &&
+          vn.includes("val wave = VoiceWaveform.squash(amps)") &&
+          vn.includes(
+            "class VoiceTake(val file: File, val seconds: Int, val waveform: List<Int>)",
+          ) &&
+          vn.includes("object VoiceWaveform {") &&
+          vn.includes("const val BARS = 36") &&
+          vn.includes("const val MAX_BARS = 64") &&
+          vn.includes(
+            "return means.map { (sqrt(it / peak) * 100f).roundToInt().coerceIn(0, 100) }",
+          ) &&
+          vn.includes("fun pseudo(seed: String, bars: Int = BARS): List<Int> {") &&
+          existsSync(
+            "native-android/app/src/test/java/app/kuchupuchu/android/VoiceWaveformTest.kt",
+          ),
+      );
+      check(
+        "r31-27: app — the player exposes progress (0..1, 80 ms ticker), PAUSES instead of stopping (pausedId keeps the spot) and seeks by fraction, also while the note is still downloading",
+        vn.includes("var progress: Float by mutableStateOf(0f)") &&
+          vn.includes("var pausedId: String? by mutableStateOf(null)") &&
+          vn.includes("const val TICK_MS = 80L") &&
+          vn.includes("runCatching { live.pause() }") &&
+          vn.includes("fun seekTo(ctx: Context, id: String, fileKey: String, frac: Float) {") &&
+          vn.includes("runCatching { live.seekTo((f * live.duration).toInt()) }") &&
+          vn.includes(
+            "if (startAt > 0f) runCatching { p.seekTo((startAt * p.duration).toInt()) }",
+          ) &&
+          vn.includes("if (gen != loadGen) {"),
+      );
+      check(
+        "r31-27: app — the bubble draws the bars on a Canvas (played part in the chat accent / white, rest faint), a tap on the bars seeks, the time line counts up while playing; the 'Voice message' label is gone; bars ride in meta.waveform on send, retry and forward",
+        chat.includes("internal fun VoiceWave(") &&
+          chat.includes("internal fun voiceWaveOf(m: JSONObject): List<Int> {") &&
+          chat.includes(
+            "val bars = remember(id) { voiceWaveOf(m).ifEmpty { VoiceWaveform.pseudo(id) } }",
+          ) &&
+          chat.includes("color = if (x <= playedUntil) played else rest,") &&
+          chat.includes("cap = StrokeCap.Round,") &&
+          chat.includes("onSeek((up.position.x / size.width).coerceIn(0f, 1f))") &&
+          chat.includes(
+            "if (!pendingEcho && fileKey.isNotBlank()) player.seekTo(ctx, id, fileKey, frac)",
+          ) &&
+          chat.includes("active && secs > 0 -> {") &&
+          !chat.includes('Text("Voice message", fontSize = 14.sp, color = Ink)') &&
+          chat.includes(
+            "fun sendVoice(file: File, seconds: Int, name: String, waveform: List<Int> = emptyList()) {",
+          ) &&
+          chat.includes(
+            '.also { if (waveform.isNotEmpty()) it.put("waveform", JSONArray(waveform)) }',
+          ) &&
+          chat.includes("sendVoice(take.file, take.seconds, name, take.waveform)") &&
+          chat.includes("voiceWaveOf(p),") &&
+          chat.includes(
+            '.also { mm -> vm.optJSONArray("waveform")?.let { mm.put("waveform", it) } },',
+          ) &&
+          chat.includes(
+            '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme)',
+          ),
+      );
     }
 
     // Every cream / warm-white literal outside Theme.kt and the login screen

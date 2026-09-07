@@ -38,6 +38,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -117,6 +118,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -146,6 +148,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.net.Uri
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import kotlin.math.roundToInt
@@ -1054,10 +1057,15 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
-    fun sendVoice(file: File, seconds: Int, name: String) {
+    fun sendVoice(file: File, seconds: Int, name: String, waveform: List<Int> = emptyList()) {
         // Owner round 21: his voice-send sound on the send itself.
         runCatching { KpSounds.voiceSend(ctx) }
         val clientId = "c_${java.util.UUID.randomUUID()}"
+        // Owner round 31 (item 27): the recorded bars ride along in meta so the
+        // pending bubble, the sent bubble and the receiver all draw the same wave.
+        fun voiceMeta() =
+            JSONObject().put("voice", true).put("seconds", seconds).put("clientId", clientId)
+                .also { if (waveform.isNotEmpty()) it.put("waveform", JSONArray(waveform)) }
         pending.add(
             JSONObject()
                 .put("id", clientId)
@@ -1071,7 +1079,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // Kept for tap-to-retry after a failed upload (the temp file
                 // is only deleted once the send succeeds).
                 .put("voicePath", file.absolutePath)
-                .put("meta", JSONObject().put("voice", true).put("seconds", seconds).put("clientId", clientId))
+                .put("meta", voiceMeta())
                 .put("createdAt", java.time.Instant.now().toString()),
         )
         scope.launch {
@@ -1091,7 +1099,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         .put("fileType", "audio/mp4")
                         .put("fileSize", bytes.size)
                         .put("clientId", clientId)
-                        .put("meta", JSONObject().put("voice", true).put("seconds", seconds).put("clientId", clientId))
+                        .put("meta", voiceMeta())
                 withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
                 UploadProgress.done(clientId)
                 runCatching { KpSounds.sent(ctx) }
@@ -1215,10 +1223,10 @@ fun ChatScreen(nav: NavController, convId: String) {
             VoiceNote.cancel()
             return
         }
-        val result = VoiceNote.stop()
-        if (result != null) {
+        val take = VoiceNote.stop()
+        if (take != null) {
             val name = "voice_${System.currentTimeMillis()}.m4a"
-            sendVoice(result.first, result.second, name)
+            sendVoice(take.file, take.seconds, name, take.waveform)
         }
     }
 
@@ -1328,7 +1336,21 @@ fun ChatScreen(nav: NavController, convId: String) {
                                     .put("fileKey", key)
                                     .put("fileName", m.optText("fileName").ifBlank { "File" })
                                     .put("fileType", m.optText("fileType").ifBlank { "application/octet-stream" })
-                                    .put("fileSize", m.optInt("fileSize")),
+                                    .put("fileSize", m.optInt("fileSize"))
+                                    // Owner round 31 (item 27): a forwarded voice note
+                                    // stays a voice note — duration + bars come along.
+                                    .also { body ->
+                                        val vm = m.optJSONObject("meta")
+                                        if (vm?.optBoolean("voice") == true) {
+                                            body.put(
+                                                "meta",
+                                                JSONObject().put("voice", true).put("seconds", vm.optInt("seconds"))
+                                                    .also { mm -> vm.optJSONArray("waveform")?.let { mm.put("waveform", it) } },
+                                            )
+                                        } else if (vm?.optBoolean("document") == true) {
+                                            body.put("meta", JSONObject().put("document", true))
+                                        }
+                                    },
                             )
                         m.optText("mediaUrl").startsWith("data:") ->
                             Api.post(
@@ -2026,6 +2048,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                                                 f,
                                                 p.optJSONObject("meta")?.optInt("seconds") ?: 0,
                                                 p.optString("fileName").ifBlank { "voice.m4a" },
+                                                voiceWaveOf(p),
                                             )
                                         }
                                     }
@@ -3371,7 +3394,7 @@ private fun MessageRow(
                             if (EmojiRepo.isCustomId(st)) CustomEmojiOrFallback(st)
                             else Text(st, fontSize = 56.sp)
                         }
-                        "FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo)
+                        "FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme)
                         "DELETED" -> Text(
                             // Owner round 18: the same trailing reserve the
                             // text path uses — the stamp sat ON the deleted
@@ -3908,6 +3931,66 @@ private fun ImageMessageRow(
     }
 }
 
+/** Owner round 31 (item 27): the bars a voice message carries in meta.waveform. */
+internal fun voiceWaveOf(m: JSONObject): List<Int> {
+    val arr = m.optJSONObject("meta")?.optJSONArray("waveform") ?: return emptyList()
+    val out = ArrayList<Int>(arr.length())
+    for (i in 0 until arr.length()) out.add(arr.optInt(i))
+    return VoiceWaveform.sanitize(out)
+}
+
+/**
+ * Owner round 31 (item 27): the voice bubble's waveform. Rounded bars, the
+ * played part in [played] and the rest in [rest]; a tap or drag anywhere on
+ * it seeks to that fraction. Pure Canvas — one draw per progress tick.
+ */
+@Composable
+internal fun VoiceWave(
+    bars: List<Int>,
+    progress: Float,
+    played: Color,
+    rest: Color,
+    modifier: Modifier = Modifier,
+    onSeek: (Float) -> Unit = {},
+) {
+    Canvas(
+        // A quick tap seeks; the down is NOT consumed, so the bubble's own
+        // long-press (action sheet) and the reply swipe keep working on the
+        // bars — only the tap's up is taken, which also stops the bubble
+        // from treating it as a select tap.
+        modifier.pointerInput(bars) {
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false)
+                // AwaitPointerEventScope's own withTimeoutOrNull (frame-clock aware).
+                val up = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) { waitForUpOrCancellation() }
+                if (up != null) {
+                    up.consume()
+                    onSeek((up.position.x / size.width).coerceIn(0f, 1f))
+                }
+            }
+        },
+    ) {
+        if (bars.isEmpty()) return@Canvas
+        val n = bars.size
+        val gap = 2.dp.toPx()
+        val stroke = ((size.width - gap * (n - 1)) / n).coerceAtLeast(1.5f)
+        val minH = 3.dp.toPx()
+        val mid = size.height / 2f
+        val playedUntil = progress.coerceIn(0f, 1f) * size.width
+        for (i in 0 until n) {
+            val x = i * (stroke + gap) + stroke / 2f
+            val h = (minH + (size.height - minH) * (bars[i].coerceIn(0, 100) / 100f)) / 2f
+            drawLine(
+                color = if (x <= playedUntil) played else rest,
+                start = Offset(x, mid - h),
+                end = Offset(x, mid + h),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round,
+            )
+        }
+    }
+}
+
 /**
  * Live upload fractions keyed by message clientId — bubbles read this to draw
  * a real progress ring ("kototuku send hoyeche") instead of a blind spinner.
@@ -4044,6 +4127,7 @@ private fun FileBubble(
     pendingEcho: Boolean = false,
     onOpenImage: (JSONObject) -> Unit = {},
     onOpenVideo: (JSONObject) -> Unit = {},
+    theme: String = "darkblue",
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -4072,6 +4156,16 @@ private fun FileBubble(
     val loading = player.loadingId == id
 
     if (isVoice) {
+        // Owner round 31 (item 27): a real waveform instead of the "Voice
+        // message" label; playback progress is painted ON the bars and a tap
+        // on them seeks. Bars come from the recorder (meta.waveform); notes
+        // recorded before that get a stable pattern from their id.
+        val paused = player.pausedId == id
+        val active = playing || paused
+        val bars = remember(id) { voiceWaveOf(m).ifEmpty { VoiceWaveform.pseudo(id) } }
+        val progress = if (active) player.progress else 0f
+        val ink = if (mine) Color.White else chatAccent(theme)
+        val faint = if (mine) Color(0x66FFFFFF) else chatAccent(theme).copy(alpha = 0.35f)
         Row(verticalAlignment = Alignment.CenterVertically) {
             val interaction = remember { MutableInteractionSource() }
             val pressed by interaction.collectIsPressedAsState()
@@ -4080,33 +4174,29 @@ private fun FileBubble(
                     .size(38.dp)
                     .pressScale(interaction)
                     .clip(CircleShape)
-                    .background(if (mine) Color(0x33FFFFFF) else GoldSoft)
+                    .background(if (mine) Color(0x33FFFFFF) else chatAccent(theme).copy(alpha = 0.18f))
                     .clickable(interactionSource = interaction, indication = null) {
                         if (pendingEcho || fileKey.isBlank()) return@clickable // still uploading
-                        if (player.playingId == id) {
-                            player.stop()
-                        } else {
-                            player.toggle(ctx, id, fileKey)
-                        }
+                        player.toggle(ctx, id, fileKey)
                     },
                 contentAlignment = Alignment.Center,
             ) {
                 when {
                     loading -> CircularProgressIndicator(
-                        color = if (mine) AmberInk else GoldDeep,
+                        color = ink,
                         strokeWidth = 2.dp,
                         modifier = Modifier.size(18.dp),
                     )
                     playing -> Icon(
                         Icons.Filled.Pause,
                         contentDescription = "Pause",
-                        tint = if (mine) Ink else GoldDeep,
+                        tint = ink,
                         modifier = Modifier.size(22.dp).scale(if (pressed) 0.85f else 1f),
                     )
                     else -> Icon(
                         Icons.Filled.PlayArrow,
                         contentDescription = "Play",
-                        tint = if (mine) Ink else GoldDeep,
+                        tint = ink,
                         modifier = Modifier.size(22.dp).scale(if (pressed) 0.85f else 1f),
                     )
                 }
@@ -4115,12 +4205,26 @@ private fun FileBubble(
             // Owner round 25: no side padding — the tick+time stamp sits in
             // the bubble's bottom band, right corner, under this column.
             Column {
-                Text("Voice message", fontSize = 14.sp, color = Ink)
+                VoiceWave(
+                    bars = bars,
+                    progress = progress,
+                    played = ink,
+                    rest = faint,
+                    modifier = Modifier.width(150.dp).height(30.dp),
+                    onSeek = { frac ->
+                        if (!pendingEcho && fileKey.isNotBlank()) player.seekTo(ctx, id, fileKey, frac)
+                    },
+                )
                 val secs = m.optJSONObject("meta")?.optInt("seconds") ?: 0
                 val vFrac = UploadProgress.fracs[m.optString("clientId")]
                 Text(
                     when {
                         vFrac != null -> "Sending · ${(vFrac * 100).toInt()}%"
+                        // While it plays, the line counts the elapsed seconds.
+                        active && secs > 0 -> {
+                            val at = (progress * secs).toInt()
+                            "%d:%02d".format(at / 60, at % 60)
+                        }
                         secs > 0 -> "%d:%02d".format(secs / 60, secs % 60)
                         pendingEcho -> "Sending…"
                         else -> FilesUtil.displaySize(m.optInt("fileSize"))
