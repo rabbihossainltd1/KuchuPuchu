@@ -656,6 +656,7 @@ async function geminiComplete(
   env: Env,
   prompt: string,
   maxOutputTokens = 120,
+  extraParts: unknown[] = [],
 ): Promise<string | null> {
   if (!env.GEMINI_API_KEY) return null;
   const started = Date.now();
@@ -677,7 +678,7 @@ async function geminiComplete(
           method: "POST",
           headers: { "content-type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
           body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
+            contents: [{ parts: [{ text: prompt }, ...extraParts] }],
             generationConfig: {
               temperature: 1,
               maxOutputTokens,
@@ -841,6 +842,29 @@ function arrayBufferToBase64(buf: ArrayBuffer): string {
   return btoa(bin);
 }
 
+/** Owner round 31 (item 17): the mime Gemini's audio understanding accepts
+ *  for a stored voice note (the app records MPEG-4/AAC = m4a). */
+const GEMINI_AUDIO_MIMES = new Set([
+  "audio/wav",
+  "audio/mp3",
+  "audio/aiff",
+  "audio/aac",
+  "audio/ogg",
+  "audio/flac",
+  "audio/m4a",
+  "audio/opus",
+  "audio/webm",
+]);
+function geminiAudioMime(type: string): string {
+  const t = type.toLowerCase().split(";")[0]!.trim();
+  if (t === "audio/mp4" || t === "audio/x-m4a" || t === "audio/mp4a-latm") return "audio/m4a";
+  if (t === "audio/mpeg" || t === "audio/mpga") return "audio/mp3";
+  if (t === "audio/x-wav" || t === "audio/wave") return "audio/wav";
+  return GEMINI_AUDIO_MIMES.has(t) ? t : "audio/m4a";
+}
+/** Voice-note bytes ≤ this go to Gemini inline (a 60s note is ~0.5 MB). */
+const AI_VOICE_MAX_BYTES = 6_000_000;
+
 /** One bounded Gemini image call: tries the image models under the shared
  *  wall-clock budget, returns raw bytes + mime or null. Never throws. */
 async function geminiImage(
@@ -972,13 +996,55 @@ async function sendAiReply(
       kind: string;
       body: string | null;
       media: string | null;
+      meta_json: string | null;
     }>(
       db,
-      "SELECT sender_id, kind, body, media FROM messages WHERE conv_id = ? ORDER BY rowid DESC LIMIT 2",
+      "SELECT sender_id, kind, body, media, meta_json FROM messages WHERE conv_id = ? ORDER BY rowid DESC LIMIT 2",
       convId,
     );
     const newest = latestTwo[0];
     const previous = latestTwo[1];
+    // Owner round 31 (item 17): a VOICE note to the AI is heard, not ignored —
+    // the clip rides along as an inline audio part and the model answers what
+    // was said. (Before, the mic in this chat was disabled and its dead
+    // button froze the app.)
+    const voiceParts: unknown[] = [];
+    let voicePrompt = "";
+    if (
+      newest &&
+      newest.sender_id === userId &&
+      newest.kind === "FILE" &&
+      newest.media &&
+      env.MEDIA
+    ) {
+      const nm = parseJson<{ voice?: boolean; type?: string; document?: boolean }>(
+        newest.meta_json,
+        {},
+      );
+      const type = String(nm.type || "");
+      if (nm.voice === true || (type.startsWith("audio/") && nm.document !== true)) {
+        try {
+          const obj = await env.MEDIA.get(newest.media);
+          if (obj) {
+            const buf = await new Response(obj.body).arrayBuffer();
+            if (buf.byteLength > 0 && buf.byteLength <= AI_VOICE_MAX_BYTES) {
+              voiceParts.push({
+                inlineData: {
+                  mimeType: geminiAudioMime(type || obj.httpMetadata?.contentType || ""),
+                  data: arrayBufferToBase64(buf),
+                },
+              });
+              voicePrompt =
+                " The user's newest message is the attached VOICE NOTE (they spoke instead of typing). " +
+                "Listen to it and reply to what they said, in the language they spoke. " +
+                "If the clip is silent or unintelligible, say so briefly and ask them to try again.";
+            }
+          }
+        } catch {
+          /* unreadable clip: plain text reply below */
+        }
+      }
+    }
     if (newest && newest.sender_id === userId && env.MEDIA) {
       let parts: unknown[] | null = null;
       let editSource: string | null = null;
@@ -1106,7 +1172,8 @@ async function sendAiReply(
       }
     }
 
-    const body = (await geminiComplete(env, prompt, 900)) ?? AI_REPLY_FALLBACK;
+    const body =
+      (await geminiComplete(env, prompt + voicePrompt, 900, voiceParts)) ?? AI_REPLY_FALLBACK;
     const botId = await ensureAiBot(db);
     const mid = id();
     const created = nowIso();

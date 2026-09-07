@@ -765,7 +765,7 @@ const convBetween = (db, a, b) =>
   // ---- Owner round 12 (2026-09-05): 5 device reports ----
   check(
     "AI budget 900 tokens: Bengali script no longer dies mid-message",
-    src.includes("geminiComplete(env, prompt, 900)"),
+    src.includes("geminiComplete(env, prompt + voicePrompt, 900, voiceParts)"),
   );
   check(
     "callee in a call → 486 LINE_BUSY (pair-redial never blocked)",
@@ -923,8 +923,10 @@ const convBetween = (db, a, b) =>
     calls.indexOf("Decline LEFT, Accept RIGHT") < calls.indexOf("fun VoiceCallScreen"),
   );
   check(
-    "AI chat: mic disabled; sub-second voice cancels silently",
-    chat.includes("micEnabled = !isAiChat") && !chat.includes("at least 1 second to record"),
+    "AI chat: mic enabled again (r31-17 — the AI hears voice notes); sub-second voice cancels silently",
+    chat.includes("micEnabled = true,") &&
+      !chat.includes("micEnabled = !isAiChat") &&
+      !chat.includes("at least 1 second to record"),
   );
   check(
     "mic button: fully transparent (round 15: shadow removed too), ring stays",
@@ -2630,6 +2632,24 @@ const convBetween = (db, a, b) =>
         ) &&
         readFileSync("src/worker/index.ts", "utf8").includes(
           'String(meta.type || "").startsWith("image/") && meta.document !== true',
+        ),
+    );
+
+    check(
+      "r31-17: the hold-mic gesture always awaits the pointer down first (a disabled mic no longer spins the main thread), and the AI answers voice notes via inline audio",
+      chat.includes(
+        "val down = awaitFirstDown(requireUnconsumed = false)\n                    if (!enabled) {\n                        down.consume()\n                        return@awaitEachGesture\n                    }",
+      ) &&
+        !chat.includes("if (!enabled) return@awaitEachGesture") &&
+        readFileSync("src/worker/index.ts", "utf8").includes(
+          "function geminiAudioMime(type: string): string",
+        ) &&
+        readFileSync("src/worker/index.ts", "utf8").includes("extraParts: unknown[] = [],") &&
+        readFileSync("src/worker/index.ts", "utf8").includes(
+          "contents: [{ parts: [{ text: prompt }, ...extraParts] }],",
+        ) &&
+        readFileSync("src/worker/index.ts", "utf8").includes(
+          "(await geminiComplete(env, prompt + voicePrompt, 900, voiceParts)) ?? AI_REPLY_FALLBACK",
         ),
     );
 

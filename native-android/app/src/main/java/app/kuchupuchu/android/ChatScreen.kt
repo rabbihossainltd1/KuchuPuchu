@@ -2184,7 +2184,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                 showStickers = false
                 startRecording()
             },
-            micEnabled = !isAiChat,
+            // Owner round 31 (item 17): the AI hears voice notes now (the
+            // worker feeds the clip to Gemini), so the mic works here too.
+            micEnabled = true,
             theme = chatTheme,
             onFinishRecord = { cancelled -> finishRecording(cancelled) },
             selectCount = selected.size,
@@ -2559,8 +2561,16 @@ private fun HoldMicButton(
             .border(1.5.dp, if (cancelArmed) Red else accent, CircleShape)
             .pointerInput(enabled) {
                 awaitEachGesture {
-                    if (!enabled) return@awaitEachGesture
-                    awaitFirstDown(requireUnconsumed = false)
+                    // Owner round 31 (item 17): the disabled branch used to
+                    // return BEFORE awaiting a pointer — awaitEachGesture then
+                    // re-entered instantly with nothing to suspend on, spinning
+                    // the main thread until the app froze (the "AI voice
+                    // button crash"). Always consume the down first.
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    if (!enabled) {
+                        down.consume()
+                        return@awaitEachGesture
+                    }
                     dragX = 0f
                     var armed = false
                     onStartRecord()
