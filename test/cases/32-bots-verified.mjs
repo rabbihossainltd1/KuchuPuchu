@@ -2877,6 +2877,26 @@ const convBetween = (db, a, b) =>
       );
     }
 
+    {
+      const cn = kt("CallNotify.kt");
+      const inc = cn.slice(
+        cn.indexOf("fun incoming(ctx: Context"),
+        cn.indexOf("fun ongoing(ctx: Context"),
+      );
+      check(
+        "r31-23: incoming-call card — Accept GREEN, Decline RED (full-length ForegroundColorSpan = the platform's emphasized call-button colour, same Green/Red as the call screen); both actions keep their intents",
+        inc.includes('val acceptLabel = coloured("Accept", Green.toArgb())') &&
+          inc.includes('val declineLabel = coloured("Decline", Red.toArgb())') &&
+          inc.includes(".addAction(0, acceptLabel, accept)") &&
+          inc.includes(".addAction(0, declineLabel, decline)") &&
+          inc.includes(".setFullScreenIntent(open, true)") &&
+          cn.includes("private fun coloured(text: String, color: Int): CharSequence =") &&
+          cn.includes("android.text.style.ForegroundColorSpan(color)") &&
+          !inc.includes('addAction(0, "Accept"') &&
+          !inc.includes('addAction(0, "Decline"'),
+      );
+    }
+
     // Every cream / warm-white literal outside Theme.kt and the login screen
     // (which the owner excluded from theme work) must be gone from the
     // screens: dark-blue may not paint any light-cream colour.

@@ -19,6 +19,7 @@ import android.os.IBinder
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import androidx.compose.ui.graphics.toArgb
 import androidx.core.app.NotificationCompat
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -332,6 +333,15 @@ object CallNotify {
                 Intent(ctx, CallActionReceiver::class.java).setAction(CALL_DECLINE).putExtra("kp_call_id", callId),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
+        // Owner round 31 (item 23): Accept is GREEN, Decline is RED. A
+        // full-length ForegroundColorSpan on an action label is the platform's
+        // own colour channel for call buttons: a card with a full-screen intent
+        // renders its actions in "emphasized" mode, and a span covering the
+        // whole label becomes the button fill (Android 9+; coloured text on
+        // 7/8) — the same mechanism Notification.CallStyle uses for its
+        // Answer / Decline on Android 12+. Same greens/reds as the call screen.
+        val acceptLabel = coloured("Accept", Green.toArgb())
+        val declineLabel = coloured("Decline", Red.toArgb())
         val n =
             NotificationCompat.Builder(ctx, CH_IN)
                 .setSmallIcon(R.mipmap.ic_stat_kp)
@@ -343,8 +353,8 @@ object CallNotify {
                 .setAutoCancel(false)
                 .setContentIntent(open)
                 .setFullScreenIntent(open, true)
-                .addAction(0, "Accept", accept)
-                .addAction(0, "Decline", decline)
+                .addAction(0, acceptLabel, accept)
+                .addAction(0, declineLabel, decline)
                 // Owner round 22: if the process dies before the missed-call
                 // push lands, nobody is left to cancel this card — it self-
                 // retires after 60s instead of ringing forever.
@@ -353,6 +363,17 @@ object CallNotify {
                 .build()
         ctx.getSystemService(NotificationManager::class.java).notify(INCOMING_ID, n)
     }
+
+    /** Action label carrying one colour over its whole length (see [incoming]). */
+    private fun coloured(text: String, color: Int): CharSequence =
+        android.text.SpannableString(text).apply {
+            setSpan(
+                android.text.style.ForegroundColorSpan(color),
+                0,
+                length,
+                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+            )
+        }
 
     fun ongoing(ctx: Context, title: String): Notification {
         ensure(ctx)
