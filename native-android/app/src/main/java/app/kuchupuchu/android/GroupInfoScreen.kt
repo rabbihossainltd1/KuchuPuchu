@@ -92,7 +92,7 @@ fun GroupInfoScreen(nav: NavController, convId: String) {
             }
         }.onFailure { error = it.message ?: "Could not load the group." }
     }
-    LaunchedEffect(convId) { reload() }
+    LaunchedEffect(convId, ScreenStore.profileVersion, ScreenStore.poke) { reload() }
 
     val c = conv
     val myId = Store.myId()

@@ -69,6 +69,22 @@ fun KpApp() {
     val appCtx = androidx.compose.ui.platform.LocalContext.current.applicationContext
     LaunchedEffect(Unit) {
         KpSocket.onEvent { ev ->
+            // Owner round 31 (item 18): a peer changed name / username / about
+            // / picture. Drop every cached view of that user, then poke: the
+            // chat list refetches (new name + avatarRef), the open chat header
+            // and the profile page re-read the user, avatars re-resolve.
+            if (ev.optString("type") == "profile") {
+                val uid = ev.optString("userId")
+                if (uid.isNotBlank()) {
+                    Cache.bust("/api/users/$uid")
+                    Cache.bustAll("/api/users/$uid/")
+                    Cache.bustAll("/api/conversations")
+                    if (ev.optBoolean("self")) Cache.bust("/api/me")
+                }
+                ScreenStore.pokeProfile()
+                ScreenStore.pokeInbox()
+                return@onEvent
+            }
             if (ev.optString("type") == "conv" && ev.optBoolean("msg") && Store.foreground) {
                 // Own sends arrive as pokes too (round 13): never play the
                 // in-app sound for a message this device just sent.

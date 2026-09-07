@@ -205,6 +205,52 @@ async function mk(withDo) {
   );
 }
 
+// ---- r31-18: profile + conversation changes fan out live --------------------
+{
+  const k = await mk(true);
+  const a = await k.reg("rt5a@x.com", "rt5a");
+  const b = await k.reg("rt5b@x.com", "rt5b");
+  const c = await k.reg("rt5c@x.com", "rt5c");
+  const stranger = await k.reg("rt5s@x.com", "rt5s");
+  await k.call("POST", "/api/conversations", { userId: b.user.id }, a.token);
+  const g = await k.call(
+    "POST",
+    "/api/conversations/group",
+    { title: "RT5", memberIds: [c.user.id] },
+    a.token,
+  );
+  const gid = g.json.conversation.id;
+  k.broadcasts.length = 0;
+  await k.call("PATCH", "/api/me", { displayName: "A Renamed" }, a.token);
+  const prof = k.broadcasts.filter((x) => x.body.type === "profile");
+  const rooms = new Set(prof.map((p) => p.room));
+  check(
+    "PATCH /api/me (name) → one profile frame per peer sharing ANY conversation (1:1 + group) plus self",
+    prof.every((p) => p.body.userId === a.user.id) &&
+      rooms.has(`user:${b.user.id}`) &&
+      rooms.has(`user:${c.user.id}`) &&
+      rooms.has(`user:${a.user.id}`) &&
+      !rooms.has(`user:${stranger.user.id}`),
+    JSON.stringify([...rooms]),
+  );
+  k.broadcasts.length = 0;
+  await k.call("PATCH", "/api/me", { privLastSeen: "nobody" }, a.token);
+  check(
+    "a privacy-only PATCH fans out NO profile frame",
+    k.broadcasts.filter((x) => x.body.type === "profile").length === 0,
+    String(k.broadcasts.length),
+  );
+  k.broadcasts.length = 0;
+  await k.call("PATCH", `/api/conversations/${gid}`, { title: "RT5 renamed" }, a.token);
+  const convPokes = k.broadcasts.filter((x) => x.body.type === "conv" && !x.body.msg);
+  const pokeRooms = new Set(convPokes.map((p) => p.room));
+  check(
+    "group rename → conv frame to the chat room AND every member's user channel",
+    pokeRooms.has(gid) && pokeRooms.has(`user:${a.user.id}`) && pokeRooms.has(`user:${c.user.id}`),
+    JSON.stringify([...pokeRooms]),
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`\n--- ${lines.length - broken} ok / ${broken} broken ---`);

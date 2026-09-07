@@ -138,6 +138,14 @@ object ScreenStore {
         poke++
     }
 
+    /** Owner round 31 (item 18): bumped when a peer's (or our own) name /
+     *  username / about / picture changed — profile pages, chat headers and
+     *  the list re-read the user the moment the "profile" frame lands. */
+    var profileVersion by mutableStateOf(0)
+    fun pokeProfile() {
+        profileVersion++
+    }
+
     private val lastNotifiedAt = HashMap<String, String>()
 
     /** Instant local read: zero the unread badge without waiting for the next

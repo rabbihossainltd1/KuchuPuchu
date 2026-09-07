@@ -4138,6 +4138,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       await run(db, `UPDATE users SET ${sets.join(", ")} WHERE id = ?`, ...values);
     }
     const row = (await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", uid))!;
+    // Owner round 31 (item 18): a name / username / about / picture change
+    // reaches every screen of every peer live. One "profile" frame per
+    // peer's user channel (chat list, open chat header, profile page all
+    // listen); the peers are everyone sharing a conversation with this user.
+    const identityChanged =
+      body.displayName !== undefined ||
+      body.username !== undefined ||
+      body.about !== undefined ||
+      body.avatarUrl !== undefined;
+    if (identityChanged) ctx.waitUntil(fanOutProfileChange(env, db, uid));
     return json({ user: userSelf(row, true) });
   }
 
@@ -4800,6 +4810,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       const theme = String(body.theme || "default").slice(0, 20);
       await run(db, "UPDATE conversations SET theme = ? WHERE id = ?", theme, convId);
     }
+    ctx.waitUntil(fanOutConversationChange(env, db, convId));
     return json({ conversation: await conversationDetail(db, convId, uid) });
   }
 
@@ -7231,6 +7242,42 @@ function previewOf(row: MsgRow): string {
       return row.body || "Call";
     default:
       return (row.body || "Message").slice(0, 120);
+  }
+}
+
+/** Owner round 31 (item 18): profile fan-out — every user who shares a
+ *  conversation with `uid` gets one {type:"profile", userId} frame on their
+ *  user channel. Best-effort; the poll paths still catch up. */
+async function fanOutProfileChange(env: Env, db: D1Database, uid: string) {
+  try {
+    const peers = await all<{ user_id: string }>(
+      db,
+      `SELECT DISTINCT m2.user_id FROM members m1
+         JOIN members m2 ON m2.conv_id = m1.conv_id AND m2.user_id != m1.user_id
+        WHERE m1.user_id = ? LIMIT 500`,
+      uid,
+    );
+    // The user's own other devices refresh too.
+    await broadcastRoomEvent(env, `user:${uid}`, { type: "profile", userId: uid, self: true });
+    for (const p of peers) {
+      await broadcastRoomEvent(env, `user:${p.user_id}`, { type: "profile", userId: uid });
+    }
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** Owner round 31 (item 18): a group's name / picture / theme / timer changed —
+ *  every member's list + open chat learns immediately. */
+async function fanOutConversationChange(env: Env, db: D1Database, convId: string) {
+  try {
+    await broadcastRoomEvent(env, convId, { type: "conv", conversationId: convId });
+    for (const m of await membersOf(db, convId)) {
+      const id = (m as { user_id: string }).user_id;
+      await broadcastRoomEvent(env, `user:${id}`, { type: "conv", conversationId: convId });
+    }
+  } catch {
+    /* best-effort */
   }
 }
 

@@ -120,10 +120,10 @@ has(
   "mutableStateOf(if (isMe) Store.me else profileSnapshot(userId))",
   "the profile screen paints the snapshot first",
 );
-const load = profile.slice(
-  profile.indexOf("LaunchedEffect(userId)"),
-  profile.indexOf("LaunchedEffect(userId)") + 900,
-);
+// r31-18: the loader is also keyed on ScreenStore.profileVersion (live
+// profile frames re-run it); the cache-then-force order inside is unchanged.
+const loadKey = "LaunchedEffect(userId, ScreenStore.profileVersion)";
+const load = profile.slice(profile.indexOf(loadKey), profile.indexOf(loadKey) + 900);
 // Both calls must exist and be ordered: comparing indexOf results alone lets an
 // absent needle (-1) "win" the comparison, which is how a mutation of exactly
 // this line slipped past the first version of this guard.

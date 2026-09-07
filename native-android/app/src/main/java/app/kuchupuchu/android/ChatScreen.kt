@@ -583,6 +583,15 @@ fun ChatScreen(nav: NavController, convId: String) {
     LaunchedEffect(convId, ScreenStore.poke) {
         if (Store.route == "chat/$convId") refreshMessages()
     }
+    // Owner round 31 (item 18): the header (name, picture, username) follows a
+    // live profile change; a "conv" frame for THIS chat (group renamed,
+    // picture / theme / timer changed by someone else) re-reads the detail.
+    LaunchedEffect(convId, ScreenStore.profileVersion) {
+        if (ScreenStore.profileVersion > 0) {
+            Cache.bust("/api/conversations/$convId")
+            refreshMeta()
+        }
+    }
 
     // Opening a chat ALWAYS lands on the newest message (instant, not animated,
     // so it never lags behind a fast paint on a slow device).
@@ -619,6 +628,14 @@ fun ChatScreen(nav: NavController, convId: String) {
             when (ev.optString("type")) {
                 // (Re)connected: one catch-up sync covers anything missed.
                 "hello" -> refreshMessages(forceNetwork = true)
+                // Owner round 31 (item 18): group name / picture / theme /
+                // timer changed elsewhere — the open chat repaints its header
+                // and wallpaper without a reopen.
+                "conv" ->
+                    if (ev.optString("conversationId") == convId && !ev.optBoolean("msg")) {
+                        Cache.bust("/api/conversations/$convId")
+                        refreshMeta()
+                    }
                 "message" ->
                     if (ev.optString("conversationId") == convId) {
                         // FAST PAINT: the WS "message" frame carries the FULL

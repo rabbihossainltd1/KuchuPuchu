@@ -75,7 +75,8 @@ fun ProfileScreen(nav: NavController, userId: String) {
     // block and the UI said "blocked" while the server said nothing changed.
     var blocked by remember { mutableStateOf(user?.optBoolean("blocked") == true) }
 
-    LaunchedEffect(userId) {
+    // Owner round 31 (item 18): re-read when a live "profile" frame lands.
+    LaunchedEffect(userId, ScreenStore.profileVersion) {
         runCatching {
             if (isMe) {
                 val fresh = withContext(Dispatchers.IO) { Api.get("/api/me", true) }

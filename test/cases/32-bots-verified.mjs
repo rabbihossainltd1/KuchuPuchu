@@ -2653,6 +2653,32 @@ const convBetween = (db, a, b) =>
         ),
     );
 
+    check(
+      "r31-18: realtime everywhere — a 'profile' frame busts the user caches and bumps ScreenStore.profileVersion; profile page, chat header and group info re-read on it; the open chat re-reads its detail on a non-message conv frame",
+      kt("KpApp.kt").includes('if (ev.optString("type") == "profile") {') &&
+        kt("KpApp.kt").includes('Cache.bust("/api/users/$uid")') &&
+        kt("KpApp.kt").includes("ScreenStore.pokeProfile()") &&
+        kt("ScreenStore.kt").includes("var profileVersion by mutableStateOf(0)") &&
+        kt("ProfileScreen.kt").includes("LaunchedEffect(userId, ScreenStore.profileVersion) {") &&
+        kt("GroupInfoScreen.kt").includes(
+          "LaunchedEffect(convId, ScreenStore.profileVersion, ScreenStore.poke) { reload() }",
+        ) &&
+        chat.includes("LaunchedEffect(convId, ScreenStore.profileVersion) {") &&
+        chat.includes('if (ev.optString("conversationId") == convId && !ev.optBoolean("msg")) {') &&
+        readFileSync("src/worker/index.ts", "utf8").includes(
+          "async function fanOutProfileChange(",
+        ) &&
+        readFileSync("src/worker/index.ts", "utf8").includes(
+          "async function fanOutConversationChange(",
+        ) &&
+        readFileSync("src/worker/index.ts", "utf8").includes(
+          "if (identityChanged) ctx.waitUntil(fanOutProfileChange(env, db, uid));",
+        ) &&
+        readFileSync("src/worker/index.ts", "utf8").includes(
+          "ctx.waitUntil(fanOutConversationChange(env, db, convId));",
+        ),
+    );
+
     // Every cream / warm-white literal outside Theme.kt and the login screen
     // (which the owner excluded from theme work) must be gone from the
     // screens: dark-blue may not paint any light-cream colour.
