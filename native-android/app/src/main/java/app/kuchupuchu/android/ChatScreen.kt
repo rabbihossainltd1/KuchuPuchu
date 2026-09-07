@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -315,6 +316,8 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
     var viewerMsg by remember { mutableStateOf<JSONObject?>(null) }
+    // Owner round 31 (item 29): "See all" of a grouped photo bubble.
+    var albumMsg by remember { mutableStateOf<JSONObject?>(null) }
     var editing by remember { mutableStateOf<JSONObject?>(null) }
     var forwarding by remember { mutableStateOf(false) }
 
@@ -900,8 +903,16 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
-    fun sendImage(dataUrl: String) {
+    fun sendImage(dataUrl: String, album: String? = null) {
         val clientId = "c_${java.util.UUID.randomUUID()}"
+        // Owner round 31 (item 29): photos picked together share one album id
+        // (meta.album) — the list folds them into a single grouped bubble.
+        fun metaWith(w: Int, h: Int): JSONObject? {
+            val o = JSONObject()
+            if (w > 0 && h > 0) o.put("w", w).put("h", h)
+            if (album != null) o.put("album", album)
+            return if (o.length() > 0) o else null
+        }
         pending.add(
             JSONObject()
                 .put("id", clientId)
@@ -913,6 +924,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .put("fileName", "photo.jpg")
                 .put("fileType", "image/jpeg")
                 .put("mediaUrl", dataUrl)
+                .also { row -> metaWith(0, 0)?.let { row.put("meta", it) } }
                 .put("createdAt", java.time.Instant.now().toString()),
         )
         scope.launch {
@@ -966,7 +978,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         .put("fileType", "image/jpeg")
                         .put("fileSize", jpeg.size)
                         .put("clientId", clientId)
-                if (shotW > 0 && shotH > 0) payload.put("meta", JSONObject().put("w", shotW).put("h", shotH))
+                metaWith(shotW, shotH)?.let { payload.put("meta", it) }
                 // The server is idempotent by clientId, so one automatic
                 // retry after a dropped response/timeout is SAFE — it returns
                 // the same message instead of failing the photo.
@@ -984,7 +996,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         "data:image/jpeg;base64," + android.util.Base64.encodeToString(jpeg, android.util.Base64.NO_WRAP)
                     } else dataUrl
                     val payload = JSONObject().put("kind", "IMAGE").put("imageData", small).put("clientId", clientId)
-                    if (shotW > 0 && shotH > 0) payload.put("meta", JSONObject().put("w", shotW).put("h", shotH))
+                    metaWith(shotW, shotH)?.let { payload.put("meta", it) }
                     withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
                     UploadProgress.done(clientId)
                     // Owner round 21: photo send has its own sound.
@@ -1124,7 +1136,7 @@ fun ChatScreen(nav: NavController, convId: String) {
        run on the *chat* screen's scope instead, which lives as long as the
        chat is open, so gallery / camera / document / audio / contact /
        location all survive the sheet closing. */
-    fun handleImagePicked(uri: Uri) {
+    fun handleImagePicked(uri: Uri, album: String? = null) {
         scope.launch {
             // 720px / ~100KB: the old 960px/220KB photos took minutes to send AND load
             // on slow mobile data (the "image loads forever" report).
@@ -1134,7 +1146,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 error = "Could not read that photo — try another one."
             } else {
                 error = ""
-                sendImage(dataUrl)
+                sendImage(dataUrl, album)
             }
         }
     }
@@ -1161,9 +1173,13 @@ fun ChatScreen(nav: NavController, convId: String) {
         val batch = attachSel.toList()
         attachSel.clear()
         showAttach = false
+        // Owner round 31 (item 29): two or more photos picked together go out
+        // as ONE album — each still its own message row, sharing meta.album.
+        val photos = batch.count { !it.isVideo }
+        val album = if (photos >= 2) newAlbumId() else null
         scope.launch {
             batch.forEach { item ->
-                if (item.isVideo) handleDocumentPicked(item.uri) else handleImagePicked(item.uri)
+                if (item.isVideo) handleDocumentPicked(item.uri) else handleImagePicked(item.uri, album)
             }
         }
     }
@@ -1257,6 +1273,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
         if (items.isEmpty()) return
         selected.clear()
+        val album = if (items.count { isPhotoMsg(it) } >= 2) newAlbumId() else null
         scope.launch {
             for (m in items) {
                 val url = m.optString("mediaUrl")
@@ -1270,7 +1287,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     val kind = m.optString("kind")
                     withContext(Dispatchers.Main) {
                         if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m))) {
-                            handleImagePicked(uri)
+                            handleImagePicked(uri, album)
                         } else {
                             handleDocumentPicked(uri)
                         }
@@ -1323,6 +1340,11 @@ fun ChatScreen(nav: NavController, convId: String) {
         selected.clear()
         reactionFor = null
         showEmojiSheet = false
+        // Owner round 31 (item 29): two or more photos forwarded together
+        // arrive as ONE grouped bubble again (a fresh album id).
+        val album = if (items.count { isPhotoMsg(it) } >= 2) newAlbumId() else null
+        fun albumMeta(m: JSONObject): JSONObject? =
+            if (album != null && isPhotoMsg(m)) JSONObject().put("album", album) else null
         scope.launch {
             for (m in items) {
                 runCatching {
@@ -1349,6 +1371,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                                             )
                                         } else if (vm?.optBoolean("document") == true) {
                                             body.put("meta", JSONObject().put("document", true))
+                                        } else {
+                                            albumMeta(m)?.let { body.put("meta", it) }
                                         }
                                     },
                             )
@@ -1357,7 +1381,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 "/api/conversations/$targetConvId/messages",
                                 JSONObject()
                                     .put("kind", "IMAGE")
-                                    .put("imageData", m.optText("mediaUrl")),
+                                    .put("imageData", m.optText("mediaUrl"))
+                                    .also { body -> albumMeta(m)?.let { body.put("meta", it) } },
                             )
                         m.optText("mediaUrl").isNotBlank() -> {
                             // Server-hosted media (photo message): re-upload to the
@@ -1373,7 +1398,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                                     .put("fileKey", up.optString("fileKey"))
                                     .put("fileName", m.optText("fileName").ifBlank { "photo.jpg" })
                                     .put("fileType", "image/jpeg")
-                                    .put("fileSize", bytes.size),
+                                    .put("fileSize", bytes.size)
+                                    .also { body -> albumMeta(m)?.let { body.put("meta", it) } },
                             )
                         }
                         else ->
@@ -1899,6 +1925,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                     }
                 }
             }
+            // Owner round 31 (item 29): photos that share meta.album collapse
+            // into ONE grouped bubble (the album's first row carries the
+            // others under "kpAlbum"); a lone photo of an album — the rest
+            // unsent — is just a photo again.
+            val groupedMsgs by remember {
+                androidx.compose.runtime.derivedStateOf { foldAlbums(visibleMsgs) }
+            }
             if (visibleMsgs.isEmpty() && pending.isEmpty() && initialLoad) {
                 // Owner round 13: Facebook-feed style skeletons while the
                 // first page loads — never a blank, silent screen.
@@ -1918,7 +1951,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
             ) {
                 items(
-                    visibleMsgs,
+                    groupedMsgs,
                     key = { it.optString("clientId").ifBlank { it.optString("id") } },
                     contentType = { it.optString("kind") },
                 ) { m ->
@@ -1940,12 +1973,16 @@ fun ChatScreen(nav: NavController, convId: String) {
                             onToggleSelect = { msg ->
                                 // Deleted tombstones are not selectable: they
                                 // can't be deleted-again, forwarded or copied.
+                                // Owner round 31 (item 29): a grouped photo
+                                // bubble selects / deselects ALL its photos.
                                 if (msg.optString("kind") != "DELETED") {
-                                    val id = msg.optString("id")
-                                    if (id in selected) selected.remove(id) else selected.add(id)
+                                    val ids = albumPhotos(msg).map { it.optString("id") }
+                                    if (ids.first() in selected) selected.removeAll(ids.toSet())
+                                    else ids.forEach { if (it !in selected) selected.add(it) }
                                 }
                             },
                             onOpenImage = { msg -> viewerMsg = msg },
+                            onOpenAlbum = { msg -> albumMsg = msg },
                             onOpenVideo = { msg ->
                                 // Owner round 31: the app's own player (MediaViewer.kt);
                                 // the sender rides along as the screen title.
@@ -1973,13 +2010,24 @@ fun ChatScreen(nav: NavController, convId: String) {
                     }
                 }
                 items(
-                    pending.filter { p ->
-                        val cid = p.optString("clientId").ifBlank { p.optString("id") }
-                        visibleMsgs.none { it.optString("clientId") == cid || it.optString("id") == cid }
-                    },
+                    foldAlbums(
+                        pending.filter { p ->
+                            val cid = p.optString("clientId").ifBlank { p.optString("id") }
+                            visibleMsgs.none { it.optString("clientId") == cid || it.optString("id") == cid }
+                        },
+                    ),
                     key = { it.optString("clientId").ifBlank { it.optString("id") } },
                 ) { m ->
-                    MessageRow(m, isGroup, Store.myId(), otherReadAt, player, pendingEcho = true, theme = chatTheme)
+                    MessageRow(
+                        m,
+                        isGroup,
+                        Store.myId(),
+                        otherReadAt,
+                        player,
+                        pendingEcho = true,
+                        theme = chatTheme,
+                        onOpenAlbum = { msg -> albumMsg = msg },
+                    )
                 }
                 // Owner round 4: one pretty bouncing-dots bubble whenever
                 // EITHER side is typing — the AI composing, or the other
@@ -2040,7 +2088,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 val url = p.optString("mediaUrl")
                                 val voicePath = p.optString("voicePath")
                                 when {
-                                    url.isNotBlank() -> sendImage(url)
+                                    // A retried album photo keeps its album.
+                                    url.isNotBlank() -> sendImage(url, p.optJSONObject("meta")?.optString("album")?.ifBlank { null })
                                     voicePath.isNotBlank() -> {
                                         val f = File(voicePath)
                                         if (f.exists()) {
@@ -2077,7 +2126,9 @@ fun ChatScreen(nav: NavController, convId: String) {
            Long-press → this sheet: quick reactions on top ("+" = full emoji
            sheet), then Reply / Copy / Forward / Edit / Unsend / Delete / Select. */
         actionFor?.let { m ->
-            val mid = m.optString("id")
+            // Owner round 31 (item 29): Forward / Unsend / Delete / Select on
+            // a grouped photo bubble act on every photo of the album.
+            val albumIds = albumPhotos(m).map { it.optString("id") }
             val mineMsg = m.optString("senderId") == Store.myId()
             val kindM = m.optString("kind")
             val isText = kindM == "TEXT" && m.optText("body").isNotBlank()
@@ -2140,7 +2191,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     KpSheetRow(Icons.AutoMirrored.Filled.Send, "Forward") {
                         close()
                         selected.clear()
-                        selected.add(mid)
+                        selected.addAll(albumIds)
                         forwarding = true
                     }
                 }
@@ -2154,19 +2205,19 @@ fun ChatScreen(nav: NavController, convId: String) {
                     KpSheetRow(Icons.Filled.DeleteForever, "Unsend", tint = Red) {
                         close()
                         selected.clear()
-                        selected.add(mid)
+                        selected.addAll(albumIds)
                         unsendSelected()
                     }
                 }
                 KpSheetRow(Icons.Filled.Delete, "Delete for me", tint = Red) {
                     close()
                     selected.clear()
-                    selected.add(mid)
+                    selected.addAll(albumIds)
                     deleteForMe()
                 }
                 KpSheetRow(Icons.Filled.CheckCircle, "Select") {
                     close()
-                    if (mid !in selected) selected.add(mid)
+                    albumIds.forEach { if (it !in selected) selected.add(it) }
                 }
             }
         }
@@ -2252,7 +2303,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 sel = attachSel,
                 onSendBatch = { sendAttachSelection() },
                 onDismiss = { showAttach = false },
-                onImagePicked = ::handleImagePicked,
+                onImagePicked = { uri -> handleImagePicked(uri) },
                 onDocumentPicked = { uri -> handleDocumentPicked(uri, asDocument = true) },
                 onContactPicked = ::handleContactPicked,
                 onLocationRequested = ::handleLocationRequested,
@@ -2302,6 +2353,18 @@ fun ChatScreen(nav: NavController, convId: String) {
             },
         )
 
+        albumMsg?.let { m ->
+            // Owner round 31 (item 29): every photo of the album, 4 per row;
+            // a tap opens the app's own viewer on that photo.
+            AlbumSheet(
+                photos = albumPhotos(m),
+                onClose = { albumMsg = null },
+                onOpen = { photo ->
+                    albumMsg = null
+                    viewerMsg = photo
+                },
+            )
+        }
         viewerMsg?.let { m ->
             // Owner round 31: the app's own photo viewer (MediaViewer.kt).
             val who =
@@ -3180,6 +3243,7 @@ private fun MessageRow(
     quoteFor: (String) -> JSONObject? = { null },
     theme: String = "darkblue",
     onOpenVideo: (JSONObject) -> Unit = {},
+    onOpenAlbum: (JSONObject) -> Unit = {},
 ) {
     val mine = m.optString("senderId") == myId
     val kind = m.optString("kind")
@@ -3233,6 +3297,11 @@ private fun MessageRow(
     // Photos skip the chat bubble entirely: the image IS the bubble, with the
     // timestamp and ticks overlaid on the photo (WhatsApp-style). FILE-kind
     // image uploads (picked as documents) get the same treatment.
+    // Owner round 31 (item 29): photos sent together = one grouped bubble.
+    if (m.has("kpAlbum")) {
+        AlbumMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenAlbum, onReply, onLongPress)
+        return
+    }
     if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {
         ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress)
         return
@@ -3927,6 +3996,310 @@ private fun ImageMessageRow(
             }
         }
         MessageReactions(m)
+        }
+    }
+}
+
+/** A photo row: kind IMAGE, or an image FILE that was not sent as a document. */
+private fun isPhotoMsg(m: JSONObject): Boolean {
+    val kind = m.optString("kind")
+    return kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))
+}
+
+/** Owner round 31 (item 29): a fresh album id for photos sent together
+ *  (the worker pins the `alb_` shape and length). */
+internal fun newAlbumId(): String = "alb_" + java.util.UUID.randomUUID().toString().replace("-", "").take(20)
+
+/** The album a photo row belongs to (meta.album), "" for anything else. */
+internal fun albumIdOf(m: JSONObject): String {
+    val a = m.optJSONObject("meta")?.optString("album").orEmpty()
+    return if (a.isNotBlank() && isPhotoMsg(m)) a else ""
+}
+
+/**
+ * Owner round 31 (item 29): rows that share meta.album (same sender) fold
+ * into ONE list row — a copy of the group's first row carrying every photo
+ * under "kpAlbum". A group of one (the rest unsent) stays a plain photo, and
+ * rows outside any album keep their identity, so LazyColumn's skip-unchanged
+ * path is untouched for them.
+ */
+internal fun foldAlbums(rows: List<JSONObject>): List<JSONObject> {
+    if (rows.none { albumIdOf(it).isNotBlank() }) return rows
+    val groups = LinkedHashMap<String, MutableList<JSONObject>>()
+    for (r in rows) {
+        val a = albumIdOf(r)
+        if (a.isNotBlank()) groups.getOrPut(r.optString("senderId") + "|" + a) { ArrayList() }.add(r)
+    }
+    val out = ArrayList<JSONObject>(rows.size)
+    val emitted = HashSet<String>()
+    for (r in rows) {
+        val a = albumIdOf(r)
+        if (a.isBlank()) {
+            out.add(r)
+            continue
+        }
+        val key = r.optString("senderId") + "|" + a
+        val g = groups[key] ?: continue
+        if (g.size < 2) {
+            out.add(r)
+            continue
+        }
+        if (!emitted.add(key)) continue
+        val first = g[0]
+        val copy = JSONObject()
+        val ks = first.keys()
+        while (ks.hasNext()) {
+            val k = ks.next()
+            copy.put(k, first.opt(k))
+        }
+        copy.put("kpAlbum", JSONArray(g))
+        out.add(copy)
+    }
+    return out
+}
+
+/** The photos of a folded album row (a plain row is its own one-photo list). */
+internal fun albumPhotos(m: JSONObject): List<JSONObject> {
+    val arr = m.optJSONArray("kpAlbum") ?: return listOf(m)
+    val out = ArrayList<JSONObject>(arr.length())
+    for (i in 0 until arr.length()) arr.optJSONObject(i)?.let { out.add(it) }
+    return if (out.isEmpty()) listOf(m) else out
+}
+
+/**
+ * Owner round 31 (item 29): photos sent together — ONE bubble. 2 = side by
+ * side, 3 = one tall + two stacked, 4 = a 2×2 grid, 5+ = the first row of a
+ * 4-column grid: three photos and a dimmed fourth reading "See all". Every
+ * tile opens the app's own viewer on THAT photo; the dimmed tile opens the
+ * whole album. Long-press on any tile = the usual action sheet (which acts
+ * on the whole album); the reply swipe is the photo bubble's.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun AlbumMessageRow(
+    m: JSONObject,
+    mine: Boolean,
+    pendingEcho: Boolean,
+    otherReadAt: String?,
+    selectedIds: List<String>,
+    onToggleSelect: (JSONObject) -> Unit,
+    onOpenImage: (JSONObject) -> Unit,
+    onOpenAlbum: (JSONObject) -> Unit,
+    onReply: (JSONObject) -> Unit = {},
+    onLongPress: (JSONObject) -> Unit = {},
+) {
+    val photos = albumPhotos(m)
+    val haptics = rememberHaptics()
+    val ctx = LocalContext.current
+    var replyDrag by remember { mutableStateOf(0f) }
+    val replyOffset by animateFloatAsState(replyDrag, spring(stiffness = 1400f), label = "albumreplydrag")
+    val replyThreshold = with(LocalDensity.current) { 36.dp.toPx() }
+    val shape = RoundedCornerShape(12.dp)
+    val gap = 2.dp
+    val albumWidth = 264.dp
+    fun longPress() {
+        if (!pendingEcho) {
+            haptics.tap()
+            if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)
+        }
+    }
+    fun tileModifier(base: Modifier, onTap: () -> Unit): Modifier =
+        base.combinedClickable(
+            onClick = {
+                if (pendingEcho) return@combinedClickable
+                if (selectedIds.isNotEmpty()) onToggleSelect(m) else onTap()
+            },
+            onLongClick = { longPress() },
+        )
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp),
+        horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
+    ) {
+        Column {
+            Box(
+                Modifier
+                    .offset { IntOffset(replyOffset.roundToInt(), 0) }
+                    .width(albumWidth)
+                    .shadow(2.dp, shape)
+                    .clip(shape)
+                    .border(
+                        1.dp,
+                        if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444),
+                        shape,
+                    )
+                    .pointerInput(m.optString("id")) {
+                        detectHorizontalDragGestures(
+                            onHorizontalDrag = { change, dragAmount ->
+                                change.consume()
+                                replyDrag =
+                                    if (mine) {
+                                        (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.4f, 0f)
+                                    } else {
+                                        (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.4f)
+                                    }
+                            },
+                            onDragEnd = {
+                                val armed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
+                                replyDrag = 0f
+                                if (armed) {
+                                    runCatching { KpSounds.replySwipe(ctx) }
+                                    onReply(m)
+                                }
+                            },
+                            onDragCancel = { replyDrag = 0f },
+                        )
+                    },
+            ) {
+                when {
+                    photos.size == 2 -> Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                        photos.forEach { p ->
+                            AlbumTile(p, tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenImage(p) })
+                        }
+                    }
+                    photos.size == 3 -> Row(
+                        Modifier.height((albumWidth - gap) * 2 / 3),
+                        horizontalArrangement = Arrangement.spacedBy(gap),
+                    ) {
+                        AlbumTile(photos[0], tileModifier(Modifier.weight(2f).fillMaxHeight()) { onOpenImage(photos[0]) })
+                        Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(gap)) {
+                            AlbumTile(photos[1], tileModifier(Modifier.weight(1f).fillMaxWidth()) { onOpenImage(photos[1]) })
+                            AlbumTile(photos[2], tileModifier(Modifier.weight(1f).fillMaxWidth()) { onOpenImage(photos[2]) })
+                        }
+                    }
+                    photos.size == 4 -> Column(verticalArrangement = Arrangement.spacedBy(gap)) {
+                        photos.chunked(2).forEach { pair ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                                pair.forEach { p ->
+                                    AlbumTile(p, tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenImage(p) })
+                                }
+                            }
+                        }
+                    }
+                    else -> Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                        photos.take(3).forEach { p ->
+                            AlbumTile(p, tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenImage(p) })
+                        }
+                        AlbumTile(
+                            photos[3],
+                            tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenAlbum(m) },
+                            dim = true,
+                            label = "See all",
+                        )
+                    }
+                }
+                // scrim so the stamp never drowns in a bright photo
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.Transparent, Color.Transparent, Color(0x66000000)),
+                            ),
+                        ),
+                )
+                Row(
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        msgStamp(m.optString("createdAt")),
+                        fontSize = 10.sp,
+                        color = Color.White,
+                    )
+                    if (mine) {
+                        Spacer(Modifier.width(3.dp))
+                        TickIcon(m, pendingEcho, otherReadAt)
+                    }
+                }
+            }
+            MessageReactions(m)
+        }
+    }
+}
+
+/** One square of a grouped bubble / the album sheet: centre-cropped photo,
+ *  its own upload ring while pending, an optional dim + label overlay. */
+@Composable
+private fun AlbumTile(
+    photo: JSONObject,
+    modifier: Modifier,
+    dim: Boolean = false,
+    label: String? = null,
+) {
+    val url = messageMediaUrl(photo)
+    Box(modifier.background(Color(0x22000000)), contentAlignment = Alignment.Center) {
+        if (url.startsWith("data:")) {
+            val bmp = rememberBitmap(url, 600)
+            if (bmp != null) {
+                Image(bmp, contentDescription = "Photo", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            }
+        } else if (url.isNotBlank()) {
+            val tileContext = LocalContext.current
+            val req = remember(url) {
+                coil.request.ImageRequest.Builder(tileContext)
+                    .data(if (url.startsWith("http")) url else Api.BASE + url)
+                    .crossfade(false)
+                    .size(480)
+                    .build()
+            }
+            coil.compose.AsyncImage(
+                model = req,
+                contentDescription = "Photo",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        }
+        val upFrac = UploadProgress.fracs[photo.optString("clientId")]
+        if (upFrac != null) {
+            Box(Modifier.fillMaxSize().background(Color(0x59000000)), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(
+                    progress = { upFrac },
+                    color = Color.White,
+                    strokeWidth = 2.5.dp,
+                    modifier = Modifier.size(26.dp),
+                )
+            }
+        }
+        if (dim) {
+            Box(Modifier.fillMaxSize().background(Color(0x99000000)), contentAlignment = Alignment.Center) {
+                Text(label.orEmpty(), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            }
+        }
+    }
+}
+
+/** Owner round 31 (item 29): "See all" — every photo of the album, four per
+ *  row; a tap opens the app's own viewer on that photo. */
+@Composable
+private fun AlbumSheet(photos: List<JSONObject>, onClose: () -> Unit, onOpen: (JSONObject) -> Unit) {
+    KpSheet(onDismiss = onClose, title = "${photos.size} photos") {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(max = 460.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            photos.chunked(4).forEach { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    row.forEach { p ->
+                        AlbumTile(
+                            p,
+                            Modifier
+                                .weight(1f)
+                                .aspectRatio(1f)
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { onOpen(p) },
+                        )
+                    }
+                    repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
         }
     }
 }

@@ -1050,11 +1050,12 @@ const convBetween = (db, a, b) =>
             `KpSheetRow(Icons.${l === '"Reply"' ? "AutoMirrored.Filled.Reply" : l === '"Forward"' ? "AutoMirrored.Filled.Send" : l === '"Copy"' ? "Filled.ContentCopy" : l === '"Edit"' ? "Filled.Edit" : l === '"Unsend"' ? "Filled.DeleteForever" : l === '"Delete for me"' ? "Filled.Delete" : "Filled.CheckCircle"}, ${l}`,
           ),
       ) &&
+      // r31-29: text, photo, video AND the grouped photo bubble (4 sites).
       (
         chat.match(
           /if \(selectedIds\.isNotEmpty\(\)\) onToggleSelect\(m\) else onLongPress\(m\)/g,
         ) || []
-      ).length === 3,
+      ).length === 4,
   );
   check(
     "r17-14: restoreChrome follows the theme (dark-blue keeps light icons)",
@@ -1107,7 +1108,8 @@ const convBetween = (db, a, b) =>
     "r18-6: PHOTOS render reaction chips too (MessageReactions wired into ImageMessageRow)",
     chat.indexOf("MessageReactions(m)") <
       chat.indexOf("Live upload fractions keyed by message clientId") &&
-      chat.split("MessageReactions(m)").length - 1 === 3,
+      // r31-29: text, photo, video + the grouped photo bubble (4 sites).
+      chat.split("MessageReactions(m)").length - 1 === 4,
   );
   check(
     "r18-3/r25: unsent messages VANISH (no tombstone) — filtered before render",
@@ -3599,6 +3601,249 @@ const convBetween = (db, a, b) =>
           !at.includes("Color(0x801C1917)"),
       );
     }
+
+    // r31-29: photos sent together share meta.album (worker pins the shape),
+    // and the app folds them into ONE grouped bubble: 2 / 3 / 4 layouts, 5+ =
+    // three + a dimmed "See all" fourth; the sheet lists them 4 per row.
+    {
+      const worker = await freshWorker();
+      const db = makeD1();
+      const env = { DB: db, MEDIA: makeR2(), GOOGLE_WEB_CLIENT_ID: "kp-test-web-client" };
+      const ctx = makeCtx();
+      let ipSeq = 0;
+      const call = async (method, path, body, token, raw) => {
+        const headers = { "content-type": "application/json" };
+        if (path.startsWith("/api/auth/"))
+          headers["cf-connecting-ip"] = `203.28.${Math.floor(ipSeq / 250)}.${(ipSeq++ % 250) + 1}`;
+        if (token) headers.authorization = `Bearer ${token}`;
+        let init = { method, headers };
+        if (raw)
+          init = {
+            method,
+            headers: { ...raw.headers, authorization: `Bearer ${token}` },
+            body: raw.body,
+          };
+        else if (body !== undefined && method !== "GET") init.body = JSON.stringify(body);
+        const res = await worker.fetch(new Request(`https://kp.test${path}`, init), env, ctx);
+        const t = await res.text();
+        await ctx.drain();
+        let j = {};
+        try {
+          j = t ? JSON.parse(t) : {};
+        } catch {
+          j = {};
+        }
+        return { status: res.status, json: j };
+      };
+      const reg = makeReg(call);
+      const a = await reg("alb-a@x.com", "alba");
+      const b = await reg("alb-b@x.com", "albb");
+      const conv = await call("POST", "/api/conversations", { userId: b.user.id }, a.token);
+      const cid = conv.json.conversation.id;
+      const upload = async (name, type) => {
+        const up = await call(`POST`, `/api/files?name=${name}&type=${type}`, undefined, a.token, {
+          headers: { "content-type": "application/octet-stream" },
+          body: Buffer.from("bytes-" + name),
+        });
+        return up.json.fileKey;
+      };
+      const album = "alb_0123456789abcdef0123";
+      const sent = [];
+      for (let i = 0; i < 5; i++) {
+        const key = await upload(`p${i}.jpg`, "image/jpeg");
+        sent.push(
+          await call(
+            "POST",
+            `/api/conversations/${cid}/messages`,
+            {
+              kind: "FILE",
+              fileKey: key,
+              fileName: "photo.jpg",
+              fileType: "image/jpeg",
+              fileSize: 8,
+              clientId: `alb-${i}`,
+              meta: { w: 1200, h: 900, album },
+            },
+            a.token,
+          ),
+        );
+      }
+      const inline = await call(
+        "POST",
+        `/api/conversations/${cid}/messages`,
+        {
+          kind: "IMAGE",
+          imageData: "data:image/jpeg;base64,/9j/4AAQSkZJRg==",
+          clientId: "alb-inline",
+          meta: { album },
+        },
+        a.token,
+      );
+      const listB = await call("GET", `/api/conversations/${cid}/messages`, undefined, b.token);
+      const rowsB = (listB.json.items || []).filter((m) => m.meta?.album === album);
+      check(
+        "r31-29: five uploaded photos + one inline photo sent with the same meta.album all land as SEPARATE rows and the OTHER side reads the shared album id (with mediaW/mediaH intact)",
+        sent.every((r) => r.status === 201 && r.json.message?.meta?.album === album) &&
+          inline.status === 201 &&
+          inline.json.message?.meta?.album === album &&
+          rowsB.length === 6 &&
+          rowsB
+            .filter((m) => m.kind === "FILE")
+            .every((m) => m.mediaW === 1200 && m.mediaH === 900) &&
+          new Set(rowsB.map((m) => m.id)).size === 6,
+        `rowsB=${rowsB.length} statuses=${sent.map((r) => r.status).join(",")}`,
+      );
+      const bad = [];
+      for (const [i, junk] of [
+        "album-1",
+        "alb_",
+        "alb_" + "x".repeat(40),
+        42,
+        "alb_has space",
+      ].entries()) {
+        const key = await upload(`j${i}.jpg`, "image/jpeg");
+        bad.push(
+          await call(
+            "POST",
+            `/api/conversations/${cid}/messages`,
+            {
+              kind: "FILE",
+              fileKey: key,
+              fileName: "photo.jpg",
+              fileType: "image/jpeg",
+              fileSize: 8,
+              clientId: `bad-${i}`,
+              meta: { album: junk },
+            },
+            a.token,
+          ),
+        );
+      }
+      const dkey = await upload("doc.jpg", "image/jpeg");
+      const doc = await call(
+        "POST",
+        `/api/conversations/${cid}/messages`,
+        {
+          kind: "FILE",
+          fileKey: dkey,
+          fileName: "doc.jpg",
+          fileType: "image/jpeg",
+          fileSize: 8,
+          clientId: "alb-doc",
+          meta: { document: true, album },
+        },
+        a.token,
+      );
+      const vkey = await upload("v.m4a", "audio/mp4");
+      const voice = await call(
+        "POST",
+        `/api/conversations/${cid}/messages`,
+        {
+          kind: "FILE",
+          fileKey: vkey,
+          fileName: "voice.m4a",
+          fileType: "audio/mp4",
+          fileSize: 8,
+          clientId: "alb-voice",
+          meta: { voice: true, seconds: 2, album },
+        },
+        a.token,
+      );
+      const text = await call(
+        "POST",
+        `/api/conversations/${cid}/messages`,
+        { kind: "TEXT", body: "hi", clientId: "alb-text", meta: { album } },
+        a.token,
+      );
+      const pkey = await upload("f.pdf", "application/pdf");
+      const pdf = await call(
+        "POST",
+        `/api/conversations/${cid}/messages`,
+        {
+          kind: "FILE",
+          fileKey: pkey,
+          fileName: "f.pdf",
+          fileType: "application/pdf",
+          fileSize: 8,
+          clientId: "alb-pdf",
+          meta: { album },
+        },
+        a.token,
+      );
+      check(
+        "r31-29: the album id is pinned to `alb_` + 4..36 url-safe chars and only on a photo row — wrong shapes, a document, a voice note, a pdf and a text all send WITHOUT it",
+        bad.every((r) => r.status === 201 && r.json.message?.meta?.album === undefined) &&
+          pdf.status === 201 &&
+          pdf.json.message?.meta?.album === undefined &&
+          doc.status === 201 &&
+          doc.json.message?.meta?.album === undefined &&
+          doc.json.message?.meta?.document === true &&
+          voice.status === 201 &&
+          voice.json.message?.meta?.album === undefined &&
+          text.status === 201 &&
+          text.json.message?.meta?.album === undefined,
+        `bad=${bad.map((r) => JSON.stringify(r.json.message?.meta?.album)).join("|")} doc=${JSON.stringify(doc.json.message?.meta)}`,
+      );
+      const src = readFileSync("src/worker/index.ts", "utf8");
+      check(
+        "r31-29: worker — ONE helper (albumId) with a named regex feeds the meta; msgFrom types it",
+        src.includes("const ALBUM_ID_RE = /^alb_[A-Za-z0-9_-]{4,36}$/;") &&
+          src.includes(
+            'const album = albumId(kind, imageData ?? fileKey, String(body.fileType || ""), incomingMeta);',
+          ) &&
+          src.includes(
+            'if (kind !== "IMAGE" && !(kind === "FILE" && fileType.startsWith("image/"))) return null;',
+          ) &&
+          src.includes("...(album ? { album } : {}),") &&
+          src.includes("if (meta.document === true || meta.voice === true) return null;") &&
+          src.includes("album?: string;"),
+      );
+    }
+    check(
+      "r31-29: app — the grid send stamps ONE album id on 2+ photos (single photo: none), the pending row + both payloads carry it, a retry keeps it, forwarding 2+ photos re-groups them",
+      chat.includes("internal fun newAlbumId(): String =") &&
+        chat.includes("val album = if (photos >= 2) newAlbumId() else null") &&
+        chat.includes("fun sendImage(dataUrl: String, album: String? = null) {") &&
+        chat.includes('if (album != null) o.put("album", album)') &&
+        chat.includes('.also { row -> metaWith(0, 0)?.let { row.put("meta", it) } }') &&
+        (chat.match(/metaWith\(shotW, shotH\)\?\.let \{ payload\.put\("meta", it\) \}/g) || [])
+          .length === 2 &&
+        chat.includes("fun handleImagePicked(uri: Uri, album: String? = null) {") &&
+        chat.includes(
+          'url.isNotBlank() -> sendImage(url, p.optJSONObject("meta")?.optString("album")?.ifBlank { null })',
+        ) &&
+        chat.includes(
+          "val album = if (items.count { isPhotoMsg(it) } >= 2) newAlbumId() else null",
+        ) &&
+        (chat.match(/albumMeta\(m\)\?\.let \{ body\.put\("meta", it\) \}/g) || []).length === 3,
+    );
+    check(
+      "r31-29: app — rows sharing meta.album fold into ONE list row (foldAlbums; a group of one stays a photo), drawn by AlbumMessageRow: 2 side by side, 3 = tall + two stacked, 4 = 2×2, 5+ = three tiles + a dimmed fourth 'See all' opening a 4-per-row sheet; select/forward/unsend/delete act on the whole album",
+      chat.includes("internal fun foldAlbums(rows: List<JSONObject>): List<JSONObject> {") &&
+        chat.includes("if (g.size < 2) {") &&
+        chat.includes('copy.put("kpAlbum", JSONArray(g))') &&
+        chat.includes("androidx.compose.runtime.derivedStateOf { foldAlbums(visibleMsgs) }") &&
+        chat.includes("groupedMsgs,\n                    key = {") &&
+        chat.includes('if (m.has("kpAlbum")) {') &&
+        chat.includes("private fun AlbumMessageRow(") &&
+        chat.includes(
+          "photos.size == 2 -> Row(horizontalArrangement = Arrangement.spacedBy(gap)) {",
+        ) &&
+        chat.includes("photos.size == 3 -> Row(") &&
+        chat.includes(
+          "photos.size == 4 -> Column(verticalArrangement = Arrangement.spacedBy(gap)) {",
+        ) &&
+        chat.includes("photos.chunked(2).forEach { pair ->") &&
+        chat.includes("photos.take(3).forEach { p ->") &&
+        chat.includes('label = "See all",') &&
+        chat.includes(
+          "private fun AlbumSheet(photos: List<JSONObject>, onClose: () -> Unit, onOpen: (JSONObject) -> Unit) {",
+        ) &&
+        chat.includes("photos.chunked(4).forEach { row ->") &&
+        chat.includes('val albumIds = albumPhotos(m).map { it.optString("id") }') &&
+        (chat.match(/selected\.addAll\(albumIds\)/g) || []).length === 3 &&
+        chat.includes("if (ids.first() in selected) selected.removeAll(ids.toSet())"),
+    );
 
     // Every cream / warm-white literal outside Theme.kt and the login screen
     // (which the owner excluded from theme work) must be gone from the

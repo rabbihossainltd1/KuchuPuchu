@@ -5800,6 +5800,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const mid = id();
     const incomingMeta = (body.meta as Record<string, unknown> | undefined) ?? {};
     const dims = imageDims(kind, imageData ?? fileKey, incomingMeta);
+    // Owner round 31 (item 29): photos sent together share ONE album id, so
+    // every device folds them into a single grouped bubble. Each photo stays
+    // its own row (unsend / forward / react per photo keep working); the id
+    // is opaque client text, pinned to the `alb_` shape and a short length.
+    const album = albumId(kind, imageData ?? fileKey, String(body.fileType || ""), incomingMeta);
     const metaObj: Record<string, unknown> = {
       ...(kind === "FILE" && fileKey
         ? {
@@ -5817,6 +5822,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           }
         : {}),
       ...(Object.keys(dims).length ? dims : {}),
+      ...(album ? { album } : {}),
     };
     if (clientId) metaObj.clientId = clientId;
     const meta = Object.keys(metaObj).length ? JSON.stringify(metaObj) : null;
@@ -7016,6 +7022,23 @@ type MsgRow = {
   reply_to?: string | null;
 };
 
+/** Owner round 31 (item 29): the shared album id of a multi-photo send.
+ *  Only on an IMAGE / image FILE row, only the `alb_<base36/hex>` shape,
+ *  at most 40 chars — anything else is dropped (never trusted as-is). */
+const ALBUM_ID_RE = /^alb_[A-Za-z0-9_-]{4,36}$/;
+function albumId(
+  kind: string,
+  hasMedia: unknown,
+  fileType: string,
+  meta: Record<string, unknown>,
+): string | null {
+  if (kind !== "IMAGE" && !(kind === "FILE" && fileType.startsWith("image/"))) return null;
+  if (!hasMedia) return null;
+  if (meta.document === true || meta.voice === true) return null;
+  const raw = typeof meta.album === "string" ? meta.album : "";
+  return ALBUM_ID_RE.test(raw) ? raw : null;
+}
+
 /** Owner round 31 (item 27): a voice note's bars. Only with `voice: true`,
  *  integers clamped to 0..100, at most VOICE_WAVEFORM_MAX of them — anything
  *  else (a document, a string, a 10k-entry array) is dropped, not stored. */
@@ -7068,6 +7091,7 @@ function msgFrom(row: MsgRow) {
     voice?: boolean;
     seconds?: number;
     waveform?: number[];
+    album?: string;
     edited?: boolean;
     document?: boolean;
     w?: number;
