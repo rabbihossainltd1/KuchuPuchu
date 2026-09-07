@@ -532,6 +532,12 @@ class CallEngine(private val app: Application) {
                 // makes call audio silent — WebRTC's software chain is safer.
                 .setUseHardwareAcousticEchoCanceler(false)
                 .setUseHardwareNoiseSuppressor(false)
+                // Owner round 31 item 20: every ~10ms mic buffer passes through
+                // here before the encoder — the screen-share audio tap mixes
+                // the phone's playback into it (a no-op while nothing is tapped).
+                .setAudioRecordDataCallback { audioFormat, channelCount, sampleRate, audioBuffer ->
+                    SystemAudioTap.mixInto(audioFormat, channelCount, sampleRate, audioBuffer)
+                }
                 .createAudioDeviceModule()
         factory =
             PeerConnectionFactory.builder()

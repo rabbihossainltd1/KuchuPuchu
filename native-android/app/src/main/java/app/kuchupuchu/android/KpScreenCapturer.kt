@@ -48,6 +48,9 @@ class KpScreenCapturer(
         val mp = mgr.getMediaProjection(Activity.RESULT_OK, resultData) ?: return
         mp.registerCallback(callback, main)
         projection = mp
+        // Owner round 31 item 20: with "Share audio via screen share" on, the
+        // phone's playback rides along (mixed into the mic track).
+        SystemAudioTap.start(app, mp)
         observer?.onCapturerStarted(true)
         helper.setTextureSize(width, height)
         helper.startListening(this)
@@ -65,6 +68,7 @@ class KpScreenCapturer(
     }
 
     override fun stopCapture() {
+        SystemAudioTap.stop()
         helper?.stopListening()
         runCatching { display?.release() }
         display = null

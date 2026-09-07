@@ -39,6 +39,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.PlayArrow
@@ -508,6 +509,16 @@ fun AppSettingsScreen(nav: NavController) {
                 }
             }
             SettingRow(Icons.Filled.Favorite, "About us", "") { nav.navigate("about") }
+            // Owner round 31 item 20: share the phone's sound along with a
+            // shared screen (off by default). Android 10+ only — older
+            // systems cannot capture playback, so the row is not offered.
+            if (SystemAudioTap.supported) {
+                var sysAudio by remember { mutableStateOf(SystemAudioTap.isEnabled(ctx)) }
+                ToggleRow(Icons.Filled.VolumeUp, "Share audio via screen share", sysAudio) { on ->
+                    sysAudio = on
+                    SystemAudioTap.setEnabled(ctx, on)
+                }
+            }
             // Owner round 15: crash detection on/off — capture stays until
             // the owner switches it off; off also clears the last report.
             var crashOn by remember { mutableStateOf(KpCrash.isEnabled(ctx)) }

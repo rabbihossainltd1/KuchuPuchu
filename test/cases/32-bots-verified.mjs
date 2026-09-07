@@ -2720,6 +2720,27 @@ const convBetween = (db, a, b) =>
         ),
     );
 
+    check(
+      "r31-20: Settings → App 'Share audio via screen share' toggle (default off) — while a screen share is up the phone's playback is captured through the projection (AudioPlaybackCapture, API 29+) and mixed into the mic track via WebRTC's AudioRecordDataCallback, so the other side really hears it",
+      kt("SystemAudioTap.kt").includes('private const val PREF = "kp_share_system_audio"') &&
+        kt("SystemAudioTap.kt").includes("getBoolean(PREF, false)") &&
+        kt("SystemAudioTap.kt").includes("AudioPlaybackCaptureConfiguration.Builder(projection)") &&
+        kt("SystemAudioTap.kt").includes(".setAudioPlaybackCaptureConfig(config)") &&
+        kt("SystemAudioTap.kt").includes(
+          "fun mixInto(audioFormat: Int, channelCount: Int, sampleRate: Int, audioBuffer: ByteBuffer) {",
+        ) &&
+        kt("KpScreenCapturer.kt").includes("SystemAudioTap.start(app, mp)") &&
+        kt("KpScreenCapturer.kt").includes("SystemAudioTap.stop()") &&
+        kt("CallEngine.kt").includes(
+          "SystemAudioTap.mixInto(audioFormat, channelCount, sampleRate, audioBuffer)",
+        ) &&
+        kt("SettingsScreen.kt").includes(
+          'ToggleRow(Icons.Filled.VolumeUp, "Share audio via screen share", sysAudio) { on ->',
+        ) &&
+        kt("SettingsScreen.kt").indexOf("fun AppSettingsScreen") <
+          kt("SettingsScreen.kt").indexOf('"Share audio via screen share"'),
+    );
+
     // Every cream / warm-white literal outside Theme.kt and the login screen
     // (which the owner excluded from theme work) must be gone from the
     // screens: dark-blue may not paint any light-cream colour.
