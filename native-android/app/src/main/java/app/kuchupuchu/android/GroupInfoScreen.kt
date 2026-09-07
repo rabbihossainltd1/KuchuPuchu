@@ -102,6 +102,8 @@ fun GroupInfoScreen(nav: NavController, convId: String) {
     val members = c?.arr("members")?.objects().orEmpty()
     val avatarRef = c?.optIso("avatarRef")
     val shownAvatar = rememberAvatarUrl(c?.optIso("avatarUrl"), avatarRef)
+    var viewerUrl by remember { mutableStateOf<String?>(null) }
+    viewerUrl?.let { url -> KpPhotoViewer(url = url, title = title, onClose = { viewerUrl = null }) }
 
     fun patch(body: JSONObject, onDone: () -> Unit = {}) {
         scope.launch {
@@ -168,15 +170,21 @@ fun GroupInfoScreen(nav: NavController, convId: String) {
                 ) {
                     Box {
                         KpAvatar(title, shownAvatar, 88.dp, avatarRef = avatarRef)
-                        if (isAdmin) {
-                            Box(
-                                Modifier
-                                    .matchParentSize()
-                                    .clip(CircleShape)
-                                    .clickable {
+                        // Admin: tap picks a new picture. Everyone else: tap
+                        // opens the current one in the app's own viewer.
+                        Box(
+                            Modifier
+                                .matchParentSize()
+                                .clip(CircleShape)
+                                .clickable {
+                                    if (isAdmin) {
                                         photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                                    },
-                            )
+                                    } else {
+                                        shownAvatar?.takeIf { it.isNotBlank() }?.let { viewerUrl = it }
+                                    }
+                                },
+                        )
+                        if (isAdmin) {
                             Box(
                                 Modifier
                                     .align(Alignment.BottomEnd)

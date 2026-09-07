@@ -175,12 +175,19 @@ has(
   'if (!res.has("error")) blocked = !blocked',
   "the flip waits for the write to succeed",
 );
+// r31-15: the profile photo opens in the shared viewer (MediaViewer.kt),
+// whose Save path is the one that must use the authed client.
+const viewer = readFileSync(
+  "native-android/app/src/main/java/app/kuchupuchu/android/MediaViewer.kt",
+  "utf8",
+);
 lacks(
-  profile,
+  viewer,
   "java.net.URL(url).openStream()",
   "avatar save goes through Api.download (auth header + timeout)",
 );
-has(profile, "else Api.download(url)", "…including absolute URLs");
+has(viewer, "Api.download(url)", "…including absolute URLs");
+has(profile, "KpPhotoViewer(", "the profile photo opens in the app's own viewer");
 
 // ── NewChatScreen: cancellation is not an error, and errors are visible ─────
 const catchIdx = newChat.indexOf("catch (e: kotlinx.coroutines.CancellationException)");

@@ -1216,19 +1216,57 @@ const convBetween = (db, a, b) =>
       chat.includes('theme == "darkblue" -> Color(0xFFE6EAF2)') &&
       src.includes('theme: conv.theme || "darkblue"'),
   );
-  check(
-    "r20-video: IN-APP player — video bubble + download-to-cache + VideoView/MediaController",
-    chat.includes("fun fileLooksVideo(") &&
-      chat.includes("fun VideoMessageRow(") &&
-      chat.includes("fun VideoPlayerScreen(") &&
-      chat.includes("Api.downloadToFile(src, dest)") &&
-      chat.includes("controller.show(0)") &&
-      chat.includes("object VideoThumbs") &&
-      chat.includes("MediaStore.Downloads") &&
-      chat.includes("android.widget.VideoView(") &&
-      chat.includes("android.widget.MediaController(") &&
-      chat.includes("kp-video-cache"),
-  );
+  {
+    // r31-14/15: the player and the photo viewer moved to MediaViewer.kt and
+    // are KuchuPuchu's own (TextureView + MediaPlayer with in-app controls;
+    // no stock widget controller, never a system ACTION_VIEW for media).
+    const mediaViewer = readFileSync(
+      "native-android/app/src/main/java/app/kuchupuchu/android/MediaViewer.kt",
+      "utf8",
+    );
+    check(
+      "r20-video/r31-14: IN-APP player — video bubble + download-to-cache + own TextureView player",
+      chat.includes("fun fileLooksVideo(") &&
+        chat.includes("fun VideoMessageRow(") &&
+        mediaViewer.includes("fun VideoPlayerScreen(nav: NavController, b64: String)") &&
+        mediaViewer.includes("Api.downloadToFile(src, tmp)") &&
+        mediaViewer.includes("class KpClipPlayer(") &&
+        mediaViewer.includes("android.view.TextureView(c)") &&
+        mediaViewer.includes("private fun SeekBar(") &&
+        mediaViewer.includes("Icons.Filled.ScreenRotation") &&
+        mediaViewer.includes("SCREEN_ORIENTATION_SENSOR_LANDSCAPE") &&
+        mediaViewer.includes("fun saveVideoToDownloads(") &&
+        mediaViewer.includes("MediaStore.Downloads") &&
+        chat.includes("internal object VideoThumbs") &&
+        chat.includes("kp-video-cache") &&
+        !chat.includes("android.widget.VideoView(") &&
+        !mediaViewer.includes("MediaController"),
+    );
+    const rd = (f) =>
+      readFileSync("native-android/app/src/main/java/app/kuchupuchu/android/" + f, "utf8");
+    const profileKt = rd("ProfileScreen.kt");
+    const groupKt = rd("GroupInfoScreen.kt");
+    const mediaTab = rd("ChatMediaScreen.kt");
+    check(
+      "r31-15: ONE in-app photo viewer (KpPhotoViewer) for chat photos, profile picture, group picture and the media tab; pinch/double-tap zoom, swipe-down close, Save (+Forward in chat)",
+      mediaViewer.includes("fun KpPhotoViewer(") &&
+        mediaViewer.includes("detectTapGestures(") &&
+        mediaViewer.includes("onDoubleTap = { p ->") &&
+        mediaViewer.includes("event.calculateZoom()") &&
+        mediaViewer.includes("if (abs(dragLocal) > size.height * 0.16f)") &&
+        mediaViewer.includes("usePlatformDefaultWidth = false, decorFitsSystemWindows = false") &&
+        mediaViewer.includes('"Saved to Pictures/KuchuPuchu"') &&
+        chat.includes("KpPhotoViewer(\n                url = messageMediaUrl(m),") &&
+        !chat.includes("fun ImageViewerDialog(") &&
+        profileKt.includes("KpPhotoViewer(") &&
+        !profileKt.includes("ProfilePhotoDialog") &&
+        groupKt.includes("shownAvatar?.takeIf { it.isNotBlank() }?.let { viewerUrl = it }") &&
+        mediaTab.includes(".clickable(enabled = url.isNotBlank()) { viewer = m }") &&
+        mediaTab.includes('nav.navigate("videoplayer/${mediaArg(') &&
+        rd("Files.kt").includes("fun openUri(") &&
+        !chat.includes("FilesUtil.openUri("),
+    );
+  }
   check(
     "r21-sounds: owner pack wired — notification tones, event sounds, Sounds type picker, channel rebuild",
     readFileSync(

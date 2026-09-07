@@ -41,8 +41,6 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.gestures.detectTransformGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -67,15 +65,12 @@ import androidx.compose.material.icons.filled.Mood
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.CallMissed
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Reply
 
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Check
@@ -96,7 +91,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -1899,11 +1893,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                             },
                             onOpenImage = { msg -> viewerMsg = msg },
                             onOpenVideo = { msg ->
-                                val b64 = android.util.Base64.encodeToString(
-                                    msg.toString().toByteArray(),
-                                    android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP,
-                                )
-                                nav.navigate("videoplayer/$b64")
+                                // Owner round 31: the app's own player (MediaViewer.kt);
+                                // the sender rides along as the screen title.
+                                val who =
+                                    if (msg.optString("senderId") == Store.myId()) "You"
+                                    else msg.optText("senderName").ifBlank { rawTitle }
+                                val arg = JSONObject(msg.toString()).put("kpTitle", who)
+                                nav.navigate("videoplayer/${mediaArg(arg)}")
                             },
                             revealChars = if (m.optString("id") == aiRevealId) aiRevealChars else null,
                             onReply = { haptics.tap(); replyTo = it; replyFocusNonce++ },
@@ -2249,8 +2245,14 @@ fun ChatScreen(nav: NavController, convId: String) {
         )
 
         viewerMsg?.let { m ->
-            ImageViewerDialog(
-                m = m,
+            // Owner round 31: the app's own photo viewer (MediaViewer.kt).
+            val who =
+                if (m.optString("senderId") == Store.myId()) "You"
+                else m.optText("senderName").ifBlank { rawTitle }
+            KpPhotoViewer(
+                url = messageMediaUrl(m),
+                title = who,
+                subtitle = viewerStamp(m.optText("createdAt")),
                 onClose = { viewerMsg = null },
                 onForward = {
                     viewerMsg = null
@@ -2739,115 +2741,6 @@ private fun otherLastSeen(iso: String?): String {
         z.toLocalDate() == now.toLocalDate() -> time
         z.toLocalDate() == now.toLocalDate().minusDays(1) -> "yesterday $time"
         else -> "${z.dayOfMonth} ${z.month.toString().take(3).lowercase()}"
-    }
-}
-
-@Composable
-private fun ImageViewerDialog(
-    m: JSONObject,
-    onClose: () -> Unit,
-    onForward: () -> Unit,
-) {
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val url =
-        m.optText("mediaUrl").takeIf { it.isNotBlank() }
-            ?: m.optText("fileKey").takeIf { it.isNotBlank() }?.let { key ->
-                if (key.startsWith("data:") || key.startsWith("http") || key.startsWith("/")) key
-                else "/api/files/$key"
-            } ?: ""
-    var scale by remember { mutableStateOf(1f) }
-    var offX by remember { mutableStateOf(0f) }
-    var offY by remember { mutableStateOf(0f) }
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Box(Modifier.fillMaxSize().background(Color.Black)) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectTransformGestures { _, pan, zoom, _ ->
-                            scale = (scale * zoom).coerceIn(1f, 6f)
-                            offX = if (scale > 1f) offX + pan.x else 0f
-                            offY = if (scale > 1f) offY + pan.y else 0f
-                        }
-                    }
-                    .pointerInput(Unit) {
-                        detectTapGestures(onDoubleTap = {
-                            if (scale > 1f) {
-                                scale = 1f; offX = 0f; offY = 0f
-                            } else {
-                                scale = 2.5f
-                            }
-                        })
-                    },
-            ) {
-                KpNetImage(
-                    url,
-                    "Photo",
-                    Modifier
-                        .fillMaxSize()
-                        .graphicsLayer(
-                            scaleX = scale,
-                            scaleY = scale,
-                            translationX = offX,
-                            translationY = offY,
-                        ),
-                    androidx.compose.ui.layout.ContentScale.Fit,
-                )
-            }
-            IconButton(onClick = onClose, Modifier.align(Alignment.TopStart).padding(6.dp)) {
-                Icon(Icons.Filled.Close, "Close", tint = Color.White)
-            }
-            // 20% black pill behind the actions: on a white photo the plain
-            // white glyphs used to vanish completely.
-            Row(
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(18.dp)
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(Color(0x33000000))
-                    .padding(horizontal = 26.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(28.dp),
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    IconButton(
-                        onClick = {
-                            scope.launch {
-                                val bytes = withContext(Dispatchers.IO) {
-                                    runCatching {
-                                        if (url.startsWith("data:")) {
-                                            android.util.Base64.decode(url.substringAfter(","), android.util.Base64.DEFAULT)
-                                        } else if (url.startsWith("http")) {
-                                            java.net.URL(url).openStream().use { it.readBytes() }
-                                        } else Api.download(url)
-                                    }.getOrNull()
-                                }
-                                if (bytes == null) {
-                                    android.widget.Toast.makeText(ctx, "Could not download the photo", android.widget.Toast.LENGTH_SHORT).show()
-                                } else {
-                                    val saved = FilesUtil.saveImage(ctx, bytes, "kuchupuchu_${System.currentTimeMillis()}.jpg")
-                                    android.widget.Toast.makeText(
-                                        ctx,
-                                        if (saved != null) "Saved to Pictures/KuchuPuchu" else "Could not save",
-                                        android.widget.Toast.LENGTH_SHORT,
-                                    ).show()
-                                }
-                            }
-                        },
-                    ) {
-                        Icon(Icons.Filled.Download, "Save to gallery", tint = Color.White, modifier = Modifier.size(26.dp))
-                    }
-                    Text("Save", color = Color.White, fontSize = 12.sp)
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    IconButton(onClick = onForward) {
-                        Icon(Icons.Filled.Reply, "Forward", tint = Color.White, modifier = Modifier.size(26.dp))
-                    }
-                    Text("Forward", color = Color.White, fontSize = 12.sp)
-                }
-            }
-        }
     }
 }
 
@@ -3571,7 +3464,7 @@ private fun EmojiSheetDialog(onPick: (String) -> Unit) {
 /** True when a FILE message is really just a photo (image mime / extension). */
 /** Owner round 22: decoded-frame thumbnails cached in MEMORY — a chat's
  *  videos stop re-decoding on every open. */
-private object VideoThumbs {
+internal object VideoThumbs {
     /** Memory net for the CURRENT process. */
     private val lru = object : LinkedHashMap<String, android.graphics.Bitmap>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, android.graphics.Bitmap>?): Boolean =
@@ -3806,114 +3699,7 @@ private fun VideoMessageRow(
     }
 }
 
-/** Owner round 22: the IN-APP video player as its OWN SCREEN (no popup):
- *  download with the auth header, then VideoView + MediaController with
- *  play/pause, seek bar and timestamps, kept visible. Save copies the file
- *  into the system Downloads (API 29+). */
-@Composable
-fun VideoPlayerScreen(nav: NavController, b64: String) {
-    val ctx = LocalContext.current
-    val m = remember(b64) {
-        runCatching {
-            JSONObject(
-                String(
-                    android.util.Base64.decode(b64, android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP),
-                    Charsets.UTF_8,
-                ),
-            )
-        }.getOrNull()
-    }
-    var saved by remember { mutableStateOf(false) }
-    Box(Modifier.fillMaxSize().background(Color(0xF2050A14))) {
-        if (m == null) {
-            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Could not load this video.", color = Color.White, fontSize = 14.sp)
-            }
-        } else {
-            val src = remember(m.optString("id")) { videoSource(m) }
-            val dest = remember(m.optString("id")) { videoCacheFile(ctx, m) }
-            var state by remember(m.optString("id")) { mutableStateOf(if (dest.exists()) 1 else 0) }
-            if (!dest.exists() && state == 0) {
-                LaunchedEffect(m.optString("id")) {
-                    val ok = withContext(Dispatchers.IO) { runCatching { Api.downloadToFile(src, dest) }.getOrDefault(false) }
-                    state = if (ok) 1 else -1
-                }
-            }
-            when {
-                state == -1 -> Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Could not load this video.", color = Color.White, fontSize = 14.sp)
-                }
-                state == 0 -> Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(color = ActionBlue)
-                    Spacer(Modifier.height(10.dp))
-                    Text("Loading video…", color = Color.White, fontSize = 13.sp)
-                }
-                else -> AndroidView(
-                    factory = {
-                        android.widget.VideoView(it).apply {
-                            setVideoURI(android.net.Uri.fromFile(dest))
-                            val controller = android.widget.MediaController(it)
-                            controller.setAnchorView(this)
-                            setMediaController(controller)
-                            setOnPreparedListener { it.start(); controller.show(0) }
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-        }
-        // top bar: back + save
-        Row(
-            Modifier
-                .align(Alignment.TopStart)
-                .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(horizontal = 4.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = { nav.popBackStack() }) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Color.White, modifier = Modifier.size(28.dp))
-            }
-            Spacer(Modifier.weight(1f))
-            if (m != null) {
-                TextButton(onClick = {
-                    val dest = videoCacheFile(ctx, m)
-                    if (dest.exists()) {
-                        val ok = runCatching {
-                            if (android.os.Build.VERSION.SDK_INT >= 29) {
-                                val name = m.optString("fileName").ifBlank { "KuchuPuchu video" }.let {
-                                    if (it.endsWith(".mp4")) it else "$it.mp4"
-                                }
-                                val values = android.content.ContentValues().apply {
-                                    put(android.provider.MediaStore.Downloads.DISPLAY_NAME, name)
-                                    put(android.provider.MediaStore.Downloads.MIME_TYPE, "video/mp4")
-                                }
-                                val uri = ctx.contentResolver.insert(
-                                    android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                                    values,
-                                ) ?: return@runCatching false
-                                ctx.contentResolver.openOutputStream(uri)?.use { out ->
-                                    dest.inputStream().use { it.copyTo(out) }
-                                }
-                                true
-                            } else {
-                                false
-                            }
-                        }.getOrDefault(false)
-                        saved = true
-                        android.widget.Toast.makeText(
-                            ctx,
-                            if (ok) "Saved to Downloads" else "Saving needs Android 10+",
-                            android.widget.Toast.LENGTH_SHORT,
-                        ).show()
-                    }
-                }) { Text(if (saved) "Saved" else "Save", color = Color.White, fontSize = 14.sp) }
-            }
-        }
-    }
-}
-
-private fun fileLooksVideo(m: JSONObject): Boolean {
+internal fun fileLooksVideo(m: JSONObject): Boolean {
     val type = m.optString("fileType")
     if (type.startsWith("video")) return true
     val name = m.optString("fileName").lowercase()
@@ -3923,7 +3709,7 @@ private fun fileLooksVideo(m: JSONObject): Boolean {
 
 /** Owner round 20: videos download to a local cache (files need the auth
  *  header, so a raw URL can never work in a system player) and play in-app. */
-private fun videoCacheFile(ctx: android.content.Context, m: JSONObject): java.io.File {
+internal fun videoCacheFile(ctx: android.content.Context, m: JSONObject): java.io.File {
     val key = m.optText("fileKey").ifBlank {
         m.optText("mediaUrl").replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "v" }
     }
@@ -3931,7 +3717,7 @@ private fun videoCacheFile(ctx: android.content.Context, m: JSONObject): java.io
     return java.io.File(java.io.File(ctx.filesDir, "kp-video-cache").apply { mkdirs() }, safe)
 }
 
-private fun videoSource(m: JSONObject): String {
+internal fun videoSource(m: JSONObject): String {
     val key = m.optText("fileKey")
     if (key.isNotBlank()) return "/api/files/$key"
     return m.optText("mediaUrl")

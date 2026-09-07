@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -55,6 +56,17 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
     var docs by remember { mutableStateOf(listOf<JSONObject>()) }
     var links by remember { mutableStateOf(listOf<JSONObject>()) }
     val uri = LocalUriHandler.current
+    // Owner round 31: photos open in the app's own viewer, videos in the
+    // app's own player — never a system app.
+    var viewer by remember { mutableStateOf<JSONObject?>(null) }
+    viewer?.let { m ->
+        KpPhotoViewer(
+            url = messageMediaUrl(m),
+            title = "Photo",
+            subtitle = viewerStamp(m.optString("createdAt")),
+            onClose = { viewer = null },
+        )
+    }
 
     LaunchedEffect(convId) {
         runCatching {
@@ -114,15 +126,13 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         items(images, key = { it.optString("id") }) { m ->
-                            val url = m.optString("mediaUrl").ifBlank {
-                                val key = m.optString("fileKey")
-                                if (key.isNotBlank()) "/api/files/$key" else ""
-                            }
+                            val url = messageMediaUrl(m)
                             Box(
                                 Modifier
                                     .height(110.dp)
                                     .clip(RoundedCornerShape(8.dp))
-                                    .background(Line),
+                                    .background(Line)
+                                    .clickable(enabled = url.isNotBlank()) { viewer = m },
                             ) {
                                 if (url.isNotBlank()) {
                                     KpNetImage(
@@ -142,11 +152,25 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
                     item { Text("No documents yet.", color = Muted, modifier = Modifier.padding(16.dp)) }
                 }
                 items(docs, key = { it.optString("id") }) { m ->
+                    val isVideo = fileLooksVideo(m)
                     Row(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Card).padding(12.dp),
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Card)
+                            .let { mod ->
+                                if (isVideo) mod.clickable { nav.navigate("videoplayer/${mediaArg(JSONObject(m.toString()).put("kpTitle", "Video"))}") }
+                                else mod
+                            }
+                            .padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(Icons.Filled.InsertDriveFile, null, tint = GoldDeep, modifier = Modifier.size(28.dp))
+                        Icon(
+                            if (isVideo) Icons.Filled.Videocam else Icons.Filled.InsertDriveFile,
+                            null,
+                            tint = if (KpThemeMode.darkBlue) ActionBlue else GoldDeep,
+                            modifier = Modifier.size(28.dp),
+                        )
                         Spacer(Modifier.size(10.dp))
                         Column {
                             Text(m.optString("fileName").ifBlank { "File" }, fontWeight = FontWeight.Medium, color = Ink)
