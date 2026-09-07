@@ -257,18 +257,25 @@ fun IncomingCallScreen(call: CallUi) {
             )
             Spacer(Modifier.weight(1f))
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 48.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                // Owner round 30: bottoms aligned — the Accept column carries
-                // the chevron lane above its circle.
+                // Owner round 31 (item 25): the two circles sit at the far
+                // edges (SpaceBetween inside a 56dp margin) — SpaceEvenly put
+                // them ~40dp apart on a 360dp phone, "almost touching". Same
+                // layout for voice and video rings (this screen serves both).
+                Modifier.fillMaxWidth().padding(horizontal = 56.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                // Owner round 30: bottoms aligned — both columns carry the
+                // chevron lane above their circle.
                 verticalAlignment = Alignment.Bottom,
             ) {
                 // Owner round 25: Decline LEFT, Accept RIGHT — a plain tap no
                 // longer answers; each circle fires on an UPWARD swipe (the
                 // circles bob gently upward so the gesture is discoverable).
+                // Owner round 31 (item 25): Decline gets the SAME rising
+                // chevrons as Accept — it is swiped the same way.
                 SwipeCallCircle(
                     Red,
                     onSwipe = { if (engine.active?.incoming == true) engine.decline() else engine.hangup() },
+                    hint = true,
                 ) {
                     Icon(Icons.Filled.CallEnd, "Decline", tint = Color.White, modifier = Modifier.size(30.dp))
                 }
@@ -328,9 +335,9 @@ fun IncomingCallScreen(call: CallUi) {
 fun SwipeCallCircle(
     color: Color,
     onSwipe: () -> Unit,
-    // Owner round 30: the Accept circle shows a rising-chevron hint above it
-    // (three chevrons that fade in low and travel up, one after another) —
-    // motion only, no instruction text.
+    // Owner round 30: a rising-chevron hint above the circle (three chevrons
+    // that fade in low and travel up, one after another) — motion only, no
+    // instruction text. Round 31 (item 25): on BOTH incoming circles.
     hint: Boolean = false,
     icon: @Composable () -> Unit,
 ) {

@@ -2437,13 +2437,31 @@ const convBetween = (db, a, b) =>
     "utf8",
   );
   check(
-    "r30-3: rising-chevron swipe hint above Accept only (motion, no label); the drag path is untouched",
+    "r30-3 → r31-25: rising-chevron swipe hint above BOTH incoming circles (Accept and Decline; motion, no label); the drag path is untouched",
     calls.includes("private fun SwipeUpChevrons(visible: Boolean)") &&
       calls.includes("if (hint) SwipeUpChevrons(visible = dragUpPx == 0f)") &&
-      (calls.match(/hint = true,/g) || []).length === 1 &&
+      (calls.match(/hint = true,/g) || []).length === 2 &&
       calls.includes("Icons.Filled.KeyboardArrowUp") &&
       !calls.includes("Swipe up"),
   );
+  {
+    const inc = calls.slice(
+      calls.indexOf("fun IncomingCallScreen(call: CallUi) {"),
+      calls.indexOf("fun SwipeCallCircle("),
+    );
+    const declineIdx = inc.indexOf("SwipeCallCircle(\n                    Red,");
+    const acceptIdx = inc.indexOf("SwipeCallCircle(\n                    Green,");
+    check(
+      "r31-25: Decline and Accept sit at the far edges — SpaceBetween inside a 56dp margin (one screen for voice AND video rings); Decline LEFT with its own chevrons, Accept RIGHT",
+      inc.includes("Modifier.fillMaxWidth().padding(horizontal = 56.dp)") &&
+        inc.includes("horizontalArrangement = Arrangement.SpaceBetween") &&
+        !inc.includes("padding(horizontal = 48.dp)") &&
+        declineIdx > 0 &&
+        acceptIdx > declineIdx &&
+        inc.slice(declineIdx, acceptIdx).includes("hint = true,") &&
+        inc.slice(acceptIdx).includes("hint = true,"),
+    );
+  }
   const ui = readFileSync("native-android/app/src/main/java/app/kuchupuchu/android/Ui.kt", "utf8");
   const kt = (f) =>
     readFileSync(`native-android/app/src/main/java/app/kuchupuchu/android/${f}`, "utf8");
