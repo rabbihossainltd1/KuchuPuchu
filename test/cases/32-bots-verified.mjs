@@ -2768,6 +2768,115 @@ const convBetween = (db, a, b) =>
         ),
     );
 
+    // Owner round 31 item 22: the Reply action already exists on the app's own
+    // card — what the owner saw was the OS-drawn payload card, which the worker
+    // attaches whenever the user channel reports `sent: 0`. Two causes, both
+    // locked here: (a) the Durable Objects kept per-socket liveness in an
+    // in-memory Map that hibernation wiped (~10 s after each event), so a woken
+    // object counted every heartbeating socket as dead; (b) a live process
+    // handed a payload push let the FCM SDK draw the bare card instead of
+    // drawing its own. The DO check below runs the REAL classes against a fake
+    // state and re-constructs the object between heartbeat and broadcast.
+    {
+      const { ChatRoom } = await import(
+        new URL("../../src/worker/durable-objects/ChatRoom.ts", import.meta.url).href
+      );
+      const { CallSignal } = await import(
+        new URL("../../src/worker/durable-objects/CallSignal.ts", import.meta.url).href
+      );
+      const fakeSocket = (attachments) => {
+        const sock = {
+          sent: [],
+          send(x) {
+            this.sent.push(x);
+          },
+          serializeAttachment(v) {
+            attachments.set(sock, v);
+          },
+          deserializeAttachment() {
+            return attachments.get(sock);
+          },
+        };
+        return sock;
+      };
+      // One "state" per object identity: the socket list and the attachments
+      // outlive an instance (that is what the runtime keeps across hibernation).
+      const fakeState = () => {
+        const sockets = [];
+        const attachments = new Map();
+        return {
+          sockets,
+          attachments,
+          acceptWebSocket(ws) {
+            sockets.push(ws);
+          },
+          getWebSockets() {
+            return [...sockets];
+          },
+        };
+      };
+      const bcast = (obj, body) =>
+        obj
+          .fetch(new Request("https://x/broadcast", { method: "POST", body }))
+          .then((r) => r.json());
+      const st = fakeState();
+      const room1 = new ChatRoom(st, {});
+      const fresh = fakeSocket(st.attachments);
+      st.acceptWebSocket(fresh);
+      fresh.serializeAttachment({ seen: Date.now() }); // what /connect does
+      const dead = fakeSocket(st.attachments);
+      st.acceptWebSocket(dead);
+      dead.serializeAttachment({ seen: Date.now() - 46_000 });
+      await room1.webSocketMessage(fresh, '{"type":"hb"}');
+      // Hibernation: a brand-new instance over the same state.
+      const room2 = new ChatRoom(st, {});
+      const r = await bcast(room2, '{"type":"conv"}');
+      check(
+        "r31-22: ChatRoom liveness survives hibernation — a re-constructed object still delivers to (and counts) the heartbeated socket, and still skips the stale one",
+        r.sent === 1 && fresh.sent.length === 1 && dead.sent.length === 0,
+        JSON.stringify({ sent: r.sent, fresh: fresh.sent.length, dead: dead.sent.length }),
+      );
+      const st2 = fakeState();
+      const sig1 = new CallSignal(st2, {});
+      const p1 = fakeSocket(st2.attachments);
+      st2.acceptWebSocket(p1);
+      await sig1.webSocketMessage(p1, '{"type":"hb"}');
+      const sig2 = new CallSignal(st2, {});
+      const live = await sig2.fetch(new Request("https://x/live")).then((r) => r.json());
+      const r2 = await bcast(sig2, '{"type":"state"}');
+      check(
+        "r31-22: CallSignal /live + /broadcast read the same hibernation-safe record (no in-memory lastSeen map anywhere)",
+        live.live === 1 &&
+          r2.sent === 1 &&
+          !readFileSync("src/worker/durable-objects/ChatRoom.ts", "utf8").includes("lastSeen") &&
+          !readFileSync("src/worker/durable-objects/CallSignal.ts", "utf8").includes("lastSeen") &&
+          readFileSync("src/worker/durable-objects/liveness.ts", "utf8").includes(
+            "ws.serializeAttachment({ seen: Date.now() } satisfies Attachment);",
+          ),
+        JSON.stringify({ live, sent: r2.sent }),
+      );
+      const push = kt("KpPush.kt");
+      const hi = push.indexOf("override fun handleIntent(intent: Intent) {");
+      const handle = push.slice(hi, hi + 700);
+      check(
+        "r31-22: a LIVE process never lets the FCM SDK draw the bare payload card — KpPushService strips the SDK's display marker (gcm.n.e / gcm.notification.e) before dispatch, so onMessageReceived posts the app's own Reply / Like / Mark-as-read card; the Reply action + RemoteInput stay on the card",
+        hi > 0 &&
+          handle.includes("own.remove(SHOW_KEY)") &&
+          handle.includes("own.remove(SHOW_KEY_OLD)") &&
+          handle.includes("intent.replaceExtras(own)") &&
+          handle.includes("super.handleIntent(intent)") &&
+          push.includes('const val SHOW_KEY = "gcm.n.e"') &&
+          push.includes('const val SHOW_KEY_OLD = "gcm.notification.e"') &&
+          push.indexOf("override fun handleIntent(intent: Intent) {") <
+            push.indexOf("override fun onMessageReceived(message: RemoteMessage) {") &&
+          kt("KpNotify.kt").includes(".addRemoteInput(remoteInput)") &&
+          kt("KpNotify.kt").includes(
+            'NotificationCompat.Action.Builder(android.R.drawable.ic_menu_send, "Reply", replyPending)',
+          ) &&
+          kt("KpNotify.kt").includes("ACTION_REPLY -> {"),
+      );
+    }
+
     // Every cream / warm-white literal outside Theme.kt and the login screen
     // (which the owner excluded from theme work) must be gone from the
     // screens: dark-blue may not paint any light-cream colour.

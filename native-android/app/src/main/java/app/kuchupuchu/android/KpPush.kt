@@ -1,6 +1,8 @@
 package app.kuchupuchu.android
 
 import android.content.Context
+import android.content.Intent
+import android.os.Bundle
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import com.google.firebase.messaging.FirebaseMessaging
@@ -232,6 +234,34 @@ class KpPushService : FirebaseMessagingService() {
         if (!wakeLock.isHeld) wakeLock.acquire(6_000L)
     }
 
+    /**
+     * Owner round 31 (item 22): a push that carries a system `notification`
+     * payload — the worker attaches one whenever it believes no live process
+     * can draw a card — is normally drawn by the FCM SDK itself while the app
+     * is backgrounded: a bare title/body card with NO Reply / Like /
+     * Mark-as-read, and onMessageReceived never runs. But if this method is
+     * executing at all the process IS alive and can draw the rich card. So the
+     * SDK's "display this yourself" marker is stripped before it dispatches:
+     * the message reaches onMessageReceived with its data intact and the app
+     * renders its own actionable card (message), full-screen ring (call) or
+     * retracting missed-call card — exactly what a data-only push gets. When
+     * the process is genuinely dead nothing here runs and Play services draw
+     * the plain payload as before, so the guaranteed-arrival rule for killed
+     * apps is untouched. (The marker keys are the SDK's own constants
+     * `gcm.n.e` / legacy `gcm.notification.e`; RemoteMessage.data never
+     * exposes `gcm.*` keys, so the handlers below see the same map either way.)
+     */
+    override fun handleIntent(intent: Intent) {
+        val extras = intent.extras
+        if (extras != null && (extras.containsKey(SHOW_KEY) || extras.containsKey(SHOW_KEY_OLD))) {
+            val own = Bundle(extras)
+            own.remove(SHOW_KEY)
+            own.remove(SHOW_KEY_OLD)
+            intent.replaceExtras(own)
+        }
+        super.handleIntent(intent)
+    }
+
     override fun onMessageReceived(message: RemoteMessage) {
         val data = message.data
         // onMessageReceived returns as soon as it hands off, and the OS is then
@@ -412,5 +442,11 @@ class KpPushService : FirebaseMessagingService() {
             // eating every push — post them through the same retry path.
             KpPush.post(this, token)
         }
+    }
+
+    private companion object {
+        /** FCM SDK: "this message has a notification payload, draw it yourself". */
+        const val SHOW_KEY = "gcm.n.e"
+        const val SHOW_KEY_OLD = "gcm.notification.e"
     }
 }

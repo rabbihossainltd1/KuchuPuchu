@@ -22,17 +22,16 @@
  * sockets are receive-only, so neither party can spoof signalling into the
  * other's connection.
  */
-const STALE_MS = 45_000;
+import { isLive, markSeen } from "./liveness.js";
 
 export class CallSignal {
   /**
-   * lastSeen: WebSocket -> last inbound data-frame timestamp (same heartbeat
-   * liveness contract as ChatRoom). Only sockets that heartbeated within
-   * STALE_MS count as alive, so a frozen/killed participant's half-open socket
-   * does not make the worker think signalling was delivered when it never will be.
+   * Liveness lives in each socket's attachment (liveness.ts), same contract as
+   * ChatRoom: only sockets that heartbeated within STALE_MS count as alive, so
+   * a frozen/killed participant's half-open socket does not make the worker
+   * think signalling was delivered when it never will be — and the record
+   * survives this object's hibernation (an in-memory map did not).
    */
-  private lastSeen = new Map<WebSocket, number>();
-
   constructor(
     private ctx: DurableObjectState,
     _env: unknown,
@@ -40,7 +39,7 @@ export class CallSignal {
 
   /** Called by the runtime for every inbound data frame on a hibernatable socket. */
   async webSocketMessage(ws: WebSocket, _message: string | ArrayBuffer) {
-    this.lastSeen.set(ws, Date.now());
+    markSeen(ws);
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -51,20 +50,14 @@ export class CallSignal {
       const payload = await request.text();
       let sent = 0;
       const now = Date.now();
-      const live = this.ctx.getWebSockets();
-      for (const ws of live) {
-        if ((this.lastSeen.get(ws) ?? 0) < now - STALE_MS) continue;
+      for (const ws of this.ctx.getWebSockets()) {
+        if (!isLive(ws, now)) continue;
         try {
           ws.send(payload);
           sent++;
         } catch {
           /* hibernation: the runtime tracks liveness, nothing to prune */
         }
-      }
-      // Prune closed-socket entries so the map stays bounded.
-      if (this.lastSeen.size > live.length) {
-        const keep = new Set(live);
-        for (const ws of this.lastSeen.keys()) if (!keep.has(ws)) this.lastSeen.delete(ws);
       }
       return Response.json({ ok: true, sent });
     }
@@ -77,7 +70,7 @@ export class CallSignal {
       const now = Date.now();
       let live = 0;
       for (const ws of this.ctx.getWebSockets()) {
-        if ((this.lastSeen.get(ws) ?? 0) >= now - STALE_MS) live++;
+        if (isLive(ws, now)) live++;
       }
       return Response.json({ live });
     }
@@ -93,7 +86,7 @@ export class CallSignal {
       const server = pair[1];
       const user = request.headers.get("x-kp-user") ?? "anon";
       this.ctx.acceptWebSocket(server, [`user:${user}`]);
-      this.lastSeen.set(server, Date.now());
+      markSeen(server);
       server.send(
         JSON.stringify({ type: "hello", user, participants: this.ctx.getWebSockets().length }),
       );

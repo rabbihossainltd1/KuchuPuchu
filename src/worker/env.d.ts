@@ -82,6 +82,10 @@ declare global {
     send(data: string): void;
     close(code?: number, reason?: string): void;
     addEventListener(type: "close" | "error" | "message", listener: (ev: never) => void): void;
+    /** Hibernation API: per-socket state the runtime keeps for the socket's
+     *  lifetime, readable after the object was evicted and re-constructed. */
+    serializeAttachment(value: unknown): void;
+    deserializeAttachment(): unknown;
   }
 
   interface WebSocketPair {

@@ -2371,6 +2371,10 @@ async function broadcastRoomEvent(env: Env, roomKey: string, event: Record<strin
  * Returns how many live WebSocket connections took the frame: -1 when the
  * realtime layer is unavailable (no binding / DO error, so the caller must not
  * read anything into it), 0 when the user has no open socket at all, 1+ when
+ * (owner round 31 item 22: "live" = heartbeated within STALE_MS, and that
+ * record lives in each socket's attachment so it survives the object's
+ * hibernation — an in-memory map made a woken object answer 0 for a socket
+ * that had heartbeated seconds earlier, i.e. bare payload card, no rich card)
  * the app process is demonstrably running. Senders use that number to decide
  * whether a push may be data-only — see recipientAlert().
  */
