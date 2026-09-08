@@ -1044,11 +1044,19 @@ const convBetween = (db, a, b) =>
       chat.includes("var actionFor by remember { mutableStateOf<JSONObject?>(null) }") &&
       chat.includes("actionFor?.let { m ->") &&
       chat.includes('listOf("👍", "❤️", "😂", "😮", "😢", "🙏").forEach { e ->') &&
-      ['"Reply"', '"Copy"', '"Forward"', '"Edit"', '"Unsend"', '"Delete for me"', '"Select"'].every(
-        (l) =>
-          chat.includes(
-            `KpSheetRow(Icons.${l === '"Reply"' ? "AutoMirrored.Filled.Reply" : l === '"Forward"' ? "AutoMirrored.Filled.Send" : l === '"Copy"' ? "Filled.ContentCopy" : l === '"Edit"' ? "Filled.Edit" : l === '"Unsend"' ? "Filled.DeleteForever" : l === '"Delete for me"' ? "Filled.Delete" : "Filled.CheckCircle"}, ${l}`,
-          ),
+      // r32-16: "Unsend" is "Delete for everyone" now.
+      [
+        '"Reply"',
+        '"Copy"',
+        '"Forward"',
+        '"Edit"',
+        '"Delete for everyone"',
+        '"Delete for me"',
+        '"Select"',
+      ].every((l) =>
+        chat.includes(
+          `KpSheetRow(Icons.${l === '"Reply"' ? "AutoMirrored.Filled.Reply" : l === '"Forward"' ? "AutoMirrored.Filled.Send" : l === '"Copy"' ? "Filled.ContentCopy" : l === '"Edit"' ? "Filled.Edit" : l === '"Delete for everyone"' ? "Filled.DeleteForever" : l === '"Delete for me"' ? "Filled.Delete" : "Filled.CheckCircle"}, ${l}`,
+        ),
       ) &&
       // r31-29: text, photo, video AND the grouped photo bubble (4 sites).
       (
@@ -4657,6 +4665,28 @@ const convBetween = (db, a, b) =>
       priv32.indexOf('"Private profile"') < priv32.indexOf('"Share Audio Via Screen Share"') &&
       !app32.includes("SystemAudioTap") &&
       !settings.includes('"Share audio via screen share"'),
+  );
+  // Items 15 + 16: no "edited" marker anywhere; "Unsend" wording is gone —
+  // the action is "Delete for everyone" (sheet row + selection bar).
+  const chat1516 = kt("ChatScreen.kt");
+  check(
+    "r32-15: no 'edited' / '(edited)' label on any bubble; the emoji-only rule no longer keys on the edited flag",
+    !chat1516.includes("(edited)") &&
+      !/"Edited"|"edited "|" edited"/.test(chat1516) &&
+      chat1516.includes(
+        'val emojiOnly = if (kind == "TEXT") emojiOnlyCount(m.optText("body")) else 0',
+      ) &&
+      !chat1516.includes('!m.optBoolean("edited")) emojiOnlyCount'),
+  );
+  check(
+    "r32-16: the own-message action reads 'Delete for everyone' (long-press sheet + selection bar); no user-facing 'Unsend' string remains",
+    chat1516.includes(
+      'KpSheetRow(Icons.Filled.DeleteForever, "Delete for everyone", tint = Red) {',
+    ) &&
+      chat1516.includes(
+        'Icon(Icons.Filled.DeleteForever, "Delete for everyone", tint = Red, modifier = Modifier.size(21.dp))',
+      ) &&
+      !/"Unsend[^"]*"/.test(chat1516),
   );
 }
 

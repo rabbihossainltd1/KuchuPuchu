@@ -1600,7 +1600,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 }
                 if (single && singleMsg != null && singleMsg.optString("senderId") == Store.myId() && !pendingEchoOf(singleMsg)) {
                     IconButton(onClick = { unsendSelected() }) {
-                        Icon(Icons.Filled.DeleteForever, "Unsend for everyone", tint = Red, modifier = Modifier.size(21.dp))
+                        Icon(Icons.Filled.DeleteForever, "Delete for everyone", tint = Red, modifier = Modifier.size(21.dp))
                     }
                 }
                 IconButton(onClick = { deleteForMe() }) {
@@ -2228,7 +2228,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                     }
                 }
                 if (mineMsg && !echo) {
-                    KpSheetRow(Icons.Filled.DeleteForever, "Unsend", tint = Red) {
+                    // Owner round 32 (item 16): the proper name for it.
+                    KpSheetRow(Icons.Filled.DeleteForever, "Delete for everyone", tint = Red) {
                         close()
                         selected.clear()
                         selected.addAll(albumIds)
@@ -3359,7 +3360,9 @@ private fun MessageRow(
             val bubbleMax =
                 maxOf(280.dp, minOf(420.dp, (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp * 0.82f).dp))
             // Owner round 31: emoji-only texts (1–3) render big, stamp underneath.
-            val emojiOnly = if (kind == "TEXT" && !m.optBoolean("edited")) emojiOnlyCount(m.optText("body")) else 0
+            // Owner round 32 (item 15): no "edited" marker anywhere — an edited
+            // text is just the text (so an emoji-only edit stays emoji-only too).
+            val emojiOnly = if (kind == "TEXT") emojiOnlyCount(m.optText("body")) else 0
             val bubbleShape =
                 RoundedCornerShape(
                     topStart = 16.dp,
@@ -3511,7 +3514,7 @@ private fun MessageRow(
                             // spot travels WITH the final line — no separate
                             // line, no overlap, no drifting left.
                             val reserve = if (mine) "                 " else "            "
-                            val full = m.optText("body") + (if (m.optBoolean("edited")) "  (edited)" else "") + reserve
+                            val full = m.optText("body") + reserve
                             if (revealChars != null && revealChars < full.length) {
                                 // The AI reply is still typing itself out —
                                 // reveal up to the current word + a caret.
