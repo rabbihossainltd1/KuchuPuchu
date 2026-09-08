@@ -1725,8 +1725,10 @@ const convBetween = (db, a, b) =>
       !src.includes("status_reaction_inbox"),
   );
   check(
-    "r25: photos smaller (185dp) + JPEG quality 90; voice/call stamps bottom-right; ONE back closes reaction+selection",
-    chat.includes(".widthIn(max = 185.dp)") &&
+    "r25/r32-29: photos smaller (150dp inline preview, ≤200dp tall) + JPEG quality 90; voice/call stamps bottom-right; ONE back closes reaction+selection",
+    (chat.match(/\.widthIn\(max = 150\.dp\)/g) || []).length === 2 &&
+      chat.includes(".heightIn(max = 200.dp)") &&
+      !chat.includes(".widthIn(max = 185.dp)") &&
       readFileSync(
         "native-android/app/src/main/java/app/kuchupuchu/android/Files.kt",
         "utf8",

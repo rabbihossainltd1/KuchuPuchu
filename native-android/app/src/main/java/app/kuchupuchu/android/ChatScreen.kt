@@ -4025,7 +4025,7 @@ private fun ImageMessageRow(
         Box(
             Modifier
                 .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                .widthIn(max = 185.dp) // Owner round 25: choto photo bubble
+                .widthIn(max = 150.dp) // Owner round 25 / round 32 item 29: smaller inline preview
                 // Owner round 10: photos float too — 3D lift + the round-8
                 // thin border.
                 .shadow(2.dp, RoundedCornerShape(12.dp))
@@ -4525,16 +4525,19 @@ private fun ImageBubble(m: JSONObject, mine: Boolean) {
     val dataBmp = if (url?.startsWith("data:") == true) rememberBitmap(url) else null
     Box(
         Modifier
-            .widthIn(max = 185.dp) // Owner round 25: choto photo bubble
+            // Owner round 32 (item 29): a smaller inline preview — 150 dp wide,
+            // never taller than 200 dp (portrait shots used to run 280 dp tall).
+            // Tap still opens the full-screen viewer.
+            .widthIn(max = 150.dp)
             .then(
                 if (ratio > 0f) {
                     Modifier
                         .aspectRatio(ratio)
-                        .heightIn(max = 280.dp)
+                        .heightIn(max = 200.dp)
                 } else {
                     Modifier
-                        .widthIn(min = 150.dp)
-                        .height(170.dp)
+                        .widthIn(min = 120.dp)
+                        .height(140.dp)
                 },
             )
             .clip(RoundedCornerShape(12.dp))
