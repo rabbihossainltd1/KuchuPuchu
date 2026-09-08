@@ -277,11 +277,25 @@ async function sessionStmt(
  *  -away phone stops lighting up. Callers put these in ONE batch with the
  *  request-state UPDATE that authorises the transfer — that is what makes
  *  the swap atomic (§15/§18). */
+/** Where a request comes from (Cloudflare edge: IP + geo). Owner round 32
+ *  item 4: stored per signed-in device so Settings → Devices can show it. */
+type ClientWhere = { ip: string | null; city: string | null; country: string | null };
+function clientWhere(request: Request): ClientWhere {
+  const cf = (request as Request & { cf?: { country?: string; city?: string } }).cf;
+  const ip = clientIp(request);
+  return {
+    ip: ip === "unknown" ? null : ip.slice(0, 64),
+    city: cf?.city ? String(cf.city).slice(0, 64) : null,
+    country: cf?.country ? String(cf.country).slice(0, 8) : null,
+  };
+}
+
 function deviceTransferStmts(
   db: D1Database,
   userId: string,
   deviceId: string,
   deviceName: string | null,
+  where: ClientWhere,
 ): D1PreparedStatement[] {
   const at = nowIso();
   return [
@@ -295,14 +309,16 @@ function deviceTransferStmts(
     db
       .prepare(
         `INSERT INTO auth_devices
-           (id, user_id, device_id, device_name, status, created_at, last_seen_at)
-         VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?)
+           (id, user_id, device_id, device_name, status, created_at, last_seen_at, ip, city, country)
+         VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?, ?)
          ON CONFLICT (user_id, device_id) DO UPDATE SET
            status = 'ACTIVE', revoked_at = NULL,
            device_name = COALESCE(excluded.device_name, auth_devices.device_name),
-           last_seen_at = excluded.last_seen_at`,
+           created_at = excluded.created_at,
+           last_seen_at = excluded.last_seen_at,
+           ip = excluded.ip, city = excluded.city, country = excluded.country`,
       )
-      .bind(id(), userId, deviceId, deviceName, at, at),
+      .bind(id(), userId, deviceId, deviceName, at, at, where.ip, where.city, where.country),
     // Old install's push handles die with the transfer. Rows with a NULL
     // device_id predate per-install identity; they cannot be proven to belong
     // to the surviving install, so they go too.
@@ -1690,6 +1706,10 @@ async function ensureSchema(db: D1Database) {
   // deliberately outside the batch — a duplicate-column error must not roll the
   // whole batch back — and each one is individually tolerant.
   await runCatchingSql(db, `ALTER TABLE messages ADD COLUMN delivered_at TEXT`);
+  // Owner round 32 item 4: where each signed-in device last came from.
+  await runCatchingSql(db, `ALTER TABLE auth_devices ADD COLUMN ip TEXT`);
+  await runCatchingSql(db, `ALTER TABLE auth_devices ADD COLUMN city TEXT`);
+  await runCatchingSql(db, `ALTER TABLE auth_devices ADD COLUMN country TEXT`);
   // Owner round 25: status reactions — stored on the view row (a reaction
   // implies a view). No inbox message: the owner sees it in the viewer list.
   await runCatchingSql(db, `ALTER TABLE status_views ADD COLUMN reaction TEXT`);
@@ -2037,7 +2057,22 @@ async function requireUser(db: D1Database, request: Request) {
   const now = Date.now();
   if (now - Date.parse(row.last_active_at) > ONLINE_WINDOW_MS) {
     const iso = new Date(now).toISOString();
-    await run(db, "UPDATE users SET last_active_at = ? WHERE id = ?", iso, row.id);
+    // Owner round 32 item 4: the same throttled tick stamps the device this
+    // session was minted on (last active + where from), one batch round trip.
+    const where = clientWhere(request);
+    const stmts = [
+      db.prepare("UPDATE users SET last_active_at = ? WHERE id = ?").bind(iso, row.id),
+    ];
+    if (row.session_device_id)
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE auth_devices SET last_seen_at = ?, ip = COALESCE(?, ip), city = COALESCE(?, city), country = COALESCE(?, country)
+              WHERE user_id = ? AND device_id = ? AND status = 'ACTIVE'`,
+          )
+          .bind(iso, where.ip, where.city, where.country, row.id, row.session_device_id),
+      );
+    await db.batch(stmts);
     row.last_active_at = iso;
   }
   return row;
@@ -3633,7 +3668,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       // restore/create the session directly (§13/§24).
       const { token, stmt } = await sessionStmt(db, user.id, deviceId);
       await db.batch([
-        ...deviceTransferStmts(db, user.id, deviceId, deviceName),
+        ...deviceTransferStmts(db, user.id, deviceId, deviceName, clientWhere(request)),
         db.prepare("UPDATE users SET last_active_at = ? WHERE id = ?").bind(nowIso(), user.id),
         stmt,
       ]);
@@ -3789,7 +3824,13 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           pending.phone_verification_method,
           target.id,
         ),
-      ...deviceTransferStmts(db, target.id, deviceId, displayName ?? "Android"),
+      ...deviceTransferStmts(
+        db,
+        target.id,
+        deviceId,
+        displayName ?? "Android",
+        clientWhere(request),
+      ),
       stmt,
     ]);
     ctx.waitUntil(sweepSessions(db));
@@ -3846,7 +3887,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           .bind(nowIso(), requestId),
         // approve() already ran the transfer; re-running is idempotent and
         // keeps the batch self-healing if approve crashed mid-way.
-        ...deviceTransferStmts(db, user.id, deviceId, null),
+        ...deviceTransferStmts(db, user.id, deviceId, null, clientWhere(request)),
         stmt,
       ])) as { meta: { changes: number } }[];
       if (!claimed[0]?.meta.changes) return json({ status: "UNKNOWN" });
@@ -3963,7 +4004,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             WHERE id = ? AND status = 'PENDING' AND expires_at > ?`,
         )
         .bind(nowIso(), requestId, nowIso()),
-      ...deviceTransferStmts(db, user.id, deviceId, null),
+      ...deviceTransferStmts(db, user.id, deviceId, null, clientWhere(request)),
       stmt,
     ])) as { meta: { changes: number } }[];
     if (!done[0]?.meta.changes)
@@ -4065,11 +4106,15 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       created_at: string;
       last_seen_at: string;
       revoked_at: string | null;
+      ip: string | null;
+      city: string | null;
+      country: string | null;
       app_version: string | null;
       push_seen_at: string | null;
     }>(
       db,
       `SELECT a.device_id, a.device_name, a.status, a.created_at, a.last_seen_at, a.revoked_at,
+              a.ip, a.city, a.country,
               (SELECT d.app_version FROM devices d
                  WHERE d.user_id = a.user_id AND d.device_id = a.device_id
                  ORDER BY d.last_seen_at DESC LIMIT 1) AS app_version,
@@ -4088,9 +4133,13 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       current: !!me.session_device_id && r.device_id === me.session_device_id,
       appVersion: r.app_version,
       firstSeenAt: r.created_at,
+      signedInAt: r.created_at,
       lastSeenAt:
         r.push_seen_at && r.push_seen_at > r.last_seen_at ? r.push_seen_at : r.last_seen_at,
       revokedAt: r.revoked_at,
+      // Owner round 32 item 4: where the device last came from.
+      ip: r.ip,
+      place: [r.city, r.country].filter(Boolean).join(", ") || null,
     }));
     return json({ items });
   }
@@ -4122,7 +4171,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             WHERE id = ? AND status = 'PENDING' AND expires_at > ?`,
         )
         .bind(nowIso(), requestId, nowIso()),
-      ...deviceTransferStmts(db, uid, row.new_device_id, null),
+      ...deviceTransferStmts(db, uid, row.new_device_id, null, clientWhere(request)),
     ])) as { meta: { changes: number } }[];
     if (!claimed[0]?.meta.changes) {
       if (row.status === "PENDING")

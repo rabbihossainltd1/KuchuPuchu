@@ -12,7 +12,7 @@
 
 import { readFile } from "node:fs/promises";
 import { makeD1, makeR2, makeCtx } from "../d1shim.mjs";
-import { makeReg, installGoogleStub } from "../helpers/phoneauth.mjs";
+import { makeReg, installGoogleStub, fakeIdToken } from "../helpers/phoneauth.mjs";
 
 installGoogleStub();
 import { MESSAGE_MAX_LENGTH } from "../../src/shared/constants.ts";
@@ -322,6 +322,103 @@ async function main() {
       "after unblocking the full profile returns",
       after.json.user.blocked === false,
       JSON.stringify(after.json.user).slice(0, 80),
+    );
+  }
+
+  // ── r32-4. Settings → Devices shows where each install came from ─────────
+  {
+    const h = await mk();
+    // A caller that pins the edge headers: Cloudflare's IP header plus the
+    // `request.cf` geo object the worker reads for the place.
+    const from = async (method, path, body, token, ip, cf) => {
+      const headers = { "content-type": "application/json", "cf-connecting-ip": ip };
+      if (token) headers.authorization = `Bearer ${token}`;
+      const init = { method, headers };
+      if (body !== undefined && method !== "GET") init.body = JSON.stringify(body);
+      const req = new Request(`https://kp.test${path}`, init);
+      if (cf) Object.defineProperty(req, "cf", { value: cf });
+      const res = await h.worker.fetch(req, h.env, h.ctx);
+      const t = await res.text();
+      await h.ctx.drain();
+      return { status: res.status, json: t ? JSON.parse(t) : {} };
+    };
+    const phone = "+8801711000404";
+    const v = await from(
+      "POST",
+      "/api/auth/verify-phone",
+      { phone, sim: "MATCH", deviceId: "dev-r324", deviceName: "Pixel 8" },
+      undefined,
+      "103.4.5.6",
+      { city: "Sirajganj", country: "BD" },
+    );
+    check(
+      "r32-4: verify-phone accepted",
+      v.json.status === "ACCOUNT_CREATED",
+      JSON.stringify(v.json).slice(0, 80),
+    );
+    const b = await from(
+      "POST",
+      "/api/auth/google/bind",
+      {
+        phone,
+        idToken: fakeIdToken("g-r324", "r324@x.com"),
+        deviceId: "dev-r324",
+        displayName: "r324",
+      },
+      undefined,
+      "103.4.5.6",
+      { city: "Sirajganj", country: "BD" },
+    );
+    const tok = b.json.token;
+    check("r32-4: bind produced a session", !!tok, JSON.stringify(b.json).slice(0, 80));
+    const devs = await from("GET", "/api/auth/devices", undefined, tok, "103.4.5.6");
+    const d0 = devs.json.items?.[0];
+    check(
+      "r32-4: GET /api/auth/devices carries ip, place (city, country) and signedInAt for the install",
+      devs.status === 200 &&
+        !!d0 &&
+        d0.ip === "103.4.5.6" &&
+        d0.place === "Sirajganj, BD" &&
+        typeof d0.signedInAt === "string" &&
+        d0.signedInAt === d0.firstSeenAt,
+      JSON.stringify(d0).slice(0, 220),
+    );
+    // The throttled presence tick (users.last_active_at older than the online
+    // window) also stamps the device row: last active + where from, both moving
+    // with the phone. Rows without geo keep what they had (COALESCE).
+    const uid = b.json.user.id;
+    const stale = new Date(Date.now() - 5 * 60_000).toISOString();
+    await h.q("UPDATE users SET last_active_at = ? WHERE id = ?", stale, uid).run();
+    await h.q("UPDATE auth_devices SET last_seen_at = ? WHERE user_id = ?", stale, uid).run();
+    await from("GET", "/api/conversations", undefined, tok, "45.9.9.9", {
+      city: "Dhaka",
+      country: "BD",
+    });
+    const row = await h
+      .q(
+        "SELECT last_seen_at, ip, city, country FROM auth_devices WHERE user_id = ? AND device_id = 'dev-r324'",
+        uid,
+      )
+      .first();
+    check(
+      "r32-4: an authenticated request past the online window refreshes the device's last_seen_at + ip + place",
+      !!row &&
+        row.last_seen_at > stale &&
+        row.ip === "45.9.9.9" &&
+        row.city === "Dhaka" &&
+        row.country === "BD",
+      JSON.stringify(row),
+    );
+    const again = await from("GET", "/api/auth/devices", undefined, tok, "45.9.9.9");
+    const d1 = again.json.items?.[0];
+    check(
+      "r32-4: …and the list reflects it (lastSeenAt moved, ip/place follow the phone, signedInAt unchanged)",
+      !!d1 &&
+        d1.ip === "45.9.9.9" &&
+        d1.place === "Dhaka, BD" &&
+        d1.lastSeenAt > stale &&
+        d1.signedInAt === d0.signedInAt,
+      JSON.stringify(d1).slice(0, 220),
     );
   }
 

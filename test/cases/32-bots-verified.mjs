@@ -4813,6 +4813,23 @@ const convBetween = (db, a, b) =>
       src.includes('"SELECT target_id FROM blocks WHERE owner_id = ? ORDER BY created_at DESC"') &&
       src.includes("if (user) list.push(userFrom(user, false, true));"),
   );
+  // Item 4: the device row shows IP · place · "Signed in <when>" under the
+  // name line. The worker stores ip/city/country per auth_devices row at every
+  // device transfer and refreshes them on the throttled presence tick.
+  check(
+    "r32-4: Devices rows show IP · place · signed-in time (worker stores auth_devices.ip/city/country, refreshed with last_seen_at)",
+    settings.includes('val ip = d.optText("ip")') &&
+      settings.includes('val place = d.optText("place")') &&
+      settings.includes('val signedIn = deviceSeen(d.optText("signedInAt"))') &&
+      settings.includes('append("Signed in $signedIn")') &&
+      src.includes("ALTER TABLE auth_devices ADD COLUMN ip TEXT") &&
+      src.includes("ip = excluded.ip, city = excluded.city, country = excluded.country") &&
+      src.includes(
+        "UPDATE auth_devices SET last_seen_at = ?, ip = COALESCE(?, ip), city = COALESCE(?, city), country = COALESCE(?, country)",
+      ) &&
+      src.includes('place: [r.city, r.country].filter(Boolean).join(", ") || null,') &&
+      src.includes("signedInAt: r.created_at,"),
+  );
 }
 
 console.log(lines.join("\n"));

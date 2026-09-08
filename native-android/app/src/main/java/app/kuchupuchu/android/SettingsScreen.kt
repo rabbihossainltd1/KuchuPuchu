@@ -81,6 +81,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
@@ -694,6 +695,28 @@ private fun DevicesSection() {
                         fontSize = 12.5.sp,
                         color = Muted,
                         maxLines = 1,
+                    )
+                    // Owner round 32 item 4: where the device came from + when it
+                    // signed in. Rows that predate the columns show only the time.
+                    val ip = d.optText("ip")
+                    val place = d.optText("place")
+                    val signedIn = deviceSeen(d.optText("signedInAt"))
+                    Text(
+                        buildString {
+                            if (ip.isNotBlank()) append(ip)
+                            if (place.isNotBlank()) {
+                                if (isNotEmpty()) append(" · ")
+                                append(place)
+                            }
+                            if (signedIn != "—") {
+                                if (isNotEmpty()) append(" · ")
+                                append("Signed in $signedIn")
+                            }
+                        },
+                        fontSize = 12.sp,
+                        color = Muted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
