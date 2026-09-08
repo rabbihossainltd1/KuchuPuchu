@@ -1428,11 +1428,11 @@ const convBetween = (db, a, b) =>
     settings.includes("vertical = 7.dp") && settings.includes("fontSize = 13.5.sp"),
   );
   check(
-    "status replies quote with >, no emoji anywhere in UI text",
+    "status replies carry the status as meta (r32-21 replaced the '> caption' prefix), no emoji anywhere in UI text",
     readFileSync(
       "native-android/app/src/main/java/app/kuchupuchu/android/StatusScreens.kt",
       "utf8",
-    ).includes("> $snippet") &&
+    ).includes('JSONObject().put("status", JSONObject().put("id", statusId))') &&
       !src.includes("🤖") &&
       !chatlist.includes('return "📷 Photo"') &&
       !chatlist.includes('return "🎤 Voice message"'),
@@ -4687,6 +4687,42 @@ const convBetween = (db, a, b) =>
         'Icon(Icons.Filled.DeleteForever, "Delete for everyone", tint = Red, modifier = Modifier.size(21.dp))',
       ) &&
       !/"Unsend[^"]*"/.test(chat1516),
+  );
+  // Item 21: a status reply used to arrive as "> null\n<text>" (the client
+  // prefixed the status caption, null for a photo). The reply now carries
+  // meta.status (server-verified id / kind / text — test 03 drives it) and the
+  // bubble draws a small quote: thumbnail for photo / video, caption for text.
+  // Item 22: the quoted-original block (in the bubble AND the composer bar) is
+  // one compact line — "You  hello" — with a 20 / 22 dp stripe.
+  const statusKt32 = kt("StatusScreens.kt");
+  check(
+    "r32-21: status reply sends body + meta.status.id (no client-built '> caption' prefix); the bubble renders StatusQuote with a 34 dp thumbnail from /api/statuses/:id/media (play glyph for video) or the caption / kind label — never 'null'",
+    statusKt32.includes(
+      'if (statusId.isNotBlank()) payload.put("meta", JSONObject().put("status", JSONObject().put("id", statusId)))',
+    ) &&
+      !statusKt32.includes('"> $snippet\\n$text"') &&
+      chat1516.includes(
+        "private fun StatusQuote(st: JSONObject, mine: Boolean, theme: String) {",
+      ) &&
+      chat1516.includes('m.optJSONObject("meta")?.optJSONObject("status")?.let { st ->') &&
+      chat1516.includes('"/api/statuses/${st.optString("id")}/media",') &&
+      chat1516.includes(
+        "Box(Modifier.size(34.dp).clip(RoundedCornerShape(6.dp)).background(Color(0x22000000))) {",
+      ) &&
+      src.includes("async function statusQuote(") &&
+      src.includes("...(await statusQuote(db, kind, incomingMeta)),"),
+  );
+  check(
+    "r32-22: compact reply preview — in-bubble quote is ONE annotated line (name bold + text) with a 20 dp stripe and 3 dp vertical padding; the composer's ReplyQuoteBar is one line with a 22 dp stripe",
+    chat1516.includes(
+      "Box(Modifier.width(2.5.dp).height(20.dp).clip(RoundedCornerShape(2.dp)).background(chatAccent(theme)))",
+    ) &&
+      chat1516.includes(".padding(start = 6.dp, end = 8.dp, top = 3.dp, bottom = 3.dp),") &&
+      (chat1516.match(/withStyle\(SpanStyle\(fontWeight = FontWeight\.SemiBold\)\)/g) || [])
+        .length >= 2 &&
+      !chat1516.includes("Box(Modifier.width(2.5.dp).height(26.dp)") &&
+      !chat1516.includes(".height(30.dp)\n                .clip(RoundedCornerShape(2.dp))") &&
+      chat1516.includes(".height(22.dp)\n                .clip(RoundedCornerShape(2.dp))"),
   );
 }
 

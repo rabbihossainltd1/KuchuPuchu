@@ -127,8 +127,11 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -3201,6 +3204,65 @@ private fun KpImeAutoScroll(listState: androidx.compose.foundation.lazy.LazyList
     }
 }
 
+/** Owner round 32 (item 21): the quoted status inside a status-reply bubble. */
+@Composable
+private fun StatusQuote(st: JSONObject, mine: Boolean, theme: String) {
+    val kind = st.optString("kind")
+    val caption = st.optText("text")
+    val visual = kind == "IMAGE" || kind == "VIDEO"
+    Row(
+        Modifier
+            .padding(bottom = 3.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (mine) Color(0x26FFFFFF) else if (KpThemeMode.darkBlue) ActionBlue.copy(alpha = 0.18f) else GoldSoft)
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.width(2.5.dp).height(30.dp).clip(RoundedCornerShape(2.dp)).background(chatAccent(theme)))
+        Spacer(Modifier.width(6.dp))
+        Column(Modifier.weight(1f, fill = false)) {
+            Text(
+                "Status",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = if (mine) Color(0xE6FFFFFF) else Ink,
+                maxLines = 1,
+            )
+            Text(
+                caption.ifBlank {
+                    when (kind) {
+                        "VIDEO" -> "Video"
+                        "IMAGE" -> "Photo"
+                        else -> "Status"
+                    }
+                }.take(64),
+                fontSize = 11.sp,
+                color = if (mine) Color(0xE6FFFFFF) else Ink,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+        }
+        if (visual) {
+            Spacer(Modifier.width(8.dp))
+            Box(Modifier.size(34.dp).clip(RoundedCornerShape(6.dp)).background(Color(0x22000000))) {
+                KpNetImage(
+                    "/api/statuses/${st.optString("id")}/media",
+                    "Status",
+                    Modifier.fillMaxSize(),
+                )
+                if (kind == "VIDEO") {
+                    Icon(
+                        Icons.Filled.PlayArrow,
+                        null,
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp).align(Alignment.Center),
+                    )
+                }
+            }
+        }
+    }
+}
+
 /** Owner round 13e: the swipe-reply quote bar above the composer. */
 @Composable
 private fun ReplyQuoteBar(replyTo: JSONObject?, theme: String, onCancel: () -> Unit) {
@@ -3214,39 +3276,41 @@ private fun ReplyQuoteBar(replyTo: JSONObject?, theme: String, onCancel: () -> U
             .clip(RoundedCornerShape(12.dp))
             .background(Card)
             .border(1.dp, Line, RoundedCornerShape(12.dp))
-            .padding(horizontal = 10.dp, vertical = 6.dp),
+            .padding(start = 8.dp, end = 4.dp, top = 3.dp, bottom = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             Modifier
                 .width(3.dp)
-                .height(30.dp)
+                .height(22.dp)
                 .clip(RoundedCornerShape(2.dp))
                 // Owner round 31: the reply "I" bar takes the CHAT's accent
                 // (it stayed app-blue under a mint/rose/cream chat).
                 .background(chatAccent(theme)),
         )
         Spacer(Modifier.width(8.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                if (replyTo.optString("senderId") == Store.myId()) "You"
-                else (replyTo.optText("senderName") ?: "").ifBlank { "Reply" },
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                // Owner round 17: gold-on-gold-soft was unreadable — full ink.
-                color = Ink,
-                maxLines = 1,
-            )
-            Text(
-                ((replyTo.optText("body") ?: "").ifBlank { "Media message" }).take(80),
-                fontSize = 12.sp,
-                color = Ink,
-                maxLines = 1,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-            )
-        }
-        IconButton(onClick = onCancel, modifier = Modifier.size(28.dp)) {
-            Icon(Icons.Filled.Close, "Cancel reply", tint = Muted, modifier = Modifier.size(16.dp))
+        // Owner round 32 (item 22): one line — "You  hello" — instead of a
+        // two-line card that pushed the composer up by a whole row.
+        Text(
+            buildAnnotatedString {
+                withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) {
+                    append(
+                        if (replyTo.optString("senderId") == Store.myId()) "You"
+                        else (replyTo.optText("senderName") ?: "").ifBlank { "Reply" },
+                    )
+                }
+                append("  ")
+                append(((replyTo.optText("body") ?: "").ifBlank { "Media" }).take(80))
+            },
+            fontSize = 12.sp,
+            // Owner round 17: gold-on-gold-soft was unreadable — full ink.
+            color = Ink,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        IconButton(onClick = onCancel, modifier = Modifier.size(26.dp)) {
+            Icon(Icons.Filled.Close, "Cancel reply", tint = Muted, modifier = Modifier.size(15.dp))
         }
     }
 }
@@ -3447,40 +3511,46 @@ private fun MessageRow(
             ) {
                 val senderName = m.optText("senderName")
                 Column {
+                    // Owner round 32 (item 21): a reply to a status quotes it —
+                    // a small thumbnail for a photo / video status, the caption
+                    // for a text one (never the word "null").
+                    m.optJSONObject("meta")?.optJSONObject("status")?.let { st ->
+                        StatusQuote(st, mine, theme)
+                    }
                     // Owner round 13: quoted original when this is a reply.
                     m.optString("replyTo").takeIf { it.isNotBlank() }?.let { rid ->
                         val q = quoteFor(rid)
+                        // Owner round 32 (item 22): compact quote — name and
+                        // text on ONE line ("You · hello"), a 20 dp stripe,
+                        // tighter padding; it used to be a two-line block
+                        // nearly as tall as the reply itself.
+                        val who =
+                            if (q?.optString("senderId") == myId) "You"
+                            else (q?.optText("senderName") ?: "").ifBlank { "Original" }
+                        val what = q?.optText("body")?.take(48)?.ifBlank { "Media" } ?: "Original message"
                         Row(
                             Modifier
-                                .padding(bottom = 3.dp)
-                                .clip(RoundedCornerShape(8.dp))
+                                .padding(bottom = 2.dp)
+                                .clip(RoundedCornerShape(6.dp))
                                 .background(if (mine) Color(0x26FFFFFF) else if (KpThemeMode.darkBlue) ActionBlue.copy(alpha = 0.18f) else GoldSoft)
-                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                                .padding(start = 6.dp, end = 8.dp, top = 3.dp, bottom = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
                             // Owner round 21: the quote bar takes the chat accent.
-                            Box(Modifier.width(2.5.dp).height(26.dp).clip(RoundedCornerShape(2.dp)).background(chatAccent(theme)))
+                            Box(Modifier.width(2.5.dp).height(20.dp).clip(RoundedCornerShape(2.dp)).background(chatAccent(theme)))
                             Spacer(Modifier.width(6.dp))
-                            Column {
-                                Text(
-                                    if (q?.optString("senderId") == myId) "You"
-                                    else (q?.optText("senderName") ?: "").ifBlank { "Original message" },
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    // Owner round 17: full ink — the name has to
-                                    // read clearly on every bubble.
-                                    color = if (mine) Color(0xE6FFFFFF) else Ink,
-                                    maxLines = 1,
-                                )
-                                Text(
-                                    q?.optText("body")?.take(64)?.ifBlank { "Original message" } ?: "Original message",
-                                    fontSize = 11.sp,
-                                    // Owner round 16: full ink, not muted — the quote
-                                    // has to stay readable on every themed bubble.
-                                    color = if (mine) Color(0xE6FFFFFF) else Ink,
-                                    maxLines = 1,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                                )
-                            }
+                            Text(
+                                buildAnnotatedString {
+                                    withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(who) }
+                                    append("  ")
+                                    append(what)
+                                },
+                                fontSize = 11.sp,
+                                // Owner round 16/17: full ink — readable on every themed bubble.
+                                color = if (mine) Color(0xE6FFFFFF) else Ink,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            )
                         }
                     }
                     if (!mine && isGroup && senderName.isNotBlank()) {

@@ -638,7 +638,12 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
         if (reply.isBlank() || user == null || isMine) return
         val target = user.optString("id")
         val text = reply.trim()
-        val snippet = statuses.getOrNull(idx)?.optString("text")?.take(40).orEmpty()
+        // Owner round 32 (item 21): the reply carries WHICH status it answers
+        // (meta.status) — the chat draws a small thumbnail / caption quote from
+        // it. The old client-built "> caption" prefix printed "null" for a
+        // photo status and is gone.
+        val current = statuses.getOrNull(idx)
+        val statusId = current?.optString("id").orEmpty()
         // Optimistic: the box clears the moment you hit send — the network
         // fires behind and only a failure speaks up.
         reply = ""
@@ -654,10 +659,10 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                 }
                 val cid = conv.optJSONObject("conversation")?.optString("id").orEmpty()
                 if (cid.isBlank()) throw Exception("Couldn't open the chat.")
-                // Owner round 13: plain ">" quote prefix — no emoji in app UI.
-                val body = if (snippet.isBlank()) "> $text" else "> $snippet\n$text"
+                val payload = JSONObject().put("body", text)
+                if (statusId.isNotBlank()) payload.put("meta", JSONObject().put("status", JSONObject().put("id", statusId)))
                 withContext(Dispatchers.IO) {
-                    Api.post("/api/conversations/$cid/messages", JSONObject().put("body", body))
+                    Api.post("/api/conversations/$cid/messages", payload)
                 }
                 ScreenStore.pokeInbox()
             } catch (e: Exception) {

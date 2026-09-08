@@ -182,6 +182,59 @@ const upload = (k, tok, name, type, bytes) =>
   check("a deleted object answers 404", got.status === 404, String(got.status));
 }
 
+// ---- r32-21: a status reply carries a server-verified status quote ----
+// The reply's meta.status is rebuilt from the statuses row (id / kind / text);
+// an unknown id is dropped, and the client's kind / text are never trusted.
+{
+  const k = await mk();
+  const A = await k.reg("sqa@x.com", "sqa");
+  const B = await k.reg("sqb@x.com", "sqb");
+  const cid = (await k.call("POST", "/api/conversations", { userId: A.user.id }, B.token)).json
+    .conversation.id;
+  const up = await upload(k, A.token, "clip.mp4", "video/mp4", "mp4bytes!!");
+  const st = await k.call(
+    "POST",
+    "/api/statuses",
+    { kind: "VIDEO", fileKey: up.json.fileKey, seconds: 9, text: "my caption" },
+    A.token,
+  );
+  const sid = st.json.status?.id;
+  const reply = await k.call(
+    "POST",
+    `/api/conversations/${cid}/messages`,
+    { body: "nice one", meta: { status: { id: sid, kind: "IMAGE", text: "forged" } } },
+    B.token,
+  );
+  const q = reply.json.message?.meta?.status;
+  check(
+    "r32-21: status reply → meta.status = { id, kind, text } from the statuses row (client kind / text ignored), body is the plain reply text",
+    reply.status === 201 &&
+      q &&
+      q.id === sid &&
+      q.kind === "VIDEO" &&
+      q.text === "my caption" &&
+      reply.json.message.body === "nice one",
+    JSON.stringify(reply.json.message ?? reply.json),
+  );
+  const bogus = await k.call(
+    "POST",
+    `/api/conversations/${cid}/messages`,
+    { body: "hm", meta: { status: { id: "nope-" + "x".repeat(20) } } },
+    B.token,
+  );
+  check(
+    "r32-21: an unknown status id leaves no quote",
+    bogus.status === 201 && !bogus.json.message?.meta?.status,
+    JSON.stringify(bogus.json.message?.meta ?? null),
+  );
+  const media = await k.call(`GET`, `/api/statuses/${sid}/media`, undefined, B.token);
+  check(
+    "r32-21: the quoted status media is readable by the replier (thumbnail source)",
+    media.status === 200,
+    String(media.status),
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`\n--- ${lines.length - broken} ok / ${broken} broken ---`);

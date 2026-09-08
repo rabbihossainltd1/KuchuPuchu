@@ -6008,6 +6008,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         : {}),
       ...(Object.keys(dims).length ? dims : {}),
       ...(album ? { album } : {}),
+      ...(await statusQuote(db, kind, incomingMeta)),
     };
     if (clientId) metaObj.clientId = clientId;
     const meta = Object.keys(metaObj).length ? JSON.stringify(metaObj) : null;
@@ -7241,6 +7242,34 @@ function voiceWaveform(
 }
 
 /**
+ * Owner round 32 (item 21): a reply to a STATUS carries what it answers —
+ * `meta.status = { id, kind, text }` — so the bubble can draw a small quote
+ * (thumbnail for a photo / video status, the caption for a text one) instead of
+ * the "> null" prefix the old client-built body produced. Only on a TEXT
+ * message, only for a status that exists, and the shape is rebuilt server-side
+ * from the row (the client's copy of kind / text is never trusted). The status
+ * id stays valid as a media reference for as long as the status lives; after
+ * it expires the quote degrades to its kind label.
+ */
+async function statusQuote(
+  db: D1Database,
+  kind: string,
+  meta: Record<string, unknown>,
+): Promise<{ status: { id: string; kind: string; text: string } } | Record<string, never>> {
+  if (kind !== "TEXT") return {};
+  const raw = meta.status as { id?: unknown } | undefined;
+  const id = typeof raw?.id === "string" ? raw.id.slice(0, 64) : "";
+  if (!id) return {};
+  const row = await one<{ id: string; kind: string; text: string | null }>(
+    db,
+    "SELECT id, kind, text FROM statuses WHERE id = ?",
+    id,
+  );
+  if (!row) return {};
+  return { status: { id: row.id, kind: row.kind, text: String(row.text || "").slice(0, 80) } };
+}
+
+/**
  * Pixel size of an uploaded image, as told by the sender.
  *
  * Why it exists: the chat bubble must be laid out at the photo's real aspect
@@ -7282,6 +7311,7 @@ function msgFrom(row: MsgRow) {
     document?: boolean;
     w?: number;
     h?: number;
+    status?: { id: string; kind: string; text: string };
   }>(row.meta_json, {});
   const imageFile =
     row.kind === "FILE" && String(meta.type || "").startsWith("image/") && meta.document !== true;
