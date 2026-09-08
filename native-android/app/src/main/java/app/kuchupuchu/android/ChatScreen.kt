@@ -1593,12 +1593,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                 }
                 if (!privateChat) {
                     IconButton(onClick = { forwarding = true }) {
-                        Icon(Icons.AutoMirrored.Filled.Send, "Forward", tint = GoldDeep, modifier = Modifier.size(21.dp))
+                        Icon(Icons.AutoMirrored.Filled.Send, "Forward", tint = ActionBlueDeep, modifier = Modifier.size(21.dp))
                     }
                 }
                 if (single && singleMsg != null && canEdit(singleMsg)) {
                     IconButton(onClick = { editing = singleMsg; selected.clear() }) {
-                        Icon(Icons.Filled.Edit, "Edit", tint = GoldDeep, modifier = Modifier.size(21.dp))
+                        Icon(Icons.Filled.Edit, "Edit", tint = ActionBlueDeep, modifier = Modifier.size(21.dp))
                     }
                 }
                 if (single && singleMsg != null && singleMsg.optString("senderId") == Store.myId() && !pendingEchoOf(singleMsg)) {
@@ -1990,7 +1990,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     Box(
                         Modifier
                             .fillMaxWidth()
-                            .background(if (rowSelected) Gold.copy(alpha = 0.16f) else Color.Transparent),
+                            .background(if (rowSelected) ActionBlue.copy(alpha = 0.16f) else Color.Transparent),
                     ) {
                         MessageRow(
                             m,
@@ -4802,7 +4802,7 @@ private fun FileBubble(
             Modifier
                 .size(40.dp)
                 .clip(RoundedCornerShape(12.dp))
-                .background(if (mine) Color(0x33FFFFFF) else GoldSoft),
+                .background(if (mine) Color(0x33FFFFFF) else chatAccent(theme).copy(alpha = 0.18f)),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
@@ -4813,7 +4813,7 @@ private fun FileBubble(
                     else -> Icons.Filled.InsertDriveFile
                 },
                 contentDescription = "File",
-                tint = if (mine) AmberInk else GoldDeep,
+                tint = if (mine) AmberInk else chatAccent(theme),
                 modifier = Modifier.size(22.dp),
             )
         }
@@ -4840,19 +4840,19 @@ private fun FileBubble(
         Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
             when {
                 opening -> CircularProgressIndicator(
-                    color = if (mine) AmberInk else GoldDeep,
+                    color = if (mine) AmberInk else chatAccent(theme),
                     strokeWidth = 2.dp,
                     modifier = Modifier.size(20.dp),
                 )
                 upFrac != null -> CircularProgressIndicator(
                     progress = { upFrac },
-                    color = if (mine) AmberInk else GoldDeep,
+                    color = if (mine) AmberInk else chatAccent(theme),
                     strokeWidth = 2.5.dp,
                     modifier = Modifier.size(22.dp),
                 )
                 ready -> Text(
                     if (isImage) "View" else if (fileLooksVideo(m) || fileType.startsWith("audio")) (if (playing) "Stop" else "Play") else "Open",
-                    color = if (mine) Color.White else GoldDeep,
+                    color = if (mine) Color.White else chatAccent(theme),
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 12.5.sp,
                     maxLines = 1,
@@ -5363,7 +5363,7 @@ private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
                     "Founder & Developer of KuchuPuchu",
                     fontSize = 10.5.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = GoldDeep,
+                    color = ActionBlueDeep,
                 )
                 Spacer(Modifier.height(3.dp))
                 Text("Kaliganj, Jhenaidah, Khulna, Bangladesh", fontSize = 10.sp, color = Muted)
@@ -5387,10 +5387,10 @@ private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
                         Icon(painterResource(R.drawable.ic_brand_tiktok), "TikTok", tint = Color.Unspecified, modifier = Modifier.size(14.dp))
                     }
                     OwnerCardIcon(onClick = { open("mailto:info@rabbihossainltd.online") }) {
-                        Icon(Icons.Filled.Email, "Email", tint = GoldDeep, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Filled.Email, "Email", tint = ActionBlueDeep, modifier = Modifier.size(14.dp))
                     }
                     OwnerCardIcon(onClick = { open("https://rabbihossainltd.online") }) {
-                        Icon(Icons.Filled.Language, "Website", tint = GoldDeep, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Filled.Language, "Website", tint = ActionBlueDeep, modifier = Modifier.size(14.dp))
                     }
                 }
                 Spacer(Modifier.height(10.dp))
@@ -5427,7 +5427,7 @@ private fun OwnerCardIcon(onClick: () -> Unit, icon: @Composable () -> Unit) {
         Modifier
             .size(27.dp)
             .clip(CircleShape)
-            .background(GoldSoft)
+            .background(ChipSelected)
             .clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) {

@@ -836,7 +836,7 @@ private fun TopTab(
             ) {
                 Text(
                     if (badge > 99) "99+" else "$badge",
-                    color = AmberInk,
+                    color = ActionBlueInk,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     lineHeight = 10.sp,
@@ -1363,7 +1363,7 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
                             .height(22.dp)
                             .widthIn(min = 22.dp)
                             .clip(CircleShape)
-                            .background(Gold)
+                            .background(ActionBlue)
                             .padding(horizontal = 6.dp),
                         contentAlignment = Alignment.Center,
                     ) {

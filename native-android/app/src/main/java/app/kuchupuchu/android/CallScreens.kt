@@ -644,9 +644,9 @@ private fun CallAction(
                         )
                         active -> Brush.verticalGradient(
                             listOf(
-                                androidx.compose.ui.graphics.lerp(Gold, Color.White, 0.3f),
-                                Gold,
-                                androidx.compose.ui.graphics.lerp(Gold, Color.Black, 0.2f),
+                                androidx.compose.ui.graphics.lerp(ActionBlue, Color.White, 0.3f),
+                                ActionBlue,
+                                androidx.compose.ui.graphics.lerp(ActionBlue, Color.Black, 0.2f),
                             ),
                         )
                         else -> Brush.verticalGradient(listOf(Color(0x42FFFFFF), Color(0x1AFFFFFF)))
@@ -1067,9 +1067,9 @@ private fun StripAction(
                         )
                         active -> Brush.verticalGradient(
                             listOf(
-                                androidx.compose.ui.graphics.lerp(Gold, Color.White, 0.3f),
-                                Gold,
-                                androidx.compose.ui.graphics.lerp(Gold, Color.Black, 0.2f),
+                                androidx.compose.ui.graphics.lerp(ActionBlue, Color.White, 0.3f),
+                                ActionBlue,
+                                androidx.compose.ui.graphics.lerp(ActionBlue, Color.Black, 0.2f),
                             ),
                         )
                         else -> Brush.verticalGradient(listOf(Color(0x3DFFFFFF), Color(0x14FFFFFF)))

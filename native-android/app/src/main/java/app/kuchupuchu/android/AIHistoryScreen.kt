@@ -135,10 +135,10 @@ fun AIHistoryScreen(nav: NavController) {
                                     .width(38.dp)
                                     .height(38.dp)
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(GoldSoft),
+                                    .background(ChipSelected),
                                 contentAlignment = Alignment.Center,
                             ) {
-                                Icon(Icons.Filled.Schedule, null, tint = GoldDeep)
+                                Icon(Icons.Filled.Schedule, null, tint = ActionBlueDeep)
                             }
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
@@ -154,7 +154,7 @@ fun AIHistoryScreen(nav: NavController) {
                                     color = Muted,
                                 )
                             }
-                            Text("View", fontSize = 12.5.sp, color = GoldDeep, fontWeight = FontWeight.SemiBold)
+                            Text("View", fontSize = 12.5.sp, color = ActionBlueDeep, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -192,7 +192,7 @@ fun AIHistoryScreen(nav: NavController) {
                                     .widthIn(max = 300.dp)
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(
-                                        if (mine) Brush.linearGradient(listOf(Gold, Gold))
+                                        if (mine) Brush.linearGradient(listOf(ActionBlue, ActionBlue))
                                         else Brush.linearGradient(listOf(Card, Card)),
                                     )
                                     .padding(horizontal = 12.dp, vertical = 8.dp),

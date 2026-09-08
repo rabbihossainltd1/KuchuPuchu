@@ -905,8 +905,8 @@ fun ThemePickerScreen(onClose: () -> Unit) {
                     .fillMaxWidth()
                     .padding(horizontal = 14.dp, vertical = 5.dp)
                     .clip(RoundedCornerShape(16.dp))
-                    .background(if (selected) GoldSoft else Card)
-                    .border(1.dp, if (selected) Gold else Line, RoundedCornerShape(16.dp))
+                    .background(if (selected) ChipSelected else Card)
+                    .border(1.dp, if (selected) ActionBlue else Line, RoundedCornerShape(16.dp))
                     .clickable {
                         if (!selected) {
                             KpThemeMode.set(ctx, o.dark)
@@ -924,7 +924,7 @@ fun ThemePickerScreen(onClose: () -> Unit) {
                         .size(44.dp)
                         .clip(CircleShape)
                         .background(o.swatch)
-                        .border(2.dp, if (selected) GoldDeep else Line, CircleShape),
+                        .border(2.dp, if (selected) ActionBlueDeep else Line, CircleShape),
                 )
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
@@ -1061,7 +1061,7 @@ fun RingtonePickerScreen(kind: String = "call", onClose: () -> Unit) {
                         .fillMaxWidth()
                         .padding(vertical = 1.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(if (selRes == res) GoldSoft else Card)
+                        .background(if (selRes == res) ChipSelected else Card)
                         .clickable {
                             selRes = res
                             selCustom = null
@@ -1095,7 +1095,7 @@ fun RingtonePickerScreen(kind: String = "call", onClose: () -> Unit) {
                     .fillMaxWidth()
                     .padding(vertical = 2.dp)
                     .clip(RoundedCornerShape(14.dp))
-                    .background(if (selCustom != null) GoldSoft else Card)
+                    .background(if (selCustom != null) ChipSelected else Card)
                     .clickable { customPicker.launch(arrayOf("audio/*")) }
                     .padding(horizontal = 14.dp, vertical = 13.dp),
                 verticalAlignment = Alignment.CenterVertically,

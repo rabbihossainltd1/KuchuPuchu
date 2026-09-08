@@ -860,7 +860,7 @@ const convBetween = (db, a, b) =>
     settings.includes("fun EditPhoneScreen(") &&
       !settings.includes("editField != null") &&
       !settings.includes("workers.dev") &&
-      settings.includes("selCustom != null) GoldSoft else Card"),
+      settings.includes("selCustom != null) ChipSelected else Card"),
   );
   check(
     "13e/r22: profile fields edit on their OWN screens (name/username/about/phone)",
@@ -4882,6 +4882,66 @@ const convBetween = (db, a, b) =>
         engine.includes('if (m.optBoolean("screen") != peerScreen || off != peerCameraOff) {') &&
         !/^\s*(?:if \(camera\) )?autoJoinCamera\(\)\s*$/m.test(engine) &&
         !engine.includes("private fun autoJoinCamera()"),
+    );
+  }
+  // Item 13: the ten light-cream leaks in dark-blue — every one now rides a
+  // themed token (ActionBlue family / ChipSelected / the chat accent), which
+  // still resolves to the classic gold in light-cream.
+  {
+    const chat = kt("ChatScreen.kt");
+    const login = kt("LoginScreen.kt");
+    const hist = kt("AIHistoryScreen.kt");
+    const st = kt("SettingsScreen.kt");
+    const cl = kt("ChatListScreen.kt");
+    const calls = kt("CallScreens.kt");
+    check(
+      "r32-13: dark-blue leaks fixed — received file/voice controls (chat accent), AI history clock + View, select-mode Forward/Edit, login wait ring + wordmark, theme swatch border, unread badge, call active buttons, owner card email/website",
+      chat.includes(
+        ".background(if (mine) Color(0x33FFFFFF) else chatAccent(theme).copy(alpha = 0.18f)),",
+      ) &&
+        chat.includes("tint = if (mine) AmberInk else chatAccent(theme),") &&
+        chat.includes("color = if (mine) Color.White else chatAccent(theme),") &&
+        chat.includes(
+          'Icon(Icons.AutoMirrored.Filled.Send, "Forward", tint = ActionBlueDeep, modifier = Modifier.size(21.dp))',
+        ) &&
+        chat.includes(
+          'Icon(Icons.Filled.Edit, "Edit", tint = ActionBlueDeep, modifier = Modifier.size(21.dp))',
+        ) &&
+        chat.includes(
+          ".background(if (rowSelected) ActionBlue.copy(alpha = 0.16f) else Color.Transparent),",
+        ) &&
+        chat.includes(
+          'Icon(Icons.Filled.Email, "Email", tint = ActionBlueDeep, modifier = Modifier.size(14.dp))',
+        ) &&
+        chat.includes(
+          'Icon(Icons.Filled.Language, "Website", tint = ActionBlueDeep, modifier = Modifier.size(14.dp))',
+        ) &&
+        !chat.includes(
+          "private fun OwnerCardIcon(onClick: () -> Unit, icon: @Composable () -> Unit) {\n    Box(\n        Modifier\n            .size(27.dp)\n            .clip(CircleShape)\n            .background(GoldSoft)",
+        ) &&
+        hist.includes("Icon(Icons.Filled.Schedule, null, tint = ActionBlueDeep)") &&
+        hist.includes(
+          'Text("View", fontSize = 12.5.sp, color = ActionBlueDeep, fontWeight = FontWeight.SemiBold)',
+        ) &&
+        !hist.includes("GoldSoft") &&
+        login.includes(
+          "drawCircle(color = ActionBlue.copy(alpha = ringAlpha), radius = r, style = Stroke(width = 4f))",
+        ) &&
+        login.includes(
+          'withStyle(SpanStyle(color = ActionBlueDeep, fontWeight = FontWeight.ExtraBold)) { append("Puchu") }',
+        ) &&
+        !/\bGold\b|GoldDeep|GoldSoft/.test(login) &&
+        st.includes(
+          ".border(1.dp, if (selected) ActionBlue else Line, RoundedCornerShape(16.dp))",
+        ) &&
+        st.includes(".border(2.dp, if (selected) ActionBlueDeep else Line, CircleShape),") &&
+        !st.includes("GoldSoft") &&
+        cl.includes(
+          ".clip(CircleShape)\n                            .background(ActionBlue)\n                            .padding(horizontal = 6.dp),",
+        ) &&
+        !cl.includes("AmberInk") &&
+        (calls.match(/lerp\(ActionBlue, Color\.White, 0\.3f\)/g) || []).length === 2 &&
+        !/\bGold\b/.test(calls),
     );
   }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
