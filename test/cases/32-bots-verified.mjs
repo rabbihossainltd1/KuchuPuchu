@@ -4830,6 +4830,25 @@ const convBetween = (db, a, b) =>
       src.includes('place: [r.city, r.country].filter(Boolean).join(", ") || null,') &&
       src.includes("signedInAt: r.created_at,"),
   );
+  // Item 10: the voice-call preview card (peer's shared screen) is 16:9 and
+  // sits ABOVE the control grid — the block precedes the first action Row.
+  {
+    const calls = kt("CallScreens.kt");
+    const voice = calls.slice(
+      calls.indexOf("fun VoiceCallScreen("),
+      calls.indexOf("private fun ShareFullscreen("),
+    );
+    const card = voice.indexOf("if (engine.peerScreen) {");
+    const grid = voice.indexOf("/* control grid");
+    check(
+      "r32-10: voice-call preview card is 16:9 (72% width) and rendered above the action buttons",
+      card > 0 &&
+        grid > card &&
+        voice.includes(".fillMaxWidth(0.72f)\n                        .aspectRatio(16f / 9f)") &&
+        !voice.includes("aspectRatio(4f / 3f)"),
+      `card=${card} grid=${grid}`,
+    );
+  }
 }
 
 console.log(lines.join("\n"));

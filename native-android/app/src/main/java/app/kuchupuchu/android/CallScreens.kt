@@ -483,6 +483,35 @@ fun VoiceCallScreen(call: CallUi) {
             )
             Spacer(Modifier.weight(1f))
 
+            // Owner round 31 item 19 / round 32 item 10: the other phone is
+            // sharing its screen on this voice call — a 16:9 live preview ABOVE
+            // the buttons; tap it for fullscreen. The call stays a voice call.
+            if (engine.peerScreen) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(0.72f)
+                        .aspectRatio(16f / 9f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(DarkCard)
+                        .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(14.dp))
+                        .clickable { engine.openShareFullscreen() },
+                ) {
+                    VideoRenderer(engine, remote = true, fit = true, pip = true)
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(6.dp)
+                            .size(26.dp)
+                            .clip(CircleShape)
+                            .background(Color(0x66000000)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.Fullscreen, "Fullscreen", tint = Color.White, modifier = Modifier.size(18.dp))
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+            }
+
             /* control grid — 3 x 2, every slot the same width, disabled
                buttons dim to 35% while ringing. Video opens THIS user's
                camera (both phones land on the video screen; the opponent
@@ -538,34 +567,6 @@ fun VoiceCallScreen(call: CallUi) {
                     danger = true,
                     enabled = true,
                 ) { haptics.heavy(); engine.hangup() }
-            }
-            // Owner round 31 item 19: the other phone is sharing its screen on
-            // this voice call — a small live preview under the buttons; tap it
-            // for fullscreen. The call itself stays a voice call.
-            if (engine.peerScreen) {
-                Spacer(Modifier.height(6.dp))
-                Box(
-                    Modifier
-                        .fillMaxWidth(0.62f)
-                        .aspectRatio(4f / 3f)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(DarkCard)
-                        .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(14.dp))
-                        .clickable { engine.openShareFullscreen() },
-                ) {
-                    VideoRenderer(engine, remote = true, fit = true, pip = true)
-                    Box(
-                        Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(6.dp)
-                            .size(26.dp)
-                            .clip(CircleShape)
-                            .background(Color(0x66000000)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(Icons.Filled.Fullscreen, "Fullscreen", tint = Color.White, modifier = Modifier.size(18.dp))
-                    }
-                }
             }
             Spacer(Modifier.weight(0.25f))
         }
