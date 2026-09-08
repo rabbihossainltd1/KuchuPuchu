@@ -64,6 +64,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -749,7 +750,12 @@ fun InCallVideoScreen(call: CallUi) {
     // here because BOTH renderers below read it: an off camera is never
     // promotable full-screen, and the self tile is not composed at all.
     val localFeedUp = !engine.cameraOff
-    val effSwap = swapped && localFeedUp
+    // Owner round 32 item 47: the other side's picture is up only when a
+    // real frame arrived AND they did not say their camera is off. Otherwise
+    // their avatar sits where the video would be — the same thing a normal
+    // video call shows for an off camera; there is no "waiting" state.
+    val remoteUp = engine.hasRemote && !engine.peerCameraOff
+    val effSwap = swapped && localFeedUp && remoteUp
     // mutableFloatStateOf avoids boxing a Float on every drag delta —
     // with the boxed mutableStateOf<Float>, each pixel of drag allocated
     // and triggered a state read/write cycle that showed up as PiP drag
@@ -778,19 +784,19 @@ fun InCallVideoScreen(call: CallUi) {
          * the opponent is left in the tile. */
         VideoRenderer(engine, remote = !effSwap)
 
-        if (!engine.hasRemote) {
-            Column(
-                Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 84.dp, ring = false)
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    if (call.connecting) "Connecting…" else "Waiting for video…",
-                    color = Color.White,
-                    fontSize = 14.sp,
-                )
+        if (!remoteUp) {
+            // Their camera is off (or nothing has arrived yet): blurred photo
+            // backdrop + avatar, like the voice screen. Name and timer live in
+            // the top row, so nothing else is written here.
+            Box(Modifier.fillMaxSize().background(Dark)) {
+                BlurredAvatarBackdrop(call.otherAvatar.ifBlank { null })
+                Column(
+                    Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 96.dp, ring = false)
+                }
             }
         }
 
@@ -847,6 +853,11 @@ fun InCallVideoScreen(call: CallUi) {
                 val maxX = (parentW - selfW - edge).coerceAtLeast(minX)
                 val minY = headGap
                 val maxY = (parentH - selfH - stripGap).coerceAtLeast(minY)
+                // Owner round 32 item 42: the drag reads the CURRENT limits
+                // through rememberUpdatedState, so the strip hiding (3 s timer)
+                // or a rotation mid-drag re-clamps instead of cancelling the
+                // gesture — the pointerInput itself is never restarted.
+                val limits = rememberUpdatedState(floatArrayOf(minX, maxX, minY, maxY))
                 LaunchedEffect(parentW, parentH, controlsVisible) {
                     if (pipX < 0f) {
                         pipX = maxX
@@ -865,17 +876,22 @@ fun InCallVideoScreen(call: CallUi) {
                     // detectors arbitrate every touch (the old drag lag). The
                     // first down is consumed too, so a tap no longer leaks
                     // through to the full-screen Box and flickers the controls.
-                    // Keyed on controlsVisible as well, because that is what the
-                    // captured limits below depend on.
-                    .pointerInput(parentW, parentH, controlsVisible) {
+                    .pointerInput(Unit) {
                         awaitEachGesture {
                             val down = awaitFirstDown().also { it.consume() }
                             var moved = false
                             drag(down.id) { change ->
-                                change.consume()
+                                // Owner round 32 item 42 — the real bug: the delta
+                                // was read AFTER consume(), and positionChange()
+                                // is Offset.Zero for a consumed change. Every
+                                // drag therefore moved the tile by nothing and
+                                // ended as a "tap" that swapped the feeds. Read
+                                // first, consume second.
                                 val d = change.positionChange()
-                                pipX = (pipX + d.x).coerceIn(minX, maxX)
-                                pipY = (pipY + d.y).coerceIn(minY, maxY)
+                                change.consume()
+                                val (lo, hi, top, bottom) = limits.value
+                                pipX = (pipX + d.x).coerceIn(lo, hi)
+                                pipY = (pipY + d.y).coerceIn(top, bottom)
                                 // Any movement of the finger counts as a drag, but
                                 // the tile only counts as MOVED once the clamped
                                 // offset itself changed: pushing against an edge

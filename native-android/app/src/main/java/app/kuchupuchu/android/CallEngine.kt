@@ -106,6 +106,17 @@ class CallEngine(private val app: Application) {
     var peerScreen by mutableStateOf(false)
         private set
 
+    /**
+     * Owner round 32 item 47: the OTHER phone said its camera is off on a
+     * video call (media flags: no camera, no screen, row VIDEO). The video
+     * screen then shows their avatar — exactly what a normal video call does
+     * for an off camera — instead of black frames or a "waiting" state. A
+     * peer that never announced anything counts as on; the first real frame
+     * (hasRemote) decides for them.
+     */
+    var peerCameraOff by mutableStateOf(false)
+        private set
+
     /** The preview card was tapped: the shared screen fills the display. */
     var shareFull by mutableStateOf(false)
         private set
@@ -115,6 +126,7 @@ class CallEngine(private val app: Application) {
 
     private fun resetPeerMedia() {
         peerScreen = false
+        peerCameraOff = false
         shareFull = false
     }
 
@@ -144,6 +156,7 @@ class CallEngine(private val app: Application) {
      */
     private fun applyPeerMedia(camera: Boolean, screen: Boolean, kind: String) {
         val cur = active ?: return
+        peerCameraOff = !camera && !screen && kind == "VIDEO"
         if (peerScreen != screen) {
             peerScreen = screen
             if (!screen) {
@@ -169,7 +182,6 @@ class CallEngine(private val app: Application) {
                 active = cur.copy(kind = "VIDEO")
                 markVideoRoute()
                 publishChange()
-                if (camera) autoJoinCamera()
             }
             // The server says AUDIO (a screen share on a voice call) while a
             // first frame already promoted this side: undo — only a camera
@@ -181,18 +193,11 @@ class CallEngine(private val app: Application) {
         }
     }
 
-    /**
-     * TRUE audio→video conversion (R25, kept): the other side turned their
-     * camera on — join with ours too, otherwise they sit on "Waiting for
-     * video…" until we find the button. Camera off is one tap away.
-     */
-    private fun autoJoinCamera() {
-        if (!sharing && videoTrack == null && !cameraOff) {
-            markVideoRoute()
-            notify("Video call…")
-            toggleCamera()
-        }
-    }
+    // Owner round 32 item 47: no auto-join. The old autoJoinCamera() (R25)
+    // turned OUR camera on when theirs came on; it never actually fired on a
+    // voice call (capture(false) leaves cameraOff true) and the screen sat on
+    // "Waiting for video" for a camera that was never coming. A camera is
+    // each side's own choice: theirs off shows their avatar, ours is one tap.
 
     private fun rearmRemoteGate() {
         remoteVideo?.let { v ->
@@ -733,7 +738,8 @@ class CallEngine(private val app: Application) {
         // The other side's live media flags ride the same row — the safety net
         // for a `media` frame that arrived while this process was asleep.
         next.optJSONObject("media")?.optJSONObject(ui.otherId)?.let { m ->
-            if (m.optBoolean("screen") != peerScreen) {
+            val off = !m.optBoolean("camera") && !m.optBoolean("screen") && next.optString("kind") == "VIDEO"
+            if (m.optBoolean("screen") != peerScreen || off != peerCameraOff) {
                 applyPeerMedia(m.optBoolean("camera"), m.optBoolean("screen"), next.optString("kind"))
             }
         }
@@ -743,9 +749,6 @@ class CallEngine(private val app: Application) {
         if (sameCall && current?.kind != "VIDEO" && ui.kind == "VIDEO" && status == "ACTIVE") {
             markVideoRoute()
             publishChange()
-            if (next.optJSONObject("media")?.optJSONObject(ui.otherId)?.optBoolean("camera") == true) {
-                autoJoinCamera()
-            }
         }
         // v3.7: hold the call's realtime signalling socket while it lives.
         if (!ui.id.startsWith("pending") && wsCallId != ui.id) {
@@ -1782,7 +1785,6 @@ override fun onRenegotiationNeeded() {
                         if (hasRemote && active?.kind != "VIDEO" && !peerScreen) {
                             active = active?.copy(kind = "VIDEO")
                             publishChange()
-                            autoJoinCamera()
                         }
                     }
                 }

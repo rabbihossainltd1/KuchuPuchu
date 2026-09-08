@@ -4848,6 +4848,23 @@ const convBetween = (db, a, b) =>
         !voice.includes("aspectRatio(4f / 3f)"),
       `card=${card} grid=${grid}`,
     );
+    // Item 47: no "waiting for video" state and no auto-join. The video
+    // screen shows the peer's avatar whenever their picture is not up (their
+    // camera announced off, or no frame yet); our camera is never switched on
+    // on their behalf.
+    const engine = kt("CallEngine.kt");
+    check(
+      "r32-47: video call — peer camera off shows their avatar (peerCameraOff from the media flags), no 'Waiting for video…' text, autoJoinCamera removed",
+      !calls.includes("Waiting for video") &&
+        calls.includes("val remoteUp = engine.hasRemote && !engine.peerCameraOff") &&
+        calls.includes("val effSwap = swapped && localFeedUp && remoteUp") &&
+        calls.includes("if (!remoteUp) {\n") &&
+        engine.includes("var peerCameraOff by mutableStateOf(false)") &&
+        engine.includes('peerCameraOff = !camera && !screen && kind == "VIDEO"') &&
+        engine.includes('if (m.optBoolean("screen") != peerScreen || off != peerCameraOff) {') &&
+        !/^\s*(?:if \(camera\) )?autoJoinCamera\(\)\s*$/m.test(engine) &&
+        !engine.includes("private fun autoJoinCamera()"),
+    );
   }
 }
 

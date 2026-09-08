@@ -156,18 +156,28 @@ const screenFlat = flat(screen);
       /val maxY = \(parentH - selfH - stripGap\)\.coerceAtLeast\(minY\)/.test(screenFlat),
   );
   check(
-    "the drag handler clamps with those same values (before, it re-derived them)",
-    /pipX = \(pipX \+ d\.x\)\.coerceIn\(minX, maxX\)/.test(screenFlat) &&
-      /pipY = \(pipY \+ d\.y\)\.coerceIn\(minY, maxY\)/.test(screenFlat),
+    "the drag handler clamps with those same values, read live through rememberUpdatedState (r32-42)",
+    /val limits = rememberUpdatedState\(floatArrayOf\(minX, maxX, minY, maxY\)\)/.test(
+      screenFlat,
+    ) &&
+      /val \(lo, hi, top, bottom\) = limits\.value/.test(screenFlat) &&
+      /pipX = \(pipX \+ d\.x\)\.coerceIn\(lo, hi\)/.test(screenFlat) &&
+      /pipY = \(pipY \+ d\.y\)\.coerceIn\(top, bottom\)/.test(screenFlat),
+  );
+  check(
+    "r32-42: the delta is read BEFORE consume() — positionChange() is zero for a consumed change, which is why the tile never moved",
+    /val d = change\.positionChange\(\)\s*change\.consume\(\)/.test(screen) &&
+      !/change\.consume\(\)\s*val d = change\.positionChange\(\)/.test(screen),
   );
   check(
     "the fixed 54dp band and the un-margined x clamp are gone",
     !/coerceIn\(topLimit/.test(screen) && !/\(parentW - selfW\)\.coerceAtLeast\(0f\)/.test(screen),
   );
   check(
-    "re-clamp and gesture detector both restart when the controls change, so the tile is never trapped under them",
+    "re-clamp restarts when the controls change; the gesture detector itself is keyed on Unit so a mid-drag strip timeout no longer cancels the drag (r32-42)",
     /LaunchedEffect\(parentW, parentH, controlsVisible\)/.test(screen) &&
-      /\.pointerInput\(parentW, parentH, controlsVisible\)/.test(screen),
+      /\.pointerInput\(Unit\)/.test(screen) &&
+      !/\.pointerInput\(parentW, parentH, controlsVisible\)/.test(screen),
   );
   check(
     "tap-to-swap still works (a tap that moved no pixel is a tap)",
