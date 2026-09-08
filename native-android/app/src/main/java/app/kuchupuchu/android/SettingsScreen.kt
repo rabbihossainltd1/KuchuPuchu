@@ -276,6 +276,7 @@ fun SettingsScreen(nav: NavController) {
 
 @Composable
 fun PrivacySettingsScreen(nav: NavController) {
+    val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val me = remember { mutableStateOf(Store.me ?: JSONObject()) }
     var picker by remember { mutableStateOf<String?>(null) }
@@ -343,6 +344,17 @@ fun PrivacySettingsScreen(nav: NavController) {
             ToggleRow(Icons.Filled.VisibilityOff, "Private profile", privacy.optBoolean("privateProfile", false)) { on ->
                 savePrivacy("privateProfile", on)
             }
+            // Owner round 32 (item 2): lives under Privacy now (was App) —
+            // whether the phone's own sound travels with a shared screen is a
+            // privacy choice. Android 10+ only (older systems cannot capture
+            // playback, so the row is not offered).
+            if (SystemAudioTap.supported) {
+                var sysAudio by remember { mutableStateOf(SystemAudioTap.isEnabled(ctx)) }
+                ToggleRow(Icons.Filled.VolumeUp, "Share Audio Via Screen Share", sysAudio) { on ->
+                    sysAudio = on
+                    SystemAudioTap.setEnabled(ctx, on)
+                }
+            }
         }
         Spacer(Modifier.height(32.dp))
     }
@@ -352,15 +364,17 @@ fun PrivacySettingsScreen(nav: NavController) {
         val current = level(key, if (key == "phone") "contacts" else "public")
         // Owner round 31: the picker is a bottom sheet (the status ⋮ pattern),
         // never a centred dialog.
+        // Owner round 32 (item 1): every privacy sheet asks the question it
+        // answers ("Who Can View Your Number?") instead of echoing the row.
         KpSheet(
             onDismiss = { picker = null },
             title =
                 when (field) {
-                    "privPhone" -> "My number"
-                    "privAvatar" -> "Profile picture"
-                    "privMessages" -> "Messages"
-                    "privLastSeen" -> "Last seen"
-                    else -> "Add to groups"
+                    "privPhone" -> "Who Can View Your Number?"
+                    "privAvatar" -> "Who Can View Your Profile Picture?"
+                    "privMessages" -> "Who Can Message You?"
+                    "privLastSeen" -> "Who Can See Your Last Seen?"
+                    else -> "Who Can Add You To Groups?"
                 },
         ) {
             PRIVACY_LEVELS.forEach { (lvl, label) ->
@@ -509,16 +523,8 @@ fun AppSettingsScreen(nav: NavController) {
                 }
             }
             SettingRow(Icons.Filled.Favorite, "About us", "") { nav.navigate("about") }
-            // Owner round 31 item 20: share the phone's sound along with a
-            // shared screen (off by default). Android 10+ only — older
-            // systems cannot capture playback, so the row is not offered.
-            if (SystemAudioTap.supported) {
-                var sysAudio by remember { mutableStateOf(SystemAudioTap.isEnabled(ctx)) }
-                ToggleRow(Icons.Filled.VolumeUp, "Share audio via screen share", sysAudio) { on ->
-                    sysAudio = on
-                    SystemAudioTap.setEnabled(ctx, on)
-                }
-            }
+            // (Owner round 32 item 2: the "Share Audio Via Screen Share"
+            // toggle moved to Settings › Privacy.)
             // Owner round 15: crash detection on/off — capture stays until
             // the owner switches it off; off also clears the last report.
             var crashOn by remember { mutableStateOf(KpCrash.isEnabled(ctx)) }

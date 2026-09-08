@@ -2759,11 +2759,14 @@ const convBetween = (db, a, b) =>
         kt("CallEngine.kt").includes(
           "SystemAudioTap.mixInto(audioFormat, channelCount, sampleRate, audioBuffer)",
         ) &&
+        // r32-2: the toggle lives under Privacy now, with the owner's exact label
         kt("SettingsScreen.kt").includes(
-          'ToggleRow(Icons.Filled.VolumeUp, "Share audio via screen share", sysAudio) { on ->',
+          'ToggleRow(Icons.Filled.VolumeUp, "Share Audio Via Screen Share", sysAudio) { on ->',
         ) &&
-        kt("SettingsScreen.kt").indexOf("fun AppSettingsScreen") <
-          kt("SettingsScreen.kt").indexOf('"Share audio via screen share"'),
+        kt("SettingsScreen.kt").indexOf("fun PrivacySettingsScreen") <
+          kt("SettingsScreen.kt").indexOf('"Share Audio Via Screen Share"') &&
+        kt("SettingsScreen.kt").indexOf('"Share Audio Via Screen Share"') <
+          kt("SettingsScreen.kt").indexOf("fun AppearanceSettingsScreen"),
     );
 
     check(
@@ -4631,6 +4634,31 @@ const convBetween = (db, a, b) =>
       chatList32.includes(
         "ListTicks(read = otherRead.isNotBlank() && otherRead >= newestAt, delivered = delivered)",
       ),
+  );
+  // Items 1 + 2 (Settings › Privacy): every privacy sheet is phrased as the
+  // question it answers; the screen-share audio toggle moved here from App.
+  const priv32 = settings.slice(
+    settings.indexOf("fun PrivacySettingsScreen("),
+    settings.indexOf("fun AppearanceSettingsScreen("),
+  );
+  const app32 = settings.slice(settings.indexOf("fun AppSettingsScreen("));
+  check(
+    "r32-1: every privacy picker sheet title is a question — number / profile picture / messages / last seen / groups",
+    priv32.includes('"privPhone" -> "Who Can View Your Number?"') &&
+      priv32.includes('"privAvatar" -> "Who Can View Your Profile Picture?"') &&
+      priv32.includes('"privMessages" -> "Who Can Message You?"') &&
+      priv32.includes('"privLastSeen" -> "Who Can See Your Last Seen?"') &&
+      priv32.includes('else -> "Who Can Add You To Groups?"') &&
+      !priv32.includes('"privPhone" -> "My number"'),
+  );
+  check(
+    "r32-2: 'Share Audio Via Screen Share' toggle sits under Privacy (after Private profile) and is gone from App",
+    priv32.includes(
+      'ToggleRow(Icons.Filled.VolumeUp, "Share Audio Via Screen Share", sysAudio) { on ->',
+    ) &&
+      priv32.indexOf('"Private profile"') < priv32.indexOf('"Share Audio Via Screen Share"') &&
+      !app32.includes("SystemAudioTap") &&
+      !settings.includes('"Share audio via screen share"'),
   );
 }
 
