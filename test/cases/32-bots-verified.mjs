@@ -5098,6 +5098,22 @@ const convBetween = (db, a, b) =>
         st.includes("borderColor = borderColor,"),
     );
   }
+  // Item 44: the About screen lost its double inset — hero edge to edge,
+  // founder card as a portrait-left row, ONE 12dp screen margin per block.
+  {
+    const about = kt("AboutScreen.kt");
+    check(
+      "r32-44: About screen — edge-to-edge hero (20/22dp padding, 88dp icon), founder row (72dp portrait left, details right), founder + links cards on a single 12dp screen margin; the old 16dp+24/30dp double inset is gone",
+      (about.match(/\.padding\(horizontal = 12\.dp\)/g) || []).length === 2 &&
+        about.includes("modifier = Modifier.size(72.dp).clip(CircleShape),") &&
+        about.includes("modifier = Modifier.size(88.dp).clip(RoundedCornerShape(24.dp)),") &&
+        about.includes(".padding(horizontal = 20.dp, vertical = 22.dp),") &&
+        about.includes("Column(Modifier.weight(1f)) {") &&
+        about.includes(".padding(horizontal = 14.dp, vertical = 13.dp),") &&
+        !about.includes("padding(horizontal = 24.dp, vertical = 30.dp)") &&
+        !about.includes("padding(horizontal = 16.dp)"),
+    );
+  }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
   // a touch on blank list space closes it (main, archive and hidden lists).
   {

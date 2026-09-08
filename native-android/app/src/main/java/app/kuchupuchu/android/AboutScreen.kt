@@ -111,35 +111,36 @@ fun AboutScreen(nav: NavController) {
             Text("About Us", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
         }
 
-        // Owner round 31: "About Us ta khub chapa" — a hero block with real
-        // air, the founder card with a centred portrait, and the links spaced
-        // out (18dp rows, 22dp gaps between the blocks).
-        Spacer(Modifier.height(10.dp))
+        // Owner round 31: "About Us ta khub chapa" — a hero block with air.
+        // Owner round 32 (item 44): the double inset (16dp screen + 24dp card
+        // padding) left wide blank margins with the text squeezed in the
+        // middle. The hero now runs edge to edge (no card), the founder card
+        // is a side-by-side row (portrait left, name / role / links right)
+        // and every block keeps ONE 12dp screen margin with 16dp inside.
+        Spacer(Modifier.height(6.dp))
 
-        /* ---------- app hero ---------- */
+        /* ---------- app hero (edge to edge) ---------- */
         Column(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .clip(RoundedCornerShape(24.dp))
                 .background(
                     Brush.verticalGradient(
                         listOf(
                             if (KpThemeMode.darkBlue) ActionBlue.copy(alpha = 0.22f) else GoldSoft,
-                            Card,
+                            Cream,
                         ),
                     ),
                 )
-                .padding(horizontal = 24.dp, vertical = 30.dp),
+                .padding(horizontal = 20.dp, vertical = 22.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Image(
                 painter = painterResource(R.drawable.icon_gold),
                 contentDescription = "KuchuPuchu",
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.size(96.dp).clip(RoundedCornerShape(26.dp)),
+                modifier = Modifier.size(88.dp).clip(RoundedCornerShape(24.dp)),
             )
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(14.dp))
             Text("KuchuPuchu", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Ink)
             Spacer(Modifier.height(6.dp))
             Text(
@@ -153,65 +154,68 @@ fun AboutScreen(nav: NavController) {
                         .background(ActionBlue.copy(alpha = 0.14f))
                         .padding(horizontal = 12.dp, vertical = 5.dp),
             )
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(14.dp))
             Text(
                 "A fast, private messenger made in Bangladesh — chats, voice & video calls, " +
                     "status updates and an AI assistant, with your phone number as your identity.",
                 fontSize = 14.sp,
                 color = Ink,
                 textAlign = TextAlign.Center,
-                lineHeight = 22.sp,
+                lineHeight = 21.sp,
             )
         }
 
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(14.dp))
 
-        /* ---------- founder card ---------- */
-        Column(
+        /* ---------- founder card: portrait left, details right ---------- */
+        Row(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .clip(RoundedCornerShape(24.dp))
+                .padding(horizontal = 12.dp)
+                .clip(RoundedCornerShape(20.dp))
                 .background(Card)
-                .padding(horizontal = 20.dp, vertical = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Image(
                 painter = painterResource(R.drawable.owner_avatar),
                 contentDescription = "Rabbi Hossain",
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.size(84.dp).clip(CircleShape),
+                modifier = Modifier.size(72.dp).clip(CircleShape),
             )
-            Spacer(Modifier.height(14.dp))
-            Text("MD Rabbi Hossain", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "Founder & Developer",
-                fontSize = 13.sp,
-                color = if (KpThemeMode.darkBlue) ActionBlueDeep else GoldDeep,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text("Kaliganj, Jhenaidah, Khulna, Bangladesh", fontSize = 12.5.sp, color = Muted)
-            Spacer(Modifier.height(18.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                AboutBrandIcon(R.drawable.ic_brand_facebook, "Facebook") { open("https://facebook.com/Rabbihossainltd") }
-                AboutBrandIcon(R.drawable.ic_brand_instagram, "Instagram") { open("https://instagram.com/Rabbihossainltd1") }
-                AboutBrandIcon(R.drawable.ic_brand_telegram, "Telegram") { open("https://t.me/Rabbihossainltd0") }
-                AboutBrandIcon(R.drawable.ic_brand_tiktok, "TikTok") { open("https://tiktok.com/@Rabbihossainltd") }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text("MD Rabbi Hossain", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1)
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "Founder & Developer",
+                    fontSize = 13.sp,
+                    color = if (KpThemeMode.darkBlue) ActionBlueDeep else GoldDeep,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text("Kaliganj, Jhenaidah, Khulna, Bangladesh", fontSize = 12.sp, color = Muted, maxLines = 2, lineHeight = 16.sp)
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    AboutBrandIcon(R.drawable.ic_brand_facebook, "Facebook") { open("https://facebook.com/Rabbihossainltd") }
+                    AboutBrandIcon(R.drawable.ic_brand_instagram, "Instagram") { open("https://instagram.com/Rabbihossainltd1") }
+                    AboutBrandIcon(R.drawable.ic_brand_telegram, "Telegram") { open("https://t.me/Rabbihossainltd0") }
+                    AboutBrandIcon(R.drawable.ic_brand_tiktok, "TikTok") { open("https://tiktok.com/@Rabbihossainltd") }
+                }
             }
         }
 
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(14.dp))
 
         /* ---------- links ---------- */
         Column(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .clip(RoundedCornerShape(24.dp))
+                .padding(horizontal = 12.dp)
+                .clip(RoundedCornerShape(20.dp))
                 .background(Card)
-                .padding(vertical = 6.dp),
+                .padding(vertical = 4.dp),
         ) {
             AboutRow(Icons.Filled.Chat, "Message the founder", "@rabbihossainltd") {
                 haptics.tap()
@@ -252,13 +256,13 @@ fun AboutScreen(nav: NavController) {
 private fun AboutBrandIcon(res: Int, label: String, onClick: () -> Unit) {
     Box(
         Modifier
-            .size(44.dp)
+            .size(38.dp)
             .clip(CircleShape)
             .background(if (KpThemeMode.darkBlue) ActionBlue.copy(alpha = 0.16f) else GoldSoft)
             .clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(painterResource(res), label, tint = Color.Unspecified, modifier = Modifier.size(21.dp))
+        Icon(painterResource(res), label, tint = Color.Unspecified, modifier = Modifier.size(19.dp))
     }
 }
 
@@ -268,7 +272,7 @@ private fun AboutRow(icon: ImageVector, label: String, value: String, onClick: (
         Modifier
             .fillMaxWidth()
             .clickable { onClick() }
-            .padding(horizontal = 18.dp, vertical = 16.dp),
+            .padding(horizontal = 14.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
@@ -278,7 +282,7 @@ private fun AboutRow(icon: ImageVector, label: String, value: String, onClick: (
                 .background(ActionBlue.copy(alpha = 0.14f)),
             contentAlignment = Alignment.Center,
         ) { Icon(icon, null, tint = ActionBlueDeep, modifier = Modifier.size(20.dp)) }
-        Spacer(Modifier.width(16.dp))
+        Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(label, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Ink, maxLines = 1)
             Spacer(Modifier.height(2.dp))
