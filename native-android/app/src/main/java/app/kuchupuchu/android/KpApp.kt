@@ -168,7 +168,17 @@ fun KpApp() {
                     val whose = entry.arguments?.getString("whose") ?: ""
                     StatusViewerScreen(nav, whose)
                 }
-                composable("statusphoto") { StatusPhotoScreen(nav) }
+                // Owner round 31 (items 30/31): the app's own gallery picks the
+                // item, the share screen receives it as a route argument.
+                composable("statuspick") { StatusPickScreen(nav) }
+                composable("statusphoto/{arg}") { entry ->
+                    val picked = statusPickDecode(entry.arguments?.getString("arg") ?: "")
+                    if (picked == null) {
+                        LaunchedEffect(Unit) { nav.popBackStack() }
+                    } else {
+                        StatusPhotoScreen(nav, picked.first, picked.second)
+                    }
+                }
                 // Owner round 22: the in-app video player is its own screen.
                 composable("videoplayer/{b64}") { entry ->
                     VideoPlayerScreen(nav, entry.arguments?.getString("b64") ?: "")

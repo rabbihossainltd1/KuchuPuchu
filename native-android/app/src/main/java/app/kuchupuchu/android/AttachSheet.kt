@@ -565,8 +565,9 @@ fun AttachPanel(
     }
 }
 
-/** Newest-first device media pool: 400 images + 80 videos, bucket-tagged. */
-private fun loadMediaPool(ctx: android.content.Context): List<MediaItem> {
+/** Newest-first device media pool: 400 images + 80 videos, bucket-tagged.
+ *  Owner round 31 (item 31): shared with the status picker (StatusPickScreen). */
+internal fun loadMediaPool(ctx: android.content.Context): List<MediaItem> {
     val out = ArrayList<MediaItem>()
     runCatching {
         ctx.contentResolver.query(
@@ -630,9 +631,10 @@ private fun loadMediaPool(ctx: android.content.Context): List<MediaItem> {
     return out.sortedByDescending { it.added }
 }
 
-/** Grid cell: SELECT toggles (never sends), thumbnail decodes off-thread. */
+/** Grid cell: SELECT toggles (never sends), thumbnail decodes off-thread.
+ *  Owner round 31 (item 31): also the status picker's cell (selectIndex 0 = plain tick). */
 @Composable
-private fun MediaCell(
+internal fun MediaCell(
     item: MediaItem,
     ctx: android.content.Context,
     selected: Boolean,

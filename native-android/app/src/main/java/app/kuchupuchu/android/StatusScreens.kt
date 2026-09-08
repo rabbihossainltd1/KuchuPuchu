@@ -36,7 +36,7 @@ import androidx.compose.material.icons.filled.HideSource
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Chat
-import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.RemoveRedEye
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.CircularProgressIndicator
@@ -121,7 +121,7 @@ fun StatusScreen(nav: NavController) {
                             .fillMaxWidth()
                             .clickable {
                                 haptics.tap()
-                                if (myStatuses.isNotEmpty()) nav.navigate("statusview/mine") else nav.navigate("statusphoto")
+                                if (myStatuses.isNotEmpty()) nav.navigate("statusview/mine") else nav.navigate("statuspick")
                             }
                             .padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -155,7 +155,7 @@ fun StatusScreen(nav: NavController) {
                                     .background(Card)
                                     .clickable {
                                         haptics.tap()
-                                        if (myStatuses.isNotEmpty()) nav.navigate("statusview/mine") else nav.navigate("statusphoto")
+                                        if (myStatuses.isNotEmpty()) nav.navigate("statusview/mine") else nav.navigate("statuspick")
                                     },
                                 contentAlignment = Alignment.Center,
                             ) {
@@ -275,32 +275,41 @@ fun StatusScreen(nav: NavController) {
             }
         }
 
-        /* WhatsApp-style stacked FABs: pencil = text status, camera = photo */
-        Column(
+        /* Owner round 31 (item 31): ONE media icon, bottom-centre, opening the
+           app's own gallery (the "choose photo" / video buttons are gone); the
+           small pencil beside it keeps the text status reachable. */
+        Row(
             Modifier
-                .align(Alignment.BottomEnd)
+                .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(end = 20.dp, bottom = 20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .padding(bottom = 20.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            Spacer(Modifier.width(40.dp))
+            androidx.compose.material3.FloatingActionButton(
+                onClick = {
+                    haptics.tap()
+                    nav.navigate("statuspick")
+                },
+                shape = CircleShape,
+                containerColor = ActionBlue,
+                contentColor = ActionBlueInk,
+                modifier = Modifier.size(56.dp),
+            ) {
+                Icon(Icons.Filled.PhotoLibrary, contentDescription = "Media status", modifier = Modifier.size(26.dp))
+            }
+            Spacer(Modifier.width(14.dp))
             androidx.compose.material3.SmallFloatingActionButton(
-                onClick = { haptics.tap(); composeText = true },
+                onClick = {
+                    haptics.tap()
+                    composeText = true
+                },
                 shape = CircleShape,
                 containerColor = Card,
                 contentColor = ActionBlueDeep,
-                modifier = Modifier.padding(bottom = 14.dp).size(40.dp),
+                modifier = Modifier.size(26.dp),
             ) {
-                Icon(Icons.Filled.Edit, contentDescription = "Text status", modifier = Modifier.size(19.dp))
-            }
-            androidx.compose.material3.FloatingActionButton(
-                onClick = { haptics.tap(); nav.navigate("statusphoto") },
-                shape = CircleShape,
-                // Owner round 20: blue action accent in dark-blue mode.
-                containerColor = ActionBlue,
-                contentColor = ActionBlueInk,
-                modifier = Modifier.size(52.dp),
-            ) {
-                Icon(Icons.Filled.PhotoCamera, contentDescription = "Photo or video status", modifier = Modifier.size(24.dp))
+                Icon(Icons.Filled.Edit, contentDescription = "Text status", modifier = Modifier.size(14.dp))
             }
         }
     }

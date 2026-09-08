@@ -3910,6 +3910,53 @@ const convBetween = (db, a, b) =>
       );
     }
 
+    // r31-31: the status screen's "choose photo" / video buttons are gone — ONE
+    // media icon (bottom-centre) opens the app's OWN gallery (StatusPickScreen,
+    // sharing the attach panel's pool + cells), and one tap there lands on the
+    // share screen with that item (no system picker anywhere in the flow).
+    {
+      const pick = kt("StatusPickScreen.kt");
+      const statusScreens = kt("StatusScreens.kt");
+      const share = kt("StatusPhotoScreen.kt");
+      const app = kt("KpApp.kt");
+      const at = kt("AttachSheet.kt");
+      check(
+        "r31-31: status screen — one PhotoLibrary FAB at BottomCenter → statuspick; the camera FAB and every statusphoto entry are gone",
+        statusScreens.includes(".align(Alignment.BottomCenter)") &&
+          statusScreens.includes(
+            'Icon(Icons.Filled.PhotoLibrary, contentDescription = "Media status"',
+          ) &&
+          (statusScreens.match(/nav\.navigate\("statuspick"\)/g) || []).length === 3 &&
+          !statusScreens.includes("PhotoCamera") &&
+          !statusScreens.includes('nav.navigate("statusphoto")'),
+      );
+      check(
+        "r31-31: the picker IS the app gallery — loadMediaPool + MediaCell from the attach panel, folder chips, 4 columns, one tap → statusphoto/{arg} replacing the picker; no system picker in the picker or the share screen",
+        at.includes(
+          "internal fun loadMediaPool(ctx: android.content.Context): List<MediaItem> {",
+        ) &&
+          at.includes("internal fun MediaCell(") &&
+          pick.includes(
+            "pool = withContext(Dispatchers.IO) { runCatching { loadMediaPool(ctx) }.getOrDefault(emptyList()) }",
+          ) &&
+          pick.includes("columns = GridCells.Fixed(4),") &&
+          pick.includes('nav.navigate("statusphoto/" + statusPickArg(item)) {') &&
+          pick.includes('popUpTo("statuspick") { inclusive = true }') &&
+          pick.includes("internal fun statusPickArg(item: MediaItem): String =") &&
+          pick.includes(
+            "internal fun statusPickDecode(arg: String): Pair<android.net.Uri, Boolean>? =",
+          ) &&
+          !pick.includes("PickVisualMedia") &&
+          !share.includes("PickVisualMedia") &&
+          !share.includes("rememberLauncherForActivityResult") &&
+          share.includes(
+            "fun StatusPhotoScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean) {",
+          ) &&
+          app.includes('composable("statuspick") { StatusPickScreen(nav) }') &&
+          app.includes('composable("statusphoto/{arg}") { entry ->'),
+      );
+    }
+
     // Every cream / warm-white literal outside Theme.kt and the login screen
     // (which the owner excluded from theme work) must be gone from the
     // screens: dark-blue may not paint any light-cream colour.

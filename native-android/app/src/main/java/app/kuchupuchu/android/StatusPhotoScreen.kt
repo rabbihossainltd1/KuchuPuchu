@@ -3,9 +3,6 @@ package app.kuchupuchu.android
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -32,7 +29,6 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Crop
-import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -81,11 +77,12 @@ import org.json.JSONObject
  * free) applies to photos and videos alike. The clip is cut on the phone:
  * only the trimmed, cropped result is uploaded.
  *
- * Nothing picked yet = one media icon in the middle of the stage; that is
- * the only way in (the "Choose photo or video" / "Post" buttons are gone).
+ * Item 31: the item comes from the app's OWN gallery (StatusPickScreen) via
+ * the route argument — the system picker and the old "Choose photo or video"
+ * / "Post" buttons are gone.
  */
 @Composable
-fun StatusPhotoScreen(nav: NavController) {
+fun StatusPhotoScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean) {
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
 
@@ -98,8 +95,8 @@ fun StatusPhotoScreen(nav: NavController) {
         onDispose { controller?.isAppearanceLightStatusBars = prev ?: true }
     }
 
-    var picked by remember { mutableStateOf<Uri?>(null) }
-    var isVideo by remember { mutableStateOf(false) }
+    val picked: Uri = pickedUri
+    val isVideo = pickedIsVideo
     var photo by remember { mutableStateOf<ImageBitmap?>(null) }
     var source by remember { mutableStateOf<VideoExport.Source?>(null) }
     var loadFailed by remember { mutableStateOf(false) }
@@ -110,25 +107,8 @@ fun StatusPhotoScreen(nav: NavController) {
     var preset by remember { mutableStateOf("Original") }
     val thumbs = remember { mutableStateListOf<ImageBitmap?>() }
 
-    fun take(uri: Uri) {
-        photo = null
-        source = null
-        loadFailed = false
-        crop = null
-        cropping = false
-        preset = "Original"
-        thumbs.clear()
-        isVideo = (ctx.contentResolver.getType(uri) ?: "").startsWith("video")
-        picked = uri
-    }
-
-    val picker =
-        rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-            if (uri != null) take(uri)
-        }
-
     LaunchedEffect(picked) {
-        val uri = picked ?: return@LaunchedEffect
+        val uri = picked
         if (isVideo) {
             val src = withContext(Dispatchers.IO) { VideoExport.probe(ctx, uri) }
             if (src == null) {
@@ -140,11 +120,11 @@ fun StatusPhotoScreen(nav: NavController) {
             start = s
             end = e
             source = src
+            thumbs.clear()
             repeat(STRIP_FRAMES) { thumbs.add(null) }
             withContext(Dispatchers.IO) {
                 VideoExport.thumbnails(ctx, uri, src.durationMs, STRIP_FRAMES) { i, bmp ->
-                    // A newer pick empties the strip; frames of the old clip must not land in it.
-                    if (picked == uri && i < thumbs.size) thumbs[i] = bmp.asImageBitmap()
+                    if (i < thumbs.size) thumbs[i] = bmp.asImageBitmap()
                 }
             }
         } else {
@@ -183,7 +163,7 @@ fun StatusPhotoScreen(nav: NavController) {
     BackHandler(enabled = cropping) { cropping = false }
 
     fun send() {
-        val uri = picked ?: return
+        val uri = picked
         val vSource = source
         val img = photo
         val video = isVideo
@@ -260,22 +240,6 @@ fun StatusPhotoScreen(nav: NavController) {
             /* the stage: media at its own aspect, crop overlay on top */
             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                 when {
-                    picked == null -> {
-                        // Item 31 territory: the single media icon in the middle.
-                        Box(
-                            Modifier
-                                .size(84.dp)
-                                .clip(CircleShape)
-                                .background(ActionBlue)
-                                .clickable {
-                                    haptics.tap()
-                                    picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
-                                },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(Icons.Filled.PhotoLibrary, "Pick media", tint = ActionBlueInk, modifier = Modifier.size(40.dp))
-                        }
-                    }
                     loadFailed -> Text("Could not open that file.", color = Color.White, fontSize = 14.sp)
                     !ready -> CircularProgressIndicator(color = ActionBlue)
                     else -> {
@@ -283,7 +247,7 @@ fun StatusPhotoScreen(nav: NavController) {
                             if (shot != null) {
                                 Image(shot, contentDescription = "Status photo", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
                             } else {
-                                StatusTrimPreview(picked!!, start, end, paused = cropping)
+                                StatusTrimPreview(pickedUri, start, end, paused = cropping)
                             }
                             if (cropping) {
                                 CropOverlay(
