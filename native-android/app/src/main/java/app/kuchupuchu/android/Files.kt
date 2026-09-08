@@ -293,17 +293,31 @@ object FilesUtil {
     }.getOrNull()
 
     /** Reads any picked document's bytes + guessed mime. */
-    fun readDocument(ctx: Context, uri: Uri): Pair<String, ByteArray>? = runCatching {
-        val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+    /**
+     * Owner round 32 (item 34): a picked document is STREAMED into the app's
+     * cache (128 KB pieces) and uploaded from that file — it used to be read
+     * whole into a byte array (twice its size at the peak of readBytes), which
+     * on a 20 MB PDF and a low-RAM phone ended the send before it began. The
+     * copy also outlives a failed send, so a document can be retried from the
+     * banner like a voice note. Copies older than a day are swept here.
+     */
+    fun copyDocument(ctx: Context, uri: Uri, name: String): Pair<String, File>? = runCatching {
+        val dir = File(ctx.cacheDir, "docs").apply { mkdirs() }
+        val dayAgo = System.currentTimeMillis() - 86_400_000L
+        dir.listFiles()?.forEach { if (it.lastModified() < dayAgo) it.delete() }
+        val safe = name.replace(Regex("[^A-Za-z0-9._ ()-]"), "_").ifBlank { "file" }
+        val dest = File(dir, "${System.currentTimeMillis()}_$safe")
+        ctx.contentResolver.openInputStream(uri)?.use { input ->
+            dest.outputStream().use { out -> input.copyTo(out, 128 * 1024) }
+        } ?: return null
         var mime = ctx.contentResolver.getType(uri) ?: ""
         if (mime.isBlank()) {
-            val name = uri.lastPathSegment ?: "file"
             // The hand-rolled table below called every sound file audio/mpeg and
             // every picture "image/*" (not a valid mime type — the receiver's
             // gallery then refuses it). mimeFor() already maps all of these.
             mime = mimeFor(name, "")
         }
-        mime to bytes
+        mime to dest
     }.getOrNull()
 
     fun displaySize(bytes: Int): String =

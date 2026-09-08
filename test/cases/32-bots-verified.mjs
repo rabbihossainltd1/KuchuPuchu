@@ -494,9 +494,9 @@ const convBetween = (db, a, b) =>
     "stamp reserves its width INLINE at the last line (rounds 12→13)",
     chat.includes("\u00A0\u00A0") &&
       // r31-12: emoji-only texts keep the bottom band instead (stamp under the emoji).
-      // r32-45: voice notes keep no band either (their duration line hosts the stamp).
+      // r32-45/34: FILE rows (voice + document) keep no band either (their second line hosts the stamp).
       chat.includes(
-        'bottom = if (voiceNote) 4.dp else if (kind == "TEXT" && emojiOnly == 0) 0.dp else 15.dp',
+        'bottom = if (fileRow) 4.dp else if (kind == "TEXT" && emojiOnly == 0) 0.dp else 15.dp',
       ),
   );
   check(
@@ -796,9 +796,9 @@ const convBetween = (db, a, b) =>
   check(
     "timestamp + tick pinned to the bubble's bottom-end, never its own line",
     chat.includes("Alignment.BottomEnd") &&
-      // r32-45: voice notes keep no band either (their duration line hosts the stamp).
+      // r32-45/34: FILE rows (voice + document) keep no band either (their second line hosts the stamp).
       chat.includes(
-        'bottom = if (voiceNote) 4.dp else if (kind == "TEXT" && emojiOnly == 0) 0.dp else 15.dp',
+        'bottom = if (fileRow) 4.dp else if (kind == "TEXT" && emojiOnly == 0) 0.dp else 15.dp',
       ) &&
       !chat.includes("appendInlineContent"),
   );
@@ -2652,7 +2652,7 @@ const convBetween = (db, a, b) =>
       "r31-16: a photo/video/audio picked through Document is SENT and SHOWN as a document (meta.document), opening in the app's own viewer/player or playing inline",
       chat.includes("fun handleDocumentPicked(uri: Uri, asDocument: Boolean = false)") &&
         chat.includes(
-          "fun sendFile(name: String, mime: String, bytes: ByteArray, asDocument: Boolean = false)",
+          "fun sendFile(name: String, mime: String, file: File, asDocument: Boolean = false)",
         ) &&
         chat.includes(
           'val docMeta = if (asDocument) JSONObject().put("document", true) else null',
@@ -4511,7 +4511,7 @@ const convBetween = (db, a, b) =>
   const chat32 = kt("ChatScreen.kt");
   const sendImageBody = chat32.slice(
     chat32.indexOf("fun sendImage(dataUrl: String, album: String? = null) {"),
-    chat32.indexOf("fun sendFile(name: String, mime: String, bytes: ByteArray"),
+    chat32.indexOf("fun sendFile(name: String, mime: String, file: File"),
   );
   const sendVoiceBody = chat32.slice(
     chat32.indexOf("fun sendVoice(file: File, seconds: Int"),
@@ -4910,7 +4910,10 @@ const convBetween = (db, a, b) =>
         ".background(if (mine) Color(0x33FFFFFF) else chatAccent(theme).copy(alpha = 0.18f)),",
       ) &&
         chat.includes("tint = if (mine) AmberInk else chatAccent(theme),") &&
-        chat.includes("color = if (mine) Color.White else chatAccent(theme),") &&
+        // r32-34: the document row's "Open" label went with its right-hand slot;
+        // the received voice controls still ride the chat accent.
+        chat.includes("val ink = if (mine) Color.White else chatAccent(theme)") &&
+        chat.includes("val docInk = if (mine) AmberInk else chatAccent(theme)") &&
         chat.includes(
           'Icon(Icons.AutoMirrored.Filled.Send, "Forward", tint = ActionBlueDeep, modifier = Modifier.size(21.dp))',
         ) &&
@@ -5129,9 +5132,7 @@ const convBetween = (db, a, b) =>
     check(
       "r32-45: voice bubble is compact — 36dp play circle, 22dp wave, duration right under it, the bubble keeps a 4dp bottom instead of the blank 15dp band (fileLooksVoice); the recording strip paints VoiceNote.livePeaks (newest 4 s, sqrt curve, LIVE_BARS wide) between the timer and the cancel hint; both draw through DrawScope.drawVoiceBars",
       chat.includes("internal fun fileLooksVoice(m: JSONObject): Boolean {") &&
-        chat.includes(
-          'val voiceNote = kind == "FILE" && fileLooksVoice(m) && !sentAsDocument(m)',
-        ) &&
+        chat.includes('val fileRow = kind == "FILE"') &&
         chat.includes("val isVoice = !asDocument && fileLooksVoice(m)") &&
         chat.includes("modifier = Modifier.width(150.dp).height(22.dp),") &&
         !chat.includes("modifier = Modifier.width(150.dp).height(30.dp),") &&
@@ -5182,6 +5183,66 @@ const convBetween = (db, a, b) =>
         ) &&
         src.includes("if (!statusVisibleTo(userRow, soloContacts.has(contactId))) continue;") &&
         src.includes("const level = privLevel(owner?.priv_status, PRIVACY_DEFAULTS.status);"),
+    );
+  }
+  // Item 34: document send — the upload ring wraps the file icon (left), the
+  // size line hosts the stamp (no bottom band, no right slot → no overlap);
+  // reliability: streamed copy + streamed upload on a process-level scope,
+  // 25 MB pre-check, Outbox hand-off for the POST, retry from the cached copy.
+  {
+    const chat = kt("ChatScreen.kt");
+    const api = kt("Api.kt");
+    const files = kt("Files.kt");
+    const bubble = chat.slice(
+      chat.indexOf("// Documents: the WHOLE row opens"),
+      chat.indexOf("textDoc?.let { body ->"),
+    );
+    check(
+      "r32-34: document bubble — progress ring + open spinner sit ON the 40dp icon (36dp ring, themed track), the right-hand slot with 'Open' / the ring is gone, the size line keeps the stamp's corner clear (padding end 50/34dp), a missing file fades the icon",
+      bubble.includes("trackColor = docInk.copy(alpha = 0.22f),") &&
+        (bubble.match(/modifier = Modifier\.size\(36\.dp\),/g) || []).length === 2 &&
+        !bubble.includes("Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {") &&
+        // code form only (the comments still mention the old label)
+        !/else "Open",/.test(bubble) &&
+        !/^\s+"…",$/m.test(bubble) &&
+        bubble.includes(
+          "modifier = Modifier.size(22.dp).alpha(if (ready || upFrac != null) 1f else 0.5f),",
+        ) &&
+        bubble.includes("modifier = Modifier.padding(end = if (mine) 50.dp else 34.dp),"),
+    );
+    check(
+      "r32-34: document send reliability — FilesUtil.copyDocument streams the pick into cache (128 KB, day-old sweep), Api.uploadFile streams from the file (64 KB, progress once per percent), Uploads.sendFile runs on a SupervisorJob scope the chat only awaits, refuses > 25 MB up front, hands a blipped POST to the Outbox (4xx still fails), keeps the copy for the retry banner (docPath) and deletes it on success",
+      files.includes(
+        "fun copyDocument(ctx: Context, uri: Uri, name: String): Pair<String, File>? = runCatching {",
+      ) &&
+        files.includes("dest.outputStream().use { out -> input.copyTo(out, 128 * 1024) }") &&
+        !files.includes("fun readDocument(") &&
+        api.includes(
+          "fun uploadFile(name: String, mime: String, file: java.io.File, onProgress: ((Long, Long) -> Unit)? = null): JSONObject {",
+        ) &&
+        api.includes("val buf = ByteArray(65_536)") &&
+        api.includes("if (pct != lastPct) {") &&
+        chat.includes("object Uploads {") &&
+        chat.includes("private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)") &&
+        chat.includes(
+          "fun sendFile(convId: String, clientId: String, name: String, mime: String, file: File, meta: JSONObject?): Deferred<Throwable?> =",
+        ) &&
+        chat.includes(
+          "val up = Api.uploadFile(name, mime, file) { w, t -> UploadProgress.set(clientId, 0.9f * w / t) }",
+        ) &&
+        chat.includes("if (e.status in 400..499 && e.status != 408 && e.status != 429) throw e") &&
+        (chat.match(/Outbox\.add\(convId, clientId, payload\)/g) || []).length >= 3 &&
+        chat.includes("if (file.length() > VideoPlan.UPLOAD_LIMIT) {") &&
+        chat.includes(
+          "val outcome = Uploads.sendFile(convId, clientId, name, mime, file, docMeta)",
+        ) &&
+        chat.includes('.put("docPath", file.absolutePath)') &&
+        chat.includes("docPath.isNotBlank() -> {") &&
+        chat.includes(
+          "val pair = withContext(Dispatchers.IO) { FilesUtil.copyDocument(ctx, uri, name) }",
+        ) &&
+        !chat.includes("Files/documents can't be retried") &&
+        !chat.includes("FilesUtil.readDocument("),
     );
   }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or

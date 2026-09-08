@@ -148,7 +148,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.navigation.NavController
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -1032,7 +1036,13 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
-    fun sendFile(name: String, mime: String, bytes: ByteArray, asDocument: Boolean = false) {
+    fun sendFile(name: String, mime: String, file: File, asDocument: Boolean = false) {
+        // Owner round 32 (item 34): the server's 25 MB cap is checked HERE — a
+        // bigger file used to upload for minutes and then fail on that check.
+        if (file.length() > VideoPlan.UPLOAD_LIMIT) {
+            error = "That file is over 25 MB."
+            return
+        }
         val clientId = "c_${java.util.UUID.randomUUID()}"
         // Owner round 31 (item 16): a photo/video/audio picked through
         // "Document" travels as a document — meta.document keeps it out of the
@@ -1046,42 +1056,31 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .put("kind", "FILE")
                 .put("fileName", name)
                 .put("fileType", mime)
-                .put("fileSize", bytes.size)
+                .put("fileSize", file.length().toInt())
+                // Kept for tap-to-retry after a failed send (the cached copy is
+                // only deleted once the send succeeds) — like voicePath.
+                .put("docPath", file.absolutePath)
                 .put("createdAt", java.time.Instant.now().toString())
                 .also { if (docMeta != null) it.put("meta", docMeta) },
         )
+        scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }
+        runCatching { KpSounds.send(ctx) }
+        // Owner round 32 (item 34): the upload + POST run on Uploads' own
+        // scope — this screen only awaits the outcome for its bubble. They
+        // used to run on the composition scope, so backing out of the chat
+        // mid-upload cancelled the coroutine and the file never arrived.
+        val outcome = Uploads.sendFile(convId, clientId, name, mime, file, docMeta)
         scope.launch {
-            runCatching { KpSounds.send(ctx) }
-            try {
-                val data = withContext(Dispatchers.IO) {
-                    Api.upload(name, mime, bytes) { w, t -> UploadProgress.set(clientId, 0.9f * w / t) }
-                }
-                UploadProgress.set(clientId, 0.95f)
-                withContext(Dispatchers.IO) {
-                    Api.post(
-                        "/api/conversations/$convId/messages",
-                        JSONObject()
-                            .put("kind", "FILE")
-                            .put("fileKey", data.optString("fileKey"))
-                            .put("fileName", name)
-                            .put("fileType", mime)
-                            .put("fileSize", bytes.size)
-                            .put("clientId", clientId)
-                            .also { if (docMeta != null) it.put("meta", docMeta) },
-                    )
-                }
-                UploadProgress.done(clientId)
+            val failure = outcome.await()
+            if (failure == null) {
                 runCatching { KpSounds.sent(ctx) }
                 refreshMessages(forceScroll = true)
-            } catch (e: Exception) {
+            } else {
                 // Before this the optimistic bubble stayed on screen forever
                 // looking like it was still uploading: the POST never happened,
                 // so no message with this clientId ever came back to match it.
-                UploadProgress.done(clientId)
                 markPendingFailed(clientId)
-                // No retry hint here on purpose: the picked bytes are gone with
-                // the dismissed picker, so "tap to retry" could never work.
-                error = e.message ?: "Could not send file."
+                error = (failure.message ?: "Could not send file.") + "  Tap the banner to retry."
             }
         }
     }
@@ -1175,18 +1174,21 @@ fun ChatScreen(nav: NavController, convId: String) {
     fun handleDocumentPicked(uri: Uri, asDocument: Boolean = false) {
         scope.launch {
             val name = withContext(Dispatchers.IO) { queryName(ctx, uri) }
-            val pair = withContext(Dispatchers.IO) { FilesUtil.readDocument(ctx, uri) }
+            // Owner round 32 (item 34): streamed into the cache, never read
+            // whole into memory (see FilesUtil.copyDocument).
+            val pair = withContext(Dispatchers.IO) { FilesUtil.copyDocument(ctx, uri, name) }
             if (pair == null) {
                 error = "Could not read that file — try another one."
                 return@launch
             }
-            val (mime, bytes) = pair
-            if (bytes.isEmpty()) {
+            val (mime, file) = pair
+            if (file.length() == 0L) {
+                file.delete()
                 error = "That file is empty."
                 return@launch
             }
             error = ""
-            sendFile(name, mime, bytes, asDocument)
+            sendFile(name, mime, file, asDocument)
         }
     }
 
@@ -2061,6 +2063,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             failed.forEach { p ->
                                 val url = p.optString("mediaUrl")
                                 val voicePath = p.optString("voicePath")
+                                val docPath = p.optString("docPath")
                                 when {
                                     // A retried album photo keeps its album.
                                     url.isNotBlank() -> sendImage(url, p.optJSONObject("meta")?.optString("album")?.ifBlank { null })
@@ -2075,8 +2078,19 @@ fun ChatScreen(nav: NavController, convId: String) {
                                             )
                                         }
                                     }
-                                    // Files/documents can't be retried: the bytes
-                                    // are gone with the dismissed picker.
+                                    // Owner round 32 (item 34): documents retry
+                                    // from their cached copy (kept until sent).
+                                    docPath.isNotBlank() -> {
+                                        val f = File(docPath)
+                                        if (f.exists()) {
+                                            sendFile(
+                                                p.optString("fileName").ifBlank { f.name },
+                                                p.optString("fileType").ifBlank { "application/octet-stream" },
+                                                f,
+                                                sentAsDocument(p),
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -3420,9 +3434,10 @@ private fun MessageRow(
             // Owner round 32 (item 15): no "edited" marker anywhere — an edited
             // text is just the text (so an emoji-only edit stays emoji-only too).
             val emojiOnly = if (kind == "TEXT") emojiOnlyCount(m.optText("body")) else 0
-            // Owner round 32 (item 45): a voice note's duration line and the
-            // stamp share ONE line, so the bubble keeps no bottom band.
-            val voiceNote = kind == "FILE" && fileLooksVoice(m) && !sentAsDocument(m)
+            // Owner round 32 (items 45 / 34): a voice note's duration line —
+            // and a document row's size line — share ONE line with the stamp,
+            // so FILE bubbles keep no bottom band (photos / videos never get here).
+            val fileRow = kind == "FILE"
             val bubbleShape =
                 RoundedCornerShape(
                     topStart = 16.dp,
@@ -3507,9 +3522,9 @@ private fun MessageRow(
                     // word — the WhatsApp trick), so the overlay can never
                     // overlap a glyph and never leaves a blank strip under
                     // the text. Other kinds keep the small bottom band —
-                    // except voice notes (item 45), whose duration line already
-                    // leaves the stamp its corner.
-                    .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (voiceNote) 4.dp else if (kind == "TEXT" && emojiOnly == 0) 0.dp else 15.dp),
+                    // except FILE rows (items 45 / 34), whose second line
+                    // already leaves the stamp its corner.
+                    .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (fileRow) 4.dp else if (kind == "TEXT" && emojiOnly == 0) 0.dp else 15.dp),
             ) {
                 val senderName = m.optText("senderName")
                 Column {
@@ -4587,6 +4602,59 @@ object UploadProgress {
     }
 }
 
+/**
+ * Owner round 32 (item 34): document / video sends run on a PROCESS-level
+ * scope. They used to run on the chat screen's composition scope, so leaving
+ * the chat (or the screen being popped for a viewer) mid-upload cancelled the
+ * coroutine and the file silently never arrived. The screen only awaits the
+ * outcome for its own bubble; the work outlives it. After a finished upload
+ * the message POST is handed to the Outbox on a network failure, so an object
+ * that took a minute to send is never thrown away over one dropped response
+ * (the server is idempotent by clientId).
+ */
+object Uploads {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** Uploads [file] then posts the FILE message; resolves to null on
+     *  success or to the failure (the bubble turns red, the file stays for
+     *  the retry banner). */
+    fun sendFile(convId: String, clientId: String, name: String, mime: String, file: File, meta: JSONObject?): Deferred<Throwable?> =
+        scope.async {
+            try {
+                val up = Api.uploadFile(name, mime, file) { w, t -> UploadProgress.set(clientId, 0.9f * w / t) }
+                val key = up.optString("fileKey")
+                if (key.isBlank()) throw ApiException(500, "Upload returned no file key.")
+                UploadProgress.set(clientId, 0.95f)
+                val payload =
+                    JSONObject()
+                        .put("kind", "FILE")
+                        .put("fileKey", key)
+                        .put("fileName", name)
+                        .put("fileType", mime)
+                        .put("fileSize", file.length())
+                        .put("clientId", clientId)
+                        .also { if (meta != null) it.put("meta", meta) }
+                try {
+                    Api.post("/api/conversations/$convId/messages", payload)
+                } catch (e: ApiException) {
+                    // Refused for good (removed from the chat, blocked…): the
+                    // bubble must say so. Anything else is a blip — queue it.
+                    if (e.status in 400..499 && e.status != 408 && e.status != 429) throw e
+                    Outbox.add(convId, clientId, payload)
+                } catch (e: Exception) {
+                    Outbox.add(convId, clientId, payload)
+                }
+                UploadProgress.done(clientId)
+                file.delete()
+                withContext(Dispatchers.Main) { ScreenStore.pokeInbox() }
+                null
+            } catch (e: Exception) {
+                UploadProgress.done(clientId)
+                e
+            }
+        }
+}
+
 @Composable
 private fun ImageBubble(m: JSONObject, mine: Boolean) {
     // Photos arrive two ways: kind=IMAGE carries mediaUrl (/api/messages/:id/media
@@ -4842,6 +4910,7 @@ private fun FileBubble(
             n.endsWith(".html") || n.endsWith(".css")
     }
     val upFrac = UploadProgress.fracs[m.optString("clientId")]
+    val docInk = if (mine) AmberInk else chatAccent(theme)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier =
@@ -4901,6 +4970,12 @@ private fun FileBubble(
                     }
                 },
     ) {
+        // Owner round 32 (item 34): the upload ring (and the open spinner) wrap
+        // the file icon on the LEFT. The old right-hand slot put the ring at
+        // the row's bottom-end — exactly where the stamp overlays — so the
+        // two collided while sending. The whole row is the tap target, so
+        // the "Open" label went with the slot; a file that is gone shows a
+        // faded icon instead of "…".
         Box(
             Modifier
                 .size(40.dp)
@@ -4917,8 +4992,23 @@ private fun FileBubble(
                 },
                 contentDescription = "File",
                 tint = if (mine) AmberInk else chatAccent(theme),
-                modifier = Modifier.size(22.dp),
+                modifier = Modifier.size(22.dp).alpha(if (ready || upFrac != null) 1f else 0.5f),
             )
+            when {
+                upFrac != null -> CircularProgressIndicator(
+                    progress = { upFrac },
+                    color = docInk,
+                    strokeWidth = 2.5.dp,
+                    trackColor = docInk.copy(alpha = 0.22f),
+                    modifier = Modifier.size(36.dp),
+                )
+                opening -> CircularProgressIndicator(
+                    color = docInk,
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(36.dp),
+                )
+                else -> {}
+            }
         }
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
@@ -4935,38 +5025,9 @@ private fun FileBubble(
                 fontSize = 11.sp,
                 color = if (mine) Color(0x99FFFFFF) else Muted,
                 maxLines = 1,
+                // The stamp overlays this line's right end (no bottom band).
+                modifier = Modifier.padding(end = if (mine) 50.dp else 34.dp),
             )
-        }
-        Spacer(Modifier.width(6.dp))
-        // Fixed-size slot: spinner / progress ring / "Open" all render inside
-        // the SAME box dimensions so the row never grows or shrinks on tap.
-        Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
-            when {
-                opening -> CircularProgressIndicator(
-                    color = if (mine) AmberInk else chatAccent(theme),
-                    strokeWidth = 2.dp,
-                    modifier = Modifier.size(20.dp),
-                )
-                upFrac != null -> CircularProgressIndicator(
-                    progress = { upFrac },
-                    color = if (mine) AmberInk else chatAccent(theme),
-                    strokeWidth = 2.5.dp,
-                    modifier = Modifier.size(22.dp),
-                )
-                ready -> Text(
-                    if (isImage) "View" else if (fileLooksVideo(m) || fileType.startsWith("audio")) (if (playing) "Stop" else "Play") else "Open",
-                    color = if (mine) Color.White else chatAccent(theme),
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 12.5.sp,
-                    maxLines = 1,
-                )
-                else -> Text(
-                    "…",
-                    fontSize = 11.sp,
-                    color = if (mine) Color(0x99FFFFFF) else Muted,
-                    maxLines = 1,
-                )
-            }
         }
     }
     textDoc?.let { body ->

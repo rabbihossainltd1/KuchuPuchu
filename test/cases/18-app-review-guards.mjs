@@ -84,12 +84,14 @@ check(
   decode.includes("inJustDecodeBounds = true") && decode.includes("inSampleSize = sample"),
   decode.slice(0, 60),
 );
+// r32-34: readDocument became copyDocument (streamed into the cache, never a
+// whole-file byte array); the mime rule is unchanged.
 const readDoc = files.slice(
-  files.indexOf("fun readDocument"),
-  files.indexOf("fun readDocument") + 1400,
+  files.indexOf("fun copyDocument"),
+  files.indexOf("fun copyDocument") + 1600,
 );
 check(
-  "readDocument delegates mime (no more audio/mpeg for wav, no image/*)",
+  "copyDocument delegates mime (no more audio/mpeg for wav, no image/*)",
   readDoc.includes('mime = mimeFor(name, "")') && !readDoc.includes('"audio/mpeg"'),
   readDoc.slice(0, 60),
 );

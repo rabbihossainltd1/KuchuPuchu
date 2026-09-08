@@ -144,6 +144,50 @@ object Api {
         return executeJson(req)
     }
 
+    /**
+     * Owner round 32 (item 34): the streaming twin of [upload] — the body reads
+     * straight from [file] in 64 KB pieces (a 25 MB document never sits on the
+     * heap) and progress is published at most once per percent, not once per
+     * 8 KB write (3,200 recompositions for one send).
+     */
+    fun uploadFile(name: String, mime: String, file: java.io.File, onProgress: ((Long, Long) -> Unit)? = null): JSONObject {
+        val path = "/api/files?name=${q(name)}&type=${q(mime)}"
+        val total = file.length()
+        val body =
+            object : RequestBody() {
+                override fun contentType(): MediaType = OCTET
+
+                override fun contentLength(): Long = total
+
+                override fun writeTo(sink: BufferedSink) {
+                    file.inputStream().use { input ->
+                        val buf = ByteArray(65_536)
+                        var written = 0L
+                        var lastPct = -1
+                        while (true) {
+                            val n = input.read(buf)
+                            if (n <= 0) break
+                            sink.write(buf, 0, n)
+                            written += n
+                            if (onProgress != null && total > 0) {
+                                val pct = (written * 100 / total).toInt()
+                                if (pct != lastPct) {
+                                    lastPct = pct
+                                    onProgress(written, total)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        val req = Request.Builder()
+            .url(BASE + path)
+            .post(body)
+            .header("Accept", "application/json")
+            .build()
+        return executeJson(req)
+    }
+
     /** Streams a download straight to disk — heavy docs never hit RAM whole. */
     fun downloadToFile(pathOrKey: String, dest: java.io.File): Boolean {
         val url =
