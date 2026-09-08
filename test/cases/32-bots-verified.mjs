@@ -2312,21 +2312,19 @@ const convBetween = (db, a, b) =>
     "utf8",
   );
   check(
-    "r28-5/r31: the settings cog is gone; the home ⋮ menu is exactly My Profile, New contact, All contacts, New group, Settings, About Us — in that order, each a real route",
+    "r28-5/r31/r32-3: the settings cog is gone; the home ⋮ menu is exactly My Profile, New contact, All contacts, New group, Settings — in that order, each a real route (r32-3: About Us removed; it stays under Settings › App)",
     !list.includes('Icon(Icons.Filled.Settings, "Settings"') &&
       (() => {
-        const order = [
-          "My Profile",
-          "New contact",
-          "All contacts",
-          "New group",
-          "Settings",
-          "About Us",
-        ];
+        const order = ["My Profile", "New contact", "All contacts", "New group", "Settings"];
         const idx = order.map((l) => list.indexOf(`"${l}")`));
         return idx.every((i, n) => i > 0 && (n === 0 || i > idx[n - 1]));
       })() &&
-      (list.match(/HomeMenuItem\(Icons/g) || []).length === 6 &&
+      (list.match(/HomeMenuItem\(Icons/g) || []).length === 5 &&
+      !list.includes('HomeMenuItem(Icons.Filled.Info, "About Us")') &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/SettingsScreen.kt",
+        "utf8",
+      ).includes('SettingRow(Icons.Filled.Favorite, "About us", "") { nav.navigate("about") }') &&
       list.includes('nav.navigate("profile/${Store.myId()}")') &&
       ["about", "contacts", "newgroup", "settings"].every((r) =>
         kpapp.includes(`composable("${r}")`),

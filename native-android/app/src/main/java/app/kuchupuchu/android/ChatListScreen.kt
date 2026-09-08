@@ -55,7 +55,6 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.GroupAdd
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.FloatingActionButton
@@ -336,7 +335,8 @@ fun ChatListScreen(nav: NavController) {
                         HomeMenuItem(Icons.Filled.Contacts, "All contacts") { homeMenu = false; nav.navigate("contacts") }
                         HomeMenuItem(Icons.Filled.GroupAdd, "New group") { homeMenu = false; nav.navigate("newgroup") }
                         HomeMenuItem(Icons.Filled.Settings, "Settings") { homeMenu = false; nav.navigate("settings") }
-                        HomeMenuItem(Icons.Filled.Info, "About Us") { homeMenu = false; nav.navigate("about") }
+                        // Owner round 32 (item 3): no About Us here — it lives
+                        // under Settings › App.
                     }
                 }
             }
