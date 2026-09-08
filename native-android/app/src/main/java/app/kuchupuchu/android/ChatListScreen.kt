@@ -585,8 +585,11 @@ fun ArchiveScreen(nav: NavController) {
         } else {
             // Same swipe language as the main list, mirrored for archive:
             // left swipe = Unarchive, right swipe = Mute + Delete.
+            val archiveList = rememberLazyListState()
+            CloseSwipeOnScroll(archiveList)
             LazyColumn(
-                Modifier.fillMaxSize(),
+                Modifier.fillMaxSize().then(swipeFocusList()),
+                state = archiveList,
                 contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -631,8 +634,11 @@ fun HiddenChatsScreen(nav: NavController) {
                 )
             }
         } else {
+            val hiddenList = rememberLazyListState()
+            CloseSwipeOnScroll(hiddenList)
             LazyColumn(
-                Modifier.fillMaxSize(),
+                Modifier.fillMaxSize().then(swipeFocusList()),
+                state = hiddenList,
                 contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -641,6 +647,49 @@ fun HiddenChatsScreen(nav: NavController) {
                 }
             }
         }
+    }
+}
+
+/**
+ * Owner round 32 (item 11): at most ONE swipe row is open at a time. `id` is
+ * the row whose actions are showing; every SwipeConvRow watches it and slides
+ * shut the moment it is no longer the one. It moves to null when the list
+ * scrolls, when a finger lands on blank list space, and when another row is
+ * touched (that row then opens on its own swipe, or not at all).
+ */
+private object SwipeOpen {
+    var id by mutableStateOf<String?>(null)
+
+    /** Which row the current down landed on — set by the row (child, Main
+     *  pass runs first), read and cleared by the list right after. */
+    var downOn: String? = null
+}
+
+/** On a row: any touch on ANOTHER row closes the open one. Pass-through. */
+private fun swipeFocusTouch(id: String): Modifier =
+    Modifier.pointerInput(id) {
+        awaitEachGesture {
+            awaitFirstDown(requireUnconsumed = false)
+            SwipeOpen.downOn = id
+            if (SwipeOpen.id != null && SwipeOpen.id != id) SwipeOpen.id = null
+        }
+    }
+
+/** On the list: a touch that reached no row (blank space) closes the open row. */
+private fun swipeFocusList(): Modifier =
+    Modifier.pointerInput(Unit) {
+        awaitEachGesture {
+            awaitFirstDown(requireUnconsumed = false)
+            if (SwipeOpen.downOn == null) SwipeOpen.id = null
+            SwipeOpen.downOn = null
+        }
+    }
+
+/** Scrolling closes the open row as well. */
+@Composable
+private fun CloseSwipeOnScroll(listState: LazyListState) {
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }.collect { if (it) SwipeOpen.id = null }
     }
 }
 
@@ -808,9 +857,11 @@ private fun ChatListBody(
         }
         return
     }
+    CloseSwipeOnScroll(listState)
     LazyColumn(
         Modifier
             .fillMaxSize()
+            .then(swipeFocusList())
             .then(threeFingerDoubleTap { nav.navigate("hidden") })
             // Owner round 19: THE archive feed — a non-consuming vertical
             // drag observer. It sees drags that start ON TOP OF ROWS (the
@@ -891,8 +942,13 @@ private fun SwipeConvRow(
     val offset by animateFloatAsState(dragged, tween(160), label = "swipe")
     val revealedLeft = offset > actionWidth / 2   // card slid left → actions on the right
     val revealedRight = offset < -actionWidth / 2 // card slid right → archive on the left
+    // Owner round 32 (item 11): only the focused row stays open.
+    val convId = conv.optString("id")
+    LaunchedEffect(SwipeOpen.id) {
+        if (SwipeOpen.id != convId && dragged != 0f) dragged = 0f
+    }
 
-    Box(Modifier.fillMaxWidth().height(76.dp)) {
+    Box(Modifier.fillMaxWidth().height(76.dp).then(swipeFocusTouch(convId))) {
         /* revealed actions: delete/mute sit on the RIGHT of the card,
            archive sits on the LEFT */
         Row(Modifier.matchParentSize()) {
@@ -1064,6 +1120,9 @@ private fun SwipeConvRow(
                                     else -> 0f
                                 }
                             buzzedSide = 0
+                            // Claim (or give up) the single open slot.
+                            if (dragged != 0f) SwipeOpen.id = convId
+                            else if (SwipeOpen.id == convId) SwipeOpen.id = null
                         },
                     ) { _, dragAmount ->
                         dragged = (dragged - dragAmount).coerceIn(-actionWidth, actionWidth)
@@ -1077,7 +1136,10 @@ private fun SwipeConvRow(
                     }
                 },
         ) {
-            ConvCard(conv, nav, revealedLeft || revealedRight) { dragged = 0f }
+            ConvCard(conv, nav, revealedLeft || revealedRight) {
+                dragged = 0f
+                if (SwipeOpen.id == convId) SwipeOpen.id = null
+            }
         }
     }
 }

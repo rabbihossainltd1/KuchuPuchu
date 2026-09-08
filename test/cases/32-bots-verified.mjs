@@ -4866,6 +4866,26 @@ const convBetween = (db, a, b) =>
         !engine.includes("private fun autoJoinCamera()"),
     );
   }
+  // Item 11: one open swipe row at a time — another row's touch, a scroll, or
+  // a touch on blank list space closes it (main, archive and hidden lists).
+  {
+    const cl = kt("ChatListScreen.kt");
+    check(
+      "r32-11: chat-list swipe reveal auto-closes — SwipeOpen focus holder, row watcher (LaunchedEffect on SwipeOpen.id), touch-on-other-row / blank-space / scroll observers on all three lists",
+      cl.includes("private object SwipeOpen {") &&
+        cl.includes("var id by mutableStateOf<String?>(null)") &&
+        cl.includes("if (SwipeOpen.id != convId && dragged != 0f) dragged = 0f") &&
+        cl.includes("if (SwipeOpen.id != null && SwipeOpen.id != id) SwipeOpen.id = null") &&
+        cl.includes("if (SwipeOpen.downOn == null) SwipeOpen.id = null") &&
+        cl.includes(
+          "snapshotFlow { listState.isScrollInProgress }.collect { if (it) SwipeOpen.id = null }",
+        ) &&
+        cl.includes("if (dragged != 0f) SwipeOpen.id = convId") &&
+        (cl.match(/CloseSwipeOnScroll\(/g) || []).length === 4 &&
+        (cl.match(/\.then\(swipeFocusList\(\)\)/g) || []).length === 3 &&
+        cl.includes(".then(swipeFocusTouch(convId))"),
+    );
+  }
 }
 
 console.log(lines.join("\n"));
