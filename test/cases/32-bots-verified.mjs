@@ -494,7 +494,10 @@ const convBetween = (db, a, b) =>
     "stamp reserves its width INLINE at the last line (rounds 12→13)",
     chat.includes("\u00A0\u00A0") &&
       // r31-12: emoji-only texts keep the bottom band instead (stamp under the emoji).
-      chat.includes('bottom = if (kind == "TEXT" && emojiOnly == 0) 0.dp else 15.dp'),
+      // r32-45: voice notes keep no band either (their duration line hosts the stamp).
+      chat.includes(
+        'bottom = if (voiceNote) 4.dp else if (kind == "TEXT" && emojiOnly == 0) 0.dp else 15.dp',
+      ),
   );
   check(
     "worker: decline also enforces the 5-minute window",
@@ -793,7 +796,10 @@ const convBetween = (db, a, b) =>
   check(
     "timestamp + tick pinned to the bubble's bottom-end, never its own line",
     chat.includes("Alignment.BottomEnd") &&
-      chat.includes('bottom = if (kind == "TEXT" && emojiOnly == 0) 0.dp else 15.dp') &&
+      // r32-45: voice notes keep no band either (their duration line hosts the stamp).
+      chat.includes(
+        'bottom = if (voiceNote) 4.dp else if (kind == "TEXT" && emojiOnly == 0) 0.dp else 15.dp',
+      ) &&
       !chat.includes("appendInlineContent"),
   );
   const calls = readFileSync(
@@ -5112,6 +5118,44 @@ const convBetween = (db, a, b) =>
         about.includes(".padding(horizontal = 14.dp, vertical = 13.dp),") &&
         !about.includes("padding(horizontal = 24.dp, vertical = 30.dp)") &&
         !about.includes("padding(horizontal = 16.dp)"),
+    );
+  }
+  // Item 45: voice waveform — compact bubble (36dp button, 22dp wave, the
+  // duration line hosts the stamp, no blank 15dp band) and a live wave in the
+  // recording strip.
+  {
+    const vn = kt("VoiceNote.kt");
+    const chat = kt("ChatScreen.kt");
+    check(
+      "r32-45: voice bubble is compact — 36dp play circle, 22dp wave, duration right under it, the bubble keeps a 4dp bottom instead of the blank 15dp band (fileLooksVoice); the recording strip paints VoiceNote.livePeaks (newest 4 s, sqrt curve, LIVE_BARS wide) between the timer and the cancel hint; both draw through DrawScope.drawVoiceBars",
+      chat.includes("internal fun fileLooksVoice(m: JSONObject): Boolean {") &&
+        chat.includes(
+          'val voiceNote = kind == "FILE" && fileLooksVoice(m) && !sentAsDocument(m)',
+        ) &&
+        chat.includes("val isVoice = !asDocument && fileLooksVoice(m)") &&
+        chat.includes("modifier = Modifier.width(150.dp).height(22.dp),") &&
+        !chat.includes("modifier = Modifier.width(150.dp).height(30.dp),") &&
+        chat.includes(
+          "internal fun DrawScope.drawVoiceBars(bars: List<Int>, progress: Float, played: Color, rest: Color, newest: Boolean = false) {",
+        ) &&
+        chat.includes("drawVoiceBars(bars, progress, played, rest)") &&
+        chat.includes(
+          "Canvas(modifier) { drawVoiceBars(VoiceNote.livePeaks, 1f, color, color, newest = true) }",
+        ) &&
+        chat.includes(
+          "LiveVoiceWave(color = accent, modifier = Modifier.weight(1f).height(22.dp))",
+        ) &&
+        chat.includes('Text("‹ Slide to cancel", color = Red, fontSize = 12.5.sp, maxLines = 1)') &&
+        (chat.match(/\.size\(36\.dp\)\n\s+\.pressScale\(interaction\)/g) || []).length === 1 &&
+        vn.includes("var livePeaks: List<Int> by mutableStateOf(emptyList())") &&
+        vn.includes("livePeaks = VoiceWaveform.live(amps)") &&
+        (vn.match(/livePeaks = emptyList\(\)/g) || []).length === 3 &&
+        vn.includes("const val LIVE_BARS = 40") &&
+        vn.includes("fun live(samples: List<Int>, bars: Int = LIVE_BARS): List<Int> {") &&
+        readFileSync(
+          "native-android/app/src/test/java/app/kuchupuchu/android/VoiceWaveformTest.kt",
+          "utf8",
+        ).includes("VoiceWaveform.live(listOf(0, 20000))"),
     );
   }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or

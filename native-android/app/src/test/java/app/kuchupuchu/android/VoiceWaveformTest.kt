@@ -63,6 +63,21 @@ class VoiceWaveformTest {
     }
 
     @Test
+    fun `the live strip is always LIVE_BARS wide - newest peak at the right, silence padded on the left`() {
+        val few = VoiceWaveform.live(listOf(0, 20000))
+        assertEquals(VoiceWaveform.LIVE_BARS, few.size)
+        assertEquals(100, few.last())
+        assertTrue(few.dropLast(1).all { it == 0 })
+        val many = VoiceWaveform.live(List(200) { i -> if (i == 199) 32767 else 100 })
+        assertEquals(VoiceWaveform.LIVE_BARS, many.size)
+        assertEquals(100, many.last())
+        assertTrue(many.all { it in 0..100 })
+        assertTrue("room noise stays near the floor", many.first() < 15)
+        assertEquals(List(VoiceWaveform.LIVE_BARS) { 0 }, VoiceWaveform.live(emptyList()))
+        assertTrue(VoiceWaveform.live(listOf(5), bars = 0).isEmpty())
+    }
+
+    @Test
     fun `whatever arrives from the server is clamped to the drawable range and length`() {
         val raw = List(200) { i -> i * 3 - 50 }
         val bars = VoiceWaveform.sanitize(raw)

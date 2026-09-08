@@ -120,6 +120,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -2566,8 +2567,14 @@ private fun Composer(
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                 )
-                Spacer(Modifier.width(8.dp))
-                Text("‹ Slide to cancel", color = Red, fontSize = 12.5.sp, modifier = Modifier.weight(1f))
+                Spacer(Modifier.width(10.dp))
+                // Owner round 32 (item 45): the last 4 s of mic peaks paint a
+                // live wave that grows in from the mic's side; the cancel hint
+                // moves next to the mic it refers to. The strip used to be
+                // timer + hint with the whole middle blank.
+                LiveVoiceWave(color = accent, modifier = Modifier.weight(1f).height(22.dp))
+                Spacer(Modifier.width(10.dp))
+                Text("‹ Slide to cancel", color = Red, fontSize = 12.5.sp, maxLines = 1)
             }
         }
         Spacer(Modifier.width(6.dp))
@@ -3413,6 +3420,9 @@ private fun MessageRow(
             // Owner round 32 (item 15): no "edited" marker anywhere — an edited
             // text is just the text (so an emoji-only edit stays emoji-only too).
             val emojiOnly = if (kind == "TEXT") emojiOnlyCount(m.optText("body")) else 0
+            // Owner round 32 (item 45): a voice note's duration line and the
+            // stamp share ONE line, so the bubble keeps no bottom band.
+            val voiceNote = kind == "FILE" && fileLooksVoice(m) && !sentAsDocument(m)
             val bubbleShape =
                 RoundedCornerShape(
                     topStart = 16.dp,
@@ -3496,8 +3506,10 @@ private fun MessageRow(
                     // INLINE (trailing non-breaking spaces glued to the last
                     // word — the WhatsApp trick), so the overlay can never
                     // overlap a glyph and never leaves a blank strip under
-                    // the text. Other kinds keep the small bottom band.
-                    .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (kind == "TEXT" && emojiOnly == 0) 0.dp else 15.dp),
+                    // the text. Other kinds keep the small bottom band —
+                    // except voice notes (item 45), whose duration line already
+                    // leaves the stamp its corner.
+                    .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (voiceNote) 4.dp else if (kind == "TEXT" && emojiOnly == 0) 0.dp else 15.dp),
             ) {
                 val senderName = m.optText("senderName")
                 Column {
@@ -3940,6 +3952,15 @@ private fun VideoMessageRow(
 
 /** Owner round 31 (item 16): picked via "Document" — never the photo/video bubble. */
 internal fun sentAsDocument(m: JSONObject): Boolean = m.optJSONObject("meta")?.optBoolean("document") == true
+
+/** Owner round 32 (item 45): a voice note (recorded in-app or an audio file
+ *  sent as media) — the row uses it to drop the bubble's bottom band. */
+internal fun fileLooksVoice(m: JSONObject): Boolean {
+    val type = m.optString("fileType")
+    val name = m.optString("fileName").lowercase()
+    return type.startsWith("audio") || name.endsWith(".m4a") || name.endsWith(".mp3") ||
+        m.optJSONObject("meta")?.optBoolean("voice") == true
+}
 
 internal fun fileLooksVideo(m: JSONObject): Boolean {
     val type = m.optString("fileType")
@@ -4507,24 +4528,45 @@ internal fun VoiceWave(
             }
         },
     ) {
-        if (bars.isEmpty()) return@Canvas
-        val n = bars.size
-        val gap = 2.dp.toPx()
-        val stroke = ((size.width - gap * (n - 1)) / n).coerceAtLeast(1.5f)
-        val minH = 3.dp.toPx()
-        val mid = size.height / 2f
-        val playedUntil = progress.coerceIn(0f, 1f) * size.width
-        for (i in 0 until n) {
-            val x = i * (stroke + gap) + stroke / 2f
-            val h = (minH + (size.height - minH) * (bars[i].coerceIn(0, 100) / 100f)) / 2f
-            drawLine(
-                color = if (x <= playedUntil) played else rest,
-                start = Offset(x, mid - h),
-                end = Offset(x, mid + h),
-                strokeWidth = stroke,
-                cap = StrokeCap.Round,
-            )
-        }
+        drawVoiceBars(bars, progress, played, rest)
+    }
+}
+
+/**
+ * Owner round 32 (item 45): the composer's live wave while a note is being
+ * recorded — [VoiceNote.livePeaks] read in the draw pass, so a new peak only
+ * repaints the strip. Same bars as the bubble, no seeking.
+ */
+@Composable
+private fun LiveVoiceWave(color: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier) { drawVoiceBars(VoiceNote.livePeaks, 1f, color, color, newest = true) }
+}
+
+/** The bar picture shared by the bubble and the live strip: 2dp gaps, round
+ *  caps, a 3dp dot for silence. With [newest] a canvas too narrow for every
+ *  bar at 2dp (the live strip on a small phone) shows the newest ones instead
+ *  of squeezing all of them into hairlines. */
+internal fun DrawScope.drawVoiceBars(bars: List<Int>, progress: Float, played: Color, rest: Color, newest: Boolean = false) {
+    if (bars.isEmpty() || size.width <= 0f) return
+    val gap = 2.dp.toPx()
+    val fit = ((size.width + gap) / (2.dp.toPx() + gap)).toInt().coerceAtLeast(1)
+    val shown = if (newest && bars.size > fit) bars.subList(bars.size - fit, bars.size) else bars
+    val n = shown.size
+    // Bars never fatten past 3dp on a wide strip — they stay bars, not blocks.
+    val stroke = ((size.width - gap * (n - 1)) / n).coerceIn(1.5f, 3.dp.toPx())
+    val minH = 3.dp.toPx()
+    val mid = size.height / 2f
+    val playedUntil = progress.coerceIn(0f, 1f) * size.width
+    for (i in 0 until n) {
+        val x = i * (stroke + gap) + stroke / 2f
+        val h = (minH + (size.height - minH) * (shown[i].coerceIn(0, 100) / 100f)) / 2f
+        drawLine(
+            color = if (x <= playedUntil) played else rest,
+            start = Offset(x, mid - h),
+            end = Offset(x, mid + h),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round,
+        )
     }
 }
 
@@ -4686,12 +4728,7 @@ private fun FileBubble(
         ImageBubble(JSONObject().put("mediaUrl", url), mine)
         return
     }
-    val isVoice =
-        !asDocument &&
-            (
-                fileType.startsWith("audio") || fileName.endsWith(".m4a") || fileName.endsWith(".mp3") ||
-                    m.optJSONObject("meta")?.optBoolean("voice") == true
-            )
+    val isVoice = !asDocument && fileLooksVoice(m)
     val playing = player.playingId == id
     val loading = player.loadingId == id
 
@@ -4706,12 +4743,17 @@ private fun FileBubble(
         val progress = if (active) player.progress else 0f
         val ink = if (mine) Color.White else chatAccent(theme)
         val faint = if (mine) Color(0x66FFFFFF) else chatAccent(theme).copy(alpha = 0.35f)
+        // Owner round 32 (item 45): compact — a 36dp button against a 22dp
+        // wave with the duration right under it; the stamp shares the
+        // duration line's right end (the bubble keeps no bottom band for
+        // voice notes). It used to be a 30dp wave over a duration line over
+        // a blank 15dp band: a 64dp bubble for one line of audio.
         Row(verticalAlignment = Alignment.CenterVertically) {
             val interaction = remember { MutableInteractionSource() }
             val pressed by interaction.collectIsPressedAsState()
             Box(
                 Modifier
-                    .size(38.dp)
+                    .size(36.dp)
                     .pressScale(interaction)
                     .clip(CircleShape)
                     .background(if (mine) Color(0x33FFFFFF) else chatAccent(theme).copy(alpha = 0.18f))
@@ -4731,30 +4773,31 @@ private fun FileBubble(
                         Icons.Filled.Pause,
                         contentDescription = "Pause",
                         tint = ink,
-                        modifier = Modifier.size(22.dp).scale(if (pressed) 0.85f else 1f),
+                        modifier = Modifier.size(21.dp).scale(if (pressed) 0.85f else 1f),
                     )
                     else -> Icon(
                         Icons.Filled.PlayArrow,
                         contentDescription = "Play",
                         tint = ink,
-                        modifier = Modifier.size(22.dp).scale(if (pressed) 0.85f else 1f),
+                        modifier = Modifier.size(21.dp).scale(if (pressed) 0.85f else 1f),
                     )
                 }
             }
             Spacer(Modifier.width(8.dp))
-            // Owner round 25: no side padding — the tick+time stamp sits in
-            // the bubble's bottom band, right corner, under this column.
+            // Owner round 25: no side padding — the tick+time stamp sits at
+            // the right end of the duration line, under the wave.
             Column {
                 VoiceWave(
                     bars = bars,
                     progress = progress,
                     played = ink,
                     rest = faint,
-                    modifier = Modifier.width(150.dp).height(30.dp),
+                    modifier = Modifier.width(150.dp).height(22.dp),
                     onSeek = { frac ->
                         if (!pendingEcho && fileKey.isNotBlank()) player.seekTo(ctx, id, fileKey, frac)
                     },
                 )
+                Spacer(Modifier.height(1.dp))
                 val secs = m.optJSONObject("meta")?.optInt("seconds") ?: 0
                 val vFrac = UploadProgress.fracs[m.optString("clientId")]
                 Text(
@@ -4771,6 +4814,7 @@ private fun FileBubble(
                     },
                     fontSize = 11.sp,
                     color = if (mine) Color(0x99FFFFFF) else Muted,
+                    maxLines = 1,
                     // Owner round 26: keep the sending/duration line clear of
                     // the bottom-right stamp ("voice sending er somoy overlap").
                     modifier = Modifier.padding(end = if (mine) 50.dp else 34.dp),

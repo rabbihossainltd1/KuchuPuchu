@@ -37,10 +37,17 @@ object VoiceNote {
                 // maxAmplitude = the loudest sample since the previous read;
                 // it throws once the recorder is gone, hence runCatching.
                 amps.add(runCatching { recorder?.maxAmplitude ?: 0 }.getOrDefault(0))
+                livePeaks = VoiceWaveform.live(amps)
                 handler.postDelayed(this, SAMPLE_MS)
             }
         }
     var isRecording: Boolean = false
+        private set
+
+    /** Owner round 32 (item 45): the newest peaks (0..100, [VoiceWaveform.LIVE_BARS]
+     *  wide, silence padded on the left) while the finger is down — the composer
+     *  paints them as a live wave next to the timer. Empty when not recording. */
+    var livePeaks: List<Int> by mutableStateOf(emptyList())
         private set
 
     fun start(ctx: Context): Boolean =
@@ -62,6 +69,7 @@ object VoiceNote {
             startedAt = System.currentTimeMillis()
             isRecording = true
             amps.clear()
+            livePeaks = emptyList()
             handler.removeCallbacks(sampler)
             handler.postDelayed(sampler, SAMPLE_MS)
             true
@@ -83,6 +91,7 @@ object VoiceNote {
         file = null
         val wave = VoiceWaveform.squash(amps)
         amps.clear()
+        livePeaks = emptyList()
         return if (f != null && f.exists() && f.length() > 0 && secs >= 1) VoiceTake(f, secs, wave) else null
     }
 
@@ -91,6 +100,7 @@ object VoiceNote {
         isRecording = false
         handler.removeCallbacks(sampler)
         amps.clear()
+        livePeaks = emptyList()
         runCatching { recorder?.stop() }
         runCatching { recorder?.release() }
         recorder = null
@@ -113,6 +123,13 @@ class VoiceTake(val file: File, val seconds: Int, val waveform: List<Int>)
 object VoiceWaveform {
     const val BARS = 36
     const val MAX_BARS = 64
+
+    /** Owner round 32 (item 45): the composer's live strip — this many 100 ms
+     *  peaks (4 s) on the same sqrt curve, scaled against a speaking-voice
+     *  ceiling because the take's own peak is unknown while it is still being
+     *  spoken. */
+    const val LIVE_BARS = 40
+    const val LIVE_CEIL = 20_000f
 
     fun squash(samples: List<Int>, bars: Int = BARS): List<Int> {
         if (samples.isEmpty() || bars <= 0) return emptyList()
@@ -140,6 +157,18 @@ object VoiceWaveform {
             val env = 0.55f + 0.45f * kotlin.math.sin(i * 6.4f / bars + 0.3f)
             (18f + r * 0.62f * env).roundToInt().coerceIn(8, 100)
         }
+    }
+
+    /** The live wave while recording: the newest [bars] peaks, oldest first,
+     *  padded with silence on the LEFT so the picture is always [bars] wide
+     *  and grows in from the right — the mic's side. */
+    fun live(samples: List<Int>, bars: Int = LIVE_BARS): List<Int> {
+        if (bars <= 0) return emptyList()
+        val tail = if (samples.size > bars) samples.subList(samples.size - bars, samples.size) else samples
+        val out = ArrayList<Int>(bars)
+        repeat(bars - tail.size) { out.add(0) }
+        for (a in tail) out.add((sqrt(a.coerceAtLeast(0) / LIVE_CEIL) * 100f).roundToInt().coerceIn(0, 100))
+        return out
     }
 
     /** Clamps whatever the server or an old client sent into drawable bars. */
