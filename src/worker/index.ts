@@ -1788,6 +1788,11 @@ async function ensureSchema(db: D1Database) {
   await runCatchingSql(db, `ALTER TABLE users ADD COLUMN priv_messages TEXT`);
   await runCatchingSql(db, `ALTER TABLE users ADD COLUMN priv_last_seen TEXT`);
   await runCatchingSql(db, `ALTER TABLE users ADD COLUMN priv_groups TEXT`);
+  // Owner round 32 (item 20): who can view this account's status updates —
+  // 'public' (default) = everyone sharing a chat with the author, groups
+  // included (exactly the pre-round rule), 'contacts' = 1:1 contacts only,
+  // 'nobody' = the author alone.
+  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN priv_status TEXT`);
   await runCatchingSql(db, `ALTER TABLE users ADD COLUMN read_receipts INTEGER`);
   await runCatchingSql(db, `ALTER TABLE users ADD COLUMN private_profile INTEGER`);
   await runCatchingSql(db, `ALTER TABLE sessions ADD COLUMN device_id TEXT`);
@@ -1881,6 +1886,7 @@ type UserRow = {
   priv_messages: string | null;
   priv_last_seen: string | null;
   priv_groups: string | null;
+  priv_status: string | null;
   read_receipts: number | null;
   private_profile: number | null;
 };
@@ -1894,6 +1900,7 @@ const PRIVACY_DEFAULTS = {
   messages: "public",
   lastSeen: "public",
   groups: "public",
+  status: "public",
 } as const;
 
 /** Who is looking. `self` sees everything; `contact` = shares a 1:1 chat. */
@@ -1918,6 +1925,7 @@ function privacyOf(row: UserRow) {
     messages: privLevel(row.priv_messages, PRIVACY_DEFAULTS.messages),
     lastSeen: privLevel(row.priv_last_seen, PRIVACY_DEFAULTS.lastSeen),
     groups: privLevel(row.priv_groups, PRIVACY_DEFAULTS.groups),
+    status: privLevel(row.priv_status, PRIVACY_DEFAULTS.status),
     readReceipts: Number(row.read_receipts ?? 1) !== 0,
     privateProfile: Number(row.private_profile ?? 0) !== 0,
   };
@@ -2102,15 +2110,37 @@ async function blockedBetween(db: D1Database, a: string, b: string) {
  */
 async function canSeeStatusOf(db: D1Database, uid: string, ownerId: string): Promise<boolean> {
   if (ownerId === uid) return true;
-  const isContact = !!(await one(
+  // Owner round 32 (item 20): the author's "Who Can View Your Status?" level.
+  // Statuses only ever travel between people sharing a chat (the feed is
+  // built from shared memberships), so 'public' = every such person (group
+  // mates included — the pre-round rule), 'contacts' = a 1:1 chat partner,
+  // 'nobody' = the author alone. Same rule as statusVisibleTo() in the feed.
+  const owner = await one<{ priv_status: string | null }>(
     db,
-    `SELECT m1.conv_id FROM members m1 JOIN members m2 ON m1.conv_id = m2.conv_id
-       WHERE m1.user_id = ? AND m2.user_id = ? LIMIT 1`,
-    uid,
+    "SELECT priv_status FROM users WHERE id = ?",
     ownerId,
-  ));
-  if (!isContact) return false;
+  );
+  const level = privLevel(owner?.priv_status, PRIVACY_DEFAULTS.status);
+  if (level === "nobody") return false;
+  const reachable =
+    level === "contacts"
+      ? await isContact(db, uid, ownerId)
+      : !!(await one(
+          db,
+          `SELECT m1.conv_id FROM members m1 JOIN members m2 ON m1.conv_id = m2.conv_id
+             WHERE m1.user_id = ? AND m2.user_id = ? LIMIT 1`,
+          uid,
+          ownerId,
+        ));
+  if (!reachable) return false;
   return !(await blockedBetween(db, uid, ownerId));
+}
+
+/** The feed-side twin of canSeeStatusOf(): the author's row and whether the
+ *  viewer is a 1:1 contact are already in hand there, so no statement. */
+function statusVisibleTo(author: UserRow, soloContact: boolean): boolean {
+  const level = privLevel(author.priv_status, PRIVACY_DEFAULTS.status);
+  return level === "public" || (level === "contacts" && soloContact);
 }
 
 /**
@@ -4363,6 +4393,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       ["privMessages", "priv_messages"],
       ["privLastSeen", "priv_last_seen"],
       ["privGroups", "priv_groups"],
+      ["privStatus", "priv_status"],
     ];
     for (const [field, column] of levelFields) {
       if (body[field] === undefined) continue;
@@ -6556,6 +6587,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     for (const [contactId, rows] of byContact) {
       const userRow = users.get(contactId);
       if (!userRow) continue;
+      // Owner round 32 (item 20): the author's status privacy, from the rows
+      // this poll already holds (no extra statement).
+      if (!statusVisibleTo(userRow, soloContacts.has(contactId))) continue;
       out.push({
         user: userFrom(userRow, onlineNow(userRow), false, viewFor(soloContacts, contactId, uid)),
         mine: false,

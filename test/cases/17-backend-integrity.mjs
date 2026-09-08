@@ -550,6 +550,84 @@ async function main() {
     );
   }
 
+  // ── 4b. r32-20: "Who Can View Your Status?" — public (default) = everyone
+  //          sharing a chat, contacts = 1:1 partners only, nobody = author only ──
+  {
+    const h = await mk();
+    const P = await h.reg("st-p"); // the poster
+    const C = await h.reg("st-c"); // 1:1 contact of P
+    const G = await h.reg("st-g"); // shares only a GROUP with P
+    const S = await h.reg("st-s"); // stranger
+    await h.call("POST", "/api/conversations", { userId: C.user.id }, P.token);
+    await h.call("POST", "/api/conversations", { userId: G.user.id }, C.token); // so G is a real user with a chat
+    const grp = await h.call(
+      "POST",
+      "/api/conversations/group",
+      { title: "st", memberIds: [G.user.id] },
+      P.token,
+    );
+    if (!grp.json.conversation) throw new Error(`group failed: ${JSON.stringify(grp.json)}`);
+    const st = await h.call("POST", "/api/statuses", { kind: "TEXT", text: "hello" }, P.token);
+    const sid = st.json.status?.id;
+    const seesFeed = async (who) =>
+      ((await h.call("GET", "/api/statuses", undefined, who.token)).json.items ?? []).some(
+        (x) => x.user?.id === P.user.id,
+      );
+    const meShape = await h.call("GET", "/api/me", undefined, P.token);
+    check(
+      "r32-20: /api/me privacy carries status = public by default",
+      meShape.json.user?.privacy?.status === "public",
+      JSON.stringify(meShape.json.user?.privacy),
+    );
+    check(
+      "r32-20: public → the 1:1 contact AND the group mate see the status, a stranger never does",
+      (await seesFeed(C)) && (await seesFeed(G)) && !(await seesFeed(S)),
+      "",
+    );
+    const bad = await h.call("PATCH", "/api/me", { privStatus: "friends" }, P.token);
+    check("r32-20: an unknown status level is refused", bad.status === 400, String(bad.status));
+    const toContacts = await h.call("PATCH", "/api/me", { privStatus: "contacts" }, P.token);
+    check(
+      "r32-20: contacts → only the 1:1 contact sees it (feed); the group mate's view ping is ignored and media is 403",
+      toContacts.json.user?.privacy?.status === "contacts" &&
+        (await seesFeed(C)) &&
+        !(await seesFeed(G)) &&
+        (await h.call("POST", `/api/statuses/${sid}/view`, {}, G.token)).status === 200 &&
+        (await h.call("POST", `/api/statuses/${sid}/react`, { emoji: "❤️" }, G.token)).status ===
+          403 &&
+        (await h.call("POST", `/api/statuses/${sid}/react`, { emoji: "❤️" }, C.token)).status ===
+          200,
+      "",
+    );
+    const viewers = await h.call("GET", `/api/statuses/${sid}/viewers`, undefined, P.token);
+    check(
+      "r32-20: …and the group mate's ignored ping never became a view row",
+      (viewers.json.viewers ?? []).length === 1 &&
+        viewers.json.viewers[0].user?.id === C.user.id &&
+        viewers.json.viewers[0].reaction === "❤️",
+      JSON.stringify(viewers.json).slice(0, 160),
+    );
+    await h.call("PATCH", "/api/me", { privStatus: "nobody" }, P.token);
+    const mineStill = (await h.call("GET", "/api/statuses", undefined, P.token)).json.items ?? [];
+    check(
+      "r32-20: nobody → hidden from the contact too, the author still sees their own ring",
+      !(await seesFeed(C)) &&
+        !(await seesFeed(G)) &&
+        mineStill.some((x) => x.mine && x.statuses?.length === 1) &&
+        (await h.call("POST", `/api/statuses/${sid}/react`, { emoji: "❤️" }, C.token)).status ===
+          403,
+      "",
+    );
+    // the poll budget is unchanged: the level rides on rows the feed already reads
+    h.env.DB._stats.reset();
+    await h.call("GET", "/api/statuses", undefined, C.token);
+    check(
+      "r32-20: the status privacy check adds no D1 statement to the feed poll",
+      h.env.DB._stats.reads <= 8,
+      `statements=${h.env.DB._stats.reads}`,
+    );
+  }
+
   // ── 5. /api/debug/clientlog is bounded, and error_log gets pruned ──────────
   {
     const h = await mk();

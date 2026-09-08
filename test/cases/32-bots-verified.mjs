@@ -5158,6 +5158,32 @@ const convBetween = (db, a, b) =>
         ).includes("VoiceWaveform.live(listOf(0, 20000))"),
     );
   }
+  // Item 20: Settings › Privacy gets "Status updates" (No one / Contacts only /
+  // Public) with the question-form sheet; the worker stores priv_status.
+  {
+    const st = kt("SettingsScreen.kt");
+    const priv = st.slice(
+      st.indexOf("fun PrivacySettingsScreen("),
+      st.indexOf("fun AppearanceSettingsScreen("),
+    );
+    const src = readFileSync("src/worker/index.ts", "utf8");
+    check(
+      "r32-20: Privacy has a 'Status updates' row (default Public) → sheet 'Who Can View Your Status?' → PATCH /api/me privStatus; worker: priv_status column, privacy.status in /api/me, canSeeStatusOf + the feed honour it (public = anyone sharing a chat, contacts = 1:1, nobody)",
+      priv.includes(
+        'SettingRow(Icons.Filled.Circle, "Status updates", privacyLabel(level("status", "public"))) { picker = "privStatus" }',
+      ) &&
+        priv.includes('"privStatus" -> "Who Can View Your Status?"') &&
+        priv.includes('"privStatus" -> "status"') &&
+        src.includes("ALTER TABLE users ADD COLUMN priv_status TEXT") &&
+        src.includes('["privStatus", "priv_status"],') &&
+        src.includes("status: privLevel(row.priv_status, PRIVACY_DEFAULTS.status),") &&
+        src.includes(
+          "function statusVisibleTo(author: UserRow, soloContact: boolean): boolean {",
+        ) &&
+        src.includes("if (!statusVisibleTo(userRow, soloContacts.has(contactId))) continue;") &&
+        src.includes("const level = privLevel(owner?.priv_status, PRIVACY_DEFAULTS.status);"),
+    );
+  }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
   // a touch on blank list space closes it (main, archive and hidden lists).
   {

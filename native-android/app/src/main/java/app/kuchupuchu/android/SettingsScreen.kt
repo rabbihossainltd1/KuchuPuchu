@@ -57,6 +57,7 @@ import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.OutlinedTextField
@@ -300,6 +301,7 @@ fun PrivacySettingsScreen(nav: NavController) {
             "privMessages" -> "messages"
             "privLastSeen" -> "lastSeen"
             "privGroups" -> "groups"
+            "privStatus" -> "status"
             else -> field
         }
 
@@ -337,6 +339,8 @@ fun PrivacySettingsScreen(nav: NavController) {
             SettingRow(Icons.AutoMirrored.Filled.Chat, "Messages", privacyLabel(level("messages", "public"))) { picker = "privMessages" }
             SettingRow(Icons.Filled.Schedule, "Last seen", privacyLabel(level("lastSeen", "public"))) { picker = "privLastSeen" }
             SettingRow(Icons.Filled.GroupAdd, "Add to groups", privacyLabel(level("groups", "public"))) { picker = "privGroups" }
+            // Owner round 32 (item 20): who can view this account's status updates.
+            SettingRow(Icons.Filled.Circle, "Status updates", privacyLabel(level("status", "public"))) { picker = "privStatus" }
         }
         Spacer(Modifier.height(12.dp))
         SectionCard {
@@ -382,6 +386,7 @@ fun PrivacySettingsScreen(nav: NavController) {
                     "privAvatar" -> "Who Can View Your Profile Picture?"
                     "privMessages" -> "Who Can Message You?"
                     "privLastSeen" -> "Who Can See Your Last Seen?"
+                    "privStatus" -> "Who Can View Your Status?"
                     else -> "Who Can Add You To Groups?"
                 },
         ) {
