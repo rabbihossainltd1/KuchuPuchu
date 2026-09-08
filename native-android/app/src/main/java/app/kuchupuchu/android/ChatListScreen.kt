@@ -677,21 +677,26 @@ private fun threeFingerDoubleTap(onTrigger: () -> Unit): Modifier =
         }
     }
 
-/** Owner round 19: delivery ticks for a list row — one tick sent, two read. */
+/** Owner round 19: delivery ticks for a list row — one tick sent, two read.
+ *  Owner round 32 (item 28): the middle state exists here too — two grey
+ *  ticks once the recipient's device has the message, blue once read — the
+ *  same three steps as the bubble, so the list row a sender is looking at
+ *  moves the moment the recipient comes back online. */
 @Composable
-private fun ListTicks(read: Boolean) {
+private fun ListTicks(read: Boolean, delivered: Boolean = read) {
+    val tint = if (read) ActionBlueDeep else Muted
     Row(verticalAlignment = Alignment.CenterVertically) {
         Icon(
             Icons.Filled.Done,
             null,
-            tint = if (read) ActionBlueDeep else Muted,
+            tint = tint,
             modifier = Modifier.size(14.dp),
         )
-        if (read) {
+        if (read || delivered) {
             Icon(
                 Icons.Filled.Done,
                 null,
-                tint = ActionBlueDeep,
+                tint = tint,
                 modifier = Modifier.size(14.dp).offset(x = (-4).dp),
             )
         }
@@ -1232,12 +1237,25 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
                 // Owner round 19: own last message gets its delivery tick in
                 // the list rows too (one tick = sent, two = read) — the
                 // archived list showed nothing at all.
+                // Owner round 32 (item 28): the list payload itself now says
+                // who sent the newest message and when it was delivered
+                // (lastMessageSenderId / lastMessageDeliveredAt), so the tick
+                // no longer depends on a cached page of that chat — a chat
+                // never opened on this device shows its tick too, and the
+                // recipient's reconnect moves it (sent → delivered → read)
+                // through the ordinary list refresh.
                 val lastMsg = ScreenStore.lastMsg(id)
-                if (lastMsg != null && lastMsg.optString("senderId") == Store.myId() && lastMsg.optString("kind") != "DELETED") {
+                val newestSender = conv.optString("lastMessageSenderId").ifBlank { lastMsg?.optString("senderId").orEmpty() }
+                val newestAt = conv.optString("lastMessageAt").ifBlank { lastMsg?.optString("createdAt").orEmpty() }
+                val newestDeleted = lastMsg != null && lastMsg.optString("createdAt") == newestAt && lastMsg.optString("kind") == "DELETED"
+                if (newestSender.isNotBlank() && newestSender == Store.myId() && !newestDeleted && newestAt.isNotBlank()) {
                     val otherRead = conv.optJSONArray("members")?.objects()?.firstOrNull {
                         it.optJSONObject("user")?.optString("id") != Store.myId()
                     }?.optString("lastReadAt") ?: ""
-                    ListTicks(read = otherRead.isNotBlank() && otherRead >= lastMsg.optString("createdAt"))
+                    val delivered =
+                        conv.optString("lastMessageDeliveredAt").isNotBlank() ||
+                            (lastMsg != null && lastMsg.optString("createdAt") == newestAt && lastMsg.optString("deliveredAt").isNotBlank())
+                    ListTicks(read = otherRead.isNotBlank() && otherRead >= newestAt, delivered = delivered)
                     Spacer(Modifier.width(4.dp))
                 }
                 Text(stamp, fontSize = 12.sp, color = if (unread > 0) GoldDeep else Muted)

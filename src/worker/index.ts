@@ -1734,6 +1734,13 @@ async function ensureSchema(db: D1Database) {
     db,
     `CREATE INDEX IF NOT EXISTS idx_messages_dedupe ON messages(conv_id, sender_id, client_id)`,
   );
+  // Owner round 32 (item 28): the reconnect catch-up (markInboxDelivered)
+  // scans only rows that are STILL undelivered — a partial index keeps that
+  // scan proportional to the backlog, never to the table.
+  await runCatchingSql(
+    db,
+    `CREATE INDEX IF NOT EXISTS idx_messages_undelivered ON messages(conv_id, created_at) WHERE delivered_at IS NULL`,
+  );
   // Phone auth (email/password removal): columns for the OTP-less system.
   // Legacy users default to auth_status ACTIVE — they are working accounts;
   // only phone signups start PENDING and flip ACTIVE at Google binding.
@@ -2431,6 +2438,113 @@ async function pokeUserConversation(
     );
     return -1;
   }
+}
+
+/**
+ * The same list poke for a DELIVERY receipt. Deliberately without `msg: 1`:
+ * that flag is the app's cue for the in-app "message received" sound, and a
+ * receipt is not a message — with the flag, a sender sitting on the chat list
+ * heard a new-message tone every time a recipient came back online.
+ */
+async function pokeUserReceipt(
+  env: Env,
+  userId: string,
+  conversationId: string,
+  at: string,
+): Promise<void> {
+  if (!env.CHAT_ROOM) return;
+  try {
+    const stub = env.CHAT_ROOM.get(env.CHAT_ROOM.idFromName(`user:${userId}`));
+    await stub.fetch("https://chat-room/broadcast", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "conv", conversationId, at, receipt: 1 }),
+    });
+  } catch {
+    /* a lost receipt poke costs one list tick, nothing more */
+  }
+}
+
+/**
+ * Owner round 32 (item 28): "the single tick never became a double tick once
+ * the recipient came back online".
+ *
+ * A message sent while the recipient was offline is stored with
+ * delivered_at = NULL (the FCM send was not accepted, or the device had no
+ * token). Delivery was only ever recorded when the recipient OPENED that chat
+ * (the messages GET) — so a recipient who came back online and merely looked at
+ * the chat list left the sender on one tick indefinitely, and the sender's
+ * tick could only move by the sender re-polling anyway.
+ *
+ * This is the WhatsApp rule instead: the recipient's device being reachable
+ * again IS delivery. It runs when the recipient's user channel connects
+ * (/ws/user) and on the chat-list poll (GET /api/conversations — also the app's
+ * first request after a cold start, before any socket is up), stamps every
+ * undelivered inbound row across all of the recipient's conversations, and
+ * tells each sender right away (room "delivered" frame for an open chat + a
+ * list poke for a sender sitting on the chat list), so the sender's tick moves
+ * without them touching anything.
+ *
+ * Cost: one SELECT over the partial index (undelivered rows only — normally
+ * zero rows, so a marker-gated list poll pays ~nothing), one UPDATE per
+ * conversation with a backlog.
+ */
+async function markInboxDelivered(
+  env: Env,
+  db: D1Database,
+  ctx: ExecutionContext,
+  uid: string,
+): Promise<number> {
+  // Driven by the caller's OWN conversation list (IN-subquery on
+  // idx_members_user), then one probe of the partial undelivered index per
+  // chat: rows read ≈ member rows + backlog, never the table's undelivered
+  // set as a whole (which grows with accounts that never return).
+  const rows = await all<{ id: string; conv_id: string; sender_id: string }>(
+    db,
+    `SELECT id, conv_id, sender_id FROM messages
+      WHERE conv_id IN (SELECT conv_id FROM members WHERE user_id = ?)
+        AND delivered_at IS NULL AND sender_id IS NOT NULL AND sender_id != ''
+        AND sender_id != ? AND kind != 'SYSTEM'
+      ORDER BY created_at DESC
+      LIMIT 400`,
+    uid,
+    uid,
+  );
+  if (!rows.length) return 0;
+  const deliveredAt = nowIso();
+  // ONE statement per 44 ids across every chat (not one per chat): the list
+  // route's statement count must stay constant (test 04 pins it).
+  for (const group of chunked(rows.map((r) => r.id))) {
+    await run(
+      db,
+      `UPDATE messages SET delivered_at = ? WHERE id IN (${inSql(group.length)}) AND delivered_at IS NULL`,
+      deliveredAt,
+      ...group,
+    );
+  }
+  const byConv = new Map<string, { ids: string[]; senders: Set<string> }>();
+  for (const r of rows) {
+    const bucket = byConv.get(r.conv_id) ?? { ids: [], senders: new Set<string>() };
+    bucket.ids.push(r.id);
+    bucket.senders.add(r.sender_id);
+    byConv.set(r.conv_id, bucket);
+  }
+  for (const [convId, bucket] of byConv) {
+    const senderIds = [...bucket.senders];
+    ctx.waitUntil(
+      broadcastRoomEvent(env, convId, {
+        type: "delivered",
+        conversationId: convId,
+        messageIds: bucket.ids,
+        senderIds,
+        at: deliveredAt,
+      }),
+    );
+    for (const senderId of senderIds) {
+      ctx.waitUntil(pokeUserReceipt(env, senderId, convId, deliveredAt));
+    }
+  }
+  return rows.length;
 }
 
 /**
@@ -4112,6 +4226,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   // Per-user chat-list channel: badges, previews, ordering updates.
   if (path === "/ws/user" && method === "GET" && env.CHAT_ROOM) {
+    // Owner round 32 (item 28): this device is reachable again — everything
+    // that was waiting for it counts as delivered, and its senders hear so.
+    ctx.waitUntil(markInboxDelivered(env, db, ctx, uid).catch(() => 0));
     const stub = env.CHAT_ROOM.get(env.CHAT_ROOM.idFromName(`user:${uid}`));
     return stub.fetch(
       new Request("https://chat-room/connect", {
@@ -4699,6 +4816,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   }
 
   if (path === "/api/conversations" && method === "GET") {
+    // Owner round 32 (item 28): the list poll is the first thing a returning
+    // app does (before its socket is up) — a reachable recipient means every
+    // message waiting for it is delivered. Off the response path; the
+    // partial index makes the no-backlog case a near-free probe.
+    ctx.waitUntil(markInboxDelivered(env, db, ctx, uid).catch(() => 0));
     const rows = await all<{ id: string }>(
       db,
       "SELECT c.id FROM conversations c JOIN members m ON m.conv_id = c.id WHERE m.user_id = ? ORDER BY COALESCE(c.last_message_at, c.created_at) DESC",
@@ -4765,6 +4887,33 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         if (c) c.max_row = r.max_row;
       }
     }
+    // Owner round 32 (item 28): the newest message's sender + delivered_at per
+    // chat — the row's own-message tick needs it. ONE statement, and per chat
+    // exactly one reverse seek on idx_messages_conv + one row (the correlated
+    // ORDER BY … LIMIT 1). NOT a GROUP BY/MAX() over the chats' messages: that
+    // walks every row of every chat on every poll — the read pattern that
+    // burned 11M row reads and hit D1's cap on 2026-09-01.
+    if (ids.length) {
+      for (const r of await all<{
+        conv_id: string;
+        sender_id: string | null;
+        delivered_at: string | null;
+      }>(
+        db,
+        `SELECT m.conv_id, m.sender_id, m.delivered_at
+           FROM json_each(?) j
+           JOIN messages m ON m.rowid = (
+             SELECT rowid FROM messages WHERE conv_id = j.value ORDER BY created_at DESC LIMIT 1
+           )`,
+        JSON.stringify(ids),
+      )) {
+        const c = convs.get(r.conv_id);
+        if (c) {
+          c.last_message_sender_id = r.sender_id;
+          c.last_message_delivered_at = r.delivered_at;
+        }
+      }
+    }
     const list = [];
     for (const row of rows) {
       const conv = convs.get(row.id);
@@ -4801,6 +4950,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           c.id,
           c.lastMessageAt,
           c.lastMessage,
+          // r32-28: a delivery / read stamp on the newest message changes the
+          // row's tick, so it must move the marker too.
+          c.lastMessageDeliveredAt,
+          (c.members as Array<{ lastReadAt?: string | null }> | undefined)?.map(
+            (m) => m.lastReadAt ?? null,
+          ),
           c.unread,
           c.muted,
           c.hidden,
@@ -5679,7 +5834,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         }),
       );
       for (const senderId of senderIds) {
-        ctx.waitUntil(pokeUserConversation(env, senderId, convId, deliveredAt));
+        ctx.waitUntil(pokeUserReceipt(env, senderId, convId, deliveredAt));
       }
     }
     // Read receipts for the sender. In a group this is the *oldest* read time
@@ -7245,6 +7400,10 @@ type ConvRow = {
   created_at: string;
   last_message_at: string | null;
   last_message: string | null;
+  /** Owner round 32 (item 28): delivered_at of the newest message (filled by
+   *  the list route, not a column) — the list row's own-message tick. */
+  last_message_delivered_at?: string | null;
+  last_message_sender_id?: string | null;
   disappear_seconds: number | null;
   theme: string | null;
   hidden_json?: string | null;
@@ -7583,6 +7742,12 @@ function buildConvDetail(
     createdAt: conv.created_at,
     lastMessageAt: conv.last_message_at,
     lastMessage: conv.last_message,
+    // Owner round 32 (item 28): the newest message's sender + delivery stamp,
+    // so a list row can draw sent / delivered / read for the caller's own last
+    // message without opening the chat (the list is the screen a sender is
+    // usually on when the recipient comes back online).
+    lastMessageSenderId: conv.last_message_sender_id ?? null,
+    lastMessageDeliveredAt: conv.last_message_delivered_at ?? null,
     other,
     members,
     muted: meMuted,
@@ -7618,6 +7783,16 @@ async function conversationDetail(db: D1Database, convId: string, uid: string) {
     `SELECT ${MEMBER_COLS} FROM members WHERE conv_id = ?`,
     convId,
   );
+  // Owner round 32 (item 28): the single-chat detail is what the list merges
+  // in on a poke — it must carry the same newest-message stamp as the list
+  // route, or the merge would blank the row's tick.
+  const newest = await one<{ sender_id: string | null; delivered_at: string | null }>(
+    db,
+    "SELECT sender_id, delivered_at FROM messages WHERE conv_id = ? ORDER BY created_at DESC LIMIT 1",
+    convId,
+  );
+  conv.last_message_sender_id = newest?.sender_id ?? null;
+  conv.last_message_delivered_at = newest?.delivered_at ?? null;
   return buildConvDetail(
     conv,
     memberRows,

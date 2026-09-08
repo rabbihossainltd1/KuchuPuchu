@@ -251,6 +251,127 @@ async function mk(withDo) {
   );
 }
 
+// ---- r32-28: the recipient coming back online IS delivery ------------------
+// A message sent while the recipient was offline (no device token → no FCM
+// accept → delivered_at NULL) used to stay on ONE tick until the recipient
+// opened that exact chat. Now the recipient's chat-list poll (the first
+// request of a returning app) and its /ws/user connect stamp everything
+// waiting for it and tell the sender at once.
+{
+  const k = await mk(true);
+  const a = await k.reg("rt6a@x.com", "rt6a");
+  const b = await k.reg("rt6b@x.com", "rt6b");
+  const c = await k.reg("rt6c@x.com", "rt6c");
+  const ab = (await k.call("POST", "/api/conversations", { userId: b.user.id }, a.token)).json
+    .conversation.id;
+  const cb = (await k.call("POST", "/api/conversations", { userId: c.user.id }, b.token)).json
+    .conversation.id;
+  const m1 = (
+    await k.call(
+      "POST",
+      `/api/conversations/${ab}/messages`,
+      { body: "while you were away 1" },
+      a.token,
+    )
+  ).json.message.id;
+  const m2 = (
+    await k.call(
+      "POST",
+      `/api/conversations/${ab}/messages`,
+      { body: "while you were away 2" },
+      a.token,
+    )
+  ).json.message.id;
+  const m3 = (
+    await k.call("POST", `/api/conversations/${cb}/messages`, { body: "from c" }, c.token)
+  ).json.message.id;
+  // b's OWN message must never be stamped by b's return.
+  const mine = (
+    await k.call("POST", `/api/conversations/${ab}/messages`, { body: "b's own" }, b.token)
+  ).json.message.id;
+  const pendingBefore = k.db._db
+    .prepare("SELECT COUNT(*) AS n FROM messages WHERE delivered_at IS NULL AND id IN (?,?,?)")
+    .get(m1, m2, m3).n;
+  check(
+    "offline recipient: the three inbound rows start undelivered",
+    pendingBefore === 3,
+    String(pendingBefore),
+  );
+
+  k.broadcasts.length = 0;
+  const list = await k.call("GET", "/api/conversations", undefined, b.token);
+  check("returning recipient's list poll succeeds", list.status === 200, String(list.status));
+  const stamped = k.db._db
+    .prepare("SELECT id, delivered_at FROM messages WHERE id IN (?,?,?,?)")
+    .all(m1, m2, m3, mine);
+  const at = (id) => stamped.find((r) => r.id === id)?.delivered_at ?? null;
+  check(
+    "r32-28: the list poll stamps EVERY undelivered inbound message across all of the recipient's chats — never the recipient's own",
+    !!at(m1) && !!at(m2) && !!at(m3) && at(mine) === null,
+    JSON.stringify(stamped),
+  );
+  const deliveredAB = k.broadcasts.find((x) => x.room === ab && x.body.type === "delivered");
+  const deliveredCB = k.broadcasts.find((x) => x.room === cb && x.body.type === "delivered");
+  check(
+    "r32-28: each affected room gets ONE delivered frame with the exact ids + sender ids",
+    !!deliveredAB &&
+      deliveredAB.body.messageIds.length === 2 &&
+      deliveredAB.body.messageIds.includes(m1) &&
+      deliveredAB.body.messageIds.includes(m2) &&
+      deliveredAB.body.senderIds.length === 1 &&
+      deliveredAB.body.senderIds[0] === a.user.id &&
+      !!deliveredCB &&
+      deliveredCB.body.messageIds.length === 1 &&
+      deliveredCB.body.messageIds[0] === m3 &&
+      deliveredCB.body.senderIds[0] === c.user.id &&
+      deliveredAB.body.at === deliveredCB.body.at,
+    JSON.stringify(k.broadcasts.map((x) => ({ room: x.room, body: x.body }))),
+  );
+  check(
+    "r32-28: every sender's list channel is poked (a sender on the chat list re-reads its ticks) WITHOUT msg:1 (no false in-app message sound); the recipient itself is not",
+    k.broadcasts.some(
+      (x) =>
+        x.room === `user:${a.user.id}` &&
+        x.body.type === "conv" &&
+        x.body.conversationId === ab &&
+        x.body.receipt === 1 &&
+        x.body.msg === undefined,
+    ) &&
+      k.broadcasts.some(
+        (x) =>
+          x.room === `user:${c.user.id}` && x.body.type === "conv" && x.body.conversationId === cb,
+      ) &&
+      !k.broadcasts.some((x) => x.room === `user:${b.user.id}`),
+    JSON.stringify(k.broadcasts.map((x) => x.room)),
+  );
+  // Second poll with nothing waiting: silent (no frames, no writes).
+  k.broadcasts.length = 0;
+  await k.call("GET", "/api/conversations", undefined, b.token);
+  check(
+    "r32-28: a poll with no backlog broadcasts nothing",
+    k.broadcasts.length === 0,
+    String(k.broadcasts.length),
+  );
+  // The /ws/user handshake stamps too (a socket coming up before any poll).
+  const m4 = (
+    await k.call("POST", `/api/conversations/${ab}/messages`, { body: "away again" }, a.token)
+  ).json.message.id;
+  k.broadcasts.length = 0;
+  const ws = await k.call("GET", "/ws/user", undefined, b.token);
+  const m4At = k.db._db
+    .prepare("SELECT delivered_at FROM messages WHERE id = ?")
+    .get(m4).delivered_at;
+  check(
+    "r32-28: connecting the user channel stamps the backlog as delivered and tells the sender",
+    // (the fake namespace cannot answer an upgrade — the status is not the point)
+    !!m4At &&
+      k.broadcasts.some(
+        (x) => x.room === ab && x.body.type === "delivered" && x.body.messageIds[0] === m4,
+      ),
+    `status=${ws.status} at=${m4At} frames=${JSON.stringify(k.broadcasts.map((x) => x.body.type))}`,
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`\n--- ${lines.length - broken} ok / ${broken} broken ---`);

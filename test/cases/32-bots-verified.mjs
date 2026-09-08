@@ -4581,6 +4581,57 @@ const convBetween = (db, a, b) =>
       cropFn.includes("val grabPx = with(LocalDensity.current) { 28.dp.toPx() }") &&
       !cropFn.includes("1 -> onChange(box.moved(dx, dy))"),
   );
+  // Item 28: a message sent while the recipient was offline stayed on ONE tick
+  // until the recipient opened that exact chat. The recipient's device being
+  // reachable again IS delivery now: the list poll + the /ws/user connect stamp
+  // every undelivered inbound row (markInboxDelivered) and tell the senders
+  // (room "delivered" + a SILENT list poke — no msg:1, so no false message
+  // sound); the list payload carries the newest message's sender + delivery
+  // stamp and the list row draws sent / delivered / read from it. Behaviour is
+  // driven end-to-end in test 09; this pins the wiring + the D1 cost shape.
+  const chatList32 = kt("ChatListScreen.kt");
+  check(
+    "r32-28: worker — markInboxDelivered is called from GET /api/conversations and /ws/user (off the response path), scans only the caller's chats over the partial undelivered index, updates in 44-id chunks, and pokes senders via pokeUserReceipt (no msg:1)",
+    src.includes("async function markInboxDelivered(") &&
+      (
+        src.match(
+          /ctx\.waitUntil\(markInboxDelivered\(env, db, ctx, uid\)\.catch\(\(\) => 0\)\);/g,
+        ) || []
+      ).length === 2 &&
+      src.includes(
+        "CREATE INDEX IF NOT EXISTS idx_messages_undelivered ON messages(conv_id, created_at) WHERE delivered_at IS NULL",
+      ) &&
+      src.includes("WHERE conv_id IN (SELECT conv_id FROM members WHERE user_id = ?)") &&
+      src.includes("for (const group of chunked(rows.map((r) => r.id))) {") &&
+      src.includes("async function pokeUserReceipt(") &&
+      src.includes('body: JSON.stringify({ type: "conv", conversationId, at, receipt: 1 }),') &&
+      !src.includes("ctx.waitUntil(pokeUserConversation(env, senderId, convId, deliveredAt));"),
+  );
+  check(
+    "r32-28: list payload carries lastMessageSenderId / lastMessageDeliveredAt (one correlated newest-row seek per chat, no GROUP BY scan), both in the freshness marker with the members' lastReadAt; the single-chat detail carries the same",
+    src.includes("lastMessageSenderId: conv.last_message_sender_id ?? null,") &&
+      src.includes("lastMessageDeliveredAt: conv.last_message_delivered_at ?? null,") &&
+      src.includes(
+        "SELECT rowid FROM messages WHERE conv_id = j.value ORDER BY created_at DESC LIMIT 1",
+      ) &&
+      !src.includes("MAX(created_at) AS created_at") &&
+      src.includes("c.lastMessageDeliveredAt,") &&
+      src.includes(
+        "SELECT sender_id, delivered_at FROM messages WHERE conv_id = ? ORDER BY created_at DESC LIMIT 1",
+      ),
+  );
+  check(
+    "r32-28: app — list row ticks have the delivered (two grey) step and read the newest message's sender / delivery stamp from the list payload (cached page only as a fallback)",
+    chatList32.includes("private fun ListTicks(read: Boolean, delivered: Boolean = read) {") &&
+      chatList32.includes("if (read || delivered) {") &&
+      chatList32.includes(
+        'val newestSender = conv.optString("lastMessageSenderId").ifBlank { lastMsg?.optString("senderId").orEmpty() }',
+      ) &&
+      chatList32.includes('conv.optString("lastMessageDeliveredAt").isNotBlank() ||') &&
+      chatList32.includes(
+        "ListTicks(read = otherRead.isNotBlank() && otherRead >= newestAt, delivered = delivered)",
+      ),
+  );
 }
 
 console.log(lines.join("\n"));
