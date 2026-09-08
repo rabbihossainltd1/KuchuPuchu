@@ -463,6 +463,10 @@ class CallEngine(private val app: Application) {
         poll =
             scope.launch {
                 polling = true
+                // Owner round 32 (item 9): an Accept / return-to-call tap that
+                // reached MainActivity before this engine existed is applied
+                // now, on the first tick (scope = Main, so this is the UI thread).
+                replayPendingIntents()
                 try {
                     while (isActive) {
                         // A throw out of tick() used to kill this coroutine, which
@@ -1979,8 +1983,63 @@ override fun onRenegotiationNeeded() {
     }
 
     companion object {
+        /**
+         * Owner round 32 (item 9): Compose state, not a plain @Volatile var. The
+         * engine is built on MainActivity's starter thread, usually AFTER the
+         * first frame; CallGate() / ReturnToCallBanner() / the app shell read
+         * `instance` during composition, and a plain var never told Compose it
+         * had changed — a ring that landed while the gate had composed against
+         * null stayed invisible until something unrelated recomposed ("call
+         * screen majhe majhe ashe na" from a cold start).
+         */
+        var instance: CallEngine? by mutableStateOf<CallEngine?>(null)
+            private set
+
+        /**
+         * A notification action that arrived before the engine existed (cold
+         * start from an Accept tap or an ongoing-call card). MainActivity's
+         * handleIntent used to `CallEngine.instance?.let { … }` — a silent
+         * no-op on exactly the cold start — so the tap opened the app on the
+         * chat list with the call still ringing in the shade. Replayed by
+         * start() the moment the engine is up.
+         */
         @Volatile
-        var instance: CallEngine? = null
+        private var pendingIntentAccept = false
+
+        @Volatile
+        private var pendingIntentRestore = false
+
+        fun onAcceptIntent() {
+            val e = instance
+            if (e == null) {
+                pendingIntentAccept = true
+                return
+            }
+            suppressIncomingFor(15_000)
+            e.pendingAccept = true
+            e.answer()
+        }
+
+        fun onRestoreIntent() {
+            val e = instance
+            if (e == null) {
+                pendingIntentRestore = true
+                return
+            }
+            e.restoreCallUi()
+        }
+
+        /** Runs the actions that arrived before [instance] existed. */
+        internal fun replayPendingIntents() {
+            if (pendingIntentAccept) {
+                pendingIntentAccept = false
+                onAcceptIntent()
+            }
+            if (pendingIntentRestore) {
+                pendingIntentRestore = false
+                onRestoreIntent()
+            }
+        }
 
         /** Oldest ids are dropped past this; only recent ones can still poll in. */
         private const val MAX_IGNORED_CALLS = 200

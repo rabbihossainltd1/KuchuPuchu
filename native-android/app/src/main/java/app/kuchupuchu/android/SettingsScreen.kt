@@ -720,6 +720,31 @@ private fun PermissionsSection() {
             }
         }
     }
+    // Owner round 32 (item 9): Android 14+ turned USE_FULL_SCREEN_INTENT into
+    // a special access that a sideloaded app may not hold by default. Without
+    // it the incoming-call card cannot take the screen over (it stays a
+    // heads-up while the phone is locked / another app is in front) — one of
+    // the "call screen ashe na" cases. Same row style as the permissions above;
+    // the toggle deep-links to the system page for this app (both directions).
+    if (android.os.Build.VERSION.SDK_INT >= 34) {
+        val fsi =
+            remember(gen) {
+                runCatching {
+                    (ctx.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager)
+                        .canUseFullScreenIntent()
+                }.getOrDefault(true)
+            }
+        ToggleRow(Icons.Filled.Call, "Full-screen calls", fsi) {
+            runCatching {
+                ctx.startActivity(
+                    android.content.Intent(
+                        android.provider.Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
+                        android.net.Uri.parse("package:${ctx.packageName}"),
+                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }.onFailure { openAppSettings(ctx) }
+        }
+    }
     Spacer(Modifier.height(6.dp))
 }
 

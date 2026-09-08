@@ -216,14 +216,11 @@ class MainActivity : ComponentActivity() {
         // Accept) brings the fullscreen call back — a plain launch, a chat
         // notification or a share intent must not jump into the call; the
         // "Return to call" banner (item 33) is the way back from anywhere.
-        if (intent.getBooleanExtra("kp_return_call", false)) CallEngine.instance?.restoreCallUi()
-        if (intent.getBooleanExtra("kp_accept", false)) {
-            CallEngine.instance?.let {
-                CallEngine.suppressIncomingFor(15_000)
-                it.pendingAccept = true
-                it.answer()
-            }
-        }
+        // Owner round 32 (item 9): both go through the companion, which queues
+        // the action when the engine is not built yet (cold start: the starter
+        // thread below is still constructing it) and replays it on start().
+        if (intent.getBooleanExtra("kp_return_call", false)) CallEngine.onRestoreIntent()
+        if (intent.getBooleanExtra("kp_accept", false)) CallEngine.onAcceptIntent()
         intent.getStringExtra("kp_chat")?.let { pendingChat.value = it }
         // Missed-call "Call back" action: start the call right away — with the
         // same contextual mic/camera gate every other call entry point uses.
@@ -242,9 +239,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        // Incoming-call notification tapped: the always-running engine's
-        // next poll (~1s) surfaces the ringing screen with Accept/Decline —
-        // nothing else to do here.
+        // Incoming-call notification tapped (plain tap, or the OS payload card
+        // with kp_call): ask the engine for an immediate sync instead of
+        // waiting for the poll timer — on a cold start the engine is not up
+        // yet, and start()'s first tick covers that case.
+        if (intent.hasExtra("kp_call") || intent.action == CALL_ACCEPT) CallEngine.instance?.syncNow()
     }
 
     override fun onResume() {

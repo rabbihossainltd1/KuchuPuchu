@@ -1094,7 +1094,8 @@ const convBetween = (db, a, b) =>
         "native-android/app/src/main/java/app/kuchupuchu/android/MainActivity.kt",
         "utf8",
       ).includes(
-        'if (intent.getBooleanExtra("kp_return_call", false)) CallEngine.instance?.restoreCallUi()',
+        // r32-9: routed through the companion so a cold-start tap is queued.
+        'if (intent.getBooleanExtra("kp_return_call", false)) CallEngine.onRestoreIntent()',
       ),
   );
   check(
@@ -3973,13 +3974,14 @@ const convBetween = (db, a, b) =>
         act.indexOf("override fun onPause"),
       );
       check(
-        "r31-32: onResume never restores the call UI (syncNow only when there is no call); handleIntent restores it ONLY for kp_return_call; the ongoing card's tap carries that flag; the ring path still un-minimizes",
+        "r31-32: onResume never restores the call UI (syncNow only when there is no call); handleIntent restores it ONLY for kp_return_call (r32-9: through the companion, which queues a cold-start tap); the ongoing card's tap carries that flag; the ring path still un-minimizes",
         !resume.includes("restoreCallUi()") &&
           resume.includes("if (engine.active == null) engine.syncNow()") &&
           act.includes(
-            'if (intent.getBooleanExtra("kp_return_call", false)) CallEngine.instance?.restoreCallUi()',
+            'if (intent.getBooleanExtra("kp_return_call", false)) CallEngine.onRestoreIntent()',
           ) &&
-          (act.match(/restoreCallUi\(\)/g) || []).length === 1 &&
+          !act.includes("restoreCallUi()") &&
+          (kt("CallEngine.kt").match(/e\.restoreCallUi\(\)/g) || []).length === 1 &&
           cn.includes('.putExtra("kp_return_call", true),') &&
           kt("CallEngine.kt").includes(
             "minimized = false\n                // Sweep the plain FCM payload card ONCE",
@@ -4376,6 +4378,42 @@ const convBetween = (db, a, b) =>
       !src.includes('proxy: "DENY"') &&
       (notify.match(/\.forEach \{ nm\.cancel\(it\.tag, it\.id\) \}/g) || []).length === 2 &&
       !/\.forEach \{ nm\.cancel\(it\.id\) \}/.test(notify),
+  );
+  // Item 9: the call screen "sometimes" did not open — three cold-start holes.
+  // (a) CallEngine.instance was a plain @Volatile var read during composition:
+  // CallGate composed against null before the starter thread built the engine
+  // and was never told it changed. (b) An Accept / return-to-call tap that
+  // reached handleIntent before the engine existed was `instance?.let { }` —
+  // a silent no-op. (c) Android 14+ makes USE_FULL_SCREEN_INTENT a special
+  // access; without it the ring card cannot take the screen.
+  const eng = kt("CallEngine.kt");
+  const act = kt("MainActivity.kt");
+  const settings = kt("SettingsScreen.kt");
+  check(
+    "r32-9: CallEngine.instance is Compose state (private set); Accept / return-to-call taps go through the companion, are queued when the engine is not built yet and replayed on start(); a ring-card tap asks for an immediate sync",
+    eng.includes(
+      "var instance: CallEngine? by mutableStateOf<CallEngine?>(null)\n            private set",
+    ) &&
+      !/@Volatile\s+var instance/.test(eng) &&
+      eng.includes("fun onAcceptIntent() {") &&
+      eng.includes("fun onRestoreIntent() {") &&
+      eng.includes("internal fun replayPendingIntents() {") &&
+      eng.includes("polling = true\n") &&
+      eng.indexOf("replayPendingIntents()\n", eng.indexOf("polling = true\n")) -
+        eng.indexOf("polling = true\n") <
+        400 &&
+      act.includes('if (intent.getBooleanExtra("kp_accept", false)) CallEngine.onAcceptIntent()') &&
+      act.includes(
+        'if (intent.hasExtra("kp_call") || intent.action == CALL_ACCEPT) CallEngine.instance?.syncNow()',
+      ) &&
+      !act.includes("it.pendingAccept = true"),
+  );
+  check(
+    "r32-9: Permissions screen (API 34+) shows a 'Full-screen calls' toggle backed by canUseFullScreenIntent(), deep-linking to ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT for this package",
+    settings.includes(".canUseFullScreenIntent()") &&
+      settings.includes('ToggleRow(Icons.Filled.Call, "Full-screen calls", fsi)') &&
+      settings.includes("android.provider.Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT") &&
+      settings.includes("if (android.os.Build.VERSION.SDK_INT >= 34) {"),
   );
 }
 
