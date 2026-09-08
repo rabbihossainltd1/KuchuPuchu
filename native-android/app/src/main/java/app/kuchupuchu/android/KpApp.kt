@@ -17,7 +17,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -119,6 +123,20 @@ fun KpApp() {
         if (!authed) {
             LoginScreen { Store.authed.value = true }
         } else {
+            // Owner round 31 (item 33): with a call connected and the call UI
+            // minimised, a "Return to call" strip (timer, one tap) sits ABOVE
+            // every screen. While it is up it owns the status-bar inset, so the
+            // screens' own statusBarsPadding() collapses to zero instead of
+            // stacking under it.
+            val callEngine = CallEngine.instance
+            val bannerUp = callEngine != null && callEngine.active != null && callEngine.minimized
+            Column(Modifier.fillMaxSize()) {
+              ReturnToCallBanner()
+              Box(
+                  Modifier
+                      .fillMaxSize()
+                      .then(if (bannerUp) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier),
+              ) {
             NavHost(
                 navController = nav,
                 startDestination = "main",
@@ -192,6 +210,8 @@ fun KpApp() {
                 composable("chatmedia/{id}") { entry ->
                     ChatMediaScreen(nav, entry.arguments?.getString("id") ?: "")
                 }
+            }
+              }
             }
             // Call screens float above everything while a call is live.
             CallGate()

@@ -381,7 +381,11 @@ object CallNotify {
             PendingIntent.getActivity(
                 ctx,
                 4,
-                Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK),
+                Intent(ctx, MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
+                    // Owner round 31 (item 32): this tap is the one plain
+                    // launch that DOES return to the fullscreen call.
+                    .putExtra("kp_return_call", true),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
         val end = PendingIntent.getBroadcast(

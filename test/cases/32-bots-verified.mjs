@@ -1093,7 +1093,9 @@ const convBetween = (db, a, b) =>
       readFileSync(
         "native-android/app/src/main/java/app/kuchupuchu/android/MainActivity.kt",
         "utf8",
-      ).includes("CallEngine.instance?.restoreCallUi()"),
+      ).includes(
+        'if (intent.getBooleanExtra("kp_return_call", false)) CallEngine.instance?.restoreCallUi()',
+      ),
   );
   check(
     "r18-4/r19-4: archive pull works ON TOP OF ROWS — pass-through drag observer on the list itself",
@@ -1674,7 +1676,7 @@ const convBetween = (db, a, b) =>
       readFileSync(
         "native-android/app/src/main/java/app/kuchupuchu/android/MainActivity.kt",
         "utf8",
-      ).includes("else engine.syncNow()"),
+      ).includes("if (engine.active == null) engine.syncNow()"),
   );
   check(
     "r25: username editor = LIVE check, green/red border, no icons, no extra instructions",
@@ -3954,6 +3956,51 @@ const convBetween = (db, a, b) =>
           ) &&
           app.includes('composable("statuspick") { StatusPickScreen(nav) }') &&
           app.includes('composable("statusphoto/{arg}") { entry ->'),
+      );
+    }
+
+    // r31-32/33: with a call connected, reopening the app does NOT jump into
+    // the call — only the ongoing card's tap (kp_return_call) / Accept do;
+    // instead a "Return to call" strip with the live timer sits above EVERY
+    // screen while the call UI is minimised, one tap restores it.
+    {
+      const act = kt("MainActivity.kt");
+      const app = kt("KpApp.kt");
+      const cs = kt("CallScreens.kt");
+      const cn = kt("CallNotify.kt");
+      const resume = act.slice(
+        act.indexOf("override fun onResume"),
+        act.indexOf("override fun onPause"),
+      );
+      check(
+        "r31-32: onResume never restores the call UI (syncNow only when there is no call); handleIntent restores it ONLY for kp_return_call; the ongoing card's tap carries that flag; the ring path still un-minimizes",
+        !resume.includes("restoreCallUi()") &&
+          resume.includes("if (engine.active == null) engine.syncNow()") &&
+          act.includes(
+            'if (intent.getBooleanExtra("kp_return_call", false)) CallEngine.instance?.restoreCallUi()',
+          ) &&
+          (act.match(/restoreCallUi\(\)/g) || []).length === 1 &&
+          cn.includes('.putExtra("kp_return_call", true),') &&
+          kt("CallEngine.kt").includes(
+            "minimized = false\n                // Sweep the plain FCM payload card ONCE",
+          ),
+      );
+      check(
+        "r31-33: ReturnToCallBanner — composes only while a call is live AND minimised; Green strip, Call/Videocam icon, 'Return to call', live clock (Ringing / Calling… / Connecting… / On hold states); tap = restoreCallUi; mounted ABOVE the NavHost for every screen and it takes over the status-bar inset",
+        cs.includes("fun ReturnToCallBanner() {") &&
+          cs.includes("if (!engine.minimized) return") &&
+          cs.includes('"Return to call",') &&
+          cs.includes("else -> clockText(secs)") &&
+          cs.includes('engine.onHold -> "On hold"') &&
+          cs.includes("engine.restoreCallUi()\n            }\n            .statusBarsPadding()") &&
+          app.includes("ReturnToCallBanner()\n              Box(") &&
+          app.includes(
+            "val bannerUp = callEngine != null && callEngine.active != null && callEngine.minimized",
+          ) &&
+          app.includes(
+            ".then(if (bannerUp) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier),",
+          ) &&
+          app.indexOf("ReturnToCallBanner()") < app.indexOf("NavHost("),
       );
     }
 

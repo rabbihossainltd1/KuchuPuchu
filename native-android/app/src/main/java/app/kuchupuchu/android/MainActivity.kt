@@ -212,9 +212,11 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         if (intent == null) return
-        // Tapping the ongoing notification restores a previously minimized
-        // Compose call overlay without recreating the call/session.
-        CallEngine.instance?.restoreCallUi()
+        // Owner round 31 (item 32): only the ONGOING-CALL notification (and
+        // Accept) brings the fullscreen call back — a plain launch, a chat
+        // notification or a share intent must not jump into the call; the
+        // "Return to call" banner (item 33) is the way back from anywhere.
+        if (intent.getBooleanExtra("kp_return_call", false)) CallEngine.instance?.restoreCallUi()
         if (intent.getBooleanExtra("kp_accept", false)) {
             CallEngine.instance?.let {
                 CallEngine.suppressIncomingFor(15_000)
@@ -271,10 +273,13 @@ class MainActivity : ComponentActivity() {
         // is a network call), once per foreground, and the server only writes when the
         // expiry is actually near — so this costs a request, not a D1 row.
         Thread { runCatching { Api.refreshSession() } }.start()
-        // Owner round 16: a live call NEVER lives in just the notification —
-        // coming back to the app brings the fullscreen call UI with it.
+        // Owner round 31 (item 32, reverses round 16): coming back to the app
+        // with a call connected must NOT auto-jump to the call screen — the
+        // user picks: the top "Return to call" banner (item 33) or the ongoing
+        // notification. A RINGING call still takes the screen (CallEngine
+        // un-minimizes on a new ring, unchanged).
         CallEngine.instance?.let { engine ->
-            if (engine.active != null) engine.restoreCallUi() else engine.syncNow()
+            if (engine.active == null) engine.syncNow()
         }
         // Returning to the app triggers an instant re-sync of the open screens
         // (they observe ScreenStore.poke) — no waiting for the next poll.

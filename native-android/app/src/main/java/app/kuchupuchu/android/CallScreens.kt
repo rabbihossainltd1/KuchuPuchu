@@ -1135,6 +1135,61 @@ fun VideoRenderer(engine: CallEngine, remote: Boolean, fit: Boolean = false, pip
     }
 }
 
+/**
+ * Owner round 31 (item 33): with a call connected and the call screen
+ * minimised, EVERY screen carries this strip at the very top — name, live
+ * timer, one tap returns to the fullscreen call. It composes to nothing when
+ * there is no call or the call UI is already up, so the layout underneath
+ * is untouched in the normal case.
+ */
+@Composable
+fun ReturnToCallBanner() {
+    val engine = CallEngine.instance ?: return
+    val call = engine.active ?: return
+    if (!engine.minimized) return
+    val haptics = rememberHaptics()
+    val secs = rememberTick(call.startedAt, call.connecting || engine.onHold)
+    val connected = call.status == "ACTIVE" || engine.hasRemote
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(Green)
+            .clickable {
+                haptics.tap()
+                engine.restoreCallUi()
+            }
+            .statusBarsPadding()
+            .padding(horizontal = 16.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            if (call.kind == "VIDEO") Icons.Filled.Videocam else Icons.Filled.Call,
+            contentDescription = null,
+            tint = Color.White,
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            "Return to call",
+            color = Color.White,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            when {
+                !connected -> if (call.incoming) "Ringing" else "Calling…"
+                call.connecting || call.startedAt <= 0L -> "Connecting…"
+                engine.onHold -> "On hold"
+                else -> clockText(secs)
+            },
+            color = Color.White,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
 @Composable
 private fun rememberTick(startedAt: Long, paused: Boolean): Int {
     var secs by remember(startedAt) { mutableIntStateOf(0) }
