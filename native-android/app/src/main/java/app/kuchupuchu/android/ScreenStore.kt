@@ -64,6 +64,34 @@ object ScreenStore {
     fun isArchived(id: String): Boolean = id in archivedConvIds
 
     /**
+     * Owner round 32 (item 12): pinned chats — local, persisted like the
+     * archive. Pinned rows sort to the top of the main list (newest first
+     * within the pinned block). Observable so the list re-sorts at once.
+     */
+    val pinnedConvIds = mutableStateListOf<String>()
+    private var pinnedFile: File? = null
+
+    fun isPinned(id: String): Boolean = id in pinnedConvIds
+
+    fun setPinned(id: String, pinned: Boolean) {
+        if (id.isBlank()) return
+        if (pinned) {
+            if (id !in pinnedConvIds) pinnedConvIds.add(id)
+        } else {
+            pinnedConvIds.remove(id)
+        }
+        runCatching { pinnedFile?.writeText(JSONObject().put("ids", JSONArray(pinnedConvIds.toList())).toString()) }
+    }
+
+    private fun loadPinned() {
+        runCatching {
+            val raw = pinnedFile?.takeIf { it.exists() }?.readText() ?: return@runCatching
+            val arr = JSONObject(raw).optJSONArray("ids") ?: return@runCatching
+            for (i in 0 until arr.length()) arr.optString(i).takeIf { it.isNotBlank() && it !in pinnedConvIds }?.let { pinnedConvIds.add(it) }
+        }
+    }
+
+    /**
      * Owner round 31 (item 26): "Hide chat" — the SERVER flag (members.hidden,
      * `hidden` on every list row) so the worker never pushes for it. A hidden
      * chat is gone from the main list, never alerts (no card, no in-app tone)
@@ -286,8 +314,10 @@ object ScreenStore {
         hiddenFile = File(ctx.filesDir, "kp-hidden.json")
         archiveFile = File(ctx.filesDir, "kp-archive.json")
         statusHiddenFile = File(ctx.filesDir, "kp-statushidden.json")
+        pinnedFile = File(ctx.filesDir, "kp-pinned.json")
         loadHidden()
         loadArchive()
+        loadPinned()
         loadStatusHidden()
         // Owner round 19 (cold-reopen lag): this file grows with use (message
         // caches for every chat ever opened), and parsing it on the MAIN

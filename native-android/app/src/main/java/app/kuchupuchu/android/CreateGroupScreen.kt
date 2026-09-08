@@ -60,12 +60,24 @@ import org.json.JSONObject
  * talks to the real endpoint: POST /api/conversations/group {title, memberIds}.
  */
 @Composable
-fun CreateGroupScreen(nav: NavController) {
+fun CreateGroupScreen(nav: NavController, with: String = "") {
     val scope = rememberCoroutineScope()
     var title by remember { mutableStateOf("") }
     var query by remember { mutableStateOf("") }
     val found = remember { mutableStateListOf<JSONObject>() }
-    val picked = remember { mutableStateListOf<JSONObject>() }
+    // Owner round 32 (item 12): "Create group with …" arrives with the ticked
+    // 1:1 peers already picked (resolved from the chat-list rows).
+    val picked = remember {
+        mutableStateListOf<JSONObject>().also { list ->
+            val wanted = with.split(',').map { it.trim() }.filter { it.isNotBlank() && !isKpBot(it) }
+            for (id in wanted) {
+                ScreenStore.convs
+                    .firstOrNull { !it.optBoolean("isGroup") && it.optJSONObject("other")?.optString("id") == id }
+                    ?.optJSONObject("other")
+                    ?.let { u -> if (list.none { it.optString("id") == id }) list.add(u) }
+            }
+        }
+    }
     var searching by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }

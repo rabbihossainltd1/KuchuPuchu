@@ -2337,9 +2337,7 @@ const convBetween = (db, a, b) =>
         "utf8",
       ).includes('SettingRow(Icons.Filled.Favorite, "About us", "") { nav.navigate("about") }') &&
       list.includes('nav.navigate("profile/${Store.myId()}")') &&
-      ["about", "contacts", "newgroup", "settings"].every((r) =>
-        kpapp.includes(`composable("${r}")`),
-      ) &&
+      ["about", "contacts", "settings"].every((r) => kpapp.includes(`composable("${r}")`)) &&
       // r30-1: the new-contact route takes optional prefill args (name, phone).
       kpapp.includes('"newcontact?name={name}&phone={phone}"') &&
       list.includes(
@@ -3309,7 +3307,7 @@ const convBetween = (db, a, b) =>
             ) &&
             row.includes("if (offset < 0f && !archivedMode && !hiddenMode) {") &&
             cl.includes(
-              'val visible = convs.filter { !ScreenStore.isArchived(it.optString("id")) && !it.optBoolean("hidden") }',
+              '.filter { !ScreenStore.isArchived(it.optString("id")) && !it.optBoolean("hidden") }',
             ) &&
             cl.includes(
               'convs.filter { ScreenStore.isArchived(it.optString("id")) && !it.optBoolean("hidden") }',
@@ -5010,6 +5008,58 @@ const convBetween = (db, a, b) =>
         !/ForwardDialog\([\s\S]{0,120}onPick/.test(chat) &&
         !kt("MediaViewer.kt").includes("onPick") &&
         !kt("ChatMediaScreen.kt").includes("onPick"),
+    );
+  }
+  // Item 12: chat-list long-press → rounded-check multi-select + a sheet
+  // (Delete / Mute-Unmute / Pin-Unpin / Create group with <username> / Select);
+  // the top bar swaps to "N selected" with ⋮ reopening the same sheet.
+  {
+    const cl = kt("ChatListScreen.kt");
+    const store = kt("ScreenStore.kt");
+    const kpapp = kt("KpApp.kt");
+    const grp = kt("CreateGroupScreen.kt");
+    const sheet = cl.slice(
+      cl.indexOf("private fun ChatRowSheet("),
+      cl.indexOf("private fun HomeMenuItem("),
+    );
+    const order = [
+      'KpSheetRow(Icons.Filled.Delete, "Delete", tint = Red)',
+      'if (allMuted) "Unmute" else "Mute",',
+      'KpSheetRow(Icons.Filled.PushPin, if (allPinned) "Unpin" else "Pin")',
+      'KpSheetRow(Icons.Filled.GroupAdd, "Create group with $handle")',
+      'KpSheetRow(Icons.Filled.CheckCircle, "Select")',
+    ].map((t) => sheet.indexOf(t));
+    check(
+      "r32-12: chat-list long-press = tick + sheet [Delete, Mute/Unmute, Pin/Unpin, Create group with $handle, Select]; rounded checks in select mode; '<n> selected' bar with X and ⋮ (reopens the sheet); pinned rows sort first (persisted kp-pinned.json); newgroup?with= pre-picks members",
+      cl.includes("internal object ListSelect {") &&
+        cl.includes(".combinedClickable(") &&
+        cl.includes("onLongClick = {") &&
+        cl.includes("ListSelect.sheetFor = conv") &&
+        cl.includes("selecting -> ListSelect.toggle(id)") &&
+        cl.includes(
+          "if (ticked) Icon(Icons.Filled.Check, null, tint = ActionBlueInk, modifier = Modifier.size(14.dp))",
+        ) &&
+        cl.includes('"${ListSelect.ids.size} selected",') &&
+        cl.includes(
+          'ListSelect.sheetFor = convs.firstOrNull { it.optString("id") == first } ?: JSONObject().put("id", first)',
+        ) &&
+        cl.includes(
+          "androidx.activity.compose.BackHandler(enabled = selecting) { ListSelect.clear() }",
+        ) &&
+        order.every((i, k) => i >= 0 && (k === 0 || i > order[k - 1])) &&
+        (sheet.match(/KpSheetRow\(/g) || []).length === 5 &&
+        sheet.includes('if (allMuted) "Unmute" else "Mute",') &&
+        sheet.includes('KpSheetRow(Icons.Filled.PushPin, if (allPinned) "Unpin" else "Pin")') &&
+        sheet.includes('KpSheetRow(Icons.Filled.GroupAdd, "Create group with $handle")') &&
+        sheet.includes('nav.navigate("newgroup?with=${peers.joinToString(",")}")') &&
+        sheet.includes(
+          'title = if (ids.size > 1) "Delete ${ids.size} chats?" else "Delete chat?",',
+        ) &&
+        cl.includes('.sortedByDescending { if (it.optString("id") in pinned) 1 else 0 }') &&
+        store.includes("val pinnedConvIds = mutableStateListOf<String>()") &&
+        store.includes('pinnedFile = File(ctx.filesDir, "kp-pinned.json")') &&
+        kpapp.includes('"newgroup?with={with}",') &&
+        grp.includes('fun CreateGroupScreen(nav: NavController, with: String = "") {'),
     );
   }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or

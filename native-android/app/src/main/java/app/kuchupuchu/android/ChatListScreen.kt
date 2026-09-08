@@ -6,6 +6,9 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -55,6 +58,10 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.GroupAdd
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.FloatingActionButton
@@ -66,6 +73,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -300,6 +308,43 @@ fun ChatListScreen(nav: NavController) {
     Box(Modifier.fillMaxSize().background(Cream)) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             /* ---------- top bar ---------- */
+            // Owner round 32 (item 12): while chats are ticked the bar shows
+            // the count, a close (X) and a ⋮ that reopens the SAME sheet.
+            val selecting = tab == 0 && ListSelect.active
+            androidx.activity.compose.BackHandler(enabled = selecting) { ListSelect.clear() }
+            // Leaving the screen ends select mode — nobody returns to a stale
+            // set of ticks.
+            androidx.compose.runtime.DisposableEffect(Unit) { onDispose { ListSelect.clear() } }
+            if (selecting) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(start = 6.dp, end = 6.dp, top = 10.dp, bottom = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = { haptics.tap(); ListSelect.clear() }) {
+                        Icon(Icons.Filled.Close, "Close", tint = Ink, modifier = Modifier.size(24.dp))
+                    }
+                    Text(
+                        "${ListSelect.ids.size} selected",
+                        fontSize = 19.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Ink,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(
+                        enabled = ListSelect.ids.isNotEmpty(),
+                        onClick = {
+                            haptics.tap()
+                            val first = ListSelect.ids.firstOrNull() ?: return@IconButton
+                            ListSelect.sheetFor = convs.firstOrNull { it.optString("id") == first } ?: JSONObject().put("id", first)
+                        },
+                    ) {
+                        Icon(Icons.Filled.MoreVert, "Menu", tint = Ink, modifier = Modifier.size(26.dp))
+                    }
+                }
+            } else {
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -340,6 +385,16 @@ fun ChatListScreen(nav: NavController) {
                     }
                 }
             }
+            }
+            // Owner round 32 (item 12): the long-press / ⋮ sheet.
+            ListSelect.sheetFor?.let { target ->
+                ChatRowSheet(
+                    target = target,
+                    nav = nav,
+                    onChange = ::refresh,
+                    onDismiss = { ListSelect.sheetFor = null },
+                )
+            }
 
             /* ---------- big top tabs ---------- */
             // Owner round 31 (item 26): hidden chats do not count — a badge
@@ -354,8 +409,8 @@ fun ChatListScreen(nav: NavController) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 TopTab(Icons.Filled.Chat, "Chats", tab == 0, unreadTotal, modifier = Modifier.weight(1f)) { haptics.tap(); tab = 0 }
-                TopTab(Icons.Filled.Circle, "Status", tab == 1, dot = unseenStatus, modifier = Modifier.weight(1f)) { haptics.tap(); tab = 1 }
-                TopTab(Icons.Filled.Call, "Calls", tab == 2, modifier = Modifier.weight(1f)) { haptics.tap(); tab = 2 }
+                TopTab(Icons.Filled.Circle, "Status", tab == 1, dot = unseenStatus, modifier = Modifier.weight(1f)) { haptics.tap(); ListSelect.clear(); tab = 1 }
+                TopTab(Icons.Filled.Call, "Calls", tab == 2, modifier = Modifier.weight(1f)) { haptics.tap(); ListSelect.clear(); tab = 2 }
             }
             Box(
                 Modifier
@@ -395,6 +450,28 @@ fun ChatListScreen(nav: NavController) {
                 )
             }
         }
+    }
+}
+
+/**
+ * Owner round 32 (item 12): chat-list multi-select. `ids` = ticked rows;
+ * `sheetFor` = the chat whose long-press sheet is open (null = closed);
+ * `active` = the list is in select mode (rounded checks on every row).
+ * Screen-wide (not per row) so the top bar can swap to the selection bar.
+ */
+internal object ListSelect {
+    val ids = mutableStateListOf<String>()
+    var active by mutableStateOf(false)
+    var sheetFor by mutableStateOf<JSONObject?>(null)
+
+    fun clear() {
+        ids.clear()
+        active = false
+        sheetFor = null
+    }
+
+    fun toggle(id: String) {
+        if (id in ids) ids.remove(id) else ids.add(id)
     }
 }
 
@@ -867,7 +944,13 @@ private fun ChatListBody(
     // Archived chats live in their own list (pull down on this list to open).
     // Owner round 31 (item 26): hidden chats leave the list as well — they
     // sit behind the three-finger double-tap (see the detector below).
-    val visible = convs.filter { !ScreenStore.isArchived(it.optString("id")) && !it.optBoolean("hidden") }
+    // Owner round 32 (item 12): pinned chats first (their own recency order),
+    // then everything else exactly as the server ordered it.
+    val pinned = ScreenStore.pinnedConvIds
+    val visible =
+        convs
+            .filter { !ScreenStore.isArchived(it.optString("id")) && !it.optBoolean("hidden") }
+            .sortedByDescending { if (it.optString("id") in pinned) 1 else 0 }
     if (visible.isEmpty()) {
         Box(Modifier.fillMaxSize().then(swipeFocusList { nav.navigate("hidden") }), contentAlignment = Alignment.Center) {
             if (loading) {
@@ -1218,8 +1301,15 @@ private fun friendlyPreview(raw: String): String {
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = false, onCollapse: () -> Unit = {}) {
     val id = conv.optString("id")
+    val haptics = rememberHaptics()
+    // Owner round 32 (item 12): long-press = tick this row + open the sheet;
+    // in select mode a tap toggles the tick instead of opening the chat.
+    val selecting = ListSelect.active
+    val ticked = id in ListSelect.ids
+    val pinned = ScreenStore.isPinned(id)
     val isGroup = conv.optBoolean("isGroup")
     val other = conv.optJSONObject("other")
     val name =
@@ -1239,12 +1329,43 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
     Row(
         Modifier
             .fillMaxSize()
-            .clickable {
-                if (revealed) onCollapse() else nav.navigate("chat/$id")
-            }
+            .background(if (ticked) ActionBlue.copy(alpha = 0.10f) else Color.Transparent)
+            .combinedClickable(
+                onClick = {
+                    when {
+                        revealed -> onCollapse()
+                        selecting -> ListSelect.toggle(id)
+                        else -> nav.navigate("chat/$id")
+                    }
+                },
+                onLongClick = {
+                    if (revealed) {
+                        onCollapse()
+                        return@combinedClickable
+                    }
+                    haptics.heavy()
+                    ListSelect.active = true
+                    if (id !in ListSelect.ids) ListSelect.ids.add(id)
+                    ListSelect.sheetFor = conv
+                },
+            )
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (selecting) {
+            // Rounded check — filled when ticked, hollow ring otherwise.
+            Box(
+                Modifier
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .background(if (ticked) ActionBlue else Color.Transparent)
+                    .border(1.5.dp, if (ticked) ActionBlue else Muted, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (ticked) Icon(Icons.Filled.Check, null, tint = ActionBlueInk, modifier = Modifier.size(14.dp))
+            }
+            Spacer(Modifier.width(12.dp))
+        }
         Box {
             // Owner round 26: a contact with a live status wears the status
             // ring right in the chat list ("user status share korleo chat
@@ -1309,6 +1430,11 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
                         Spacer(Modifier.width(5.dp))
                         ModeratorBadge()
                     }
+                }
+                if (pinned) {
+                    Spacer(Modifier.width(6.dp))
+                    Icon(Icons.Filled.PushPin, contentDescription = "Pinned", tint = Muted, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(2.dp))
                 }
                 if (muted) {
                     Spacer(Modifier.width(6.dp))
@@ -1376,6 +1502,100 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Owner round 32 (item 12): the chat-row sheet — Delete / Mute-Unmute /
+ * Pin-Unpin / Create group with (username) / Select. Delete, mute and pin act
+ * on EVERY ticked chat (the long-pressed one included); "Create group with"
+ * names the long-pressed / first-ticked peer and pre-fills the group picker
+ * with all ticked 1:1 peers; "Select" keeps the list in select mode.
+ */
+@Composable
+private fun ChatRowSheet(
+    target: JSONObject,
+    nav: NavController,
+    onChange: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
+    val haptics = rememberHaptics()
+    val ids = ListSelect.ids.toList().ifEmpty { listOf(target.optString("id")) }
+    val rows = ids.mapNotNull { id -> ScreenStore.convs.firstOrNull { it.optString("id") == id } }
+    val allMuted = rows.isNotEmpty() && rows.all { it.optBoolean("muted") }
+    val allPinned = ids.all { ScreenStore.isPinned(it) }
+    val other = target.optJSONObject("other")
+    val otherId = other?.optString("id").orEmpty()
+    val handle = other?.optText("username").orEmpty().ifBlank { other?.optText("displayName").orEmpty() }
+    val canGroup = !target.optBoolean("isGroup") && otherId.isNotBlank() && !isKpBot(otherId)
+    var confirmDelete by remember { mutableStateOf(false) }
+    if (confirmDelete) {
+        KpConfirmSheet(
+            title = if (ids.size > 1) "Delete ${ids.size} chats?" else "Delete chat?",
+            confirmLabel = "Delete",
+            danger = true,
+            onDismiss = { confirmDelete = false },
+            onConfirm = {
+                confirmDelete = false
+                haptics.heavy()
+                ids.forEach { ScreenStore.dropConv(it) }
+                android.widget.Toast.makeText(ctx, if (ids.size > 1) "Chats deleted" else "Chat deleted", android.widget.Toast.LENGTH_SHORT).show()
+                ListSelect.clear()
+                onChange()
+                scope.launch {
+                    for (id in ids) {
+                        runCatching { withContext(Dispatchers.IO) { Api.delete("/api/conversations/$id") } }
+                    }
+                }
+            },
+        )
+        return
+    }
+    KpSheet(onDismiss = onDismiss) {
+        KpSheetRow(Icons.Filled.Delete, "Delete", tint = Red) { confirmDelete = true }
+        KpSheetRow(
+            if (allMuted) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
+            if (allMuted) "Unmute" else "Mute",
+        ) {
+            haptics.confirm()
+            val next = !allMuted
+            ids.forEach { ScreenStore.setMuted(it, next) }
+            ListSelect.clear()
+            scope.launch {
+                for (id in ids) {
+                    runCatching {
+                        withContext(Dispatchers.IO) { Api.post("/api/conversations/$id/mute", JSONObject().put("muted", next)) }
+                    }.onFailure { ScreenStore.setMuted(id, !next) }
+                }
+            }
+        }
+        KpSheetRow(Icons.Filled.PushPin, if (allPinned) "Unpin" else "Pin") {
+            haptics.confirm()
+            ids.forEach { ScreenStore.setPinned(it, !allPinned) }
+            ListSelect.clear()
+        }
+        if (canGroup) {
+            KpSheetRow(Icons.Filled.GroupAdd, "Create group with $handle") {
+                haptics.tap()
+                // Every ticked 1:1 peer rides along as a pre-picked member.
+                val peers =
+                    rows.filter { !it.optBoolean("isGroup") }
+                        .mapNotNull { it.optJSONObject("other")?.optString("id") }
+                        .filter { it.isNotBlank() && !isKpBot(it) }
+                        .ifEmpty { listOf(otherId) }
+                        .distinct()
+                ListSelect.clear()
+                nav.navigate("newgroup?with=${peers.joinToString(",")}")
+            }
+        }
+        KpSheetRow(Icons.Filled.CheckCircle, "Select") {
+            haptics.tap()
+            ListSelect.active = true
+            if (target.optString("id") !in ListSelect.ids) ListSelect.ids.add(target.optString("id"))
+            onDismiss()
         }
     }
 }

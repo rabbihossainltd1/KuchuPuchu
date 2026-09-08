@@ -147,7 +147,14 @@ fun KpApp() {
             ) {
                 composable("main") { ChatListScreen(nav) }
                 composable("newchat") { NewChatScreen(nav) }
-                composable("newgroup") { CreateGroupScreen(nav) }
+                // Owner round 32 (item 12): `with` = comma-separated user ids
+                // pre-picked as members ("Create group with …" from the list).
+                composable(
+                    "newgroup?with={with}",
+                    arguments = listOf(navArgument("with") { defaultValue = "" }),
+                ) { entry ->
+                    CreateGroupScreen(nav, entry.arguments?.getString("with") ?: "")
+                }
                 composable("chat/{id}") { entry ->
                     val id = entry.arguments?.getString("id") ?: ""
                     ChatScreen(nav, id)
