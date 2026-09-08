@@ -1854,11 +1854,11 @@ const convBetween = (db, a, b) =>
       ).length === 1,
   );
   check(
-    "r27: status composer uploads with the real mime + a proper name (readDocument = (mime, bytes))",
+    "r27/r31-30: status composer uploads the cut clip as video/mp4 under a proper name (the export always writes mp4)",
     readFileSync(
       "native-android/app/src/main/java/app/kuchupuchu/android/StatusPhotoScreen.kt",
       "utf8",
-    ).includes('Api.upload("status.mp4", mime.ifBlank { "video/mp4" }, bytes)'),
+    ).includes('Api.upload("status.mp4", "video/mp4", bytes)'),
   );
   check(
     "r27: status clip cache is READ (no re-download per view) + streamed to disk + 24h prune",
@@ -2481,7 +2481,8 @@ const convBetween = (db, a, b) =>
       !kt("CreateGroupScreen.kt").includes("Add members — search by name or username") &&
       !kt("SearchScreen.kt").includes("Search people, chats, messages") &&
       !kt("NewChatScreen.kt").includes('"Name or username"') &&
-      kt("StatusPhotoScreen.kt").includes('label = { Text("Caption") }'),
+      // r31-30: the status share screen has NO caption bar any more.
+      !kt("StatusPhotoScreen.kt").includes('Text("Caption")'),
   );
   // r31-5: real groups — group profile screen, admin = creator, add/kick/rename/picture,
   // the create screen lists chat-list peers immediately, group avatar cache token "g:".
@@ -3844,6 +3845,70 @@ const convBetween = (db, a, b) =>
         (chat.match(/selected\.addAll\(albumIds\)/g) || []).length === 3 &&
         chat.includes("if (ids.first() in selected) selected.removeAll(ids.toSet())"),
     );
+
+    // r31-30: the status share screen — full-bleed dark stage, Close on top, ONE
+    // Send button, no caption bar; video trim (first minute preselected, window
+    // slides anywhere, never over a minute) + crop for photo AND video; the
+    // clip is cut on the phone (GPU re-encode, sample-copy fallback) and only
+    // the result is uploaded.
+    {
+      const share = kt("StatusPhotoScreen.kt");
+      const exp = kt("VideoExport.kt");
+      const plan = readFileSync(
+        "native-android/app/src/test/java/app/kuchupuchu/android/VideoPlanTest.kt",
+        "utf8",
+      );
+      check(
+        "r31-30: share screen — no caption field / Post / 'Choose photo or video' buttons; dark stage + Close + one Send; the >60s rejection is gone",
+        !share.includes("OutlinedTextField(") &&
+          !share.includes('Text("Caption")') &&
+          !share.includes('GoldBtn("Post")') &&
+          !share.includes('GoldBtn("Choose photo or video")') &&
+          !share.includes("Video status can be at most 1 minute.") &&
+          share.includes("Box(Modifier.fillMaxSize().background(Color.Black)) {") &&
+          share.includes('Icon(Icons.Filled.Close, "Close", tint = Color.White)') &&
+          share.includes('contentDescription = if (cropping) "Done" else "Send",') &&
+          share.includes('.put("text", ""),'),
+      );
+      check(
+        "r31-30: video — first minute preselected (VideoPlan.defaultWindow), a trim strip with slide/start/end handles, a crop overlay with Original/9:16/1:1/Free, the cut clip's real length goes up as `seconds`",
+        share.includes("val (s, e) = VideoPlan.defaultWindow(src.durationMs)") &&
+          share.includes("private fun TrimStrip(") &&
+          share.includes("1 -> VideoPlan.moveStart(s, e, durationMs, s + deltaMs)") &&
+          share.includes("2 -> VideoPlan.moveEnd(s, e, durationMs, e + deltaMs)") &&
+          share.includes("3 -> VideoPlan.slide(s, e, durationMs, deltaMs)") &&
+          share.includes("private fun CropOverlay(") &&
+          share.includes('listOf("Original", "9:16", "1:1", "Free").forEach { name ->') &&
+          share.includes('.put("seconds", ((e - s + 500L) / 1000L).toInt().coerceAtLeast(1))') &&
+          share.includes("VideoExport.export(ctx, uri, start, end, crop, out)") &&
+          share.includes("VideoExport.passthrough(ctx, uri, start, end, out)") &&
+          share.includes(
+            "if (!VideoPlan.needsTranscode(crop, start, end, src.durationMs, size, mime)) {",
+          ),
+      );
+      check(
+        "r31-30: VideoExport — MediaExtractor → MediaCodec decoder on a GL texture → crop/rotate quad → surface encoder → MediaMuxer, audio copied inside the window; MAX_STATUS_MS = 60_000; the JVM test pins the maths",
+        exp.includes("const val MAX_STATUS_MS = 60_000L") &&
+          exp.includes("fun texCoords(rotation: Int, crop: CropBox?): FloatArray {") &&
+          exp.includes("vf.setInteger(MediaFormat.KEY_ROTATION, 0)") &&
+          exp.includes("MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface") &&
+          exp.includes("enc.createInputSurface()") &&
+          exp.includes("EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, ptsNs)") &&
+          exp.includes("val render = info.size > 0 && pts >= startUs && pts <= endUs") &&
+          exp.includes("copyAudio(ctx, uri, audioTrack, audioMuxTrack, startUs, endUs, mux)") &&
+          exp.includes(
+            "fun passthrough(ctx: Context, uri: Uri, startMs: Long, endMs: Long, out: File) {",
+          ) &&
+          plan.includes("class VideoPlanTest") &&
+          plan.includes("VideoPlan.defaultWindow(185_000L)"),
+      );
+      check(
+        "r31-30: the status viewer honours the rotation tag when sizing the clip box",
+        kt("StatusScreens.kt").includes(
+          "if (w > 0f && h > 0f) aspect = if (rot == 90 || rot == 270) h / w else w / h",
+        ),
+      );
+    }
 
     // Every cream / warm-white literal outside Theme.kt and the login screen
     // (which the owner excluded from theme work) must be gone from the

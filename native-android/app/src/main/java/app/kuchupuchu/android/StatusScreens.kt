@@ -1384,7 +1384,11 @@ private fun StatusVideoPlayer(
                 r.setDataSource(p)
                 val w = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toFloatOrNull() ?: 0f
                 val h = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toFloatOrNull() ?: 0f
-                if (w > 0f && h > 0f) aspect = w / h
+                // Owner round 31 (item 30): the coded size ignores the rotation
+                // tag — a phone clip recorded portrait is 1920x1080 + 90°, and
+                // the player rotates it, so the box must be portrait too.
+                val rot = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+                if (w > 0f && h > 0f) aspect = if (rot == 90 || rot == 270) h / w else w / h
             }
             runCatching { r.release() }
         }
