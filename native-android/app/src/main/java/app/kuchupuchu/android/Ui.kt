@@ -464,13 +464,16 @@ fun KpAvatar(
                 // Default "no photo" placeholder: light circle + person glyph.
                 // Also visible WHILE a photo decodes/downloads, so the circle
                 // is never just an empty ring.
+                // Owner round 32 (item 39): the glyph sits in the CENTRE of
+                // the circle (it was pinned to the bottom edge, so every
+                // photo-less avatar looked cut off / dropped).
                 Icon(
                     Icons.Filled.Person,
                     contentDescription = name,
                     tint = Color(0xFFC9C5BE),
                     modifier = Modifier
-                        .size(inner * 0.75f)
-                        .align(Alignment.BottomCenter),
+                        .size(inner * 0.62f)
+                        .align(Alignment.Center),
                 )
             }
             when {

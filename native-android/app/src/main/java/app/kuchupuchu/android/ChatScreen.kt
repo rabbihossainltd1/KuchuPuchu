@@ -3474,14 +3474,18 @@ private fun MessageRow(
                             onDragCancel = { replyDrag = 0f },
                         )
                     }
-                    .widthIn(min = 72.dp, max = bubbleMax)
+                    .widthIn(min = if (emojiOnly > 0) 0.dp else 72.dp, max = bubbleMax)
                     .wrapContentWidth()
                     // Owner round 10: the same soft 3D lift the call buttons
                     // have — bubbles float on the wallpaper now.
-                    .shadow(2.dp, bubbleShape)
+                    // Owner round 32 (item 8): an emoji-only message has NO
+                    // bubble at all — no lift, no fill — the glyph sits on the
+                    // wallpaper with its stamp under it.
+                    .then(if (emojiOnly > 0) Modifier else Modifier.shadow(2.dp, bubbleShape))
                     .clip(bubbleShape)
                     .background(
                         when {
+                            emojiOnly > 0 -> Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
                             // Deleted tombstones sit in a flat, greyed bubble.
                             m.optString("kind") == "DELETED" ->
                                 Brush.linearGradient(listOf(Color(0xFFB9B3A9), Color(0xFFB9B3A9)))
@@ -3573,11 +3577,14 @@ private fun MessageRow(
                             color = Color(0xFF4A463F),
                         )
                         else -> if (emojiOnly > 0) {
+                            // Owner round 32 (item 8): the stamp row sits in the
+                            // 15 dp bottom band below the glyph (never over it);
+                            // a little end room keeps a wide tick row clear too.
                             Text(
                                 m.optText("body").trim(),
                                 fontSize = if (emojiOnly == 1) 44.sp else 34.sp,
                                 lineHeight = if (emojiOnly == 1) 52.sp else 40.sp,
-                                modifier = Modifier.padding(end = 2.dp, bottom = 2.dp),
+                                modifier = Modifier.padding(start = 2.dp, end = if (mine) 30.dp else 10.dp, bottom = 3.dp),
                             )
                         } else {
                             //   runs glue to the last word, so the stamp's
@@ -3612,11 +3619,13 @@ private fun MessageRow(
                     Text(
                         msgStamp(m.optString("createdAt")),
                         fontSize = 10.sp,
-                        color = if (mine) Color(0xD9FFFFFF) else stampInk,
+                        // r32-8: no bubble under an emoji — the stamp reads in
+                        // the wallpaper's ink instead of bubble-white.
+                        color = if (mine && emojiOnly == 0) Color(0xD9FFFFFF) else stampInk,
                     )
                     if (mine) {
                         Spacer(Modifier.width(3.dp))
-                        TickIcon(m, pendingEcho, otherReadAt)
+                        TickIcon(m, pendingEcho, otherReadAt, onWallpaper = emojiOnly > 0, ink = stampInk)
                     }
                 }
             }
@@ -5132,17 +5141,26 @@ private fun ThemeDialog(current: String, onClose: () -> Unit, onPick: (String) -
 }
 
 @Composable
-private fun TickIcon(m: JSONObject, pendingEcho: Boolean, otherReadAt: String?) {
+private fun TickIcon(
+    m: JSONObject,
+    pendingEcho: Boolean,
+    otherReadAt: String?,
+    // r32-8: an emoji-only message has no bubble — the grey ticks take the
+    // stamp ink so they stay visible on a light wallpaper.
+    onWallpaper: Boolean = false,
+    ink: Color = Color(0xB3FFFFFF),
+) {
+    val grey = if (onWallpaper) ink else Color(0xB3FFFFFF)
     if (pendingEcho) {
-        Icon(Icons.Filled.Schedule, "Sending", tint = Color(0xB3FFFFFF), modifier = Modifier.size(12.dp))
+        Icon(Icons.Filled.Schedule, "Sending", tint = grey, modifier = Modifier.size(12.dp))
         return
     }
     val seen = isReadByOther(otherReadAt, m.optString("createdAt"))
     val delivered = m.optIso("deliveredAt") != null
     when {
         seen -> Icon(Icons.Filled.DoneAll, "Seen", tint = Color(0xFF53BDEB), modifier = Modifier.size(13.dp))
-        delivered -> Icon(Icons.Filled.DoneAll, "Delivered", tint = Color(0xB3FFFFFF), modifier = Modifier.size(13.dp))
-        else -> Icon(Icons.Filled.Done, "Sent", tint = Color(0xB3FFFFFF), modifier = Modifier.size(13.dp))
+        delivered -> Icon(Icons.Filled.DoneAll, "Delivered", tint = grey, modifier = Modifier.size(13.dp))
+        else -> Icon(Icons.Filled.Done, "Sent", tint = grey, modifier = Modifier.size(13.dp))
     }
 }
 

@@ -4724,6 +4724,37 @@ const convBetween = (db, a, b) =>
       !chat1516.includes(".height(30.dp)\n                .clip(RoundedCornerShape(2.dp))") &&
       chat1516.includes(".height(22.dp)\n                .clip(RoundedCornerShape(2.dp))"),
   );
+  // Item 8: an emoji-only message has NO bubble (no lift, no fill, no 72 dp
+  // minimum); the stamp sits in the band under the glyph in the wallpaper's
+  // ink, and the ticks follow that ink so they never vanish on a light theme.
+  check(
+    "r32-8: emoji-only TEXT → transparent bubble (no shadow, transparent fill, min width 0), glyph keeps end room for the stamp/ticks, stamp + ticks use the wallpaper ink",
+    chat1516.includes(
+      ".then(if (emojiOnly > 0) Modifier else Modifier.shadow(2.dp, bubbleShape))",
+    ) &&
+      chat1516.includes(
+        "emojiOnly > 0 -> Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))",
+      ) &&
+      chat1516.includes(".widthIn(min = if (emojiOnly > 0) 0.dp else 72.dp, max = bubbleMax)") &&
+      chat1516.includes(
+        "modifier = Modifier.padding(start = 2.dp, end = if (mine) 30.dp else 10.dp, bottom = 3.dp),",
+      ) &&
+      chat1516.includes("color = if (mine && emojiOnly == 0) Color(0xD9FFFFFF) else stampInk,") &&
+      chat1516.includes(
+        "TickIcon(m, pendingEcho, otherReadAt, onWallpaper = emojiOnly > 0, ink = stampInk)",
+      ) &&
+      chat1516.includes("val grey = if (onWallpaper) ink else Color(0xB3FFFFFF)"),
+  );
+  // Item 39: the no-photo person glyph is centred in the avatar circle.
+  check(
+    "r32-39: KpAvatar placeholder glyph is centred (Alignment.Center, 62 % of the circle), not pinned to the bottom edge",
+    kt("Ui.kt").includes(
+      ".size(inner * 0.62f)\n                        .align(Alignment.Center),",
+    ) &&
+      !kt("Ui.kt").includes(
+        ".size(inner * 0.75f)\n                        .align(Alignment.BottomCenter),",
+      ),
+  );
 }
 
 console.log(lines.join("\n"));
