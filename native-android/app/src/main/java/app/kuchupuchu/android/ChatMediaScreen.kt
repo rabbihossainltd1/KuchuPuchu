@@ -35,10 +35,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -46,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
@@ -64,14 +67,31 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
         KpSecure.privatePeer(ScreenStore.convDetailOf(convId) ?: ScreenStore.convs.firstOrNull { it.optString("id") == convId }) ||
             KpSecure.selfPrivate()
     KpSecure.Guard(privateChat)
+    // Owner round 32 (item 46): the viewer's ⋮ sheet offers Forward here too.
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var forwardMsg by remember { mutableStateOf<JSONObject?>(null) }
     viewer?.let { m ->
         KpPhotoViewer(
             url = messageMediaUrl(m),
             title = "Photo",
             subtitle = viewerStamp(m.optString("createdAt")),
             onClose = { viewer = null },
+            onForward = if (privateChat) null else ({ viewer = null; forwardMsg = m }),
             canSave = !privateChat,
             secure = privateChat,
+        )
+    }
+    forwardMsg?.let { m ->
+        ForwardDialog(
+            onClose = { forwardMsg = null },
+            onPick = { targetId ->
+                forwardMsg = null
+                scope.launch {
+                    val ok = runCatching { forwardMessageTo(targetId, m) }.isSuccess
+                    android.widget.Toast.makeText(ctx, if (ok) "Forwarded" else "Could not forward", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            },
         )
     }
 

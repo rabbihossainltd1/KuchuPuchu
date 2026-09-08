@@ -14,7 +14,6 @@ import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -38,6 +37,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay
@@ -174,6 +174,36 @@ fun KpPhotoViewer(
     val drag = remember { Animatable(0f) }
     var chrome by remember { mutableStateOf(true) }
     var saving by remember { mutableStateOf(false) }
+    // Owner round 32 (item 46): the viewer's ⋮ opens a sheet with Save /
+    // Forward (nothing else); the old always-visible bottom strip is gone.
+    var menuOpen by remember { mutableStateOf(false) }
+    fun savePhoto() {
+        if (saving) return
+        scope.launch {
+            saving = true
+            val bytes =
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        if (url.startsWith("data:")) {
+                            android.util.Base64.decode(url.substringAfter(","), android.util.Base64.DEFAULT)
+                        } else {
+                            Api.download(url)
+                        }
+                    }.getOrNull()
+                }
+            saving = false
+            if (bytes == null) {
+                android.widget.Toast.makeText(ctx, "Could not download the photo", android.widget.Toast.LENGTH_SHORT).show()
+            } else {
+                val saved = FilesUtil.saveImage(ctx, bytes, "kuchupuchu_${System.currentTimeMillis()}.jpg")
+                android.widget.Toast.makeText(
+                    ctx,
+                    if (saved != null) "Saved to Pictures/KuchuPuchu" else "Could not save",
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
+    }
     Dialog(
         onDismissRequest = onClose,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
@@ -315,74 +345,38 @@ fun KpPhotoViewer(
                         }
                     }
                     Spacer(Modifier.width(8.dp))
-                }
-                if (canSave || onForward != null) {
-                    Row(
-                        Modifier
-                            .align(Alignment.BottomCenter)
-                            .graphicsLayer { alpha = chromeAlpha }
-                            .navigationBarsPadding()
-                            .padding(18.dp)
-                            .clip(RoundedCornerShape(22.dp))
-                            .background(Color(0x33000000))
-                            .padding(horizontal = 26.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(28.dp),
-                    ) {
-                        if (canSave) {
-                            ViewerAction(Icons.Filled.Download, "Save", busy = saving) {
-                                if (saving) return@ViewerAction
-                                scope.launch {
-                                    saving = true
-                                    val bytes =
-                                        withContext(Dispatchers.IO) {
-                                            runCatching {
-                                                if (url.startsWith("data:")) {
-                                                    android.util.Base64.decode(url.substringAfter(","), android.util.Base64.DEFAULT)
-                                                } else {
-                                                    Api.download(url)
-                                                }
-                                            }.getOrNull()
-                                        }
-                                    saving = false
-                                    if (bytes == null) {
-                                        android.widget.Toast.makeText(ctx, "Could not download the photo", android.widget.Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        val saved = FilesUtil.saveImage(ctx, bytes, "kuchupuchu_${System.currentTimeMillis()}.jpg")
-                                        android.widget.Toast.makeText(
-                                            ctx,
-                                            if (saved != null) "Saved to Pictures/KuchuPuchu" else "Could not save",
-                                            android.widget.Toast.LENGTH_SHORT,
-                                        ).show()
-                                    }
-                                }
-                            }
-                        }
-                        if (onForward != null) {
-                            ViewerAction(Icons.AutoMirrored.Filled.Send, "Forward") { onForward() }
+                    if (saving) {
+                        CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.padding(end = 14.dp).size(18.dp))
+                    } else if (canSave || onForward != null) {
+                        IconButton(onClick = { menuOpen = true }) {
+                            Icon(Icons.Filled.MoreVert, "More", tint = Color.White, modifier = Modifier.size(24.dp))
                         }
                     }
                 }
             }
         }
     }
+    // The sheet is its own window, composed beside the viewer dialog (a later
+    // window stacks above it) — not nested inside the dialog's composition.
+    if (menuOpen) {
+        MediaMenuSheet(
+            onDismiss = { menuOpen = false },
+            onSave = if (canSave) ({ menuOpen = false; savePhoto() }) else null,
+            onForward = onForward?.let { f -> { menuOpen = false; f() } },
+        )
+    }
 }
 
+/** Owner round 32 (item 46): the viewer / player ⋮ sheet — Save, Forward. */
 @Composable
-private fun ViewerAction(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    busy: Boolean = false,
-    onClick: () -> Unit,
+internal fun MediaMenuSheet(
+    onDismiss: () -> Unit,
+    onSave: (() -> Unit)?,
+    onForward: (() -> Unit)?,
 ) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        IconButton(onClick = onClick) {
-            if (busy) {
-                CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
-            } else {
-                Icon(icon, label, tint = Color.White, modifier = Modifier.size(26.dp))
-            }
-        }
-        Text(label, color = Color.White, fontSize = 12.sp)
+    KpSheet(onDismiss = onDismiss) {
+        if (onSave != null) KpSheetRow(Icons.Filled.Download, "Save", onClick = onSave)
+        if (onForward != null) KpSheetRow(Icons.AutoMirrored.Filled.Send, "Forward", onClick = onForward)
     }
 }
 
@@ -454,6 +448,48 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
     var saved by remember { mutableStateOf(false) }
     var savingClip by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    // Owner round 32 (item 46): ⋮ → Save / Forward sheet (Forward = the
+    // chat picker, then the clip is re-posted by its file key).
+    var menuOpen by remember { mutableStateOf(false) }
+    var forwarding by remember { mutableStateOf(false) }
+    val canForward = m != null && !privateClip && m.optText("fileKey").isNotBlank()
+    fun saveClip() {
+        if (m == null || dest == null || savingClip || saved) return
+        scope.launch {
+            savingClip = true
+            val name = m.optText("fileName").ifBlank { "KuchuPuchu_${System.currentTimeMillis()}.mp4" }
+            val ok =
+                withContext(Dispatchers.IO) {
+                    saveVideoToDownloads(ctx, dest, name, FilesUtil.mimeFor(name, m.optText("fileType")))
+                }
+            savingClip = false
+            saved = ok
+            android.widget.Toast.makeText(
+                ctx,
+                if (ok) "Saved to Downloads" else "Could not save",
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
+    if (menuOpen) {
+        MediaMenuSheet(
+            onDismiss = { menuOpen = false },
+            onSave = if (m != null && dest != null && state == 1 && !privateClip && !saved) ({ menuOpen = false; saveClip() }) else null,
+            onForward = if (canForward) ({ menuOpen = false; forwarding = true }) else null,
+        )
+    }
+    if (forwarding && m != null) {
+        ForwardDialog(
+            onClose = { forwarding = false },
+            onPick = { targetId ->
+                forwarding = false
+                scope.launch {
+                    val ok = runCatching { forwardMessageTo(targetId, m) }.isSuccess
+                    android.widget.Toast.makeText(ctx, if (ok) "Forwarded" else "Could not forward", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            },
+        )
+    }
 
     LaunchedEffect(b64) {
         if (m == null || dest == null) {
@@ -587,30 +623,13 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
                 IconButton(onClick = { setLandscape(!landscape) }) {
                     Icon(Icons.Filled.ScreenRotation, "Rotate", tint = if (landscape) accent else Color.White, modifier = Modifier.size(22.dp))
                 }
-                if (m != null && dest != null && state == 1 && !privateClip) {
-                    IconButton(onClick = {
-                        if (savingClip || saved) return@IconButton
-                        scope.launch {
-                            savingClip = true
-                            val name = m.optText("fileName").ifBlank { "KuchuPuchu_${System.currentTimeMillis()}.mp4" }
-                            val ok =
-                                withContext(Dispatchers.IO) {
-                                    saveVideoToDownloads(ctx, dest, name, FilesUtil.mimeFor(name, m.optText("fileType")))
-                                }
-                            savingClip = false
-                            saved = ok
-                            android.widget.Toast.makeText(
-                                ctx,
-                                if (ok) "Saved to Downloads" else "Could not save",
-                                android.widget.Toast.LENGTH_SHORT,
-                            ).show()
-                        }
-                    }) {
-                        if (savingClip) {
-                            CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
-                        } else {
-                            Icon(if (saved) Icons.Filled.Check else Icons.Filled.Download, "Save", tint = Color.White, modifier = Modifier.size(22.dp))
-                        }
+                if (savingClip) {
+                    CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.padding(end = 14.dp).size(18.dp))
+                } else if (saved) {
+                    Icon(Icons.Filled.Check, "Saved", tint = Color.White, modifier = Modifier.padding(end = 14.dp).size(22.dp))
+                } else if (m != null && !privateClip) {
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Filled.MoreVert, "More", tint = Color.White, modifier = Modifier.size(24.dp))
                     }
                 }
             }

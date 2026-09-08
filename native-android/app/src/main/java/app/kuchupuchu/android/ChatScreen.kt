@@ -1371,69 +1371,10 @@ fun ChatScreen(nav: NavController, convId: String) {
         fun albumMeta(m: JSONObject): JSONObject? =
             if (album != null && isPhotoMsg(m)) JSONObject().put("album", album) else null
         scope.launch {
+            // Owner round 32 (item 46): one shared, off-main forward path (the
+            // viewers use it too).
             for (m in items) {
-                runCatching {
-                    val key = m.optText("fileKey")
-                    when {
-                        key.isNotBlank() ->
-                            Api.post(
-                                "/api/conversations/$targetConvId/messages",
-                                JSONObject()
-                                    .put("kind", "FILE")
-                                    .put("fileKey", key)
-                                    .put("fileName", m.optText("fileName").ifBlank { "File" })
-                                    .put("fileType", m.optText("fileType").ifBlank { "application/octet-stream" })
-                                    .put("fileSize", m.optInt("fileSize"))
-                                    // Owner round 31 (item 27): a forwarded voice note
-                                    // stays a voice note — duration + bars come along.
-                                    .also { body ->
-                                        val vm = m.optJSONObject("meta")
-                                        if (vm?.optBoolean("voice") == true) {
-                                            body.put(
-                                                "meta",
-                                                JSONObject().put("voice", true).put("seconds", vm.optInt("seconds"))
-                                                    .also { mm -> vm.optJSONArray("waveform")?.let { mm.put("waveform", it) } },
-                                            )
-                                        } else if (vm?.optBoolean("document") == true) {
-                                            body.put("meta", JSONObject().put("document", true))
-                                        } else {
-                                            albumMeta(m)?.let { body.put("meta", it) }
-                                        }
-                                    },
-                            )
-                        m.optText("mediaUrl").startsWith("data:") ->
-                            Api.post(
-                                "/api/conversations/$targetConvId/messages",
-                                JSONObject()
-                                    .put("kind", "IMAGE")
-                                    .put("imageData", m.optText("mediaUrl"))
-                                    .also { body -> albumMeta(m)?.let { body.put("meta", it) } },
-                            )
-                        m.optText("mediaUrl").isNotBlank() -> {
-                            // Server-hosted media (photo message): re-upload to the
-                            // target chat so both chats own their own copy.
-                            val bytes = withContext(Dispatchers.IO) { Api.download(m.optText("mediaUrl")) }
-                            val up = withContext(Dispatchers.IO) {
-                                Api.upload(m.optText("fileName").ifBlank { "photo.jpg" }, "image/jpeg", bytes)
-                            }
-                            Api.post(
-                                "/api/conversations/$targetConvId/messages",
-                                JSONObject()
-                                    .put("kind", "FILE")
-                                    .put("fileKey", up.optString("fileKey"))
-                                    .put("fileName", m.optText("fileName").ifBlank { "photo.jpg" })
-                                    .put("fileType", "image/jpeg")
-                                    .put("fileSize", bytes.size)
-                                    .also { body -> albumMeta(m)?.let { body.put("meta", it) } },
-                            )
-                        }
-                        else ->
-                            Api.post(
-                                "/api/conversations/$targetConvId/messages",
-                                JSONObject().put("kind", "TEXT").put("body", m.optText("body")),
-                            )
-                    }
-                }
+                runCatching { forwardMessageTo(targetConvId, m, albumMeta(m)) }
             }
             error = "Forwarded"
         }
@@ -2944,7 +2885,7 @@ private fun EditDialog(original: String, onClose: () -> Unit, onSave: (String) -
 
 /** Pick a conversation to forward the selected message(s) to. */
 @Composable
-private fun ForwardDialog(onClose: () -> Unit, onPick: (String) -> Unit) {
+internal fun ForwardDialog(onClose: () -> Unit, onPick: (String) -> Unit) {
     // Owner round 14: forward was a cramped popup with mismatched colors —
     // now a FULLSCREEN picker sheet: back arrow header, themed background,
     // the whole conversation list to pick from.
@@ -4109,6 +4050,76 @@ private fun ImageMessageRow(
 }
 
 /** A photo row: kind IMAGE, or an image FILE that was not sent as a document. */
+/**
+ * Owner round 32 (item 46): post a copy of [m] into [targetConvId] — used by the
+ * chat's multi-select Forward and by the full-screen photo / video viewers.
+ * Runs on IO: the old in-composable loop issued the POST on the main thread,
+ * which the OS refuses (NetworkOnMainThread), so text forwards silently died
+ * inside runCatching while the "Forwarded" toast still showed.
+ */
+internal suspend fun forwardMessageTo(targetConvId: String, m: JSONObject, albumMeta: JSONObject? = null) {
+    withContext(Dispatchers.IO) {
+        val key = m.optText("fileKey")
+        when {
+            key.isNotBlank() ->
+                Api.post(
+                    "/api/conversations/$targetConvId/messages",
+                    JSONObject()
+                        .put("kind", "FILE")
+                        .put("fileKey", key)
+                        .put("fileName", m.optText("fileName").ifBlank { "File" })
+                        .put("fileType", m.optText("fileType").ifBlank { "application/octet-stream" })
+                        .put("fileSize", m.optInt("fileSize"))
+                        // Owner round 31 (item 27): a forwarded voice note
+                        // stays a voice note — duration + bars come along.
+                        .also { body ->
+                            val vm = m.optJSONObject("meta")
+                            if (vm?.optBoolean("voice") == true) {
+                                body.put(
+                                    "meta",
+                                    JSONObject().put("voice", true).put("seconds", vm.optInt("seconds"))
+                                        .also { mm -> vm.optJSONArray("waveform")?.let { mm.put("waveform", it) } },
+                                )
+                            } else if (vm?.optBoolean("document") == true) {
+                                body.put("meta", JSONObject().put("document", true))
+                            } else {
+                                albumMeta?.let { body.put("meta", it) }
+                            }
+                        },
+                )
+            m.optText("mediaUrl").startsWith("data:") ->
+                Api.post(
+                    "/api/conversations/$targetConvId/messages",
+                    JSONObject()
+                        .put("kind", "IMAGE")
+                        .put("imageData", m.optText("mediaUrl"))
+                        .also { body -> albumMeta?.let { body.put("meta", it) } },
+                )
+            m.optText("mediaUrl").isNotBlank() -> {
+                // Server-hosted media (photo message): re-upload to the
+                // target chat so both chats own their own copy.
+                val bytes = Api.download(m.optText("mediaUrl"))
+                val up = Api.upload(m.optText("fileName").ifBlank { "photo.jpg" }, "image/jpeg", bytes)
+                Api.post(
+                    "/api/conversations/$targetConvId/messages",
+                    JSONObject()
+                        .put("kind", "FILE")
+                        .put("fileKey", up.optString("fileKey"))
+                        .put("fileName", m.optText("fileName").ifBlank { "photo.jpg" })
+                        .put("fileType", "image/jpeg")
+                        .put("fileSize", bytes.size)
+                        .also { body -> albumMeta?.let { body.put("meta", it) } },
+                )
+            }
+            else ->
+                Api.post(
+                    "/api/conversations/$targetConvId/messages",
+                    JSONObject().put("kind", "TEXT").put("body", m.optText("body")),
+                )
+        }
+    }
+}
+
 private fun isPhotoMsg(m: JSONObject): Boolean {
     val kind = m.optString("kind")
     return kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))

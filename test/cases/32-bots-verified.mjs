@@ -2799,7 +2799,10 @@ const convBetween = (db, a, b) =>
         kt("MediaViewer.kt").includes("KpSecure.Guard(secure || !canSave)") &&
         kt("MediaViewer.kt").includes('val privateClip = m?.optBoolean("kpPrivate") == true') &&
         kt("MediaViewer.kt").includes(
-          "if (m != null && dest != null && state == 1 && !privateClip) {",
+          "onSave = if (m != null && dest != null && state == 1 && !privateClip && !saved) ({ menuOpen = false; saveClip() }) else null,",
+        ) &&
+        kt("MediaViewer.kt").includes(
+          'val canForward = m != null && !privateClip && m.optText("fileKey").isNotBlank()',
         ) &&
         kt("ChatMediaScreen.kt").includes("KpSecure.Guard(privateChat)") &&
         readFileSync("src/worker/index.ts", "utf8").includes(
@@ -3851,7 +3854,7 @@ const convBetween = (db, a, b) =>
         chat.includes(
           "val album = if (items.count { isPhotoMsg(it) } >= 2) newAlbumId() else null",
         ) &&
-        (chat.match(/albumMeta\(m\)\?\.let \{ body\.put\("meta", it\) \}/g) || []).length === 3,
+        (chat.match(/albumMeta\?\.let \{ body\.put\("meta", it\) \}/g) || []).length === 3,
     );
     check(
       "r31-29: app — rows sharing meta.album fold into ONE list row (foldAlbums; a group of one stays a photo), drawn by AlbumMessageRow: 2 side by side, 3 = tall + two stacked, 4 = 2×2, 5+ = three tiles + a dimmed fourth 'See all' opening a 4-per-row sheet; select/forward/unsend/delete act on the whole album",
@@ -4944,6 +4947,42 @@ const convBetween = (db, a, b) =>
         !cl.includes("AmberInk") &&
         (calls.match(/lerp\(ActionBlue, Color\.White, 0\.3f\)/g) || []).length === 2 &&
         !/\bGold\b/.test(calls),
+    );
+  }
+  // Item 46: the full-screen photo viewer and the video player carry a ⋮ whose
+  // sheet is exactly Save / Forward (the old bottom action strip is gone);
+  // forwarding runs through ONE off-main helper shared with multi-select.
+  {
+    const mv = kt("MediaViewer.kt");
+    const chat = kt("ChatScreen.kt");
+    const tab = kt("ChatMediaScreen.kt");
+    check(
+      "r32-46: viewer/player ⋮ → sheet = Save / Forward only; one IO forward helper (forwardMessageTo) used by chat select, photo viewer, video player and the media tab",
+      mv.includes("internal fun MediaMenuSheet(") &&
+        mv.includes(
+          'if (onSave != null) KpSheetRow(Icons.Filled.Download, "Save", onClick = onSave)',
+        ) &&
+        mv.includes(
+          'if (onForward != null) KpSheetRow(Icons.AutoMirrored.Filled.Send, "Forward", onClick = onForward)',
+        ) &&
+        (mv.match(/KpSheetRow\(/g) || []).length === 2 &&
+        (mv.match(/Icons\.Filled\.MoreVert, "More"/g) || []).length === 2 &&
+        !mv.includes("private fun ViewerAction(") &&
+        (mv.match(/\.align\(Alignment\.BottomCenter\)/g) || []).length === 1 &&
+        mv.includes("onForward = onForward?.let { f -> { menuOpen = false; f() } },") &&
+        mv.includes(
+          "onForward = if (canForward) ({ menuOpen = false; forwarding = true }) else null,",
+        ) &&
+        mv.includes("val ok = runCatching { forwardMessageTo(targetId, m) }.isSuccess") &&
+        chat.includes(
+          "internal suspend fun forwardMessageTo(targetConvId: String, m: JSONObject, albumMeta: JSONObject? = null) {\n    withContext(Dispatchers.IO) {",
+        ) &&
+        chat.includes("runCatching { forwardMessageTo(targetConvId, m, albumMeta(m)) }") &&
+        chat.includes("internal fun ForwardDialog(") &&
+        tab.includes(
+          "onForward = if (privateChat) null else ({ viewer = null; forwardMsg = m }),",
+        ) &&
+        tab.includes("val ok = runCatching { forwardMessageTo(targetId, m) }.isSuccess"),
     );
   }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
