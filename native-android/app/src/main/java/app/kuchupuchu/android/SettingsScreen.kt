@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Call
@@ -356,6 +357,12 @@ fun PrivacySettingsScreen(nav: NavController) {
                 }
             }
         }
+        Spacer(Modifier.height(12.dp))
+        // Owner round 32 (item 7): the people this account blocked — unblock
+        // lives here; Block itself is only in a profile's ⋮ sheet.
+        SectionCard {
+            SettingRow(Icons.Filled.Block, "Blocklist", "") { nav.navigate("settings/blocklist") }
+        }
         Spacer(Modifier.height(32.dp))
     }
 
@@ -384,6 +391,72 @@ fun PrivacySettingsScreen(nav: NavController) {
                 }
             }
         }
+    }
+}
+
+/* ---------------- Settings › Privacy › Blocklist ---------------- */
+
+/** Owner round 32 (item 7): everyone this account blocked, each with Unblock. */
+@Composable
+fun BlocklistScreen(nav: NavController) {
+    val scope = rememberCoroutineScope()
+    var items by remember { mutableStateOf<List<JSONObject>?>(null) }
+    var failed by remember { mutableStateOf(false) }
+    fun reload() {
+        scope.launch {
+            runCatching {
+                items = withContext(Dispatchers.IO) { Api.get("/api/blocks", true) }.arr("users").objects()
+                failed = false
+            }.onFailure { failed = items == null }
+        }
+    }
+    LaunchedEffect(Unit) { reload() }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Cream)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .verticalScroll(rememberScrollState()),
+    ) {
+        SubScreenHeader("Blocklist", onBack = { nav.popBackStack() })
+        val list = items
+        when {
+            list == null && failed -> Text("Couldn't load.", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(20.dp))
+            list == null -> CircularProgressIndicator(color = ActionBlueDeep, strokeWidth = 2.dp, modifier = Modifier.padding(20.dp).size(18.dp))
+            list.isEmpty() -> Text("No blocked accounts", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(20.dp))
+            else ->
+                SectionCard {
+                    list.forEach { u ->
+                        val id = u.optString("id")
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { nav.navigate("profile/$id") }
+                                .padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            KpAvatar(u.optText("displayName"), u.optText("avatarUrl").ifBlank { null }, 40.dp, avatarRef = u.optIso("avatarRef"))
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(u.optText("displayName").ifBlank { "User" }, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, color = Ink, maxLines = 1)
+                                val un = u.optText("username")
+                                if (un.isNotBlank()) Text("@$un", fontSize = 12.sp, color = Muted, maxLines = 1)
+                            }
+                            androidx.compose.material3.TextButton(onClick = {
+                                items = list.filter { it.optString("id") != id }
+                                scope.launch {
+                                    runCatching { withContext(Dispatchers.IO) { Api.delete("/api/blocks/$id") } }
+                                        .onFailure { reload() }
+                                }
+                            }) {
+                                Text("Unblock", color = Red, fontSize = 13.sp, maxLines = 1)
+                            }
+                        }
+                    }
+                }
+        }
+        Spacer(Modifier.height(32.dp))
     }
 }
 

@@ -585,11 +585,12 @@ const convBetween = (db, a, b) =>
     chat.includes('if (otherUserId != "kp_official_bot") {'),
   );
   check(
-    "owner account cannot be blocked from its profile",
+    "owner account cannot be blocked from its profile (r32-25: the guard is on the ⋮ Block row; the worker refuses the POST too)",
     readFileSync(
       "native-android/app/src/main/java/app/kuchupuchu/android/ProfileScreen.kt",
       "utf8",
-    ).includes('u.optText("username") != "rabbihossainltd"'),
+    ).includes('user?.optText("username") == "rabbihossainltd"') &&
+      src.includes('if (ownerRow) fail(403, "This account can\'t be blocked.", "OWNER_ACCOUNT");'),
   );
   check(
     "owner card photo is display-only (no viewer, no click)",
@@ -2350,7 +2351,9 @@ const convBetween = (db, a, b) =>
   check(
     "r28-5/r31: my own profile edits IN PLACE (photo tap + Name/Username/About/Phone rows) instead of call/search/block — no intermediate edit screen",
     profile.includes("val isMe = userId.isNotBlank() && userId == Store.myId()") &&
-      profile.includes(
+      // r32-25: calls / search on EVERY peer profile (the owner's too)
+      profile.includes("if (!isMe && !isKpBot(userId)) {\n        Row(") &&
+      !profile.includes(
         'if (!isMe && !isKpBot(userId) && u.optText("username") != "rabbihossainltd")',
       ) &&
       !profile.includes('Text("Edit profile"') &&
@@ -4754,6 +4757,61 @@ const convBetween = (db, a, b) =>
       !kt("Ui.kt").includes(
         ".size(inner * 0.75f)\n                        .align(Alignment.BottomCenter),",
       ),
+  );
+  // Items 6 / 7 / 25: the peer profile's actions are ONE ⋮ sheet — Add contact
+  // (only when not in the phone book) / Block-Unblock / Hide-Unhide /
+  // Mute-Unmute / Report; the body Block button is gone; Blocklist (unblock)
+  // sits under Settings › Privacy; the owner's profile shows calls and has no
+  // Block row (and the worker refuses the POST — test 17 drives it).
+  const profile32 = kt("ProfileScreen.kt");
+  const menu32 = profile32.slice(
+    profile32.indexOf("if (moreOpen && user != null) {"),
+    profile32.indexOf("if (confirmReport) {"),
+  );
+  check(
+    "r32-6: profile ⋮ → KpSheet with Add contact (only when !inBook) / Block-Unblock (never for owner or bots) / Hide-Unhide / Mute-Unmute / Report (confirm sheet → POST /api/reports)",
+    profile32.includes('Icon(Icons.Filled.MoreVert, "More", tint = Ink)') &&
+      menu32.includes("KpSheet(onDismiss = { moreOpen = false }) {") &&
+      menu32.includes(
+        'if (!inBook) {\n                    KpSheetRow(Icons.Filled.PersonAdd, "Add contact") {',
+      ) &&
+      menu32.includes(
+        'KpSheetRow(Icons.Filled.Block, if (blocked) "Unblock" else "Block", tint = Red) {',
+      ) &&
+      menu32.includes("if (!unblockable) {") &&
+      menu32.includes(
+        'KpSheetRow(Icons.Filled.VisibilityOff, if (hidden) "Unhide" else "Hide") {',
+      ) &&
+      menu32.includes(
+        'KpSheetRow(Icons.Filled.NotificationsOff, if (muted) "Unmute" else "Mute") {',
+      ) &&
+      menu32.includes('KpSheetRow(Icons.Filled.Flag, "Report", tint = Red) {') &&
+      profile32.includes('title = "Report this account?",') &&
+      profile32.includes('Api.post("/api/reports", JSONObject().put("userId", userId))') &&
+      profile32.includes(
+        'val unblockable = isMe || isKpBot(userId) || user?.optText("username") == "rabbihossainltd"',
+      ) &&
+      !profile32.includes(
+        "androidx.compose.material3.TextButton(\n                    onClick = {\n                        scope.launch {\n                            runCatching {\n                                val res = withContext(Dispatchers.IO) {\n                                    if (blocked) Api.delete",
+      ) &&
+      // exactly one Block CONTROL (the sheet row) — comments aside
+      (profile32.match(/else "Block"/g) || []).length === 1 &&
+      !profile32.includes(
+        "androidx.compose.material3.TextButton(\n                    onClick = {\n                        scope.launch {",
+      ),
+  );
+  check(
+    "r32-7: Settings › Privacy has a Blocklist row → settings/blocklist (BlocklistScreen: GET /api/blocks, Unblock per row → DELETE /api/blocks/:id)",
+    settings.includes(
+      'SettingRow(Icons.Filled.Block, "Blocklist", "") { nav.navigate("settings/blocklist") }',
+    ) &&
+      settings.includes("fun BlocklistScreen(nav: NavController) {") &&
+      settings.includes('Api.get("/api/blocks", true) }.arr("users").objects()') &&
+      settings.includes('Api.delete("/api/blocks/$id")') &&
+      settings.includes('Text("Unblock", color = Red, fontSize = 13.sp, maxLines = 1)') &&
+      kt("KpApp.kt").includes('composable("settings/blocklist") { BlocklistScreen(nav) }') &&
+      src.includes('"SELECT target_id FROM blocks WHERE owner_id = ? ORDER BY created_at DESC"') &&
+      src.includes("if (user) list.push(userFrom(user, false, true));"),
   );
 }
 

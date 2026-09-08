@@ -30,8 +30,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -105,6 +110,15 @@ fun ProfileScreen(nav: NavController, userId: String) {
             .statusBarsPadding()
             .navigationBarsPadding(),
     ) {
+        // Owner round 32 (items 6/7/25): the peer actions live in ONE ⋮ sheet
+        // — Add contact (only when not in the phone book) / Block / Hide /
+        // Mute-Unmute / Report. Block exists nowhere else on this screen; the
+        // owner's account and the bots never get Block at all.
+        var moreOpen by remember { mutableStateOf(false) }
+        var confirmReport by remember { mutableStateOf(false) }
+        val ctx = LocalContext.current
+        val peerConvForMenu = ScreenStore.convs.firstOrNull { !it.optBoolean("isGroup") && it.optJSONObject("other")?.optString("id") == userId }
+        val unblockable = isMe || isKpBot(userId) || user?.optText("username") == "rabbihossainltd"
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -112,7 +126,114 @@ fun ProfileScreen(nav: NavController, userId: String) {
             IconButton(onClick = { nav.popBackStack() }) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink)
             }
-            Text(if (isMe) "My profile" else "Contact", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
+            Text(
+                if (isMe) "My profile" else "Contact",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = Ink,
+                modifier = Modifier.weight(1f),
+            )
+            if (!isMe && !isKpBot(userId) && user != null) {
+                IconButton(onClick = { haptics.tap(); moreOpen = true }) {
+                    Icon(Icons.Filled.MoreVert, "More", tint = Ink)
+                }
+            }
+        }
+        if (moreOpen && user != null) {
+            val uMenu = user!!
+            val inBook = PhoneBook.entries.any { it.user?.optString("id") == userId }
+            val muted = peerConvForMenu?.optBoolean("muted") == true || (peerConvForMenu != null && ScreenStore.isMuted(peerConvForMenu.optString("id")))
+            val hidden = peerConvForMenu != null && ScreenStore.isHidden(peerConvForMenu.optString("id"))
+            fun withConv(block: (String) -> Unit) {
+                val cached = peerConvForMenu?.optString("id") ?: ScreenStore.convIdForUser[userId]
+                if (cached != null) {
+                    block(cached)
+                    return
+                }
+                scope.launch {
+                    runCatching {
+                        val data = withContext(Dispatchers.IO) { Api.post("/api/conversations", JSONObject().put("userId", userId)) }
+                        val cid = data.optJSONObject("conversation")?.optString("id").orEmpty()
+                        if (cid.isNotBlank()) {
+                            ScreenStore.convIdForUser[userId] = cid
+                            block(cid)
+                        }
+                    }
+                }
+            }
+            KpSheet(onDismiss = { moreOpen = false }) {
+                if (!inBook) {
+                    KpSheetRow(Icons.Filled.PersonAdd, "Add contact") {
+                        moreOpen = false
+                        val n = android.net.Uri.encode(uMenu.optText("displayName").trim())
+                        val p = android.net.Uri.encode(uMenu.optText("phone"))
+                        nav.navigate("newcontact?name=$n&phone=$p")
+                    }
+                }
+                if (!unblockable) {
+                    KpSheetRow(Icons.Filled.Block, if (blocked) "Unblock" else "Block", tint = Red) {
+                        moreOpen = false
+                        scope.launch {
+                            runCatching {
+                                val res = withContext(Dispatchers.IO) {
+                                    if (blocked) Api.delete("/api/blocks/$userId")
+                                    else Api.post("/api/blocks", JSONObject().put("userId", userId))
+                                }
+                                // Flip on the server's answer only: these calls
+                                // return an error body (403/429) instead of
+                                // throwing.
+                                if (!res.has("error")) blocked = !blocked
+                            }
+                        }
+                    }
+                }
+                KpSheetRow(Icons.Filled.VisibilityOff, if (hidden) "Unhide" else "Hide") {
+                    moreOpen = false
+                    withConv { cid ->
+                        val next = !hidden
+                        ScreenStore.setHidden(cid, next)
+                        android.widget.Toast.makeText(ctx, if (next) "Chat hidden" else "Chat unhidden", android.widget.Toast.LENGTH_SHORT).show()
+                        scope.launch {
+                            runCatching {
+                                withContext(Dispatchers.IO) { Api.post("/api/conversations/$cid/hide", JSONObject().put("hidden", next)) }
+                            }.onFailure { ScreenStore.setHidden(cid, !next) }
+                        }
+                    }
+                }
+                KpSheetRow(Icons.Filled.NotificationsOff, if (muted) "Unmute" else "Mute") {
+                    moreOpen = false
+                    withConv { cid ->
+                        val next = !muted
+                        ScreenStore.setMuted(cid, next)
+                        scope.launch {
+                            runCatching {
+                                withContext(Dispatchers.IO) { Api.post("/api/conversations/$cid/mute", JSONObject().put("muted", next)) }
+                            }.onFailure { ScreenStore.setMuted(cid, !next) }
+                        }
+                    }
+                }
+                KpSheetRow(Icons.Filled.Flag, "Report", tint = Red) {
+                    moreOpen = false
+                    confirmReport = true
+                }
+            }
+        }
+        if (confirmReport) {
+            KpConfirmSheet(
+                title = "Report this account?",
+                confirmLabel = "Report",
+                danger = true,
+                onConfirm = {
+                    confirmReport = false
+                    scope.launch {
+                        runCatching {
+                            withContext(Dispatchers.IO) { Api.post("/api/reports", JSONObject().put("userId", userId)) }
+                        }
+                        android.widget.Toast.makeText(ctx, "Reported", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onDismiss = { confirmReport = false },
+            )
         }
         val u = user
         if (u == null) {
@@ -176,7 +297,6 @@ fun ProfileScreen(nav: NavController, userId: String) {
             val shownAvatar = rememberAvatarUrl(u.optText("avatarUrl").ifBlank { null }, avatarRef)
             // Owner round 31: MY profile edits in place — tapping my photo picks
             // a new one (no separate "Edit profile" screen in between).
-            val ctx = LocalContext.current
             var photoBusy by remember { mutableStateOf(false) }
             val avatarPicker =
                 rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -357,8 +477,11 @@ fun ProfileScreen(nav: NavController, userId: String) {
         // accent (the in-chat theme used to stop at the chat screen).
         val peerConv = ScreenStore.convs.firstOrNull { !it.optBoolean("isGroup") && it.optJSONObject("other")?.optString("id") == userId }
         val peerAccent = chatAccent(cTheme(peerConv))
-        // Owner round 7: the owner's account can never be blocked.
-        if (!isMe && !isKpBot(userId) && u.optText("username") != "rabbihossainltd") {
+        // Owner round 32 (item 25): this row used to be wrapped in the
+        // "owner can't be blocked" guard, so the OWNER's profile had no call /
+        // search buttons at all. The block guard lives in the ⋮ sheet now;
+        // calls are offered on every peer profile.
+        if (!isMe && !isKpBot(userId)) {
         Row(
             Modifier
                 .fillMaxWidth()
@@ -469,38 +592,8 @@ fun ProfileScreen(nav: NavController, userId: String) {
             Spacer(Modifier.height(10.dp))
         }
         }
-        if (!isMe && !isKpBot(userId)) {
-            androidx.compose.foundation.layout.Box(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Card)
-                    .padding(4.dp),
-            ) {
-                androidx.compose.material3.TextButton(
-                    onClick = {
-                        scope.launch {
-                            runCatching {
-                                val res = withContext(Dispatchers.IO) {
-                                    if (blocked) Api.delete("/api/blocks/$userId")
-                                    else Api.post("/api/blocks", JSONObject().put("userId", userId))
-                                }
-                                // Flip on the server's answer only: these calls
-                                // return an error body (403/429) instead of
-                                // throwing, and the old code marked the user blocked
-                                // even when the write was refused.
-                                if (!res.has("error")) blocked = !blocked
-                            }
-                        }
-                    },
-                ) {
-                    Icon(Icons.Filled.Block, null, tint = Red, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (blocked) "Unblock" else "Block", color = Red)
-                }
-            }
-        }
+        // (Owner round 32 item 7: Block lives ONLY in the ⋮ sheet above; the
+        // unblock list is Settings › Privacy › Blocklist.)
     }
 }
 

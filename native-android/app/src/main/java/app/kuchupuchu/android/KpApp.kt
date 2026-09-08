@@ -159,6 +159,8 @@ fun KpApp() {
                 composable("settings/devices") { DevicesSettingsScreen(nav) }
                 composable("settings/permissions") { PermissionsSettingsScreen(nav) }
                 composable("settings/app") { AppSettingsScreen(nav) }
+                // Owner round 32 (item 7): Privacy › Blocklist (unblock lives here).
+                composable("settings/blocklist") { BlocklistScreen(nav) }
                 // Owner round 31: the group profile (members / admin actions).
                 composable("group/{id}") { GroupInfoScreen(nav, it.arguments?.getString("id") ?: "") }
                 // Owner round 28: home ⋮ menu destinations.

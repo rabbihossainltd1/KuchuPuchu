@@ -267,8 +267,56 @@ async function main() {
         reverse.json.user.avatarUrl == null,
       JSON.stringify(reverse.json.user ?? {}).slice(0, 90),
     );
+    // r32-7: the Blocklist screen reads GET /api/blocks — light user shape,
+    // one IN() lookup (no per-user SELECT), newest block first.
+    const listed = await h.call("GET", "/api/blocks", undefined, A.token);
+    check(
+      "r32-7: GET /api/blocks lists the blocked account in the light shape (avatarRef, no inline avatarUrl)",
+      listed.status === 200 &&
+        Array.isArray(listed.json.users) &&
+        listed.json.users.length === 1 &&
+        listed.json.users[0].id === B.user.id &&
+        !("avatarUrl" in listed.json.users[0] && listed.json.users[0].avatarUrl) &&
+        "avatarRef" in listed.json.users[0],
+      JSON.stringify(listed.json).slice(0, 160),
+    );
     const unblocked = await h.call("DELETE", `/api/blocks/${B.user.id}`, undefined, A.token);
     check("unblock works from the profile screen", unblocked.status === 200, `${unblocked.status}`);
+    // r32-25: the owner's account is unblockable through the API itself.
+    await h.q("UPDATE users SET username = 'rabbihossainltd' WHERE id = ?", B.user.id).run();
+    const ownerBlock = await h.call("POST", "/api/blocks", { userId: B.user.id }, A.token);
+    const ownerRows = await h
+      .q(
+        "SELECT COUNT(*) AS n FROM blocks WHERE owner_id = ? AND target_id = ?",
+        A.user.id,
+        B.user.id,
+      )
+      .first();
+    check(
+      "r32-25: POST /api/blocks against the owner's account is refused (403 OWNER_ACCOUNT) and writes nothing",
+      ownerBlock.status === 403 &&
+        (ownerBlock.json.error?.code ?? ownerBlock.json.code) === "OWNER_ACCOUNT" &&
+        Number(ownerRows?.n ?? 0) === 0,
+      `${ownerBlock.status} ${JSON.stringify(ownerBlock.json)} rows=${ownerRows?.n}`,
+    );
+    await h.q("UPDATE users SET username = 'ib-b' WHERE id = ?", B.user.id).run();
+    // r32-6: Report lands one throttled row in error_log.
+    const rep = await h.call(
+      "POST",
+      "/api/reports",
+      { userId: B.user.id, reason: "spam" },
+      A.token,
+    );
+    const repRow = await h
+      .q("SELECT stack FROM error_log WHERE stack LIKE 'REPORT[%' ORDER BY created_at DESC LIMIT 1")
+      .first();
+    check(
+      "r32-6: POST /api/reports records REPORT[<reporter>] -> <target> :: reason",
+      rep.status === 200 && rep.json.ok === true && !!repRow && repRow.stack.includes("spam"),
+      `${rep.status} ${JSON.stringify(repRow)}`,
+    );
+    const selfRep = await h.call("POST", "/api/reports", { userId: A.user.id }, A.token);
+    check("r32-6: reporting yourself is a 400", selfRep.status === 400, String(selfRep.status));
     const after = await h.call("GET", `/api/users/${B.user.id}`, undefined, A.token);
     check(
       "after unblocking the full profile returns",

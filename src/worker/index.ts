@@ -4659,6 +4659,15 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // The system accounts can't be blocked — they deliver security notices.
     if (target === OFFICIAL_BOT_ID || target === AI_BOT_ID)
       fail(403, "You can't block an official account.", "BOT_ACCOUNT");
+    // Owner round 32 (item 25): the owner's account is unblockable through
+    // EVERY path — the profile button was the only guard before, so a raw
+    // POST (or any other screen) could still write the row.
+    const ownerRow = await one<{ id: string }>(
+      db,
+      "SELECT id FROM users WHERE id = ? AND username = 'rabbihossainltd' LIMIT 1",
+      target,
+    );
+    if (ownerRow) fail(403, "This account can't be blocked.", "OWNER_ACCOUNT");
     await run(
       db,
       "INSERT OR IGNORE INTO blocks (owner_id, target_id, created_at) VALUES (?, ?, ?)",
@@ -4676,15 +4685,42 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   if (path === "/api/blocks" && method === "GET") {
     const rows = await all<{ target_id: string }>(
       db,
-      "SELECT target_id FROM blocks WHERE owner_id = ?",
+      "SELECT target_id FROM blocks WHERE owner_id = ? ORDER BY created_at DESC",
       uid,
+    );
+    // Owner round 32 (item 7): the Blocklist screen reads this — one IN()
+    // per chunk instead of a SELECT per blocked user, light shape (avatarRef,
+    // no inline data URL) like the chat list.
+    const users = await usersById(
+      db,
+      rows.map((r) => r.target_id),
     );
     const list = [];
     for (const row of rows) {
-      const user = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row.target_id);
-      if (user) list.push(userFrom(user, false));
+      const user = users.get(row.target_id);
+      if (user) list.push(userFrom(user, false, true));
     }
     return json({ users: list });
+  }
+
+  // Owner round 32 (item 6): "Report" from a profile ⋮. One row in error_log
+  // (the same table the client breadcrumbs use — no new table, no new read
+  // path), throttled per reporter; the reporter gets a plain ok.
+  if (path === "/api/reports" && method === "POST") {
+    rateLimit(`report:${uid}`, 10, 5);
+    const target = String(body.userId || "").slice(0, 64);
+    if (!target || target === uid) fail(400, "Bad user.");
+    const reason = String(body.reason || "").slice(0, 60);
+    const exists = await one<{ id: string }>(db, "SELECT id FROM users WHERE id = ?", target);
+    if (!exists) fail(404, "User not found.");
+    await run(
+      db,
+      "INSERT INTO error_log (id, stack, created_at) VALUES (?, ?, ?)",
+      crypto.randomUUID(),
+      `REPORT[${uid.slice(0, 8)}] -> ${target.slice(0, 8)} :: ${reason || "no reason"}`,
+      nowIso(),
+    );
+    return json({ ok: true });
   }
 
   /* ---------- conversations ---------- */
