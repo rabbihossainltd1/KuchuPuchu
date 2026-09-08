@@ -3851,9 +3851,7 @@ const convBetween = (db, a, b) =>
         chat.includes(
           'url.isNotBlank() -> sendImage(url, p.optJSONObject("meta")?.optString("album")?.ifBlank { null })',
         ) &&
-        chat.includes(
-          "val album = if (items.count { isPhotoMsg(it) } >= 2) newAlbumId() else null",
-        ) &&
+        chat.includes("val grouped = items.count { isPhotoMsg(it) } >= 2") &&
         (chat.match(/albumMeta\?\.let \{ body\.put\("meta", it\) \}/g) || []).length === 3,
     );
     check(
@@ -4973,16 +4971,45 @@ const convBetween = (db, a, b) =>
         mv.includes(
           "onForward = if (canForward) ({ menuOpen = false; forwarding = true }) else null,",
         ) &&
-        mv.includes("val ok = runCatching { forwardMessageTo(targetId, m) }.isSuccess") &&
+        mv.includes("val ok = targets.all { runCatching { forwardMessageTo(it, m) }.isSuccess }") &&
         chat.includes(
           "internal suspend fun forwardMessageTo(targetConvId: String, m: JSONObject, albumMeta: JSONObject? = null) {\n    withContext(Dispatchers.IO) {",
         ) &&
-        chat.includes("runCatching { forwardMessageTo(targetConvId, m, albumMeta(m)) }") &&
+        chat.includes("runCatching { forwardMessageTo(targetConvId, m, meta) }") &&
         chat.includes("internal fun ForwardDialog(") &&
         tab.includes(
           "onForward = if (privateChat) null else ({ viewer = null; forwardMsg = m }),",
         ) &&
-        tab.includes("val ok = runCatching { forwardMessageTo(targetId, m) }.isSuccess"),
+        tab.includes("val ok = targets.all { runCatching { forwardMessageTo(it, m) }.isSuccess }"),
+    );
+  }
+  // Item 37: the forward picker is multi-select — rows tick (rounded check),
+  // "N selected", a Send bar fires every picked chat; nothing sends on a tap.
+  {
+    const chat = kt("ChatScreen.kt");
+    check(
+      "r32-37: forward picker = multi-recipient select (rounded check rows, 'N selected', Send bar) — a row tap never sends; every caller passes onSend(List)",
+      chat.includes(
+        "internal fun ForwardDialog(onClose: () -> Unit, onSend: (List<String>) -> Unit) {",
+      ) &&
+        chat.includes("val picked = remember { mutableStateListOf<String>() }") &&
+        chat.includes(".clickable { if (on) picked.remove(id) else picked.add(id) }") &&
+        chat.includes(
+          'if (picked.isEmpty()) "${convs.size} chats" else "${picked.size} selected",',
+        ) &&
+        chat.includes(
+          "if (on) Icon(Icons.Filled.Check, null, tint = ActionBlueInk, modifier = Modifier.size(14.dp))",
+        ) &&
+        chat.includes(
+          'GoldBtn("Send", modifier = Modifier.width(112.dp)) { onSend(picked.toList()) }',
+        ) &&
+        chat.includes("fun forwardSelected(targets: List<String>) {") &&
+        chat.includes(
+          "for (targetConvId in targets) {\n                val album = if (grouped) newAlbumId() else null",
+        ) &&
+        !/ForwardDialog\([\s\S]{0,120}onPick/.test(chat) &&
+        !kt("MediaViewer.kt").includes("onPick") &&
+        !kt("ChatMediaScreen.kt").includes("onPick"),
     );
   }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or

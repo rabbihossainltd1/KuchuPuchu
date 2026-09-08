@@ -85,10 +85,10 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
     forwardMsg?.let { m ->
         ForwardDialog(
             onClose = { forwardMsg = null },
-            onPick = { targetId ->
+            onSend = { targets ->
                 forwardMsg = null
                 scope.launch {
-                    val ok = runCatching { forwardMessageTo(targetId, m) }.isSuccess
+                    val ok = targets.all { runCatching { forwardMessageTo(it, m) }.isSuccess }
                     android.widget.Toast.makeText(ctx, if (ok) "Forwarded" else "Could not forward", android.widget.Toast.LENGTH_SHORT).show()
                 }
             },

@@ -1359,22 +1359,25 @@ fun ChatScreen(nav: NavController, convId: String) {
         paintFromStore()
     }
 
-    fun forwardSelected(targetConvId: String) {
+    fun forwardSelected(targets: List<String>) {
         val items = selectedMessages()
         forwarding = false
         selected.clear()
         reactionFor = null
         showEmojiSheet = false
         // Owner round 31 (item 29): two or more photos forwarded together
-        // arrive as ONE grouped bubble again (a fresh album id).
-        val album = if (items.count { isPhotoMsg(it) } >= 2) newAlbumId() else null
-        fun albumMeta(m: JSONObject): JSONObject? =
-            if (album != null && isPhotoMsg(m)) JSONObject().put("album", album) else null
+        // arrive as ONE grouped bubble again (a fresh album id — one per
+        // target chat, so each chat owns its own group).
+        val grouped = items.count { isPhotoMsg(it) } >= 2
         scope.launch {
-            // Owner round 32 (item 46): one shared, off-main forward path (the
-            // viewers use it too).
-            for (m in items) {
-                runCatching { forwardMessageTo(targetConvId, m, albumMeta(m)) }
+            // Owner round 32 (items 37/46): every picked chat, one shared
+            // off-main forward path (the viewers use it too).
+            for (targetConvId in targets) {
+                val album = if (grouped) newAlbumId() else null
+                for (m in items) {
+                    val meta = if (album != null && isPhotoMsg(m)) JSONObject().put("album", album) else null
+                    runCatching { forwardMessageTo(targetConvId, m, meta) }
+                }
             }
             error = "Forwarded"
         }
@@ -2382,9 +2385,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         if (forwarding) {
             ForwardDialog(
                 onClose = { forwarding = false },
-                onPick = { targetId ->
-                    forwardSelected(targetId)
-                },
+                onSend = { targets -> forwardSelected(targets) },
             )
         }
     }
@@ -2885,11 +2886,14 @@ private fun EditDialog(original: String, onClose: () -> Unit, onSave: (String) -
 
 /** Pick a conversation to forward the selected message(s) to. */
 @Composable
-internal fun ForwardDialog(onClose: () -> Unit, onPick: (String) -> Unit) {
+internal fun ForwardDialog(onClose: () -> Unit, onSend: (List<String>) -> Unit) {
     // Owner round 14: forward was a cramped popup with mismatched colors —
     // now a FULLSCREEN picker sheet: back arrow header, themed background,
     // the whole conversation list to pick from.
+    // Owner round 32 (item 37): tapping a row TICKS it (rounded check), as
+    // many chats as wanted; the Send bar at the bottom fires them all at once.
     val convs = ScreenStore.convs
+    val picked = remember { mutableStateListOf<String>() }
     androidx.activity.compose.BackHandler { onClose() }
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(
@@ -2910,20 +2914,22 @@ internal fun ForwardDialog(onClose: () -> Unit, onPick: (String) -> Unit) {
                 Text("Forward to", color = Ink, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
             }
             Text(
-                "${convs.size} chats",
+                if (picked.isEmpty()) "${convs.size} chats" else "${picked.size} selected",
                 color = Muted,
                 fontSize = 13.sp,
                 modifier = Modifier.padding(horizontal = 20.dp),
             )
             Spacer(Modifier.height(6.dp))
             LazyColumn(
-                Modifier.fillMaxSize().padding(horizontal = 14.dp),
+                Modifier.weight(1f).fillMaxWidth().padding(horizontal = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 if (convs.isEmpty()) {
                     item { Text("No chats yet.", color = Muted, fontSize = 14.sp, modifier = Modifier.padding(16.dp)) }
                 }
                 items(convs, key = { it.optString("id") }) { c ->
+                    val id = c.optString("id")
+                    val on = id in picked
                     val isGroup = c.optBoolean("isGroup")
                     val other = c.optJSONObject("other")
                     val name =
@@ -2934,9 +2940,9 @@ internal fun ForwardDialog(onClose: () -> Unit, onPick: (String) -> Unit) {
                         Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(14.dp))
-                            .background(Card)
-                            .border(1.dp, Line, RoundedCornerShape(14.dp))
-                            .clickable { onPick(c.optString("id")) }
+                            .background(if (on) ChipSelected else Card)
+                            .border(1.dp, if (on) ActionBlue else Line, RoundedCornerShape(14.dp))
+                            .clickable { if (on) picked.remove(id) else picked.add(id) }
                             .padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -2947,8 +2953,47 @@ internal fun ForwardDialog(onClose: () -> Unit, onPick: (String) -> Unit) {
                             avatarRef = if (isGroup) null else other?.optIso("avatarRef"),
                         )
                         Spacer(Modifier.width(12.dp))
-                        Text(name, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            name,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        // Rounded check — filled when picked, hollow ring otherwise.
+                        Box(
+                            Modifier
+                                .size(22.dp)
+                                .clip(CircleShape)
+                                .background(if (on) ActionBlue else Color.Transparent)
+                                .border(1.5.dp, if (on) ActionBlue else Muted, CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (on) Icon(Icons.Filled.Check, null, tint = ActionBlueInk, modifier = Modifier.size(14.dp))
+                        }
                     }
+                }
+            }
+            if (picked.isNotEmpty()) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(Card)
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "${picked.size} selected",
+                        color = Ink,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f),
+                    )
+                    GoldBtn("Send", modifier = Modifier.width(112.dp)) { onSend(picked.toList()) }
                 }
             }
         }

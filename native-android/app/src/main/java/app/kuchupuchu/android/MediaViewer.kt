@@ -481,10 +481,10 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
     if (forwarding && m != null) {
         ForwardDialog(
             onClose = { forwarding = false },
-            onPick = { targetId ->
+            onSend = { targets ->
                 forwarding = false
                 scope.launch {
-                    val ok = runCatching { forwardMessageTo(targetId, m) }.isSuccess
+                    val ok = targets.all { runCatching { forwardMessageTo(it, m) }.isSuccess }
                     android.widget.Toast.makeText(ctx, if (ok) "Forwarded" else "Could not forward", android.widget.Toast.LENGTH_SHORT).show()
                 }
             },
