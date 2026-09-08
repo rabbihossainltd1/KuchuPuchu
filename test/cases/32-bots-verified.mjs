@@ -1693,7 +1693,7 @@ const convBetween = (db, a, b) =>
     settings.includes("LaunchedEffect(value)") &&
       settings.includes("this username not available") &&
       !settings.includes("Check availability") &&
-      settings.includes("focusedBorderColor = borderColor"),
+      settings.includes("borderColor = borderColor,"),
   );
   check(
     "r25: sounds row is just 'Calls & Notification' + country sheet theme colours",
@@ -1765,10 +1765,13 @@ const convBetween = (db, a, b) =>
   );
   check(
     "r26: phone input border themed; profile avatar big again; no plays-for text; compact call chip",
+    // r32-24: the phone input is the KpInputField pill (themed border lives there).
     readFileSync(
       "native-android/app/src/main/java/app/kuchupuchu/android/LoginScreen.kt",
       "utf8",
-    ).includes("unfocusedBorderColor = Muted") &&
+    ).includes(
+      "keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = imeAction),",
+    ) &&
       readFileSync(
         "native-android/app/src/main/java/app/kuchupuchu/android/ProfileScreen.kt",
         "utf8",
@@ -5060,6 +5063,39 @@ const convBetween = (db, a, b) =>
         store.includes('pinnedFile = File(ctx.filesDir, "kp-pinned.json")') &&
         kpapp.includes('"newgroup?with={with}",') &&
         grp.includes('fun CreateGroupScreen(nav: NavController, with: String = "") {'),
+    );
+  }
+  // Item 24: form inputs are ONE compact 46dp pill (KpInputField) — hint
+  // inside, 1dp border, no thick M3 outlined field with a floating label —
+  // on the login phone + profile step, the country search and the name /
+  // username edit screens.
+  {
+    const ui = kt("Ui.kt");
+    const login = kt("LoginScreen.kt");
+    const st = kt("SettingsScreen.kt");
+    check(
+      "r32-24: login phone / name / username / about + country search + Settings name / username use the compact KpInputField pill (46dp, hint inside) — no OutlinedTextField left on the login screen",
+      ui.includes("fun KpInputField(") &&
+        ui.includes(".height(46.dp)") &&
+        ui.includes(
+          ".border(1.dp, borderColor ?: if (focused) ActionBlue else Muted.copy(alpha = 0.35f), RoundedCornerShape(14.dp))",
+        ) &&
+        ui.includes(
+          "if (value.isEmpty()) Text(placeholder, color = Muted.copy(alpha = 0.7f), fontSize = 15.sp, maxLines = 1)",
+        ) &&
+        !login.includes("OutlinedTextField") &&
+        (login.match(/KpInputField\(/g) || []).length === 6 &&
+        login.includes(
+          'placeholder = if (country.iso == "BD") "1XXXXXXXXX" else "Phone number",',
+        ) &&
+        login.includes(".height(46.dp)\n                .clip(FieldShape)") &&
+        st.includes(
+          'KpInputField(first, { first = it.take(40); err = "" }, placeholder = "First name")',
+        ) &&
+        st.includes(
+          'KpInputField(last, { last = it.take(40); err = "" }, placeholder = "Last name")',
+        ) &&
+        st.includes("borderColor = borderColor,"),
     );
   }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or

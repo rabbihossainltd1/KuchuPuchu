@@ -1254,9 +1254,10 @@ fun EditNameScreen(nav: NavController) {
     var busy by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf("") }
     EditFieldScaffold("Name", "First and last name", nav) {
-        OutlinedTextField(value = first, onValueChange = { first = it.take(40); err = "" }, label = { Text("First name") }, singleLine = true, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = ActionBlue, cursorColor = ActionBlue, focusedLabelColor = ActionBlue), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth())
+        // Owner round 32 (item 24): compact pills, hint inside.
+        KpInputField(first, { first = it.take(40); err = "" }, placeholder = "First name")
         Spacer(Modifier.height(10.dp))
-        OutlinedTextField(value = last, onValueChange = { last = it.take(40); err = "" }, label = { Text("Last name") }, singleLine = true, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = ActionBlue, cursorColor = ActionBlue, focusedLabelColor = ActionBlue), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth())
+        KpInputField(last, { last = it.take(40); err = "" }, placeholder = "Last name")
         if (err.isNotBlank()) Text(err, color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
         EditSaveButton(
             "Save",
@@ -1319,19 +1320,14 @@ fun EditUsernameScreen(nav: NavController) {
         else -> Muted
     }
     EditFieldScaffold("Username", "", nav) {
-        OutlinedTextField(
-            value = value,
-            onValueChange = { value = it.trim().lowercase().take(30); err = "" },
-            label = { Text("Username") },
-            singleLine = true,
-            shape = RoundedCornerShape(14.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = borderColor,
-                unfocusedBorderColor = borderColor,
-                cursorColor = ActionBlue,
-                focusedLabelColor = ActionBlue,
-            ),
-            modifier = Modifier.fillMaxWidth(),
+        // Owner round 32 (item 24): compact pill; the live-check colour is
+        // the border (focusedBorderColor = borderColor in spirit — green /
+        // red / muted), hint inside.
+        KpInputField(
+            value,
+            { value = it.trim().lowercase().take(30); err = "" },
+            placeholder = "Username",
+            borderColor = borderColor,
         )
         if (available == false && value.isNotBlank() && value != (Store.me?.optText("username") ?: "")) {
             Text("this username not available", color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))

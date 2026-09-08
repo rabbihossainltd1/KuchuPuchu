@@ -49,8 +49,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -678,50 +676,40 @@ fun LoginScreen(onAuthed: () -> Unit) {
                         Text("Add a photo (optional)", fontSize = 11.sp, color = Muted, maxLines = 1)
                     }
                     Spacer(Modifier.height(12.dp))
+                    // Owner round 32 (item 24): compact pills, hint inside —
+                    // no thick outlined fields with a floating label.
                     Row(Modifier.fillMaxWidth()) {
-                        OutlinedTextField(
+                        KpInputField(
                             firstName,
                             { firstName = it.take(25); profileError = "" },
-                            label = { Text("First name") },
-                            singleLine = true,
-                            shape = FieldShape,
+                            placeholder = "First name",
                             keyboardOptions =
                                 KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
                             modifier = Modifier.weight(1f),
                         )
                         Spacer(Modifier.width(8.dp))
-                        OutlinedTextField(
+                        KpInputField(
                             lastName,
                             { lastName = it.take(25); profileError = "" },
-                            label = { Text("Last name") },
-                            singleLine = true,
-                            shape = FieldShape,
+                            placeholder = "Last name",
                             keyboardOptions =
                                 KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
                             modifier = Modifier.weight(1f),
                         )
                     }
                     Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
+                    KpInputField(
                         username,
                         { username = it.lowercase().take(20); profileError = "" },
-                        label = { Text("Username (optional)") },
-                        placeholder = { Text("e.g. rabbi_ff", color = Muted.copy(alpha = 0.45f)) },
-                        singleLine = true,
-                        shape = FieldShape,
+                        placeholder = "Username",
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, imeAction = ImeAction.Next),
-                        modifier = Modifier.fillMaxWidth(),
                     )
                     Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
+                    KpInputField(
                         about,
                         { about = it.take(160); profileError = "" },
-                        label = { Text("About (optional)") },
-                        placeholder = { Text("Hey! I'm using KuchuPuchu", color = Muted.copy(alpha = 0.45f)) },
-                        singleLine = true,
-                        shape = FieldShape,
+                        placeholder = "About",
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                        modifier = Modifier.fillMaxWidth(),
                     )
                     if (profileError.isNotBlank()) {
                         Spacer(Modifier.height(6.dp))
@@ -932,7 +920,7 @@ fun PhoneField(
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Box(
             Modifier
-                .heightIn(min = 56.dp)
+                .height(46.dp)
                 .clip(FieldShape)
                 .background(Card)
                 .border(1.dp, Muted.copy(alpha = 0.35f), FieldShape)
@@ -967,27 +955,13 @@ fun PhoneField(
             }
         }
         Spacer(Modifier.width(8.dp))
-        OutlinedTextField(
+        // Owner round 26: themed border (ActionBlue is gold on light-cream,
+        // blue on dark-blue). Owner round 32 (item 24): the compact pill —
+        // same 46dp as the country chip, hint inside, no floating label.
+        KpInputField(
             phone,
             { raw -> onPhone(raw.filter { it.isDigit() }.take(maxDigits)) },
-            // Owner round 26: themed outline — the M3 default painted the
-            // cream/gold border ("phone number input border colour ekhono
-            // cream"). ActionBlue is gold on light-cream, blue on dark-blue.
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = ActionBlue,
-                unfocusedBorderColor = Muted,
-                cursorColor = ActionBlue,
-                focusedLabelColor = ActionBlue,
-            ),
-            label = { Text("Phone number") },
-            placeholder = {
-                Text(
-                    if (country.iso == "BD") "1XXXXXXXXX" else "Phone number",
-                    color = Muted.copy(alpha = 0.45f),
-                )
-            },
-            singleLine = true,
-            shape = FieldShape,
+            placeholder = if (country.iso == "BD") "1XXXXXXXXX" else "Phone number",
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = imeAction),
             keyboardActions = KeyboardActions(onDone = { onDone() }),
             modifier = Modifier.weight(1f),
@@ -1019,20 +993,12 @@ fun CountryPickerSheet(
         ) {
             Text("Select country", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Ink)
             Spacer(Modifier.height(8.dp))
-            OutlinedTextField(
+            KpInputField(
                 query,
                 { query = it },
-                label = { Text("Search") },
-                singleLine = true,
-                shape = FieldShape,
+                placeholder = "Search",
                 keyboardOptions =
                     KeyboardOptions(keyboardType = KeyboardType.Ascii, imeAction = ImeAction.Search),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = ActionBlue,
-                    cursorColor = ActionBlue,
-                    focusedLabelColor = ActionBlue,
-                ),
-                modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(8.dp))
             val needle = query.trim()

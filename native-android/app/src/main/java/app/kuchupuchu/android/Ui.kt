@@ -16,6 +16,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
@@ -656,6 +657,58 @@ fun CompactSearchBar(
                 modifier = Modifier.size(20.dp).clip(CircleShape).clickable { onValueChange("") }.padding(2.dp),
             )
         }
+    }
+}
+
+/**
+ * Owner round 32 (item 24): the ONE compact text input for forms (login phone,
+ * profile details, country search). A 46dp pill — 14dp radius, 1dp border
+ * (accent while focused), the hint INSIDE the field. Never the thick M3
+ * outlined field with its floating "second line" label.
+ */
+@Composable
+fun KpInputField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    keyboardActions: androidx.compose.foundation.text.KeyboardActions = androidx.compose.foundation.text.KeyboardActions.Default,
+    leading: (@Composable () -> Unit)? = null,
+    /** Fixed border (e.g. the username live-check green / red); null = focus-driven. */
+    borderColor: Color? = null,
+) {
+    var focused by remember { mutableStateOf(false) }
+    Row(
+        modifier
+            .fillMaxWidth()
+            .height(46.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Card)
+            .border(1.dp, borderColor ?: if (focused) ActionBlue else Muted.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (leading != null) {
+            leading()
+            Spacer(Modifier.width(8.dp))
+        }
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = true,
+            textStyle = TextStyle(color = Ink, fontSize = 15.sp),
+            cursorBrush = SolidColor(ActionBlue),
+            keyboardOptions = keyboardOptions,
+            keyboardActions = keyboardActions,
+            modifier = Modifier.weight(1f).onFocusChanged { focused = it.isFocused },
+            decorationBox = { inner ->
+                Box(contentAlignment = Alignment.CenterStart) {
+                    if (value.isEmpty()) Text(placeholder, color = Muted.copy(alpha = 0.7f), fontSize = 15.sp, maxLines = 1)
+                    inner()
+                }
+            },
+        )
     }
 }
 
