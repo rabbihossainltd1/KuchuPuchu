@@ -287,6 +287,7 @@ class KpPushService : FirebaseMessagingService() {
                 "message" -> handleMessage(data)
                 "missed_call" -> handleMissedCall(data)
                 "reoffer", "reanswer" -> data["callId"]?.let { CallEngine.instance?.kickPoll(it) }
+                else -> {}
             }
         }.onFailure { KpCrash.mark("push_${data["type"]}_failed:${it.javaClass.simpleName}") }
     }
