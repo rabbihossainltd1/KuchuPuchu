@@ -271,13 +271,24 @@ class KpPushService : FirebaseMessagingService() {
         // released by the caller: 6 seconds covers the /calls/active revalidate
         // and the card post, and the timeout means no code path can leak a hold.
         wakeFor()
-        when (data["type"]) {
-            "call" -> handleCall(data)
-            "call_answer" -> handleCallAnswer(data)
-            "message" -> handleMessage(data)
-            "missed_call" -> handleMissedCall(data)
-            "reoffer", "reanswer" -> data["callId"]?.let { CallEngine.instance?.kickPoll(it) }
-        }
+        // Owner round 32 (items 1A/1B/26): until this round the manifest bound
+        // this service to a non-existent action, so nothing below had ever run
+        // on a device. Two consequences handled here. (1) A push to a KILLED app
+        // makes this service the first code in a fresh process — no Activity
+        // has restored the session, so the revalidate / mark-read calls the
+        // handlers make would go out unsigned; load it (a prefs read). (2) A
+        // throw inside a handler would take the whole process down from the
+        // FCM thread; it is contained and left as a crash-report breadcrumb.
+        runCatching { Api.loadToken(this) }
+        runCatching {
+            when (data["type"]) {
+                "call" -> handleCall(data)
+                "call_answer" -> handleCallAnswer(data)
+                "message" -> handleMessage(data)
+                "missed_call" -> handleMissedCall(data)
+                "reoffer", "reanswer" -> data["callId"]?.let { CallEngine.instance?.kickPoll(it) }
+            }
+        }.onFailure { KpCrash.mark("push_${data["type"]}_failed:${it.javaClass.simpleName}") }
     }
 
 

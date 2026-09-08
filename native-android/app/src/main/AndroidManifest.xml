@@ -94,13 +94,45 @@
              receive anything it was not already going to deliver, and it died to
              a recents swipe anyway. Re-introducing it needs evidence that the
              process IS being reached (see KpDiag / Settings -> Push log). -->
+        <!-- Owner round 32 (items 1A/1B/26): the action MUST be
+             com.google.firebase.MESSAGING_EVENT. The FCM SDK resolves the
+             app's FirebaseMessagingService subclass by that exact action
+             (ServiceStarter / WithinAppServiceConnection bind to it; the SDK's
+             own base service is registered on it at priority -500). This
+             filter said "com.google.firebase.messaging.RECEIVE" since v2.1.1 —
+             a string that exists nowhere in the SDK — so every push resolved
+             to the SDK's BASE service, whose onMessageReceived is an empty
+             method: the app's own Reply / Like / Mark-as-read card, the
+             missed-call card with Call back / Message, the fullscreen ring
+             and the ring-card retraction never ran from a push. The only
+             cards the owner ever saw from a push were the OS-drawn payload
+             cards (generic glyph, no buttons); the rich cards he saw while
+             the app was "recently active" came from the WebSocket path. -->
         <service
             android:name=".KpPushService"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.google.firebase.messaging.RECEIVE" />
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
+        <!-- Defaults for the OS-drawn payload card (a genuinely dead process):
+             the brand status icon + colour instead of the generic glyph, and
+             the message channel when the push names none. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@mipmap/ic_stat_kp" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/colorPrimary" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="kp_messages_v2" />
+        <!-- Notification delegation stays ON (FCM default): a payload push is
+             only sent when no live socket exists, and a card Play services
+             draws without starting the app is the only card a process the
+             OEM refuses to start can ever show. Stale ring cards are handled
+             by the shared FCM tag (missed-call card replaces the ring card)
+             and tag-aware cancels in KpNotify, not by disabling delegation. -->
         <!-- Shares picked-camera photos and downloaded files with system apps. -->
         <provider
             android:name="androidx.core.content.FileProvider"

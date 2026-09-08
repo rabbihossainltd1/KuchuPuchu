@@ -148,6 +148,17 @@ async function main() {
       "idle recipient payload uses the message channel",
       idle?.message?.android?.notification?.channel_id === "kp_messages_v2",
     );
+    // Owner round 32 (items 1A/1B/26): the OS-drawn payload card carries the
+    // brand status icon + colour (the launcher icon is adaptive and renders as
+    // the generic glyph). Message cards carry no tag (each message is its own
+    // card); call cards do — asserted in test 32.
+    check(
+      "r32-26: payload card names the status icon and brand colour, no tag on message cards",
+      idle?.message?.android?.notification?.icon === "ic_stat_kp" &&
+        idle?.message?.android?.notification?.color === "#F59E0B" &&
+        idle?.message?.android?.notification?.tag === undefined,
+      JSON.stringify(idle?.message?.android?.notification ?? {}),
+    );
 
     // 3) Data-only payload still carries the fields the client needs for the
     //    rich card (fromName + body + convoId + muted).

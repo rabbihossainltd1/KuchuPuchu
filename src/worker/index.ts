@@ -100,6 +100,15 @@ const pairId = (a: string, b: string) => (a < b ? `c_${a}_${b}` : `c_${b}_${a}`)
 const PHANTOM_RING_MS = 1_600;
 /** Android channel for missed-call cards (KpNotify.MISSED_CHANNEL). */
 const MISSED_CALL_CHANNEL = "kp_missed_v1";
+/**
+ * Owner round 32 (item 26): notification tag shared by a call's ring card and
+ * its missed-call card. Android keys a notification by (tag, id) and the FCM
+ * SDK posts every payload card under id 0, so the missed-call card REPLACES the
+ * "X is calling" card of the same call instead of stacking under it — the
+ * retraction happens in the OS, with no process of ours involved. The app
+ * cancels the same tag (KpNotify.cancelSystemCallCards) when it takes over.
+ */
+const callTag = (callId: string) => `kp_call_${callId}`;
 
 function bytesToHex(bytes: Uint8Array) {
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -2471,7 +2480,7 @@ async function pushToUser(
   db: D1Database,
   userId: string,
   data: Record<string, string>,
-  note?: { title: string; body: string; channel: string },
+  note?: { title: string; body: string; channel: string; tag?: string },
 ): Promise<boolean> {
   try {
     const auth = await fcmAccessToken(env);
@@ -2521,6 +2530,22 @@ async function pushToUser(
                             title: note.title,
                             body: note.body,
                             channel_id: note.channel,
+                            // Owner round 32 (items 1A/1B/26): the payload card is
+                            // drawn without the app's handler only when the process
+                            // is dead (or Play services proxies it for a process the
+                            // OEM will not start). Without an icon it fell back to the
+                            // launcher icon, which is adaptive and therefore unusable
+                            // in the shade — hence the generic glyph the owner saw.
+                            // `proxy` is deliberately left at its default
+                            // (IF_PRIORITY_LOWERED): the Play-services fallback is the
+                            // only card a MIUI/ColorOS-blocked process ever shows.
+                            icon: "ic_stat_kp",
+                            color: "#F59E0B",
+                            // Same tag on a call's ring card and its missed-call
+                            // card: the OS REPLACES the first with the second, so
+                            // "X is calling" cannot stay in the shade after the
+                            // call ended — even when no process of ours ever ran.
+                            ...(note.tag ? { tag: note.tag } : {}),
                           },
                         }
                       : {}),
@@ -3004,7 +3029,9 @@ async function notifyMissedCall(
       kp_callback: row.caller_id,
       kp_chat: pairId(row.caller_id, row.callee_id),
     },
-    live <= 0 ? { title: `Missed call · ${name}`, body, channel: MISSED_CALL_CHANNEL } : undefined,
+    live <= 0
+      ? { title: `Missed call · ${name}`, body, channel: MISSED_CALL_CHANNEL, tag: callTag(row.id) }
+      : undefined,
   );
 }
 
@@ -6573,6 +6600,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
                 title: `${me.display_name} is calling`,
                 body: kind === "VIDEO" ? "Incoming video call" : "Incoming voice call",
                 channel: "kp_calls_v5",
+                tag: callTag(callId),
               }
             : undefined,
         );

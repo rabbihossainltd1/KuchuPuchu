@@ -4307,6 +4307,78 @@ const convBetween = (db, a, b) =>
   );
 }
 
+// ── r32: owner list ──────────────────────────────────────────────────────────
+{
+  const kt = (f) =>
+    readFileSync(`native-android/app/src/main/java/app/kuchupuchu/android/${f}`, "utf8");
+  const manifest = readFileSync("native-android/app/src/main/AndroidManifest.xml", "utf8");
+  // Items 1A/1B/26: KpPushService was bound to "com.google.firebase.messaging.RECEIVE"
+  // — an action the FCM SDK never dispatches (it resolves the app's service by
+  // "com.google.firebase.MESSAGING_EVENT"; its own base service sits on that action
+  // at priority -500 with an EMPTY onMessageReceived). So no push ever reached
+  // handleIntent / onMessageReceived: the rich message card, the missed-call card
+  // with Call back / Message, the background ring and the ring-card retraction
+  // never ran from a push — only the OS-drawn payload card (generic glyph, no
+  // buttons) did. The lock is on the exact service block, not on the string
+  // appearing somewhere in the file.
+  const svc = manifest.slice(
+    manifest.indexOf('android:name=".KpPushService"'),
+    manifest.indexOf("</service>", manifest.indexOf('android:name=".KpPushService"')),
+  );
+  check(
+    "r32-26: KpPushService is bound to com.google.firebase.MESSAGING_EVENT (the only action the FCM SDK dispatches) and not to the phantom messaging.RECEIVE action",
+    svc.includes('<action android:name="com.google.firebase.MESSAGING_EVENT" />') &&
+      !/<action android:name="com\.google\.firebase\.messaging\.RECEIVE"/.test(manifest),
+    svc.replace(/\s+/g, " ").slice(0, 200),
+  );
+  check(
+    "r32-26: OS-drawn payload cards use the brand status icon / colour / message channel by default; Play-services delegation is left ON (the only card an OEM-blocked process can show)",
+    manifest.includes(
+      'android:name="com.google.firebase.messaging.default_notification_icon"\n            android:resource="@mipmap/ic_stat_kp"',
+    ) &&
+      manifest.includes(
+        'android:name="com.google.firebase.messaging.default_notification_color"\n            android:resource="@color/colorPrimary"',
+      ) &&
+      manifest.includes(
+        'android:name="com.google.firebase.messaging.default_notification_channel_id"\n            android:value="kp_messages_v2"',
+      ) &&
+      !manifest.includes("firebase_messaging_notification_delegation_enabled"),
+  );
+  const push = kt("KpPush.kt");
+  const omr = push.slice(
+    push.indexOf("override fun onMessageReceived(message: RemoteMessage) {"),
+    push.indexOf("private fun handleMissedCall("),
+  );
+  check(
+    "r32-26: a push into a freshly started (killed) process restores the session before any handler runs, and a handler throw is contained as a breadcrumb instead of taking the FCM thread down",
+    omr.includes("runCatching { Api.loadToken(this) }") &&
+      omr.indexOf("runCatching { Api.loadToken(this) }") < omr.indexOf('when (data["type"]) {') &&
+      omr.includes(
+        '.onFailure { KpCrash.mark("push_${data["type"]}_failed:${it.javaClass.simpleName}") }',
+      ),
+  );
+  const notify = kt("KpNotify.kt");
+  check(
+    "r32-1A/1B: a refused message / missed-call post is no longer swallowed silently — the runCatching failure branch leaves a breadcrumb (no Log)",
+    notify.includes('KpCrash.mark("notify_message_failed:${it.javaClass.simpleName}")') &&
+      notify.includes('KpCrash.mark("notify_missed_failed:${it.javaClass.simpleName}")') &&
+      !/android\.util\.Log\./.test(notify) &&
+      !/\bLog\.[dewiv]\(/.test(notify),
+  );
+  const src = readFileSync("src/worker/index.ts", "utf8");
+  check(
+    "r32-26: worker payload cards name the status icon + brand colour, and a call's ring card and missed-call card share one tag (kp_call_<id>) so the OS replaces the stuck 'X is calling' card; the app cancels by (tag, id)",
+    src.includes('icon: "ic_stat_kp",\n                            color: "#F59E0B",') &&
+      src.includes("...(note.tag ? { tag: note.tag } : {}),") &&
+      src.includes("const callTag = (callId: string) => `kp_call_${callId}`;") &&
+      src.includes('channel: "kp_calls_v5",\n                tag: callTag(callId),') &&
+      src.includes("channel: MISSED_CALL_CHANNEL, tag: callTag(row.id) }") &&
+      !src.includes('proxy: "DENY"') &&
+      (notify.match(/\.forEach \{ nm\.cancel\(it\.tag, it\.id\) \}/g) || []).length === 2 &&
+      !/\.forEach \{ nm\.cancel\(it\.id\) \}/.test(notify),
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`bots-verified: ${lines.length - broken} ok / ${broken} broken`);

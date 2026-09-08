@@ -310,6 +310,12 @@ object KpNotify {
             cardsByConv.getOrPut(convoId) { mutableSetOf() }.add(msgId)
             mgr.notify(msgId, n)
             mgr.notify(GROUP.hashCode(), summary)
+        }.onFailure {
+            // Owner round 32 (item 1A): a refused post used to vanish here.
+            // No log (owner rule) — the crash report's breadcrumb ring carries
+            // the exact exception class, so a "card never appeared" report can
+            // be matched to a real throw instead of a guess.
+            KpCrash.mark("notify_message_failed:${it.javaClass.simpleName}")
         }
     }
 
@@ -405,6 +411,7 @@ object KpNotify {
                 .apply { if (Build.VERSION.SDK_INT < 26) setSound(defaultSound()) }
                 .build()
         runCatching { NotificationManagerCompat.from(ctx).notify(("missed$otherId").hashCode(), n) }
+            .onFailure { KpCrash.mark("notify_missed_failed:${it.javaClass.simpleName}") }
     }
 
     /** The chatTap PendingIntent without the notify wrapper. */
@@ -465,7 +472,10 @@ object KpNotify {
                                 )
                             )
                 }
-                .forEach { nm.cancel(it.id) }
+                // Owner round 32 (item 26): the worker tags OS-drawn call cards
+                // (`kp_call_<id>`); a (tag, id) card is only removable by the
+                // same pair — cancel(id) alone left it in the shade.
+                .forEach { nm.cancel(it.tag, it.id) }
         }
     }
 
@@ -483,7 +493,7 @@ object KpNotify {
             val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
             nm.activeNotifications
                 .filter { it.notification.channelId == CALL_CHANNEL && it.notification.category == null }
-                .forEach { nm.cancel(it.id) }
+                .forEach { nm.cancel(it.tag, it.id) }
         }
     }
 
