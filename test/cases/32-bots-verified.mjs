@@ -4459,6 +4459,62 @@ const convBetween = (db, a, b) =>
       push.includes('loginRequestId = data["kp_login_req"],') &&
       manifest.includes('<action android:name="app.kuchupuchu.android.NOTIF_DECLINE_LOGIN" />'),
   );
+  // Item 48: multi-photo sent ONE photo. LazyListState.animateScrollToItem is
+  // a scroll mutation: the next scroll cancels the coroutine that owns the
+  // previous one (CancellationException at that suspension point). sendImage
+  // ran the jump-to-bottom INLINE ahead of the upload, so photo #2's launch
+  // killed photo #1's coroutine before its upload began, #3 killed #2… and only
+  // the last photo of an album ever reached the server. The scroll now lives in
+  // its own coroutine (text / voice too), no upload path awaits a scroll, and
+  // the grid batch reads photos in selection order.
+  const chat32 = kt("ChatScreen.kt");
+  const sendImageBody = chat32.slice(
+    chat32.indexOf("fun sendImage(dataUrl: String, album: String? = null) {"),
+    chat32.indexOf("fun sendFile(name: String, mime: String, bytes: ByteArray"),
+  );
+  const sendVoiceBody = chat32.slice(
+    chat32.indexOf("fun sendVoice(file: File, seconds: Int"),
+    chat32.indexOf("fun handleImagePicked("),
+  );
+  const sendTextBody = chat32.slice(
+    chat32.indexOf('fun sendText(body: String, kind: String = "TEXT") {'),
+    chat32.indexOf("fun sendImage(dataUrl: String, album: String? = null) {"),
+  );
+  check(
+    "r32-48: no send path awaits a list scroll — sendImage / sendVoice / sendText launch the jump-to-bottom on a separate coroutine wrapped in runCatching, the upload coroutine never contains animateScrollToItem, and the grid batch decodes photos sequentially in tick order via readAndSendImage",
+    sendImageBody.includes(
+      "scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }",
+    ) &&
+      sendVoiceBody.includes(
+        "scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }",
+      ) &&
+      sendTextBody.includes(
+        "if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }",
+      ) &&
+      // the upload coroutine starts with the sound, never with a scroll
+      sendImageBody.includes(
+        "scope.launch {\n            runCatching { KpSounds.send(ctx) }\n            var shotW = 0",
+      ) &&
+      sendVoiceBody.includes(
+        "scope.launch {\n            runCatching { KpSounds.send(ctx) }\n            try {",
+      ) &&
+      !/scope\.launch \{\n\s+listState\.animateScrollToItem/.test(chat32) &&
+      !/scope\.launch \{\n\s+val total = msgs\.size \+ pending\.size\n\s+if \(total > 0\) listState\.animateScrollToItem/.test(
+        chat32,
+      ) &&
+      chat32.includes("suspend fun readAndSendImage(uri: Uri, album: String?) {") &&
+      chat32.includes("scope.launch { readAndSendImage(uri, album) }") &&
+      chat32.includes(
+        "if (item.isVideo) handleDocumentPicked(item.uri) else readAndSendImage(item.uri, album)",
+      ) &&
+      // refresh's forced scroll + the AI reveal loop survive an interrupted scroll too
+      chat32.includes(
+        "runCatching { listState.animateScrollToItem(total - 1) }\n                }\n                lastTopId = newTop",
+      ) &&
+      chat32.includes(
+        "if (nearBottom) runCatching { listState.scrollToItem(info.totalItemsCount - 1) }",
+      ),
+  );
 }
 
 console.log(lines.join("\n"));

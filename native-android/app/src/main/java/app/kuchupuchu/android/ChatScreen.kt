@@ -534,7 +534,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // A real new message needs a known previous top.
                 val newMessage = prevTop.isNotBlank() && newTop.isNotBlank() && newTop != prevTop
                 if (total > 0 && (forceScroll || (newMessage && nearBottom))) {
-                    listState.animateScrollToItem(total - 1)
+                    // Owner round 32 (item 48): a scroll that a newer scroll
+                    // interrupts throws here; the mark-read below must still run.
+                    runCatching { listState.animateScrollToItem(total - 1) }
                 }
                 lastTopId = newTop
                 if (markRead || (newMessage && prevTop.isNotBlank())) {
@@ -881,9 +883,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .put("body", body)
                 .put("createdAt", java.time.Instant.now().toString()),
         )
+        // Owner round 32 (item 48): scroll in its own coroutine — a newer
+        // scroll cancels the older one, and that must not take the POST with it.
         scope.launch {
             val total = msgs.size + pending.size
-            if (total > 0) listState.animateScrollToItem(total - 1)
+            if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }
+        }
+        scope.launch {
             // Owner round 11: tap sound on the send itself…
             runCatching { KpSounds.send(ctx) }
             try {
@@ -927,8 +933,15 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .also { row -> metaWith(0, 0)?.let { row.put("meta", it) } }
                 .put("createdAt", java.time.Instant.now().toString()),
         )
+        // Owner round 32 (item 48): the jump-to-bottom is its own coroutine.
+        // animateScrollToItem is a scroll MUTATION — starting the next one
+        // cancels whichever coroutine owns the previous, with a
+        // CancellationException thrown at that suspension point. With the
+        // scroll inline, photo #2's launch cancelled photo #1's *before its
+        // upload began*, #3 cancelled #2, … so of an N-photo album only the
+        // last photo ever reached the server ("multi-photo sends one").
+        scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }
         scope.launch {
-            listState.animateScrollToItem(msgs.size + pending.size - 1)
             runCatching { KpSounds.send(ctx) }
             var shotW = 0
             var shotH = 0
@@ -1094,8 +1107,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .put("meta", voiceMeta())
                 .put("createdAt", java.time.Instant.now().toString()),
         )
+        // Owner round 32 (item 48): same split as sendImage — a scroll started
+        // by anything else must never cancel the upload coroutine.
+        scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }
         scope.launch {
-            listState.animateScrollToItem(msgs.size + pending.size - 1)
             runCatching { KpSounds.send(ctx) }
             try {
                 val bytes = withContext(Dispatchers.IO) { file.readBytes() }
@@ -1136,19 +1151,21 @@ fun ChatScreen(nav: NavController, convId: String) {
        run on the *chat* screen's scope instead, which lives as long as the
        chat is open, so gallery / camera / document / audio / contact /
        location all survive the sheet closing. */
-    fun handleImagePicked(uri: Uri, album: String? = null) {
-        scope.launch {
-            // 720px / ~100KB: the old 960px/220KB photos took minutes to send AND load
-            // on slow mobile data (the "image loads forever" report).
-            // High-quality photos: 1440px, ~380KB inline budget (server caps at 450K).
-            val dataUrl = withContext(Dispatchers.IO) { FilesUtil.imageToDataUrl(uri, ctx, maxSide = 1440, maxChars = 380_000) }
-            if (dataUrl == null) {
-                error = "Could not read that photo — try another one."
-            } else {
-                error = ""
-                sendImage(dataUrl, album)
-            }
+    suspend fun readAndSendImage(uri: Uri, album: String?) {
+        // 720px / ~100KB: the old 960px/220KB photos took minutes to send AND load
+        // on slow mobile data (the "image loads forever" report).
+        // High-quality photos: 1440px, ~380KB inline budget (server caps at 450K).
+        val dataUrl = withContext(Dispatchers.IO) { FilesUtil.imageToDataUrl(uri, ctx, maxSide = 1440, maxChars = 380_000) }
+        if (dataUrl == null) {
+            error = "Could not read that photo — try another one."
+        } else {
+            error = ""
+            sendImage(dataUrl, album)
         }
+    }
+
+    fun handleImagePicked(uri: Uri, album: String? = null) {
+        scope.launch { readAndSendImage(uri, album) }
     }
 
     fun handleDocumentPicked(uri: Uri, asDocument: Boolean = false) {
@@ -1178,8 +1195,13 @@ fun ChatScreen(nav: NavController, convId: String) {
         val photos = batch.count { !it.isVideo }
         val album = if (photos >= 2) newAlbumId() else null
         scope.launch {
+            // Owner round 32 (item 48): photos are read one after another, in
+            // the order they were ticked, so the pending rows (and the album's
+            // row order on the server) follow the selection instead of whichever
+            // decode happened to finish first. Each upload still runs on its
+            // own coroutine inside sendImage, so they overlap on the wire.
             batch.forEach { item ->
-                if (item.isVideo) handleDocumentPicked(item.uri) else handleImagePicked(item.uri, album)
+                if (item.isVideo) handleDocumentPicked(item.uri) else readAndSendImage(item.uri, album)
             }
         }
     }
@@ -1513,7 +1535,11 @@ fun ChatScreen(nav: NavController, convId: String) {
             val info = listState.layoutInfo
             val nearBottom =
                 info.visibleItemsInfo.lastOrNull()?.index?.let { it >= info.totalItemsCount - 2 } == true
-            if (nearBottom) listState.scrollToItem(info.totalItemsCount - 1)
+            // Owner round 32 (item 48 family): a user drag owns the scroll
+            // mutex, so this programmatic scroll throws — the reveal must keep
+            // typing (and reset aiRevealId at the end) instead of dying here
+            // and leaving the reply cut off at that word.
+            if (nearBottom) runCatching { listState.scrollToItem(info.totalItemsCount - 1) }
         }
         delay(250)
         aiRevealId = null
