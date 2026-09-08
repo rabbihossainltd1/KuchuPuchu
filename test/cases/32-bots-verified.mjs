@@ -4415,6 +4415,25 @@ const convBetween = (db, a, b) =>
       settings.includes("android.provider.Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT") &&
       settings.includes("if (android.os.Build.VERSION.SDK_INT >= 34) {"),
   );
+  // Item 1C: Install did nothing. PackageInstaller.commit() does not show the
+  // system confirm sheet by itself — it answers STATUS_PENDING_USER_ACTION with
+  // the confirmation activity in EXTRA_INTENT, which the status receiver must
+  // start; ours only handled STATUS_SUCCESS. And on Android 8+ the per-source
+  // "install unknown apps" grant is required before commit() is honoured.
+  const upd = kt("KpUpdate.kt");
+  const rx = upd.slice(upd.indexOf("class KpUpdateReceiver"));
+  check(
+    "r32-1C: the installer receiver starts the EXTRA_INTENT confirm sheet on STATUS_PENDING_USER_ACTION, keeps the APK on a dismissed sheet, and surfaces other failures via downloadError; installReady() routes a missing 'install unknown apps' grant to ACTION_MANAGE_UNKNOWN_APP_SOURCES for this package",
+    rx.includes("PackageInstaller.STATUS_PENDING_USER_ACTION -> {") &&
+      rx.includes("intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)") &&
+      rx.includes("ctx.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))") &&
+      rx.includes("PackageInstaller.STATUS_FAILURE_ABORTED -> {}") &&
+      rx.includes("intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)") &&
+      upd.includes("!ctx.packageManager.canRequestPackageInstalls()") &&
+      upd.includes("android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES") &&
+      upd.indexOf("canRequestPackageInstalls()") <
+        upd.indexOf("withContext(Dispatchers.IO) { install(ctx, apk) }"),
+  );
 }
 
 console.log(lines.join("\n"));

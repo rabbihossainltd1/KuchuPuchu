@@ -148,6 +148,23 @@ object KpUpdate {
     /** The Install tap: hands the downloaded APK to the system installer. */
     suspend fun installReady(ctx: Context) {
         val apk = ready ?: return
+        // Owner round 32 (item 1C): on Android 8+ REQUEST_INSTALL_PACKAGES only
+        // lets the app ASK — the user grants "install unknown apps" per source
+        // in system settings. Without it PackageInstaller.commit() is refused
+        // with nothing visible ("Install e click korle kichu hoy na"). Take
+        // the user to that exact page; coming back, Install works.
+        if (android.os.Build.VERSION.SDK_INT >= 26 && !ctx.packageManager.canRequestPackageInstalls()) {
+            downloadError = ""
+            runCatching {
+                ctx.startActivity(
+                    Intent(
+                        android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        android.net.Uri.parse("package:${ctx.packageName}"),
+                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }.onFailure { downloadError = "Allow installs from KuchuPuchu in Settings" }
+            return
+        }
         runCatching { withContext(Dispatchers.IO) { install(ctx, apk) } }
             .onFailure { downloadError = it.message ?: "Install failed" }
     }
@@ -177,13 +194,41 @@ object KpUpdate {
     }
 }
 
-/** Silently absorbs the installer session result (success or otherwise — the
- *  system UI already told the user; failures just leave the app as it was). */
+/**
+ * Installer session status receiver.
+ *
+ * Owner round 32 (item 1C): the system's "Install this update?" sheet is NOT
+ * shown by commit() itself. The platform answers the commit with
+ * STATUS_PENDING_USER_ACTION and hands the confirmation activity to this
+ * receiver as EXTRA_INTENT; the app must start it. This receiver only ever
+ * handled STATUS_SUCCESS, so the confirm intent was dropped on the floor and
+ * Install visibly did nothing. A failure now surfaces through downloadError
+ * (the sheet is still up) instead of vanishing.
+ */
 class KpUpdateReceiver : android.content.BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
-        val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
-        if (status == PackageInstaller.STATUS_SUCCESS) {
-            ctx.filesDir.resolve("kp-update.apk").delete()
+        when (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
+            PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                @Suppress("DEPRECATION")
+                val confirm =
+                    if (android.os.Build.VERSION.SDK_INT >= 33) {
+                        intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
+                    } else {
+                        intent.getParcelableExtra(Intent.EXTRA_INTENT)
+                    }
+                if (confirm == null) {
+                    KpUpdate.downloadError = "Install failed"
+                    return
+                }
+                runCatching { ctx.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    .onFailure { KpUpdate.downloadError = "Install failed" }
+            }
+            PackageInstaller.STATUS_SUCCESS -> ctx.filesDir.resolve("kp-update.apk").delete()
+            // The user dismissed the system sheet: keep the APK, no error text.
+            PackageInstaller.STATUS_FAILURE_ABORTED -> {}
+            else ->
+                KpUpdate.downloadError =
+                    intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "Install failed"
         }
     }
 }
