@@ -186,6 +186,7 @@ object KpNotify {
         convoId: String,
         muted: Boolean = false,
         mid: String? = null,
+        loginRequestId: String? = null,
     ) {
         ensureChannels(ctx)
         // WhatsApp-style direct actions: reply straight from the
@@ -246,6 +247,26 @@ object KpNotify {
         val readAction =
             NotificationCompat.Action.Builder(android.R.drawable.ic_menu_view, "Mark as read", readPending)
                 .build()
+        // Owner round 32 (item 27): the login-alert card gets a Decline action
+        // (owner: Decline only — Approve happens inside the app, where the
+        // request details are on screen). The receiver posts the decline.
+        val declineAction =
+            loginRequestId?.takeIf { it.isNotBlank() }?.let { req ->
+                NotificationCompat.Action.Builder(
+                    android.R.drawable.ic_menu_close_clear_cancel,
+                    "Decline",
+                    PendingIntent.getBroadcast(
+                        ctx,
+                        req.hashCode(),
+                        Intent(ctx, KpNotifActionReceiver::class.java)
+                            .setAction(KpNotifActionReceiver.ACTION_DECLINE_LOGIN)
+                            .putExtra("convoId", convoId)
+                            .putExtra("mid", mid ?: "")
+                            .putExtra("requestId", req),
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                    ),
+                ).build()
+            }
         val n =
             NotificationCompat.Builder(ctx, if (muted) SILENT_CHANNEL else CHAT_CHANNEL)
                 .setSmallIcon(R.mipmap.ic_stat_kp)
@@ -265,8 +286,10 @@ object KpNotify {
                 // only bounce off the API's NO_REPLIES refusal.
                 .apply {
                     if (!convoId.contains("kp_official_bot")) addAction(replyAction)
+                    // A login alert: Decline + Mark as read only (Like is
+                    // meaningless on a security prompt).
+                    if (declineAction != null) addAction(declineAction) else addAction(likeAction)
                 }
-                .addAction(likeAction)
                 .addAction(readAction)
                 // Muted: no heads-up, no sound — channel is silent anyway,
                 // and PRIORITY_DEFAULT keeps it out of the full-intent path.
@@ -537,6 +560,24 @@ class KpNotifActionReceiver : android.content.BroadcastReceiver() {
                     pending.finish()
                 }.start()
             }
+            ACTION_DECLINE_LOGIN -> {
+                // Owner round 32 (item 27): one tap declines the sign-in
+                // attempt from the shade. The worker flips the request and
+                // re-labels the chat card; the notification is dismissed
+                // either way (an expired / already-handled request is a 4xx,
+                // which is the same outcome for the user).
+                val req = intent.getStringExtra("requestId") ?: return
+                nm.cancel(cardId)
+                val pending = goAsync()
+                Thread {
+                    runCatching {
+                        Api.post("/api/auth/login/decline", org.json.JSONObject().put("requestId", req))
+                    }
+                    runCatching { Api.post("/api/conversations/$convoId/read") }
+                    runCatching { ScreenStore.markRead(convoId) }
+                    pending.finish()
+                }.start()
+            }
             ACTION_MARK_READ -> {
                 // Just dismisses + marks read server-side — no reply sent,
                 // no app open, matches the messenger-style tick behaviour.
@@ -588,5 +629,6 @@ class KpNotifActionReceiver : android.content.BroadcastReceiver() {
         const val ACTION_REPLY = "app.kuchupuchu.android.NOTIF_REPLY"
         const val ACTION_LIKE = "app.kuchupuchu.android.NOTIF_LIKE"
         const val ACTION_MARK_READ = "app.kuchupuchu.android.NOTIF_MARK_READ"
+        const val ACTION_DECLINE_LOGIN = "app.kuchupuchu.android.NOTIF_DECLINE_LOGIN"
     }
 }

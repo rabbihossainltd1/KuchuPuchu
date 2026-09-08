@@ -460,6 +460,7 @@ class KpPushService : FirebaseMessagingService() {
             convoId,
             muted = muted,
             mid = mid,
+            loginRequestId = data["kp_login_req"],
         )
     }
 

@@ -529,6 +529,9 @@ async function sendApprovalMessage(
         body: `New sign-in attempt on ${label}${where}. Tap to review it.`,
         kp_chat: convId,
         muted: "0",
+        // Owner round 32 (item 27): the card carries a Decline action that
+        // posts /api/auth/login/decline with this id (Approve stays in-app).
+        kp_login_req: requestId,
       },
       {
         title: "KuchuPuchu",

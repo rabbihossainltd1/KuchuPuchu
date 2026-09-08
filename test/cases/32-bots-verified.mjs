@@ -4434,6 +4434,31 @@ const convBetween = (db, a, b) =>
       upd.indexOf("canRequestPackageInstalls()") <
         upd.indexOf("withContext(Dispatchers.IO) { install(ctx, apk) }"),
   );
+  // Item 27 (owner: Decline ONLY — Approve stays inside the app): the login
+  // alert push carries the request id; the card swaps Like for Decline; the
+  // receiver posts /api/auth/login/decline and marks the chat read.
+  const sam = src.slice(
+    src.indexOf("async function sendApprovalMessage("),
+    src.indexOf("async function resolveApprovalMessage("),
+  );
+  check(
+    "r32-27: login-alert card has a Decline action (no Approve): the push carries kp_login_req; KpNotify adds Decline instead of Like when it is present; the receiver posts /api/auth/login/decline with that id, then marks read; manifest filter declares the action",
+    sam.includes("kp_login_req: requestId,") &&
+      notify.includes("loginRequestId: String? = null,") &&
+      notify.includes(".setAction(KpNotifActionReceiver.ACTION_DECLINE_LOGIN)") &&
+      notify.includes(
+        "if (declineAction != null) addAction(declineAction) else addAction(likeAction)",
+      ) &&
+      notify.includes(
+        'Api.post("/api/auth/login/decline", org.json.JSONObject().put("requestId", req))',
+      ) &&
+      notify.includes(
+        'const val ACTION_DECLINE_LOGIN = "app.kuchupuchu.android.NOTIF_DECLINE_LOGIN"',
+      ) &&
+      !/"Approve"/.test(notify) &&
+      push.includes('loginRequestId = data["kp_login_req"],') &&
+      manifest.includes('<action android:name="app.kuchupuchu.android.NOTIF_DECLINE_LOGIN" />'),
+  );
 }
 
 console.log(lines.join("\n"));
