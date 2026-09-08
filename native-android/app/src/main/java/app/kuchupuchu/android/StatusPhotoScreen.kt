@@ -41,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,6 +59,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -105,6 +107,9 @@ fun StatusPhotoScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean
     var cropping by remember { mutableStateOf(false) }
     var crop by remember { mutableStateOf<CropBox?>(null) }
     var preset by remember { mutableStateOf("Original") }
+    // Owner round 32 (item 43): the handle being dragged, as a clip position —
+    // the preview freezes on that exact frame while the finger is down.
+    var scrub by remember { mutableStateOf<Long?>(null) }
     val thumbs = remember { mutableStateListOf<ImageBitmap?>() }
 
     LaunchedEffect(picked) {
@@ -247,7 +252,7 @@ fun StatusPhotoScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean
                             if (shot != null) {
                                 Image(shot, contentDescription = "Status photo", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
                             } else {
-                                StatusTrimPreview(pickedUri, start, end, paused = cropping)
+                                StatusTrimPreview(pickedUri, start, end, paused = cropping, scrubAt = scrub)
                             }
                             if (cropping) {
                                 CropOverlay(
@@ -304,6 +309,7 @@ fun StatusPhotoScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean
                         start = s
                         end = e
                     },
+                    onScrub = { scrub = it },
                 )
             }
             Row(
@@ -403,14 +409,16 @@ private fun readVideo(
     return bytes
 }
 
-/** The clip loops inside the selected window; tap pauses/resumes. */
+/** The clip loops inside the selected window; tap pauses/resumes. While a
+ *  trim handle is being dragged ([scrubAt]) the picture holds the frame under
+ *  that handle — the release restarts playback from the start handle. */
 @Composable
-private fun StatusTrimPreview(uri: Uri, start: Long, end: Long, paused: Boolean) {
+private fun StatusTrimPreview(uri: Uri, start: Long, end: Long, paused: Boolean, scrubAt: Long? = null) {
     var player by remember(uri) { mutableStateOf<TrimClipPlayer?>(null) }
     var userPaused by remember { mutableStateOf(false) }
     val haptics = rememberHaptics()
-    LaunchedEffect(player, start, end) { player?.setWindow(start, end) }
-    LaunchedEffect(player, paused, userPaused) { player?.setPaused(paused || userPaused) }
+    LaunchedEffect(player, start, end, scrubAt) { player?.setWindow(start, end, scrubAt ?: -1L) }
+    LaunchedEffect(player, paused, userPaused, scrubAt) { player?.setPaused(paused || userPaused || scrubAt != null) }
     LaunchedEffect(player) {
         val p = player ?: return@LaunchedEffect
         while (true) {
@@ -448,7 +456,17 @@ private fun StatusTrimPreview(uri: Uri, start: Long, end: Long, paused: Boolean)
     }
 }
 
-/** MediaPlayer on a TextureView that loops [start, end] of the source clip. */
+/**
+ * MediaPlayer on a TextureView that loops [start, end] of the source clip.
+ *
+ * Owner round 32 (item 43, "preview glitches and loops back after ~1 s"):
+ * the old loop used seekTo(int), which lands on the PREVIOUS keyframe — with
+ * a 2-3 s GOP that is seconds before the start handle — and then judged the
+ * position against `start - 1.5 s` on the very next tick, seeking again,
+ * landing on the same keyframe again… an endless stutter. Seeks are now
+ * frame-exact (SEEK_CLOSEST, API 26+), a seek in flight is never second-
+ * guessed, and where a seek actually landed is accepted as the loop floor.
+ */
 private class TrimClipPlayer(
     private val view: android.view.TextureView,
     private val ctx: android.content.Context,
@@ -460,6 +478,10 @@ private class TrimClipPlayer(
     private var startMs = 0L
     private var endMs = Long.MAX_VALUE
     private var pendingSeek = -1L
+    private var seeking = false
+    private var seekSince = 0L
+    private var landedAt = 0L
+    private var scrubbing = false
 
     fun attach() {
         view.surfaceTextureListener = this
@@ -480,12 +502,16 @@ private class TrimClipPlayer(
                     setDataSource(ctx, uri)
                     setOnPreparedListener { p ->
                         prepared = true
-                        runCatching { p.seekTo(startMs.toInt()) }
+                        seek(p, startMs)
                         if (!wantPaused) runCatching { p.start() }
+                    }
+                    setOnSeekCompleteListener { p ->
+                        seeking = false
+                        landedAt = runCatching { p.currentPosition.toLong() }.getOrDefault(startMs)
                     }
                     setOnCompletionListener { p ->
                         runCatching {
-                            p.seekTo(startMs.toInt())
+                            seek(p, startMs)
                             if (!wantPaused) p.start()
                         }
                     }
@@ -496,30 +522,76 @@ private class TrimClipPlayer(
         runCatching { mp?.setSurface(android.view.Surface(st)) }
     }
 
-    fun setWindow(s: Long, e: Long) {
-        if (s != startMs) pendingSeek = s
+    /** Frame-exact where the platform can (26+); the legacy call lands on a keyframe. */
+    private fun seek(p: android.media.MediaPlayer, ms: Long) {
+        seeking = true
+        seekSince = android.os.SystemClock.uptimeMillis()
+        runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= 26) {
+                p.seekTo(ms, android.media.MediaPlayer.SEEK_CLOSEST)
+            } else {
+                p.seekTo(ms.toInt())
+            }
+        }.onFailure { seeking = false }
+    }
+
+    /**
+     * The window, plus the handle under the finger ([scrubTo], -1 when none):
+     * a dragged handle shows its exact frame; letting go restarts from the
+     * start handle.
+     */
+    fun setWindow(s: Long, e: Long, scrubTo: Long = -1L) {
+        val startMoved = s != startMs
         startMs = s
         endMs = e
+        val nowScrubbing = scrubTo >= 0L
+        when {
+            nowScrubbing -> pendingSeek = scrubTo
+            scrubbing || startMoved -> pendingSeek = s
+        }
+        scrubbing = nowScrubbing
     }
 
     fun setPaused(p: Boolean) {
         wantPaused = p
         val m = mp ?: return
         if (!prepared) return
-        runCatching { if (p) m.pause() else m.start() }
+        runCatching {
+            if (p) {
+                m.pause()
+            } else {
+                // Resume from the handle, not from wherever the scrub left the head.
+                if (pendingSeek >= 0L) {
+                    seek(m, pendingSeek)
+                    pendingSeek = -1L
+                }
+                m.start()
+            }
+        }
     }
 
-    /** ~8×/s: applies a pending seek (at most one per tick) and loops at the end handle. */
+    /** ~8×/s: applies a pending seek (never while one is in flight) and loops at the end handle. */
     fun tick() {
         val m = mp ?: return
         if (!prepared) return
+        // A seek-complete that never arrives (some OEM players skip it for a
+        // no-op seek) must not freeze the loop for good.
+        if (seeking && android.os.SystemClock.uptimeMillis() - seekSince > 1_500L) seeking = false
+        if (seeking) return
         runCatching {
             if (pendingSeek >= 0L) {
-                m.seekTo(pendingSeek.toInt())
+                val target = pendingSeek
                 pendingSeek = -1L
-            } else if (m.currentPosition >= endMs || m.currentPosition < startMs - 1500L) {
-                m.seekTo(startMs.toInt())
+                seek(m, target)
+                return
             }
+            // A paused picture never loops (a scrub holds its frame).
+            if (wantPaused) return
+            val pos = m.currentPosition.toLong()
+            // Past the end handle → back to the start. Behind the start is
+            // only a restart when it is also behind where the last seek
+            // LANDED (a legacy keyframe seek lands early — that is fine).
+            if (pos >= endMs || pos < minOf(startMs, landedAt) - 1_000L) seek(m, startMs)
         }
     }
 
@@ -550,6 +622,14 @@ private class TrimClipPlayer(
  * The trim strip: frames of the whole clip with a bright window over the
  * chosen part. Drag inside the window to slide it (length kept), drag either
  * edge to move that handle; VideoPlan keeps the window inside a minute.
+ *
+ * Owner round 32 (item 43, "handles imprecise"): the handle hit zone was 40 px
+ * (~13 dp — a fingertip missed it and slid the whole window instead); it is
+ * 24 dp each side now, the nearer handle wins, and the drag is computed in
+ * absolute terms (window at touch-down + total finger travel) instead of
+ * summing per-event deltas rounded to whole milliseconds. [onScrub] reports the
+ * handle's clip position while the finger is down (null on release) so the
+ * preview can show that exact frame.
  */
 @Composable
 private fun TrimStrip(
@@ -558,16 +638,23 @@ private fun TrimStrip(
     start: Long,
     end: Long,
     onWindow: (Long, Long) -> Unit,
+    onScrub: (Long?) -> Unit = {},
 ) {
     var widthPx by remember { mutableStateOf(1f) }
     var mode by remember { mutableStateOf(0) } // 0 idle · 1 start · 2 end · 3 slide
     var s by remember { mutableStateOf(start) }
     var e by remember { mutableStateOf(end) }
+    var grabS by remember { mutableStateOf(start) }
+    var grabE by remember { mutableStateOf(end) }
+    var travel by remember { mutableStateOf(0f) }
     LaunchedEffect(start, end) {
         s = start
         e = end
     }
     val total = durationMs.coerceAtLeast(1L).toFloat()
+    val grabPx = with(LocalDensity.current) { 24.dp.toPx() }
+    val scrubCb = rememberUpdatedState(onScrub)
+    val windowCb = rememberUpdatedState(onWindow)
     Box(
         Modifier
             .fillMaxWidth()
@@ -581,31 +668,44 @@ private fun TrimStrip(
                     onDragStart = { pos ->
                         val sx = s / total * widthPx
                         val ex = e / total * widthPx
-                        val grab = 40f
+                        val ds = kotlin.math.abs(pos.x - sx)
+                        val de = kotlin.math.abs(pos.x - ex)
                         mode =
                             when {
-                                kotlin.math.abs(pos.x - sx) <= grab -> 1
-                                kotlin.math.abs(pos.x - ex) <= grab -> 2
+                                ds <= grabPx && ds <= de -> 1
+                                de <= grabPx -> 2
                                 pos.x in sx..ex -> 3
                                 else -> 0
                             }
+                        grabS = s
+                        grabE = e
+                        travel = 0f
+                        if (mode != 0) scrubCb.value(if (mode == 2) e else s)
                     },
-                    onDragEnd = { mode = 0 },
-                    onDragCancel = { mode = 0 },
+                    onDragEnd = {
+                        mode = 0
+                        scrubCb.value(null)
+                    },
+                    onDragCancel = {
+                        mode = 0
+                        scrubCb.value(null)
+                    },
                 ) { change, drag ->
                     change.consume()
-                    val deltaMs = (drag.x / widthPx * total).toLong()
+                    travel += drag.x
+                    val deltaMs = (travel / widthPx * total).toLong()
                     val next =
                         when (mode) {
-                            1 -> VideoPlan.moveStart(s, e, durationMs, s + deltaMs)
-                            2 -> VideoPlan.moveEnd(s, e, durationMs, e + deltaMs)
-                            3 -> VideoPlan.slide(s, e, durationMs, deltaMs)
+                            1 -> VideoPlan.moveStart(grabS, grabE, durationMs, grabS + deltaMs)
+                            2 -> VideoPlan.moveEnd(grabS, grabE, durationMs, grabE + deltaMs)
+                            3 -> VideoPlan.slide(grabS, grabE, durationMs, deltaMs)
                             else -> null
                         }
                     if (next != null) {
                         s = next.first
                         e = next.second
-                        onWindow(s, e)
+                        windowCb.value(s, e)
+                        scrubCb.value(if (mode == 2) e else s)
                     }
                 }
             },
@@ -624,12 +724,20 @@ private fun TrimStrip(
             drawRect(shade, Offset.Zero, Size(sx.coerceAtLeast(0f), size.height))
             drawRect(shade, Offset(ex, 0f), Size((size.width - ex).coerceAtLeast(0f), size.height))
             val accent = ActionBlue // blue in dark-blue, the classic gold in light-cream
-            drawRect(accent, Offset(sx, 0f), Size(ex - sx, size.height), style = Stroke(6f))
-            val hw = 22f
-            drawRoundRect(accent, Offset(sx - hw / 2f, 0f), Size(hw, size.height), CornerRadius(6f))
-            drawRoundRect(accent, Offset(ex - hw / 2f, 0f), Size(hw, size.height), CornerRadius(6f))
-            listOf(sx, ex).forEach { x ->
-                drawLine(Color.White, Offset(x, size.height * 0.35f), Offset(x, size.height * 0.65f), strokeWidth = 4f)
+            val edge = 2.dp.toPx()
+            drawRect(accent, Offset(sx, 0f), Size(ex - sx, size.height), style = Stroke(edge * 2f))
+            // Handles: 10 dp pills a thumb can find, brighter while held.
+            val hw = 10.dp.toPx()
+            val r = CornerRadius(3.dp.toPx())
+            drawRoundRect(if (mode == 1) Color.White else accent, Offset(sx - hw / 2f, 0f), Size(hw, size.height), r)
+            drawRoundRect(if (mode == 2) Color.White else accent, Offset(ex - hw / 2f, 0f), Size(hw, size.height), r)
+            listOf(sx to (mode == 1), ex to (mode == 2)).forEach { (x, held) ->
+                drawLine(
+                    if (held) accent else Color.White,
+                    Offset(x, size.height * 0.32f),
+                    Offset(x, size.height * 0.68f),
+                    strokeWidth = edge,
+                )
             }
         }
     }
@@ -642,6 +750,14 @@ private fun TrimStrip(
 @Composable
 private fun CropOverlay(box: CropBox, lock: Float?, boxAspect: Float, onChange: (CropBox) -> Unit) {
     var corner by remember { mutableStateOf(0) } // 0 none · 1 inside · 2..5 corners
+    // Owner round 32 (item 43, "the Free crop box can't be moved"): the gesture
+    // block is launched once per (lock, boxAspect) and kept the `box` it was
+    // created with — every drag event moved that stale copy by (dx, dy), so the
+    // box only ever jittered around its first position. The block now reads the
+    // box (and the callback) as they are NOW.
+    val current = rememberUpdatedState(box)
+    val changeCb = rememberUpdatedState(onChange)
+    val grabPx = with(LocalDensity.current) { 28.dp.toPx() }
     Canvas(
         Modifier
             .fillMaxSize()
@@ -650,8 +766,9 @@ private fun CropOverlay(box: CropBox, lock: Float?, boxAspect: Float, onChange: 
                     onDragStart = { pos ->
                         val w = size.width.toFloat()
                         val h = size.height.toFloat()
-                        val r = Rect(box.x * w, box.y * h, (box.x + box.w) * w, (box.y + box.h) * h)
-                        val grab = 64f
+                        val b = current.value
+                        val r = Rect(b.x * w, b.y * h, (b.x + b.w) * w, (b.y + b.h) * h)
+                        val grab = grabPx
                         corner =
                             when {
                                 (pos - r.topLeft).getDistance() <= grab -> 2
@@ -668,9 +785,10 @@ private fun CropOverlay(box: CropBox, lock: Float?, boxAspect: Float, onChange: 
                     change.consume()
                     val dx = drag.x / size.width.toFloat().coerceAtLeast(1f)
                     val dy = drag.y / size.height.toFloat().coerceAtLeast(1f)
+                    val b = current.value
                     when (corner) {
-                        1 -> onChange(box.moved(dx, dy))
-                        in 2..5 -> onChange(box.resized(corner, dx, dy, lock, boxAspect))
+                        1 -> changeCb.value(b.moved(dx, dy))
+                        in 2..5 -> changeCb.value(b.resized(corner, dx, dy, lock, boxAspect))
                     }
                 }
             },

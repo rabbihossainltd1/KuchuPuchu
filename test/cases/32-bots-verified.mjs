@@ -3877,9 +3877,10 @@ const convBetween = (db, a, b) =>
         "r31-30: video — first minute preselected (VideoPlan.defaultWindow), a trim strip with slide/start/end handles, a crop overlay with Original/9:16/1:1/Free, the cut clip's real length goes up as `seconds`",
         share.includes("val (s, e) = VideoPlan.defaultWindow(src.durationMs)") &&
           share.includes("private fun TrimStrip(") &&
-          share.includes("1 -> VideoPlan.moveStart(s, e, durationMs, s + deltaMs)") &&
-          share.includes("2 -> VideoPlan.moveEnd(s, e, durationMs, e + deltaMs)") &&
-          share.includes("3 -> VideoPlan.slide(s, e, durationMs, deltaMs)") &&
+          // r32-43: the drag is absolute (window at touch-down + total travel)
+          share.includes("1 -> VideoPlan.moveStart(grabS, grabE, durationMs, grabS + deltaMs)") &&
+          share.includes("2 -> VideoPlan.moveEnd(grabS, grabE, durationMs, grabE + deltaMs)") &&
+          share.includes("3 -> VideoPlan.slide(grabS, grabE, durationMs, deltaMs)") &&
           share.includes("private fun CropOverlay(") &&
           share.includes('listOf("Original", "9:16", "1:1", "Free").forEach { name ->') &&
           share.includes('.put("seconds", ((e - s + 500L) / 1000L).toInt().coerceAtLeast(1))') &&
@@ -4514,6 +4515,71 @@ const convBetween = (db, a, b) =>
       chat32.includes(
         "if (nearBottom) runCatching { listState.scrollToItem(info.totalItemsCount - 1) }",
       ),
+  );
+  // Item 43 / 1D (status share screen) — three real defects, all fixed in place:
+  //  (a) the preview "loops back after ~1 s": seekTo(int) lands on the previous
+  //      keyframe (seconds before the start handle), the next tick saw
+  //      position < start - 1.5 s and seeked again → endless stutter. Seeks are
+  //      frame-exact on 26+ (SEEK_CLOSEST), never re-issued while one is in
+  //      flight, and where a seek landed is the loop floor;
+  //  (b) "handles imprecise": 40 px hit zone → 24 dp, nearer handle wins, the
+  //      drag is absolute (window at touch-down + travel) and the held handle
+  //      scrubs the preview to its exact frame;
+  //  (c) "Free crop box can't be moved": the pointerInput block captured the
+  //      `box` it was created with (keyed only on lock/aspect), so each drag
+  //      moved that stale copy — the block now reads the box through
+  //      rememberUpdatedState.
+  const share32 = kt("StatusPhotoScreen.kt");
+  const playerCls = share32.slice(
+    share32.indexOf("private class TrimClipPlayer("),
+    share32.indexOf("private fun TrimStrip("),
+  );
+  const stripFn = share32.slice(
+    share32.indexOf("private fun TrimStrip("),
+    share32.indexOf("private fun CropOverlay("),
+  );
+  const cropFn = share32.slice(share32.indexOf("private fun CropOverlay("));
+  check(
+    "r32-43: trim preview — frame-exact seeks (SEEK_CLOSEST on 26+), a seek in flight is never re-issued, the loop floor is where the last seek landed, a paused/scrubbed picture never loops, and the scrubbed handle's frame is shown while the finger is down",
+    playerCls.includes("p.seekTo(ms, android.media.MediaPlayer.SEEK_CLOSEST)") &&
+      playerCls.includes("setOnSeekCompleteListener { p ->") &&
+      playerCls.includes("if (seeking) return") &&
+      playerCls.includes("if (wantPaused) return") &&
+      playerCls.includes(
+        "if (pos >= endMs || pos < minOf(startMs, landedAt) - 1_000L) seek(m, startMs)",
+      ) &&
+      !playerCls.includes("m.currentPosition < startMs - 1500L") &&
+      playerCls.includes("fun setWindow(s: Long, e: Long, scrubTo: Long = -1L) {") &&
+      share32.includes(
+        "LaunchedEffect(player, start, end, scrubAt) { player?.setWindow(start, end, scrubAt ?: -1L) }",
+      ) &&
+      share32.includes("player?.setPaused(paused || userPaused || scrubAt != null)") &&
+      share32.includes(
+        "StatusTrimPreview(pickedUri, start, end, paused = cropping, scrubAt = scrub)",
+      ),
+  );
+  check(
+    "r32-43: trim handles — 24 dp grab zone, the nearer handle wins, absolute drag maths (grabS/grabE + travel), the held handle reports its clip position via onScrub (null on release), 10 dp handle pills",
+    stripFn.includes("val grabPx = with(LocalDensity.current) { 24.dp.toPx() }") &&
+      stripFn.includes("ds <= grabPx && ds <= de -> 1") &&
+      stripFn.includes("de <= grabPx -> 2") &&
+      stripFn.includes("travel += drag.x") &&
+      stripFn.includes("val deltaMs = (travel / widthPx * total).toLong()") &&
+      stripFn.includes("if (mode != 0) scrubCb.value(if (mode == 2) e else s)") &&
+      stripFn.includes("scrubCb.value(null)") &&
+      stripFn.includes("val hw = 10.dp.toPx()") &&
+      !stripFn.includes("val grab = 40f") &&
+      share32.includes("onScrub = { scrub = it },"),
+  );
+  check(
+    "r32-43: Free crop box moves — CropOverlay reads the CURRENT box / callback through rememberUpdatedState inside its pointerInput (no stale capture), 28 dp corner grab",
+    cropFn.includes("val current = rememberUpdatedState(box)") &&
+      cropFn.includes("val changeCb = rememberUpdatedState(onChange)") &&
+      cropFn.includes("val b = current.value") &&
+      cropFn.includes("1 -> changeCb.value(b.moved(dx, dy))") &&
+      cropFn.includes("in 2..5 -> changeCb.value(b.resized(corner, dx, dy, lock, boxAspect))") &&
+      cropFn.includes("val grabPx = with(LocalDensity.current) { 28.dp.toPx() }") &&
+      !cropFn.includes("1 -> onChange(box.moved(dx, dy))"),
   );
 }
 
