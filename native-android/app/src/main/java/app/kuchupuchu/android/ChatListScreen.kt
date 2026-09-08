@@ -625,7 +625,10 @@ fun HiddenChatsScreen(nav: NavController) {
             Spacer(Modifier.width(8.dp))
             Text("(${hidden.size})", fontSize = 15.sp, color = Muted)
         }
-        if (hidden.isEmpty()) {
+        // Owner round 32 (item 23): the calls with those people live here too
+        // (they leave the Calls tab the moment the chat is hidden).
+        val hiddenCalls = remember(rev, ScreenStore.callsRaw, ScreenStore.convsRaw) { ScreenStore.calls.filter { ScreenStore.isHiddenCall(it) } }
+        if (hidden.isEmpty() && hiddenCalls.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 EmptyState(
                     icon = Icons.Filled.VisibilityOff,
@@ -644,6 +647,22 @@ fun HiddenChatsScreen(nav: NavController) {
             ) {
                 items(hidden, key = { it.optString("id") }) { conv ->
                     SwipeConvRow(conv, nav, { rev++ }, hiddenMode = true)
+                }
+                if (hiddenCalls.isNotEmpty()) {
+                    item(key = "hidden_calls_head") {
+                        Text(
+                            "Calls",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Muted,
+                            modifier = Modifier.padding(start = 8.dp, top = 10.dp, bottom = 2.dp),
+                        )
+                    }
+                    items(hiddenCalls, key = { "call_" + it.optString("id") }) { call ->
+                        CallRow(call) {
+                            ScreenStore.convIdForUser[callPeerId(call)]?.let { nav.navigate("chat/$it") }
+                        }
+                    }
                 }
             }
         }
@@ -675,13 +694,52 @@ private fun swipeFocusTouch(id: String): Modifier =
         }
     }
 
-/** On the list: a touch that reached no row (blank space) closes the open row. */
-private fun swipeFocusList(): Modifier =
-    Modifier.pointerInput(Unit) {
+/**
+ * On the list: a touch that reached no row (blank space) closes the open
+ * row — and, owner round 32 (item 23), THREE quick such taps open the hidden
+ * chats. One finger, no drag, each tap within 600ms of the last. A tap that
+ * landed on a row (that row's observer ran first — Main pass, child before
+ * parent — and set `downOn`) never counts and resets the run, so tapping
+ * chats can never open the hidden screen; the old three-finger detector
+ * fired on ordinary multi-touch and opened chats underneath it. One observer
+ * reads `downOn` exactly once per gesture, so the two jobs cannot race.
+ */
+private fun swipeFocusList(onTripleTapBlank: (() -> Unit)? = null): Modifier =
+    Modifier.pointerInput(onTripleTapBlank) {
+        var taps = 0
+        var lastUp = 0L
+        val slop = viewConfiguration.touchSlop
         awaitEachGesture {
-            awaitFirstDown(requireUnconsumed = false)
-            if (SwipeOpen.downOn == null) SwipeOpen.id = null
+            val down = awaitFirstDown(requireUnconsumed = false)
+            val onRow = SwipeOpen.downOn != null
             SwipeOpen.downOn = null
+            if (!onRow) SwipeOpen.id = null
+            if (onTripleTapBlank == null) return@awaitEachGesture
+            val start = down.position
+            var fingers = 1
+            var moved = false
+            val downAt = System.currentTimeMillis()
+            while (true) {
+                val event = awaitPointerEvent()
+                fingers = maxOf(fingers, event.changes.count { it.pressed })
+                event.changes.firstOrNull { it.id == down.id }?.let {
+                    if ((it.position - start).getDistance() > slop) moved = true
+                }
+                if (event.changes.all { !it.pressed }) break
+            }
+            val now = System.currentTimeMillis()
+            val tap = !onRow && !moved && fingers == 1 && now - downAt < 300
+            if (tap && (taps == 0 || now - lastUp < 600)) {
+                taps++
+                lastUp = now
+                if (taps >= 3) {
+                    taps = 0
+                    onTripleTapBlank()
+                }
+            } else {
+                taps = if (tap) 1 else 0
+                lastUp = now
+            }
         }
     }
 
@@ -692,39 +750,6 @@ private fun CloseSwipeOnScroll(listState: LazyListState) {
         snapshotFlow { listState.isScrollInProgress }.collect { if (it) SwipeOpen.id = null }
     }
 }
-
-/**
- * Owner round 31 (item 26): THREE fingers down together, twice within 400ms
- * — the only way into the hidden chats. A pass-through observer (nothing is
- * consumed), so scrolling, row swipes and the archive pull are untouched;
- * a normal one- or two-finger gesture can never trigger it.
- */
-private fun threeFingerDoubleTap(onTrigger: () -> Unit): Modifier =
-    Modifier.pointerInput(Unit) {
-        var lastTripleUp = 0L
-        awaitEachGesture {
-            awaitFirstDown(requireUnconsumed = false)
-            var maxFingers = 1
-            val downAt = System.currentTimeMillis()
-            while (true) {
-                val event = awaitPointerEvent()
-                maxFingers = maxOf(maxFingers, event.changes.count { it.pressed })
-                if (event.changes.all { !it.pressed }) break
-            }
-            val now = System.currentTimeMillis()
-            // A tap, not a hold or a drag: all three fingers up within 350ms.
-            if (maxFingers >= 3 && now - downAt < 350) {
-                if (now - lastTripleUp < 400) {
-                    lastTripleUp = 0L
-                    onTrigger()
-                } else {
-                    lastTripleUp = now
-                }
-            } else {
-                lastTripleUp = 0L
-            }
-        }
-    }
 
 /** Owner round 19: delivery ticks for a list row — one tick sent, two read.
  *  Owner round 32 (item 28): the middle state exists here too — two grey
@@ -844,7 +869,7 @@ private fun ChatListBody(
     // sit behind the three-finger double-tap (see the detector below).
     val visible = convs.filter { !ScreenStore.isArchived(it.optString("id")) && !it.optBoolean("hidden") }
     if (visible.isEmpty()) {
-        Box(Modifier.fillMaxSize().then(threeFingerDoubleTap { nav.navigate("hidden") }), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxSize().then(swipeFocusList { nav.navigate("hidden") }), contentAlignment = Alignment.Center) {
             if (loading) {
                 CircularProgressIndicator(color = ActionBlue)
             } else {
@@ -861,8 +886,7 @@ private fun ChatListBody(
     LazyColumn(
         Modifier
             .fillMaxSize()
-            .then(swipeFocusList())
-            .then(threeFingerDoubleTap { nav.navigate("hidden") })
+            .then(swipeFocusList { nav.navigate("hidden") })
             // Owner round 19: THE archive feed — a non-consuming vertical
             // drag observer. It sees drags that start ON TOP OF ROWS (the
             // nested-scroll chain never reliably delivered those on the

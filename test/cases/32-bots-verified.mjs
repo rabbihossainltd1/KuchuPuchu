@@ -3314,16 +3314,34 @@ const convBetween = (db, a, b) =>
             ),
         );
         check(
-          "r31-26: app — hidden chats screen opens ONLY by a three-finger double-tap on the chat list (pass-through detector, no menu entry); route `hidden`",
+          "r31-26/r32-23: app — hidden chats screen opens ONLY by three quick taps on BLANK chat-list space (one finger, no drag, row taps reset the run; pass-through, no menu entry); route `hidden`",
           cl.includes("fun HiddenChatsScreen(nav: NavController) {") &&
-            cl.includes("private fun threeFingerDoubleTap(onTrigger: () -> Unit): Modifier =") &&
-            cl.includes("if (maxFingers >= 3 && now - downAt < 350) {") &&
-            cl.includes("if (now - lastTripleUp < 400) {") &&
-            (cl.match(/threeFingerDoubleTap \{ nav\.navigate\("hidden"\) \}/g) || []).length ===
-              2 &&
+            cl.includes(
+              "private fun swipeFocusList(onTripleTapBlank: (() -> Unit)? = null): Modifier =",
+            ) &&
+            cl.includes("val onRow = SwipeOpen.downOn != null") &&
+            cl.includes("val tap = !onRow && !moved && fingers == 1 && now - downAt < 300") &&
+            cl.includes("if (tap && (taps == 0 || now - lastUp < 600)) {") &&
+            cl.includes("if (taps >= 3) {") &&
+            (cl.match(/swipeFocusList \{ nav\.navigate\("hidden"\) \}/g) || []).length === 2 &&
+            !cl.includes("threeFingerDoubleTap") &&
+            !cl.includes("maxFingers >= 3") &&
             kt("KpApp.kt").includes('composable("hidden") { HiddenChatsScreen(nav) }') &&
             !cl.includes('"Hidden chats"') &&
             !cl.includes("HomeMenuItem(Icons.Filled.VisibilityOff"),
+        );
+        check(
+          "r32-23: hidden calls — call rows whose 1:1 peer chat is hidden leave the Calls tab and show under a Calls heading on the Hidden screen (ScreenStore.isHiddenCall via convIdForUser)",
+          kt("ScreenStore.kt").includes("fun isHiddenCall(call: JSONObject): Boolean {") &&
+            kt("ScreenStore.kt").includes("fun callPeerId(call: JSONObject): String =") &&
+            kt("CallsTabScreen.kt").includes("calls.filter { !ScreenStore.isHiddenCall(it) }") &&
+            kt("CallsTabScreen.kt").includes("} else if (shown.isEmpty()) {") &&
+            kt("CallsTabScreen.kt").includes(
+              "internal fun CallRow(call: JSONObject, onOpenChat: () -> Unit) {",
+            ) &&
+            cl.includes("ScreenStore.calls.filter { ScreenStore.isHiddenCall(it) }") &&
+            cl.includes('items(hiddenCalls, key = { "call_" + it.optString("id") }) { call ->') &&
+            cl.includes("if (hidden.isEmpty() && hiddenCalls.isEmpty()) {"),
         );
         check(
           "r31-26: app — no notification card, no in-app tone, no list alert for a hidden chat (push handler drops it; the tone + list paths use isSilenced = muted || hidden)",
@@ -4876,13 +4894,13 @@ const convBetween = (db, a, b) =>
         cl.includes("var id by mutableStateOf<String?>(null)") &&
         cl.includes("if (SwipeOpen.id != convId && dragged != 0f) dragged = 0f") &&
         cl.includes("if (SwipeOpen.id != null && SwipeOpen.id != id) SwipeOpen.id = null") &&
-        cl.includes("if (SwipeOpen.downOn == null) SwipeOpen.id = null") &&
+        cl.includes("if (!onRow) SwipeOpen.id = null") &&
         cl.includes(
           "snapshotFlow { listState.isScrollInProgress }.collect { if (it) SwipeOpen.id = null }",
         ) &&
         cl.includes("if (dragged != 0f) SwipeOpen.id = convId") &&
         (cl.match(/CloseSwipeOnScroll\(/g) || []).length === 4 &&
-        (cl.match(/\.then\(swipeFocusList\(\)\)/g) || []).length === 3 &&
+        (cl.match(/swipeFocusList[ ]?[({]/g) || []).length === 5 &&
         cl.includes(".then(swipeFocusTouch(convId))"),
     );
   }

@@ -83,7 +83,10 @@ fun CallsScreen(nav: NavController) {
     // list identity so scrolling (which just recomposes visible rows, not
     // this screen-level call) no longer re-runs it on every frame. This was
     // the "call tab a scrolling ta laggy" cause.
-    val sections = remember(calls) { groupByDay(calls) }
+    // Owner round 32 (item 23): calls with a hidden chat's peer leave this tab
+    // (they show on the Hidden screen instead).
+    val shown = remember(calls, ScreenStore.callsRaw, ScreenStore.convsRaw) { calls.filter { !ScreenStore.isHiddenCall(it) } }
+    val sections = remember(shown) { groupByDay(shown) }
 
     Column(Modifier.fillMaxSize().background(Cream)) {
         // No "Calls" heading here: this screen only ever appears inside the
@@ -95,7 +98,7 @@ fun CallsScreen(nav: NavController) {
                 val sh = rememberShimmerAlpha()
                 repeat(7) { KpShimmerListItem(alpha = sh) }
             }
-        } else if (calls.isEmpty()) {
+        } else if (shown.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 EmptyState(
                     icon = Icons.Filled.Call,
@@ -149,7 +152,7 @@ fun CallsScreen(nav: NavController) {
 }
 
 @Composable
-private fun CallRow(call: JSONObject, onOpenChat: () -> Unit) {
+internal fun CallRow(call: JSONObject, onOpenChat: () -> Unit) {
     val haptics = rememberHaptics()
     val incoming = call.optBoolean("incoming")
     val other = call.optJSONObject("other")

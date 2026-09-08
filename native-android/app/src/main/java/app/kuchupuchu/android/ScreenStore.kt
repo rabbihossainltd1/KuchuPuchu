@@ -84,6 +84,15 @@ object ScreenStore {
     /** True when the chat must stay silent: muted OR hidden. */
     fun isSilenced(convId: String): Boolean = isMuted(convId) || isHidden(convId)
 
+    /** Owner round 32 (item 23): a call row belongs to a hidden chat when the
+     *  1:1 conversation with its other party is hidden. */
+    fun isHiddenCall(call: JSONObject): Boolean {
+        val uid = callPeerId(call)
+        if (uid.isBlank()) return false
+        val cid = convIdForUser[uid] ?: return false
+        return isHidden(cid)
+    }
+
     private fun saveArchive() {
         runCatching { archiveFile?.writeText(JSONObject().put("ids", JSONArray(archivedConvIds.toList())).toString()) }
     }
@@ -604,3 +613,7 @@ object ScreenStore {
         if (changed) persist()
     }
 }
+
+/** The other party of a call-history row (caller for incoming, callee otherwise). */
+fun callPeerId(call: JSONObject): String =
+    if (call.optBoolean("incoming")) call.optString("callerId") else call.optString("calleeId")
