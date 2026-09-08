@@ -203,7 +203,7 @@ const sites = avatarSites();
     // and no avatar token crosses that boundary yet (its own bug, its own step).
     "CallScreens.kt KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 108.dp, ring = fal",
     "CallScreens.kt KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 116.dp, ring = fal",
-    "CallScreens.kt KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 84.dp, ring = fals",
+    "CallScreens.kt KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 96.dp, ring = fals",
     // (r31: the own-profile editor banner is gone — My profile edits in place
     // through ProfileScreen's cached avatar.)
   ].sort();
