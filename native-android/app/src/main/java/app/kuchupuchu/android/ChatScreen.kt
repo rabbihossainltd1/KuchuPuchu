@@ -122,7 +122,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.input.pointer.positionChange
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalDensity
@@ -1970,6 +1969,11 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 val arg = JSONObject(msg.toString()).put("kpTitle", who).put("kpPrivate", privateChat)
                                 nav.navigate("videoplayer/${mediaArg(arg)}")
                             },
+                            // Owner round 32 (item 33): documents → the app's own viewer.
+                            onOpenDoc = { msg ->
+                                val arg = JSONObject(msg.toString()).put("kpPrivate", privateChat)
+                                nav.navigate("docviewer/${mediaArg(arg)}")
+                            },
                             revealChars = if (m.optString("id") == aiRevealId) aiRevealChars else null,
                             onReply = { haptics.tap(); replyTo = it; replyFocusNonce++ },
                             onLongPress = { msg ->
@@ -3408,6 +3412,7 @@ private fun MessageRow(
     theme: String = "darkblue",
     onOpenVideo: (JSONObject) -> Unit = {},
     onOpenAlbum: (JSONObject) -> Unit = {},
+    onOpenDoc: (JSONObject) -> Unit = {},
 ) {
     val mine = m.optString("senderId") == myId
     val kind = m.optString("kind")
@@ -3645,7 +3650,7 @@ private fun MessageRow(
                             if (EmojiRepo.isCustomId(st)) CustomEmojiOrFallback(st)
                             else Text(st, fontSize = 56.sp)
                         }
-                        "FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme)
+                        "FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc)
                         "DELETED" -> Text(
                             // Owner round 18: the same trailing reserve the
                             // text path uses — the stamp sat ON the deleted
@@ -4864,9 +4869,9 @@ private fun FileBubble(
     onOpenImage: (JSONObject) -> Unit = {},
     onOpenVideo: (JSONObject) -> Unit = {},
     theme: String = "darkblue",
+    onOpenDoc: (JSONObject) -> Unit = {},
 ) {
     val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
     val id = m.optString("id")
     val fileName = m.optString("fileName").ifBlank { "File" }
     val fileType = m.optString("fileType")
@@ -4982,19 +4987,7 @@ private fun FileBubble(
     // spinner while downloading and a toast if it fails — the old version
     // swallowed every error in runCatching, so a failed download looked like
     // a dead button ("open korte parche na").
-    var opening by remember { mutableStateOf(false) }
-    // Text-like docs open INSIDE the app — most phones have no .md viewer,
-    // which made "Open" feel dead for exactly these files.
-    var textDoc by remember { mutableStateOf<String?>(null) }
     val ready = fileKey.isNotBlank()
-    fun isTextLike(): Boolean {
-        val n = fileName.lowercase()
-        return fileType.startsWith("text/") || fileType == "application/json" ||
-            n.endsWith(".md") || n.endsWith(".txt") || n.endsWith(".json") ||
-            n.endsWith(".csv") || n.endsWith(".log") || n.endsWith(".kt") ||
-            n.endsWith(".js") || n.endsWith(".ts") || n.endsWith(".py") ||
-            n.endsWith(".html") || n.endsWith(".css")
-    }
     val upFrac = UploadProgress.fracs[m.optString("clientId")]
     val docInk = if (mine) AmberInk else chatAccent(theme)
     Row(
@@ -5002,7 +4995,7 @@ private fun FileBubble(
         modifier =
             Modifier
                 .width(200.dp) // fixed width so the bubble never grows/shrinks on tap
-                .clickable(enabled = !opening) {
+                .clickable {
                     if (!ready) {
                         android.widget.Toast.makeText(ctx, "This file is no longer available.", android.widget.Toast.LENGTH_SHORT).show()
                         return@clickable
@@ -5024,36 +5017,12 @@ private fun FileBubble(
                             return@clickable
                         }
                     }
-                    scope.launch {
-                        opening = true
-                        try {
-                            val dir = java.io.File(ctx.cacheDir, "open")
-                            if (!dir.exists()) dir.mkdirs()
-                            val safe = fileName.replace(Regex("[^A-Za-z0-9._ ()-]"), "_")
-                            val dest = java.io.File(dir, System.currentTimeMillis().toString() + "_" + safe)
-                            val ok = withContext(Dispatchers.IO) { Api.downloadToFile(fileKey, dest) }
-                            if (ok) {
-                                if (isTextLike()) {
-                                    val body = runCatching {
-                                        dest.readText().take(60_000)
-                                    }.getOrDefault("")
-                                    withContext(Dispatchers.Main) { textDoc = body }
-                                } else {
-                                    FilesUtil.openFile(ctx, fileName, dest, FilesUtil.mimeFor(fileName, fileType))
-                                }
-                            } else {
-                                android.widget.Toast.makeText(ctx, "Could not download. Please try again.", android.widget.Toast.LENGTH_SHORT).show()
-                                dest.delete()
-                            }
-                        } catch (e: Exception) {
-                            android.widget.Toast.makeText(
-                                ctx,
-                                "Could not open \"${fileName.take(28)}…\". Try again.",
-                                android.widget.Toast.LENGTH_SHORT,
-                            ).show()
-                        }
-                        opening = false
-                    }
+                    // Owner round 32 (item 33): every other document opens in
+                    // KuchuPuchu's own viewer screen (PDF pages, text,
+                    // pictures, SVG, TIFF, archive contents; ⋮ → Save /
+                    // Forward / Open with) — never straight into a system app,
+                    // never a dead tap. The screen downloads and caches it.
+                    onOpenDoc(m)
                 },
     ) {
         // Owner round 32 (item 34): the upload ring (and the open spinner) wrap
@@ -5088,11 +5057,6 @@ private fun FileBubble(
                     trackColor = docInk.copy(alpha = 0.22f),
                     modifier = Modifier.size(36.dp),
                 )
-                opening -> CircularProgressIndicator(
-                    color = docInk,
-                    strokeWidth = 2.dp,
-                    modifier = Modifier.size(36.dp),
-                )
                 else -> {}
             }
         }
@@ -5114,29 +5078,6 @@ private fun FileBubble(
                 // The stamp overlays this line's right end (no bottom band).
                 modifier = Modifier.padding(end = if (mine) 50.dp else 34.dp),
             )
-        }
-    }
-    textDoc?.let { body ->
-        val clipboard = LocalClipboardManager.current
-        // Owner round 31: bottom sheet, not a centred dialog.
-        KpSheet(onDismiss = { textDoc = null }, title = fileName) {
-            Column(Modifier.padding(horizontal = 14.dp)) {
-                Text(
-                    body.ifBlank { "(empty file)" },
-                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                    fontSize = 12.5.sp,
-                    color = Ink,
-                    modifier = Modifier
-                        .heightIn(max = 420.dp)
-                        .verticalScroll(rememberScrollState()),
-                )
-                Spacer(Modifier.height(12.dp))
-                GoldBtn("Copy", Modifier.fillMaxWidth()) {
-                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(body))
-                    android.widget.Toast.makeText(ctx, "Copied", android.widget.Toast.LENGTH_SHORT).show()
-                }
-                Spacer(Modifier.height(6.dp))
-            }
         }
     }
 }

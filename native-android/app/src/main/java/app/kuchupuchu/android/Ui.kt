@@ -301,6 +301,16 @@ object Bitmaps {
             BitmapFactory.Options().apply { inSampleSize = bitmapSampleSize(bounds.outWidth, bounds.outHeight, maxSide) }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
     }.getOrNull()
+
+    /** Owner round 32 (item 33): a picture file on disk, long side ≤ [maxSide] (subsampled, no full decode). */
+    fun decodeFileBounded(file: java.io.File, maxSide: Int): Bitmap? = runCatching {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
+        val opts =
+            BitmapFactory.Options().apply { inSampleSize = bitmapSampleSize(bounds.outWidth, bounds.outHeight, maxSide) }
+        BitmapFactory.decodeFile(file.absolutePath, opts)
+    }.getOrNull()
 }
 
 @Composable

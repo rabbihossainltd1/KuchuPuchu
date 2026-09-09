@@ -211,6 +211,10 @@ fun KpApp() {
                 composable("videoplayer/{b64}") { entry ->
                     VideoPlayerScreen(nav, entry.arguments?.getString("b64") ?: "")
                 }
+                // Owner round 32 (item 33): documents open in the app's own viewer.
+                composable("docviewer/{b64}") { entry ->
+                    DocViewerScreen(nav, entry.arguments?.getString("b64") ?: "")
+                }
                 composable("archive") { ArchiveScreen(nav) }
                 composable("hidden") { HiddenChatsScreen(nav) }
                 composable("profile/{id}") { entry ->

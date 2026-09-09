@@ -2590,14 +2590,15 @@ const convBetween = (db, a, b) =>
         ),
     );
     check(
-      "r31-7: chat popups are sheets — edit message, disappearing timer, chat theme, text-file viewer; crash report + status delete too",
+      "r31-7: chat popups are sheets — edit message, disappearing timer, chat theme, document viewer menu; crash report + status delete too",
       (() => {
         const chat = kt("ChatScreen.kt");
         return (
           chat.includes('KpSheet(onDismiss = onClose, title = "Edit message")') &&
           chat.includes('KpSheet(onDismiss = onClose, title = "Disappearing messages")') &&
           chat.includes('KpSheet(onDismiss = onClose, title = "Chat theme")') &&
-          chat.includes("KpSheet(onDismiss = { textDoc = null }, title = fileName)") &&
+          // r32-33: the text-file sheet became the document viewer screen.
+          kt("DocViewerScreen.kt").includes("KpSheet(onDismiss = { menuOpen = false }) {") &&
           kt("KpCrash.kt").includes('title = "Last crash report"') &&
           kt("StatusScreens.kt").includes('title = "Delete status?"')
         );
@@ -2668,7 +2669,7 @@ const convBetween = (db, a, b) =>
         chat.includes("if (isImage && !asDocument) {") &&
         // r31-27: the call site now also hands the chat theme down (voice bars).
         chat.includes(
-          '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme)',
+          '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc)',
         ) &&
         readFileSync("src/worker/index.ts", "utf8").includes(
           "...(incomingMeta.document === true ? { document: true } : {}),",
@@ -3611,7 +3612,7 @@ const convBetween = (db, a, b) =>
             '.also { mm -> vm.optJSONArray("waveform")?.let { mm.put("waveform", it) } },',
           ) &&
           chat.includes(
-            '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme)',
+            '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc)',
           ),
       );
     }
@@ -5195,12 +5196,14 @@ const convBetween = (db, a, b) =>
     const files = kt("Files.kt");
     const bubble = chat.slice(
       chat.indexOf("// Documents: the WHOLE row opens"),
-      chat.indexOf("textDoc?.let { body ->"),
+      chat.indexOf("private fun compactFileName("),
     );
     check(
       "r32-34: document bubble — progress ring + open spinner sit ON the 40dp icon (36dp ring, themed track), the right-hand slot with 'Open' / the ring is gone, the size line keeps the stamp's corner clear (padding end 50/34dp), a missing file fades the icon",
       bubble.includes("trackColor = docInk.copy(alpha = 0.22f),") &&
-        (bubble.match(/modifier = Modifier\.size\(36\.dp\),/g) || []).length === 2 &&
+        // r32-33: the open spinner went with the in-bubble download — the
+        // viewer screen downloads now; only the upload ring remains.
+        (bubble.match(/modifier = Modifier\.size\(36\.dp\),/g) || []).length === 1 &&
         !bubble.includes("Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {") &&
         // code form only (the comments still mention the old label)
         !/else "Open",/.test(bubble) &&
@@ -5513,6 +5516,57 @@ const convBetween = (db, a, b) =>
           "if (linked != null) Text(linked, fontSize = 14.5.sp, lineHeight = 19.sp, color = bodyInk)",
         ) &&
         chat.indexOf("LinkPreviewCard(") < chat.indexOf("if (linked != null) Text(linked"),
+    );
+  }
+  // Item 33: documents open inside the app.
+  {
+    const doc = kt("DocViewerScreen.kt");
+    const tiff = kt("TiffDecoder.kt");
+    const arc = kt("ArchiveList.kt");
+    const chat = kt("ChatScreen.kt");
+    const media = kt("ChatMediaScreen.kt");
+    const app = kt("KpApp.kt");
+    check(
+      "r32-33: DocViewerScreen (route docviewer/{b64}) renders PDF pages (PdfRenderer, pinch zoom, locked → 'Locked PDF'), text (selectable monospace), pictures, SVG (offline WebView: no JS / network / file access, scripts stripped), TIFF (own decoder), ZIP / RAR contents (lock mark), and a name / type / size card for the rest; ⋮ → bottom sheet Save / Forward / Open with",
+      app.includes('composable("docviewer/{b64}") { entry ->') &&
+        doc.includes("fun DocViewerScreen(nav: NavController, b64: String) {") &&
+        doc.includes(
+          "private enum class DocKind { PDF, TEXT, IMAGE, SVG, TIFF, ARCHIVE, OTHER }",
+        ) &&
+        doc.includes("val r = PdfRenderer(pfd)") &&
+        doc.includes("locked = e is SecurityException") &&
+        doc.includes("page.render(b, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)") &&
+        doc.includes("SelectionContainer {") &&
+        doc.includes("settings.javaScriptEnabled = false") &&
+        doc.includes("settings.blockNetworkLoads = true") &&
+        doc.includes("settings.allowFileAccess = false") &&
+        doc.includes('loadDataWithBaseURL("about:blank", page, "text/html", "utf-8", null)') &&
+        doc.includes("val img = withContext(Dispatchers.IO) { TiffDecoder.decode(file, 2048) }") &&
+        doc.includes("val l = withContext(Dispatchers.IO) { ArchiveList.list(file) }") &&
+        doc.includes("KpSheet(onDismiss = { menuOpen = false }) {") &&
+        doc.includes('KpSheetRow(Icons.Filled.Download, "Save")') &&
+        doc.includes('KpSheetRow(Icons.AutoMirrored.Filled.Send, "Forward")') &&
+        doc.includes('KpSheetRow(Icons.AutoMirrored.Filled.OpenInNew, "Open with")') &&
+        doc.includes("KpSecure.Guard(privateDoc)") &&
+        tiff.includes("object TiffDecoder {") &&
+        tiff.includes("if (compression !in intArrayOf(1, 5, 8, 32773, 32946)) return null") &&
+        arc.includes("object ArchiveList {") &&
+        arc.includes("private fun rar3(raf: RandomAccessFile, start: Long): Listing {") &&
+        arc.includes("private fun rar5(raf: RandomAccessFile, start: Long): Listing {"),
+    );
+    check(
+      "r32-33: the document bubble and the Docs tab hand every non-media file to the viewer (onOpenDoc → docviewer, kpPrivate carried) — no in-bubble download, no system ACTION_VIEW from the chat, the old text-file sheet is gone",
+      chat.includes("onOpenDoc: (JSONObject) -> Unit = {},") &&
+        chat.includes('nav.navigate("docviewer/${mediaArg(arg)}")') &&
+        chat.includes("onOpenDoc(m)") &&
+        !chat.includes("var textDoc by remember") &&
+        !chat.includes(
+          "FilesUtil.openFile(ctx, fileName, dest, FilesUtil.mimeFor(fileName, fileType))",
+        ) &&
+        !chat.includes("fun isTextLike(): Boolean {") &&
+        media.includes(
+          'else nav.navigate("docviewer/${mediaArg(JSONObject(m.toString()).put("kpPrivate", privateChat))}")',
+        ),
     );
   }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or

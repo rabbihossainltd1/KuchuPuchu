@@ -185,9 +185,10 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(14.dp))
                             .background(Card)
-                            .let { mod ->
-                                if (isVideo) mod.clickable { nav.navigate("videoplayer/${mediaArg(JSONObject(m.toString()).put("kpTitle", "Video").put("kpPrivate", privateChat))}") }
-                                else mod
+                            .clickable {
+                                // Owner round 32 (item 33): documents open in the app's viewer too.
+                                if (isVideo) nav.navigate("videoplayer/${mediaArg(JSONObject(m.toString()).put("kpTitle", "Video").put("kpPrivate", privateChat))}")
+                                else nav.navigate("docviewer/${mediaArg(JSONObject(m.toString()).put("kpPrivate", privateChat))}")
                             }
                             .padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
