@@ -187,6 +187,7 @@ object KpNotify {
         muted: Boolean = false,
         mid: String? = null,
         loginRequestId: String? = null,
+        picture: android.graphics.Bitmap? = null,
     ) {
         ensureChannels(ctx)
         // WhatsApp-style direct actions: reply straight from the
@@ -280,6 +281,21 @@ object KpNotify {
                 .setGroup(GROUP)
                 .setWhen(System.currentTimeMillis())
                 .setContentIntent(chatTap(ctx, convoId))
+                // Owner round 32 (item 35): a photo message shows the photo —
+                // expanded as the big picture, collapsed as the large icon on
+                // the right (the brand logo steps aside for it). The style only
+                // changes the body; Reply / Like / Mark-as-read stay below it.
+                .apply {
+                    if (picture != null) {
+                        setLargeIcon(picture)
+                        setStyle(
+                            NotificationCompat.BigPictureStyle()
+                                .bigPicture(picture)
+                                .bigLargeIcon(null as android.graphics.Bitmap?)
+                                .setSummaryText(body),
+                        )
+                    }
+                }
                 // The official notification account is one-way (owner rule):
                 // its pair conversation id embeds "kp_official_bot", and for
                 // those cards the Reply quick-action is omitted — it would

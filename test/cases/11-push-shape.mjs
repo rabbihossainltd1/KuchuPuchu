@@ -76,13 +76,14 @@ async function main() {
   try {
     const ctx = makeCtx();
     let ipSeq = 0;
-    const call = async (method, path, body, token) => {
-      const headers = { "content-type": "application/json" };
+    const call = async (method, path, body, token, extra = {}) => {
+      const headers = { "content-type": "application/json", ...(extra.headers ?? {}) };
       if (path.startsWith("/api/auth/"))
         headers["cf-connecting-ip"] = `203.0.${Math.floor(ipSeq / 250)}.${(ipSeq++ % 250) + 1}`;
       if (token) headers.authorization = `Bearer ${token}`;
       const init = { method, headers };
-      if (body !== undefined && method !== "GET") init.body = JSON.stringify(body);
+      if (extra.body !== undefined) init.body = extra.body;
+      else if (body !== undefined && method !== "GET") init.body = JSON.stringify(body);
       const res = await worker.fetch(new Request(`https://kp.test${path}`, init), env, ctx);
       const t = await res.text();
       await ctx.drain(); // settle waitUntil (the FCM send) before we assert
@@ -169,6 +170,66 @@ async function main() {
         !!recent?.message?.android?.data?.convoId &&
         recent.message.android.data.muted !== undefined,
       JSON.stringify(recent?.message?.android?.data ?? {}),
+    );
+    check(
+      "r32-35: a text push carries no picture reference",
+      recent?.message?.android?.data?.kp_media === undefined,
+    );
+
+    // 4) Owner round 32 (item 35): a photo sent as an upload previews as
+    //    "Photo" (not "photo.jpg") and the push names the picture's authorized
+    //    API path (kp_media) so the recipient's card can show the thumbnail. A
+    //    photo sent through Document stays a file row: file name, no picture.
+    const up = await call("POST", "/api/files?name=photo.jpg&type=image/jpeg", undefined, a.token, {
+      headers: { "content-type": "application/octet-stream" },
+      body: Buffer.from("jpegbytes!"),
+    });
+    const key = up.json.fileKey;
+    sent.length = 0;
+    await call(
+      "POST",
+      `/api/conversations/${convId}/messages`,
+      { kind: "FILE", fileKey: key, fileName: "photo.jpg", fileType: "image/jpeg", fileSize: 10 },
+      a.token,
+    );
+    const photo = sent.find((m) => m.message?.android?.data?.type === "message");
+    check(
+      "r32-35: photo push previews as 'Photo' and names the picture (kp_media = /api/files/<key>)",
+      photo?.message?.android?.data?.body === "Photo" &&
+        photo?.message?.android?.data?.kp_media === `/api/files/${key}` &&
+        photo?.message?.android?.notification?.body === "Photo",
+      JSON.stringify(photo?.message?.android?.data ?? {}),
+    );
+    const list = await call("GET", "/api/conversations", undefined, b.token);
+    check(
+      "r32-35: the chat list preview says 'Photo' too",
+      list.json.items?.find((c) => c.id === convId)?.lastMessage === "Photo",
+      JSON.stringify(list.json.items?.map((c) => c.lastMessage)),
+    );
+    const up2 = await call("POST", "/api/files?name=scan.jpg&type=image/jpeg", undefined, a.token, {
+      headers: { "content-type": "application/octet-stream" },
+      body: Buffer.from("jpegbytes!"),
+    });
+    sent.length = 0;
+    await call(
+      "POST",
+      `/api/conversations/${convId}/messages`,
+      {
+        kind: "FILE",
+        fileKey: up2.json.fileKey,
+        fileName: "scan.jpg",
+        fileType: "image/jpeg",
+        fileSize: 10,
+        meta: { document: true },
+      },
+      a.token,
+    );
+    const doc = sent.find((m) => m.message?.android?.data?.type === "message");
+    check(
+      "r32-35: a photo sent as a Document keeps its file name and carries no picture",
+      doc?.message?.android?.data?.body === "scan.jpg" &&
+        doc?.message?.android?.data?.kp_media === undefined,
+      JSON.stringify(doc?.message?.android?.data ?? {}),
     );
   } finally {
     globalThis.fetch = realFetch;

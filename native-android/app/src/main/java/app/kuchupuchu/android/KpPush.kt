@@ -453,6 +453,20 @@ class KpPushService : FirebaseMessagingService() {
         // Background (process alive): message card WITH Reply / Like / Mark-as-read.
         // Badge jumps instantly; the next list refresh confirms the same number.
         ScreenStore.bumpUnread(convoId, data["body"])
+        // Owner round 32 (item 35): a photo message's push names the picture
+        // (kp_media, an authorized API path); the card shows the photo itself
+        // instead of "photo.jpg". The fetch is bounded (FCM gives this handler
+        // only seconds) and a miss costs the picture, never the card; the
+        // bytes land in the shared bitmap cache, so opening the chat afterwards
+        // paints the bubble without a second download.
+        // Below 8.1 the system does not shrink notification bitmaps before the
+        // binder hop, so the decode stays small there; newer releases scale
+        // whatever they are handed.
+        val picture =
+            data["kp_media"]?.takeIf { it.startsWith("/api/") }?.let {
+                Bitmaps.ensureInit(this)
+                Bitmaps.fetchWithin(it, 3_500L, maxSide = if (android.os.Build.VERSION.SDK_INT >= 27) 720 else 400)
+            }
         KpNotify.message(
             this,
             data["fromName"] ?: data["from"] ?: "KuchuPuchu",
@@ -461,6 +475,7 @@ class KpPushService : FirebaseMessagingService() {
             muted = muted,
             mid = mid,
             loginRequestId = data["kp_login_req"],
+            picture = picture,
         )
     }
 

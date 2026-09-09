@@ -216,6 +216,27 @@ object Api {
         }
     }
 
+    /**
+     * Owner round 32 (item 35): the same download with a hard wall-clock cap
+     * (whole call, not per read). The push handler fetches a card thumbnail
+     * with this — FCM gives onMessageReceived only seconds, so a slow radio
+     * must cost the card its picture, never the card itself. Null on any
+     * failure or timeout.
+     */
+    fun downloadWithin(pathOrKey: String, millis: Long): ByteArray? {
+        val url =
+            if (pathOrKey.startsWith("http")) pathOrKey
+            else if (pathOrKey.startsWith("/")) BASE + pathOrKey
+            else "$BASE/api/files/${encodePath(pathOrKey)}"
+        val client = http.newBuilder().callTimeout(millis, TimeUnit.MILLISECONDS).build()
+        val req = Request.Builder().url(url).get().build()
+        return runCatching {
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) null else resp.body?.bytes()
+            }
+        }.getOrNull()
+    }
+
     private fun bustFor(path: String) {
         if (path.contains("/conversations")) Cache.bust("/api/conversations")
         if (path.contains("/messages")) {

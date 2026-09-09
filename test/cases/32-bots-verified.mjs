@@ -5245,6 +5245,50 @@ const convBetween = (db, a, b) =>
         !chat.includes("FilesUtil.readDocument("),
     );
   }
+  // Item 35: photo notifications show the photo. Worker: the send preview is
+  // derived from the stored shape (previewOf), so an uploaded photo reads
+  // "Photo"; the push names the picture (kp_media). App: the push handler
+  // fetches it under a hard time cap into the shared bitmap cache and the
+  // card draws it as the big picture + large icon; the actions stay.
+  {
+    const src = readFileSync("src/worker/index.ts", "utf8");
+    const push = kt("KpPush.kt");
+    const notify = kt("KpNotify.kt");
+    const api = kt("Api.kt");
+    const ui = kt("Ui.kt");
+    const previewOf = src.slice(
+      src.indexOf("function previewOf(row: MsgRow): string {"),
+      src.indexOf("async function fanOutProfileChange("),
+    );
+    check(
+      "r32-35: worker — send preview comes from previewOf (no 'photo.jpg'), image/video/audio media files read as words, Documents keep their name, push data carries kp_media only for a picture",
+      src.includes("const preview = previewOf({") &&
+        !src.includes('kind === "FILE" ? String(body.fileName || "File") : "Message"') &&
+        previewOf.includes('if (type.startsWith("image/")) return "Photo";') &&
+        previewOf.includes('if (type.startsWith("video/")) return "Video";') &&
+        previewOf.includes("if (meta.document !== true) {") &&
+        src.includes("const pictureUrl = message.hasImage") &&
+        src.includes("...(pictureUrl ? { kp_media: pictureUrl } : {}),"),
+    );
+    check(
+      "r32-35: app — bounded fetch (Api.downloadWithin via Bitmaps.fetchWithin, cache-first, stored for the chat), only an /api/ path is fetched, the card sets the large icon + BigPictureStyle and keeps Reply / Like / Mark-as-read",
+      api.includes("fun downloadWithin(pathOrKey: String, millis: Long): ByteArray? {") &&
+        api.includes("http.newBuilder().callTimeout(millis, TimeUnit.MILLISECONDS).build()") &&
+        ui.includes("fun fetchWithin(url: String, millis: Long, maxSide: Int = 720): Bitmap? {") &&
+        ui.includes("val bytes = Api.downloadWithin(url, millis) ?: return null") &&
+        ui.includes("fun ensureInit(ctx: android.content.Context) {") &&
+        push.includes('data["kp_media"]?.takeIf { it.startsWith("/api/") }?.let {') &&
+        push.includes("Bitmaps.ensureInit(this)") &&
+        push.includes("picture = picture,") &&
+        notify.includes("picture: android.graphics.Bitmap? = null,") &&
+        notify.includes("NotificationCompat.BigPictureStyle()") &&
+        notify.includes(".bigPicture(picture)") &&
+        notify.includes("setLargeIcon(picture)") &&
+        notify.indexOf("NotificationCompat.BigPictureStyle()") <
+          notify.indexOf('if (!convoId.contains("kp_official_bot")) addAction(replyAction)') &&
+        notify.includes(".addAction(readAction)"),
+    );
+  }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
   // a touch on blank list space closes it (main, archive and hidden lists).
   {

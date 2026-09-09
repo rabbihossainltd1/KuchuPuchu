@@ -316,6 +316,16 @@ async function mk() {
       doc.json.message.fileName === "scan.jpg",
     JSON.stringify(doc.json.message),
   );
+  // The preview is read while the document is the newest message: the plain
+  // photo sent next previews as "Photo" (owner round 32, item 35), not as a
+  // file name.
+  const list = await call("GET", "/api/conversations", undefined, B.token);
+  const row = (list.json.items || list.json.conversations || []).find((c) => c.id === cid);
+  check(
+    "chat-list preview of the document is its file name",
+    !!row && row.lastMessage === "scan.jpg",
+    JSON.stringify(row).slice(0, 200),
+  );
   const plain = await call(
     "POST",
     `/api/conversations/${cid}/messages`,
@@ -337,12 +347,11 @@ async function mk() {
       plain.json.message.meta?.document === undefined,
     JSON.stringify(plain.json.message?.meta),
   );
-  const list = await call("GET", "/api/conversations", undefined, B.token);
-  const row = (list.json.items || list.json.conversations || []).find((c) => c.id === cid);
+  const after = await call("GET", "/api/conversations", undefined, B.token);
   check(
-    "chat-list preview of the document is its file name",
-    !!row && /scan\.jpg/.test(JSON.stringify(row)),
-    JSON.stringify(row).slice(0, 200),
+    "r32-35: the photo that follows previews as 'Photo', never as its upload name",
+    (after.json.items || []).find((c) => c.id === cid)?.lastMessage === "Photo",
+    JSON.stringify((after.json.items || []).find((c) => c.id === cid)?.lastMessage),
   );
 }
 

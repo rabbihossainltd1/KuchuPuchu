@@ -6169,11 +6169,21 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         uid,
       );
     }
-    const preview =
-      kind === "STICKER"
-        ? "Sticker"
-        : text ||
-          (imageData ? "Photo" : kind === "FILE" ? String(body.fileName || "File") : "Message");
+    // Owner round 32 (item 35): the preview is derived from the stored shape
+    // (previewOf, the same function the delete path uses), so a photo sent as
+    // an upload reads "Photo" in the chat list AND in the push — it used to be
+    // the upload's file name ("photo.jpg") because this branch only knew the
+    // inline-data path.
+    const preview = previewOf({
+      id: mid,
+      conv_id: convId,
+      sender_id: uid,
+      kind: imageData ? "IMAGE" : fileKey ? "FILE" : kind,
+      body: text,
+      media: imageData ?? fileKey ?? null,
+      meta_json: meta,
+      created_at: created,
+    });
     // A new message has to un-hide the conversation for everyone, but it must
     // not erase the other members' delete watermarks: those are what keep the
     // history they deleted away when the chat reappears. The old statement
@@ -6218,6 +6228,15 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     ctx.waitUntil(
       broadcastRoomEvent(env, convId, { type: "message", conversationId: convId, message }),
     );
+    // Owner round 32 (item 35): a photo's push names where the picture lives
+    // (the same authorized path the chat itself loads, fetched with the
+    // recipient's session), so the recipient's card can carry the thumbnail.
+    // Documents that happen to be images stay file rows: no picture.
+    const pictureUrl = message.hasImage
+      ? message.fileKey
+        ? `/api/files/${message.fileKey}`
+        : message.mediaUrl
+      : undefined;
     // Push: every other member gets a high-priority message. The chat-list poke
     // doubles as a live-connectivity probe, and its answer decides whether the
     // push is data-only (app connected -> our rich card with actions) or
@@ -6286,6 +6305,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           body: preview.slice(0, 120),
           kp_chat: convId,
           muted: memberId.muted === 1 ? "1" : "0",
+          ...(pictureUrl ? { kp_media: pictureUrl } : {}),
         },
         recipientAlert(memberId, preview, me.display_name, live),
       );
@@ -7761,7 +7781,10 @@ async function sweepExpiredStatuses(env: Env, db: D1Database): Promise<number> {
 
 /** Chat-list preview text for a stored row — mirrors what the send path writes. */
 function previewOf(row: MsgRow): string {
-  const meta = parseJson<{ name?: string; voice?: boolean }>(row.meta_json, {});
+  const meta = parseJson<{ name?: string; type?: string; voice?: boolean; document?: boolean }>(
+    row.meta_json,
+    {},
+  );
   switch (row.kind) {
     case "STICKER":
       return "Sticker";
@@ -7769,8 +7792,19 @@ function previewOf(row: MsgRow): string {
       return row.body || "Photo";
     case "VIDEO":
       return row.body || "Video";
-    case "FILE":
-      return row.body || (meta.voice ? "Voice message" : String(meta.name || "File"));
+    case "FILE": {
+      if (row.body) return row.body;
+      if (meta.voice) return "Voice message";
+      // Owner round 32 (item 35): media picked as media reads as what it is;
+      // only a Document keeps its file name (the bubble draws it as a file row).
+      const type = String(meta.type || "");
+      if (meta.document !== true) {
+        if (type.startsWith("image/")) return "Photo";
+        if (type.startsWith("video/")) return "Video";
+        if (type.startsWith("audio/")) return "Voice message";
+      }
+      return String(meta.name || "File");
+    }
     case "CALL":
       return row.body || "Call";
     default:

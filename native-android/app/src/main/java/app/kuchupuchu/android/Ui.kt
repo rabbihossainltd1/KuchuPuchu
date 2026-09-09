@@ -125,6 +125,12 @@ object Bitmaps {
         dir = java.io.File(ctx.filesDir, "kp-bitmaps").apply { mkdirs() }
     }
 
+    /** Idempotent: the push service can be the first code in a fresh process,
+     *  before any Activity ran Store.init — without a dir the disk tier is off. */
+    fun ensureInit(ctx: android.content.Context) {
+        if (dir == null) init(ctx)
+    }
+
     private fun fileFor(url: String): java.io.File? {
         val d = dir ?: return null
         if (url.length < 8) return null
@@ -176,6 +182,34 @@ object Bitmaps {
             BitmapFactory.Options().apply { inSampleSize = bitmapSampleSize(bounds.outWidth, bounds.outHeight, maxSide) }
         val bmp = runCatching { BitmapFactory.decodeFile(f.absolutePath, opts) }.getOrNull() ?: return null
         mem.put(key, bmp)
+        return bmp
+    }
+
+    /**
+     * Owner round 32 (item 35): cache-first like [load], but a network miss is
+     * fetched under a hard time cap and stored for the chat to reuse. Built for
+     * the push handler, whose whole budget is a few seconds; null on timeout.
+     */
+    fun fetchWithin(url: String, millis: Long, maxSide: Int = 720): Bitmap? {
+        val key = memKey(url, maxSide)
+        mem.get(key)?.let { return it }
+        val f = fileFor(url)
+        if (f != null && f.exists()) {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            runCatching { BitmapFactory.decodeFile(f.absolutePath, bounds) }
+            val opts =
+                BitmapFactory.Options().apply {
+                    inSampleSize = bitmapSampleSize(bounds.outWidth, bounds.outHeight, maxSide)
+                }
+            runCatching { BitmapFactory.decodeFile(f.absolutePath, opts) }.getOrNull()?.let {
+                mem.put(key, it)
+                return it
+            }
+        }
+        val bytes = Api.downloadWithin(url, millis) ?: return null
+        val bmp = decodeBytes(bytes, maxSide) ?: return null
+        mem.put(key, bmp)
+        store(url, bytes)
         return bmp
     }
 
