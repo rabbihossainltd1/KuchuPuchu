@@ -39,6 +39,8 @@ object Cache {
             // it names still has to be fetched and decoded.
             runCatching { Bitmaps.init(app) }
             runCatching { ImageRatios.init(app) }
+            // Owner round 32 (item 32): link cards already seen.
+            runCatching { LinkPreviews.init(app) }
             // The avatar ref → data-URI map is read by every row that composes;
             // warming it here means no composition ever touches the prefs file.
             runCatching { AvatarRefs.warm(app) }

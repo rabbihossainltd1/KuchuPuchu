@@ -1042,6 +1042,141 @@ async function main() {
     );
   }
 
+  // ── r32-32. link preview cards ──────────────────────────────────────────────
+  {
+    const h = await mk();
+    const A = await h.reg("lp-a");
+    const realFetch = globalThis.fetch;
+    let pageHits = 0;
+    globalThis.fetch = async (input, init) => {
+      const u = typeof input === "string" ? input : input.url;
+      if (u.startsWith("https://page.example/post")) {
+        pageHits++;
+        const html =
+          '<!doctype html><html><head><meta charset="utf-8"><title>Fallback &amp; title</title>' +
+          '<meta property="og:title" content="KuchuPuchu &#8212; fast chats" />' +
+          '<meta content="Private chats &amp; calls." name="description">' +
+          '<meta property="og:image" content="/img/cover.png">' +
+          '<meta property="og:site_name" content="KP"></head><body>' +
+          "x".repeat(300_000) +
+          "</body></html>";
+        return new Response(html, {
+          status: 200,
+          headers: { "content-type": "text/html; charset=utf-8" },
+        });
+      }
+      if (u === "https://page.example/img/cover.png")
+        return new Response(new Uint8Array(900), {
+          status: 200,
+          headers: { "content-type": "image/png" },
+        });
+      if (u === "https://page.example/huge.png")
+        return new Response(new Uint8Array(3 * 1024 * 1024), {
+          status: 200,
+          headers: { "content-type": "image/png" },
+        });
+      if (u === "https://page.example/evil.svg")
+        return new Response("<svg onload=alert(1)/>", {
+          status: 200,
+          headers: { "content-type": "image/svg+xml" },
+        });
+      if (u.startsWith("https://dead.example/")) return new Response("nope", { status: 503 });
+      return realFetch(input, init);
+    };
+    try {
+      const q = (u) => `/api/link-preview?url=${encodeURIComponent(u)}`;
+      const card = await h.call("GET", q("https://page.example/post?id=7#top"), undefined, A.token);
+      const again = await h.call("GET", q("https://page.example/post?id=7"), undefined, A.token);
+      const bare = await h.call("GET", q("page.example/post"), undefined, A.token);
+      check(
+        "r32-32: GET /api/link-preview reads the page's Open Graph head on the worker — title (entities decoded), description, site name, host, a worker-relayed image path — a bare www-style link reads as https, the fragment is dropped, and the second ask is served from memory (one upstream fetch)",
+        card.status === 200 &&
+          card.json.ok === true &&
+          card.json.url === "https://page.example/post?id=7" &&
+          card.json.host === "page.example" &&
+          card.json.title === "KuchuPuchu — fast chats" &&
+          card.json.description === "Private chats & calls." &&
+          card.json.siteName === "KP" &&
+          card.json.image ===
+            "/api/link-image?url=" + encodeURIComponent("https://page.example/img/cover.png") &&
+          again.json.title === "KuchuPuchu — fast chats" &&
+          bare.json.ok === true &&
+          pageHits === 2,
+        JSON.stringify({ s: card.status, c: card.json, hits: pageHits }).slice(0, 300),
+      );
+      const bad = [];
+      for (const u of [
+        "http://127.0.0.1/admin",
+        "http://10.0.0.5/",
+        "http://192.168.1.1/",
+        "http://169.254.169.254/latest/meta-data",
+        "https://localhost/",
+        "https://kp.test/api/me",
+        "ftp://page.example/x",
+        "https://[::1]/",
+        "https://user:pw@page.example/",
+        "just words",
+      ]) {
+        const r = await h.call("GET", q(u), undefined, A.token);
+        if (r.status !== 400 || r.json.error?.code !== "BAD_LINK") bad.push(`${u}=${r.status}`);
+      }
+      const anon = await h.call("GET", q("https://page.example/post"));
+      check(
+        "r32-32: the preview fetcher refuses loopback / private / link-local / bare hosts, the worker's own host, credentials, non-http schemes and junk with 400 BAD_LINK, and needs a session (401)",
+        bad.length === 0 && anon.status === 401,
+        `${bad.join(" ")} anon=${anon.status}`,
+      );
+      const dead = await h.call("GET", q("https://dead.example/x"), undefined, A.token);
+      check(
+        "r32-32: an unreachable page is a plain ok:false shell with the host (the app shows the bare link), never an error",
+        dead.status === 200 && dead.json.ok === false && dead.json.host === "dead.example",
+        JSON.stringify(dead.json),
+      );
+      const rawGet = async (path) => {
+        const res = await h.worker.fetch(
+          new Request(`https://kp.test${path}`, {
+            headers: { authorization: `Bearer ${A.token}` },
+          }),
+          h.env,
+          h.ctx,
+        );
+        const buf = await res.arrayBuffer();
+        return {
+          status: res.status,
+          type: res.headers.get("content-type"),
+          len: buf.byteLength,
+          nosniff: res.headers.get("x-content-type-options"),
+        };
+      };
+      const qi = (u) => `/api/link-image?url=${encodeURIComponent(u)}`;
+      const pic = await rawGet(qi("https://page.example/img/cover.png"));
+      const huge = await rawGet(qi("https://page.example/huge.png"));
+      const svg = await rawGet(qi("https://page.example/evil.svg"));
+      const html = await rawGet(qi("https://page.example/post"));
+      const plain = await rawGet(qi("http://page.example/img/cover.png"));
+      check(
+        "r32-32: GET /api/link-image relays the card picture (image/* only, nosniff), refuses > 2 MB (413), SVG and HTML (415) and plain-http sources (400)",
+        pic.status === 200 &&
+          pic.type === "image/png" &&
+          pic.len === 900 &&
+          pic.nosniff === "nosniff" &&
+          huge.status === 413 &&
+          svg.status === 415 &&
+          html.status === 415 &&
+          plain.status === 400,
+        JSON.stringify({
+          pic,
+          huge: huge.status,
+          svg: svg.status,
+          html: html.status,
+          plain: plain.status,
+        }),
+      );
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  }
+
   process.stdout.write(lines.join("\n") + "\n");
   const broken = lines.filter((l) => l.startsWith("  BROKEN")).length;
   process.exit(broken ? 1 : 0);

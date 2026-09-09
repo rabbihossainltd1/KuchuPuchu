@@ -5481,6 +5481,40 @@ const convBetween = (db, a, b) =>
         ),
     );
   }
+  // Item 32: links in a chat are clickable and carry a preview card.
+  {
+    const lp = kt("LinkPreview.kt");
+    const chat = kt("ChatScreen.kt");
+    const cache = kt("Cache.kt");
+    check(
+      "r32-32: LinkPreview.kt — Links.RE / clean / first / annotate (LinkAnnotation.Url + underline, taps handled by Links.open — no default handler throw), LinkPreviews (snapshot map + one file, fetched through /api/link-preview) and LinkPreviewCard (worker-relayed picture 1.91:1, title 2 lines, description, host); Cache.init warms the card file",
+      lp.includes(
+        'val RE = Regex("""(?:https?://|www\\.)[^\\s<>"\']+""", RegexOption.IGNORE_CASE)',
+      ) &&
+        lp.includes(
+          "fun annotate(text: String, ink: Color, open: (String) -> Unit): AnnotatedString? {",
+        ) &&
+        lp.includes("withLink(LinkAnnotation.Url(u, styles, listener)) { append(u) }") &&
+        lp.includes("textDecoration = TextDecoration.Underline") &&
+        lp.includes('Api.request("/api/link-preview?url=${Api.q(url)}", "GET", null)') &&
+        lp.includes(
+          "internal fun LinkPreviewCard(url: String, mine: Boolean, ink: Color, onOpen: (() -> Unit)?) {",
+        ) &&
+        lp.includes('model = if (image.startsWith("/")) Api.BASE + image else image,') &&
+        lp.includes("modifier = Modifier.fillMaxWidth().aspectRatio(1.91f),") &&
+        cache.includes("runCatching { LinkPreviews.init(app) }"),
+    );
+    check(
+      "r32-32: the TEXT bubble annotates its body (plain Text again in select mode so taps go to the bubble) and shows LinkPreviewCard for the first link above the text",
+      chat.includes("else Links.annotate(full, bodyInk) { u -> Links.open(ctx, u) }") &&
+        chat.includes("val firstLink = remember(full) { Links.first(full) }") &&
+        chat.includes("onOpen = if (selecting) null else ({ Links.open(ctx, firstLink) }),") &&
+        chat.includes(
+          "if (linked != null) Text(linked, fontSize = 14.5.sp, lineHeight = 19.sp, color = bodyInk)",
+        ) &&
+        chat.indexOf("LinkPreviewCard(") < chat.indexOf("if (linked != null) Text(linked"),
+    );
+  }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
   // a touch on blank list space closes it (main, archive and hidden lists).
   {

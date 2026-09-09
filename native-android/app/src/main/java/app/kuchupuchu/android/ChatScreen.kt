@@ -3681,7 +3681,27 @@ private fun MessageRow(
                                     color = bodyInk,
                                 )
                             } else {
-                                Text(full, fontSize = 14.5.sp, lineHeight = 19.sp, color = bodyInk)
+                                // Owner round 32 (item 32): a link in the text
+                                // is a real link (underlined, tap opens it) and
+                                // the first one gets a preview card above the
+                                // text. In select mode taps stay with the bubble.
+                                val selecting = selectedIds.isNotEmpty()
+                                val linked =
+                                    remember(full, bodyInk, selecting) {
+                                        if (selecting) null
+                                        else Links.annotate(full, bodyInk) { u -> Links.open(ctx, u) }
+                                    }
+                                val firstLink = remember(full) { Links.first(full) }
+                                if (firstLink != null) {
+                                    LinkPreviewCard(
+                                        url = firstLink,
+                                        mine = mine,
+                                        ink = bodyInk,
+                                        onOpen = if (selecting) null else ({ Links.open(ctx, firstLink) }),
+                                    )
+                                }
+                                if (linked != null) Text(linked, fontSize = 14.5.sp, lineHeight = 19.sp, color = bodyInk)
+                                else Text(full, fontSize = 14.5.sp, lineHeight = 19.sp, color = bodyInk)
                             }
                         }
                     }

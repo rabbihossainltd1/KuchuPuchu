@@ -1516,6 +1516,259 @@ function slugFrom(value: string) {
   return cleaned || "user";
 }
 
+/* ---------------- link previews (owner round 32, item 32) ---------------- */
+
+type LinkPreview = {
+  ok: boolean;
+  url: string;
+  host: string;
+  title: string | null;
+  description: string | null;
+  image: string | null;
+  siteName: string | null;
+};
+
+const LINK_PREVIEW_TTL_MS = 6 * 3600_000;
+const LINK_PREVIEW_MISS_TTL_MS = 5 * 60_000;
+const LINK_PREVIEW_MAX_BYTES = 1024 * 1024;
+const LINK_PREVIEW_TIMEOUT_MS = 4_500;
+const LINK_PREVIEW_CACHE_MAX = 300;
+const linkPreviewCache = new Map<string, { at: number; data: LinkPreview }>();
+
+/** Loopback / link-local / RFC1918 / bare-name hosts: never fetched from the worker. */
+const PRIVATE_HOST_RE =
+  /^(localhost|.*\.(local|internal|localhost)|0\.[\d.]+|10\.[\d.]+|127\.[\d.]+|169\.254\.[\d.]+|172\.(1[6-9]|2\d|3[01])\.[\d.]+|192\.168\.[\d.]+)$/i;
+
+/**
+ * The URL a preview may be fetched for: http(s) only, a dotted public-looking
+ * host (no IPv6 literals, no credentials), never the worker's own host. A bare
+ * `www.example.com/x` (the shape the app's link regex also accepts) is read as
+ * https. Returns null for anything else — the route answers 400 BAD_LINK.
+ */
+function linkTarget(raw: string, ownHost: string): URL | null {
+  const text = raw.trim().slice(0, 2048);
+  if (!text) return null;
+  let u: URL;
+  try {
+    u = new URL(/^https?:\/\//i.test(text) ? text : `https://${text}`);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+  if (!u.hostname || !u.hostname.includes(".") || u.hostname.startsWith("[")) return null;
+  if (PRIVATE_HOST_RE.test(u.hostname)) return null;
+  if (u.username || u.password) return null;
+  if (u.host.toLowerCase() === ownHost.toLowerCase()) return null;
+  u.hash = "";
+  return u;
+}
+
+function safeChar(cp: number) {
+  return Number.isFinite(cp) && cp > 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : "";
+}
+
+/** Numeric entities first, then the named few — `&amp;#39;` stays `&#39;` (no double decode). */
+function decodeEntities(s: string) {
+  const named: Record<string, string> = {
+    amp: "&",
+    lt: "<",
+    gt: ">",
+    quot: '"',
+    apos: "'",
+    nbsp: " ",
+  };
+  return s
+    .replace(/&#x([0-9a-f]+);/gi, (_, h: string) => safeChar(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d: string) => safeChar(parseInt(d, 10)))
+    .replace(/&(amp|lt|gt|quot|apos|nbsp);/gi, (_, n: string) => named[n.toLowerCase()] ?? "");
+}
+
+/** `<meta property|name=… content=…>` in either attribute order; first wins. */
+function metaMap(html: string) {
+  const out = new Map<string, string>();
+  const tagRe = /<meta\b([^>]*)>/gi;
+  const attrRe = /([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/g;
+  let t: RegExpExecArray | null;
+  while ((t = tagRe.exec(html))) {
+    const attrs = new Map<string, string>();
+    let a: RegExpExecArray | null;
+    attrRe.lastIndex = 0;
+    while ((a = attrRe.exec(t[1]!))) attrs.set(a[1]!.toLowerCase(), a[2] ?? a[3] ?? a[4] ?? "");
+    const key = (attrs.get("property") || attrs.get("name") || "").toLowerCase();
+    const content = attrs.get("content");
+    if (key && content != null && !out.has(key))
+      out.set(key, decodeEntities(content).replace(/\s+/g, " ").trim());
+  }
+  return out;
+}
+
+/** Reads the document only as far as `</head>` (or the byte cap), then cancels. */
+async function readHead(res: Response, max: number) {
+  const reader = res.body?.getReader();
+  if (!reader) return "";
+  const decoder = new TextDecoder("utf-8");
+  let text = "";
+  let total = 0;
+  while (total < max) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    const chunk = decoder.decode(value, { stream: true });
+    // Only the fresh tail is scanned (plus a few bytes of overlap for a tag
+    // split across two chunks) — a 700 KB head (YouTube) must not be
+    // re-scanned from the start on every chunk.
+    const tail = text.slice(-12) + chunk;
+    text += chunk;
+    if (/<\/head\s*>/i.test(tail)) break;
+  }
+  await reader.cancel().catch(() => {});
+  return text;
+}
+
+const stripWww = (host: string) => host.replace(/^www\./i, "");
+
+const LINK_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
+
+/** The whole body, or null once it exceeds [max] (the read stops there). */
+async function readCapped(res: Response, max: number): Promise<Uint8Array<ArrayBuffer> | null> {
+  const declared = Number(res.headers.get("content-length") || 0);
+  if (declared > max) {
+    await res.body?.cancel().catch(() => {});
+    return null;
+  }
+  const reader = res.body?.getReader();
+  if (!reader) return new Uint8Array(new ArrayBuffer(0));
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    parts.push(value);
+  }
+  const out = new Uint8Array(new ArrayBuffer(total));
+  let at = 0;
+  for (const part of parts) {
+    out.set(part, at);
+    at += part.byteLength;
+  }
+  return out;
+}
+
+/**
+ * Open Graph card for a link: the worker fetches the page — never the phone,
+ * so the link's host does not learn every reader's IP and one fetch serves
+ * everyone through the cache — and reads at most the head. A direct image URL
+ * becomes an image-only card. Failures are a plain `ok: false` shell (the app
+ * shows the bare link), remembered briefly so a dead page is not re-fetched by
+ * every bubble that scrolls past.
+ */
+async function linkPreview(target: URL): Promise<LinkPreview> {
+  const key = target.href;
+  const hit = linkPreviewCache.get(key);
+  if (hit && Date.now() - hit.at < LINK_PREVIEW_TTL_MS) return hit.data;
+  const base: LinkPreview = {
+    ok: false,
+    url: key,
+    host: stripWww(target.hostname),
+    title: null,
+    description: null,
+    image: null,
+    siteName: null,
+  };
+  let data = base;
+  try {
+    const res = await fetch(key, {
+      redirect: "follow",
+      signal: AbortSignal.timeout(LINK_PREVIEW_TIMEOUT_MS),
+      headers: {
+        "user-agent":
+          "Mozilla/5.0 (compatible; KuchuPuchuBot/1.0; +https://github.com/rabbihossainltd1/KuchuPuchu)",
+        accept: "text/html,application/xhtml+xml;q=0.9,image/*;q=0.5,*/*;q=0.1",
+        "accept-language": "en",
+      },
+    });
+    const type = (res.headers.get("content-type") || "").toLowerCase();
+    const final = new URL(res.url || key);
+    if (res.ok && type.startsWith("image/")) {
+      await res.body?.cancel();
+      data = {
+        ...base,
+        ok: final.protocol === "https:",
+        host: stripWww(final.hostname),
+        title: decodeURIComponent(final.pathname.split("/").pop() || "") || base.host,
+        image:
+          final.protocol === "https:"
+            ? `/api/link-image?url=${encodeURIComponent(final.href)}`
+            : null,
+      };
+    } else if (res.ok && (type.startsWith("text/html") || type.startsWith("application/xhtml"))) {
+      const html = await readHead(res, LINK_PREVIEW_MAX_BYTES);
+      const meta = metaMap(html);
+      const pick = (...keys: string[]) => {
+        for (const k of keys) {
+          const v = meta.get(k);
+          if (v) return v;
+        }
+        return null;
+      };
+      const titleTag = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1];
+      const title =
+        (
+          pick("og:title", "twitter:title") ??
+          (titleTag ? decodeEntities(titleTag).replace(/\s+/g, " ").trim() : null)
+        )?.slice(0, 140) || null;
+      const description =
+        pick("og:description", "twitter:description", "description")?.slice(0, 220) || null;
+      const rawImage = pick(
+        "og:image:secure_url",
+        "og:image",
+        "twitter:image",
+        "twitter:image:src",
+      );
+      let image: string | null = null;
+      if (rawImage) {
+        try {
+          const iu = new URL(rawImage, final);
+          // The phone loads the picture through the worker (see
+          // /api/link-image) — never from the page's host — so a card cannot
+          // be used to learn who opened the chat.
+          if (iu.protocol === "https:" && iu.href.length <= 1024)
+            image = `/api/link-image?url=${encodeURIComponent(iu.href)}`;
+        } catch {
+          /* unusable image url: card without a picture */
+        }
+      }
+      data = {
+        ok: title != null || image != null,
+        url: key,
+        host: stripWww(final.hostname),
+        title,
+        description,
+        image,
+        siteName: pick("og:site_name")?.slice(0, 60) || null,
+      };
+    } else {
+      await res.body?.cancel().catch(() => {});
+    }
+  } catch {
+    /* unreachable / slow / refused: a plain link, no card */
+  }
+  if (linkPreviewCache.size >= LINK_PREVIEW_CACHE_MAX) {
+    const oldest = linkPreviewCache.keys().next().value;
+    if (oldest !== undefined) linkPreviewCache.delete(oldest);
+  }
+  linkPreviewCache.set(key, {
+    at: Date.now() - (data.ok ? 0 : LINK_PREVIEW_TTL_MS - LINK_PREVIEW_MISS_TTL_MS),
+    data,
+  });
+  return data;
+}
+
 /* ---------------- schema ---------------- */
 
 let schemaReady = false;
@@ -4863,6 +5116,55 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       nowIso(),
     );
     return json({ ok: true });
+  }
+
+  // Owner round 32 (item 32): a link in a chat renders as a clickable link
+  // with a preview card. The card comes from here (Open Graph title /
+  // description / image of the page), fetched by the worker and cached, so
+  // the phone never touches the link's host until the user taps it.
+  if (path === "/api/link-preview" && method === "GET") {
+    rateLimit(`lnk:${uid}`, 60, 30);
+    const target = linkTarget(url.searchParams.get("url") || "", url.host);
+    if (!target) fail(400, "Bad link.", "BAD_LINK");
+    return json(await linkPreview(target), 200, {
+      "cache-control": "private, max-age=3600",
+    });
+  }
+
+  // The card's picture, relayed by the worker (2 MB cap, image/* only, edge
+  // cached a day) — the page's host sees Cloudflare, not the reader.
+  if (path === "/api/link-image" && method === "GET") {
+    rateLimit(`lnki:${uid}`, 120, 60);
+    const target = linkTarget(url.searchParams.get("url") || "", url.host);
+    if (!target || target.protocol !== "https:") fail(400, "Bad link.", "BAD_LINK");
+    let upstream: Response;
+    try {
+      upstream = await fetch(target.href, {
+        redirect: "follow",
+        signal: AbortSignal.timeout(LINK_PREVIEW_TIMEOUT_MS),
+        headers: { accept: "image/*", "user-agent": "Mozilla/5.0 (compatible; KuchuPuchuBot/1.0)" },
+        cf: { cacheEverything: true, cacheTtl: 86_400 },
+      } as RequestInit);
+    } catch {
+      fail(502, "Picture unavailable.", "LINK_IMAGE");
+    }
+    const type = (upstream.headers.get("content-type") || "").toLowerCase().split(";")[0]!.trim();
+    if (!upstream.ok || !type.startsWith("image/") || type === "image/svg+xml") {
+      await upstream.body?.cancel().catch(() => {});
+      fail(415, "Not a picture.", "LINK_IMAGE");
+    }
+    const bytes = await readCapped(upstream, LINK_IMAGE_MAX_BYTES);
+    if (!bytes) fail(413, "Picture too large.", "LINK_IMAGE");
+    return new Response(bytes, {
+      status: 200,
+      headers: {
+        "content-type": type,
+        "content-length": String(bytes.byteLength),
+        "cache-control": "private, max-age=86400",
+        "x-content-type-options": "nosniff",
+        "access-control-allow-origin": "*",
+      },
+    });
   }
 
   /* ---------- conversations ---------- */
