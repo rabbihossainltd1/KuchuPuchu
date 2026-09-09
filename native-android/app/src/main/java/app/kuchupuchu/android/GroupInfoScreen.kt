@@ -259,14 +259,18 @@ fun GroupInfoScreen(nav: NavController, convId: String) {
                     KpAvatar(u.optText("displayName"), u.optIso("avatarUrl"), 44.dp, avatarRef = u.optIso("avatarRef"))
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(
-                            if (uid == myId) "You" else u.optText("displayName").ifBlank { "User" },
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Ink,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                if (uid == myId) "You" else u.optText("displayName").ifBlank { "User" },
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Ink,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            UserBadges(u, 14.dp)
+                        }
                         val uname = u.optText("username")
                         if (uname.isNotBlank()) Text("@$uname", fontSize = 12.5.sp, color = Muted, maxLines = 1)
                     }

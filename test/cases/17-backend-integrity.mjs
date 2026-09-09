@@ -984,6 +984,64 @@ async function main() {
     );
   }
 
+  // ── r32-31. badge choice for multi-badge accounts ───────────────────────────
+  {
+    const h = await mk();
+    const A = await h.reg("bd-a");
+    const B = await h.reg("bd-b");
+    const plain = await h.call("GET", "/api/me", undefined, A.token);
+    const notHeld = await h.call("PATCH", "/api/me", { badge: "verified" }, A.token);
+    check(
+      "r32-31: badge is null by default (show all) and a badge the account does not hold is refused (400 BAD_BADGE)",
+      plain.json.user?.badge === null &&
+        notHeld.status === 400 &&
+        notHeld.json.error?.code === "BAD_BADGE",
+      `${plain.json.user?.badge}/${notHeld.status}`,
+    );
+    await h.q("UPDATE users SET verified = 1, moderator = 1 WHERE id = ?", A.user.id).run();
+    const pickMod = await h.call("PATCH", "/api/me", { badge: "moderator" }, A.token);
+    const cid = (await h.call("POST", "/api/conversations", { userId: A.user.id }, B.token)).json
+      .conversation.id;
+    const row = (await h.call("GET", "/api/conversations", undefined, B.token)).json.items.find(
+      (c) => c.id === cid,
+    );
+    const prof = await h.call("GET", `/api/users/${A.user.id}`, undefined, B.token);
+    check(
+      "r32-31: a held badge is accepted and the choice rides on every user shape (chat list `other`, profile) next to the flags",
+      pickMod.status === 200 &&
+        pickMod.json.user?.badge === "moderator" &&
+        row?.other?.badge === "moderator" &&
+        row?.other?.verified === true &&
+        row?.other?.moderator === true &&
+        prof.json.user?.badge === "moderator",
+      JSON.stringify({
+        p: pickMod.json.user?.badge,
+        r: row?.other?.badge,
+        u: prof.json.user?.badge,
+      }),
+    );
+    const none = await h.call("PATCH", "/api/me", { badge: "none" }, A.token);
+    const bad = await h.call("PATCH", "/api/me", { badge: "gold" }, A.token);
+    const reset = await h.call("PATCH", "/api/me", { badge: null }, A.token);
+    check(
+      "r32-31: 'none' hides the badges, an unknown value is refused, null goes back to 'all'",
+      none.json.user?.badge === "none" &&
+        bad.status === 400 &&
+        reset.status === 200 &&
+        reset.json.user?.badge === null,
+      `${none.json.user?.badge}/${bad.status}/${reset.json.user?.badge}`,
+    );
+    // A revoked badge cannot keep being shown by an old preference.
+    await h.call("PATCH", "/api/me", { badge: "verified" }, A.token);
+    await h.q("UPDATE users SET verified = NULL WHERE id = ?", A.user.id).run();
+    const revoked = await h.call("GET", `/api/users/${A.user.id}`, undefined, B.token);
+    check(
+      "r32-31: a choice for a badge the account has since lost reads as null (show what is held), never as the lost badge",
+      revoked.json.user?.badge === null && revoked.json.user?.verified === false,
+      JSON.stringify(revoked.json.user?.badge),
+    );
+  }
+
   process.stdout.write(lines.join("\n") + "\n");
   const broken = lines.filter((l) => l.startsWith("  BROKEN")).length;
   process.exit(broken ? 1 : 0);

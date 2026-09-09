@@ -1783,6 +1783,9 @@ async function ensureSchema(db: D1Database) {
   // Moderator badge (owner round 2026-09-04): @fsleader carries the crossed-
   // tools badge; independent of verified so the two never collide.
   await runCatchingSql(db, `ALTER TABLE users ADD COLUMN moderator INTEGER`);
+  // Owner round 32 (item 31): which badge a multi-badge account shows —
+  // 'verified' | 'moderator' | 'none'; NULL = all the badges it holds.
+  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN badge TEXT`);
   // Owner round 30: privacy settings. Each visibility column is one of
   // 'nobody' | 'contacts' | 'public' ("contact" = the two share a 1:1
   // conversation — see isContact). The number defaults to contacts, the rest
@@ -1885,6 +1888,7 @@ type UserRow = {
   auth_status: string;
   verified: number | null;
   moderator: number | null;
+  badge?: string | null;
   priv_phone: string | null;
   priv_avatar: string | null;
   priv_messages: string | null;
@@ -2013,6 +2017,11 @@ function userFrom(row: UserRow, online = false, light = false, viewer?: Viewer) 
     lastActiveAt: showSeen ? row.last_active_at : null,
     verified: !!row.verified,
     moderator: !!row.moderator,
+    // Owner round 32 (item 31): the badge the account CHOSE to show. Every
+    // screen draws from this, so the choice holds on the chat list, the chat
+    // header, calls, status, groups and the profile alike. Null = show all
+    // the badges the account holds (the pre-round behaviour).
+    badge: badgeChoice(row),
     // Owner round 31 item 21: peers need to know — a private profile's chat,
     // calls, pictures and videos are screenshot-blocked and not saveable /
     // forwardable on the OTHER phone too.
@@ -2039,6 +2048,18 @@ function userFrom(row: UserRow, online = false, light = false, viewer?: Viewer) 
     // every screen open — the "profile picture reloads every launch" bug).
     avatarRef,
   };
+}
+
+const BADGE_CHOICES = new Set(["verified", "moderator", "none"]);
+
+/** Owner round 32 (item 31): the badge preference, validated against what the
+ *  account actually holds — a choice for a badge that was since revoked falls
+ *  back to "show what you have" instead of drawing a badge the row lost. */
+function badgeChoice(row: UserRow): string | null {
+  const choice = row.badge && BADGE_CHOICES.has(row.badge) ? row.badge : null;
+  if (choice === "verified" && !row.verified) return null;
+  if (choice === "moderator" && !row.moderator) return null;
+  return choice;
 }
 
 /** Full shape, only ever returned for the signed-in user themself. Phone
@@ -4433,6 +4454,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (body.privateProfile !== undefined) {
       sets.push("private_profile = ?");
       values.push(body.privateProfile ? 1 : 0);
+    }
+    // Owner round 32 (item 31): the badge to show. Only a badge the account
+    // holds (or "none" / null = all) is accepted.
+    if (body.badge !== undefined) {
+      const choice = body.badge === null || body.badge === "" ? null : String(body.badge);
+      if (choice !== null && !BADGE_CHOICES.has(choice)) fail(400, "Bad badge.", "BAD_BADGE");
+      if ((choice === "verified" && !me.verified) || (choice === "moderator" && !me.moderator))
+        fail(400, "You don't hold that badge.", "BAD_BADGE");
+      sets.push("badge = ?");
+      values.push(choice);
     }
     if (sets.length) {
       values.push(uid);

@@ -5429,6 +5429,58 @@ const convBetween = (db, a, b) =>
         ),
     );
   }
+  // Items 30/31: ONE badge row (UserBadges) on every screen — chat list, chat
+  // header, profile, all call screens, status list + viewer, group members —
+  // driven by the server's `badge` choice; multi-badge accounts pick All /
+  // Verified / Moderator / None from a bottom sheet on their own profile.
+  {
+    const ui = kt("Ui.kt");
+    const chat = kt("ChatScreen.kt");
+    const cl = kt("ChatListScreen.kt");
+    const profile = kt("ProfileScreen.kt");
+    const calls = kt("CallScreens.kt");
+    const engine = kt("CallEngine.kt");
+    const status = kt("StatusScreens.kt");
+    const group = kt("GroupInfoScreen.kt");
+    const src = readFileSync("src/worker/index.ts", "utf8");
+    check(
+      "r32-30: UserBadges(user, size, gap) in Ui.kt honours badge = verified / moderator / none / null(all); used on the chat list row, chat header, profile, every call screen name line (CallUi.otherUser), status list + viewer header and the group member list — the old per-screen verified/moderator pairs are gone",
+      ui.includes("fun UserBadges(user: JSONObject?, size: Dp = 16.dp, gap: Dp = 5.dp) {") &&
+        ui.includes('if (choice == "none") return') &&
+        ui.includes(
+          'val verified = user.optBoolean("verified") && (choice == null || choice == "verified")',
+        ) &&
+        cl.includes("if (!isGroup) UserBadges(other)") &&
+        chat.includes("if (!isGroup) UserBadges(other)") &&
+        !chat.includes(
+          'val verified = !isGroup && c?.optJSONObject("other")?.optBoolean("verified") == true',
+        ) &&
+        profile.includes("UserBadges(u, 16.dp, gap = 6.dp)") &&
+        engine.includes("val otherUser: JSONObject? = null,") &&
+        engine.includes('otherUser = if (other.has("id")) other else current?.otherUser,') &&
+        (calls.match(/UserBadges\(call\.otherUser/g) || []).length === 5 &&
+        status.includes("UserBadges(user)") &&
+        status.includes("UserBadges(user ?: Store.me, 14.dp)") &&
+        group.includes("UserBadges(u, 14.dp)") &&
+        !/VerifiedBadge\(\)\s*\}\s*if \(.*moderator/.test(cl + chat + profile),
+    );
+    check(
+      "r32-31: worker — users.badge column, badgeChoice() validated against the held flags on every user shape, PATCH /api/me badge ∈ verified|moderator|none|null (400 BAD_BADGE otherwise / not held); app — own profile with 2+ badges shows a 'Badge' row → sheet 'Which badge to show?' with All / Verified / Moderator / None → PATCH /api/me",
+      src.includes("ALTER TABLE users ADD COLUMN badge TEXT") &&
+        src.includes("function badgeChoice(row: UserRow): string | null {") &&
+        src.includes("badge: badgeChoice(row),") &&
+        src.includes('fail(400, "You don\'t hold that badge.", "BAD_BADGE");') &&
+        profile.includes('if (u.optBoolean("verified") && u.optBoolean("moderator")) {') &&
+        profile.includes('ProfileEditRow(Icons.Filled.Verified, "Badge", shown) {') &&
+        profile.includes(
+          'KpSheet(onDismiss = { badgeSheet = false }, title = "Which badge to show?") {',
+        ) &&
+        profile.includes('KpSheetRow(Icons.Filled.VisibilityOff, "None"') &&
+        profile.includes(
+          'Api.patch("/api/me", JSONObject().put("badge", choice ?: JSONObject.NULL))',
+        ),
+    );
+  }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
   // a touch on blank list space closes it (main, archive and hidden lists).
   {

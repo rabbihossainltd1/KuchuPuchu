@@ -67,6 +67,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import org.json.JSONObject
 
 /**
  * Shared image helpers. Avatars are data-URLs the worker stores inline, so
@@ -1009,6 +1010,31 @@ fun ModeratorBadge(size: Dp = 16.dp) {
         contentDescription = "Moderator",
         modifier = Modifier.size(width = size, height = size * (1199f / 1312f)),
     )
+}
+
+/**
+ * Owner round 32 (items 30/31): the account's badge(s), the same on every
+ * screen — chat list, chat header, profile, call screens, status list and
+ * viewer, group member lists. Draws what the server says the account SHOWS:
+ * `badge` = "verified" / "moderator" picks one, "none" hides them, null
+ * (or an old server) = every badge the account holds. Each badge is preceded
+ * by [gap], so the row can sit right after a name.
+ */
+@Composable
+fun UserBadges(user: JSONObject?, size: Dp = 16.dp, gap: Dp = 5.dp) {
+    if (user == null) return
+    val choice = user.optIso("badge")
+    if (choice == "none") return
+    val verified = user.optBoolean("verified") && (choice == null || choice == "verified")
+    val moderator = user.optBoolean("moderator") && (choice == null || choice == "moderator")
+    if (verified) {
+        Spacer(Modifier.width(gap))
+        VerifiedBadge(size)
+    }
+    if (moderator) {
+        Spacer(Modifier.width(gap))
+        ModeratorBadge(size)
+    }
 }
 
 /** Blue verified seal (starburst + check) drawn on Canvas: a vector glyph at

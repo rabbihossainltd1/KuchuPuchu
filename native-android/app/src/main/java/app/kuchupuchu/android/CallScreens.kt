@@ -249,7 +249,10 @@ fun IncomingCallScreen(call: CallUi) {
                 KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 108.dp, ring = false)
             }
             Spacer(Modifier.height(26.dp))
-            Text(call.otherName, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(call.otherName, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
+                UserBadges(call.otherUser, 18.dp)
+            }
             Spacer(Modifier.height(6.dp))
             Text(
                 if (call.kind == "VIDEO") "Incoming video call…" else "Incoming voice call…",
@@ -467,7 +470,10 @@ fun VoiceCallScreen(call: CallUi) {
             // Owner round 12: zoom/pulse effect removed — a calm static avatar.
             KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 116.dp, ring = false)
             Spacer(Modifier.height(28.dp))
-            Text(call.otherName, color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.SemiBold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(call.otherName, color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.SemiBold)
+                UserBadges(call.otherUser, 18.dp)
+            }
             Spacer(Modifier.height(8.dp))
             Text(
                 when {
@@ -596,6 +602,7 @@ private fun ShareFullscreen(call: CallUi) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(call.otherName, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            UserBadges(call.otherUser, 13.dp, gap = 4.dp)
             Spacer(Modifier.width(10.dp))
             Text(clockText(secs), color = Color(0xB3FFFFFF), fontSize = 13.sp)
         }
@@ -687,7 +694,10 @@ fun OutgoingVideoScreen(call: CallUi) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Spacer(Modifier.weight(0.55f))
-            Text(call.otherName, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(call.otherName, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+                UserBadges(call.otherUser, 18.dp)
+            }
             Spacer(Modifier.height(6.dp))
             Text(
                 when {
@@ -810,7 +820,10 @@ fun InCallVideoScreen(call: CallUi) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(call.otherName, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(call.otherName, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    UserBadges(call.otherUser, 14.dp, gap = 4.dp)
+                }
                 Text(
                     when {
                         engine.sharing -> "You are sharing your screen"

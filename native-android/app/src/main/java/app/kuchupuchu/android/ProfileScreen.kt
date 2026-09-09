@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
@@ -73,6 +74,8 @@ fun ProfileScreen(nav: NavController, userId: String) {
     // action rows give way to an "Edit profile" row that opens Settings.
     val isMe = userId.isNotBlank() && userId == Store.myId()
     var user by remember { mutableStateOf(if (isMe) Store.me else profileSnapshot(userId)) }
+    // Owner round 32 (item 31): badge picker sheet (own profile, 2+ badges).
+    var badgeSheet by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     // The API answers `blocked` on the profile now (it has to, so the profile can
     // be shown at all to someone who blocked this user). Starting from `false`
@@ -137,6 +140,30 @@ fun ProfileScreen(nav: NavController, userId: String) {
                 IconButton(onClick = { haptics.tap(); moreOpen = true }) {
                     Icon(Icons.Filled.MoreVert, "More", tint = Ink)
                 }
+            }
+        }
+        if (badgeSheet && user != null) {
+            val current = user!!.optIso("badge")
+            fun pick(choice: String?) {
+                badgeSheet = false
+                scope.launch {
+                    runCatching {
+                        val updated =
+                            withContext(Dispatchers.IO) {
+                                Api.patch("/api/me", JSONObject().put("badge", choice ?: JSONObject.NULL))
+                            }
+                        updated.optJSONObject("user")?.let {
+                            user = it
+                            Store.saveMe(it)
+                        }
+                    }.onFailure { error = it.message ?: "Could not change the badge." }
+                }
+            }
+            KpSheet(onDismiss = { badgeSheet = false }, title = "Which badge to show?") {
+                KpSheetRow(Icons.Filled.Verified, "All", tint = if (current == null) ActionBlueDeep else Ink) { pick(null) }
+                KpSheetRow(Icons.Filled.Verified, "Verified", tint = if (current == "verified") ActionBlueDeep else Ink) { pick("verified") }
+                KpSheetRow(Icons.Filled.Badge, "Moderator", tint = if (current == "moderator") ActionBlueDeep else Ink) { pick("moderator") }
+                KpSheetRow(Icons.Filled.VisibilityOff, "None", tint = if (current == "none") ActionBlueDeep else Ink) { pick("none") }
             }
         }
         if (moreOpen && user != null) {
@@ -388,14 +415,7 @@ fun ProfileScreen(nav: NavController, userId: String) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(u.optText("displayName").ifBlank { "—" }, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
-                if (u.optBoolean("verified")) {
-                    Spacer(Modifier.width(6.dp))
-                    VerifiedBadge(16.dp)
-                }
-                if (u.optBoolean("moderator")) {
-                    Spacer(Modifier.width(6.dp))
-                    ModeratorBadge(16.dp)
-                }
+                UserBadges(u, 16.dp, gap = 6.dp)
             }
             val uname = u.optText("username")
             if (uname.isNotBlank()) Text("@$uname", fontSize = 13.5.sp, color = Muted)
@@ -463,6 +483,21 @@ fun ProfileScreen(nav: NavController, userId: String) {
                 ProfileEditRow(Icons.Filled.Info, "About", u.optText("about").ifBlank { "Hey! I'm using KuchuPuchu" }) {
                     haptics.tap()
                     nav.navigate("editfield/about")
+                }
+                // Owner round 32 (item 31): an account holding more than one
+                // badge picks which one it shows (or none) — a bottom sheet.
+                if (u.optBoolean("verified") && u.optBoolean("moderator")) {
+                    val shown =
+                        when (u.optIso("badge")) {
+                            "verified" -> "Verified"
+                            "moderator" -> "Moderator"
+                            "none" -> "None"
+                            else -> "All"
+                        }
+                    ProfileEditRow(Icons.Filled.Verified, "Badge", shown) {
+                        haptics.tap()
+                        badgeSheet = true
+                    }
                 }
                 // Phone auth: the login identity now. Change needs the new SIM
                 // literally present on this device (MATCH).

@@ -62,6 +62,8 @@ data class CallUi(
     val connecting: Boolean = false,
     /** Owner round 31 item 21: the other side is a private profile → no capture. */
     val otherPrivate: Boolean = false,
+    /** Owner round 32 (item 30): the peer's user object (badges) for the call screens. */
+    val otherUser: JSONObject? = null,
 )
 
 /**
@@ -699,6 +701,7 @@ class CallEngine(private val app: Application) {
                 otherOnline = other.optBoolean("online"),
                 otherAvatar = other.optIso("avatarUrl").orEmpty().ifBlank { current?.otherAvatar.orEmpty() },
                 otherPrivate = other.optBoolean("privateProfile") || current?.otherPrivate == true,
+                otherUser = if (other.has("id")) other else current?.otherUser,
                 startedAt =
                     when {
                         status != "ACTIVE" -> 0L
@@ -731,7 +734,7 @@ class CallEngine(private val app: Application) {
             )
         if (current?.id != ui.id) activeSince = System.currentTimeMillis()
         if (current?.id?.startsWith("pending") == true) {
-            active = ui.copy(otherName = current.otherName, otherAvatar = current.otherAvatar)
+            active = ui.copy(otherName = current.otherName, otherAvatar = current.otherAvatar, otherUser = ui.otherUser ?: current.otherUser)
         } else {
             active = ui
         }

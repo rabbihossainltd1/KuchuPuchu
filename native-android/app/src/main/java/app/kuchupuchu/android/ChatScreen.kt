@@ -1422,8 +1422,6 @@ fun ChatScreen(nav: NavController, convId: String) {
     // The ref is what makes the header paint without re-fetching: pass it too.
     val avatarRef = if (isGroup) c?.optIso("avatarRef") else c?.optJSONObject("other")?.optIso("avatarRef")
     val online = !isGroup && c?.optJSONObject("other")?.optBoolean("online") == true
-    val verified = !isGroup && c?.optJSONObject("other")?.optBoolean("verified") == true
-    val moderator = !isGroup && c?.optJSONObject("other")?.optBoolean("moderator") == true
     // Official notification account: one-way (owner rule) — no composer.
     val noReply = !isGroup && otherUserId == "kp_official_bot"
     // Owner round 31 item 21: a private profile's chat (theirs, or mine when
@@ -1617,14 +1615,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    if (verified) {
-                        Spacer(Modifier.width(5.dp))
-                        VerifiedBadge()
-                    }
-                    if (moderator) {
-                        Spacer(Modifier.width(5.dp))
-                        ModeratorBadge()
-                    }
+                    if (!isGroup) UserBadges(other)
                 }
                 Text(
                     when {

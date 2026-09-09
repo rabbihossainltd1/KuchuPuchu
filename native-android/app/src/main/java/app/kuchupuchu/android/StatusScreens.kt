@@ -246,12 +246,15 @@ fun StatusScreen(nav: NavController) {
                             )
                             Spacer(Modifier.width(14.dp))
                             Column {
-                                Text(
-                                    user.optString("displayName"),
-                                    fontSize = 16.5.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Ink,
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        user.optString("displayName"),
+                                        fontSize = 16.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Ink,
+                                    )
+                                    UserBadges(user)
+                                }
                                 Spacer(Modifier.height(2.dp))
                                 Text(
                                     "${statuses.size} update${if (statuses.size > 1) "s" else ""} · ${statusStampShort(lastAt)}",
@@ -874,14 +877,18 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                     )
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(
-                            user?.optText("displayName") ?: "My status",
-                            color = Color.White,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 15.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                user?.optText("displayName") ?: "My status",
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 15.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            UserBadges(user ?: Store.me, 14.dp)
+                        }
                         Text(
                             statusStamp(s.optString("createdAt")),
                             color = Color.White.copy(alpha = 0.75f),
