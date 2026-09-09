@@ -1724,6 +1724,10 @@ async function ensureSchema(db: D1Database) {
   // Owner round 31 (item 26): "Hide chat" — per-member, like `muted`.
   await runCatchingSql(db, `ALTER TABLE members ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`);
   await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN disappear_since TEXT`);
+  // Owner round 32 (item 38): a 1:1 chat opened by a stranger is a message
+  // REQUEST until the other side accepts — the user id of whoever opened it,
+  // NULL once accepted (or when the two already knew each other).
+  await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN request_from TEXT`);
   // Owner round 31: real groups — a group picture (same inline data-URI shape
   // as a profile photo) with a per-version cache token like user avatars.
   await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN avatar_url TEXT`);
@@ -1938,7 +1942,25 @@ const receiptsOn = (row: { read_receipts?: number | null } | undefined) =>
  *  primary-key lookup — the pair id is deterministic. */
 async function isContact(db: D1Database, uid: string, otherId: string) {
   if (uid === otherId) return true;
-  return !!(await one(db, "SELECT id FROM conversations WHERE id = ?", pairId(uid, otherId)));
+  // Owner round 32 (item 38): a chat that is still a message REQUEST does not
+  // make the two contacts — the stranger gets none of the contacts-only
+  // fields (last seen, contacts-only number / picture) until Accept.
+  return !!(await one(
+    db,
+    "SELECT id FROM conversations WHERE id = ? AND request_from IS NULL",
+    pairId(uid, otherId),
+  ));
+}
+
+/** Owner round 32 (item 38): the 1:1 chat between the two is still an
+ *  unaccepted message request (one primary-key lookup). */
+async function requestPendingBetween(db: D1Database, uid: string, otherId: string) {
+  if (uid === otherId) return false;
+  return !!(await one(
+    db,
+    "SELECT id FROM conversations WHERE id = ? AND request_from IS NOT NULL",
+    pairId(uid, otherId),
+  ));
 }
 
 /** Same rule for a whole list at once (one statement per 44 ids). */
@@ -1951,7 +1973,7 @@ async function contactSet(db: D1Database, uid: string, ids: string[]) {
   for (const group of chunked(pairs)) {
     for (const r of await all<{ id: string }>(
       db,
-      `SELECT id FROM conversations WHERE id IN (${inSql(group.length)})`,
+      `SELECT id FROM conversations WHERE id IN (${inSql(group.length)}) AND request_from IS NULL`,
       ...group,
     )) {
       const other = byPair.get(r.id);
@@ -2253,11 +2275,12 @@ async function requireMember(db: D1Database, convId: string, userId: string) {
     hidden_json: string | null;
     disappear_seconds: number | null;
     disappear_since: string | null;
+    request_from: string | null;
     role: string | null;
   }>(
     db,
     `SELECT c.id, c.kind, c.title, c.owner_id, c.hidden_json,
-            c.disappear_seconds, c.disappear_since, m.role
+            c.disappear_seconds, c.disappear_since, c.request_from, m.role
        FROM conversations c
        LEFT JOIN members m ON m.conv_id = c.id AND m.user_id = ?
       WHERE c.id = ?`,
@@ -2274,6 +2297,7 @@ async function requireMember(db: D1Database, convId: string, userId: string) {
     hidden_json: row.hidden_json,
     disappear_seconds: row.disappear_seconds,
     disappear_since: row.disappear_since,
+    request_from: row.request_from,
   };
   const member = { user_id: userId, role: row.role };
   return { conv, member };
@@ -4725,7 +4749,14 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     }
     const view =
       row.id === uid ? SELF_VIEW : (await isContact(db, uid, row.id)) ? CONTACT_VIEW : {};
-    return json({ user: { ...userFrom(row, onlineNow(row), false, view), blocked: false } });
+    const shaped = { ...userFrom(row, onlineNow(row), false, view), blocked: false };
+    // Owner round 32 (item 38): across a pending message request the profile
+    // shows no last seen / online either (the prompt gates it, not privacy).
+    if (row.id !== uid && (await requestPendingBetween(db, uid, row.id))) {
+      shaped.online = false;
+      shaped.lastActiveAt = null;
+    }
+    return json({ user: shaped });
   }
 
   // Profile lookups embedded by the search/chats screens were full
@@ -4827,11 +4858,20 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       if (!privAllows(target.priv_messages, PRIVACY_DEFAULTS.messages, {}))
         fail(403, "This user isn't accepting new messages.", "MSG_PRIVACY");
       const created = nowIso();
+      // Owner round 32 (item 38): a first chat opened from username search
+      // with someone outside the opener's phone book (the client says so —
+      // it is the only side that has the phone book) is a message REQUEST:
+      // the other side sees Accept / Block first, and calls / shared media /
+      // last seen wait for Accept (or for a reply, which accepts). System
+      // accounts never become requests.
+      const request =
+        body.request === true && other !== OFFICIAL_BOT_ID && other !== AI_BOT_ID ? uid : null;
       await run(
         db,
-        "INSERT INTO conversations (id, kind, created_at, hidden_json) VALUES (?, 'SOLO', ?, '{}')",
+        "INSERT INTO conversations (id, kind, created_at, hidden_json, request_from) VALUES (?, 'SOLO', ?, '{}', ?)",
         convId,
         created,
+        request,
       );
       await run(
         db,
@@ -5073,6 +5113,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             (m) => m.lastReadAt ?? null,
           ),
           c.unread,
+          // r32-38: Accept flips the row from a request to a chat.
+          c.requestFrom,
           c.muted,
           c.hidden,
           c.title,
@@ -5229,6 +5271,15 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   if (convMedia && method === "GET") {
     const convId = convMedia[1]!;
     await requireMember(db, convId, uid);
+    // Owner round 32 (item 38): the media gallery waits for Accept.
+    if (
+      await one(
+        db,
+        "SELECT id FROM conversations WHERE id = ? AND request_from IS NOT NULL",
+        convId,
+      )
+    )
+      fail(403, "Accept the message request first.", "REQUEST_PENDING");
     const rows = await all<MsgRow>(
       db,
       "SELECT * FROM messages WHERE conv_id = ? ORDER BY created_at DESC LIMIT 400",
@@ -5389,6 +5440,41 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       }),
     );
     return json({ ok: true, hidden: hidden === 1 });
+  }
+
+  // Owner round 32 (item 38): the recipient of a message request accepts it.
+  // Only the member who did NOT open the chat can; idempotent afterwards.
+  // Block is the other answer — POST /api/blocks, which already hides the
+  // chat behind the block wall on both sides.
+  const acceptMatch = path.match(/^\/api\/conversations\/([^/]+)\/accept$/);
+  if (acceptMatch && method === "POST") {
+    const convId = acceptMatch[1]!;
+    const { conv } = await requireMember(db, convId, uid);
+    if (conv.kind !== "SOLO") fail(400, "Only a direct chat can be accepted.");
+    const row = await one<{ request_from: string | null }>(
+      db,
+      "SELECT request_from FROM conversations WHERE id = ?",
+      convId,
+    );
+    if (row?.request_from && row.request_from === uid)
+      fail(403, "The other person accepts this request.", "FORBIDDEN");
+    if (row?.request_from) {
+      await run(db, "UPDATE conversations SET request_from = NULL WHERE id = ?", convId);
+      const at = nowIso();
+      // Both sides repaint: the opener's chat gains calls / media / last
+      // seen, the acceptor's list row drops the prompt.
+      ctx.waitUntil(
+        Promise.all([
+          broadcastRoomEvent(env, `user:${uid}`, { type: "conv", conversationId: convId, at }),
+          broadcastRoomEvent(env, `user:${row.request_from}`, {
+            type: "conv",
+            conversationId: convId,
+            at,
+          }),
+        ]),
+      );
+    }
+    return json({ ok: true, conversation: await conversationDetail(db, convId, uid) });
   }
 
   const muteMatch = path.match(/^\/api\/conversations\/([^/]+)\/mute$/);
@@ -6010,6 +6096,21 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const convId = msgMatch[1]!;
     const { conv } = await requireMember(db, convId, uid);
     const members = await membersOf(db, convId);
+    // Owner round 32 (item 38): the recipient of a message request writing
+    // back IS the acceptance (no prompt tap needed). The opener's open chat
+    // re-reads the detail (a conv frame without `msg`) and gains calls /
+    // media / last seen.
+    if (conv.kind === "SOLO" && conv.request_from && conv.request_from !== uid) {
+      await run(db, "UPDATE conversations SET request_from = NULL WHERE id = ?", convId);
+      const opener = conv.request_from;
+      ctx.waitUntil(
+        broadcastRoomEvent(env, `user:${opener}`, {
+          type: "conv",
+          conversationId: convId,
+          at: nowIso(),
+        }),
+      );
+    }
     // The official notification account is one-way (owner rule): nobody can
     // reply into it, in-app or via the API.
     if (conv.kind === "SOLO" && members.some((m) => m.user_id === OFFICIAL_BOT_ID))
@@ -6792,6 +6893,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       if (level === "nobody" || (level === "contacts" && !(await isContact(db, uid, other))))
         fail(403, "This user isn't accepting calls.", "MSG_PRIVACY");
     }
+    // Owner round 32 (item 38): no calls across a message request that has
+    // not been accepted — in either direction.
+    if (await requestPendingBetween(db, uid, other))
+      fail(403, "Accept the message request first.", "REQUEST_PENDING");
     // Owner round 12 (2026-09-05): the callee is already on another call →
     // the caller sees "Line busy" instantly instead of endless ringing.
     // NOTE the pair-exclusion: an orphaned ACTIVE call between THESE two
@@ -7585,6 +7690,8 @@ type ConvRow = {
   hidden_json?: string | null;
   avatar_url?: string | null;
   avatar_version?: number | null;
+  /** Owner round 32 (item 38): who opened this 1:1 chat unasked; NULL = accepted. */
+  request_from?: string | null;
   /** Newest messages rowid in the conversation; only the list query selects it. */
   max_row?: number | null;
 };
@@ -7640,7 +7747,7 @@ type ConvMemberRow = {
 };
 
 const CONV_COLS =
-  "id, kind, title, owner_id, created_at, last_message_at, last_message, disappear_seconds, theme, hidden_json, avatar_url, avatar_version";
+  "id, kind, title, owner_id, created_at, last_message_at, last_message, disappear_seconds, theme, hidden_json, avatar_url, avatar_version, request_from";
 const MEMBER_COLS = "conv_id, user_id, role, muted, unread, last_read_at, hidden";
 
 /** Placeholder list for an IN(...) clause. */
@@ -7909,8 +8016,17 @@ function buildConvDetail(
   for (const row of memberRows) {
     const user = users.get(row.user_id);
     if (!user) continue;
-    const view: Viewer = row.user_id === uid ? SELF_VIEW : solo ? CONTACT_VIEW : {};
+    // Owner round 32 (item 38): a pending request is a stranger's chat — no
+    // contacts-only fields (last seen, number, picture) until Accept.
+    const view: Viewer =
+      row.user_id === uid ? SELF_VIEW : solo && !conv.request_from ? CONTACT_VIEW : {};
     const shaped = userFrom(user, onlineNow(user), light, view);
+    // Owner round 32 (item 38): last seen / online wait for Accept — at
+    // every privacy level, both directions.
+    if (solo && conv.request_from && row.user_id !== uid) {
+      shaped.online = false;
+      shaped.lastActiveAt = null;
+    }
     members.push({
       user: shaped,
       role: row.role,
@@ -7932,6 +8048,12 @@ function buildConvDetail(
     createdAt: conv.created_at,
     lastMessageAt: conv.last_message_at,
     lastMessage: conv.last_message,
+    // Owner round 32 (item 38): a 1:1 chat a stranger opened. `requestFrom`
+    // is the opener; the OTHER member sees the Accept / Block prompt
+    // (`requestPending` is that member's flag), the opener a "request sent"
+    // state. Null / false once accepted.
+    requestFrom: solo ? (conv.request_from ?? null) : null,
+    requestPending: solo && !!conv.request_from && conv.request_from !== uid,
     // Owner round 32 (item 28): the newest message's sender + delivery stamp,
     // so a list row can draw sent / delivered / read for the caller's own last
     // message without opening the chat (the list is the screen a sender is

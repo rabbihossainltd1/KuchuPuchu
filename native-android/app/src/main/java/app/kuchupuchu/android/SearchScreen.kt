@@ -74,8 +74,12 @@ fun SearchScreen(nav: NavController) {
         }
         scope.launch {
             runCatching {
+                // Owner round 32 (item 38): a first chat with someone who is
+                // NOT in the phone book opens as a message request — the other
+                // side answers Accept / Block before calls, media or last seen.
+                val known = PhoneBook.entries.any { it.user?.optString("id") == userId }
                 val conv = withContext(Dispatchers.IO) {
-                    Api.post("/api/conversations", JSONObject().put("userId", userId))
+                    Api.post("/api/conversations", JSONObject().put("userId", userId).put("request", !known))
                 }
                 conv.optJSONObject("conversation")?.optString("id")?.let {
                     ScreenStore.convIdForUser[userId] = it

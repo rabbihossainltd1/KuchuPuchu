@@ -860,6 +860,130 @@ async function main() {
     );
   }
 
+  // ── r32-38. message requests: a first chat from username search ─────────────
+  {
+    const h = await mk();
+    const A = await h.reg("rq-a");
+    const B = await h.reg("rq-b");
+    const opened = await h.call(
+      "POST",
+      "/api/conversations",
+      { userId: B.user.id, request: true },
+      A.token,
+    );
+    const cid = opened.json.conversation?.id;
+    check(
+      "r32-38: `request: true` opens the chat as a message request (requestFrom = opener, opener sees no prompt)",
+      opened.status === 200 &&
+        opened.json.conversation.requestFrom === A.user.id &&
+        opened.json.conversation.requestPending === false,
+      JSON.stringify(opened.json.conversation).slice(0, 160),
+    );
+    await h.call(
+      "POST",
+      `/api/conversations/${cid}/messages`,
+      { kind: "TEXT", body: "hello?", clientId: "rq1" },
+      A.token,
+    );
+    const rowB = (await h.call("GET", "/api/conversations", undefined, B.token)).json.items.find(
+      (c) => c.id === cid,
+    );
+    const rowA = (await h.call("GET", "/api/conversations", undefined, A.token)).json.items.find(
+      (c) => c.id === cid,
+    );
+    check(
+      "r32-38: the recipient's list row carries requestPending, and neither side sees the other's last seen / online while it is open",
+      rowB?.requestPending === true &&
+        rowB?.requestFrom === A.user.id &&
+        rowB?.other?.lastActiveAt == null &&
+        rowB?.other?.online === false &&
+        rowA?.requestPending === false &&
+        rowA?.other?.lastActiveAt == null,
+      JSON.stringify({ b: rowB?.other, a: rowA?.other }).slice(0, 200),
+    );
+    const callAB = await h.call(
+      "POST",
+      "/api/calls",
+      { userId: B.user.id, kind: "AUDIO" },
+      A.token,
+    );
+    const callBA = await h.call(
+      "POST",
+      "/api/calls",
+      { userId: A.user.id, kind: "AUDIO" },
+      B.token,
+    );
+    const media = await h.call("GET", `/api/conversations/${cid}/media`, undefined, B.token);
+    const profile = await h.call("GET", `/api/users/${A.user.id}`, undefined, B.token);
+    check(
+      "r32-38: calls (both directions) and the shared-media gallery answer 403 REQUEST_PENDING; the profile shows no last seen; the pair are not contacts yet (contacts-only fields withheld)",
+      callAB.status === 403 &&
+        callAB.json.error?.code === "REQUEST_PENDING" &&
+        callBA.status === 403 &&
+        callBA.json.error?.code === "REQUEST_PENDING" &&
+        media.status === 403 &&
+        media.json.error?.code === "REQUEST_PENDING" &&
+        profile.json.user?.lastActiveAt == null &&
+        profile.json.user?.phone == null,
+      `${callAB.status}/${callBA.status}/${media.status} seen=${profile.json.user?.lastActiveAt}`,
+    );
+    const wrongSide = await h.call("POST", `/api/conversations/${cid}/accept`, {}, A.token);
+    const accepted = await h.call("POST", `/api/conversations/${cid}/accept`, {}, B.token);
+    const callAfter = await h.call(
+      "POST",
+      "/api/calls",
+      { userId: B.user.id, kind: "AUDIO" },
+      A.token,
+    );
+    const mediaAfter = await h.call("GET", `/api/conversations/${cid}/media`, undefined, B.token);
+    const profileAfter = await h.call("GET", `/api/users/${A.user.id}`, undefined, B.token);
+    check(
+      "r32-38: only the recipient can accept (opener → 403); after Accept the row is a normal chat and calls / media / last seen / the number (contacts-only default) open up",
+      wrongSide.status === 403 &&
+        accepted.status === 200 &&
+        accepted.json.conversation.requestFrom === null &&
+        accepted.json.conversation.requestPending === false &&
+        callAfter.status === 201 &&
+        mediaAfter.status === 200 &&
+        typeof profileAfter.json.user?.lastActiveAt === "string" &&
+        profileAfter.json.user?.phone === A.user.phone,
+      `${wrongSide.status}/${accepted.status}/${callAfter.status}/${mediaAfter.status}`,
+    );
+    // A reply from the recipient accepts by itself; a plain open (phone-book
+    // match, or an old client) is never a request; the bots never are.
+    const C = await h.reg("rq-c");
+    const c2 = (
+      await h.call("POST", "/api/conversations", { userId: C.user.id, request: true }, A.token)
+    ).json.conversation.id;
+    await h.call(
+      "POST",
+      `/api/conversations/${c2}/messages`,
+      { kind: "TEXT", body: "sure", clientId: "rq2" },
+      C.token,
+    );
+    const replied = await h.call("GET", `/api/conversations/${c2}`, undefined, A.token);
+    const D = await h.reg("rq-d");
+    const plain = await h.call("POST", "/api/conversations", { userId: D.user.id }, A.token);
+    await h.call("POST", "/api/ai/welcome", {}, A.token); // mints the AI account
+    const bot = await h.call(
+      "POST",
+      "/api/conversations",
+      { userId: "kp_ai_bot", request: true },
+      A.token,
+    );
+    check(
+      "r32-38: the recipient writing back accepts the request; a plain open (phone-book match / old client) and a bot chat are never requests",
+      replied.json.conversation?.requestFrom === null &&
+        plain.json.conversation?.requestFrom === null &&
+        bot.json.conversation?.requestFrom === null,
+      JSON.stringify({
+        r: replied.json.conversation?.requestFrom,
+        p: plain.json.conversation?.requestFrom,
+        b: bot.json.conversation?.requestFrom,
+      }),
+    );
+  }
+
   process.stdout.write(lines.join("\n") + "\n");
   const broken = lines.filter((l) => l.startsWith("  BROKEN")).length;
   process.exit(broken ? 1 : 0);

@@ -477,11 +477,14 @@ fun ProfileScreen(nav: NavController, userId: String) {
         // accent (the in-chat theme used to stop at the chat screen).
         val peerConv = ScreenStore.convs.firstOrNull { !it.optBoolean("isGroup") && it.optJSONObject("other")?.optString("id") == userId }
         val peerAccent = chatAccent(cTheme(peerConv))
+        // Owner round 32 (item 38): across an unaccepted message request the
+        // profile offers no calls and no shared media (the server refuses too).
+        val requestOpen = peerConv?.optText("requestFrom")?.isNotBlank() == true
         // Owner round 32 (item 25): this row used to be wrapped in the
         // "owner can't be blocked" guard, so the OWNER's profile had no call /
         // search buttons at all. The block guard lives in the ⋮ sheet now;
         // calls are offered on every peer profile.
-        if (!isMe && !isKpBot(userId)) {
+        if (!isMe && !isKpBot(userId) && !requestOpen) {
         Row(
             Modifier
                 .fillMaxWidth()
@@ -541,7 +544,7 @@ fun ProfileScreen(nav: NavController, userId: String) {
             }
         }
         Spacer(Modifier.height(16.dp))
-        if (!isMe) Column(Modifier.padding(horizontal = 16.dp)) {
+        if (!isMe && !requestOpen) Column(Modifier.padding(horizontal = 16.dp)) {
             // Real shared-media strip: recent photos from this user's chat.
             // (The card here used to be a dead placeholder.)
             val convId0 = ScreenStore.convs

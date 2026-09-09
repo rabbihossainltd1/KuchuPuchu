@@ -125,11 +125,14 @@ fun NewChatScreen(nav: NavController) {
                     UserRow(user) {
                         scope.launch {
                             try {
+                                // Owner round 32 (item 38): outside the phone
+                                // book → the chat opens as a message request.
+                                val known = PhoneBook.entries.any { it.user?.optString("id") == user.optString("id") }
                                 val data =
                                     withContext(Dispatchers.IO) {
                                         Api.post(
                                             "/api/conversations",
-                                            JSONObject().put("userId", user.optString("id")),
+                                            JSONObject().put("userId", user.optString("id")).put("request", !known),
                                         )
                                     }
                                 val conv = data.optJSONObject("conversation")

@@ -1395,6 +1395,14 @@ fun ChatScreen(nav: NavController, convId: String) {
     // System accounts: full name in the header (no call buttons there, so
     // space is never a problem) and no call/block actions anywhere.
     val botChat = !isGroup && isKpBot(otherUserId)
+    // Owner round 32 (item 38): a 1:1 chat a stranger opened from username
+    // search is a message REQUEST until accepted. `requestPending` = this
+    // side has to answer (Accept / Block prompt in place of the composer);
+    // `requestSent` = this side opened it and waits. Calls, shared media and
+    // last seen are withheld on both sides meanwhile (the server refuses too).
+    val requestPending = !isGroup && c?.optBoolean("requestPending") == true
+    val requestSent = !isGroup && c?.optText("requestFrom")?.takeIf { it.isNotBlank() } == Store.myId()
+    val requestOpen = requestPending || requestSent
     val rawTitle =
         if (isGroup) c?.optText("title")?.ifBlank { "Group" } ?: "…"
         else c?.optJSONObject("other")?.optText("displayName")?.ifBlank { "…" } ?: "…"
@@ -1622,6 +1630,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     when {
                         isGroup -> "${c?.arr("members")?.length() ?: 0} members"
                         botChat -> "Official account"
+                        requestOpen -> " "
                         online -> "online"
                         else -> otherLastSeen(other?.optText("lastActiveAt"))
                     },
@@ -1638,7 +1647,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 )
             }
             }
-            if (!isGroup && c != null && !botChat) {
+            if (!isGroup && c != null && !botChat && !requestOpen) {
                 if (otherId.isNotBlank()) {
                     HeaderCallBtn(onClick = {
                         gateMicCamera(video = false) {
@@ -1797,11 +1806,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                         leadingIcon = { Icon(Icons.Filled.Search, null, tint = ActionBlueDeep) },
                         onClick = { menuOpen = false; showChatSearch = true },
                     )
-                    DropdownMenuItem(
-                        text = { Text("Media, links, and docs", color = Ink) },
-                        leadingIcon = { Icon(Icons.Filled.PermMedia, null, tint = ActionBlueDeep) },
-                        onClick = { menuOpen = false; nav.navigate("chatmedia/$convId") },
-                    )
+                    if (!requestOpen) {
+                        DropdownMenuItem(
+                            text = { Text("Media, links, and docs", color = Ink) },
+                            leadingIcon = { Icon(Icons.Filled.PermMedia, null, tint = ActionBlueDeep) },
+                            onClick = { menuOpen = false; nav.navigate("chatmedia/$convId") },
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text(if (c?.optBoolean("muted") == true) "Unmute notifications" else "Mute notifications", color = Ink) },
                         leadingIcon = { Icon(Icons.Filled.NotificationsOff, null, tint = ActionBlueDeep) },
@@ -2213,7 +2224,71 @@ fun ChatScreen(nav: NavController, convId: String) {
 
         /* ---------------- composer (doubles as the recording bar) ---------------- */
         ReplyQuoteBar(replyTo, chatTheme) { replyTo = null }
-        if (noReply) {
+        if (requestPending) {
+            // Owner round 32 (item 38): message request — Accept or Block
+            // before anything else. Accept = POST /accept (the chat becomes a
+            // normal one on both sides); Block = the same block the profile
+            // sheet writes, then back to the list.
+            var deciding by remember { mutableStateOf(false) }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(Card)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Line)
+                        .clickable(enabled = !deciding) {
+                            deciding = true
+                            scope.launch {
+                                val ok = runCatching {
+                                    withContext(Dispatchers.IO) {
+                                        Api.post("/api/blocks", JSONObject().put("userId", otherUserId))
+                                    }
+                                }.isSuccess
+                                deciding = false
+                                if (ok) {
+                                    ScreenStore.dropConv(convId)
+                                    nav.popBackStack()
+                                } else {
+                                    error = "Could not block. Try again."
+                                }
+                            }
+                        }
+                        .padding(vertical = 12.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text("Block", color = Red, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(ActionBlue)
+                        .clickable(enabled = !deciding) {
+                            deciding = true
+                            scope.launch {
+                                val res = runCatching {
+                                    withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/accept") }
+                                }.getOrNull()
+                                deciding = false
+                                val accepted = res?.optJSONObject("conversation")
+                                if (accepted != null) {
+                                    conv.value = accepted
+                                    ScreenStore.setConvDetail(convId, accepted)
+                                    ScreenStore.pokeInbox()
+                                } else {
+                                    error = "Could not accept. Try again."
+                                }
+                            }
+                        }
+                        .padding(vertical = 12.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text("Accept", color = ActionBlueInk, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }
+            }
+        } else if (noReply) {
             // Official security account: replies are off (owner rule).
             Text(
                 "This account doesn't accept replies",

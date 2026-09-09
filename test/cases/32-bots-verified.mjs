@@ -2361,7 +2361,7 @@ const convBetween = (db, a, b) =>
     "r28-5/r31: my own profile edits IN PLACE (photo tap + Name/Username/About/Phone rows) instead of call/search/block — no intermediate edit screen",
     profile.includes("val isMe = userId.isNotBlank() && userId == Store.myId()") &&
       // r32-25: calls / search on EVERY peer profile (the owner's too)
-      profile.includes("if (!isMe && !isKpBot(userId)) {\n        Row(") &&
+      profile.includes("if (!isMe && !isKpBot(userId) && !requestOpen) {\n        Row(") &&
       !profile.includes(
         'if (!isMe && !isKpBot(userId) && u.optText("username") != "rabbihossainltd")',
       ) &&
@@ -5364,6 +5364,69 @@ const convBetween = (db, a, b) =>
         share.includes("if (item.file.length() > VideoPlan.UPLOAD_LIMIT) return null") &&
         share.includes("payload.items.forEach { runCatching { it.file.delete() } }") &&
         share.includes("ScreenStore.pokeInbox()"),
+    );
+  }
+  // Item 38: message requests. A first chat opened from username search with
+  // someone outside the phone book is a request (conversations.request_from);
+  // the recipient gets Accept / Block in place of the composer; calls, shared
+  // media and last seen wait on both sides (server-enforced); a reply accepts.
+  {
+    const src = readFileSync("src/worker/index.ts", "utf8");
+    const chat = kt("ChatScreen.kt");
+    const profile = kt("ProfileScreen.kt");
+    const search = kt("SearchScreen.kt");
+    const newChat = kt("NewChatScreen.kt");
+    check(
+      "r32-38: worker — request_from column, `request: true` marks a stranger's first chat, requestFrom / requestPending in the detail, POST /accept (recipient only, both sides poked), a reply accepts, calls + media refuse REQUEST_PENDING, isContact/contactSet exclude pending pairs, last seen withheld across a request",
+      src.includes("ALTER TABLE conversations ADD COLUMN request_from TEXT") &&
+        src.includes(
+          "body.request === true && other !== OFFICIAL_BOT_ID && other !== AI_BOT_ID ? uid : null",
+        ) &&
+        src.includes("requestFrom: solo ? (conv.request_from ?? null) : null,") &&
+        src.includes("requestPending: solo && !!conv.request_from && conv.request_from !== uid,") &&
+        src.includes(
+          "const acceptMatch = path.match(/^\\/api\\/conversations\\/([^/]+)\\/accept$/);",
+        ) &&
+        src.includes('fail(403, "The other person accepts this request.", "FORBIDDEN");') &&
+        src.includes(
+          'if (conv.kind === "SOLO" && conv.request_from && conv.request_from !== uid) {',
+        ) &&
+        (src.match(/fail\(403, "Accept the message request first\.", "REQUEST_PENDING"\);/g) || [])
+          .length === 2 &&
+        src.includes('"SELECT id FROM conversations WHERE id = ? AND request_from IS NULL",') &&
+        src.includes(
+          "async function requestPendingBetween(db: D1Database, uid: string, otherId: string) {",
+        ) &&
+        src.includes("if (solo && conv.request_from && row.user_id !== uid) {") &&
+        src.includes("c.requestFrom,"),
+    );
+    check(
+      "r32-38: app — search / new-chat opens pass `request` = not in the phone book; the chat shows Block / Accept in place of the composer while requestPending (Accept → POST /accept, Block → POST /api/blocks + leave); header calls, the media menu entry and last seen hide while a request is open; the profile hides calls + shared media too",
+      search.includes('JSONObject().put("userId", userId).put("request", !known)') &&
+        newChat.includes(
+          'JSONObject().put("userId", user.optString("id")).put("request", !known),',
+        ) &&
+        chat.includes('val requestPending = !isGroup && c?.optBoolean("requestPending") == true') &&
+        chat.includes("val requestOpen = requestPending || requestSent") &&
+        chat.includes("if (!isGroup && c != null && !botChat && !requestOpen) {") &&
+        chat.includes('requestOpen -> " "') &&
+        chat.includes("if (!requestOpen) {\n                        DropdownMenuItem(") &&
+        chat.includes("if (requestPending) {") &&
+        chat.includes('Api.post("/api/conversations/$convId/accept")') &&
+        chat.includes('Api.post("/api/blocks", JSONObject().put("userId", otherUserId))') &&
+        chat.includes(
+          '{ Text("Accept", color = ActionBlueInk, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }',
+        ) &&
+        chat.includes(
+          '{ Text("Block", color = Red, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }',
+        ) &&
+        profile.includes(
+          'val requestOpen = peerConv?.optText("requestFrom")?.isNotBlank() == true',
+        ) &&
+        profile.includes("if (!isMe && !isKpBot(userId) && !requestOpen) {") &&
+        profile.includes(
+          "if (!isMe && !requestOpen) Column(Modifier.padding(horizontal = 16.dp)) {",
+        ),
     );
   }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
