@@ -171,6 +171,8 @@ fun KpApp() {
                 composable("settings/blocklist") { BlocklistScreen(nav) }
                 // Owner round 31: the group profile (members / admin actions).
                 composable("group/{id}") { GroupInfoScreen(nav, it.arguments?.getString("id") ?: "") }
+                // Owner round 32 (item 5): group profile ⋮ → Settings ("Private group").
+                composable("group/{id}/settings") { GroupSettingsScreen(nav, it.arguments?.getString("id") ?: "") }
                 // Owner round 28: home ⋮ menu destinations.
                 composable("about") { AboutScreen(nav) }
                 composable("contacts") { AllContactsScreen(nav) }

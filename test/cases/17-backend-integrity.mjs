@@ -1177,6 +1177,105 @@ async function main() {
     }
   }
 
+  // ── r32-5a. private group: admin switch closes adds + the media gallery ──────
+  {
+    const h = await mk();
+    const A = await h.reg("pg-a");
+    const B = await h.reg("pg-b");
+    const C = await h.reg("pg-c");
+    // B and C know A (1:1 chats) so the group privacy default lets them in.
+    await h.call("POST", "/api/conversations", { userId: B.user.id }, A.token);
+    await h.call("POST", "/api/conversations", { userId: C.user.id }, A.token);
+    const g = (
+      await h.call(
+        "POST",
+        "/api/conversations/group",
+        { title: "pg", memberIds: [B.user.id] },
+        A.token,
+      )
+    ).json.conversation;
+    const openDetail = await h.call("GET", `/api/conversations/${g.id}`, undefined, B.token);
+    const byMember = await h.call(
+      "PATCH",
+      `/api/conversations/${g.id}`,
+      { privateGroup: true },
+      B.token,
+    );
+    const on = await h.call("PATCH", `/api/conversations/${g.id}`, { privateGroup: true }, A.token);
+    check(
+      "r32-5a: privateGroup is false by default, only the admin may switch it (member → 403 FORBIDDEN), and the switch lands on the detail with a system line",
+      openDetail.json.conversation?.privateGroup === false &&
+        byMember.status === 403 &&
+        byMember.json.error?.code === "FORBIDDEN" &&
+        on.status === 200 &&
+        on.json.conversation?.privateGroup === true &&
+        (
+          await h.call("GET", `/api/conversations/${g.id}/messages`, undefined, B.token)
+        ).json.items?.some(
+          (m) => m.kind === "SYSTEM" && /made this a private group/.test(m.body || ""),
+        ),
+      JSON.stringify({
+        d: openDetail.json.conversation?.privateGroup,
+        m: byMember.status,
+        on: on.json.conversation?.privateGroup,
+      }),
+    );
+    const add = await h.call(
+      "POST",
+      `/api/conversations/${g.id}/members`,
+      { userId: C.user.id },
+      A.token,
+    );
+    const media = await h.call("GET", `/api/conversations/${g.id}/media`, undefined, B.token);
+    const listRow = (await h.call("GET", "/api/conversations", undefined, B.token)).json.items.find(
+      (c) => c.id === g.id,
+    );
+    check(
+      "r32-5a: while private, even the admin's member add and everyone's media gallery answer 403 PRIVATE_GROUP; the list row carries privateGroup too",
+      add.status === 403 &&
+        add.json.error?.code === "PRIVATE_GROUP" &&
+        media.status === 403 &&
+        media.json.error?.code === "PRIVATE_GROUP" &&
+        listRow?.privateGroup === true,
+      JSON.stringify({ add: add.status, media: media.status, row: listRow?.privateGroup }),
+    );
+    const off = await h.call(
+      "PATCH",
+      `/api/conversations/${g.id}`,
+      { privateGroup: false },
+      A.token,
+    );
+    const addAgain = await h.call(
+      "POST",
+      `/api/conversations/${g.id}/members`,
+      { userId: C.user.id },
+      A.token,
+    );
+    const mediaAgain = await h.call("GET", `/api/conversations/${g.id}/media`, undefined, B.token);
+    const solo = await h.call(
+      "PATCH",
+      `/api/conversations/${
+        (await h.call("POST", "/api/conversations", { userId: B.user.id }, A.token)).json
+          .conversation.id
+      }`,
+      { privateGroup: true },
+      A.token,
+    );
+    check(
+      "r32-5a: switching it off reopens adds and the gallery; a 1:1 chat cannot be made private (400)",
+      off.json.conversation?.privateGroup === false &&
+        addAgain.status === 200 &&
+        mediaAgain.status === 200 &&
+        solo.status === 400,
+      JSON.stringify({
+        off: off.json.conversation?.privateGroup,
+        add: addAgain.status,
+        media: mediaAgain.status,
+        solo: solo.status,
+      }),
+    );
+  }
+
   process.stdout.write(lines.join("\n") + "\n");
   const broken = lines.filter((l) => l.startsWith("  BROKEN")).length;
   process.exit(broken ? 1 : 0);

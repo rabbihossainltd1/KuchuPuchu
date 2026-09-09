@@ -1378,9 +1378,10 @@ const convBetween = (db, a, b) =>
       chatlist.split("ActionBlueDeep").length - 1 >= 4,
   );
   check(
-    "r21-sweep: chat dropdown menus blue + reply/quote bars carry the chat accent",
-    chat.split(", null, tint = ActionBlueDeep) }").length - 1 >= 7 &&
-      chat.includes("background(chatAccent(theme))"),
+    "r21-sweep: chat ⋮ menu rows blue (r32-5: KpSheetRow icons take ActionBlueDeep by design) + reply/quote bars carry the chat accent",
+    chat.includes(
+      'KpSheetRow(Icons.Filled.Search, "Search in chat") { menuOpen = false; showChatSearch = true }',
+    ) && chat.includes("background(chatAccent(theme))"),
   );
   check(
     "r21-sweep: friends-profile buttons, call-back icon, status pencil/status+/send, settings crash row",
@@ -1524,7 +1525,9 @@ const convBetween = (db, a, b) =>
   // ---- Owner round 15 (2026-09-05) ----
   check(
     "15: chat search — 3-dot Search opens the CHAT-scoped sheet everywhere (global nav gone)",
-    chat.includes('Text("Search in chat", color = Ink)') &&
+    chat.includes(
+      'KpSheetRow(Icons.Filled.Search, "Search in chat") { menuOpen = false; showChatSearch = true }',
+    ) &&
       !chat.includes('nav.navigate("search")') &&
       chat.includes("showChatSearch = true"),
   );
@@ -2451,7 +2454,7 @@ const convBetween = (db, a, b) =>
   check(
     "r30-1: chat ⋮ says View contact only for a phone-book person, else Add contact (prefilled)",
     chat.includes('if (inBook) "View contact" else "Add contact"') &&
-      chat.includes('PhoneBook.entries.any { it.user?.optString("id") == otherId }') &&
+      chat.includes('PhoneBook.entries.any { it.user?.optString("id") == otherUserId }') &&
       chat.includes('nav.navigate("newcontact?name=$n&phone=$p")') &&
       kpapp.includes('"newcontact?name={name}&phone={phone}"'),
   );
@@ -5413,7 +5416,9 @@ const convBetween = (db, a, b) =>
         chat.includes("val requestOpen = requestPending || requestSent") &&
         chat.includes("if (!isGroup && c != null && !botChat && !requestOpen) {") &&
         chat.includes('requestOpen -> " "') &&
-        chat.includes("if (!requestOpen) {\n                        DropdownMenuItem(") &&
+        chat.includes(
+          'if (!requestOpen) {\n                            KpSheetRow(Icons.Filled.PermMedia, "Media, links, and docs")',
+        ) &&
         chat.includes("if (requestPending) {") &&
         chat.includes('Api.post("/api/conversations/$convId/accept")') &&
         chat.includes('Api.post("/api/blocks", JSONObject().put("userId", otherUserId))') &&
@@ -5566,6 +5571,84 @@ const convBetween = (db, a, b) =>
         !chat.includes("fun isTextLike(): Boolean {") &&
         media.includes(
           'else nav.navigate("docviewer/${mediaArg(JSONObject(m.toString()).put("kpPrivate", privateChat))}")',
+        ),
+    );
+  }
+  // Item 5 (a): group chat ⋮ / group profile ⋮ / Group Settings (Private group).
+  {
+    const chat = kt("ChatScreen.kt");
+    const group = kt("GroupInfoScreen.kt");
+    const app = kt("KpApp.kt");
+    const src = readFileSync("src/worker/index.ts", "utf8");
+    const groupMenu = chat.slice(
+      chat.indexOf("isGroup -> {"),
+      chat.indexOf("else -> {", chat.indexOf("isGroup -> {")),
+    );
+    const order = [
+      '"Add Members"',
+      '"Group Media"',
+      '"Theme"',
+      '"Search"',
+      'if (muted) "Unmute" else "Mute"',
+      '"Leave Group"',
+    ];
+    check(
+      "r32-5a: the chat ⋮ is a KpSheet (no DropdownMenu anywhere in the chat); a group's list is exactly Add Members (admin, open group) / Group Media (open group) / Theme / Search / Mute-Unmute / Leave Group (confirm sheet → DELETE members/me) in that order",
+      !chat.includes("DropdownMenu") &&
+        chat.includes("KpSheet(onDismiss = { menuOpen = false }) {") &&
+        order.every(
+          (l, i) =>
+            groupMenu.includes(l) &&
+            (i === 0 || groupMenu.indexOf(l) > groupMenu.indexOf(order[i - 1])),
+        ) &&
+        groupMenu.includes("if (groupAdmin && !privateGroup) {") &&
+        groupMenu.includes("if (!privateGroup) {") &&
+        groupMenu.includes(
+          'KpSheetRow(Icons.AutoMirrored.Filled.Logout, "Leave Group", tint = Red) { menuOpen = false; confirmLeave = true }',
+        ) &&
+        chat.includes('Api.delete("/api/conversations/$convId/members/${Store.myId()}")') &&
+        chat.includes('val privateGroup = isGroup && c?.optBoolean("privateGroup") == true') &&
+        chat.includes(
+          "val privateChat = KpSecure.privatePeer(c) || KpSecure.selfPrivate() || privateGroup",
+        ) &&
+        chat.includes("AddMembersSheet(") &&
+        group.includes("internal fun AddMembersSheet("),
+    );
+    check(
+      "r32-5a: group profile ⋮ (admin) = Add Members / Settings → GroupSettingsScreen (route group/{id}/settings) with the single 'Private group' switch (PATCH privateGroup; admin only, others read-only); the body's Add members row is gone",
+      group.includes('KpSheetRow(Icons.Filled.PersonAdd, "Add Members") {') &&
+        group.includes('KpSheetRow(Icons.Filled.Settings, "Settings") {') &&
+        group.includes('nav.navigate("group/$convId/settings")') &&
+        group.includes("fun GroupSettingsScreen(nav: NavController, convId: String) {") &&
+        group.includes(
+          'Text("Group Settings", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)',
+        ) &&
+        group.includes('Text("Private group", fontSize = 14.5.sp') &&
+        group.includes(
+          'Api.patch("/api/conversations/$convId", JSONObject().put("privateGroup", on))',
+        ) &&
+        group.includes("enabled = isAdmin && !busy && c != null,") &&
+        group.includes("KpSecure.Guard(privateGroup)") &&
+        !group.includes('Text("Add members", fontSize = 15.sp') &&
+        app.includes(
+          'composable("group/{id}/settings") { GroupSettingsScreen(nav, it.arguments?.getString("id") ?: "") }',
+        ),
+    );
+    check(
+      "r32-5a: worker — conversations.private_group (admin PATCH privateGroup, system line), private → member add and the media gallery answer 403 PRIVATE_GROUP, detail carries privateGroup",
+      src.includes(
+        "ALTER TABLE conversations ADD COLUMN private_group INTEGER NOT NULL DEFAULT 0",
+      ) &&
+        src.includes("body.privateGroup !== undefined;") &&
+        src.includes('if (conv.kind !== "GROUP") fail(400, "Only groups can be private.");') &&
+        src.includes(
+          'if (conv.private_group) fail(403, "This group is private.", "PRIVATE_GROUP");',
+        ) &&
+        src.includes(
+          'if (mediaConv.private_group) fail(403, "This group is private.", "PRIVATE_GROUP");',
+        ) &&
+        src.includes(
+          'privateGroup: conv.kind === "GROUP" && Number(conv.private_group ?? 0) === 1,',
         ),
     );
   }

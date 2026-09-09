@@ -1988,6 +1988,12 @@ async function ensureSchema(db: D1Database) {
     db,
     `ALTER TABLE conversations ADD COLUMN avatar_version INTEGER NOT NULL DEFAULT 0`,
   );
+  // Owner round 32 (item 5): "Private group" — admin switch that closes the
+  // shared-media gallery, call recording and new-member additions.
+  await runCatchingSql(
+    db,
+    `ALTER TABLE conversations ADD COLUMN private_group INTEGER NOT NULL DEFAULT 0`,
+  );
   await runCatchingSql(db, `ALTER TABLE messages ADD COLUMN client_id TEXT`);
   // Bumped whenever the profile photo changes; it backs the lightweight
   // avatarRef token in list responses so clients cache avatars per version.
@@ -2550,11 +2556,12 @@ async function requireMember(db: D1Database, convId: string, userId: string) {
     disappear_seconds: number | null;
     disappear_since: string | null;
     request_from: string | null;
+    private_group: number | null;
     role: string | null;
   }>(
     db,
     `SELECT c.id, c.kind, c.title, c.owner_id, c.hidden_json,
-            c.disappear_seconds, c.disappear_since, c.request_from, m.role
+            c.disappear_seconds, c.disappear_since, c.request_from, c.private_group, m.role
        FROM conversations c
        LEFT JOIN members m ON m.conv_id = c.id AND m.user_id = ?
       WHERE c.id = ?`,
@@ -2572,6 +2579,7 @@ async function requireMember(db: D1Database, convId: string, userId: string) {
     disappear_seconds: row.disappear_seconds,
     disappear_since: row.disappear_since,
     request_from: row.request_from,
+    private_group: Number(row.private_group ?? 0) === 1,
   };
   const member = { user_id: userId, role: row.role };
   return { conv, member };
@@ -5485,7 +5493,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       body.disappearSeconds !== undefined ||
       body.theme !== undefined ||
       body.title !== undefined ||
-      body.avatarUrl !== undefined;
+      body.avatarUrl !== undefined ||
+      body.privateGroup !== undefined;
     if (conv.kind === "GROUP" && changesSharedSettings && conv.owner_id !== uid) {
       fail(403, "Only the group owner can change these settings.", "FORBIDDEN");
     }
@@ -5536,6 +5545,28 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (body.theme !== undefined) {
       const theme = String(body.theme || "default").slice(0, 20);
       await run(db, "UPDATE conversations SET theme = ? WHERE id = ?", theme, convId);
+    }
+    // Owner round 32 (item 5): the "Private group" switch (groups, admin only —
+    // the gate above). ON closes the shared-media gallery, call recording and
+    // new-member additions for everyone; a system line tells the room.
+    if (body.privateGroup !== undefined) {
+      if (conv.kind !== "GROUP") fail(400, "Only groups can be private.");
+      const on = body.privateGroup === true || body.privateGroup === 1 || body.privateGroup === "1";
+      if (on !== conv.private_group) {
+        await run(
+          db,
+          "UPDATE conversations SET private_group = ? WHERE id = ?",
+          on ? 1 : 0,
+          convId,
+        );
+        await systemMessage(
+          db,
+          convId,
+          on
+            ? `${me.display_name} made this a private group`
+            : `${me.display_name} made this group open again`,
+        );
+      }
     }
     ctx.waitUntil(fanOutConversationChange(env, db, convId));
     return json({ conversation: await conversationDetail(db, convId, uid) });
@@ -5603,7 +5634,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   const convMedia = path.match(/^\/api\/conversations\/([^/]+)\/media$/);
   if (convMedia && method === "GET") {
     const convId = convMedia[1]!;
-    await requireMember(db, convId, uid);
+    const { conv: mediaConv } = await requireMember(db, convId, uid);
+    // Owner round 32 (item 5): a private group has no shared-media gallery.
+    if (mediaConv.private_group) fail(403, "This group is private.", "PRIVATE_GROUP");
     // Owner round 32 (item 38): the media gallery waits for Accept.
     if (
       await one(
@@ -5642,6 +5675,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // Matches the rule the remove endpoint already enforced ("Only the group
     // owner can remove others"); before this any member could add anyone.
     if (conv.owner_id !== uid) fail(403, "Only the group owner can add members.", "FORBIDDEN");
+    // Owner round 32 (item 5): a private group takes no new members — the
+    // admin switches it off first.
+    if (conv.private_group) fail(403, "This group is private.", "PRIVATE_GROUP");
     const target = String(body.userId || "");
     if (!target) fail(400, "Bad user.");
     const targetUser = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", target);
@@ -8025,6 +8061,8 @@ type ConvRow = {
   avatar_version?: number | null;
   /** Owner round 32 (item 38): who opened this 1:1 chat unasked; NULL = accepted. */
   request_from?: string | null;
+  /** Owner round 32 (item 5): 1 = private group (no gallery / recording / adds). */
+  private_group?: number | null;
   /** Newest messages rowid in the conversation; only the list query selects it. */
   max_row?: number | null;
 };
@@ -8080,7 +8118,7 @@ type ConvMemberRow = {
 };
 
 const CONV_COLS =
-  "id, kind, title, owner_id, created_at, last_message_at, last_message, disappear_seconds, theme, hidden_json, avatar_url, avatar_version, request_from";
+  "id, kind, title, owner_id, created_at, last_message_at, last_message, disappear_seconds, theme, hidden_json, avatar_url, avatar_version, request_from, private_group";
 const MEMBER_COLS = "conv_id, user_id, role, muted, unread, last_read_at, hidden";
 
 /** Placeholder list for an IN(...) clause. */
@@ -8405,6 +8443,9 @@ function buildConvDetail(
     avatarRef:
       conv.kind === "GROUP" && conv.avatar_url ? `g:${conv.id}@v${conv.avatar_version ?? 0}` : null,
     avatarUrl: conv.kind === "GROUP" && !light ? conv.avatar_url || null : null,
+    // Owner round 32 (item 5): the admin's "Private group" switch — the app
+    // hides Group Media / Add Members / call recording while it is on.
+    privateGroup: conv.kind === "GROUP" && Number(conv.private_group ?? 0) === 1,
     // The caller's own role — the client shows admin actions from this.
     myRole:
       memberRows.find((m) => m.user_id === uid)?.role ||

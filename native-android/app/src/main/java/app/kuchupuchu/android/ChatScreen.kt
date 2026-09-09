@@ -49,6 +49,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
@@ -87,8 +88,6 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PermMedia
 import androidx.compose.material.icons.filled.Timer
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -277,6 +276,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     // used to fire a request per bubble).
     val msgSyncPending = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
     var menuOpen by remember { mutableStateOf(false) }
+    // Owner round 32 (item 5): group ⋮ — Leave Group confirm + Add Members picker.
+    var confirmLeave by remember { mutableStateOf(false) }
+    var showAddMembers by remember { mutableStateOf(false) }
     // Owner round 7: AI-chat incognito — the session is wiped on leaving.
     var aiIncognito by remember { mutableStateOf(false) }
     var showChatSearch by remember { mutableStateOf(false) }
@@ -1426,7 +1428,11 @@ fun ChatScreen(nav: NavController, convId: String) {
     // Owner round 31 item 21: a private profile's chat (theirs, or mine when
     // I am private) is screenshot-blocked, and their photos / videos carry no
     // Save / Forward.
-    val privateChat = KpSecure.privatePeer(c) || KpSecure.selfPrivate()
+    // Owner round 32 (item 5): a PRIVATE group is guarded the same way — no
+    // capture, no Save / Forward, no gallery (the server closes it too).
+    val groupAdmin = isGroup && c?.optText("ownerId") == Store.myId()
+    val privateGroup = isGroup && c?.optBoolean("privateGroup") == true
+    val privateChat = KpSecure.privatePeer(c) || KpSecure.selfPrivate() || privateGroup
     KpSecure.Guard(privateChat)
     // Recompose exactly when the six-second typing lease expires. Computing
     // directly from currentTimeMillis() left the label visible indefinitely
@@ -1656,193 +1662,171 @@ fun ChatScreen(nav: NavController, convId: String) {
                 }
             }
             // Owner round 7: the notifications bot carries NO options menu.
+            // Owner round 32 (item 5): the ⋮ is a bottom sheet like every other
+            // popup in the app; a GROUP gets its own list — Add Members /
+            // Group Media / Theme / Search / Mute-Unmute / Leave Group.
             if (otherUserId != "kp_official_bot") {
-                Box {
-                    IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.Filled.MoreVert, "More", tint = Ink, modifier = Modifier.size(22.dp))
+                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Filled.MoreVert, "More", tint = Ink, modifier = Modifier.size(22.dp))
+                }
+            }
+        }
+        }
+
+        if (menuOpen) {
+            val muted = c?.optBoolean("muted") == true
+            val toggleMute: () -> Unit = {
+                menuOpen = false
+                val snap = conv.value ?: c
+                val next = snap?.optBoolean("muted") != true
+                val copy = JSONObject((snap ?: JSONObject()).toString()).put("muted", next)
+                conv.value = copy
+                ScreenStore.setMuted(convId, next)
+                muteInFlight = true
+                scope.launch {
+                    val ok =
+                        runCatching {
+                            withContext(Dispatchers.IO) {
+                                Api.post("/api/conversations/$convId/mute", JSONObject().put("muted", next))
+                            }
+                        }.isSuccess
+                    if (!ok) {
+                        conv.value = JSONObject(copy.toString()).put("muted", !next)
+                        ScreenStore.setMuted(convId, !next)
                     }
-                    DropdownMenu(
-                        expanded = menuOpen,
-                        onDismissRequest = { menuOpen = false },
-                        modifier = Modifier.background(Cream),
-                    ) {
-                    if (otherUserId == "kp_ai_bot") {
+                    muteInFlight = false
+                }
+            }
+            KpSheet(onDismiss = { menuOpen = false }) {
+                when {
+                    otherUserId == "kp_ai_bot" -> {
                         // Owner round 7: the AI chat's own menu, exactly six
                         // options — nothing else.
-                        DropdownMenuItem(
-                            text = { Text("History", color = Ink) },
-                            leadingIcon = { Icon(Icons.Filled.Schedule, null, tint = ActionBlueDeep) },
-                            onClick = { menuOpen = false; nav.navigate("aihistory") },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("New chat", color = Ink) },
-                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.Chat, null, tint = ActionBlueDeep) },
-                            onClick = { menuOpen = false; resetAiSession() },
-                        )
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    if (c?.optBoolean("muted") == true) "Unmute notifications" else "Mute notifications",
-                                    color = Ink,
-                                )
-                            },
-                            leadingIcon = { Icon(Icons.Filled.NotificationsOff, null, tint = ActionBlueDeep) },
-                            onClick = {
-                                menuOpen = false
-                                val snap = conv.value ?: c
-                                val next = snap?.optBoolean("muted") != true
-                                val copy = JSONObject((snap ?: JSONObject()).toString()).put("muted", next)
-                                conv.value = copy
-                                ScreenStore.setMuted(convId, next)
-                                muteInFlight = true
+                        KpSheetRow(Icons.Filled.Schedule, "History") { menuOpen = false; nav.navigate("aihistory") }
+                        KpSheetRow(Icons.AutoMirrored.Filled.Chat, "New chat") { menuOpen = false; resetAiSession() }
+                        KpSheetRow(Icons.Filled.NotificationsOff, if (muted) "Unmute notifications" else "Mute notifications", onClick = toggleMute)
+                        KpSheetRow(Icons.Filled.Palette, "Chat theme") { menuOpen = false; showTheme = true }
+                        KpSheetRow(Icons.Filled.VisibilityOff, if (aiIncognito) "Close incognito mode" else "Incognito mode") {
+                            menuOpen = false
+                            if (aiIncognito) {
+                                // Close: the incognito run is archived and
+                                // the previous session comes BACK into the
+                                // chat (owner round 11).
+                                aiIncognito = false
                                 scope.launch {
-                                    val ok =
-                                        runCatching {
-                                            withContext(Dispatchers.IO) {
-                                                Api.post("/api/conversations/$convId/mute", JSONObject().put("muted", next))
-                                            }
-                                        }.isSuccess
-                                    if (!ok) {
-                                        conv.value = JSONObject(copy.toString()).put("muted", !next)
-                                        ScreenStore.setMuted(convId, !next)
-                                    }
-                                    muteInFlight = false
-                                }
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Chat theme", color = Ink) },
-                            leadingIcon = { Icon(Icons.Filled.Palette, null, tint = ActionBlueDeep) },
-                            onClick = { menuOpen = false; showTheme = true },
-                        )
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    if (aiIncognito) "Close incognito mode" else "Incognito mode",
-                                    color = Ink,
-                                )
-                            },
-                            leadingIcon = {
-                                Icon(Icons.Filled.VisibilityOff, null, tint = if (aiIncognito) GoldDeep else Muted)
-                            },
-                            onClick = {
-                                menuOpen = false
-                                if (aiIncognito) {
-                                    // Close: the incognito run is archived and
-                                    // the previous session comes BACK into the
-                                    // chat (owner round 11).
-                                    aiIncognito = false
-                                    scope.launch {
-                                        runCatching {
-                                            withContext(Dispatchers.IO) {
-                                                Api.post("/api/conversations/$convId/restore-latest", JSONObject())
-                                            }
+                                    runCatching {
+                                        withContext(Dispatchers.IO) {
+                                            Api.post("/api/conversations/$convId/restore-latest", JSONObject())
                                         }
-                                        msgs.clear()
-                                        pending.clear()
-                                        olderIds.clear()
-                                        olderCursor = null
-                                        hasMoreOlder = false
-                                        lastTopId = ""
-                                        msgsMarker = ""
-                                        ScreenStore.setMsgs(convId, emptyList())
-                                        refreshMessages(forceNetwork = true, forceScroll = true)
                                     }
-                                } else {
-                                    // Open: archive the current session NOW and
-                                    // start clean — nothing further is kept.
-                                    aiIncognito = true
-                                    resetAiSession()
+                                    msgs.clear()
+                                    pending.clear()
+                                    olderIds.clear()
+                                    olderCursor = null
+                                    hasMoreOlder = false
+                                    lastTopId = ""
+                                    msgsMarker = ""
+                                    ScreenStore.setMsgs(convId, emptyList())
+                                    refreshMessages(forceNetwork = true, forceScroll = true)
                                 }
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Search in chat", color = Ink) },
-                            leadingIcon = { Icon(Icons.Filled.Search, null, tint = ActionBlueDeep) },
-                            onClick = { menuOpen = false; showChatSearch = true },
-                        )
-                    } else {
-                    DropdownMenuItem(
-                        text = { Text("New group", color = Ink) },
-                        leadingIcon = { Icon(Icons.Filled.GroupAdd, null, tint = ActionBlueDeep) },
-                        onClick = { menuOpen = false; nav.navigate("newgroup") },
-                    )
-                    if (!isGroup && otherId.isNotBlank()) {
-                        // Owner round 30: "View contact" only when this person is
-                        // already in the phone book; otherwise offer to add them
-                        // (name — and number, when they share it — pre-filled).
-                        val inBook = PhoneBook.entries.any { it.user?.optString("id") == otherId }
-                        DropdownMenuItem(
-                            text = { Text(if (inBook) "View contact" else "Add contact", color = Ink) },
-                            leadingIcon = {
-                                Icon(if (inBook) Icons.Filled.Person else Icons.Filled.PersonAdd, null, tint = ActionBlueDeep)
-                            },
-                            onClick = {
+                            } else {
+                                // Open: archive the current session NOW and
+                                // start clean — nothing further is kept.
+                                aiIncognito = true
+                                resetAiSession()
+                            }
+                        }
+                        KpSheetRow(Icons.Filled.Search, "Search in chat") { menuOpen = false; showChatSearch = true }
+                    }
+                    isGroup -> {
+                        // Owner round 32 (item 5): the group's six, in the
+                        // owner's order. Add Members is the admin's (the
+                        // server refuses everyone else) and a PRIVATE group
+                        // takes no new members and has no media gallery.
+                        if (groupAdmin && !privateGroup) {
+                            KpSheetRow(Icons.Filled.PersonAdd, "Add Members") { menuOpen = false; showAddMembers = true }
+                        }
+                        if (!privateGroup) {
+                            KpSheetRow(Icons.Filled.PermMedia, "Group Media") { menuOpen = false; nav.navigate("chatmedia/$convId") }
+                        }
+                        KpSheetRow(Icons.Filled.Palette, "Theme") { menuOpen = false; showTheme = true }
+                        KpSheetRow(Icons.Filled.Search, "Search") { menuOpen = false; showChatSearch = true }
+                        KpSheetRow(Icons.Filled.NotificationsOff, if (muted) "Unmute" else "Mute", onClick = toggleMute)
+                        KpSheetRow(Icons.AutoMirrored.Filled.Logout, "Leave Group", tint = Red) { menuOpen = false; confirmLeave = true }
+                    }
+                    else -> {
+                        KpSheetRow(Icons.Filled.GroupAdd, "New group") { menuOpen = false; nav.navigate("newgroup") }
+                        if (otherUserId.isNotBlank()) {
+                            // Owner round 30: "View contact" only when this person is
+                            // already in the phone book; otherwise offer to add them
+                            // (name — and number, when they share it — pre-filled).
+                            val inBook = PhoneBook.entries.any { it.user?.optString("id") == otherUserId }
+                            KpSheetRow(if (inBook) Icons.Filled.Person else Icons.Filled.PersonAdd, if (inBook) "View contact" else "Add contact") {
                                 menuOpen = false
                                 if (inBook) {
-                                    nav.navigate("profile/$otherId")
+                                    nav.navigate("profile/$otherUserId")
                                 } else {
                                     val n = android.net.Uri.encode(rawTitle.trim())
                                     val p = android.net.Uri.encode(c?.optJSONObject("other")?.optText("phone").orEmpty())
                                     nav.navigate("newcontact?name=$n&phone=$p")
                                 }
-                            },
-                        )
-                    }
-                    DropdownMenuItem(
+                            }
+                        }
                         // Owner round 15: this opened the GLOBAL search —
                         // in a chat, search means THIS conversation.
-                        text = { Text("Search in chat", color = Ink) },
-                        leadingIcon = { Icon(Icons.Filled.Search, null, tint = ActionBlueDeep) },
-                        onClick = { menuOpen = false; showChatSearch = true },
-                    )
-                    if (!requestOpen) {
-                        DropdownMenuItem(
-                            text = { Text("Media, links, and docs", color = Ink) },
-                            leadingIcon = { Icon(Icons.Filled.PermMedia, null, tint = ActionBlueDeep) },
-                            onClick = { menuOpen = false; nav.navigate("chatmedia/$convId") },
-                        )
-                    }
-                    DropdownMenuItem(
-                        text = { Text(if (c?.optBoolean("muted") == true) "Unmute notifications" else "Mute notifications", color = Ink) },
-                        leadingIcon = { Icon(Icons.Filled.NotificationsOff, null, tint = ActionBlueDeep) },
-                        onClick = {
-                            menuOpen = false
-                            val snap = conv.value ?: c
-                            val next = snap?.optBoolean("muted") != true
-                            val copy = JSONObject((snap ?: JSONObject()).toString()).put("muted", next)
-                            conv.value = copy
-                            ScreenStore.setMuted(convId, next)
-                            muteInFlight = true
-                            scope.launch {
-                                val ok = runCatching {
-                                    withContext(Dispatchers.IO) {
-                                        Api.post("/api/conversations/$convId/mute", JSONObject().put("muted", next))
-                                    }
-                                }.isSuccess
-                                if (!ok) {
-                                    conv.value = JSONObject(copy.toString()).put("muted", !next)
-                                    ScreenStore.setMuted(convId, !next)
-                                }
-                                muteInFlight = false
-                            }
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Disappearing messages", color = Ink) },
-                        leadingIcon = { Icon(Icons.Filled.Timer, null, tint = ActionBlueDeep) },
-                        onClick = { menuOpen = false; showDisappear = true },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Chat theme", color = Ink) },
-                        leadingIcon = { Icon(Icons.Filled.Palette, null, tint = ActionBlueDeep) },
-                        onClick = { menuOpen = false; showTheme = true },
-                    )
+                        KpSheetRow(Icons.Filled.Search, "Search in chat") { menuOpen = false; showChatSearch = true }
+                        if (!requestOpen) {
+                            KpSheetRow(Icons.Filled.PermMedia, "Media, links, and docs") { menuOpen = false; nav.navigate("chatmedia/$convId") }
+                        }
+                        KpSheetRow(Icons.Filled.NotificationsOff, if (muted) "Unmute notifications" else "Mute notifications", onClick = toggleMute)
+                        KpSheetRow(Icons.Filled.Timer, "Disappearing messages") { menuOpen = false; showDisappear = true }
+                        KpSheetRow(Icons.Filled.Palette, "Chat theme") { menuOpen = false; showTheme = true }
                     }
                 }
             }
-            }
         }
+        if (confirmLeave) {
+            KpConfirmSheet(
+                title = "Leave group?",
+                confirmLabel = "Leave",
+                danger = true,
+                onDismiss = { confirmLeave = false },
+                onConfirm = {
+                    confirmLeave = false
+                    scope.launch {
+                        val ok =
+                            runCatching {
+                                withContext(Dispatchers.IO) { Api.delete("/api/conversations/$convId/members/${Store.myId()}") }
+                            }.isSuccess
+                        if (ok) {
+                            ScreenStore.convs.removeAll { it.optString("id") == convId }
+                            nav.popBackStack("main", inclusive = false)
+                        } else {
+                            error = "Could not leave."
+                        }
+                    }
+                },
+            )
+        }
+        if (showAddMembers) {
+            val memberIds = c?.arr("members")?.objects()?.mapNotNull { it.optJSONObject("user")?.optString("id") }.orEmpty().toSet()
+            AddMembersSheet(
+                exclude = memberIds,
+                onDismiss = { showAddMembers = false },
+                onAdd = { picked ->
+                    showAddMembers = false
+                    scope.launch {
+                        for (u in picked) {
+                            runCatching {
+                                withContext(Dispatchers.IO) {
+                                    Api.post("/api/conversations/$convId/members", JSONObject().put("userId", u.optString("id")))
+                                }
+                            }.onFailure { error = it.message ?: "Could not add ${u.optText("displayName")}." }
+                        }
+                        refreshMeta()
+                    }
+                },
+            )
         }
 
         /* ---------------- message list on coin wallpaper ---------------- */

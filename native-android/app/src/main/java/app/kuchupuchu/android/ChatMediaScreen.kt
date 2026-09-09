@@ -63,9 +63,11 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
     // app's own player — never a system app.
     var viewer by remember { mutableStateOf<JSONObject?>(null) }
     // Owner round 31 item 21: a private peer's media — no capture, no Save.
+    // Owner round 32 (item 5): a private GROUP is guarded the same way.
+    val convSnap = ScreenStore.convDetailOf(convId) ?: ScreenStore.convs.firstOrNull { it.optString("id") == convId }
     val privateChat =
-        KpSecure.privatePeer(ScreenStore.convDetailOf(convId) ?: ScreenStore.convs.firstOrNull { it.optString("id") == convId }) ||
-            KpSecure.selfPrivate()
+        KpSecure.privatePeer(convSnap) || KpSecure.selfPrivate() ||
+            (convSnap?.optBoolean("isGroup") == true && convSnap.optBoolean("privateGroup"))
     KpSecure.Guard(privateChat)
     // Owner round 32 (item 46): the viewer's ⋮ sheet offers Forward here too.
     val ctx = LocalContext.current

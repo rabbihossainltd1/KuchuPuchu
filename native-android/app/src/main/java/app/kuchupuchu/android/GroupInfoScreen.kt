@@ -28,13 +28,18 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.Photo
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -47,6 +52,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -82,6 +88,8 @@ fun GroupInfoScreen(nav: NavController, convId: String) {
     var confirmLeave by remember { mutableStateOf(false) }
     var rename by remember { mutableStateOf(false) }
     var addOpen by remember { mutableStateOf(false) }
+    // Owner round 32 (item 5): the profile's ⋮ sheet — Add Members / Settings.
+    var moreOpen by remember { mutableStateOf(false) }
 
     suspend fun reload() {
         runCatching {
@@ -98,6 +106,10 @@ fun GroupInfoScreen(nav: NavController, convId: String) {
     val myId = Store.myId()
     val ownerId = c?.optText("ownerId").orEmpty()
     val isAdmin = ownerId.isNotBlank() && ownerId == myId
+    // Owner round 32 (item 5): a private group takes no new members (and its
+    // picture is not capturable, like a private profile's).
+    val privateGroup = c?.optBoolean("privateGroup") == true
+    KpSecure.Guard(privateGroup)
     val title = c?.optText("title")?.ifBlank { "Group" } ?: "Group"
     val members = c?.arr("members")?.objects().orEmpty()
     val avatarRef = c?.optIso("avatarRef")
@@ -157,7 +169,14 @@ fun GroupInfoScreen(nav: NavController, convId: String) {
             Text("Group", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
             Spacer(Modifier.weight(1f))
             if (busy) CircularProgressIndicator(color = ActionBlueDeep, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(16.dp))
+            if (isAdmin) {
+                IconButton(onClick = { moreOpen = true }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Filled.MoreVert, "More", tint = Ink, modifier = Modifier.size(22.dp))
+                }
+                Spacer(Modifier.width(4.dp))
+            } else {
+                Spacer(Modifier.width(16.dp))
+            }
         }
 
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -214,7 +233,7 @@ fun GroupInfoScreen(nav: NavController, convId: String) {
                         }
                     }
                     Text(
-                        "${members.size} member${if (members.size == 1) "" else "s"}",
+                        "${members.size} member${if (members.size == 1) "" else "s"}${if (privateGroup) " · Private group" else ""}",
                         fontSize = 13.sp,
                         color = Muted,
                     )
@@ -224,24 +243,7 @@ fun GroupInfoScreen(nav: NavController, convId: String) {
                     }
                 }
             }
-            if (isAdmin) {
-                item {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 6.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Card)
-                            .clickable { haptics.tap(); addOpen = true }
-                            .padding(horizontal = 16.dp, vertical = 13.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(Icons.Filled.PersonAdd, null, tint = ActionBlueDeep, modifier = Modifier.size(22.dp))
-                        Spacer(Modifier.width(14.dp))
-                        Text("Add members", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Ink, maxLines = 1)
-                    }
-                }
-            }
+            item { Spacer(Modifier.height(4.dp)) }
             items(members, key = { it.optJSONObject("user")?.optString("id") ?: it.toString() }) { m ->
                 val u = m.optJSONObject("user") ?: JSONObject()
                 val uid = u.optString("id")
@@ -309,6 +311,22 @@ fun GroupInfoScreen(nav: NavController, convId: String) {
         }
     }
 
+    // ---- ⋮ sheet (admin): Add Members / Settings — owner round 32 (item 5) ----
+    if (moreOpen) {
+        KpSheet(onDismiss = { moreOpen = false }) {
+            if (!privateGroup) {
+                KpSheetRow(Icons.Filled.PersonAdd, "Add Members") {
+                    moreOpen = false
+                    haptics.tap()
+                    addOpen = true
+                }
+            }
+            KpSheetRow(Icons.Filled.Settings, "Settings") {
+                moreOpen = false
+                nav.navigate("group/$convId/settings")
+            }
+        }
+    }
     // ---- member sheet: profile / remove (admin) ----
     memberSheet?.let { u ->
         val uid = u.optString("id")
@@ -418,9 +436,117 @@ fun GroupInfoScreen(nav: NavController, convId: String) {
     }
 }
 
+/**
+ * Owner round 32 (item 5): Group Settings — reached from the group profile's
+ * ⋮ → Settings. One switch, "Private group": ON closes the shared-media
+ * gallery, call recording and new-member additions for everyone in the
+ * group (the server enforces all three; the app hides the entries too).
+ * Admin only — other members get the read-only state.
+ */
+@Composable
+fun GroupSettingsScreen(nav: NavController, convId: String) {
+    val scope = rememberCoroutineScope()
+    val haptics = rememberHaptics()
+    var conv by remember { mutableStateOf(ScreenStore.convDetailOf(convId)) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    LaunchedEffect(convId, ScreenStore.poke) {
+        runCatching {
+            val data = withContext(Dispatchers.IO) { Api.get("/api/conversations/$convId", true) }
+            data.optJSONObject("conversation")?.let {
+                conv = it
+                ScreenStore.setConvDetail(convId, it)
+            }
+        }
+    }
+    val c = conv
+    val isAdmin = c?.optText("ownerId").orEmpty().let { it.isNotBlank() && it == Store.myId() }
+    val privateGroup = c?.optBoolean("privateGroup") == true
+    KpSecure.Guard(privateGroup)
+
+    fun setPrivate(on: Boolean) {
+        if (busy || !isAdmin) return
+        haptics.tap()
+        // Flip at once; the server's answer (or a failure) settles it.
+        val before = c
+        conv = c?.let { JSONObject(it.toString()).put("privateGroup", on) }
+        scope.launch {
+            busy = true
+            error = ""
+            runCatching {
+                val data = withContext(Dispatchers.IO) { Api.patch("/api/conversations/$convId", JSONObject().put("privateGroup", on)) }
+                data.optJSONObject("conversation")?.let {
+                    conv = it
+                    ScreenStore.setConvDetail(convId, it)
+                }
+            }.onFailure {
+                conv = before
+                error = it.message ?: "Could not save."
+            }
+            busy = false
+        }
+    }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Cream)
+            .statusBarsPadding()
+            .navigationBarsPadding(),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = { nav.popBackStack() }) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Ink, modifier = Modifier.size(26.dp))
+            }
+            Text("Group Settings", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
+            Spacer(Modifier.weight(1f))
+            if (busy) CircularProgressIndicator(color = ActionBlueDeep, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(16.dp))
+        }
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 6.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Card),
+        ) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, top = 4.dp, bottom = 4.dp, end = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Lock, "Private group", tint = ActionBlueDeep, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(12.dp))
+                Text("Private group", fontSize = 14.5.sp, color = Ink, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.weight(1f))
+                Switch(
+                    checked = privateGroup,
+                    onCheckedChange = { setPrivate(it) },
+                    enabled = isAdmin && !busy && c != null,
+                    colors =
+                        SwitchDefaults.colors(
+                            checkedThumbColor = ActionBlueInk,
+                            checkedTrackColor = ActionBlue,
+                            checkedBorderColor = ActionBlue,
+                        ),
+                    modifier = Modifier.scale(0.85f),
+                )
+            }
+        }
+        if (error.isNotBlank()) {
+            Text(error, color = Red, fontSize = 12.5.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+        }
+    }
+}
+
 /** Pick people to add: chat-list peers first, server search for the rest. */
 @Composable
-private fun AddMembersSheet(exclude: Set<String>, onDismiss: () -> Unit, onAdd: (List<JSONObject>) -> Unit) {
+internal fun AddMembersSheet(exclude: Set<String>, onDismiss: () -> Unit, onAdd: (List<JSONObject>) -> Unit) {
     var query by remember { mutableStateOf("") }
     val picked = remember { mutableStateListOf<JSONObject>() }
     val found = remember { mutableStateListOf<JSONObject>() }
