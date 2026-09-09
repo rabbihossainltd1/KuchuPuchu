@@ -105,6 +105,29 @@ const upload = (k, tok, name, type, bytes) =>
 
   const stranger = await k.call("GET", `/api/messages/${mid}/media`, undefined, C.token);
   check("non-member is rejected", stranger.status === 403, String(stranger.status));
+
+  // Owner round 32 (item 37 follow-up): a forward reuses the same key in a
+  // second chat. files.conv_id stays bound to the first chat, so the forward's
+  // recipient must be admitted by the message reference instead of 403'd.
+  const before = await k.call("GET", `/api/files/${key}`, undefined, C.token);
+  check("r32-37: a stranger cannot fetch the key before any forward", before.status === 403);
+  const cac = (await k.call("POST", "/api/conversations", { userId: C.user.id }, A.token)).json
+    .conversation.id;
+  const fwd = await k.call(
+    "POST",
+    `/api/conversations/${cac}/messages`,
+    { kind: "FILE", fileKey: key, fileName: "photo.jpg", fileType: "image/jpeg" },
+    A.token,
+  );
+  const after = await k.call("GET", `/api/files/${key}`, undefined, C.token);
+  check(
+    "r32-37: the forward's recipient can fetch the forwarded file (admitted by the message reference, one indexed seek)",
+    fwd.status === 201 && after.status === 200 && after.body.toString() === "jpegbytes!",
+    `fwd=${fwd.status} get=${after.status}`,
+  );
+  const D = await k.reg("md@x.com", "md");
+  const still = await k.call("GET", `/api/files/${key}`, undefined, D.token);
+  check("r32-37: …and a user in neither chat is still refused", still.status === 403);
 }
 
 // ---- 2. the legacy data-URL path still works ----

@@ -6418,6 +6418,22 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       "SELECT owner_id, conv_id FROM files WHERE key = ?",
       key,
     );
+    // "Is this key referenced by a message in one of my conversations?" —
+    // the rule for objects that predate the files table, and (owner round
+    // 32, item 37) for a FORWARDED file: forwarding reuses the same key in a
+    // second chat, but files.conv_id stays bound to the first one, so the
+    // forward's recipient was refused with 403 and saw a broken photo /
+    // voice note / document. One indexed seek (idx_messages_media), only on
+    // the miss path.
+    const referenced = async () =>
+      !!(await one<{ conv_id: string }>(
+        db,
+        `SELECT m.conv_id FROM messages m
+         JOIN members mem ON mem.conv_id = m.conv_id AND mem.user_id = ?
+         WHERE m.media = ? LIMIT 1`,
+        uid,
+        key,
+      ));
     if (meta) {
       const allowed =
         meta.owner_id === uid ||
@@ -6427,20 +6443,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             "SELECT user_id FROM members WHERE conv_id = ? AND user_id = ?",
             meta.conv_id,
             uid,
-          )));
+          ))) ||
+        (await referenced());
       if (!allowed) fail(403, "File not found.", "FORBIDDEN");
-    } else {
-      // Object uploaded before the files table existed: fall back to "is this
-      // key referenced by a message in one of my conversations?".
-      const ref = await one<{ conv_id: string }>(
-        db,
-        `SELECT m.conv_id FROM messages m
-         JOIN members mem ON mem.conv_id = m.conv_id AND mem.user_id = ?
-         WHERE m.media = ? LIMIT 1`,
-        uid,
-        key,
-      );
-      if (!ref) fail(403, "File not found.", "FORBIDDEN");
+    } else if (!(await referenced())) {
+      fail(403, "File not found.", "FORBIDDEN");
     }
     const object = await env.MEDIA.get(key);
     if (!object) fail(404, "File not found.");
