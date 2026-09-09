@@ -332,6 +332,11 @@ class MainActivity : ComponentActivity() {
          *  landed before login on a cold start.
          */
         val pendingChat = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
+        /** Owner round 32 (item 36): content handed over by the system share
+         *  sheet (see ShareActivity) — KpApp shows the chat picker for it. Same
+         *  StateFlow shape as pendingChat, for the same cold-start reasons. */
+        internal val pendingShare = kotlinx.coroutines.flow.MutableStateFlow<SharePayload?>(null)
     }
 }
 

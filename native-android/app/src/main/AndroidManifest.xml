@@ -85,6 +85,39 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- Owner round 32 (item 36): the system share sheet target. Its own
+             activity (not MainActivity): a SEND aimed at the singleTop launcher
+             activity is created inside the SENDER's task, so a second copy of
+             the whole app would come up beside the real one. ShareActivity
+             copies the shared content into the cache while the sender's URI
+             grant is still valid, hands it to MainActivity.pendingShare, brings
+             the real app forward and finishes; the app shows the "Send to"
+             picker. Translucent + no history + out of recents: it never shows. -->
+        <activity
+            android:name=".ShareActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:label="KuchuPuchu"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/*" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+                <data android:mimeType="audio/*" />
+                <data android:mimeType="application/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+                <data android:mimeType="audio/*" />
+                <data android:mimeType="application/*" />
+            </intent-filter>
+        </activity>
         <!-- Push delivery: high-priority FCM data messages wake the app
              just-in-time. There is deliberately NO other service here. A
              remoteMessaging keep-alive foreground service (PR #7, and later

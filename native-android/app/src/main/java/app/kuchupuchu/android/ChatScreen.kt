@@ -2907,7 +2907,7 @@ private fun EditDialog(original: String, onClose: () -> Unit, onSave: (String) -
 
 /** Pick a conversation to forward the selected message(s) to. */
 @Composable
-internal fun ForwardDialog(onClose: () -> Unit, onSend: (List<String>) -> Unit) {
+internal fun ForwardDialog(onClose: () -> Unit, onSend: (List<String>) -> Unit, title: String = "Forward to") {
     // Owner round 14: forward was a cramped popup with mismatched colors —
     // now a FULLSCREEN picker sheet: back arrow header, themed background,
     // the whole conversation list to pick from.
@@ -2932,7 +2932,7 @@ internal fun ForwardDialog(onClose: () -> Unit, onSend: (List<String>) -> Unit) 
                 IconButton(onClick = onClose) {
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Ink, modifier = Modifier.size(26.dp))
                 }
-                Text("Forward to", color = Ink, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+                Text(title, color = Ink, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
             }
             Text(
                 if (picked.isEmpty()) "${convs.size} chats" else "${picked.size} selected",

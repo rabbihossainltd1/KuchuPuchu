@@ -5000,7 +5000,7 @@ const convBetween = (db, a, b) =>
     check(
       "r32-37: forward picker = multi-recipient select (rounded check rows, 'N selected', Send bar) — a row tap never sends; every caller passes onSend(List)",
       chat.includes(
-        "internal fun ForwardDialog(onClose: () -> Unit, onSend: (List<String>) -> Unit) {",
+        'internal fun ForwardDialog(onClose: () -> Unit, onSend: (List<String>) -> Unit, title: String = "Forward to") {',
       ) &&
         chat.includes("val picked = remember { mutableStateListOf<String>() }") &&
         chat.includes(".clickable { if (on) picked.remove(id) else picked.add(id) }") &&
@@ -5287,6 +5287,83 @@ const convBetween = (db, a, b) =>
         notify.indexOf("NotificationCompat.BigPictureStyle()") <
           notify.indexOf('if (!convoId.contains("kp_official_bot")) addAction(replyAction)') &&
         notify.includes(".addAction(readAction)"),
+    );
+  }
+  // Item 36: KuchuPuchu in the system share sheet. A dedicated translucent
+  // ShareActivity (SEND / SEND_MULTIPLE for text, image, video, audio,
+  // application) copies the shared content into the cache while the sender's
+  // URI grant is valid, hands it to MainActivity.pendingShare, brings the app
+  // forward and finishes; KpApp shows the multi-select picker titled "Send to";
+  // ShareSend uploads each file once on its own scope and posts to every
+  // picked chat (photo → JPEG photo with dims / album, video → media, else
+  // document; > 25 MB skipped).
+  {
+    const share = kt("ShareIntake.kt");
+    const app = kt("KpApp.kt");
+    const main = kt("MainActivity.kt");
+    const svc = manifest.slice(
+      manifest.indexOf('android:name=".ShareActivity"'),
+      manifest.indexOf("</activity>", manifest.indexOf('android:name=".ShareActivity"')),
+    );
+    check(
+      "r32-36: manifest — ShareActivity is exported, translucent, out of recents, filters SEND (text/image/video/audio/application) and SEND_MULTIPLE; MainActivity keeps only its launcher filter",
+      svc.includes('android:exported="true"') &&
+        svc.includes('android:excludeFromRecents="true"') &&
+        svc.includes('android:noHistory="true"') &&
+        svc.includes('android:theme="@android:style/Theme.Translucent.NoTitleBar"') &&
+        svc.includes('<action android:name="android.intent.action.SEND" />') &&
+        svc.includes('<action android:name="android.intent.action.SEND_MULTIPLE" />') &&
+        (svc.match(/<data android:mimeType="image\/\*" \/>/g) || []).length === 2 &&
+        svc.includes('<data android:mimeType="text/*" />') &&
+        svc.includes('<data android:mimeType="application/*" />') &&
+        !/android:name="\.MainActivity"[\s\S]*?android\.intent\.action\.SEND[\s\S]*?<\/activity>/.test(
+          manifest.slice(0, manifest.indexOf('android:name=".ShareActivity"')),
+        ),
+      svc.replace(/\s+/g, " ").slice(0, 160),
+    );
+    check(
+      "r32-36: intake — ShareActivity copies off the main thread via FilesUtil.copyDocument (EXTRA_STREAM via IntentCompat, clip fallback), skips > 25 MB non-pictures before copying, publishes MainActivity.pendingShare, brings MainActivity forward and finishes",
+      share.includes("class ShareActivity : ComponentActivity() {") &&
+        share.includes(
+          "IntentCompat.getParcelableArrayListExtra(i, Intent.EXTRA_STREAM, Uri::class.java)",
+        ) &&
+        share.includes(
+          "IntentCompat.getParcelableExtra(i, Intent.EXTRA_STREAM, Uri::class.java)",
+        ) &&
+        share.includes("val clip = i.clipData ?: return emptyList()") &&
+        share.includes("FilesUtil.copyDocument(app, uri, name) ?: return@runCatching null") &&
+        share.includes(
+          'if (!declared.startsWith("image/") && querySize(app, uri) > VideoPlan.UPLOAD_LIMIT) {',
+        ) &&
+        share.includes("MainActivity.pendingShare.value = SharePayload(text, items)") &&
+        share.includes(
+          "Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP,",
+        ) &&
+        main.includes(
+          "internal val pendingShare = kotlinx.coroutines.flow.MutableStateFlow<SharePayload?>(null)",
+        ),
+    );
+    check(
+      "r32-36: picker + send — KpApp collects pendingShare into the ForwardDialog titled 'Send to' (close discards the copies, one target opens that chat); ShareSend runs on a SupervisorJob scope, uploads once per file, posts per target, photo → JPEG with dims (album when 2+), video → media, else document, deletes the copies, pokes the inbox",
+      app.includes("val share by MainActivity.pendingShare.collectAsState()") &&
+        app.includes('title = "Send to",') &&
+        app.includes("ShareSend.discard(payload)") &&
+        app.includes("ShareSend.send(appCtx, targets, payload) { ok ->") &&
+        app.includes(
+          'runCatching { nav.navigate("chat/${targets[0]}") { launchSingleTop = true } }',
+        ) &&
+        share.includes("internal object ShareSend {") &&
+        share.includes("private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)") &&
+        share.includes(
+          "val jpeg = FilesUtil.imageToJpeg(Uri.fromFile(item.file), ctx, maxSide = 1440, maxBytes = 285_000)",
+        ) &&
+        share.includes("val album = if (photos >= 2) newAlbumId() else null") &&
+        share.includes(
+          'if (!item.mime.startsWith("video/")) body.put("meta", JSONObject().put("document", true))',
+        ) &&
+        share.includes("if (item.file.length() > VideoPlan.UPLOAD_LIMIT) return null") &&
+        share.includes("payload.items.forEach { runCatching { it.file.delete() } }") &&
+        share.includes("ScreenStore.pokeInbox()"),
     );
   }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or

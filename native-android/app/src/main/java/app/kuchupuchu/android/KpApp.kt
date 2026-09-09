@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -221,6 +222,28 @@ fun KpApp() {
                 }
             }
               }
+            }
+            // Owner round 32 (item 36): something shared from another app —
+            // the same multi-select picker as Forward, titled "Send to". The
+            // sends run on ShareSend's own scope; one target opens that chat.
+            val share by MainActivity.pendingShare.collectAsState()
+            share?.takeIf { authed }?.let { payload ->
+                ForwardDialog(
+                    onClose = {
+                        MainActivity.pendingShare.value = null
+                        ShareSend.discard(payload)
+                    },
+                    onSend = { targets ->
+                        MainActivity.pendingShare.value = null
+                        ShareSend.send(appCtx, targets, payload) { ok ->
+                            android.widget.Toast.makeText(appCtx, if (ok) "Sent" else "Could not send", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                        if (targets.size == 1) {
+                            runCatching { nav.navigate("chat/${targets[0]}") { launchSingleTop = true } }
+                        }
+                    },
+                    title = "Send to",
+                )
             }
             // Call screens float above everything while a call is live.
             CallGate()
