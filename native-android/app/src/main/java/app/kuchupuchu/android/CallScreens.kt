@@ -91,6 +91,9 @@ import org.webrtc.RendererCommon
 import org.webrtc.SurfaceViewRenderer
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.fillMaxHeight
+import org.json.JSONObject
 
 /**
  * The call screens — one shared flow for BOTH sides:
@@ -194,11 +197,17 @@ fun CallGate() {
                 // never converts: that stays on the voice UI with a small
                 // preview card. (The old `hasRemoteVideo` shortcut here could
                 // not tell the two apart.)
-                if (call.kind == "VIDEO") InCallVideoScreen(call) else VoiceCallScreen(call)
+                if (call.kind == "VIDEO") {
+                    // Owner round 32 (item 5c): a group video call is a grid.
+                    if (call.group) GroupVideoScreen(call) else InCallVideoScreen(call)
+                } else {
+                    VoiceCallScreen(call)
+                }
             // Incoming ringing needs its own Accept/Decline screen; everything
             // else voice (outgoing ringing, connecting, in-call) is THE SAME
             // screen on caller and receiver — one UI, per design.
             call.incoming && call.status == "RINGING" -> IncomingCallScreen(call)
+            call.kind == "VIDEO" && call.group -> GroupVideoScreen(call)
             call.kind == "VIDEO" -> OutgoingVideoScreen(call)
             else -> VoiceCallScreen(call)
         }
@@ -979,6 +988,219 @@ fun InCallVideoScreen(call: CallUi) {
             StripAction(Icons.Filled.ScreenShare, "Share", active = engine.sharing) { engine.toggleShare() }
             StripAction(Icons.Filled.CallEnd, "End", active = false, danger = true) { haptics.heavy(); engine.hangup() }
         }
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* GROUP VIDEO — owner round 32 (item 5c)                              */
+/* one tile per member on the call; own camera in the corner           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The grid: every OTHER member currently JOINED gets a tile (their picture
+ * when it flows, their avatar while the camera is off / still connecting —
+ * item 47's rule, no "waiting" state). Members still ringing sit dimmed in
+ * the strip under the name. Own camera is a small tile bottom-right, hidden
+ * while it is off. Same control strip as the 1:1 video screen minus share.
+ */
+@Composable
+fun GroupVideoScreen(call: CallUi) {
+    val engine = CallEngine.instance ?: return
+    val haptics = rememberHaptics()
+    val secs = rememberTick(call.startedAt, call.connecting)
+    var controlsVisible by remember { mutableStateOf(true) }
+    val me = Store.myId()
+    // Read once per composition: bumps whenever any member's picture starts,
+    // stops or is declared off.
+    val videoVersion = engine.groupVideoVersion
+    val others = call.joined.filter { it.optString("id") != me }
+    val ringing = call.participants.filter { it.optString("state") == "RINGING" }
+    val connected = call.status == "ACTIVE" && others.isNotEmpty()
+    LaunchedEffect(controlsVisible) {
+        if (controlsVisible) {
+            kotlinx.coroutines.delay(3_000)
+            controlsVisible = false
+        }
+    }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Dark)
+            .clickable { controlsVisible = !controlsVisible },
+    ) {
+        if (others.isEmpty()) {
+            // Alone (everyone still ringing, or all left): the group picture,
+            // like the voice screen while it rings.
+            Column(
+                Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                CallAvatar(call, 96.dp)
+            }
+        } else {
+            // 1 → full, 2 → stacked, 3-4 → 2×2, more → rows of 2 that scroll.
+            val cols = if (others.size <= 2) 1 else 2
+            val rows = others.chunked(cols)
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .padding(top = 56.dp, bottom = if (controlsVisible) 96.dp else 8.dp, start = 4.dp, end = 4.dp)
+                    .then(if (rows.size > 2) Modifier.verticalScroll(rememberScrollState()) else Modifier),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                for (row in rows) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .then(if (rows.size > 2) Modifier.height(220.dp) else Modifier.weight(1f)),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        for (p in row) {
+                            key(p.optString("id"), videoVersion) {
+                                GroupTile(engine, p, Modifier.weight(1f).fillMaxHeight())
+                            }
+                        }
+                        if (row.size < cols) Spacer(Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+
+        /* top: group name + count / timer */
+        Column(
+            Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(horizontal = 18.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(call.otherName, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                when {
+                    !connected -> "Ringing…"
+                    call.connecting || call.startedAt <= 0L -> "Connecting…"
+                    else -> "${others.size + 1} on call · ${clockText(secs)}"
+                },
+                color = Color(0xB3FFFFFF),
+                fontSize = 12.sp,
+            )
+            if (ringing.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (p in ringing) {
+                        val u = p.optJSONObject("user")
+                        Box(Modifier.alpha(0.45f)) {
+                            KpAvatar(u?.optText("displayName")?.ifBlank { null } ?: "Member", null, 26.dp, ring = false, avatarRef = u?.optIso("avatarRef"))
+                        }
+                    }
+                }
+            }
+        }
+
+        /* own camera, bottom-right, only while it is on */
+        if (!engine.cameraOff) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomEnd)
+                    .navigationBarsPadding()
+                    .padding(end = 14.dp, bottom = if (controlsVisible) 110.dp else 14.dp)
+                    .size(width = 84.dp, height = 116.dp)
+                    .zIndex(1f)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(DarkCard)
+                    .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(14.dp)),
+            ) {
+                VideoRenderer(engine, remote = false, fit = true, pip = true)
+            }
+        }
+
+        /* bottom control strip */
+        if (controlsVisible) Row(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 12.dp, vertical = 14.dp)
+                .clip(RoundedCornerShape(26.dp))
+                .background(Color(0x99000000))
+                .padding(horizontal = 8.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val routeAction = rememberRouteAction(engine)
+            StripAction(routeAction.icon, routeAction.label, active = engine.audioRoute != AudioRoute.EARPIECE) {
+                routeAction.onClick()
+            }
+            StripAction(
+                if (engine.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
+                if (engine.muted) "Unmute" else "Mute",
+                active = engine.muted,
+            ) { engine.toggleMute() }
+            StripAction(
+                if (engine.cameraOff) Icons.Filled.VideocamOff else Icons.Filled.Videocam,
+                if (engine.cameraOff) "Camera on" else "Camera",
+                active = engine.cameraOff,
+            ) { gateCamera { engine.toggleCamera() } }
+            StripAction(Icons.Filled.CallEnd, if (connected) "End" else "Cancel", active = false, danger = true) {
+                haptics.heavy()
+                engine.hangup()
+            }
+        }
+    }
+}
+
+/** One member's tile: their video when live, else their avatar on a dark card. */
+@Composable
+private fun GroupTile(engine: CallEngine, p: JSONObject, modifier: Modifier) {
+    val id = p.optString("id")
+    val user = p.optJSONObject("user")
+    val name = user?.optText("displayName")?.ifBlank { null } ?: "Member"
+    val live = engine.groupVideoLive(id)
+    Box(
+        modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(DarkCard),
+    ) {
+        if (live) {
+            AndroidView(
+                factory = { c ->
+                    SurfaceViewRenderer(c).apply {
+                        init(engine.egl.eglBaseContext, null)
+                        setEnableHardwareScaler(true)
+                        setMirror(false)
+                        setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+                        engine.attachGroupRemote(id, this)
+                    }
+                },
+                onRelease = { view ->
+                    engine.detachGroupRemote(id, view)
+                    runCatching { view.release() }
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Column(
+                Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                KpAvatar(name, null, 64.dp, ring = false, avatarRef = user?.optIso("avatarRef"))
+            }
+        }
+        Text(
+            name.split(" ").firstOrNull() ?: name,
+            color = Color.White,
+            fontSize = 12.sp,
+            maxLines = 1,
+            modifier =
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(8.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0x66000000))
+                    .padding(horizontal = 7.dp, vertical = 3.dp),
+        )
     }
 }
 

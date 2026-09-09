@@ -304,6 +304,84 @@ class CallEngine(private val app: Application) {
     private val groupOffered = mutableSetOf<String>()
     private val groupAnswered = mutableMapOf<String, String>()
     private val groupSyncing = java.util.concurrent.atomic.AtomicBoolean(false)
+    // Owner round 32 (item 5c): video on the mesh. Each leg carries a video
+    // m-line (our camera swapped in with setTrack, no renegotiation — the
+    // 1:1 trick); the other side's track lands here keyed by their id, the
+    // first REAL frame marks it live, and an explicit camera:false flag from
+    // them hides it again (item 47: an off camera shows the avatar).
+    private val groupRemoteVideo = java.util.concurrent.ConcurrentHashMap<String, VideoTrack>()
+    private val groupRemoteViews = java.util.concurrent.ConcurrentHashMap<String, SurfaceViewRenderer>()
+    private val groupFramesSeen = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private val groupCameraOff = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+
+    /** Bumped on every per-member video change; the group grid recomposes on it. */
+    var groupVideoVersion by mutableStateOf(0)
+        private set
+
+    /** Is [peerId]'s picture flowing (track bound, a frame seen, camera not declared off)? */
+    fun groupVideoLive(peerId: String): Boolean =
+        groupRemoteVideo.containsKey(peerId) && peerId in groupFramesSeen && groupCameraOff[peerId] != true
+
+    fun attachGroupRemote(peerId: String, view: SurfaceViewRenderer) {
+        val old = groupRemoteViews[peerId]
+        if (old != null && old !== view) groupRemoteVideo[peerId]?.let { t -> runCatching { t.removeSink(old) } }
+        groupRemoteViews[peerId] = view
+        groupRemoteVideo[peerId]?.let { runCatching { it.addSink(view) } }
+    }
+
+    fun detachGroupRemote(peerId: String, view: SurfaceViewRenderer) {
+        groupRemoteVideo[peerId]?.let { runCatching { it.removeSink(view) } }
+        if (groupRemoteViews[peerId] === view) groupRemoteViews.remove(peerId)
+    }
+
+    private fun bindGroupRemote(peerId: String, track: VideoTrack) {
+        groupRemoteVideo[peerId]?.let { old -> groupRemoteViews[peerId]?.let { v -> runCatching { old.removeSink(v) } } }
+        groupRemoteVideo[peerId] = track
+        track.setEnabled(true)
+        groupRemoteViews[peerId]?.let { runCatching { track.addSink(it) } }
+        // Live only from the first real frame — the sendrecv m-line surfaces
+        // an empty placeholder track at connect on a voice call.
+        runCatching {
+            track.addSink(
+                object : org.webrtc.VideoSink {
+                    @Volatile
+                    private var seen = false
+
+                    override fun onFrame(frame: org.webrtc.VideoFrame) {
+                        if (seen) return
+                        seen = true
+                        Handler(Looper.getMainLooper()).post {
+                            groupFramesSeen.add(peerId)
+                            groupVideoVersion++
+                            // Their camera reached us on a call the row still
+                            // labels AUDIO (an announcement in flight): the
+                            // grid is the right screen for a picture.
+                            val cur = active
+                            if (cur != null && cur.group && cur.kind != "VIDEO" && groupCameraOff[peerId] != true) {
+                                active = cur.copy(kind = "VIDEO")
+                                markVideoRoute()
+                                publishChange()
+                            }
+                        }
+                    }
+                },
+            )
+        }
+        Handler(Looper.getMainLooper()).post { groupVideoVersion++ }
+    }
+
+    /** A member's own media flags (poll row or `media` frame) on a group call. */
+    private fun applyGroupPeerMedia(peerId: String, camera: Boolean, kind: String) {
+        val was = groupCameraOff[peerId]
+        groupCameraOff[peerId] = !camera
+        if (was != !camera) groupVideoVersion++
+        val cur = active ?: return
+        if (kind == "VIDEO" && cur.kind != "VIDEO") {
+            active = cur.copy(kind = "VIDEO")
+            markVideoRoute()
+            publishChange()
+        }
+    }
     private val left = AtomicBoolean(false)
     private var poll: Job? = null
     private val scope = CoroutineScope(
@@ -480,7 +558,12 @@ class CallEngine(private val app: Application) {
                             val camera = ev.optBoolean("camera")
                             val screen = ev.optBoolean("screen")
                             val kind = ev.optString("kind")
-                            scope.launch { applyPeerMedia(camera, screen, kind) }
+                            val who = ev.optString("userId")
+                            scope.launch {
+                                // Owner round 32 (item 5c): per member on a group call.
+                                if (active?.group == true) applyGroupPeerMedia(who, camera, kind)
+                                else applyPeerMedia(camera, screen, kind)
+                            }
                         }
                         pokeTick()
                     }
@@ -853,6 +936,18 @@ class CallEngine(private val app: Application) {
             CallService.start(app, "In a call with ${ui.otherName}")
         }
         if (isGroup) {
+            // Owner round 32 (item 5c): each member's camera flag from the row
+            // (the safety net for a `media` frame that arrived while asleep).
+            next.optJSONObject("media")?.let { media ->
+                val me = Store.myId()
+                for (peerId in media.keys()) {
+                    if (peerId == me) continue
+                    val m = media.optJSONObject(peerId) ?: continue
+                    if (!m.has("camera")) continue
+                    val camera = m.optBoolean("camera")
+                    if (groupCameraOff[peerId] != !camera) applyGroupPeerMedia(peerId, camera, next.optString("kind"))
+                }
+            }
             // Owner round 32 (item 5b): the mesh follows the member list —
             // offer to newcomers, answer their offers, drop leavers.
             if (status == "ACTIVE" && myState == "JOINED") groupSync(ui)
@@ -946,6 +1041,9 @@ class CallEngine(private val app: Application) {
                         group = true,
                         participants = call.arr("participants").objects(),
                     )
+                // Owner round 32 (item 5c): a video start tells the others our
+                // camera is on (their grid shows the picture, not the avatar).
+                if (cameraLive) postMedia(camera = true)
             } catch (e: Exception) {
                 notify((e as? ApiException)?.message ?: "Couldn't start the call. Try again.")
                 hangupLocal()
@@ -971,6 +1069,7 @@ class CallEngine(private val app: Application) {
         }
         active = active?.copy(status = "ACTIVE", participants = call.arr("participants").objects())
         publishChange()
+        if (cameraLive) postMedia(camera = true)
         pokeTick()
     }
 
@@ -994,6 +1093,7 @@ class CallEngine(private val app: Application) {
                 groupPeers.remove(gone)?.let { runCatching { it.close() } }
                 groupOffered.remove(gone)
                 groupAnswered.remove(gone)
+                dropGroupVideo(gone)
             }
             if (groupPeers.isEmpty() && others.isEmpty()) {
                 // Alone on the call: media is not live.
@@ -1035,6 +1135,15 @@ class CallEngine(private val app: Application) {
                     groupPeers[from] = peer
                     runCatching {
                         peer.setRemoteDescriptionAwait(SessionDescription(SessionDescription.Type.OFFER, offerSdp))
+                        // Owner round 32 (item 5c): keep the video m-line two-way
+                        // so a camera can be swapped in later on either side.
+                        peer.transceivers
+                            .firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO }
+                            ?.let { t ->
+                                if (t.direction != RtpTransceiver.RtpTransceiverDirection.SEND_RECV) {
+                                    runCatching { t.setDirection(RtpTransceiver.RtpTransceiverDirection.SEND_RECV) }
+                                }
+                            }
                         val answer = peer.createAnswerAwait(sdpConstraints())
                         peer.setLocalDescriptionAwait(answer)
                         withContext(Dispatchers.IO) {
@@ -1145,6 +1254,8 @@ class CallEngine(private val app: Application) {
                     override fun onRenegotiationNeeded() {}
                     override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {
                         val track = receiver?.track()
+                        // Owner round 32 (item 5c): their camera, keyed by member.
+                        if (track is VideoTrack) bindGroupRemote(peerId, track)
                         if (track is AudioTrack) {
                             track.setEnabled(true)
                             Handler(Looper.getMainLooper()).post { applyAudio() }
@@ -1153,7 +1264,30 @@ class CallEngine(private val app: Application) {
                 },
             )!!
         audioTrack?.let { peer.addTrack(it, listOf("kp")) }
+        // Owner round 32 (item 5c): the camera rides the leg when it is already
+        // on; otherwise a sendrecv video m-line waits for it (setTrack later
+        // needs no renegotiation — the same shape a 1:1 voice call negotiates).
+        val cam = videoTrack
+        if (cam != null) {
+            peer.addTrack(cam, listOf("kp"))
+        } else {
+            runCatching {
+                peer.addTransceiver(
+                    MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO,
+                    RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_RECV),
+                )
+            }
+        }
         return peer
+    }
+
+    private fun dropGroupVideo(peerId: String) {
+        val track = groupRemoteVideo.remove(peerId)
+        val view = groupRemoteViews[peerId]
+        if (track != null && view != null) runCatching { track.removeSink(view) }
+        groupFramesSeen.remove(peerId)
+        groupCameraOff.remove(peerId)
+        groupVideoVersion++
     }
 
     fun startCall(userId: String, kind: String, name: String, avatar: String = "") {
@@ -1431,9 +1565,40 @@ class CallEngine(private val app: Application) {
     fun toggleCamera() {
         if (sharing) return
         if (active?.group == true) {
-            // Item 5(c) brings video to group calls; the audio mesh has no
-            // video transceivers to swap a camera into.
-            notify("Group video calling is coming in the next update.")
+            // Owner round 32 (item 5c): one camera, every leg — the track goes
+            // into each connection's video sender (setTrack, no renegotiation),
+            // the row is re-labelled VIDEO through /media so everyone's screen
+            // switches to the grid.
+            scope.launch {
+                if (videoTrack == null) {
+                    withContext(Dispatchers.IO) { runCatching { capture(true) } }
+                    val track = videoTrack
+                    if (track == null) {
+                        cameraOff = true
+                        notify("Camera couldn't start. Please try again.")
+                        return@launch
+                    }
+                    for (peer in groupPeers.values) {
+                        val sender =
+                            peer.senders.find { it.track()?.kind() == "video" }
+                                ?: peer.transceivers
+                                    .firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO }
+                                    ?.sender
+                        runCatching { if (sender != null) sender.setTrack(track, true) else peer.addTrack(track, listOf("kp")) }
+                    }
+                    localView?.let { runCatching { track.addSink(it) } }
+                    cameraOff = false
+                } else {
+                    cameraOff = !cameraOff
+                    videoTrack?.setEnabled(!cameraOff)
+                }
+                if (!cameraOff && active?.kind != "VIDEO") {
+                    active = active?.copy(kind = "VIDEO")
+                    markVideoRoute()
+                }
+                publishChange()
+                postMedia(camera = !cameraOff)
+            }
             return
         }
         if (videoTrack == null) {
@@ -1705,6 +1870,11 @@ class CallEngine(private val app: Application) {
         groupPeers.clear()
         groupOffered.clear()
         groupAnswered.clear()
+        groupRemoteVideo.clear()
+        groupRemoteViews.clear()
+        groupFramesSeen.clear()
+        groupCameraOff.clear()
+        groupVideoVersion++
         seenIce.clear()
         iceWatchdog?.let { Handler(Looper.getMainLooper()).removeCallbacks(it) }
         iceWatchdog = null

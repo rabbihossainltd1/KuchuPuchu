@@ -2749,8 +2749,9 @@ const convBetween = (db, a, b) =>
         kt("CallScreens.kt").includes(
           "connected && engine.shareFull && engine.peerScreen -> ShareFullscreen(call)",
         ) &&
+        // r32-5c: a group video call branches to the grid first.
         kt("CallScreens.kt").includes(
-          'if (call.kind == "VIDEO") InCallVideoScreen(call) else VoiceCallScreen(call)',
+          "if (call.group) GroupVideoScreen(call) else InCallVideoScreen(call)\n                } else {\n                    VoiceCallScreen(call)",
         ) &&
         kt("CallScreens.kt").includes("if (engine.peerScreen) {") &&
         kt("CallScreens.kt").includes(".clickable { engine.openShareFullscreen() },") &&
@@ -5729,7 +5730,8 @@ const convBetween = (db, a, b) =>
         ) &&
         (calls.match(/ParticipantRow\(call\)/g) || []).length === 2 &&
         tab.includes(
-          'CallEngine.instance?.startGroupCall(otherId, "AUDIO", name, avatarRef ?: "")',
+          // r32-5c: the call-back keeps the kind (video row → group video).
+          'CallEngine.instance?.startGroupCall(otherId, if (video) "VIDEO" else "AUDIO", name, avatarRef ?: "")',
         ) &&
         tab.includes('group && missed -> "Missed group ${if (video) "video" else "voice"} call"') &&
         tab.includes(
@@ -5740,6 +5742,48 @@ const convBetween = (db, a, b) =>
         kt("KpNotify.kt").includes('.putExtra("kp_callback_group", group)') &&
         kt("MainActivity.kt").includes(
           "if (group) CallEngine.instance?.startGroupCall(otherId, kind, name)",
+        ),
+    );
+  }
+  // Item 5 (c): group VIDEO calls on the same mesh — per-member tiles.
+  {
+    const eng = kt("CallEngine.kt");
+    const calls = kt("CallScreens.kt");
+    const chat = kt("ChatScreen.kt");
+    check(
+      "r32-5c: engine — every mesh leg carries a video m-line (camera track or a sendrecv transceiver), each member's remote video is bound by id (bindGroupRemote, live from the first real frame, hidden by their camera:false flag), toggleCamera swaps ONE camera into every leg with setTrack and announces it via /media; the old 'coming in the next update' stub is gone",
+      eng.includes(
+        "private val groupRemoteVideo = java.util.concurrent.ConcurrentHashMap<String, VideoTrack>()",
+      ) &&
+        eng.includes("var groupVideoVersion by mutableStateOf(0)") &&
+        eng.includes("fun groupVideoLive(peerId: String): Boolean =") &&
+        eng.includes("private fun bindGroupRemote(peerId: String, track: VideoTrack) {") &&
+        eng.includes("if (track is VideoTrack) bindGroupRemote(peerId, track)") &&
+        eng.includes(
+          "private fun applyGroupPeerMedia(peerId: String, camera: Boolean, kind: String) {",
+        ) &&
+        eng.includes("if (active?.group == true) applyGroupPeerMedia(who, camera, kind)") &&
+        eng.includes(
+          'runCatching { if (sender != null) sender.setTrack(track, true) else peer.addTrack(track, listOf("kp")) }',
+        ) &&
+        !eng.includes("Group video calling is coming in the next update."),
+    );
+    check(
+      "r32-5c: screens — a group VIDEO call renders GroupVideoScreen (grid of GroupTile per joined member: their video when live, avatar otherwise — no waiting state; own camera tile bottom-right; ringing members dimmed under the title); the group chat header has a video-call button; call-back keeps the kind",
+      calls.includes("fun GroupVideoScreen(call: CallUi) {") &&
+        calls.includes(
+          "private fun GroupTile(engine: CallEngine, p: JSONObject, modifier: Modifier) {",
+        ) &&
+        calls.includes("if (call.group) GroupVideoScreen(call) else InCallVideoScreen(call)") &&
+        calls.includes('call.kind == "VIDEO" && call.group -> GroupVideoScreen(call)') &&
+        calls.includes("val live = engine.groupVideoLive(id)") &&
+        calls.includes("engine.attachGroupRemote(id, this)") &&
+        !calls.includes("Waiting for video") &&
+        chat.includes(
+          'CallEngine.instance?.startGroupCall(convId, "VIDEO", title, avatarRef ?: "")',
+        ) &&
+        kt("MainActivity.kt").includes(
+          'val kind = intent.getStringExtra("kp_callback_kind") ?: "AUDIO"',
         ),
     );
   }

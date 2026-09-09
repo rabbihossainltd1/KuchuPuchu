@@ -251,9 +251,9 @@ internal fun CallRow(call: JSONObject, onOpenChat: () -> Unit) {
                     .border(1.dp, CircleButtonEdge, CircleShape)
                     .clickable {
                         haptics.tap()
-                        gateMicCamera(video = video && !group) {
+                        gateMicCamera(video = video) {
                             if (group) {
-                                CallEngine.instance?.startGroupCall(otherId, "AUDIO", name, avatarRef ?: "")
+                                CallEngine.instance?.startGroupCall(otherId, if (video) "VIDEO" else "AUDIO", name, avatarRef ?: "")
                             } else {
                                 CallEngine.instance?.startCall(otherId, if (video) "VIDEO" else "AUDIO", name, avatar ?: "")
                             }
@@ -262,7 +262,7 @@ internal fun CallRow(call: JSONObject, onOpenChat: () -> Unit) {
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    if (video && !group) Icons.Filled.Videocam else Icons.Filled.Call,
+                    if (video) Icons.Filled.Videocam else Icons.Filled.Call,
                     contentDescription = "Call back ${if (video) "video" else "voice"}",
                     tint = ActionBlueDeep,
                     modifier = Modifier.size(20.dp),

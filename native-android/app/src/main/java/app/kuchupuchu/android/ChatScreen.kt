@@ -1643,8 +1643,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                 )
             }
             }
-            // Owner round 32 (item 5b): a GROUP gets a voice-call button — the
-            // whole group rings (video for groups lands with item 5c).
+            // Owner round 32 (items 5b/5c): a GROUP gets voice + video call
+            // buttons — the whole group rings.
             if (isGroup && c != null) {
                 HeaderCallBtn(onClick = {
                     gateMicCamera(video = false) {
@@ -1652,6 +1652,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                     }
                 }) {
                     Icon(Icons.Filled.Call, "Group voice call", tint = chatAccent(chatTheme), modifier = Modifier.size(19.dp))
+                }
+                HeaderCallBtn(onClick = {
+                    gateMicCamera(video = true) {
+                        CallEngine.instance?.startGroupCall(convId, "VIDEO", title, avatarRef ?: "")
+                    }
+                }) {
+                    Icon(Icons.Filled.Videocam, "Group video call", tint = chatAccent(chatTheme), modifier = Modifier.size(21.dp))
                 }
             }
             if (!isGroup && c != null && !botChat && !requestOpen) {

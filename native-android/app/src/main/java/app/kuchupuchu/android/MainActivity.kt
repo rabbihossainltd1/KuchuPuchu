@@ -230,7 +230,7 @@ class MainActivity : ComponentActivity() {
                 // Owner round 32 (item 5b): a missed GROUP call's Call back rings
                 // the group again (voice; otherId is the group chat).
                 val group = intent.getBooleanExtra("kp_callback_group", false)
-                val kind = if (group) "AUDIO" else intent.getStringExtra("kp_callback_kind") ?: "AUDIO"
+                val kind = intent.getStringExtra("kp_callback_kind") ?: "AUDIO"
                 ensurePermissions(
                     if (kind == "VIDEO") {
                         listOf(android.Manifest.permission.RECORD_AUDIO, android.Manifest.permission.CAMERA)
