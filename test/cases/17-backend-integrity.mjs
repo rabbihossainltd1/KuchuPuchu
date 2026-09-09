@@ -1276,6 +1276,293 @@ async function main() {
     );
   }
 
+  // ── r32-5b. group audio call: one row per group call, a mesh per pair ─────
+  {
+    const h = await mk();
+    // Signalling fakes: the call room records frames (per-pair offers/answers,
+    // joins, leaves); the user rooms record the ring relays.
+    const callFrames = [];
+    const userFrames = [];
+    h.env.CALL_SIGNAL = {
+      idFromName: (name) => ({ toString: () => name, name }),
+      get: (id) => ({
+        fetch: async (_u, init) => {
+          if (init?.body) callFrames.push({ room: id.name, body: JSON.parse(init.body) });
+          return new Response(JSON.stringify({ ok: true, sent: 1, live: 0 }), { status: 200 });
+        },
+      }),
+    };
+    h.env.CHAT_ROOM = {
+      idFromName: (name) => ({ toString: () => name, name }),
+      get: (id) => ({
+        fetch: async (_u, init) => {
+          if (init?.body) userFrames.push({ room: id.name, body: JSON.parse(init.body) });
+          return new Response(JSON.stringify({ ok: true, sent: 0 }), { status: 200 });
+        },
+      }),
+    };
+    const A = await h.reg("gc-a");
+    const B = await h.reg("gc-b");
+    const C = await h.reg("gc-c");
+    const D = await h.reg("gc-d");
+    const soloConv = (await h.call("POST", "/api/conversations", { userId: B.user.id }, A.token))
+      .json.conversation;
+    await h.call("POST", "/api/conversations", { userId: C.user.id }, A.token);
+    const g = (
+      await h.call(
+        "POST",
+        "/api/conversations/group",
+        { title: "gc", memberIds: [B.user.id, C.user.id] },
+        A.token,
+      )
+    ).json.conversation;
+    const solo = await h.call(
+      "POST",
+      "/api/calls/group",
+      { conversationId: soloConv.id, kind: "AUDIO" },
+      A.token,
+    );
+    const outsider = await h.call(
+      "POST",
+      "/api/calls/group",
+      { conversationId: g.id, kind: "AUDIO" },
+      D.token,
+    );
+    const started = await h.call(
+      "POST",
+      "/api/calls/group",
+      { conversationId: g.id, kind: "AUDIO" },
+      A.token,
+    );
+    const call = started.json.call;
+    // The ring relay waits out the 700 ms anti-phantom gate.
+    await new Promise((r) => setTimeout(r, 900));
+    await h.ctx.drain();
+    const rung = userFrames.filter((f) => f.body.type === "call" && f.body.callId === call?.id);
+    check(
+      "r32-5b: POST /api/calls/group (member only, GROUP only) opens ONE RINGING row with group:true, the starter JOINED and every other member RINGING; each of them is rung on their user room with fromName = the starter + the group name",
+      started.status === 201 &&
+        call?.group === true &&
+        call?.status === "RINGING" &&
+        call?.calleeId === "" &&
+        call?.title === "gc" &&
+        call?.participants?.length === 3 &&
+        call.participants.find((p) => p.id === A.user.id)?.state === "JOINED" &&
+        call.participants.find((p) => p.id === B.user.id)?.state === "RINGING" &&
+        call.participants.find((p) => p.id === C.user.id)?.state === "RINGING" &&
+        rung.length === 2 &&
+        rung.every((f) => f.body.group === true && f.body.groupName === "gc") &&
+        rung.some((f) => f.room === `user:${B.user.id}`) &&
+        rung.some((f) => f.room === `user:${C.user.id}`) &&
+        outsider.status === 403 &&
+        solo.status === 400,
+      JSON.stringify({
+        s: started.status,
+        call: call && { g: call.group, st: call.status, n: call.participants?.length },
+        rung: rung.length,
+        outsider: outsider.status,
+        solo: solo.status,
+      }),
+    );
+    // The second start is a join, not a second ring.
+    const again = await h.call(
+      "POST",
+      "/api/calls/group",
+      { conversationId: g.id, kind: "AUDIO" },
+      B.token,
+    );
+    // /active: B sees it as incoming after the gate; D (not a member) sees nothing.
+    const activeB = await h.call("GET", "/api/calls/active", undefined, B.token);
+    const activeD = await h.call("GET", "/api/calls/active", undefined, D.token);
+    const rowB = activeB.json.items?.find((c) => c.id === call.id);
+    check(
+      "r32-5b: a running group call is returned (existing:true) instead of a second ring; /api/calls/active lists it for every member as incoming with the participants, and not at all for a non-member",
+      again.status === 200 &&
+        again.json.existing === true &&
+        again.json.call?.id === call.id &&
+        rowB?.group === true &&
+        rowB?.incoming === true &&
+        rowB?.myState === "RINGING" &&
+        rowB?.other?.id === A.user.id &&
+        !(activeD.json.items ?? []).some((c) => c.id === call.id),
+      JSON.stringify({ again: again.status, rowB: rowB && { g: rowB.group, my: rowB.myState } }),
+    );
+    // B joins → ACTIVE; the starter gets the call_answer nudge (push path) and
+    // the room hears `joined`. Then B offers to A through /peer, A answers.
+    const joinB = await h.call("POST", `/api/calls/${call.id}/join`, {}, B.token);
+    const offer = await h.call(
+      "POST",
+      `/api/calls/${call.id}/peer`,
+      { to: A.user.id, sdp: "v=0 offer-b-to-a" },
+      B.token,
+    );
+    const peersA = await h.call("GET", `/api/calls/${call.id}/peer`, undefined, A.token);
+    const answer = await h.call(
+      "POST",
+      `/api/calls/${call.id}/peer`,
+      { to: B.user.id, sdp: "v=0 answer-a-to-b", answer: true },
+      A.token,
+    );
+    const noOffer = await h.call(
+      "POST",
+      `/api/calls/${call.id}/peer`,
+      { to: C.user.id, sdp: "v=0 stray", answer: true },
+      A.token,
+    );
+    const peersB = await h.call("GET", `/api/calls/${call.id}/peer`, undefined, B.token);
+    const pairB = peersB.json.items?.find((p) => p.from === B.user.id && p.to === A.user.id);
+    check(
+      "r32-5b: /join flips the row ACTIVE (started_at set) and marks the joiner JOINED; /peer stores the (from → to) offer, the peer reads it, answers it in place (answer:true), and answering a pair that never offered is 409 NO_OFFER",
+      joinB.status === 200 &&
+        joinB.json.call?.status === "ACTIVE" &&
+        !!joinB.json.call?.startedAt &&
+        joinB.json.call.participants.find((p) => p.id === B.user.id)?.state === "JOINED" &&
+        offer.status === 201 &&
+        peersA.json.items?.some(
+          (p) => p.from === B.user.id && p.to === A.user.id && p.offerSdp === "v=0 offer-b-to-a",
+        ) &&
+        answer.status === 201 &&
+        pairB?.answerSdp === "v=0 answer-a-to-b" &&
+        noOffer.status === 409 &&
+        noOffer.json.error?.code === "NO_OFFER" &&
+        callFrames.some((f) => f.body.type === "call" && f.body.joined === B.user.id) &&
+        callFrames.some(
+          (f) => f.body.type === "peer" && f.body.from === B.user.id && f.body.to === A.user.id,
+        ),
+      JSON.stringify({
+        join: joinB.status,
+        st: joinB.json.call?.status,
+        offer: offer.status,
+        answer: answer.status,
+        pairB,
+        noOffer: noOffer.status,
+      }),
+    );
+    // ICE is addressed per peer: A's candidate for B is read by B only.
+    const iceToB = await h.call(
+      "POST",
+      `/api/calls/${call.id}/ice`,
+      {
+        to: B.user.id,
+        candidate: { candidate: "candidate:1 1 UDP a-to-b", sdpMid: "0", sdpMLineIndex: 0 },
+      },
+      A.token,
+    );
+    const iceNoTarget = await h.call(
+      "POST",
+      `/api/calls/${call.id}/ice`,
+      { candidate: { candidate: "candidate:2 1 UDP no-target", sdpMid: "0", sdpMLineIndex: 0 } },
+      A.token,
+    );
+    const iceB = await h.call("GET", `/api/calls/${call.id}/ice`, undefined, B.token);
+    const iceC = await h.call("GET", `/api/calls/${call.id}/ice`, undefined, C.token);
+    const iceD = await h.call("GET", `/api/calls/${call.id}/ice`, undefined, D.token);
+    check(
+      "r32-5b: group ICE needs a peer (`to`); GET /ice hands a member only the candidates addressed to them (with `from`), and a non-member is refused",
+      iceToB.status === 201 &&
+        iceNoTarget.status === 400 &&
+        iceB.json.items?.length === 1 &&
+        iceB.json.items[0].from === A.user.id &&
+        iceB.json.items[0].candidate.candidate === "candidate:1 1 UDP a-to-b" &&
+        (iceC.json.items ?? []).length === 0 &&
+        iceD.status === 403,
+      JSON.stringify({
+        ice: iceToB.status,
+        none: iceNoTarget.status,
+        b: iceB.json.items?.length,
+        c: iceC.json.items?.length,
+        d: iceD.status,
+      }),
+    );
+    // C declines (personal): the call goes on for A + B. B leaves: A is alone →
+    // the row ENDS with a duration and the GROUP chat gets the bubble.
+    const declineC = await h.call("POST", `/api/calls/${call.id}/decline`, {}, C.token);
+    const stillOn = await h.call("GET", "/api/calls/active", undefined, A.token);
+    const activeC = await h.call("GET", "/api/calls/active", undefined, C.token);
+    const leaveB = await h.call("POST", `/api/calls/${call.id}/end`, {}, B.token);
+    const goneA = await h.call("GET", "/api/calls/active", undefined, A.token);
+    const rowNow = await h
+      .q("SELECT status, started_at, ended_at FROM calls WHERE id = ?", call.id)
+      .first();
+    const bubble = (
+      await h.call("GET", `/api/conversations/${g.id}/messages`, undefined, C.token)
+    ).json.items?.find((m) => m.kind === "CALL");
+    const histB = await h.call("GET", "/api/calls/history", undefined, B.token);
+    const histRow = histB.json.items?.find((c) => c.id === call.id);
+    check(
+      "r32-5b: a member's decline only drops THEM (the call stays ACTIVE for the rest, off their own /active); when the second-to-last member leaves the row ENDS, the CALL bubble lands in the group chat (meta.group) and the call shows in each member's history with the group title",
+      declineC.status === 200 &&
+        stillOn.json.items?.some((c) => c.id === call.id && c.status === "ACTIVE") &&
+        !(activeC.json.items ?? []).some((c) => c.id === call.id) &&
+        leaveB.status === 200 &&
+        !(goneA.json.items ?? []).some((c) => c.id === call.id) &&
+        rowNow?.status === "ENDED" &&
+        !!rowNow?.ended_at &&
+        bubble?.body?.startsWith("Group voice call") &&
+        bubble?.meta?.group === true &&
+        histRow?.group === true &&
+        histRow?.title === "gc" &&
+        histRow?.status === "ENDED",
+      JSON.stringify({
+        declineC: declineC.status,
+        row: rowNow,
+        bubble: bubble?.body,
+        hist: histRow && { g: histRow.group, t: histRow.title, s: histRow.status },
+      }),
+    );
+    // Nobody picks up: the starter cancels → MISSED for everyone rung, one
+    // bubble in the group; the reaper does the same for an abandoned ring.
+    const second = (
+      await h.call("POST", "/api/calls/group", { conversationId: g.id, kind: "AUDIO" }, A.token)
+    ).json.call;
+    await h
+      .q(
+        "UPDATE calls SET created_at = ? WHERE id = ?",
+        new Date(Date.now() - 8_000).toISOString(),
+        second.id,
+      )
+      .run();
+    const cancel = await h.call("POST", `/api/calls/${second.id}/end`, {}, A.token);
+    const secondRow = await h.q("SELECT status FROM calls WHERE id = ?", second.id).first();
+    const secondMembers = await h
+      .q("SELECT user_id, state FROM call_members WHERE call_id = ? ORDER BY user_id", second.id)
+      .all();
+    const missedBubble = (
+      await h.call("GET", `/api/conversations/${g.id}/messages`, undefined, B.token)
+    ).json.items?.filter((m) => m.kind === "CALL" && /Missed group voice call/.test(m.body || ""));
+    const third = (
+      await h.call("POST", "/api/calls/group", { conversationId: g.id, kind: "AUDIO" }, A.token)
+    ).json.call;
+    await h
+      .q(
+        "UPDATE calls SET created_at = ? WHERE id = ?",
+        new Date(Date.now() - 120_000).toISOString(),
+        third.id,
+      )
+      .run();
+    await h.worker.scheduled({ scheduledTime: Date.now(), cron: "* * * * *" }, h.env, h.ctx);
+    await h.ctx.drain();
+    const thirdRow = await h.q("SELECT status FROM calls WHERE id = ?", third.id).first();
+    const activeAfter = await h.call("GET", "/api/calls/active", undefined, B.token);
+    check(
+      "r32-5b: the starter cancelling an unanswered group ring = MISSED (rung members MISSED, starter LEFT, one 'Missed group voice call' bubble); the 60 s reaper misses an abandoned group ring the same way and it leaves everyone's /active",
+      cancel.status === 200 &&
+        secondRow?.status === "MISSED" &&
+        secondMembers.results?.find((m) => m.user_id === B.user.id)?.state === "MISSED" &&
+        secondMembers.results?.find((m) => m.user_id === A.user.id)?.state === "LEFT" &&
+        missedBubble?.length === 1 &&
+        thirdRow?.status === "MISSED" &&
+        !(activeAfter.json.items ?? []).some((c) => c.id === third.id || c.id === second.id),
+      JSON.stringify({
+        cancel: cancel.status,
+        second: secondRow,
+        members: secondMembers.results,
+        missed: missedBubble?.length,
+        third: thirdRow,
+      }),
+    );
+  }
+
   process.stdout.write(lines.join("\n") + "\n");
   const broken = lines.filter((l) => l.startsWith("  BROKEN")).length;
   process.exit(broken ? 1 : 0);

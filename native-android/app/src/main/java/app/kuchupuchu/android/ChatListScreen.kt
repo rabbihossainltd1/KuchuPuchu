@@ -737,7 +737,9 @@ fun HiddenChatsScreen(nav: NavController) {
                     }
                     items(hiddenCalls, key = { "call_" + it.optString("id") }) { call ->
                         CallRow(call) {
-                            ScreenStore.convIdForUser[callPeerId(call)]?.let { nav.navigate("chat/$it") }
+                            val gid = if (call.optBoolean("group")) call.optText("conversationId") else ""
+                            if (gid.isNotBlank()) nav.navigate("chat/$gid")
+                            else ScreenStore.convIdForUser[callPeerId(call)]?.let { nav.navigate("chat/$it") }
                         }
                     }
                 }

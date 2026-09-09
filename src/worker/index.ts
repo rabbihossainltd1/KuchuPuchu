@@ -1906,6 +1906,14 @@ async function ensureSchema(db: D1Database) {
       started_at TEXT, ended_at TEXT, created_at TEXT NOT NULL
     )`,
     `CREATE TABLE IF NOT EXISTS call_ice (call_id TEXT NOT NULL, sender_id TEXT NOT NULL, candidate_json TEXT NOT NULL, created_at TEXT NOT NULL)`,
+    // Owner round 32 (item 5b): GROUP calls. One `calls` row per group call
+    // (callee_id = '' marks it), one call_members row per invited member
+    // (state RINGING → JOINED / LEFT / DECLINED / MISSED). Media is a mesh:
+    // every pair of JOINED members holds its own peer connection, so SDP
+    // and ICE are exchanged per (from, to) pair in call_peers / call_ice.
+    `CREATE TABLE IF NOT EXISTS call_members (call_id TEXT NOT NULL, user_id TEXT NOT NULL, state TEXT NOT NULL, joined_at TEXT, created_at TEXT NOT NULL, PRIMARY KEY (call_id, user_id))`,
+    `CREATE TABLE IF NOT EXISTS call_peers (call_id TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, offer_sdp TEXT, answer_sdp TEXT, updated_at TEXT NOT NULL, PRIMARY KEY (call_id, from_id, to_id))`,
+    `CREATE INDEX IF NOT EXISTS idx_call_members_user ON call_members(user_id, created_at)`,
     // "X is typing" pings: one row per (conversation, user), overwritten on
     // every keystroke batch and expired by age on read (no cleanup job).
     `CREATE TABLE IF NOT EXISTS typing (conv_id TEXT NOT NULL, user_id TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (conv_id, user_id))`,
@@ -1972,6 +1980,13 @@ async function ensureSchema(db: D1Database) {
   await runCatchingSql(db, `ALTER TABLE calls ADD COLUMN reanswer_sdp TEXT`);
   // Owner round 31 item 19: per-user live media flags ({ [userId]: { camera, screen } }).
   await runCatchingSql(db, `ALTER TABLE calls ADD COLUMN media_json TEXT`);
+  // Owner round 32 (item 5b): who an ICE candidate is FOR. NULL on a 1:1
+  // call (the only other participant); the peer's id on a group call.
+  await runCatchingSql(db, `ALTER TABLE call_ice ADD COLUMN target_id TEXT`);
+  await runCatchingSql(
+    db,
+    `CREATE INDEX IF NOT EXISTS idx_call_ice_target ON call_ice(call_id, target_id, created_at)`,
+  );
   await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN disappear_seconds INTEGER`);
   await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN theme TEXT`);
   // Owner round 31 (item 26): "Hide chat" — per-member, like `muted`.
@@ -3442,7 +3457,16 @@ async function reapStaleCalls(env: Env, db: D1Database, ctx: ExecutionContext): 
       row.id,
     );
     if (changed > 0) {
-      await logCallEvent(db, row.caller_id, row.callee_id, row.kind, "ENDED");
+      if (row.callee_id === "") {
+        await run(
+          db,
+          "UPDATE call_members SET state = 'LEFT' WHERE call_id = ? AND state IN ('RINGING', 'JOINED')",
+          row.id,
+        );
+        await logGroupCallEvent(db, row.id, "ENDED");
+      } else {
+        await logCallEvent(db, row.caller_id, row.callee_id, row.kind, "ENDED");
+      }
       // Both sides hear it instantly; a frozen phone clears on its next poll.
       ctx.waitUntil(
         broadcastCallEvent(env, row.id, {
@@ -3455,6 +3479,47 @@ async function reapStaleCalls(env: Env, db: D1Database, ctx: ExecutionContext): 
   }
   let reaped = 0;
   for (const row of stale) {
+    // Owner round 32 (item 5b): a GROUP call nobody joined within a minute
+    // is a missed group call — the starter's row ends, every still-ringing
+    // member is marked MISSED and the group chat gets the bubble.
+    if (row.callee_id === "") {
+      const rung = (await callMembers(db, row.id)).filter((m) => m.state === "RINGING");
+      const changed = await run(
+        db,
+        "UPDATE calls SET status = 'MISSED', ended_at = ? WHERE id = ? AND status = 'RINGING'",
+        nowIso(),
+        row.id,
+      );
+      if (changed > 0) {
+        reaped++;
+        await run(
+          db,
+          "UPDATE call_members SET state = 'MISSED' WHERE call_id = ? AND state = 'RINGING'",
+          row.id,
+        );
+        await run(
+          db,
+          "UPDATE call_members SET state = 'LEFT' WHERE call_id = ? AND state = 'JOINED'",
+          row.id,
+        );
+        await logGroupCallEvent(db, row.id, "MISSED");
+        const full = await one<CallRow>(db, "SELECT * FROM calls WHERE id = ?", row.id);
+        if (full) {
+          ctx.waitUntil(
+            notifyMissedGroupCall(
+              env,
+              db,
+              full,
+              rung.map((m) => m.user_id),
+            ),
+          );
+        }
+        ctx.waitUntil(
+          broadcastCallEvent(env, row.id, { type: "state", callId: row.id, status: "MISSED" }),
+        );
+      }
+      continue;
+    }
     // Conditional UPDATE + row count: this endpoint is polled by every client,
     // so two simultaneous polls used to each insert their own "Missed call"
     // bubble for the same call.
@@ -3590,6 +3655,183 @@ function clockLabel(seconds: number) {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+/* ---------------- group calls (owner round 32, item 5b) ---------------- */
+
+type CallMemberRow = {
+  user_id: string;
+  state: string;
+  joined_at: string | null;
+};
+
+/** A group call is a `calls` row whose callee_id is empty; conv_id is the group. */
+const isGroupCall = (row: { callee_id: string }) => row.callee_id === "";
+
+async function callMembers(db: D1Database, callId: string) {
+  return all<CallMemberRow>(
+    db,
+    "SELECT user_id, state, joined_at FROM call_members WHERE call_id = ? ORDER BY created_at ASC",
+    callId,
+  );
+}
+
+/** May `uid` touch this call's signalling? 1:1 → caller/callee; group → invited member. */
+async function callParticipant(db: D1Database, row: CallRow, uid: string) {
+  if (row.caller_id === uid || row.callee_id === uid) return true;
+  if (!isGroupCall(row)) return false;
+  return !!(await one(
+    db,
+    "SELECT user_id FROM call_members WHERE call_id = ? AND user_id = ?",
+    row.id,
+    uid,
+  ));
+}
+
+/**
+ * The CALL bubble for a group call lands in the GROUP chat (a 1:1 call's
+ * goes to the pair chat via logCallEvent). Sender = the member who started
+ * it, so it renders on their right like any other outgoing call log.
+ */
+async function logGroupCallEvent(db: D1Database, callId: string, status: string) {
+  const row = await one<CallRow>(db, "SELECT * FROM calls WHERE id = ?", callId);
+  if (!row || !row.conv_id) return;
+  const seconds =
+    status === "ENDED" && row.started_at
+      ? Math.max(
+          0,
+          Math.round((Date.parse(row.ended_at ?? nowIso()) - Date.parse(row.started_at)) / 1000),
+        )
+      : 0;
+  const video = row.kind === "VIDEO";
+  const clock = seconds > 0 ? ` · ${clockLabel(seconds)}` : "";
+  const label =
+    status === "ENDED"
+      ? `Group ${video ? "video" : "voice"} call${clock}`
+      : `Missed group ${video ? "video" : "voice"} call`;
+  const mid = id();
+  const created = nowIso();
+  await run(
+    db,
+    "INSERT INTO messages (id, conv_id, sender_id, kind, body, meta_json, created_at) VALUES (?, ?, ?, 'CALL', ?, ?, ?)",
+    mid,
+    row.conv_id,
+    row.caller_id,
+    label,
+    JSON.stringify({ callKind: row.kind, status, seconds, group: true }),
+    created,
+  );
+  await run(
+    db,
+    "UPDATE conversations SET last_message = ?, last_message_at = ? WHERE id = ?",
+    label,
+    created,
+    row.conv_id,
+  );
+}
+
+/**
+ * Ring one group member: the same two paths a 1:1 ring uses (the user room
+ * relay for a live process, FCM data + a payload card for a dead one), under
+ * the same 700 ms still-RINGING gate. `fromName` is the STARTER (the card
+ * reads "Rabbi is calling"), `groupName`/`convId` tell the app it is a group.
+ */
+async function ringGroupMember(
+  env: Env,
+  db: D1Database,
+  callId: string,
+  kind: string,
+  convId: string,
+  starter: UserRow,
+  groupName: string,
+  memberId: string,
+) {
+  await broadcastRoomEvent(env, `user:${memberId}`, {
+    type: "call",
+    callId,
+    kind,
+    fromId: starter.id,
+    fromName: starter.display_name,
+    group: true,
+    groupName,
+    convId,
+  });
+  const live = await pokeUserConversation(env, memberId, convId, nowIso());
+  await pushToUser(
+    env,
+    db,
+    memberId,
+    {
+      type: "call",
+      callId,
+      kind,
+      fromName: starter.display_name,
+      fromId: starter.id,
+      group: "1",
+      groupName,
+      convId,
+      kp_call: callId,
+    },
+    live <= 0
+      ? {
+          title: `${starter.display_name} is calling`,
+          body:
+            kind === "VIDEO"
+              ? `Group video call · ${groupName}`
+              : `Group voice call · ${groupName}`,
+          channel: "kp_calls_v5",
+          tag: callTag(callId),
+        }
+      : undefined,
+  );
+}
+
+/**
+ * Missed GROUP call: every member who was still ringing gets the same
+ * missed_call push a 1:1 callee gets (same tag as the ring card, so the OS
+ * replaces a stuck "X is calling" card). `kp_callback` is the GROUP chat —
+ * Call back starts a new group call there.
+ */
+async function notifyMissedGroupCall(env: Env, db: D1Database, row: CallRow, members: string[]) {
+  if (!row.conv_id || !members.length) return;
+  const convId = row.conv_id;
+  const starter = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row.caller_id);
+  const conv = await one<{ title: string | null }>(
+    db,
+    "SELECT title FROM conversations WHERE id = ?",
+    convId,
+  );
+  const name = starter?.display_name ?? "KuchuPuchu";
+  const groupName = conv?.title || "Group";
+  const body = row.kind === "VIDEO" ? "Missed group video call" : "Missed group voice call";
+  await Promise.all(
+    members.map(async (m) => {
+      const live = await pokeUserConversation(env, m, convId, nowIso());
+      await pushToUser(
+        env,
+        db,
+        m,
+        {
+          type: "missed_call",
+          callId: row.id,
+          kind: row.kind,
+          fromName: name,
+          group: "1",
+          groupName,
+          kp_callback: convId,
+          kp_chat: convId,
+        },
+        live <= 0
+          ? {
+              title: `Missed call · ${groupName}`,
+              body,
+              channel: MISSED_CALL_CHANNEL,
+              tag: callTag(row.id),
+            }
+          : undefined,
+      );
+    }),
+  );
 }
 
 /** Serves an inline dataUrl (data:image/...;base64,xxx) as real bytes. */
@@ -4627,13 +4869,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   const wsCallMatch = path.match(/^\/ws\/call\/([^/]+)$/);
   if (wsCallMatch && method === "GET" && env.CALL_SIGNAL) {
     const callId = wsCallMatch[1]!;
-    const row = await one<{ caller_id: string; callee_id: string }>(
-      db,
-      "SELECT caller_id, callee_id FROM calls WHERE id = ?",
-      callId,
-    );
+    const row = await one<CallRow>(db, "SELECT * FROM calls WHERE id = ?", callId);
     if (!row) fail(404, "Call not found.");
-    if (row.caller_id !== uid && row.callee_id !== uid) fail(403, "Not your call.", "FORBIDDEN");
+    // Owner round 32 (item 5b): a group call's room admits every invited member.
+    if (!(await callParticipant(db, row, uid))) fail(403, "Not your call.", "FORBIDDEN");
     const stub = env.CALL_SIGNAL.get(env.CALL_SIGNAL.idFromName(callId));
     return stub.fetch(
       new Request("https://call-signal/connect", {
@@ -7417,6 +7656,208 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     );
   }
 
+  // Owner round 32 (item 5b): start a GROUP call. One row (callee_id = '')
+  // per call, one call_members row per member; every other member rings
+  // exactly like a 1:1 callee (relay + FCM, 700 ms anti-phantom gate).
+  // Media is a mesh — the starter has no offer yet; each pair negotiates
+  // through /peer when the second side joins.
+  if (path === "/api/calls/group" && method === "POST") {
+    const convId = String(body.conversationId || "");
+    const kind = body.kind === "VIDEO" ? "VIDEO" : "AUDIO";
+    if (!convId) fail(400, "Bad conversation.");
+    const { conv } = await requireMember(db, convId, uid);
+    if (conv.kind !== "GROUP") fail(400, "Only groups can be called this way.");
+    const running = await one<CallRow>(
+      db,
+      "SELECT * FROM calls WHERE conv_id = ? AND callee_id = '' AND status IN ('RINGING', 'ACTIVE') AND julianday(created_at) > julianday('now', '-2 hours') ORDER BY created_at DESC LIMIT 1",
+      convId,
+    );
+    if (running) {
+      // A call is already going in this group: join it instead of a second ring.
+      return json({ call: await groupCallFrom(db, running, uid), existing: true });
+    }
+    const members = (await membersOf(db, convId)).map((m) => m.user_id).filter((m) => m !== uid);
+    const invited: string[] = [];
+    for (const m of members) {
+      if (m === OFFICIAL_BOT_ID || m === AI_BOT_ID) continue;
+      if (await blockedBetween(db, uid, m)) continue;
+      invited.push(m);
+    }
+    if (!invited.length) fail(400, "No one to call.", "NO_MEMBERS");
+    const callId = id();
+    const created = nowIso();
+    await run(
+      db,
+      "INSERT INTO calls (id, conv_id, caller_id, callee_id, kind, status, created_at) VALUES (?, ?, ?, '', ?, 'RINGING', ?)",
+      callId,
+      convId,
+      uid,
+      kind,
+      created,
+    );
+    await db.batch([
+      db
+        .prepare(
+          "INSERT INTO call_members (call_id, user_id, state, joined_at, created_at) VALUES (?, ?, 'JOINED', ?, ?)",
+        )
+        .bind(callId, uid, created, created),
+      ...invited.map((m) =>
+        db
+          .prepare(
+            "INSERT INTO call_members (call_id, user_id, state, created_at) VALUES (?, ?, 'RINGING', ?)",
+          )
+          .bind(callId, m, created),
+      ),
+    ]);
+    const groupName = conv.title || "Group";
+    ctx.waitUntil(
+      (async () => {
+        await new Promise((r) => setTimeout(r, 700));
+        const fresh = await one<{ status: string }>(
+          db,
+          "SELECT status FROM calls WHERE id = ?",
+          callId,
+        );
+        if (!fresh || fresh.status !== "RINGING") return;
+        await Promise.all(
+          invited.map((m) => ringGroupMember(env, db, callId, kind, convId, me, groupName, m)),
+        );
+      })(),
+    );
+    ctx.waitUntil(
+      broadcastCallEvent(env, callId, {
+        type: "call",
+        callId,
+        status: "RINGING",
+        kind,
+        callerId: uid,
+      }),
+    );
+    const started = (await one<CallRow>(db, "SELECT * FROM calls WHERE id = ?", callId))!;
+    return json({ call: await groupCallFrom(db, started, uid) }, 201);
+  }
+
+  // Owner round 32 (item 5b): a rung member picks up. The call goes ACTIVE
+  // on the first join; later joins just add a member. The joiner then
+  // offers to every member already JOINED (the app does that via /peer).
+  const joinMatch = path.match(/^\/api\/calls\/([^/]+)\/join$/);
+  if (joinMatch && method === "POST") {
+    const callId = joinMatch[1]!;
+    const row = await one<CallRow>(db, "SELECT * FROM calls WHERE id = ?", callId);
+    if (!row) fail(404, "Call not found.");
+    if (!isGroupCall(row)) fail(400, "Not a group call.");
+    if (!(await callParticipant(db, row, uid))) fail(403, "Not your call.", "FORBIDDEN");
+    if (row.status !== "RINGING" && row.status !== "ACTIVE") {
+      return json({ call: await groupCallFrom(db, row, uid) });
+    }
+    const at = nowIso();
+    await run(
+      db,
+      "UPDATE call_members SET state = 'JOINED', joined_at = ? WHERE call_id = ? AND user_id = ? AND state != 'JOINED'",
+      at,
+      callId,
+      uid,
+    );
+    const flipped = await run(
+      db,
+      "UPDATE calls SET status = 'ACTIVE', started_at = ? WHERE id = ? AND status = 'RINGING'",
+      at,
+      callId,
+    );
+    const fresh = (await one<CallRow>(db, "SELECT * FROM calls WHERE id = ?", callId))!;
+    ctx.waitUntil(
+      broadcastCallEvent(env, callId, {
+        type: "call",
+        callId,
+        status: fresh.status,
+        joined: uid,
+      }),
+    );
+    if (flipped > 0) {
+      ctx.waitUntil(
+        pushToUser(env, db, row.caller_id, { type: "call_answer", callId, kind: row.kind }),
+      );
+    }
+    return json({ call: await groupCallFrom(db, fresh, uid) });
+  }
+
+  // Owner round 32 (item 5b): per-pair SDP for the mesh. POST { to, sdp,
+  // answer? } stores an offer (from → to) or the answer to the offer that
+  // came the other way; GET returns every pair row that involves me.
+  const peerMatch = path.match(/^\/api\/calls\/([^/]+)\/peer$/);
+  if (peerMatch) {
+    const callId = peerMatch[1]!;
+    const row = await one<CallRow>(db, "SELECT * FROM calls WHERE id = ?", callId);
+    if (!row) fail(404, "Call not found.");
+    if (!isGroupCall(row)) fail(400, "Not a group call.");
+    if (!(await callParticipant(db, row, uid))) fail(403, "Not your call.", "FORBIDDEN");
+    if (method === "POST") {
+      const to = String(body.to || "");
+      const sdp = String(body.sdp ?? "");
+      if (!to || to === uid) fail(400, "Bad peer.");
+      if (!sdp) fail(400, "Missing sdp.");
+      if (!(await callParticipant(db, row, to))) fail(404, "Peer not on this call.");
+      const at = nowIso();
+      if (body.answer === true) {
+        // Answering THEIR offer: the row is keyed (them → me).
+        const changed = await run(
+          db,
+          "UPDATE call_peers SET answer_sdp = ?, updated_at = ? WHERE call_id = ? AND from_id = ? AND to_id = ?",
+          sdp.slice(0, 60_000),
+          at,
+          callId,
+          to,
+          uid,
+        );
+        if (changed === 0) fail(409, "No offer to answer.", "NO_OFFER");
+      } else {
+        await run(
+          db,
+          "INSERT INTO call_peers (call_id, from_id, to_id, offer_sdp, answer_sdp, updated_at) VALUES (?, ?, ?, ?, NULL, ?) ON CONFLICT(call_id, from_id, to_id) DO UPDATE SET offer_sdp = excluded.offer_sdp, answer_sdp = NULL, updated_at = excluded.updated_at",
+          callId,
+          uid,
+          to,
+          sdp.slice(0, 60_000),
+          at,
+        );
+      }
+      ctx.waitUntil(
+        broadcastCallEvent(env, callId, {
+          type: "peer",
+          callId,
+          from: uid,
+          to,
+          answer: body.answer === true,
+        }),
+      );
+      return json({ ok: true }, 201);
+    }
+    if (method === "GET") {
+      const rows = await all<{
+        from_id: string;
+        to_id: string;
+        offer_sdp: string | null;
+        answer_sdp: string | null;
+        updated_at: string;
+      }>(
+        db,
+        "SELECT from_id, to_id, offer_sdp, answer_sdp, updated_at FROM call_peers WHERE call_id = ? AND (from_id = ? OR to_id = ?) ORDER BY updated_at ASC",
+        callId,
+        uid,
+        uid,
+      );
+      return json({
+        items: rows.map((r) => ({
+          from: r.from_id,
+          to: r.to_id,
+          offerSdp: r.offer_sdp,
+          answerSdp: r.answer_sdp,
+          updatedAt: r.updated_at,
+        })),
+      });
+    }
+  }
+
   if (path === "/api/calls/active" && method === "GET") {
     // Reap stale RINGING calls + fire their missed-call pushes. Also runs as a
     // one-minute cron (see the `scheduled` handler) so the transition happens
@@ -7429,12 +7870,31 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       uid,
       uid,
     );
+    // Owner round 32 (item 5b): group calls I am invited to / on. A member
+    // who LEFT (or declined) is done with that call — it stays off their list
+    // even while the others talk on.
+    const groupRows = await all<CallRow & { my_state: string }>(
+      db,
+      "SELECT c.*, m.state AS my_state FROM calls c JOIN call_members m ON m.call_id = c.id WHERE m.user_id = ? AND c.status IN ('RINGING', 'ACTIVE') AND m.state IN ('RINGING', 'JOINED') ORDER BY c.created_at DESC",
+      uid,
+    );
     const othersById = await usersById(
       db,
       rows.map((row) => (row.caller_id === uid ? row.callee_id : row.caller_id)),
     );
-    const items = [];
+    const items: unknown[] = [];
+    for (const row of groupRows) {
+      if (
+        row.status === "RINGING" &&
+        row.caller_id !== uid &&
+        Date.now() - Date.parse(row.created_at) < PHANTOM_RING_MS
+      ) {
+        continue;
+      }
+      items.push(await groupCallFrom(db, row, uid));
+    }
     for (const row of rows) {
+      if (isGroupCall(row)) continue;
       // Anti-phantom grace: a RINGING call younger than 1.6s is invisible to
       // the CALLEE. The push carries the same gate, so a call cancelled
       // before it ever rang cannot ring the other phone from EITHER path
@@ -7453,10 +7913,19 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   }
 
   if (path === "/api/calls/history" && method === "GET") {
-    const rows = await all<CallRow>(
+    const rows = (
+      await all<CallRow>(
+        db,
+        "SELECT * FROM calls WHERE (caller_id = ? OR callee_id = ?) AND status IN ('ENDED', 'DECLINED', 'MISSED') ORDER BY created_at DESC LIMIT 100",
+        uid,
+        uid,
+      )
+    ).filter((row) => !isGroupCall(row));
+    // Owner round 32 (item 5b): finished group calls I was part of ride the
+    // same list (light rows: group name + picture, no per-member users).
+    const groupRows = await all<CallRow & { my_state: string }>(
       db,
-      "SELECT * FROM calls WHERE (caller_id = ? OR callee_id = ?) AND status IN ('ENDED', 'DECLINED', 'MISSED') ORDER BY created_at DESC LIMIT 100",
-      uid,
+      "SELECT c.*, m.state AS my_state FROM calls c JOIN call_members m ON m.call_id = c.id WHERE m.user_id = ? AND c.status IN ('ENDED', 'MISSED') ORDER BY c.created_at DESC LIMIT 100",
       uid,
     );
     // One batched usersById() instead of a per-row SELECT — the Calls tab was
@@ -7465,14 +7934,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       db,
       rows.map((row) => (row.caller_id === uid ? row.callee_id : row.caller_id)),
     );
-    const items = rows.map((row) =>
+    const items: Array<{ createdAt: string }> = rows.map((row) =>
       callHistoryFrom(
         row,
         uid,
         others.get(row.caller_id === uid ? row.callee_id : row.caller_id) ?? null,
       ),
     );
-    return json({ items });
+    for (const row of groupRows) items.push(await groupCallFrom(db, row, uid, true));
+    items.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+    return json({ items: items.slice(0, 100) });
   }
 
   const answerMatch = path.match(/^\/api\/calls\/([^/]+)\/answer$/);
@@ -7511,6 +7982,24 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const callId = declineMatch[1]!;
     const row = await one<CallRow>(db, "SELECT * FROM calls WHERE id = ?", callId);
     if (!row) fail(404, "Call not found.");
+    // Owner round 32 (item 5b): declining a GROUP ring is personal — this
+    // member drops out (state DECLINED); the call itself keeps ringing the
+    // others and ends only when nobody is left (see /end).
+    if (isGroupCall(row)) {
+      if (row.status === "RINGING" || row.status === "ACTIVE") {
+        await run(
+          db,
+          "UPDATE call_members SET state = 'DECLINED' WHERE call_id = ? AND user_id = ? AND state = 'RINGING'",
+          callId,
+          uid,
+        );
+        await settleGroupCall(env, db, ctx, callId);
+        ctx.waitUntil(
+          broadcastCallEvent(env, callId, { type: "call", callId, status: row.status, left: uid }),
+        );
+      }
+      return json({ ok: true });
+    }
     if (row.status === "RINGING" && row.callee_id === uid) {
       await run(
         db,
@@ -7531,7 +8020,32 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (!row) fail(404, "Call not found.");
     // Only the two people on the call may end it. /ice and /decline already had
     // this check; /end did not, so any signed-in user could hang up on anyone.
-    if (row.caller_id !== uid && row.callee_id !== uid) fail(403, "Not your call.", "FORBIDDEN");
+    if (!(await callParticipant(db, row, uid))) fail(403, "Not your call.", "FORBIDDEN");
+    // Owner round 32 (item 5b): on a GROUP call "end" means LEAVE. The row
+    // ends when fewer than two members remain (or when the starter gives up
+    // before anyone joined — a missed group call for everyone rung).
+    if (isGroupCall(row)) {
+      if (row.status === "ACTIVE" || row.status === "RINGING") {
+        await run(
+          db,
+          "UPDATE call_members SET state = 'LEFT' WHERE call_id = ? AND user_id = ? AND state IN ('RINGING', 'JOINED')",
+          callId,
+          uid,
+        );
+        const ended = await settleGroupCall(env, db, ctx, callId);
+        if (!ended) {
+          ctx.waitUntil(
+            broadcastCallEvent(env, callId, {
+              type: "call",
+              callId,
+              status: row.status,
+              left: uid,
+            }),
+          );
+        }
+      }
+      return json({ ok: true });
+    }
     if (row.status === "ACTIVE" || row.status === "RINGING") {
       const seconds = Math.max(
         0,
@@ -7584,7 +8098,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const callId = iceMatch[1]!;
     const row = await one<CallRow>(db, "SELECT * FROM calls WHERE id = ?", callId);
     if (!row) fail(404, "Call not found.");
-    if (row.caller_id !== uid && row.callee_id !== uid) fail(403, "Not your call.");
+    if (!(await callParticipant(db, row, uid))) fail(403, "Not your call.");
     if (method === "POST") {
       // The app sends { candidate: { candidate, sdpMid, sdpMLineIndex } } —
       // store the whole object so nothing is lost (stringifying an object
@@ -7602,13 +8116,18 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
               sdpMLineIndex: raw.sdpMLineIndex ?? 0,
             });
       const iceAt = nowIso();
+      // Owner round 32 (item 5b): on a group call a candidate is for ONE
+      // peer (body.to); a 1:1 call has only one other side (NULL target).
+      const target = isGroupCall(row) ? String(body.to || "") : "";
+      if (isGroupCall(row) && !target) fail(400, "Missing peer.");
       await run(
         db,
-        "INSERT INTO call_ice (call_id, sender_id, candidate_json, created_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO call_ice (call_id, sender_id, candidate_json, created_at, target_id) VALUES (?, ?, ?, ?, ?)",
         callId,
         uid,
         payload.slice(0, 4000),
         iceAt,
+        target || null,
       );
       // Realtime: the peer applies this candidate immediately instead of on
       // its next ICE poll. Payload shape == one GET /ice item.
@@ -7616,6 +8135,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         broadcastCallEvent(env, callId, {
           type: "ice",
           callId,
+          from: uid,
+          to: target || null,
           candidate: parseJson<Record<string, unknown>>(payload, {}),
           createdAt: iceAt,
         }),
@@ -7624,6 +8145,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     }
     if (method === "GET") {
       const since = url.searchParams.get("since") || "";
+      // A group member reads only the candidates addressed to them; the 1:1
+      // shape (everything the other side sent) is unchanged.
+      const forMe = isGroupCall(row) ? " AND target_id = ?" : "";
+      const forMeBind = isGroupCall(row) ? [uid] : [];
       const rows = since
         ? await all<{
             rowid: number;
@@ -7632,9 +8157,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             created_at: string;
           }>(
             db,
-            "SELECT rowid AS rowid, sender_id, candidate_json, created_at FROM call_ice WHERE call_id = ? AND sender_id != ? AND created_at > ? ORDER BY created_at ASC, rowid ASC",
+            `SELECT rowid AS rowid, sender_id, candidate_json, created_at FROM call_ice WHERE call_id = ? AND sender_id != ?${forMe} AND created_at > ? ORDER BY created_at ASC, rowid ASC`,
             callId,
             uid,
+            ...forMeBind,
             since,
           )
         : await all<{
@@ -7644,12 +8170,14 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             created_at: string;
           }>(
             db,
-            "SELECT rowid AS rowid, sender_id, candidate_json, created_at FROM call_ice WHERE call_id = ? AND sender_id != ? ORDER BY created_at ASC, rowid ASC",
+            `SELECT rowid AS rowid, sender_id, candidate_json, created_at FROM call_ice WHERE call_id = ? AND sender_id != ?${forMe} ORDER BY created_at ASC, rowid ASC`,
             callId,
             uid,
+            ...forMeBind,
           );
       const items = rows.map((r) => ({
         id: `${r.created_at}:${r.rowid}`,
+        from: r.sender_id,
         candidate: parseJson<Record<string, unknown>>(r.candidate_json, {}),
         createdAt: r.created_at,
       }));
@@ -7710,7 +8238,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const callId = mediaMatch[1]!;
     const row = await one<CallRow>(db, "SELECT * FROM calls WHERE id = ?", callId);
     if (!row) fail(404, "Call not found.");
-    if (row.caller_id !== uid && row.callee_id !== uid) fail(403, "Not your call.", "FORBIDDEN");
+    if (!(await callParticipant(db, row, uid))) fail(403, "Not your call.", "FORBIDDEN");
     const media = parseJson<Record<string, { camera?: boolean; screen?: boolean }>>(
       row.media_json ?? null,
       {},
@@ -8031,6 +8559,120 @@ function callHistoryFrom(row: CallRow, uid: string, other: UserRow | null) {
     true,
   );
   return history;
+}
+
+/**
+ * Owner round 32 (item 5b): the wire shape of a GROUP call. Same keys the
+ * app's CallUi reads for a 1:1 call (id/kind/status/incoming/callerId/
+ * startedAt/…) plus `group: true`, the group's `title` + `avatarRef`, and
+ * `participants` — every member with their state, so the call screens can
+ * draw who is on and the mesh knows whom to offer to. `other` is the
+ * STARTER (the ring card / Telecom line shows their name); calleeId = "".
+ */
+async function groupCallFrom(db: D1Database, row: CallRow, uid: string, light = false) {
+  const members = await callMembers(db, row.id);
+  const conv = row.conv_id
+    ? await one<{
+        title: string | null;
+        avatar_url: string | null;
+        avatar_version: number | null;
+        private_group: number | null;
+      }>(
+        db,
+        "SELECT title, avatar_url, avatar_version, private_group FROM conversations WHERE id = ?",
+        row.conv_id,
+      )
+    : null;
+  const users = light
+    ? new Map<string, UserRow>()
+    : await usersById(
+        db,
+        members.map((m) => m.user_id),
+      );
+  const mine = members.find((m) => m.user_id === uid);
+  const starter = users.get(row.caller_id) ?? null;
+  return {
+    id: row.id,
+    kind: row.kind,
+    status: row.status,
+    group: true,
+    conversationId: row.conv_id,
+    title: conv?.title || "Group",
+    avatarRef:
+      conv?.avatar_url && row.conv_id ? `g:${row.conv_id}@v${conv.avatar_version ?? 0}` : null,
+    // A private group's call is capture-blocked on every phone (item 5a rule).
+    privateGroup: Number(conv?.private_group ?? 0) === 1,
+    incoming: row.caller_id !== uid,
+    callerId: row.caller_id,
+    calleeId: "",
+    myState: mine?.state ?? null,
+    participants: members.map((m) => ({
+      id: m.user_id,
+      state: m.state,
+      joinedAt: m.joined_at,
+      user: light
+        ? null
+        : (() => {
+            const u = users.get(m.user_id);
+            return u ? userFrom(u, onlineNow(u), true, CONTACT_VIEW) : null;
+          })(),
+    })),
+    media: parseJson<Record<string, unknown>>(row.media_json ?? null, {}),
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+    createdAt: row.created_at,
+    other: starter ? userFrom(starter, onlineNow(starter), true, CONTACT_VIEW) : null,
+  };
+}
+
+/**
+ * After a member leaves / declines: end the row when fewer than two members
+ * are still on it. A ring nobody answered that the starter cancelled is a
+ * MISSED group call (bubble + state for the rung members); a call that had
+ * started ends normally with its duration. Returns true when the row ended.
+ */
+async function settleGroupCall(env: Env, db: D1Database, ctx: ExecutionContext, callId: string) {
+  const row = await one<CallRow>(db, "SELECT * FROM calls WHERE id = ?", callId);
+  if (!row || (row.status !== "RINGING" && row.status !== "ACTIVE")) return false;
+  const members = await callMembers(db, callId);
+  const joined = members.filter((m) => m.state === "JOINED").length;
+  const ringing = members.filter((m) => m.state === "RINGING").length;
+  // Someone still talking with someone, or the starter still waiting on a
+  // ring: the call goes on.
+  if (joined >= 2 || (joined >= 1 && ringing > 0)) return false;
+  const gaveUp = !row.started_at;
+  const next = gaveUp ? "MISSED" : "ENDED";
+  const changed = await run(
+    db,
+    "UPDATE calls SET status = ?, ended_at = ? WHERE id = ? AND status IN ('RINGING', 'ACTIVE')",
+    next,
+    nowIso(),
+    callId,
+  );
+  if (changed === 0) return false;
+  await run(
+    db,
+    "UPDATE call_members SET state = ? WHERE call_id = ? AND state IN ('RINGING', 'JOINED')",
+    gaveUp ? "MISSED" : "LEFT",
+    callId,
+  );
+  // A ring cut inside the anti-phantom window never showed anywhere: no
+  // bubble, no missed-call card.
+  if (!gaveUp || Date.now() - Date.parse(row.created_at) >= PHANTOM_RING_MS) {
+    await logGroupCallEvent(db, callId, next);
+    if (gaveUp) {
+      ctx.waitUntil(
+        notifyMissedGroupCall(
+          env,
+          db,
+          row,
+          members.filter((m) => m.state === "RINGING").map((m) => m.user_id),
+        ),
+      );
+    }
+  }
+  ctx.waitUntil(broadcastCallEvent(env, callId, { type: "call", callId, status: next }));
+  return true;
 }
 
 async function hiddenJson(db: D1Database, convId: string) {

@@ -115,6 +115,11 @@ object ScreenStore {
     /** Owner round 32 (item 23): a call row belongs to a hidden chat when the
      *  1:1 conversation with its other party is hidden. */
     fun isHiddenCall(call: JSONObject): Boolean {
+        // Owner round 32 (item 5b): a group call belongs to its group chat.
+        if (call.optBoolean("group")) {
+            val gid = call.optText("conversationId")
+            return gid.isNotBlank() && isHidden(gid)
+        }
         val uid = callPeerId(call)
         if (uid.isBlank()) return false
         val cid = convIdForUser[uid] ?: return false
@@ -646,4 +651,9 @@ object ScreenStore {
 
 /** The other party of a call-history row (caller for incoming, callee otherwise). */
 fun callPeerId(call: JSONObject): String =
-    if (call.optBoolean("incoming")) call.optString("callerId") else call.optString("calleeId")
+    when {
+        // Owner round 32 (item 5b): a group call has no single peer.
+        call.optBoolean("group") -> ""
+        call.optBoolean("incoming") -> call.optString("callerId")
+        else -> call.optString("calleeId")
+    }

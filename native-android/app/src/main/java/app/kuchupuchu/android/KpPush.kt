@@ -326,10 +326,12 @@ class KpPushService : FirebaseMessagingService() {
         KpNotify.cancelSystemCallCards(this)
         KpNotify.missedCall(
             this,
-            data["fromName"] ?: "KuchuPuchu",
+            // Owner round 32 (item 5b): a missed GROUP call names the group.
+            if (data["group"] == "1") data["groupName"] ?: "Group" else data["fromName"] ?: "KuchuPuchu",
             data["kind"] == "VIDEO",
             data["kp_callback"] ?: "",
             data["kp_chat"] ?: "",
+            group = data["group"] == "1",
         )
     }
 
@@ -397,7 +399,9 @@ class KpPushService : FirebaseMessagingService() {
             KpNotify.cancelSystemCallCards(this)
             CallNotify.incoming(
                 this,
-                data["fromName"] ?: data["from"] ?: "KuchuPuchu",
+                (data["fromName"] ?: data["from"] ?: "KuchuPuchu") +
+                    // Owner round 32 (item 5b): "Rabbi · Family" for a group ring.
+                    (if (data["group"] == "1") " · ${data["groupName"] ?: "Group"}" else ""),
                 data["kind"] == "VIDEO",
                 callId,
             )

@@ -201,9 +201,11 @@ const sites = avatarSites();
   const known = [
     // Call UI: `CallUi.otherAvatar` is a string copied out of the signalling payload,
     // and no avatar token crosses that boundary yet (its own bug, its own step).
-    "CallScreens.kt KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 108.dp, ring = fal",
-    "CallScreens.kt KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 116.dp, ring = fal",
+    // r32-5b: the ring + voice screens now go through CallAvatar(call, size),
+    // which passes the GROUP picture as a ref; the 1:1 branch inside it and the
+    // video screen's 96dp render are the two inline-URL sites left.
     "CallScreens.kt KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 96.dp, ring = fals",
+    "CallScreens.kt KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, size, ring = false",
     // (r31: the own-profile editor banner is gone — My profile edits in place
     // through ProfileScreen's cached avatar.)
   ].sort();

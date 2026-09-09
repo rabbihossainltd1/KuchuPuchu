@@ -89,6 +89,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import org.webrtc.RendererCommon
 import org.webrtc.SurfaceViewRenderer
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 
 /**
  * The call screens — one shared flow for BOTH sides:
@@ -246,7 +248,7 @@ fun IncomingCallScreen(call: CallUi) {
         ) {
             Spacer(Modifier.weight(0.7f))
             PulseRing {
-                KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 108.dp, ring = false)
+                CallAvatar(call, 108.dp)
             }
             Spacer(Modifier.height(26.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -254,11 +256,21 @@ fun IncomingCallScreen(call: CallUi) {
                 UserBadges(call.otherUser, 18.dp)
             }
             Spacer(Modifier.height(6.dp))
+            // Owner round 32 (item 5b): a GROUP ring names who started it.
             Text(
-                if (call.kind == "VIDEO") "Incoming video call…" else "Incoming voice call…",
+                when {
+                    call.group && call.kind == "VIDEO" -> "${call.starterName} · Group video call"
+                    call.group -> "${call.starterName} · Group voice call"
+                    call.kind == "VIDEO" -> "Incoming video call…"
+                    else -> "Incoming voice call…"
+                },
                 color = Color(0xB3FFFFFF),
                 fontSize = 14.sp,
             )
+            if (call.group) {
+                Spacer(Modifier.height(14.dp))
+                ParticipantRow(call)
+            }
             Spacer(Modifier.weight(1f))
             Row(
                 // Owner round 31 (item 25): the two circles sit at the far
@@ -468,17 +480,22 @@ fun VoiceCallScreen(call: CallUi) {
         ) {
             Spacer(Modifier.weight(0.62f))
             // Owner round 12: zoom/pulse effect removed — a calm static avatar.
-            KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, 116.dp, ring = false)
+            CallAvatar(call, 116.dp)
             Spacer(Modifier.height(28.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(call.otherName, color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.SemiBold)
                 UserBadges(call.otherUser, 18.dp)
             }
             Spacer(Modifier.height(8.dp))
+            // Owner round 32 (item 5b): on a group call the line counts who is
+            // on; alone on it (everyone else still ringing / left) = "Ringing…".
+            val othersOn = if (call.group) call.joined.count { it.optString("id") != Store.myId() } else 0
             Text(
                 when {
                     call.status == "BUSY" -> "Line busy — on another call"
                     engine.onHold -> "On hold"
+                    call.group && call.status == "ACTIVE" && othersOn == 0 -> "Ringing…"
+                    call.group && call.status == "ACTIVE" && connected -> "${othersOn + 1} on call · ${clockText(secs)}"
                     call.status == "ACTIVE" && (call.connecting || call.startedAt <= 0L) -> "Connecting…"
                     connected -> clockText(secs)
                     call.incoming -> "Ringing…"
@@ -488,6 +505,10 @@ fun VoiceCallScreen(call: CallUi) {
                 color = Color(0xB3FFFFFF),
                 fontSize = 15.sp,
             )
+            if (call.group) {
+                Spacer(Modifier.height(16.dp))
+                ParticipantRow(call)
+            }
             Spacer(Modifier.weight(1f))
 
             // Owner round 31 item 19 / round 32 item 10: the other phone is
@@ -559,7 +580,7 @@ fun VoiceCallScreen(call: CallUi) {
                     Icons.Filled.PersonAddAlt1,
                     "Add call",
                     active = false,
-                    enabled = connected,
+                    enabled = connected && !call.group,
                 ) { engine.notify("Adding calls is coming in a future update.") }
                 CallAction(
                     Icons.Filled.ScreenShare,
@@ -978,6 +999,62 @@ private fun DarkCallScaffold(content: @Composable () -> Unit) {
  * back to the plain dark background when there is no photo. (Modifier.blur
  * needs API 31+; older devices just get the dimmed photo.)
  */
+/**
+ * Owner round 32 (item 5b): the big call picture. A 1:1 call shows the
+ * peer's photo (inline data-URI from /active); a GROUP call shows the group
+ * picture, which travels as a cache ref (`g:<convId>@vN`) like the chat
+ * list's rows do.
+ */
+@Composable
+internal fun CallAvatar(call: CallUi, size: androidx.compose.ui.unit.Dp) {
+    if (call.group) {
+        KpAvatar(call.otherName, null, size, ring = false, avatarRef = call.otherAvatar.ifBlank { null })
+    } else {
+        KpAvatar(call.otherName, call.otherAvatar.ifBlank { null }, size, ring = false)
+    }
+}
+
+/**
+ * Owner round 32 (item 5b): who is on a group call — one small avatar per
+ * member (me excluded), dimmed while they are still ringing, gone once they
+ * left or declined. The row scrolls sideways for big groups.
+ */
+@Composable
+internal fun ParticipantRow(call: CallUi) {
+    val me = Store.myId()
+    val shown =
+        call.participants.filter {
+            it.optString("id") != me && it.optString("state") in setOf("JOINED", "RINGING")
+        }
+    if (shown.isEmpty()) return
+    Row(
+        Modifier
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        for (p in shown) {
+            val user = p.optJSONObject("user")
+            val joined = p.optString("state") == "JOINED"
+            val name = user?.optText("displayName")?.ifBlank { null } ?: "Member"
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.alpha(if (joined) 1f else 0.45f),
+            ) {
+                KpAvatar(name, null, 40.dp, ring = false, avatarRef = user?.optIso("avatarRef"))
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    name.split(" ").firstOrNull() ?: name,
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun BlurredAvatarBackdrop(avatarUrl: String?) {
     if (avatarUrl.isNullOrBlank()) return
@@ -1208,7 +1285,7 @@ fun ReturnToCallBanner() {
         )
         Text(
             when {
-                !connected -> if (call.incoming) "Ringing" else "Calling…"
+                !connected -> if (call.incoming && !call.group) "Ringing" else "Calling…"
                 call.connecting || call.startedAt <= 0L -> "Connecting…"
                 engine.onHold -> "On hold"
                 else -> clockText(secs)

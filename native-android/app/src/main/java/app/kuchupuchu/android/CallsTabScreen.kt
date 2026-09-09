@@ -123,10 +123,12 @@ fun CallsScreen(nav: NavController) {
                 items(items, key = { it.optString("id") }) { call ->
                     CallRow(call) {
                         // open chat with the other person on row tap
-                        val otherId =
-                            if (call.optBoolean("incoming")) call.optString("callerId")
-                            else call.optString("calleeId")
-                        if (otherId.isNotBlank()) {
+                        val otherId = callPeerId(call)
+                        // Owner round 32 (item 5b): a group call row opens the group.
+                        val groupConv = if (call.optBoolean("group")) call.optText("conversationId") else ""
+                        if (groupConv.isNotBlank()) {
+                            nav.navigate("chat/$groupConv")
+                        } else if (otherId.isNotBlank()) {
                             val cached = ScreenStore.convIdForUser[otherId]
                             if (cached != null) {
                                 nav.navigate("chat/$cached")
@@ -156,12 +158,17 @@ internal fun CallRow(call: JSONObject, onOpenChat: () -> Unit) {
     val haptics = rememberHaptics()
     val incoming = call.optBoolean("incoming")
     val other = call.optJSONObject("other")
-    val name = other?.optText("displayName")?.takeIf { it.isNotBlank() } ?: "Unknown"
-    val avatar = other?.optIso("avatarUrl")
+    // Owner round 32 (item 5b): a GROUP call row shows the group's name and
+    // picture; its call-back starts a new group call in that chat.
+    val group = call.optBoolean("group")
+    val name =
+        if (group) call.optText("title").ifBlank { "Group" }
+        else other?.optText("displayName")?.takeIf { it.isNotBlank() } ?: "Unknown"
+    val avatar = if (group) null else other?.optIso("avatarUrl")
     // The worker sends history rows LIGHT (avatarUrl:null + avatarRef) so the
     // payload stays small; KpAvatar resolves the ref through the persistent
     // per-version cache rather than re-transferring a data-URI per row.
-    val avatarRef = other?.optIso("avatarRef")
+    val avatarRef = if (group) call.optIso("avatarRef") else other?.optIso("avatarRef")
     val kind = call.optString("kind")
     val status = call.optString("status")
     val video = kind == "VIDEO"
@@ -184,6 +191,9 @@ internal fun CallRow(call: JSONObject, onOpenChat: () -> Unit) {
     val missed = status == "MISSED" || status == "DECLINED"
     val label =
         when {
+            group && missed -> "Missed group ${if (video) "video" else "voice"} call"
+            group && seconds > 0 -> "Group ${if (video) "video" else "voice"} call · %d:%02d".format(seconds / 60, seconds % 60)
+            group -> "Group ${if (video) "video" else "voice"} call"
             missed -> "Missed ${if (video) "video" else "voice"} call"
             status == "CANCELLED" -> "Cancelled ${if (video) "video" else "voice"} call"
             seconds > 0 -> "${if (video) "Video" else "Voice"} call · %d:%02d".format(seconds / 60, seconds % 60)
@@ -229,7 +239,7 @@ internal fun CallRow(call: JSONObject, onOpenChat: () -> Unit) {
             }
         }
         /* gold callback buttons */
-        val otherId = if (incoming) call.optString("callerId") else call.optString("calleeId")
+        val otherId = if (group) call.optText("conversationId") else callPeerId(call)
         if (otherId.isNotBlank()) {
             Box(
                 Modifier
@@ -241,14 +251,18 @@ internal fun CallRow(call: JSONObject, onOpenChat: () -> Unit) {
                     .border(1.dp, CircleButtonEdge, CircleShape)
                     .clickable {
                         haptics.tap()
-                        gateMicCamera(video = video) {
-                            CallEngine.instance?.startCall(otherId, if (video) "VIDEO" else "AUDIO", name, avatar ?: "")
+                        gateMicCamera(video = video && !group) {
+                            if (group) {
+                                CallEngine.instance?.startGroupCall(otherId, "AUDIO", name, avatarRef ?: "")
+                            } else {
+                                CallEngine.instance?.startCall(otherId, if (video) "VIDEO" else "AUDIO", name, avatar ?: "")
+                            }
                         }
                     },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    if (video) Icons.Filled.Videocam else Icons.Filled.Call,
+                    if (video && !group) Icons.Filled.Videocam else Icons.Filled.Call,
                     contentDescription = "Call back ${if (video) "video" else "voice"}",
                     tint = ActionBlueDeep,
                     modifier = Modifier.size(20.dp),

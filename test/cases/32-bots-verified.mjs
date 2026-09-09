@@ -2804,7 +2804,10 @@ const convBetween = (db, a, b) =>
         kt("CallScreens.kt").includes(
           "KpSecure.Guard(call.otherPrivate || KpSecure.selfPrivate())",
         ) &&
-        kt("CallEngine.kt").includes('otherPrivate = other.optBoolean("privateProfile")') &&
+        // r32-5b: a group call reads privateGroup instead — same field, two sources.
+        kt("CallEngine.kt").includes(
+          'else other.optBoolean("privateProfile") || current?.otherPrivate == true,',
+        ) &&
         kt("ProfileScreen.kt").includes("KpSecure.Guard(privatePerson)") &&
         kt("ProfileScreen.kt").includes("canSave = !privatePerson,") &&
         kt("MediaViewer.kt").includes("KpSecure.Guard(secure || !canSave)") &&
@@ -5465,7 +5468,10 @@ const convBetween = (db, a, b) =>
         ) &&
         profile.includes("UserBadges(u, 16.dp, gap = 6.dp)") &&
         engine.includes("val otherUser: JSONObject? = null,") &&
-        engine.includes('otherUser = if (other.has("id")) other else current?.otherUser,') &&
+        // r32-5b: a group call has no single peer to badge.
+        engine.includes(
+          'otherUser = if (!isGroup && other.has("id")) other else current?.otherUser,',
+        ) &&
         (calls.match(/UserBadges\(call\.otherUser/g) || []).length === 5 &&
         status.includes("UserBadges(user)") &&
         status.includes("UserBadges(user ?: Store.me, 14.dp)") &&
@@ -5649,6 +5655,91 @@ const convBetween = (db, a, b) =>
         ) &&
         src.includes(
           'privateGroup: conv.kind === "GROUP" && Number(conv.private_group ?? 0) === 1,',
+        ),
+    );
+  }
+  // Item 5 (b): group AUDIO calls — one row per group call, per-pair mesh.
+  {
+    const eng = kt("CallEngine.kt");
+    const calls = kt("CallScreens.kt");
+    const chat = kt("ChatScreen.kt");
+    const tab = kt("CallsTabScreen.kt");
+    const store = kt("ScreenStore.kt");
+    const src = readFileSync("src/worker/index.ts", "utf8");
+    check(
+      "r32-5b: worker — call_members / call_peers tables + call_ice.target_id; POST /api/calls/group (member, GROUP only; running call → existing), /join, /peer (per-pair offer/answer), per-peer ICE; every call route admits a group member via callParticipant; leave/decline settle the row (settleGroupCall), the bubble lands in the group chat, missed group rings push the rung members",
+      src.includes(
+        "CREATE TABLE IF NOT EXISTS call_members (call_id TEXT NOT NULL, user_id TEXT NOT NULL, state TEXT NOT NULL, joined_at TEXT, created_at TEXT NOT NULL, PRIMARY KEY (call_id, user_id))",
+      ) &&
+        src.includes(
+          "CREATE TABLE IF NOT EXISTS call_peers (call_id TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, offer_sdp TEXT, answer_sdp TEXT, updated_at TEXT NOT NULL, PRIMARY KEY (call_id, from_id, to_id))",
+        ) &&
+        src.includes("ALTER TABLE call_ice ADD COLUMN target_id TEXT") &&
+        src.includes('if (path === "/api/calls/group" && method === "POST") {') &&
+        src.includes("const joinMatch = path.match(/^\\/api\\/calls\\/([^/]+)\\/join$/);") &&
+        src.includes("const peerMatch = path.match(/^\\/api\\/calls\\/([^/]+)\\/peer$/);") &&
+        src.includes('const isGroupCall = (row: { callee_id: string }) => row.callee_id === "";') &&
+        (
+          src.match(
+            /if \(!\(await callParticipant\(db, row, uid\)\)\) fail\(403, "Not your call\./g,
+          ) || []
+        ).length >= 5 &&
+        src.includes("async function settleGroupCall(") &&
+        src.includes("async function logGroupCallEvent(") &&
+        src.includes("async function ringGroupMember(") &&
+        src.includes("async function notifyMissedGroupCall(") &&
+        src.includes(
+          "AND c.status IN ('RINGING', 'ACTIVE') AND m.state IN ('RINGING', 'JOINED') ORDER BY c.created_at DESC",
+        ),
+    );
+    check(
+      "r32-5b: engine — startGroupCall / joinGroup / groupSync mesh: one PeerConnection per JOINED member sharing the kp-a track, the lexically smaller id offers, ICE is posted with `to`, legs close on leave and in hangupLocal; a group ring's Accept = /join; CallUi carries group/starterName/participants",
+      eng.includes(
+        'fun startGroupCall(convId: String, kind: String, title: String, avatarRef: String = "") {',
+      ) &&
+        eng.includes("private suspend fun joinGroup(callId: String) {") &&
+        eng.includes("private suspend fun groupSync(ui: CallUi) {") &&
+        eng.includes("private fun newGroupPc(peerId: String): PeerConnection {") &&
+        eng.includes(
+          "private val groupPeers = java.util.concurrent.ConcurrentHashMap<String, PeerConnection>()",
+        ) &&
+        eng.includes('audioTrack?.let { peer.addTrack(it, listOf("kp")) }') &&
+        eng.includes("if (me < peerId && peerId !in groupOffered) {") &&
+        eng.includes('val body = JSONObject().put("candidate", payload).put("to", peerId)') &&
+        eng.includes("groupPeers.values.forEach { runCatching { it.close() } }") &&
+        eng.includes("if (rec.group) {\n            scope.launch {") &&
+        eng.includes("joinGroup(rec.id)") &&
+        eng.includes("val group: Boolean = false,") &&
+        eng.includes("val participants: List<JSONObject> = emptyList(),") &&
+        eng.includes('if (status == "ACTIVE" && myState == "JOINED") groupSync(ui)'),
+    );
+    check(
+      "r32-5b: screens — the group chat header gets a voice-call button (startGroupCall); ring + in-call screens show the group picture (CallAvatar), '<starter> · Group voice call', the participant avatar row and 'N on call'; Calls tab rows for group calls show the group title / call-back rings the group / tap opens the group; hidden-call + peer helpers know group rows; missed group card's Call back opens a group call",
+      chat.includes(
+        'CallEngine.instance?.startGroupCall(convId, "AUDIO", title, avatarRef ?: "")',
+      ) &&
+        chat.includes("if (isGroup && c != null) {\n                HeaderCallBtn(onClick = {") &&
+        calls.includes("internal fun ParticipantRow(call: CallUi) {") &&
+        calls.includes(
+          "internal fun CallAvatar(call: CallUi, size: androidx.compose.ui.unit.Dp) {",
+        ) &&
+        calls.includes('call.group -> "${call.starterName} · Group voice call"') &&
+        calls.includes(
+          'call.group && call.status == "ACTIVE" && connected -> "${othersOn + 1} on call · ${clockText(secs)}"',
+        ) &&
+        (calls.match(/ParticipantRow\(call\)/g) || []).length === 2 &&
+        tab.includes(
+          'CallEngine.instance?.startGroupCall(otherId, "AUDIO", name, avatarRef ?: "")',
+        ) &&
+        tab.includes('group && missed -> "Missed group ${if (video) "video" else "voice"} call"') &&
+        tab.includes(
+          'if (groupConv.isNotBlank()) {\n                            nav.navigate("chat/$groupConv")',
+        ) &&
+        store.includes('call.optBoolean("group") -> ""') &&
+        kt("KpPush.kt").includes('group = data["group"] == "1",') &&
+        kt("KpNotify.kt").includes('.putExtra("kp_callback_group", group)') &&
+        kt("MainActivity.kt").includes(
+          "if (group) CallEngine.instance?.startGroupCall(otherId, kind, name)",
         ),
     );
   }

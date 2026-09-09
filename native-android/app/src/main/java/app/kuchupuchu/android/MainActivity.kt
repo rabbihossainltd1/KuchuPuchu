@@ -226,8 +226,11 @@ class MainActivity : ComponentActivity() {
         // same contextual mic/camera gate every other call entry point uses.
         intent.getStringExtra("kp_callback")?.let { otherId ->
             if (otherId.isNotBlank()) {
-                val kind = intent.getStringExtra("kp_callback_kind") ?: "AUDIO"
                 val name = intent.getStringExtra("kp_callback_name") ?: "KuchuPuchu"
+                // Owner round 32 (item 5b): a missed GROUP call's Call back rings
+                // the group again (voice; otherId is the group chat).
+                val group = intent.getBooleanExtra("kp_callback_group", false)
+                val kind = if (group) "AUDIO" else intent.getStringExtra("kp_callback_kind") ?: "AUDIO"
                 ensurePermissions(
                     if (kind == "VIDEO") {
                         listOf(android.Manifest.permission.RECORD_AUDIO, android.Manifest.permission.CAMERA)
@@ -235,7 +238,8 @@ class MainActivity : ComponentActivity() {
                         listOf(android.Manifest.permission.RECORD_AUDIO)
                     },
                 ) {
-                    CallEngine.instance?.startCall(otherId, kind, name)
+                    if (group) CallEngine.instance?.startGroupCall(otherId, kind, name)
+                    else CallEngine.instance?.startCall(otherId, kind, name)
                 }
             }
         }

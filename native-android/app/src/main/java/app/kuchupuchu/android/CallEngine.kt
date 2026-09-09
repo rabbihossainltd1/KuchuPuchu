@@ -64,7 +64,20 @@ data class CallUi(
     val otherPrivate: Boolean = false,
     /** Owner round 32 (item 30): the peer's user object (badges) for the call screens. */
     val otherUser: JSONObject? = null,
-)
+    /**
+     * Owner round 32 (item 5b): a GROUP call. `otherName` / `otherAvatar` carry
+     * the group's title + picture ref so every consumer that names the call
+     * (Telecom line, ongoing / ring cards, missed card) keeps working;
+     * `otherId` is the group CONVERSATION id; `participants` = every invited
+     * member with their state (RINGING / JOINED / LEFT / DECLINED / MISSED).
+     */
+    val group: Boolean = false,
+    val starterName: String = "",
+    val participants: List<JSONObject> = emptyList(),
+) {
+    /** Members currently on the call (excluding nobody — the caller filters itself). */
+    val joined: List<JSONObject> get() = participants.filter { it.optString("state") == "JOINED" }
+}
 
 /**
  * WebRTC call engine for v3 — polls /api/calls/active, drives the peer
@@ -282,6 +295,15 @@ class CallEngine(private val app: Application) {
     private var localView: SurfaceViewRenderer? = null
     private var remoteView: SurfaceViewRenderer? = null
     private val seenIce = mutableSetOf<String>()
+    // Owner round 32 (item 5b): GROUP call mesh — one PeerConnection per
+    // other JOINED member, all sending the same local audio track. Keyed by
+    // the peer's user id. `groupOffered` = pairs we already posted an offer
+    // for; `groupAnswered` = their offers we already answered (dedupe across
+    // poll ticks — the server keeps the SDP rows until the call ends).
+    private val groupPeers = java.util.concurrent.ConcurrentHashMap<String, PeerConnection>()
+    private val groupOffered = mutableSetOf<String>()
+    private val groupAnswered = mutableMapOf<String, String>()
+    private val groupSyncing = java.util.concurrent.atomic.AtomicBoolean(false)
     private val left = AtomicBoolean(false)
     private var poll: Job? = null
     private val scope = CoroutineScope(
@@ -654,6 +676,13 @@ class CallEngine(private val app: Application) {
         }
         val other = next.optJSONObject("other") ?: JSONObject()
         val incoming = next.optBoolean("incoming")
+        // Owner round 32 (item 5b): a GROUP call row. Our own state on it
+        // decides the phase: RINGING = the invite screen (even while the call
+        // is already ACTIVE for others), JOINED = in the call.
+        val isGroup = next.optBoolean("group")
+        val myState = next.optIso("myState").orEmpty()
+        if (isGroup && incoming && myState == "RINGING" && current?.status != "ACTIVE") status = "RINGING"
+        val participants = next.arr("participants").objects()
         // Outgoing call nobody picked up within a minute: end it like the
         // server's missed-call sweep does, instead of ringing forever.
         if (!incoming && status == "RINGING") {
@@ -696,12 +725,23 @@ class CallEngine(private val app: Application) {
                 kind = kind,
                 status = status,
                 incoming = incoming,
-                otherName = other.optString("displayName").ifBlank { current?.otherName ?: "KuchuPuchu" },
-                otherId = other.optString("id").ifBlank { current?.otherId.orEmpty() },
+                otherName =
+                    if (isGroup) next.optText("title").ifBlank { current?.otherName ?: "Group" }
+                    else other.optString("displayName").ifBlank { current?.otherName ?: "KuchuPuchu" },
+                otherId =
+                    if (isGroup) next.optText("conversationId").ifBlank { current?.otherId.orEmpty() }
+                    else other.optString("id").ifBlank { current?.otherId.orEmpty() },
                 otherOnline = other.optBoolean("online"),
-                otherAvatar = other.optIso("avatarUrl").orEmpty().ifBlank { current?.otherAvatar.orEmpty() },
-                otherPrivate = other.optBoolean("privateProfile") || current?.otherPrivate == true,
-                otherUser = if (other.has("id")) other else current?.otherUser,
+                otherAvatar =
+                    if (isGroup) next.optIso("avatarRef").orEmpty().ifBlank { current?.otherAvatar.orEmpty() }
+                    else other.optIso("avatarUrl").orEmpty().ifBlank { current?.otherAvatar.orEmpty() },
+                otherPrivate =
+                    if (isGroup) next.optBoolean("privateGroup") || current?.otherPrivate == true
+                    else other.optBoolean("privateProfile") || current?.otherPrivate == true,
+                otherUser = if (!isGroup && other.has("id")) other else current?.otherUser,
+                group = isGroup,
+                starterName = if (isGroup) other.optString("displayName") else "",
+                participants = if (isGroup) participants else emptyList(),
                 startedAt =
                     when {
                         status != "ACTIVE" -> 0L
@@ -782,7 +822,12 @@ class CallEngine(private val app: Application) {
                 // the post, so the card lives for the whole ring.
                 KpNotify.cancelSystemCallCards(app)
                 CallSounds.startRing(app)
-                CallNotify.incoming(app, ui.otherName, ui.kind == "VIDEO", ui.id)
+                CallNotify.incoming(
+                    app,
+                    if (ui.group) "${ui.starterName} · ${ui.otherName}" else ui.otherName,
+                    ui.kind == "VIDEO",
+                    ui.id,
+                )
             }
             if (ui.kind == "VIDEO" && videoTrack == null) {
                 withContext(Dispatchers.IO) { runCatching { capture(true) } }
@@ -806,6 +851,14 @@ class CallEngine(private val app: Application) {
                 ringingId = null
             }
             CallService.start(app, "In a call with ${ui.otherName}")
+        }
+        if (isGroup) {
+            // Owner round 32 (item 5b): the mesh follows the member list —
+            // offer to newcomers, answer their offers, drop leavers.
+            if (status == "ACTIVE" && myState == "JOINED") groupSync(ui)
+            return
+        }
+        if (status == "ACTIVE") {
             val answer = next.optIso("answerSdp").orEmpty()
             if (answer.isNotBlank() && pc?.remoteDescription == null && pc != null) {
                 runCatching {
@@ -818,6 +871,289 @@ class CallEngine(private val app: Application) {
             rebindRemoteVideo()
             handleRenegotiation(next)
         }
+    }
+
+    /**
+     * Owner round 32 (item 5b): start a GROUP call in [convId]. The server
+     * rings every other member; media is a mesh that forms as they join (see
+     * [groupSync]) — so unlike a 1:1 call there is no offer to post here.
+     */
+    fun startGroupCall(convId: String, kind: String, title: String, avatarRef: String = "") {
+        if (active != null) {
+            if (!hasRemote && System.currentTimeMillis() - activeSince > 2 * 60_000L) {
+                hangupLocal()
+            } else {
+                return
+            }
+        }
+        minimized = false
+        left.set(false)
+        hasRemote = false
+        resetPeerMedia()
+        onHold = false
+        relayRetryUsed = false
+        renegotiationQueued.set(false)
+        val start = AudioRouter.begin(app, kind)
+        audioRoute = start
+        speaker = start == AudioRoute.SPEAKER
+        ensureFactory(app)
+        activeSince = System.currentTimeMillis()
+        active = CallUi("pending", kind, "RINGING", false, title, convId, otherAvatar = avatarRef, group = true)
+        CallService.start(app, if (kind == "VIDEO") "Video calling $title" else "Calling $title")
+        scope.launch {
+            try {
+                val streamOk = withContext(Dispatchers.IO) { capture(kind == "VIDEO") }
+                if (!streamOk || left.get()) return@launch
+                publishChange()
+                val created =
+                    withContext(Dispatchers.IO) {
+                        Api.post(
+                            "/api/calls/group",
+                            JSONObject().put("conversationId", convId).put("kind", kind),
+                        )
+                    }
+                val call = created.optJSONObject("call") ?: JSONObject()
+                val callId = call.optString("id")
+                if (left.get()) {
+                    withContext(Dispatchers.IO) { runCatching { Api.post("/api/calls/$callId/end") } }
+                    hangupLocal()
+                    return@launch
+                }
+                iceCallId = callId
+                if (callId.isNotBlank() && wsCallId != callId) {
+                    if (wsCallId.isNotBlank()) KpSocket.leaveCall(wsCallId)
+                    wsCallId = callId
+                    KpSocket.joinCall(callId)
+                }
+                // Already running (someone else started it a moment ago): we
+                // are a joiner, not the starter — go straight in.
+                if (created.optBoolean("existing")) {
+                    active = active?.copy(id = callId, status = "ACTIVE", connecting = true, incoming = true)
+                    joinGroup(callId)
+                    return@launch
+                }
+                val prev = active
+                if (prev != null && prev.id == callId && prev.status == "ACTIVE") return@launch
+                active =
+                    CallUi(
+                        callId,
+                        kind,
+                        call.optString("status").ifBlank { "RINGING" },
+                        false,
+                        title,
+                        convId,
+                        otherAvatar = avatarRef,
+                        group = true,
+                        participants = call.arr("participants").objects(),
+                    )
+            } catch (e: Exception) {
+                notify((e as? ApiException)?.message ?: "Couldn't start the call. Try again.")
+                hangupLocal()
+            }
+        }
+    }
+
+    /** POST /join, then let the next tick's [groupSync] build the mesh. */
+    private suspend fun joinGroup(callId: String) {
+        val joined =
+            withContext(Dispatchers.IO) { runCatching { Api.post("/api/calls/$callId/join") }.getOrNull() }
+        val call = joined?.optJSONObject("call")
+        if (call == null) {
+            answering.set(false)
+            notify("Couldn't connect the call. Try again.")
+            hangupLocal()
+            return
+        }
+        answering.set(false)
+        runCatching {
+            val ms = java.time.Instant.parse(call.optIso("startedAt")).toEpochMilli()
+            if (ms > 0L) active = active?.copy(startedAt = ms)
+        }
+        active = active?.copy(status = "ACTIVE", participants = call.arr("participants").objects())
+        publishChange()
+        pokeTick()
+    }
+
+    /**
+     * One pass of mesh maintenance for a group call we are JOINED on:
+     *  - every OTHER joined member without a connection gets one; the side
+     *    with the lexically smaller id offers (deterministic, no glare);
+     *  - offers addressed to us are answered; answers to ours are applied;
+     *  - candidates addressed to us go to the right connection;
+     *  - members who left / declined have their connection closed.
+     * Serialized: a tick that arrives while a pass is running is skipped —
+     * the next one (they are frequent) finishes the job.
+     */
+    private suspend fun groupSync(ui: CallUi) {
+        if (!groupSyncing.compareAndSet(false, true)) return
+        try {
+            val me = Store.myId()
+            val others = ui.joined.map { it.optString("id") }.filter { it.isNotBlank() && it != me }.toSet()
+            // Leavers: close and forget.
+            for (gone in groupPeers.keys.filter { it !in others }) {
+                groupPeers.remove(gone)?.let { runCatching { it.close() } }
+                groupOffered.remove(gone)
+                groupAnswered.remove(gone)
+            }
+            if (groupPeers.isEmpty() && others.isEmpty()) {
+                // Alone on the call: media is not live.
+                if (hasRemote) { hasRemote = false; publishChange() }
+            }
+            // Newcomers we should offer to.
+            for (peerId in others) {
+                if (me < peerId && peerId !in groupOffered) {
+                    groupOffered.add(peerId)
+                    val peer = groupPeers.getOrPut(peerId) { newGroupPc(peerId) }
+                    runCatching {
+                        val offer = peer.createOfferAwait(sdpConstraints())
+                        peer.setLocalDescriptionAwait(offer)
+                        withContext(Dispatchers.IO) {
+                            Api.post(
+                                "/api/calls/${ui.id}/peer",
+                                JSONObject().put("to", peerId).put("sdp", offer.description),
+                            )
+                        }
+                    }.onFailure { groupOffered.remove(peerId) }
+                }
+            }
+            // Their offers / their answers.
+            val rows =
+                withContext(Dispatchers.IO) { runCatching { Api.get("/api/calls/${ui.id}/peer", true) }.getOrNull() }
+                    ?.arr("items")?.objects().orEmpty()
+            for (row in rows) {
+                val from = row.optString("from")
+                val to = row.optString("to")
+                val offerSdp = row.optIso("offerSdp").orEmpty()
+                val answerSdp = row.optIso("answerSdp").orEmpty()
+                if (to == me && from in others && offerSdp.isNotBlank() && groupAnswered[from] != offerSdp) {
+                    // Answer their offer (a fresh offer from the same peer = a
+                    // rebuilt connection on their side: rebuild ours too).
+                    groupAnswered[from] = offerSdp
+                    val stale = groupPeers.remove(from)
+                    stale?.let { runCatching { it.close() } }
+                    val peer = newGroupPc(from)
+                    groupPeers[from] = peer
+                    runCatching {
+                        peer.setRemoteDescriptionAwait(SessionDescription(SessionDescription.Type.OFFER, offerSdp))
+                        val answer = peer.createAnswerAwait(sdpConstraints())
+                        peer.setLocalDescriptionAwait(answer)
+                        withContext(Dispatchers.IO) {
+                            Api.post(
+                                "/api/calls/${ui.id}/peer",
+                                JSONObject().put("to", from).put("sdp", answer.description).put("answer", true),
+                            )
+                        }
+                    }.onFailure { groupAnswered.remove(from) }
+                } else if (from == me && to in others && answerSdp.isNotBlank()) {
+                    val peer = groupPeers[to] ?: continue
+                    if (peer.signalingState() == PeerConnection.SignalingState.HAVE_LOCAL_OFFER) {
+                        runCatching {
+                            peer.setRemoteDescriptionAwait(SessionDescription(SessionDescription.Type.ANSWER, answerSdp))
+                        }
+                    }
+                }
+            }
+            // Candidates addressed to us, routed by sender.
+            val ice =
+                withContext(Dispatchers.IO) { runCatching { Api.get("/api/calls/${ui.id}/ice") }.getOrNull() }
+                    ?.arr("items")?.objects().orEmpty()
+            for (item in ice) {
+                val id = item.optString("id")
+                if (id.isNotBlank() && id in seenIce) continue
+                val peer = groupPeers[item.optString("from")] ?: continue
+                if (peer.remoteDescription == null) continue
+                val c = item.optJSONObject("candidate") ?: continue
+                val cand = c.optString("candidate")
+                if (cand.isBlank()) continue
+                runCatching {
+                    peer.addIceCandidate(IceCandidate(c.optString("sdpMid"), c.optInt("sdpMLineIndex"), cand))
+                    if (id.isNotBlank()) seenIce.add(id)
+                }
+            }
+        } finally {
+            groupSyncing.set(false)
+        }
+    }
+
+    /**
+     * A mesh leg to one group member: our shared audio track goes out, their
+     * audio plays through the same route as a 1:1 call. Candidates are posted
+     * addressed to [peerId]; the first connected leg marks media live.
+     */
+    private fun newGroupPc(peerId: String): PeerConnection {
+        val rtc =
+            PeerConnection.RTCConfiguration(iceServers()).apply {
+                sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
+                continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+                iceCandidatePoolSize = 1
+                tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.ENABLED
+                iceTransportsType = PeerConnection.IceTransportsType.ALL
+            }
+        val peer =
+            factory!!.createPeerConnection(
+                rtc,
+                object : PeerConnection.Observer {
+                    override fun onSignalingChange(p0: PeerConnection.SignalingState?) {}
+                    override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
+                        when (state) {
+                            PeerConnection.IceConnectionState.CONNECTED,
+                            PeerConnection.IceConnectionState.COMPLETED,
+                            -> Handler(Looper.getMainLooper()).post {
+                                val cur = active ?: return@post
+                                hasRemote = true
+                                active = cur.copy(
+                                    connecting = false,
+                                    startedAt = if (cur.startedAt > 0L) cur.startedAt else System.currentTimeMillis(),
+                                )
+                                publishChange()
+                                updateProximityLock()
+                                CallService.start(app, "In a call with ${cur.otherName}")
+                            }
+                            PeerConnection.IceConnectionState.FAILED ->
+                                Handler(Looper.getMainLooper()).post {
+                                    // One leg failed: drop it; the next sync
+                                    // pass re-offers (the offerer side) or
+                                    // re-answers their fresh offer.
+                                    groupPeers.remove(peerId)?.let { runCatching { it.close() } }
+                                    groupOffered.remove(peerId)
+                                    groupAnswered.remove(peerId)
+                                    pokeTick()
+                                }
+                            else -> {}
+                        }
+                    }
+                    override fun onIceConnectionReceivingChange(p0: Boolean) {}
+                    override fun onIceGatheringChange(p0: PeerConnection.IceGatheringState?) {}
+                    override fun onIceCandidate(c: IceCandidate?) {
+                        if (c == null) return
+                        val callId = iceCallId
+                        if (callId.isBlank() || callId.startsWith("pending")) return
+                        val payload =
+                            JSONObject()
+                                .put("candidate", c.sdp)
+                                .put("sdpMid", c.sdpMid)
+                                .put("sdpMLineIndex", c.sdpMLineIndex)
+                        val body = JSONObject().put("candidate", payload).put("to", peerId)
+                        scope.launch(Dispatchers.IO) {
+                            runCatching { Api.post("/api/calls/$callId/ice", body) }
+                        }
+                    }
+                    override fun onIceCandidatesRemoved(p0: Array<out IceCandidate>?) {}
+                    override fun onAddStream(p0: MediaStream?) {}
+                    override fun onRemoveStream(p0: MediaStream?) {}
+                    override fun onDataChannel(p0: DataChannel?) {}
+                    override fun onRenegotiationNeeded() {}
+                    override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {
+                        val track = receiver?.track()
+                        if (track is AudioTrack) {
+                            track.setEnabled(true)
+                            Handler(Looper.getMainLooper()).post { applyAudio() }
+                        }
+                    }
+                },
+            )!!
+        audioTrack?.let { peer.addTrack(it, listOf("kp")) }
+        return peer
     }
 
     fun startCall(userId: String, kind: String, name: String, avatar: String = "") {
@@ -944,6 +1280,16 @@ class CallEngine(private val app: Application) {
         // started_at (parsed from the answer response / poll) so both phones
         // show the exact same duration.
         active = rec.copy(status = "ACTIVE", startedAt = 0L, connecting = true)
+        // Owner round 32 (item 5b): picking up a GROUP ring = /join; the mesh
+        // legs are negotiated by groupSync() on the ticks that follow.
+        if (rec.group) {
+            scope.launch {
+                withContext(Dispatchers.IO) { runCatching { capture(rec.kind == "VIDEO") } }
+                iceCallId = rec.id
+                joinGroup(rec.id)
+            }
+            return
+        }
         scope.launch {
             try {
                 // `repeat(24) { ... return@repeat }` here NEVER left the loop —
@@ -1035,11 +1381,12 @@ class CallEngine(private val app: Application) {
         if (call.otherId.isBlank()) return
         scope.launch(Dispatchers.IO) {
             runCatching {
-                val conv = Api.post("/api/conversations", JSONObject().put("userId", call.otherId))
-                Api.post(
-                    "/api/conversations/${conv.optJSONObject("conversation")?.optString("id")}/messages",
-                    JSONObject().put("body", text),
-                )
+                // Owner round 32 (item 5b): on a group call otherId IS the chat.
+                val convId =
+                    if (call.group) call.otherId
+                    else Api.post("/api/conversations", JSONObject().put("userId", call.otherId))
+                        .optJSONObject("conversation")?.optString("id")
+                Api.post("/api/conversations/$convId/messages", JSONObject().put("body", text))
             }
         }
     }
@@ -1083,6 +1430,12 @@ class CallEngine(private val app: Application) {
 
     fun toggleCamera() {
         if (sharing) return
+        if (active?.group == true) {
+            // Item 5(c) brings video to group calls; the audio mesh has no
+            // video transceivers to swap a camera into.
+            notify("Group video calling is coming in the next update.")
+            return
+        }
         if (videoTrack == null) {
             scope.launch {
                 withContext(Dispatchers.IO) { runCatching { capture(true) } }
@@ -1132,6 +1485,10 @@ class CallEngine(private val app: Application) {
     }
 
     fun toggleShare() {
+        if (active?.group == true) {
+            notify("Screen share isn't available on group calls yet.")
+            return
+        }
         if (active == null || pc == null) {
             // A call and a connected peer are all that is needed: startShare()
             // swaps its track into the sendrecv video transceiver that every
@@ -1343,6 +1700,11 @@ class CallEngine(private val app: Application) {
         remoteView = null
         pc?.close()
         pc = null
+        // Owner round 32 (item 5b): every mesh leg goes with the call.
+        groupPeers.values.forEach { runCatching { it.close() } }
+        groupPeers.clear()
+        groupOffered.clear()
+        groupAnswered.clear()
         seenIce.clear()
         iceWatchdog?.let { Handler(Looper.getMainLooper()).removeCallbacks(it) }
         iceWatchdog = null

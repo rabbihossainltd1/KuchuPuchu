@@ -410,6 +410,9 @@ object KpNotify {
         video: Boolean,
         otherId: String,
         convoId: String,
+        // Owner round 32 (item 5b): a missed GROUP call — otherId is the group
+        // chat and Call back starts a new group call there.
+        group: Boolean = false,
     ) {
         ensureChannels(ctx)
         val callBack =
@@ -420,6 +423,7 @@ object KpNotify {
                     .putExtra("kp_callback", otherId)
                     .putExtra("kp_callback_kind", if (video) "VIDEO" else "AUDIO")
                     .putExtra("kp_callback_name", from)
+                    .putExtra("kp_callback_group", group)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
@@ -435,7 +439,14 @@ object KpNotify {
                 .setSmallIcon(R.mipmap.ic_stat_kp)
                 .setLargeIcon(roundLogo(ctx))
                 .setContentTitle("Missed call · $from")
-                .setContentText(if (video) "Missed video call" else "Missed voice call")
+                .setContentText(
+                    when {
+                        group && video -> "Missed group video call"
+                        group -> "Missed group voice call"
+                        video -> "Missed video call"
+                        else -> "Missed voice call"
+                    },
+                )
                 .setAutoCancel(true)
                 .setWhen(System.currentTimeMillis())
                 .setShowWhen(true)

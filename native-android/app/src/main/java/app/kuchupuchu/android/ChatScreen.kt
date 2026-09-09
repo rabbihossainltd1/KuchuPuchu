@@ -1643,6 +1643,17 @@ fun ChatScreen(nav: NavController, convId: String) {
                 )
             }
             }
+            // Owner round 32 (item 5b): a GROUP gets a voice-call button — the
+            // whole group rings (video for groups lands with item 5c).
+            if (isGroup && c != null) {
+                HeaderCallBtn(onClick = {
+                    gateMicCamera(video = false) {
+                        CallEngine.instance?.startGroupCall(convId, "AUDIO", title, avatarRef ?: "")
+                    }
+                }) {
+                    Icon(Icons.Filled.Call, "Group voice call", tint = chatAccent(chatTheme), modifier = Modifier.size(19.dp))
+                }
+            }
             if (!isGroup && c != null && !botChat && !requestOpen) {
                 if (otherId.isNotBlank()) {
                     HeaderCallBtn(onClick = {
