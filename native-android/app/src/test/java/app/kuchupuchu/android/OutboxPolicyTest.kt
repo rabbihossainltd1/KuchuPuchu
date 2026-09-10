@@ -2,6 +2,7 @@ package app.kuchupuchu.android
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -65,5 +66,21 @@ class OutboxPolicyTest {
         assertTrue(OutboxPolicy.isDue(now + 300_000L, now, true))
         assertTrue(OutboxPolicy.isDue(Long.MAX_VALUE / 4, now, true))
         assertFalse(OutboxPolicy.isDue(Long.MAX_VALUE / 4, now, false))
+    }
+
+    @Test
+    fun `the queue wakes itself for the nearest live deadline, never sooner than a second`() {
+        val now = 1_700_000_000_000L
+        assertNull("an empty queue has nothing to wake for", OutboxPolicy.nextWakeMs(emptyList(), now))
+        assertNull("parked items wait for a real trigger", OutboxPolicy.nextWakeMs(listOf(now + Long.MAX_VALUE / 4), now))
+        assertEquals("a due item still gets a 1 s floor", 1_000L, OutboxPolicy.nextWakeMs(listOf(0L), now))
+        assertEquals(1_000L, OutboxPolicy.nextWakeMs(listOf(now - 5_000L, now + 30_000L), now))
+        assertEquals(
+            "the nearest live deadline wins, parked ones are ignored",
+            4_000L,
+            OutboxPolicy.nextWakeMs(listOf(now + 30_000L, now + 4_000L, now + Long.MAX_VALUE / 4), now),
+        )
+        // The same clock the queue bumps with: after the first failure it wakes at the first backoff step.
+        assertEquals(OutboxPolicy.backoffMs[0], OutboxPolicy.nextWakeMs(listOf(now + OutboxPolicy.waitMs(1)), now))
     }
 }

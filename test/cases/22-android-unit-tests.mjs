@@ -85,9 +85,11 @@ const ciFlat = ci.replace(/\s+/g, " ");
     "the queue keeps no private copy of the retry table",
     !cache.includes("private val backoffMs") && !cache.includes("private const val MAX_AUTO"),
   );
+  // r33 item 3: seven — rearmOnLoad, add's first retry, bump, isDue, send's
+  // first retry, the self re-arm (nextWakeMs) and its cap (backoffMs.last()).
   check(
-    "…and calls the policy at every one of its four call sites",
-    (cache.match(/OutboxPolicy\./g) || []).length === 4,
+    "…and calls the policy at every one of its seven call sites",
+    (cache.match(/OutboxPolicy\./g) || []).length === 7,
     String((cache.match(/OutboxPolicy\./g) || []).length),
   );
   const policy = main("OutboxPolicy.kt");

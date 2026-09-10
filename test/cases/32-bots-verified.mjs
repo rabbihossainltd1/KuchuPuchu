@@ -5262,7 +5262,7 @@ const convBetween = (db, a, b) =>
           "val up = Api.uploadFile(name, mime, file) { w, t -> UploadProgress.set(clientId, 0.9f * w / t) }",
         ) &&
         chat.includes("if (e.status in 400..499 && e.status != 408 && e.status != 429) throw e") &&
-        (chat.match(/Outbox\.add\(convId, clientId, payload\)/g) || []).length >= 3 &&
+        (chat.match(/Outbox\.add\(convId, clientId, payload\)/g) || []).length >= 2 &&
         chat.includes("if (file.length() > VideoPlan.UPLOAD_LIMIT) {") &&
         chat.includes(
           "val outcome = Uploads.sendFile(convId, clientId, name, mime, file, docMeta)",
@@ -6450,6 +6450,116 @@ const convBetween = (db, a, b) =>
     );
   }
 
+  // r33 item 3 (part A — text): a message must never vanish for leaving the
+  // chat before it went out, or for being offline. sendText used to POST on the
+  // screen's rememberCoroutineScope (leaving cancelled it) and only queue on an
+  // exception; queued rows were never painted on re-entry; the queue's retry
+  // clock never re-armed itself after `bump`. Now: Outbox.send persists BEFORE
+  // the request leaves and posts on the queue's own scope; pendingFor() feeds
+  // the clock bubbles back to the chat on open; flushNow re-arms via
+  // OutboxPolicy.nextWakeMs; the POST's own response row is painted (item 4).
+  {
+    const cache = kt("Cache.kt");
+    const policy = kt("OutboxPolicy.kt");
+    const policyTest = readFileSync(
+      "native-android/app/src/test/java/app/kuchupuchu/android/OutboxPolicyTest.kt",
+      "utf8",
+    );
+    const chat33 = kt("ChatScreen.kt");
+    const sendText33 = chat33.slice(
+      chat33.indexOf('fun sendText(body: String, kind: String = "TEXT") {'),
+      chat33.indexOf("fun loadScheduled() {"),
+    );
+    const flush33 = cache.slice(
+      cache.indexOf("suspend fun flushNow"),
+      cache.indexOf("private fun purgeInvalid"),
+    );
+    const send33 = cache.slice(
+      cache.indexOf("fun send(convId: String, clientId: String, body: JSONObject"),
+      cache.indexOf("fun pendingFor(convId: String)"),
+    );
+    check(
+      "r33-3a: Outbox.send is queue-first — the payload is enqueued (persisted) before the POST, the POST runs on the queue's scope, a blip bumps + re-kicks, a permanent 4xx refuses (text comes back via §20), the result is delivered on Main and an unpainted outcome pokes the chat",
+      cache.includes(
+        "fun send(convId: String, clientId: String, body: JSONObject, onResult: ((Result<JSONObject>) -> Boolean)? = null) {",
+      ) &&
+        send33.indexOf("enqueue(convId, clientId, body)") <
+          send33.indexOf('Api.post("/api/conversations/$convId/messages", body)') &&
+        send33.includes("inflight.add(clientId)") &&
+        send33.includes("if (status in 400..499 && status != 408 && status != 429) {") &&
+        send33.includes("refuse(clientId)") &&
+        send33.includes('bump(clientId, e.message ?: "network")') &&
+        send33.includes("kick(OutboxPolicy.waitMs(1))") &&
+        send33.includes(
+          "val painted = withContext(Dispatchers.Main) { onResult?.invoke(outcome) ?: false }",
+        ) &&
+        send33.includes("if (!painted) ScreenStore.pokeInbox()") &&
+        cache.includes("fun pendingFor(convId: String): List<JSONObject> =") &&
+        cache.includes('row.put("queued", true)') &&
+        cache.includes("fun awaitLoaded(ms: Long = 3_000): Boolean =") &&
+        cache.includes("loadLatch.countDown()") &&
+        // a send in the first milliseconds must not be wiped by the load landing after it
+        cache.includes('items.addAll(0, loaded.filter { it.optString("clientId") !in have })') &&
+        cache.includes("if (kickPending && kickDueAt <= dueAt && (kickForce || !force)) return") &&
+        cache.includes("if (kickPending) kickJob?.cancel()") &&
+        cache.includes("if (flushing) return retryLater(force)"),
+    );
+    check(
+      "r33-3a: flushNow waits for the loader (off Main), skips in-flight sends, counts refusals (poke), and re-arms itself from OutboxPolicy.nextWakeMs only when it was not cancelled by a newer kick; a success force-kicks the rest; save() snapshots under the lock and writes on one ordered thread",
+      flush33.includes("withContext(Dispatchers.IO) { awaitLoaded() }") &&
+        flush33.includes("if (clientId in inflight) continue") &&
+        flush33.includes('pathDeadUntil = bump(clientId, e.message ?: "network")') &&
+        flush33.includes(
+          "if (kotlin.coroutines.coroutineContext.isActive) rearm(sent, pathDeadUntil) else kick(2_000, force)",
+        ) &&
+        flush33.includes(
+          "if (sent > 0) ScreenStore.pokeInbox() else if (refused > 0) ScreenStore.pokeInbox()",
+        ) &&
+        cache.includes("private fun rearm(sent: Int, pathDeadUntil: Long) {") &&
+        cache.includes(
+          "val wake = OutboxPolicy.nextWakeMs(left.map { maxOf(it, dead) }, now) ?: return",
+        ) &&
+        cache.includes("kick(500, force = true)") &&
+        cache.includes("kick(if (Api.inCooldown()) maxOf(wake, 15_000L) else wake)") &&
+        cache.includes('Executors.newSingleThreadExecutor { r -> Thread(r, "kp-outbox-write")') &&
+        cache.includes("writer.execute {") &&
+        policy.includes("fun nextWakeMs(deadlines: List<Long>, nowMs: Long): Long? =") &&
+        policy.includes(
+          "deadlines.filter { it < PARKED }.minOrNull()?.let { maxOf(1_000L, it - nowMs) }",
+        ) &&
+        policyTest.includes("OutboxPolicy.nextWakeMs(emptyList(), now)") &&
+        policyTest.includes("OutboxPolicy.nextWakeMs(listOf(now + OutboxPolicy.waitMs(1)), now)"),
+    );
+    check(
+      "r33-3a: the chat sends text through Outbox.send (no Api.post on the screen scope, r32-48 scroll coroutine kept, draft released right after the queue owns it), paints the reply row via paintSent while alive, seeds queued rows from Outbox.pendingFor on open, and the leave effect flips `alive`",
+      sendText33.includes("Outbox.send(convId, clientId, payload) { outcome ->") &&
+        !sendText33.includes("Api.post(") &&
+        !sendText33.includes("Outbox.add(") &&
+        !sendText33.includes("refreshMessages(") &&
+        sendText33.includes("reconcileRefused()") &&
+        chat33.includes("fun reconcileRefused() {") &&
+        // the refusal pass runs BEFORE the marker GET (an "unchanged" page used to skip it)
+        chat33.indexOf("fun reconcileRefused() {") < chat33.indexOf("fun refreshMessages(") &&
+        /scope\.launch \{\n\s+try \{\n\s+reconcileRefused\(\)/.test(chat33) &&
+        sendText33.includes(
+          "if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }",
+        ) &&
+        sendText33.includes("if (!alive.get()) return@send false") &&
+        sendText33.includes("outcome.onSuccess { row -> paintSent(row) }") &&
+        sendText33.includes("Drafts.clear(convId)") &&
+        sendText33.indexOf("Outbox.send(") < sendText33.indexOf("Drafts.clear(convId)") &&
+        chat33.includes("fun paintSent(row: JSONObject) {") &&
+        chat33.includes("ScreenStore.setMsgs(convId, msgs.toList())") &&
+        chat33.includes(
+          "val alive = remember(convId) { java.util.concurrent.atomic.AtomicBoolean(true) }",
+        ) &&
+        chat33.includes("alive.set(false)") &&
+        chat33.includes("withContext(Dispatchers.IO) { Outbox.awaitLoaded() }") &&
+        chat33.includes("Outbox.pendingFor(convId).forEach { row ->") &&
+        chat33.indexOf("Outbox.pendingFor(convId).forEach") <
+          chat33.indexOf("refreshMessages(markRead = true)"),
+    );
+  }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
   // a touch on blank list space closes it (main, archive and hidden lists).
   {

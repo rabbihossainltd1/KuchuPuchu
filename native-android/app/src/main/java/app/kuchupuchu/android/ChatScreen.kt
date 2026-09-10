@@ -328,8 +328,12 @@ fun ChatScreen(nav: NavController, convId: String) {
     // zeroes the badge NOW. The list used to show a stale unread count after
     // exiting (a poke merge carried the pre-read value back in) until the
     // chat was opened a SECOND time.
+    // Owner round 33 (item 3): a send's reply may land after this screen is
+    // gone — its state must not be painted into a dead composition.
+    val alive = remember(convId) { java.util.concurrent.atomic.AtomicBoolean(true) }
     androidx.compose.runtime.DisposableEffect(convId) {
         onDispose {
+            alive.set(false)
             ScreenStore.markRead(convId)
             Thread {
                 runCatching { Api.post("/api/conversations/$convId/read") }
@@ -438,6 +442,35 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
+    // Owner round 33 (item 3): a queue refusal is independent of the page —
+    // the text comes back to the composer (§20) and the bubble turns red the
+    // moment the chat hears of it. This used to sit behind the marker GET,
+    // and an "unchanged" page returned before it ran.
+    fun reconcileRefused() {
+        if (pending.isEmpty()) return
+        // A queued send the server refused for good (banned word,
+        // removed from the chat, over the length limit) never comes
+        // back as a server row, so without this the bubble sits on
+        // "sending" for the rest of the session.
+        // A refused send's text returns here (§20 counterpart of §11).
+        Outbox.takeDroppedBody(convId)?.let { lost ->
+            input = if (input.isBlank()) lost else "$input\n\n$lost"
+            Drafts.set(convId, input)
+        }
+        val refused = Outbox.droppedIds()
+        if (refused.isNotEmpty()) {
+            pending
+                .filter { it.optString("clientId") in refused && !it.optBoolean("failed") }
+                .forEach { it.put("failed", true).put("failedAt", System.currentTimeMillis()) }
+        }
+        // Failed sends keep their bubble long enough for the error to
+        // be read, then clear instead of spinning forever.
+        pending.removeAll {
+            it.optBoolean("failed") &&
+                System.currentTimeMillis() - it.optLong("failedAt") > 20_000
+        }
+    }
+
     fun refreshMessages(
         forceScroll: Boolean = false,
         markRead: Boolean = false,
@@ -445,6 +478,7 @@ fun ChatScreen(nav: NavController, convId: String) {
     ) {
         scope.launch {
             try {
+                reconcileRefused()
                 // Owner round 15: the skeleton used to be cleared in the same
                 // frame the fetch STARTED (refreshMessages returns
                 // immediately), so the loading placeholder never showed.
@@ -514,27 +548,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         val cid = p.optString("clientId").ifBlank { "" }
                         cid.isNotBlank() && fresh.any { it.optString("clientId") == cid }
                     }
-                    // A queued send the server refused for good (banned word,
-                    // removed from the chat, over the length limit) never comes
-                    // back as a server row, so without this the bubble sits on
-                    // "sending" for the rest of the session.
-                    // A refused send's text returns here (§20 counterpart of §11).
-                    Outbox.takeDroppedBody(convId)?.let { lost ->
-                        input = if (input.isBlank()) lost else "$input\n\n$lost"
-                        Drafts.set(convId, input)
-                    }
-                    val refused = Outbox.droppedIds()
-                    if (refused.isNotEmpty()) {
-                        pending
-                            .filter { it.optString("clientId") in refused && !it.optBoolean("failed") }
-                            .forEach { it.put("failed", true).put("failedAt", System.currentTimeMillis()) }
-                    }
-                    // Failed sends keep their bubble long enough for the error to
-                    // be read, then clear instead of spinning forever.
-                    pending.removeAll {
-                        it.optBoolean("failed") &&
-                            System.currentTimeMillis() - it.optLong("failedAt") > 20_000
-                    }
+                    reconcileRefused()
                 }
                 val total = msgs.size + pending.size
                 // Only scroll when it matters: explicit send, or a NEW
@@ -587,6 +601,18 @@ fun ChatScreen(nav: NavController, convId: String) {
         olderCursor = null
         hasMoreOlder = false
         paintFromStore()
+        // Owner round 33 (item 3): whatever this chat still has in the queue
+        // file comes back as its clock bubble — a message typed here never
+        // vanishes for leaving early or being offline; it goes when it can.
+        scope.launch {
+            withContext(Dispatchers.IO) { Outbox.awaitLoaded() }
+            val known = HashSet<String>()
+            msgs.forEach { known.add(it.optString("clientId")); known.add(it.optString("id")) }
+            pending.forEach { known.add(it.optString("clientId")) }
+            Outbox.pendingFor(convId).forEach { row ->
+                if (row.optString("clientId") !in known) pending.add(row)
+            }
+        }
         // §20: the draft comes back with the chat — but only into an empty
         // composer, so returning from a media picker never overwrites live typing.
         if (input.isBlank()) Drafts.of(convId).takeIf { it.isNotBlank() }?.let { input = it }
@@ -893,6 +919,21 @@ fun ChatScreen(nav: NavController, convId: String) {
     // val inside this (huge) function produced a VerifyError on device ART.
     KpImeAutoScroll(listState)
 
+    // Owner round 33 (item 4): the POST's own response row is painted straight
+    // away — the same merge the socket's "message" frame does — instead of a
+    // marker GET round trip after every send.
+    fun paintSent(row: JSONObject) {
+        val id = row.optString("id")
+        val cid = row.optString("clientId")
+        if (id.isBlank()) return
+        val idx = msgs.indexOfFirst { it.optString("id") == id || (cid.isNotBlank() && it.optString("clientId") == cid) }
+        if (idx >= 0) msgs[idx] = row else msgs.add(row)
+        pending.removeAll { it.optString("clientId") == cid || it.optString("id") == id }
+        // Painted here = not "new" for the next marker GET (no second scroll / read post).
+        if (idx < 0) lastTopId = id
+        ScreenStore.setMsgs(convId, msgs.toList())
+    }
+
     fun sendText(body: String, kind: String = "TEXT") {
         if (body.isBlank()) return
         val clientId = "c_${java.util.UUID.randomUUID()}"
@@ -915,24 +956,34 @@ fun ChatScreen(nav: NavController, convId: String) {
             val total = msgs.size + pending.size
             if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }
         }
-        scope.launch {
-            // Owner round 11: tap sound on the send itself…
-            runCatching { KpSounds.send(ctx) }
-            try {
-                withContext(Dispatchers.IO) {
-                    Api.post("/api/conversations/$convId/messages", payload)
-                }
-                // …and the owner's "sent" sound when the server accepted it.
-                runCatching { KpSounds.sent(ctx) }
-                refreshMessages(forceScroll = true)
-            } catch (e: Exception) {
-                Outbox.add(convId, clientId, payload)
+        // Owner round 11: tap sound on the send itself…
+        runCatching { KpSounds.send(ctx) }
+        // Owner round 33 (item 3): queue-FIRST, off this screen's scope. The
+        // POST used to run on the composable's coroutine scope with the queue
+        // as its exception path only: backing out of the chat mid-request
+        // cancelled it (the bubble left with the screen and the text with it),
+        // and an offline send's bubble was gone on re-entry because nothing
+        // painted queued rows. Outbox.send persists the payload before the
+        // request leaves; the reply is painted here while the screen is still
+        // up, and pendingFor() repaints the clock bubble on re-entry.
+        Outbox.send(convId, clientId, payload) { outcome ->
+            // …and the owner's "sent" sound when the server accepted it.
+            outcome.onSuccess { runCatching { KpSounds.sent(ctx) } }
+            if (!alive.get()) return@send false
+            outcome.onSuccess { row -> paintSent(row) }
+            outcome.onFailure { e ->
+                // Refused for good: the bubble turns red now and the text
+                // comes back to the composer (§20) — no page fetch in between.
+                error = e.message?.takeIf { it.isNotBlank() } ?: "Could not send."
+                markPendingFailed(clientId)
+                reconcileRefused()
             }
-            // The draft's job ends here, not at "server said ok": from now on the
-            // text is owned by the server row or by the queue file (and if the
-            // queue refuses it for good, that text comes back to the composer).
-            Drafts.clear(convId)
+            true
         }
+        // The draft's job ends here, not at "server said ok": from now on the
+        // text is owned by the server row or by the queue file (and if the
+        // queue refuses it for good, that text comes back to the composer).
+        Drafts.clear(convId)
     }
 
     // Owner round 32 (item 18): the chat's parked "send later" rows — mine

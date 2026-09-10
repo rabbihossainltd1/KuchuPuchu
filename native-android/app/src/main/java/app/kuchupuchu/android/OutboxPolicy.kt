@@ -42,4 +42,13 @@ object OutboxPolicy {
     /** `true` when the item may be flushed now. Mirrors the queue's own gate. */
     fun isDue(nextAt: Long, nowMs: Long, force: Boolean): Boolean =
         force || nextAt <= nowMs
+
+    /**
+     * Owner round 33 (item 3): when the queue should wake ITSELF next — the
+     * nearest live deadline, never sooner than 1 s (a due item skipped behind a
+     * dead path must not spin), `null` when nothing is waiting (empty, or
+     * everything parked past [MAX_AUTO] — those wait for a real trigger).
+     */
+    fun nextWakeMs(deadlines: List<Long>, nowMs: Long): Long? =
+        deadlines.filter { it < PARKED }.minOrNull()?.let { maxOf(1_000L, it - nowMs) }
 }
