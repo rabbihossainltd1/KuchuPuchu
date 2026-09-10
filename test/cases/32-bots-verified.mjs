@@ -6023,10 +6023,13 @@ const convBetween = (db, a, b) =>
         src.includes("if (!claimed) continue;") &&
         src.includes("`https://scheduled.internal/api/conversations/${row.conv_id}/messages`") &&
         src.includes('"x-kp-scheduled": row.sender_id,') &&
-        src.includes('"x-kp-scheduled-nonce": SCHEDULE_NONCE,') &&
-        src.includes("const SCHEDULE_NONCE = crypto.randomUUID();") &&
+        src.includes('"x-kp-scheduled-nonce": SCHEDULE_NONCE(),') &&
+        src.includes(
+          "function SCHEDULE_NONCE(): string {\n  if (!scheduleNonce) scheduleNonce = crypto.randomUUID();",
+        ) &&
+        !src.includes("const SCHEDULE_NONCE = crypto.randomUUID();") &&
         src.includes('new URL(request.url).host === "scheduled.internal" &&') &&
-        src.includes('request.headers.get("x-kp-scheduled-nonce") === SCHEDULE_NONCE') &&
+        src.includes('request.headers.get("x-kp-scheduled-nonce") === SCHEDULE_NONCE()') &&
         src.includes("if (status >= 200 && status < 300) {") &&
         src.includes(
           "} else if ((status >= 400 && status < 500) || Number(row.attempts ?? 0) + 1 >= 10) {",

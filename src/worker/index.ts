@@ -2387,7 +2387,7 @@ async function requireUser(db: D1Database, request: Request) {
   if (
     scheduledBy &&
     new URL(request.url).host === "scheduled.internal" &&
-    request.headers.get("x-kp-scheduled-nonce") === SCHEDULE_NONCE
+    request.headers.get("x-kp-scheduled-nonce") === SCHEDULE_NONCE()
   ) {
     const author = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", scheduledBy);
     if (!author) fail(404, "Not found.");
@@ -8566,8 +8566,14 @@ type ScheduledRow = {
 const SCHEDULE_MIN_MS = 60_000;
 const SCHEDULE_MAX_MS = 30 * 86_400_000;
 /** Per-isolate secret the cron's internal replay carries — a client can never
- *  know it, so the identity header is worthless from outside. */
-const SCHEDULE_NONCE = crypto.randomUUID();
+ *  know it, so the identity header is worthless from outside. Minted on first
+ *  use, inside a handler: the Workers runtime forbids random values (and any
+ *  I/O) at module scope, and the deploy validator rejects the script. */
+let scheduleNonce = "";
+function SCHEDULE_NONCE(): string {
+  if (!scheduleNonce) scheduleNonce = crypto.randomUUID();
+  return scheduleNonce;
+}
 function scheduleTime(raw: string): string | null {
   const t = Date.parse(String(raw));
   if (!Number.isFinite(t)) return null;
@@ -8646,7 +8652,7 @@ async function dispatchScheduledMessages(env: Env, ctx: ExecutionContext): Promi
           headers: {
             "content-type": "application/json",
             "x-kp-scheduled": row.sender_id,
-            "x-kp-scheduled-nonce": SCHEDULE_NONCE,
+            "x-kp-scheduled-nonce": SCHEDULE_NONCE(),
           },
           body: row.body_json,
         }),
