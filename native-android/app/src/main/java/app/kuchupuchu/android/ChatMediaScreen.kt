@@ -54,6 +54,7 @@ import org.json.JSONObject
 
 @Composable
 fun ChatMediaScreen(nav: NavController, convId: String) {
+    val haptics = rememberHaptics()
     var tab by remember { mutableIntStateOf(0) }
     var images by remember { mutableStateOf(listOf<JSONObject>()) }
     var docs by remember { mutableStateOf(listOf<JSONObject>()) }
@@ -131,7 +132,7 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
                         .padding(end = 8.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(if (on) ActionBlue.copy(alpha = 0.18f) else Card)
-                        .clickable { tab = i }
+                        .clickable { haptics.tap(); tab = i }
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                     color = if (on) ActionBlueDeep else Muted,
                     fontWeight = FontWeight.SemiBold,

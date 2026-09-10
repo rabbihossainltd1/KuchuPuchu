@@ -1702,7 +1702,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     .padding(horizontal = 2.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = { selected.clear() }, modifier = Modifier.size(36.dp)) {
+                IconButton(onClick = { haptics.tap(); selected.clear() }, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", tint = Ink, modifier = Modifier.size(26.dp))
                 }
                 Text(
@@ -1721,6 +1721,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             .joinToString("\n") { it.optText("body") }
                         val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                         cm.setPrimaryClip(android.content.ClipData.newPlainText("KuchuPuchu", text))
+                        haptics.confirm()
                         android.widget.Toast.makeText(ctx, "Copied", android.widget.Toast.LENGTH_SHORT).show()
                         selected.clear()
                         reactionFor = null
@@ -1729,21 +1730,21 @@ fun ChatScreen(nav: NavController, convId: String) {
                     }
                 }
                 if (!privateChat && selectedMessages().none { isViewOnce(it) }) {
-                    IconButton(onClick = { forwarding = true }) {
+                    IconButton(onClick = { haptics.tap(); forwarding = true }) {
                         Icon(Icons.AutoMirrored.Filled.Send, "Forward", tint = ActionBlueDeep, modifier = Modifier.size(21.dp))
                     }
                 }
                 if (single && singleMsg != null && canEdit(singleMsg)) {
-                    IconButton(onClick = { editing = singleMsg; selected.clear() }) {
+                    IconButton(onClick = { haptics.tap(); editing = singleMsg; selected.clear() }) {
                         Icon(Icons.Filled.Edit, "Edit", tint = ActionBlueDeep, modifier = Modifier.size(21.dp))
                     }
                 }
                 if (single && singleMsg != null && singleMsg.optString("senderId") == Store.myId() && !pendingEchoOf(singleMsg)) {
-                    IconButton(onClick = { unsendSelected() }) {
+                    IconButton(onClick = { haptics.heavy(); unsendSelected() }) {
                         Icon(Icons.Filled.DeleteForever, "Delete for everyone", tint = Red, modifier = Modifier.size(21.dp))
                     }
                 }
-                IconButton(onClick = { deleteForMe() }) {
+                IconButton(onClick = { haptics.heavy(); deleteForMe() }) {
                     Icon(Icons.Filled.Delete, "Delete for me", tint = Red, modifier = Modifier.size(21.dp))
                 }
             }
@@ -1863,7 +1864,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             // popup in the app; a GROUP gets its own list — Add Members /
             // Group Media / Theme / Search / Mute-Unmute / Leave Group.
             if (otherUserId != "kp_official_bot") {
-                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) {
+                IconButton(onClick = { haptics.tap(); menuOpen = true }, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.Filled.MoreVert, "More", tint = Ink, modifier = Modifier.size(22.dp))
                 }
             }
@@ -2232,6 +2233,8 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
 
         /* ---------------- error ---------------- */
+        // Owner round 32 (item 40): a refusal buzzes once when it appears.
+        LaunchedEffect(error) { if (error.isNotBlank()) haptics.reject() }
         if (error.isNotBlank()) {
             Row(
                 Modifier
@@ -3641,6 +3644,7 @@ internal fun scheduleStamp(iso: String): String {
  *  then a custom date + time (hour / minute wheels, no dialogs). */
 @Composable
 private fun ScheduleSheet(onClose: () -> Unit, onPick: (java.time.Instant) -> Unit) {
+    val haptics = rememberHaptics()
     val now = dhakaNow().withSecond(0).withNano(0)
     val quick =
         listOf(
@@ -3676,7 +3680,7 @@ private fun ScheduleSheet(onClose: () -> Unit, onPick: (java.time.Instant) -> Un
                             .weight(1f)
                             .clip(RoundedCornerShape(12.dp))
                             .background(if (on) ChipSelected else ChipIdle)
-                            .clickable { dayOff = d }
+                            .clickable { haptics.tap(); dayOff = d }
                             .padding(vertical = 8.dp),
                         contentAlignment = Alignment.Center,
                     ) {
@@ -3707,7 +3711,7 @@ private fun ScheduleSheet(onClose: () -> Unit, onPick: (java.time.Instant) -> Un
                                 .padding(vertical = 2.dp)
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(if (on) ChipSelected else ChipIdle)
-                                .clickable { pm = isPm }
+                                .clickable { haptics.tap(); pm = isPm }
                                 .padding(vertical = 8.dp),
                             contentAlignment = Alignment.Center,
                         ) {
@@ -3747,6 +3751,7 @@ private fun NumberWheel(
     onChange: (Int) -> Unit,
 ) {
     val values = range.toList()
+    val haptics = rememberHaptics()
     val idx = values.indexOf(value).coerceAtLeast(0)
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
@@ -3754,7 +3759,7 @@ private fun NumberWheel(
                 .size(36.dp)
                 .clip(CircleShape)
                 .background(ChipIdle)
-                .clickable { onChange(values[(idx + 1) % values.size]) },
+                .clickable { haptics.tap(); onChange(values[(idx + 1) % values.size]) },
             contentAlignment = Alignment.Center,
         ) { Text("+", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.SemiBold) }
         Text(
@@ -3769,7 +3774,7 @@ private fun NumberWheel(
                 .size(36.dp)
                 .clip(CircleShape)
                 .background(ChipIdle)
-                .clickable { onChange(values[(idx - 1 + values.size) % values.size]) },
+                .clickable { haptics.tap(); onChange(values[(idx - 1 + values.size) % values.size]) },
             contentAlignment = Alignment.Center,
         ) { Text("−", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.SemiBold) }
     }
@@ -3779,6 +3784,7 @@ private fun NumberWheel(
  *  X cancels (server-side; the row simply never goes out). */
 @Composable
 private fun ScheduledSheet(rows: List<JSONObject>, onClose: () -> Unit, onCancel: (String) -> Unit) {
+    val haptics = rememberHaptics()
     LaunchedEffect(rows.size) { if (rows.isEmpty()) onClose() }
     KpSheet(onDismiss = onClose, title = "Scheduled") {
         rows.forEach { r ->
@@ -3800,7 +3806,7 @@ private fun ScheduledSheet(rows: List<JSONObject>, onClose: () -> Unit, onCancel
                     )
                     Text(scheduleStamp(r.optString("sendAt")), color = Muted, fontSize = 12.sp, maxLines = 1)
                 }
-                IconButton(onClick = { onCancel(r.optString("id")) }, modifier = Modifier.size(30.dp)) {
+                IconButton(onClick = { haptics.heavy(); onCancel(r.optString("id")) }, modifier = Modifier.size(30.dp)) {
                     Icon(Icons.Filled.Close, "Cancel", tint = Red, modifier = Modifier.size(16.dp))
                 }
             }
@@ -4010,12 +4016,16 @@ private fun MessageRow(
                                 // Owner round 17: the left swipe was touchy —
                                 // it now needs half again as much distance and
                                 // barely overshoots.
+                                val wasArmed = kotlin.math.abs(replyDrag) >= (if (mine) replyThreshold * 1.5f else replyThreshold)
                                 replyDrag =
                                     if (mine) {
                                         (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.5f, 0f)
                                     } else {
                                         (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.8f)
                                     }
+                                // Owner round 32 (item 40): the finger feels the
+                                // reply point — one tap when the swipe arms.
+                                if (!wasArmed && kotlin.math.abs(replyDrag) >= (if (mine) replyThreshold * 1.5f else replyThreshold)) haptics.tap()
                             },
                             onDragEnd = {
                                 val need =
@@ -4444,12 +4454,14 @@ private fun VideoMessageRow(
                     detectHorizontalDragGestures(
                         onHorizontalDrag = { change, dragAmount ->
                             change.consume()
+                            val wasArmed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
                             replyDrag =
                                 if (mine) {
                                     (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.4f, 0f)
                                 } else {
                                     (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.4f)
                                 }
+                            if (!wasArmed && kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f) haptics.tap()
                         },
                         onDragEnd = {
                             val armed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
@@ -4598,12 +4610,14 @@ private fun ViewOnceRow(
                         detectHorizontalDragGestures(
                             onHorizontalDrag = { change, dragAmount ->
                                 change.consume()
+                                val wasArmed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
                                 replyDrag =
                                     if (mine) {
                                         (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.4f, 0f)
                                     } else {
                                         (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.4f)
                                     }
+                                if (!wasArmed && kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f) haptics.tap()
                             },
                             onDragEnd = {
                                 val armed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
@@ -4795,12 +4809,14 @@ private fun ImageMessageRow(
                             change.consume()
                             // Owner round 17: calmer — needs a longer, more
                             // deliberate drag and barely overshoots.
+                            val wasArmed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
                             replyDrag =
                                 if (mine) {
                                     (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.4f, 0f)
                                 } else {
                                     (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.4f)
                                 }
+                            if (!wasArmed && kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f) haptics.tap()
                         },
                         onDragEnd = {
                             val armed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
@@ -5095,12 +5111,14 @@ private fun AlbumMessageRow(
                         detectHorizontalDragGestures(
                             onHorizontalDrag = { change, dragAmount ->
                                 change.consume()
+                                val wasArmed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
                                 replyDrag =
                                     if (mine) {
                                         (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.4f, 0f)
                                     } else {
                                         (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.4f)
                                     }
+                                if (!wasArmed && kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f) haptics.tap()
                             },
                             onDragEnd = {
                                 val armed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
@@ -5543,6 +5561,7 @@ private fun FileBubble(
     onOpenDoc: (JSONObject) -> Unit = {},
 ) {
     val ctx = LocalContext.current
+    val haptics = rememberHaptics()
     val id = m.optString("id")
     val fileName = m.optString("fileName").ifBlank { "File" }
     val fileType = m.optString("fileType")
@@ -5589,6 +5608,7 @@ private fun FileBubble(
                     .background(if (mine) Color(0x33FFFFFF) else chatAccent(theme).copy(alpha = 0.18f))
                     .clickable(interactionSource = interaction, indication = null) {
                         if (pendingEcho || fileKey.isBlank()) return@clickable // still uploading
+                        haptics.tap()
                         player.toggle(ctx, id, fileKey)
                     },
                 contentAlignment = Alignment.Center,
@@ -5964,6 +5984,7 @@ private fun DisappearDialog(current: Int, onClose: () -> Unit, onPick: (Int) -> 
 
 @Composable
 private fun ThemeDialog(current: String, onClose: () -> Unit, onPick: (String) -> Unit) {
+    val haptics = rememberHaptics()
     // Owner round 14: real swatches. Owner round 31: a bottom sheet.
     data class Opt(val id: String, val label: String, val swatch: Color)
     // Owner round 20: DARK BLUE is the default chat theme; the classic
@@ -5983,7 +6004,7 @@ private fun ThemeDialog(current: String, onClose: () -> Unit, onPick: (String) -
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
                     .background(if (sel) ActionBlue.copy(alpha = 0.14f) else Color.Transparent)
-                    .clickable { onPick(o.id) }
+                    .clickable { haptics.tap(); onPick(o.id) }
                     .padding(horizontal = 14.dp, vertical = 11.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

@@ -133,11 +133,13 @@ fun LoginScreen(onAuthed: () -> Unit) {
     val deviceId = remember { KpPush.deviceId(ctx) }
     val deviceName = remember { Build.MODEL.take(64) }
 
+    val haptics = rememberHaptics()
     var stage by remember { mutableStateOf(LoginStage.PHONE) }
     var phone by remember { mutableStateOf("") }
     var country by remember { mutableStateOf(DEFAULT_COUNTRY) }
     var showCountries by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
+    LaunchedEffect(error) { if (error.isNotBlank()) haptics.reject() }
     var busy by remember { mutableStateOf(false) }
     var requestId by remember { mutableStateOf("") }
     var deviceOnly by remember { mutableStateOf(false) }
@@ -512,7 +514,9 @@ fun LoginScreen(onAuthed: () -> Unit) {
     }
 
     // Auto-advance from the success animation to whatever came next.
+    // Owner round 32 (item 40): the green tick moments confirm, a refusal rejects.
     LaunchedEffect(stage) {
+        if (stage == LoginStage.VERIFY_OK || stage == LoginStage.DONE) haptics.confirm()
         if (stage == LoginStage.VERIFY_OK) {
             delay(1000)
             afterVerify()

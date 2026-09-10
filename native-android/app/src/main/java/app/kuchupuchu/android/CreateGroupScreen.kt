@@ -62,6 +62,7 @@ import org.json.JSONObject
 @Composable
 fun CreateGroupScreen(nav: NavController, with: String = "") {
     val scope = rememberCoroutineScope()
+    val haptics = rememberHaptics()
     var title by remember { mutableStateOf("") }
     var query by remember { mutableStateOf("") }
     val found = remember { mutableStateListOf<JSONObject>() }
@@ -116,6 +117,7 @@ fun CreateGroupScreen(nav: NavController, with: String = "") {
 
     fun toggle(u: JSONObject) {
         val id = u.optString("id")
+        haptics.tap()
         if (picked.any { it.optString("id") == id }) {
             picked.removeAll { it.optString("id") == id }
         } else if (picked.size < 50) {

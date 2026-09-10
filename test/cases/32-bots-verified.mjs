@@ -3347,7 +3347,10 @@ const convBetween = (db, a, b) =>
             cl.includes("val tap = !onRow && !moved && fingers == 1 && now - downAt < 300") &&
             cl.includes("if (tap && (taps == 0 || now - lastUp < 600)) {") &&
             cl.includes("if (taps >= 3) {") &&
-            (cl.match(/swipeFocusList \{ nav\.navigate\("hidden"\) \}/g) || []).length === 2 &&
+            (
+              cl.match(/swipeFocusList \{ haptics\.confirm\(\); nav\.navigate\("hidden"\) \}/g) ||
+              []
+            ).length === 2 &&
             !cl.includes("threeFingerDoubleTap") &&
             !cl.includes("maxFingers >= 3") &&
             kt("KpApp.kt").includes('composable("hidden") { HiddenChatsScreen(nav) }') &&
@@ -6220,6 +6223,114 @@ const convBetween = (db, a, b) =>
         ) &&
         plan.includes(
           "fun moveEnd(start: Long, end: Long, durationMs: Long, newEnd: Long, maxMs: Long = MAX_STATUS_MS): Pair<Long, Long> {",
+        ),
+    );
+  }
+  // r32-40: haptics polish — a five-verb vocabulary (tap / confirm / heavy /
+  // toggle / reject) wired through the SHARED primitives so every sheet row,
+  // primary button and confirm sheet buzzes, plus the missing moments.
+  {
+    const feel = kt("Feel.kt");
+    const ui = kt("Ui.kt");
+    const chat = kt("ChatScreen.kt");
+    const cl = kt("ChatListScreen.kt");
+    const calls = kt("CallScreens.kt");
+    const settings = kt("SettingsScreen.kt");
+    const login = kt("LoginScreen.kt");
+    check(
+      "r32-40: Haptics gains toggle(on) (TOGGLE_ON / TOGGLE_OFF on 34+, KEYBOARD_TAP below) and reject() (REJECT on 30+, LONG_PRESS below); all through View.performHapticFeedback so the system touch-feedback setting is honoured; no Vibrator use",
+      feel.includes("fun toggle(on: Boolean) {") &&
+        feel.includes(
+          "if (on) HapticFeedbackConstants.TOGGLE_ON else HapticFeedbackConstants.TOGGLE_OFF",
+        ) &&
+        feel.includes("fun reject() {") &&
+        feel.includes("v.performHapticFeedback(HapticFeedbackConstants.REJECT)") &&
+        feel.includes("android.os.Build.VERSION.SDK_INT >= 34") &&
+        feel.includes("android.os.Build.VERSION.SDK_INT >= 30") &&
+        !feel.includes("Vibrator") &&
+        !feel.includes("VibrationEffect"),
+    );
+    check(
+      "r32-40: shared primitives buzz on their own — GoldBtn / ActionBtn tap, KpSheetRow taps, KpConfirmSheet Cancel taps and the confirm thuds (danger) or confirms, CompactSearchBar's clear taps",
+      (ui.match(/onClick = \{ haptics\.tap\(\); onClick\(\) \},/g) || []).length === 2 &&
+        ui.includes(
+          ".clickable { haptics.tap(); onClick() }\n            .padding(horizontal = 14.dp, vertical = 13.dp),",
+        ) &&
+        ui.includes(".clickable { haptics.tap(); onDismiss() }") &&
+        ui.includes(
+          "if (danger) haptics.heavy() else haptics.confirm()\n                            onConfirm()",
+        ) &&
+        ui.includes('.clickable { haptics.tap(); onValueChange("") }'),
+    );
+    check(
+      "r32-40: switches flip with toggle(on) (Settings ToggleRow, Crash reports, Private group); Settings hub / setting rows / logout / theme + ringtone picks tap; the username live-check's verdict buzzes (free taps, taken rejects)",
+      (settings.match(/haptics\.toggle\(on\)/g) || []).length === 2 &&
+        kt("GroupInfoScreen.kt").includes(
+          "haptics.toggle(it)\n                        setPrivate(it)",
+        ) &&
+        settings.includes(
+          ".let { m -> if (clickable) m.clickable { haptics.tap(); onClick() } else m }",
+        ) &&
+        settings.includes(
+          "private fun HubRow(icon: ImageVector, label: String, onClick: () -> Unit) {\n    val haptics = rememberHaptics()",
+        ) &&
+        settings.includes(".clickable { haptics.tap(); confirmLogout = true }") &&
+        settings.includes(
+          "haptics.confirm()\n                            KpThemeMode.set(ctx, o.dark)",
+        ) &&
+        settings.includes("if (available == true) haptics.tap() else haptics.reject()"),
+    );
+    check(
+      "r32-40: chat — the reply swipe taps once when it ARMS (all five bubble kinds), the select bar's actions buzz (copy confirms, delete-for-everyone / delete-for-me thud), the ⋮ taps, an error line rejects once when it appears, schedule-sheet chips / steppers / theme swatches tap, a parked message's X thuds, voice play taps",
+      (chat.match(/if \(!wasArmed && kotlin\.math\.abs\(replyDrag\) >= /g) || []).length === 5 &&
+        chat.includes(
+          'cm.setPrimaryClip(android.content.ClipData.newPlainText("KuchuPuchu", text))\n                        haptics.confirm()',
+        ) &&
+        chat.includes("IconButton(onClick = { haptics.heavy(); unsendSelected() })") &&
+        chat.includes("IconButton(onClick = { haptics.heavy(); deleteForMe() })") &&
+        chat.includes("IconButton(onClick = { haptics.tap(); forwarding = true })") &&
+        chat.includes(
+          "IconButton(onClick = { haptics.tap(); menuOpen = true }, modifier = Modifier.size(36.dp))",
+        ) &&
+        chat.includes("LaunchedEffect(error) { if (error.isNotBlank()) haptics.reject() }") &&
+        chat.includes(".clickable { haptics.tap(); dayOff = d }") &&
+        chat.includes(".clickable { haptics.tap(); pm = isPm }") &&
+        chat.includes(".clickable { haptics.tap(); onChange(values[(idx + 1) % values.size]) },") &&
+        chat.includes(".clickable { haptics.tap(); onPick(o.id) }") &&
+        chat.includes(
+          'IconButton(onClick = { haptics.heavy(); onCancel(r.optString("id")) }, modifier = Modifier.size(30.dp))',
+        ) &&
+        chat.includes(
+          "if (pendingEcho || fileKey.isBlank()) return@clickable // still uploading\n                        haptics.tap()\n                        player.toggle(ctx, id, fileKey)",
+        ),
+    );
+    check(
+      "r32-40: chat list — a selection tick taps, the hidden-chats triple tap and the archive opening confirm; calls — one confirm when the call connects (first remote media), the minimise chevron / Message / Remind me tap, the swipe circles tap at the arm point and confirm on release; login — Number verified / All set confirm, an error rejects; new group member tick, media tabs, video play / rotate tap",
+      cl.includes("if (selecting && !revealed) haptics.tap()") &&
+        cl.includes(
+          "state.logo = true\n                    // Owner round 32 (item 40): the archive opening is felt.\n                    haptics.confirm()",
+        ) &&
+        calls.includes(
+          "LaunchedEffect(engine.hasRemote) {\n        if (engine.hasRemote) gateHaptics.confirm()\n    }",
+        ) &&
+        calls.includes(".clickable { gateHaptics.tap(); engine.minimizeCall() },") &&
+        (calls.match(/haptics\.tap\(\)\n                        engine\.decline\(\)/g) || [])
+          .length === 2 &&
+        calls.includes("if (!before && dragUpPx >= threshold) haptics.tap()") &&
+        calls.includes(
+          "if (dragUpPx >= threshold) {\n                                haptics.confirm()\n                                onSwipe()",
+        ) &&
+        login.includes(
+          "if (stage == LoginStage.VERIFY_OK || stage == LoginStage.DONE) haptics.confirm()",
+        ) &&
+        login.includes("LaunchedEffect(error) { if (error.isNotBlank()) haptics.reject() }") &&
+        kt("CreateGroupScreen.kt").includes('val id = u.optString("id")\n        haptics.tap()') &&
+        kt("ChatMediaScreen.kt").includes(".clickable { haptics.tap(); tab = i }") &&
+        kt("MediaViewer.kt").includes(
+          "val p = player ?: return@clickable\n                            haptics.tap()",
+        ) &&
+        kt("MediaViewer.kt").includes(
+          "IconButton(onClick = { haptics.tap(); setLandscape(!landscape) })",
         ),
     );
   }

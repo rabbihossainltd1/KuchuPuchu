@@ -499,6 +499,7 @@ private class ArchivePullState {
  */
 @Composable
 private fun ArchivePullArea(nav: NavController, state: ArchivePullState, content: @Composable () -> Unit) {
+    val haptics = rememberHaptics()
     val density = LocalDensity.current
     val threshold = with(density) { 90.dp.toPx() }
     state.thresholdPx = threshold
@@ -533,6 +534,8 @@ private fun ArchivePullArea(nav: NavController, state: ArchivePullState, content
                 if (state.pull >= state.thresholdPx) {
                     state.hold = 1f
                     state.logo = true
+                    // Owner round 32 (item 40): the archive opening is felt.
+                    haptics.confirm()
                     delay(450)
                     nav.navigate("archive")
                     state.logo = false
@@ -943,6 +946,7 @@ private fun ChatListBody(
     listState: LazyListState,
     archivePull: ArchivePullState,
 ) {
+    val haptics = rememberHaptics()
     // Archived chats live in their own list (pull down on this list to open).
     // Owner round 31 (item 26): hidden chats leave the list as well — they
     // sit behind the three-finger double-tap (see the detector below).
@@ -954,7 +958,7 @@ private fun ChatListBody(
             .filter { !ScreenStore.isArchived(it.optString("id")) && !it.optBoolean("hidden") }
             .sortedByDescending { if (it.optString("id") in pinned) 1 else 0 }
     if (visible.isEmpty()) {
-        Box(Modifier.fillMaxSize().then(swipeFocusList { nav.navigate("hidden") }), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxSize().then(swipeFocusList { haptics.confirm(); nav.navigate("hidden") }), contentAlignment = Alignment.Center) {
             if (loading) {
                 CircularProgressIndicator(color = ActionBlue)
             } else {
@@ -971,7 +975,7 @@ private fun ChatListBody(
     LazyColumn(
         Modifier
             .fillMaxSize()
-            .then(swipeFocusList { nav.navigate("hidden") })
+            .then(swipeFocusList { haptics.confirm(); nav.navigate("hidden") })
             // Owner round 19: THE archive feed — a non-consuming vertical
             // drag observer. It sees drags that start ON TOP OF ROWS (the
             // nested-scroll chain never reliably delivered those on the
@@ -1336,6 +1340,8 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
             .background(if (ticked) ActionBlue.copy(alpha = 0.10f) else Color.Transparent)
             .combinedClickable(
                 onClick = {
+                    // Owner round 32 (item 40): a selection tick is felt.
+                    if (selecting && !revealed) haptics.tap()
                     when {
                         revealed -> onCollapse()
                         selecting -> ListSelect.toggle(id)

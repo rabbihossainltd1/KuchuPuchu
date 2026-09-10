@@ -126,6 +126,12 @@ fun CallGate() {
         }
     }
 
+    // Owner round 32 (item 40): one confirm the moment the call CONNECTS
+    // (first remote media) — the phone can be away from the eyes then.
+    val gateHaptics = rememberHaptics()
+    LaunchedEffect(engine.hasRemote) {
+        if (engine.hasRemote) gateHaptics.confirm()
+    }
     LaunchedEffect(call.status, call.kind) {
         MainActivity.current?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         // Dark screens → status/navigation icons must be light. (Bar colors
@@ -174,7 +180,7 @@ fun CallGate() {
                 .size(38.dp)
                 .clip(CircleShape)
                 .background(Color(0x33000000))
-                .clickable { engine.minimizeCall() },
+                .clickable { gateHaptics.tap(); engine.minimizeCall() },
             contentAlignment = Alignment.Center,
         ) {
             Icon(
@@ -240,6 +246,7 @@ fun CallGate() {
 @Composable
 fun IncomingCallScreen(call: CallUi) {
     val engine = CallEngine.instance ?: return
+    val haptics = rememberHaptics()
     DarkCallScaffold {
         // Owner round 25: the incoming ring gets the same blurred profile
         // photo backdrop as connected calls ("connected er moto photo blur").
@@ -331,6 +338,7 @@ fun IncomingCallScreen(call: CallUi) {
                     color = Color(0x99FFFFFF),
                     fontSize = 13.sp,
                     modifier = Modifier.clickable {
+                        haptics.tap()
                         engine.decline()
                         engine.sendQuickReply(call, "Can't talk right now — I'll reply with a message.")
                     },
@@ -340,6 +348,7 @@ fun IncomingCallScreen(call: CallUi) {
                     color = Color(0x99FFFFFF),
                     fontSize = 13.sp,
                     modifier = Modifier.clickable {
+                        haptics.tap()
                         engine.decline()
                         Reminders.schedule(engineApp(), call.otherName, call.otherId)
                     },
@@ -409,11 +418,15 @@ fun SwipeCallCircle(
                         onDragStart = { dragUpPx = 0f },
                         onVerticalDrag = { change, dy ->
                             change.consume()
+                            val before = dragUpPx >= threshold
                             dragUpPx = (dragUpPx - dy).coerceIn(0f, threshold * 1.6f)
+                            // Owner round 32 (item 40): the finger feels the
+                            // arm point — one tap crossing it upward.
+                            if (!before && dragUpPx >= threshold) haptics.tap()
                         },
                         onDragEnd = {
                             if (dragUpPx >= threshold) {
-                                haptics.tap()
+                                haptics.confirm()
                                 onSwipe()
                             }
                             dragUpPx = 0f

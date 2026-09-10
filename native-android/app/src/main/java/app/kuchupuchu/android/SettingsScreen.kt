@@ -117,10 +117,11 @@ private fun SettingRow(
     clickable: Boolean = true,
     onClick: () -> Unit,
 ) {
+    val haptics = rememberHaptics()
     Row(
         Modifier
             .fillMaxWidth()
-            .let { m -> if (clickable) m.clickable { onClick() } else m }
+            .let { m -> if (clickable) m.clickable { haptics.tap(); onClick() } else m }
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -141,6 +142,8 @@ private fun kpSwitchColors() =
 
 @Composable
 private fun ToggleRow(icon: ImageVector, label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    // Owner round 32 (item 40): a switch flip has its own on / off feel.
+    val haptics = rememberHaptics()
     Row(
         Modifier
             .fillMaxWidth()
@@ -150,17 +153,26 @@ private fun ToggleRow(icon: ImageVector, label: String, checked: Boolean, onChan
         Icon(icon, label, tint = ActionBlueDeep, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(12.dp))
         Text(label, fontSize = 14.5.sp, color = Ink, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.weight(1f))
-        Switch(checked = checked, onCheckedChange = onChange, colors = kpSwitchColors(), modifier = Modifier.scale(0.85f))
+        Switch(
+            checked = checked,
+            onCheckedChange = { on ->
+                haptics.toggle(on)
+                onChange(on)
+            },
+            colors = kpSwitchColors(),
+            modifier = Modifier.scale(0.85f),
+        )
     }
 }
 
 /** The hub entries: icon + name, chevron on the right. */
 @Composable
 private fun HubRow(icon: ImageVector, label: String, onClick: () -> Unit) {
+    val haptics = rememberHaptics()
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable { onClick() }
+            .clickable { haptics.tap(); onClick() }
             .padding(horizontal = 16.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -201,6 +213,7 @@ private fun privacyLabel(level: String): String = PRIVACY_LEVELS.firstOrNull { i
  */
 @Composable
 fun SettingsScreen(nav: NavController) {
+    val haptics = rememberHaptics()
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var confirmLogout by remember { mutableStateOf(false) }
@@ -228,7 +241,7 @@ fun SettingsScreen(nav: NavController) {
                 .padding(horizontal = 14.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(Red.copy(alpha = 0.12f))
-                .clickable { confirmLogout = true }
+                .clickable { haptics.tap(); confirmLogout = true }
                 .padding(horizontal = 16.dp, vertical = 13.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -568,6 +581,7 @@ fun PermissionsSettingsScreen(nav: NavController) {
 
 @Composable
 fun AppSettingsScreen(nav: NavController) {
+    val haptics = rememberHaptics()
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     Column(
@@ -619,6 +633,7 @@ fun AppSettingsScreen(nav: NavController) {
                 Switch(
                     checked = crashOn,
                     onCheckedChange = { on ->
+                        haptics.toggle(on)
                         crashOn = on
                         KpCrash.setEnabled(ctx, on)
                     },
@@ -877,6 +892,7 @@ private fun openAppSettings(ctx: android.content.Context) {
  */
 @Composable
 fun ThemePickerScreen(onClose: () -> Unit) {
+    val haptics = rememberHaptics()
     val ctx = androidx.compose.ui.platform.LocalContext.current
     Column(
         Modifier
@@ -914,6 +930,7 @@ fun ThemePickerScreen(onClose: () -> Unit) {
                     .border(1.dp, if (selected) ActionBlue else Line, RoundedCornerShape(16.dp))
                     .clickable {
                         if (!selected) {
+                            haptics.confirm()
                             KpThemeMode.set(ctx, o.dark)
                             onClose()
                             (ctx as? android.app.Activity)?.recreate()
@@ -946,6 +963,7 @@ fun ThemePickerScreen(onClose: () -> Unit) {
 
 @Composable
 fun RingtonePickerScreen(kind: String = "call", onClose: () -> Unit) {
+    val haptics = rememberHaptics()
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val isNotif = kind == "notif"
     val savedCustom = if (isNotif) null else SoundPrefs.customRingPath(ctx)
@@ -1068,6 +1086,7 @@ fun RingtonePickerScreen(kind: String = "call", onClose: () -> Unit) {
                         .clip(RoundedCornerShape(10.dp))
                         .background(if (selRes == res) ChipSelected else Card)
                         .clickable {
+                            haptics.tap()
                             selRes = res
                             selCustom = null
                             preview(res, null)
@@ -1132,6 +1151,7 @@ fun RingtonePickerScreen(kind: String = "call", onClose: () -> Unit) {
                 // Owner round 20: Save is BLUE in dark-blue mode.
                 .background(ActionBlue)
                 .clickable {
+                    haptics.confirm()
                     if (isNotif) {
                         if (selRes >= 0) SoundPrefs.setNotifIndex(ctx, SoundPrefs.notifRes.indexOf(selRes))
                     } else {
@@ -1154,6 +1174,7 @@ fun RingtonePickerScreen(kind: String = "call", onClose: () -> Unit) {
  *  the shared picker (preview on tap, Save keeps, stops on exit). */
 @Composable
 fun SoundTypePickerScreen(onClose: () -> Unit, onPick: (String) -> Unit) {
+    val haptics = rememberHaptics()
     val ctx = androidx.compose.ui.platform.LocalContext.current
     Column(
         Modifier
@@ -1182,7 +1203,7 @@ fun SoundTypePickerScreen(onClose: () -> Unit, onPick: (String) -> Unit) {
                     .padding(horizontal = 12.dp, vertical = 4.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(Card)
-                    .clickable { pick() }
+                    .clickable { haptics.tap(); pick() }
                     .padding(horizontal = 12.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -1290,6 +1311,7 @@ fun EditNameScreen(nav: NavController) {
 /** USERNAME: live availability check with a tick when free. */
 @Composable
 fun EditUsernameScreen(nav: NavController) {
+    val haptics = rememberHaptics()
     val scope = rememberCoroutineScope()
     var value by remember { mutableStateOf(Store.me?.optText("username") ?: "") }
     var busy by remember { mutableStateOf(false) }
@@ -1312,6 +1334,8 @@ fun EditUsernameScreen(nav: NavController) {
         try {
             val res = withContext(Dispatchers.IO) { Api.get("/api/users/username-available?u=${android.net.Uri.encode(v)}") }
             available = res.optBoolean("available")
+            // Owner round 32 (item 40): the verdict buzzes — free taps, taken rejects.
+            if (available == true) haptics.tap() else haptics.reject()
         } catch (_: Exception) {
             available = null
         } finally {

@@ -398,6 +398,7 @@ internal fun MediaMenuSheet(
  */
 @Composable
 fun VideoPlayerScreen(nav: NavController, b64: String) {
+    val haptics = rememberHaptics()
     val ctx = LocalContext.current
     val m = remember(b64) { mediaArgDecode(b64) }
     val accent = playerAccent()
@@ -630,7 +631,7 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
                     Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (sub.isNotBlank()) Text(sub, color = Color(0xB3FFFFFF), fontSize = 11.5.sp, maxLines = 1)
                 }
-                IconButton(onClick = { setLandscape(!landscape) }) {
+                IconButton(onClick = { haptics.tap(); setLandscape(!landscape) }) {
                     Icon(Icons.Filled.ScreenRotation, "Rotate", tint = if (landscape) accent else Color.White, modifier = Modifier.size(22.dp))
                 }
                 if (savingClip) {
@@ -654,6 +655,7 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
                         .background(Color(0x66000000))
                         .clickable {
                             val p = player ?: return@clickable
+                            haptics.tap()
                             when {
                                 ended -> {
                                     ended = false

@@ -586,8 +586,10 @@ fun GoldBtn(
         ActionBtn(text, modifier, enabled, onClick)
         return
     }
+    // Owner round 32 (item 40): every primary button taps back.
+    val haptics = rememberHaptics()
     androidx.compose.material3.Button(
-        onClick = onClick,
+        onClick = { haptics.tap(); onClick() },
         enabled = enabled,
         modifier = modifier,
         shape = RoundedCornerShape(14.dp),
@@ -675,6 +677,7 @@ fun CompactSearchBar(
     imeAction: ImeAction = ImeAction.Search,
     keyboardType: KeyboardType = KeyboardType.Text,
 ) {
+    val haptics = rememberHaptics()
     Row(
         modifier
             .fillMaxWidth()
@@ -705,7 +708,7 @@ fun CompactSearchBar(
                 Icons.Filled.Close,
                 null,
                 tint = Muted,
-                modifier = Modifier.size(20.dp).clip(CircleShape).clickable { onValueChange("") }.padding(2.dp),
+                modifier = Modifier.size(20.dp).clip(CircleShape).clickable { haptics.tap(); onValueChange("") }.padding(2.dp),
             )
         }
     }
@@ -811,12 +814,16 @@ fun KpSheetRow(
     selected: Boolean = false,
     onClick: () -> Unit,
 ) {
+    // Owner round 32 (item 40): every sheet row taps back (callers that add
+    // their own confirm / heavy for the OUTCOME keep it — a tap then a thud
+    // reads as press → done).
+    val haptics = rememberHaptics()
     Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(if (selected) ActionBlue.copy(alpha = 0.14f) else Color.Transparent)
-            .clickable(onClick = onClick)
+            .clickable { haptics.tap(); onClick() }
             .padding(horizontal = 14.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -839,6 +846,9 @@ fun KpConfirmSheet(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    // Owner round 32 (item 40): Cancel taps; a destructive confirm thuds,
+    // an ordinary one confirms.
+    val haptics = rememberHaptics()
     KpSheet(onDismiss = onDismiss) {
         Column(Modifier.padding(horizontal = 14.dp)) {
             Spacer(Modifier.height(4.dp))
@@ -854,7 +864,7 @@ fun KpConfirmSheet(
                         .weight(1f)
                         .clip(RoundedCornerShape(14.dp))
                         .background(Line)
-                        .clickable(onClick = onDismiss)
+                        .clickable { haptics.tap(); onDismiss() }
                         .padding(vertical = 12.dp),
                     contentAlignment = Alignment.Center,
                 ) { Text("Cancel", color = Ink, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }
@@ -863,7 +873,10 @@ fun KpConfirmSheet(
                         .weight(1f)
                         .clip(RoundedCornerShape(14.dp))
                         .background(if (danger) Red else ActionBlue)
-                        .clickable(onClick = onConfirm)
+                        .clickable {
+                            if (danger) haptics.heavy() else haptics.confirm()
+                            onConfirm()
+                        }
                         .padding(vertical = 12.dp),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -1167,8 +1180,10 @@ fun ActionBtn(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
+    // Owner round 32 (item 40): every primary button taps back.
+    val haptics = rememberHaptics()
     androidx.compose.material3.Button(
-        onClick = onClick,
+        onClick = { haptics.tap(); onClick() },
         enabled = enabled,
         modifier = modifier,
         shape = RoundedCornerShape(14.dp),

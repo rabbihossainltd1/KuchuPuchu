@@ -199,7 +199,18 @@ object KpSounds {
     }
 }
 
-/** Light tap / confirm haptics via the current Compose view. */
+/** Light tap / confirm haptics via the current Compose view.
+ *
+ *  Owner round 32 (item 40) — the vocabulary, used the same way everywhere:
+ *  - tap()      any button / row / chip / tab press, a selection tick
+ *  - confirm()  something was DONE: sent, saved, scheduled, picked, connected
+ *  - heavy()    a long-press that opens a mode, and destructive actions
+ *  - toggle(on) a switch flips (distinct on / off feel on Android 14+)
+ *  - reject()   a refusal: an error surfaced, an unavailable username,
+ *               a failed send — the finger learns it without reading
+ *  Every call goes through View.performHapticFeedback, which honours the
+ *  system's "touch feedback" setting — nothing buzzes when the user turned
+ *  haptics off in Android settings. */
 class Haptics(private val view: View?) {
     fun tap() {
         view?.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -211,6 +222,24 @@ class Haptics(private val view: View?) {
 
     fun heavy() {
         view?.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+    }
+
+    fun toggle(on: Boolean) {
+        val v = view ?: return
+        if (android.os.Build.VERSION.SDK_INT >= 34) {
+            v.performHapticFeedback(if (on) HapticFeedbackConstants.TOGGLE_ON else HapticFeedbackConstants.TOGGLE_OFF)
+        } else {
+            v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+        }
+    }
+
+    fun reject() {
+        val v = view ?: return
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            v.performHapticFeedback(HapticFeedbackConstants.REJECT)
+        } else {
+            v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        }
     }
 }
 

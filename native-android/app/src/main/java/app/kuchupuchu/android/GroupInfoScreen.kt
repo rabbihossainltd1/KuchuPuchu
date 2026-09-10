@@ -526,7 +526,10 @@ fun GroupSettingsScreen(nav: NavController, convId: String) {
                 Text("Private group", fontSize = 14.5.sp, color = Ink, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.weight(1f))
                 Switch(
                     checked = privateGroup,
-                    onCheckedChange = { setPrivate(it) },
+                    onCheckedChange = {
+                        haptics.toggle(it)
+                        setPrivate(it)
+                    },
                     enabled = isAdmin && !busy && c != null,
                     colors =
                         SwitchDefaults.colors(
