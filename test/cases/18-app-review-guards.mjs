@@ -451,9 +451,12 @@ has(list, "Api.PollCadence.failed()", "…and a bad one starts it");
     "every composer edit feeds the draft store",
     /input = v\n\s+Drafts\.set\(convId, v\)/.test(chat),
   );
+  // r33-3: the chat hands the text to the queue FIRST (Outbox.send persists
+  // before the POST); Outbox.add is now only for a send that already failed.
   check(
     "the draft is released when the server OR the queue owns the text",
-    chat.includes("Drafts.clear(convId)") && chat.includes("Outbox.add(convId, clientId, payload)"),
+    chat.includes("Drafts.clear(convId)") &&
+      chat.includes("Outbox.send(convId, clientId, payload) { outcome ->"),
   );
   check(
     "…and a send the queue refuses for good hands its text back to the composer",

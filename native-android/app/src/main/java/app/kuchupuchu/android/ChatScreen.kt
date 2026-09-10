@@ -147,10 +147,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.navigation.NavController
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -1148,54 +1146,29 @@ fun ChatScreen(nav: NavController, convId: String) {
                 pending.find { it.optString("clientId") == clientId }?.put("mediaW", shotW)?.put("mediaH", shotH)
                 ImageRatios.put(dataUrl, shotW.toFloat() / shotH.toFloat())
             }
-            try {
-                val up = withContext(Dispatchers.IO) {
-                    Api.upload("photo.jpg", "image/jpeg", jpeg) { w, t -> UploadProgress.set(clientId, 0.9f * w / t) }
+            // Owner round 33 (item 3): the upload + POST run on Uploads' own
+            // scope, queue-first (the bytes are on disk before the upload
+            // starts), so leaving the chat or losing the network mid-way can
+            // no longer drop the photo. This screen only paints the outcome.
+            val payload =
+                JSONObject()
+                    .put("kind", "FILE")
+                    .put("fileName", "photo.jpg")
+                    .put("fileType", "image/jpeg")
+                    .put("fileSize", jpeg.size)
+                    .put("clientId", clientId)
+            metaWith(shotW, shotH)?.let { payload.put("meta", it) }
+            Uploads.sendPhoto(ctx, convId, clientId, jpeg, payload) { outcome ->
+                // Owner round 21: photo send has its own sound.
+                outcome.onSuccess { runCatching { KpSounds.photoSend(ctx) } }
+                if (!alive.get()) return@sendPhoto false
+                outcome.onSuccess { row -> paintSent(row) }
+                outcome.onFailure { e ->
+                    error = "Photo: " + (e.message ?: "?") + "  Tap the banner to try again."
+                    markPendingFailed(clientId)
+                    reconcileRefused()
                 }
-                UploadProgress.set(clientId, 0.95f)
-                val key = up.optString("fileKey")
-                if (key.isBlank()) throw ApiException(500, "Upload returned no file key.")
-                val payload =
-                    JSONObject()
-                        .put("kind", "FILE")
-                        .put("fileKey", key)
-                        .put("fileName", "photo.jpg")
-                        .put("fileType", "image/jpeg")
-                        .put("fileSize", jpeg.size)
-                        .put("clientId", clientId)
-                metaWith(shotW, shotH)?.let { payload.put("meta", it) }
-                // The server is idempotent by clientId, so one automatic
-                // retry after a dropped response/timeout is SAFE — it returns
-                // the same message instead of failing the photo.
-                try {
-                    withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
-                } catch (e: Exception) {
-                    delay(1_500)
-                    withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
-                }
-                UploadProgress.done(clientId)
-                refreshMessages(forceScroll = true)
-            } catch (e: Exception) {
-                try {
-                    val small = if (dataUrl.length > 400_000) {
-                        "data:image/jpeg;base64," + android.util.Base64.encodeToString(jpeg, android.util.Base64.NO_WRAP)
-                    } else dataUrl
-                    val payload = JSONObject().put("kind", "IMAGE").put("imageData", small).put("clientId", clientId)
-                    metaWith(shotW, shotH)?.let { payload.put("meta", it) }
-                    withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
-                    UploadProgress.done(clientId)
-                    // Owner round 21: photo send has its own sound.
-                    if (payload.optString("kind") == "IMAGE") {
-                        runCatching { KpSounds.photoSend(ctx) }
-                    } else {
-                        runCatching { KpSounds.sent(ctx) }
-                    }
-                    refreshMessages(forceScroll = true)
-                } catch (e2: Exception) {
-                    UploadProgress.done(clientId)
-                    error = "Photo: " + ((e.message?.take(60) + " / ") ?: "") + (e2.message ?: "?") + "  Tap the banner to try again."
-                    pending.find { it.optString("clientId") == clientId }?.put("failed", true)
-                }
+                true
             }
         }
     }
@@ -1275,19 +1248,22 @@ fun ChatScreen(nav: NavController, convId: String) {
         // scope — this screen only awaits the outcome for its bubble. They
         // used to run on the composition scope, so backing out of the chat
         // mid-upload cancelled the coroutine and the file never arrived.
-        val outcome = Uploads.sendFile(convId, clientId, name, mime, file, docMeta)
-        scope.launch {
-            val failure = outcome.await()
-            if (failure == null) {
-                runCatching { KpSounds.sent(ctx) }
-                refreshMessages(forceScroll = true)
-            } else {
+        // Owner round 33 (item 3): queue-first — the copy is already on disk
+        // (docPath), so the queue itself can upload it later when the send
+        // was started offline; the outcome is painted here while alive.
+        Uploads.sendFile(convId, clientId, name, mime, file, docMeta) { outcome ->
+            outcome.onSuccess { runCatching { KpSounds.sent(ctx) } }
+            if (!alive.get()) return@sendFile false
+            outcome.onSuccess { row -> paintSent(row) }
+            outcome.onFailure { failure ->
                 // Before this the optimistic bubble stayed on screen forever
                 // looking like it was still uploading: the POST never happened,
                 // so no message with this clientId ever came back to match it.
                 markPendingFailed(clientId)
                 error = (failure.message ?: "Could not send file.") + "  Tap the banner to retry."
+                reconcileRefused()
             }
+            true
         }
     }
 
@@ -1321,34 +1297,29 @@ fun ChatScreen(nav: NavController, convId: String) {
         scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }
         scope.launch {
             runCatching { KpSounds.send(ctx) }
-            try {
-                val bytes = withContext(Dispatchers.IO) { file.readBytes() }
-                val data = withContext(Dispatchers.IO) {
-                    Api.upload(name, "audio/mp4", bytes) { w, t -> UploadProgress.set(clientId, 0.9f * w / t) }
+            // Owner round 33 (item 3): the recording is a file already — the
+            // upload + POST run queue-first on Uploads' own scope (the old
+            // coroutine here died with the screen and the note with it; a
+            // FILE payload without a fileKey is never queued — the queue
+            // uploads the local file itself, see Outbox.materialize).
+            val payload =
+                JSONObject()
+                    .put("kind", "FILE")
+                    .put("fileName", name)
+                    .put("fileType", "audio/mp4")
+                    .put("fileSize", file.length())
+                    .put("clientId", clientId)
+                    .put("meta", voiceMeta())
+            Uploads.sendFile(convId, clientId, name, "audio/mp4", file, null, payload) { outcome ->
+                outcome.onSuccess { runCatching { KpSounds.sent(ctx) } }
+                if (!alive.get()) return@sendFile false
+                outcome.onSuccess { row -> paintSent(row) }
+                outcome.onFailure { e ->
+                    markPendingFailed(clientId)
+                    error = (e.message ?: "Could not send that voice note.") + "  Tap the banner to retry."
+                    reconcileRefused()
                 }
-                UploadProgress.set(clientId, 0.95f)
-                val payload =
-                    JSONObject()
-                        .put("kind", "FILE")
-                        .put("fileKey", data.optString("fileKey"))
-                        .put("fileName", name)
-                        .put("fileType", "audio/mp4")
-                        .put("fileSize", bytes.size)
-                        .put("clientId", clientId)
-                        .put("meta", voiceMeta())
-                withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
-                UploadProgress.done(clientId)
-                runCatching { KpSounds.sent(ctx) }
-                file.delete()
-                refreshMessages(forceScroll = false)
-            } catch (e: Exception) {
-                UploadProgress.done(clientId)
-                // The old fallback queued a FILE payload with no fileKey. The
-                // server rejects that with 400 every time, and because flush()
-                // stops at the first failure it wedged every later queued
-                // message behind it permanently.
-                markPendingFailed(clientId)
-                error = (e.message ?: "Could not send that voice note.") + "  Tap the banner to retry."
+                true
             }
         }
     }
@@ -5263,7 +5234,7 @@ private fun AlbumTile(
 ) {
     val url = messageMediaUrl(photo)
     Box(modifier.background(Color(0x22000000)), contentAlignment = Alignment.Center) {
-        if (url.startsWith("data:")) {
+        if (url.startsWith("data:") || url.startsWith("file://")) {
             val bmp = rememberBitmap(url, 600)
             if (bmp != null) {
                 Image(bmp, contentDescription = "Photo", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
@@ -5446,44 +5417,55 @@ object UploadProgress {
 object Uploads {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    /** Uploads [file] then posts the FILE message; resolves to null on
-     *  success or to the failure (the bubble turns red, the file stays for
-     *  the retry banner). */
-    fun sendFile(convId: String, clientId: String, name: String, mime: String, file: File, meta: JSONObject?): Deferred<Throwable?> =
-        scope.async {
-            try {
-                val up = Api.uploadFile(name, mime, file) { w, t -> UploadProgress.set(clientId, 0.9f * w / t) }
-                val key = up.optString("fileKey")
-                if (key.isBlank()) throw ApiException(500, "Upload returned no file key.")
-                UploadProgress.set(clientId, 0.95f)
-                val payload =
-                    JSONObject()
-                        .put("kind", "FILE")
-                        .put("fileKey", key)
-                        .put("fileName", name)
-                        .put("fileType", mime)
-                        .put("fileSize", file.length())
-                        .put("clientId", clientId)
-                        .also { if (meta != null) it.put("meta", meta) }
-                try {
-                    Api.post("/api/conversations/$convId/messages", payload)
-                } catch (e: ApiException) {
-                    // Refused for good (removed from the chat, blocked…): the
-                    // bubble must say so. Anything else is a blip — queue it.
-                    if (e.status in 400..499 && e.status != 408 && e.status != 429) throw e
-                    Outbox.add(convId, clientId, payload)
-                } catch (e: Exception) {
-                    Outbox.add(convId, clientId, payload)
-                }
-                UploadProgress.done(clientId)
-                file.delete()
-                withContext(Dispatchers.Main) { ScreenStore.pokeInbox() }
-                null
-            } catch (e: Exception) {
-                UploadProgress.done(clientId)
-                e
+    /**
+     * Owner round 33 (item 3): queue-FIRST for media. The FILE payload goes
+     * into the queue file with the local copy's path BEFORE the upload
+     * starts; Outbox.send then uploads (Outbox.materialize fills fileKey)
+     * and posts on the queue's own scope. Offline, the entry simply waits —
+     * the retry clock / network callback uploads and posts it later, chat
+     * open or not. [onResult] as in Outbox.send (Main; painted or not).
+     * [payload] lets a caller supply its own body (voice meta etc.).
+     */
+    fun sendFile(
+        convId: String,
+        clientId: String,
+        name: String,
+        mime: String,
+        file: File,
+        meta: JSONObject?,
+        payload: JSONObject? = null,
+        onResult: ((Result<JSONObject>) -> Boolean)? = null,
+    ) {
+        val body =
+            payload
+                ?: JSONObject()
+                    .put("kind", "FILE")
+                    .put("fileName", name)
+                    .put("fileType", mime)
+                    .put("fileSize", file.length())
+                    .put("clientId", clientId)
+                    .also { if (meta != null) it.put("meta", meta) }
+        Outbox.send(convId, clientId, body, JSONObject().put("path", file.absolutePath).put("temp", true), onResult)
+    }
+
+    /** A photo: the JPEG is written to the queue's media dir first (a send
+     *  that never got to upload must survive the process), then travels like
+     *  any file. */
+    fun sendPhoto(ctx: android.content.Context, convId: String, clientId: String, jpeg: ByteArray, payload: JSONObject, onResult: ((Result<JSONObject>) -> Boolean)? = null) {
+        val app = ctx.applicationContext
+        scope.launch {
+            val f =
+                runCatching {
+                    val dir = File(app.filesDir, "kp-outbox-media").apply { mkdirs() }
+                    File(dir, "$clientId.jpg").also { it.writeBytes(jpeg) }
+                }.getOrNull()
+            if (f == null) {
+                withContext(Dispatchers.Main) { onResult?.invoke(Result.failure(ApiException(0, "Could not keep that photo."))) }
+                return@launch
             }
+            sendFile(convId, clientId, "photo.jpg", "image/jpeg", f, null, payload, onResult)
         }
+    }
 }
 
 @Composable
@@ -5519,7 +5501,7 @@ private fun ImageBubble(m: JSONObject, mine: Boolean) {
                 ?: 0f,
         )
     }
-    val dataBmp = if (url?.startsWith("data:") == true) rememberBitmap(url) else null
+    val dataBmp = if (url?.startsWith("data:") == true || url?.startsWith("file://") == true) rememberBitmap(url) else null
     Box(
         Modifier
             // Owner round 32 (item 29): a smaller inline preview — 150 dp wide,

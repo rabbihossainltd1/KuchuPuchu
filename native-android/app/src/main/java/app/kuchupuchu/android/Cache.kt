@@ -252,7 +252,7 @@ object Outbox {
     }
 
     @Synchronized
-    private fun enqueue(convId: String, clientId: String, body: JSONObject) {
+    private fun enqueue(convId: String, clientId: String, body: JSONObject, local: JSONObject? = null) {
         items.removeAll { it.optString("clientId") == clientId }
         items.add(
             JSONObject()
@@ -261,9 +261,46 @@ object Outbox {
                 .put("body", JSONObject(body.toString()))
                 .put("attempts", 0)
                 .put("nextAt", 0L)
-                .put("addedAt", System.currentTimeMillis()),
+                .put("addedAt", System.currentTimeMillis())
+                .also { if (local != null) it.put("local", JSONObject(local.toString())) },
         )
         dropped.remove(clientId)
+        save()
+    }
+
+    /**
+     * Owner round 33 (item 3, media): a queued FILE payload whose upload never
+     * happened (sent offline) carries its bytes as `local.path`; the upload
+     * runs here — from the queue's own scope, so it also survives the chat
+     * being closed — and the finished key is written back into the queue entry
+     * (a second walk after a dropped POST response must not upload twice).
+     * A payload that already has its key is returned as is.
+     */
+    private fun materialize(clientId: String, body: JSONObject, local: JSONObject?): JSONObject {
+        if (body.optString("kind") != "FILE" || body.optString("fileKey").isNotBlank()) return body
+        val path = local?.optString("path").orEmpty()
+        if (path.isBlank()) return body
+        val f = File(path)
+        if (!f.exists()) throw ApiException(410, "That file is no longer on this phone.")
+        val name = body.optString("fileName").ifBlank { f.name }
+        val mime = body.optString("fileType").ifBlank { "application/octet-stream" }
+        val up =
+            try {
+                Api.uploadFile(name, mime, f) { w, t -> UploadProgress.set(clientId, 0.9f * w / t) }
+            } finally {
+                UploadProgress.done(clientId)
+            }
+        val key = up.optString("fileKey")
+        if (key.isBlank()) throw ApiException(500, "Upload returned no file key.")
+        body.put("fileKey", key).put("fileSize", f.length())
+        setKey(clientId, key, f.length())
+        return body
+    }
+
+    @Synchronized
+    private fun setKey(clientId: String, key: String, size: Long) {
+        val item = items.firstOrNull { it.optString("clientId") == clientId } ?: return
+        item.optJSONObject("body")?.put("fileKey", key)?.put("fileSize", size)
         save()
     }
 
@@ -277,14 +314,25 @@ object Outbox {
      * row (success) or the refusal (failure) and answers whether it painted the
      * outcome — when nothing did, the open chat is poked to reconcile itself.
      */
-    fun send(convId: String, clientId: String, body: JSONObject, onResult: ((Result<JSONObject>) -> Boolean)? = null) {
+    fun send(
+        convId: String,
+        clientId: String,
+        body: JSONObject,
+        local: JSONObject? = null,
+        onResult: ((Result<JSONObject>) -> Boolean)? = null,
+    ) {
         inflight.add(clientId)
-        enqueue(convId, clientId, body)
+        enqueue(convId, clientId, body, local)
         scope.launch {
             val outcome: Result<JSONObject>? =
                 try {
-                    val row = Api.post("/api/conversations/$convId/messages", body).optJSONObject("message") ?: JSONObject()
+                    // Owner round 33 (item 3, media): a photo / voice note queued
+                    // OFFLINE has its bytes on disk and no fileKey yet — the
+                    // upload happens here, on the queue's scope, then the POST.
+                    val ready = materialize(clientId, body, local)
+                    val row = Api.post("/api/conversations/$convId/messages", ready).optJSONObject("message") ?: JSONObject()
                     remove(clientId)
+                    local?.optString("path")?.takeIf { it.isNotBlank() && local.optBoolean("temp") }?.let { File(it).delete() }
                     Result.success(row)
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
@@ -337,6 +385,23 @@ object Outbox {
             row.put("hasImage", true)
         }
         if (body.optString("fileType").startsWith("image/")) row.put("hasImage", true)
+        // The photo's measured size rides in meta (w/h); the bubble reads it
+        // as mediaW/mediaH to reserve the right box before the decode.
+        body.optJSONObject("meta")?.let { m ->
+            if (m.optInt("w") > 0 && m.optInt("h") > 0) row.put("mediaW", m.optInt("w")).put("mediaH", m.optInt("h"))
+        }
+        // A queued photo / voice / document still on this phone draws from
+        // its local copy (the bubble's own keys: mediaUrl for a picture,
+        // voicePath / docPath for the retry banner) until the server row lands.
+        item.optJSONObject("local")?.optString("path")?.takeIf { it.isNotBlank() && File(it).exists() }?.let { p ->
+            val meta = body.optJSONObject("meta")
+            when {
+                meta?.optBoolean("voice") == true -> row.put("voicePath", p)
+                body.optString("fileType").startsWith("image/") && meta?.optBoolean("document") != true ->
+                    row.put("mediaUrl", "file://$p")
+                else -> row.put("docPath", p)
+            }
+        }
         return row
     }
 
@@ -484,8 +549,12 @@ object Outbox {
                 if (clientId in inflight) continue
                 try {
                     val body = item.optJSONObject("body")!!
-                    withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", body) }
+                    val local = item.optJSONObject("local")
+                    withContext(Dispatchers.IO) {
+                        Api.post("/api/conversations/$convId/messages", materialize(clientId, body, local))
+                    }
                     remove(clientId)
+                    local?.optString("path")?.takeIf { it.isNotBlank() && local.optBoolean("temp") }?.let { File(it).delete() }
                     sent++
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e

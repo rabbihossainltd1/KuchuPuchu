@@ -283,6 +283,8 @@ object Bitmaps {
                 if (b64.isBlank()) null else Base64.decode(b64, Base64.DEFAULT)
             }
             url.startsWith("http") || url.startsWith("/") -> Api.download(url)
+            // Owner round 33 (item 3): a queued photo's local copy.
+            url.startsWith("file://") -> java.io.File(url.removePrefix("file://")).takeIf { it.exists() }?.readBytes()
             else -> null
         }
     }.getOrNull()

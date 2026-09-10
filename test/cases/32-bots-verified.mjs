@@ -3872,7 +3872,7 @@ const convBetween = (db, a, b) =>
         chat.includes('if (album != null) o.put("album", album)') &&
         chat.includes('.also { row -> metaWith(0, 0)?.let { row.put("meta", it) } }') &&
         (chat.match(/metaWith\(shotW, shotH\)\?\.let \{ payload\.put\("meta", it\) \}/g) || [])
-          .length === 2 &&
+          .length === 1 &&
         chat.includes("fun handleImagePicked(uri: Uri, album: String? = null) {") &&
         chat.includes(
           'url.isNotBlank() -> sendImage(url, p.optJSONObject("meta")?.optString("album")?.ifBlank { null }, isViewOnce(p))',
@@ -4564,7 +4564,7 @@ const convBetween = (db, a, b) =>
         "scope.launch {\n            runCatching { KpSounds.send(ctx) }\n            var shotW = 0",
       ) &&
       sendVoiceBody.includes(
-        "scope.launch {\n            runCatching { KpSounds.send(ctx) }\n            try {",
+        "scope.launch {\n            runCatching { KpSounds.send(ctx) }\n            // Owner round 33 (item 3)",
       ) &&
       !/scope\.launch \{\n\s+listState\.animateScrollToItem/.test(chat32) &&
       !/scope\.launch \{\n\s+val total = msgs\.size \+ pending\.size\n\s+if \(total > 0\) listState\.animateScrollToItem/.test(
@@ -5255,17 +5255,15 @@ const convBetween = (db, a, b) =>
         api.includes("if (pct != lastPct) {") &&
         chat.includes("object Uploads {") &&
         chat.includes("private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)") &&
-        chat.includes(
-          "fun sendFile(convId: String, clientId: String, name: String, mime: String, file: File, meta: JSONObject?): Deferred<Throwable?> =",
+        // r33-3b: the upload moved into the queue (Outbox.materialize) — queue-first.
+        chat.includes("fun sendFile(\n        convId: String,\n        clientId: String,") &&
+        kt("Cache.kt").includes(
+          "Api.uploadFile(name, mime, f) { w, t -> UploadProgress.set(clientId, 0.9f * w / t) }",
         ) &&
-        chat.includes(
-          "val up = Api.uploadFile(name, mime, file) { w, t -> UploadProgress.set(clientId, 0.9f * w / t) }",
-        ) &&
-        chat.includes("if (e.status in 400..499 && e.status != 408 && e.status != 429) throw e") &&
-        (chat.match(/Outbox\.add\(convId, clientId, payload\)/g) || []).length >= 2 &&
+        kt("Cache.kt").includes("if (status in 400..499 && status != 408 && status != 429) {") &&
         chat.includes("if (file.length() > VideoPlan.UPLOAD_LIMIT) {") &&
         chat.includes(
-          "val outcome = Uploads.sendFile(convId, clientId, name, mime, file, docMeta)",
+          "Uploads.sendFile(convId, clientId, name, mime, file, docMeta) { outcome ->",
         ) &&
         chat.includes('.put("docPath", file.absolutePath)') &&
         chat.includes("docPath.isNotBlank() -> {") &&
@@ -6475,16 +6473,18 @@ const convBetween = (db, a, b) =>
       cache.indexOf("private fun purgeInvalid"),
     );
     const send33 = cache.slice(
-      cache.indexOf("fun send(convId: String, clientId: String, body: JSONObject"),
+      cache.indexOf(
+        "fun send(\n        convId: String,\n        clientId: String,\n        body: JSONObject,",
+      ),
       cache.indexOf("fun pendingFor(convId: String)"),
     );
     check(
       "r33-3a: Outbox.send is queue-first — the payload is enqueued (persisted) before the POST, the POST runs on the queue's scope, a blip bumps + re-kicks, a permanent 4xx refuses (text comes back via §20), the result is delivered on Main and an unpainted outcome pokes the chat",
       cache.includes(
-        "fun send(convId: String, clientId: String, body: JSONObject, onResult: ((Result<JSONObject>) -> Boolean)? = null) {",
+        "fun send(\n        convId: String,\n        clientId: String,\n        body: JSONObject,\n        local: JSONObject? = null,\n        onResult: ((Result<JSONObject>) -> Boolean)? = null,\n    ) {",
       ) &&
-        send33.indexOf("enqueue(convId, clientId, body)") <
-          send33.indexOf('Api.post("/api/conversations/$convId/messages", body)') &&
+        send33.indexOf("enqueue(convId, clientId, body, local)") <
+          send33.indexOf('Api.post("/api/conversations/$convId/messages", ready)') &&
         send33.includes("inflight.add(clientId)") &&
         send33.includes("if (status in 400..499 && status != 408 && status != 429) {") &&
         send33.includes("refuse(clientId)") &&
@@ -6558,6 +6558,100 @@ const convBetween = (db, a, b) =>
         chat33.includes("Outbox.pendingFor(convId).forEach { row ->") &&
         chat33.indexOf("Outbox.pendingFor(convId).forEach") <
           chat33.indexOf("refreshMessages(markRead = true)"),
+    );
+  }
+  // r33 item 3 (part B — media): photo / voice / document sends take the same
+  // queue-first road. The FILE payload is queued WITH the local copy's path
+  // before the upload starts; Outbox.materialize uploads it from the queue's
+  // scope (chat open or not, now or after the network is back) and writes the
+  // key back so a repeated walk never uploads twice; the re-entry echo draws
+  // the local copy (file:// through Bitmaps, voicePath / docPath for retry).
+  {
+    const cache = kt("Cache.kt");
+    const chat33 = kt("ChatScreen.kt");
+    const ui33 = kt("Ui.kt");
+    const uploads = chat33.slice(
+      chat33.indexOf("object Uploads {"),
+      chat33.indexOf("private fun ImageBubble("),
+    );
+    const sendImage33 = chat33.slice(
+      chat33.indexOf(
+        "fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {",
+      ),
+      chat33.indexOf("fun sendFile(name: String, mime: String, file: File"),
+    );
+    const sendVoice33 = chat33.slice(
+      chat33.indexOf("fun sendVoice(file: File, seconds: Int"),
+      chat33.indexOf("fun handleImagePicked("),
+    );
+    check(
+      "r33-3b: Outbox.send takes the local copy (`local.path`, temp) into the queue entry; materialize uploads a keyless FILE payload from disk, writes the key back (setKey), refuses a vanished file with 410; both the immediate send and flushNow go through it and delete a temp copy only after the POST succeeded",
+      cache.includes(
+        "local: JSONObject? = null,\n        onResult: ((Result<JSONObject>) -> Boolean)? = null,",
+      ) &&
+        cache.includes("enqueue(convId, clientId, body, local)") &&
+        cache.includes(
+          '.also { if (local != null) it.put("local", JSONObject(local.toString())) },',
+        ) &&
+        cache.includes(
+          "private fun materialize(clientId: String, body: JSONObject, local: JSONObject?): JSONObject {",
+        ) &&
+        cache.includes(
+          'if (body.optString("kind") != "FILE" || body.optString("fileKey").isNotBlank()) return body',
+        ) &&
+        cache.includes(
+          'if (!f.exists()) throw ApiException(410, "That file is no longer on this phone.")',
+        ) &&
+        cache.includes("setKey(clientId, key, f.length())") &&
+        cache.includes("val ready = materialize(clientId, body, local)") &&
+        cache.includes(
+          'Api.post("/api/conversations/$convId/messages", materialize(clientId, body, local))',
+        ) &&
+        (
+          cache.match(
+            /local\?\.optString\("path"\)\?\.takeIf \{ it\.isNotBlank\(\) && local\.optBoolean\("temp"\) \}\?\.let \{ File\(it\)\.delete\(\) \}/g,
+          ) || []
+        ).length === 2 &&
+        cache.includes('meta?.optBoolean("voice") == true -> row.put("voicePath", p)') &&
+        cache.includes('row.put("mediaUrl", "file://$p")') &&
+        cache.includes('else -> row.put("docPath", p)') &&
+        ui33.includes(
+          'url.startsWith("file://") -> java.io.File(url.removePrefix("file://")).takeIf { it.exists() }?.readBytes()',
+        ) &&
+        chat33.includes(
+          'val dataBmp = if (url?.startsWith("data:") == true || url?.startsWith("file://") == true) rememberBitmap(url) else null',
+        ),
+    );
+    check(
+      "r33-3b: Uploads is queue-first (no Deferred, no Outbox.add, no Api.post): sendFile hands the body + local path to Outbox.send; sendPhoto writes the JPEG under filesDir/kp-outbox-media/<clientId>.jpg first; sendImage / sendVoice / sendFile in the chat paint through paintSent while alive and never POST on the screen scope any more",
+      uploads.includes(
+        'Outbox.send(convId, clientId, body, JSONObject().put("path", file.absolutePath).put("temp", true), onResult)',
+      ) &&
+        uploads.includes('File(app.filesDir, "kp-outbox-media").apply { mkdirs() }') &&
+        uploads.includes('File(dir, "$clientId.jpg").also { it.writeBytes(jpeg) }') &&
+        uploads.includes(
+          'sendFile(convId, clientId, "photo.jpg", "image/jpeg", f, null, payload, onResult)',
+        ) &&
+        !uploads.includes("Deferred") &&
+        !uploads.includes("Outbox.add(") &&
+        !uploads.includes("Api.post(") &&
+        !chat33.includes("import kotlinx.coroutines.Deferred") &&
+        !chat33.includes("import kotlinx.coroutines.async") &&
+        sendImage33.includes(
+          "Uploads.sendPhoto(ctx, convId, clientId, jpeg, payload) { outcome ->",
+        ) &&
+        sendImage33.includes("if (!alive.get()) return@sendPhoto false") &&
+        !sendImage33.includes('put("imageData", small)') &&
+        !sendImage33.includes("delay(1_500)") &&
+        sendVoice33.includes(
+          'Uploads.sendFile(convId, clientId, name, "audio/mp4", file, null, payload) { outcome ->',
+        ) &&
+        sendVoice33.includes("if (!alive.get()) return@sendFile false") &&
+        !sendVoice33.includes("Api.upload(") &&
+        !sendVoice33.includes("Api.post(") &&
+        // sendAt (scheduled) paths still post directly — they are not optimistic bubbles
+        (sendImage33.match(/Api\.post\(/g) || []).length === 1 &&
+        (chat33.match(/outcome\.onSuccess \{ row -> paintSent\(row\) \}/g) || []).length === 4,
     );
   }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
