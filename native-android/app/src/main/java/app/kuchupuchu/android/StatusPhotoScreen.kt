@@ -413,7 +413,7 @@ private fun readVideo(
  *  trim handle is being dragged ([scrubAt]) the picture holds the frame under
  *  that handle — the release restarts playback from the start handle. */
 @Composable
-private fun StatusTrimPreview(uri: Uri, start: Long, end: Long, paused: Boolean, scrubAt: Long? = null) {
+internal fun StatusTrimPreview(uri: Uri, start: Long, end: Long, paused: Boolean, scrubAt: Long? = null) {
     var player by remember(uri) { mutableStateOf<TrimClipPlayer?>(null) }
     var userPaused by remember { mutableStateOf(false) }
     val haptics = rememberHaptics()
@@ -632,13 +632,16 @@ private class TrimClipPlayer(
  * preview can show that exact frame.
  */
 @Composable
-private fun TrimStrip(
+internal fun TrimStrip(
     thumbs: List<ImageBitmap?>,
     durationMs: Long,
     start: Long,
     end: Long,
     onWindow: (Long, Long) -> Unit,
     onScrub: (Long?) -> Unit = {},
+    // Owner round 32 (item 19): the window cap — a minute for a status, none
+    // for a chat video (MediaEditScreen).
+    maxMs: Long = VideoPlan.MAX_STATUS_MS,
 ) {
     var widthPx by remember { mutableStateOf(1f) }
     var mode by remember { mutableStateOf(0) } // 0 idle · 1 start · 2 end · 3 slide
@@ -696,8 +699,8 @@ private fun TrimStrip(
                     val deltaMs = (travel / widthPx * total).toLong()
                     val next =
                         when (mode) {
-                            1 -> VideoPlan.moveStart(grabS, grabE, durationMs, grabS + deltaMs)
-                            2 -> VideoPlan.moveEnd(grabS, grabE, durationMs, grabE + deltaMs)
+                            1 -> VideoPlan.moveStart(grabS, grabE, durationMs, grabS + deltaMs, maxMs)
+                            2 -> VideoPlan.moveEnd(grabS, grabE, durationMs, grabE + deltaMs, maxMs)
                             3 -> VideoPlan.slide(grabS, grabE, durationMs, deltaMs)
                             else -> null
                         }

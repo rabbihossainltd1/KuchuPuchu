@@ -207,6 +207,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     // clock chip above the composer.
     var showSchedule by remember { mutableStateOf(false) }
     var showScheduled by remember { mutableStateOf(false) }
+    // Owner round 32 (item 19): the attach panel's Send held → the same sheet
+    // schedules the picked photos / videos.
+    var showScheduleMedia by remember { mutableStateOf(false) }
     val scheduledRows = remember { mutableStateListOf<JSONObject>() }
     var recording by remember { mutableStateOf(false) }
     var recMs by remember { mutableStateOf(0) }
@@ -980,7 +983,47 @@ fun ChatScreen(nav: NavController, convId: String) {
     // Owner round 32 (item 18): this chat's parked "send later" rows.
     LaunchedEffect(convId) { loadScheduled() }
 
-    fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false) {
+    fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {
+        // Owner round 32 (item 19): a photo picked for LATER uploads now and
+        // parks on the server (item 18) — no bubble, the clock chip shows it.
+        if (sendAt != null) {
+            scope.launch {
+                val jpeg = withContext(Dispatchers.IO) {
+                    runCatching { android.util.Base64.decode(dataUrl.substringAfter(",", ""), android.util.Base64.DEFAULT) }.getOrNull()
+                }
+                if (jpeg == null || jpeg.isEmpty()) {
+                    error = "Could not read that photo."
+                    return@launch
+                }
+                try {
+                    val up = withContext(Dispatchers.IO) { Api.upload("photo.jpg", "image/jpeg", jpeg) }
+                    val key = up.optString("fileKey")
+                    if (key.isBlank()) throw ApiException(500, "Upload returned no file key.")
+                    val payload =
+                        JSONObject()
+                            .put("kind", "FILE")
+                            .put("fileKey", key)
+                            .put("fileName", "photo.jpg")
+                            .put("fileType", "image/jpeg")
+                            .put("fileSize", jpeg.size)
+                            .put("clientId", "c_${java.util.UUID.randomUUID()}")
+                            .put("sendAt", sendAt.toString())
+                    val meta = JSONObject()
+                    if (viewOnce) meta.put("viewOnce", true) else if (album != null) meta.put("album", album)
+                    if (meta.length() > 0) payload.put("meta", meta)
+                    val res = withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
+                    res.optJSONObject("scheduled")?.let { row ->
+                        scheduledRows.removeAll { it.optString("id") == row.optString("id") }
+                        scheduledRows.add(row)
+                        scheduledRows.sortBy { it.optString("sendAt") }
+                    }
+                    runCatching { KpSounds.sent(ctx) }
+                } catch (e: Exception) {
+                    error = (e as? ApiException)?.message?.takeIf { it.isNotBlank() } ?: "Could not schedule. Try again."
+                }
+            }
+            return
+        }
         val clientId = "c_${java.util.UUID.randomUUID()}"
         // Owner round 31 (item 29): photos picked together share one album id
         // (meta.album) — the list folds them into a single grouped bubble.
@@ -1106,11 +1149,46 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
-    fun sendFile(name: String, mime: String, file: File, asDocument: Boolean = false, viewOnce: Boolean = false) {
+    fun sendFile(name: String, mime: String, file: File, asDocument: Boolean = false, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {
         // Owner round 32 (item 34): the server's 25 MB cap is checked HERE — a
         // bigger file used to upload for minutes and then fail on that check.
         if (file.length() > VideoPlan.UPLOAD_LIMIT) {
             error = "That file is over 25 MB."
+            return
+        }
+        // Owner round 32 (item 19): picked for LATER — upload now, park on the
+        // server (item 18); no bubble, the clock chip shows it.
+        if (sendAt != null) {
+            scope.launch {
+                try {
+                    val up = withContext(Dispatchers.IO) { Api.uploadFile(name, mime, file) }
+                    val key = up.optString("fileKey")
+                    if (key.isBlank()) throw ApiException(500, "Upload returned no file key.")
+                    val payload =
+                        JSONObject()
+                            .put("kind", "FILE")
+                            .put("fileKey", key)
+                            .put("fileName", name)
+                            .put("fileType", mime)
+                            .put("fileSize", file.length())
+                            .put("clientId", "c_${java.util.UUID.randomUUID()}")
+                            .put("sendAt", sendAt.toString())
+                    when {
+                        asDocument -> payload.put("meta", JSONObject().put("document", true))
+                        viewOnce -> payload.put("meta", JSONObject().put("viewOnce", true))
+                    }
+                    val res = withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
+                    res.optJSONObject("scheduled")?.let { row ->
+                        scheduledRows.removeAll { it.optString("id") == row.optString("id") }
+                        scheduledRows.add(row)
+                        scheduledRows.sortBy { it.optString("sendAt") }
+                    }
+                    file.delete()
+                    runCatching { KpSounds.sent(ctx) }
+                } catch (e: Exception) {
+                    error = (e as? ApiException)?.message?.takeIf { it.isNotBlank() } ?: "Could not schedule. Try again."
+                }
+            }
             return
         }
         val clientId = "c_${java.util.UUID.randomUUID()}"
@@ -1231,7 +1309,7 @@ fun ChatScreen(nav: NavController, convId: String) {
        run on the *chat* screen's scope instead, which lives as long as the
        chat is open, so gallery / camera / document / audio / contact /
        location all survive the sheet closing. */
-    suspend fun readAndSendImage(uri: Uri, album: String?, viewOnce: Boolean = false) {
+    suspend fun readAndSendImage(uri: Uri, album: String?, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {
         // 720px / ~100KB: the old 960px/220KB photos took minutes to send AND load
         // on slow mobile data (the "image loads forever" report).
         // High-quality photos: 1440px, ~380KB inline budget (server caps at 450K).
@@ -1240,7 +1318,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             error = "Could not read that photo — try another one."
         } else {
             error = ""
-            sendImage(dataUrl, album, viewOnce)
+            sendImage(dataUrl, album, viewOnce, sendAt)
         }
     }
 
@@ -1248,7 +1326,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         scope.launch { readAndSendImage(uri, album) }
     }
 
-    fun handleDocumentPicked(uri: Uri, asDocument: Boolean = false, viewOnce: Boolean = false) {
+    fun handleDocumentPicked(uri: Uri, asDocument: Boolean = false, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {
         scope.launch {
             val name = withContext(Dispatchers.IO) { queryName(ctx, uri) }
             // Owner round 32 (item 34): streamed into the cache, never read
@@ -1265,11 +1343,27 @@ fun ChatScreen(nav: NavController, convId: String) {
                 return@launch
             }
             error = ""
-            sendFile(name, mime, file, asDocument, viewOnce)
+            sendFile(name, mime, file, asDocument, viewOnce, sendAt)
+        }
+    }
+    // Owner round 32 (item 19): the media editor hands its result back here —
+    // a drawn-on photo / trimmed clip goes out like any picked media.
+    LaunchedEffect(convId) {
+        ScreenStore.pendingEdited.collect { edited ->
+            if (edited == null || edited.convId != convId) return@collect
+            ScreenStore.pendingEdited.value = null
+            when (val m = edited.media) {
+                is EditedMedia.Photo -> sendImage(m.dataUrl, null, edited.viewOnce)
+                is EditedMedia.Video -> sendFile("video.mp4", m.mime, m.file, viewOnce = edited.viewOnce)
+                is EditedMedia.Untouched ->
+                    if (m.isVideo) handleDocumentPicked(m.uri, viewOnce = edited.viewOnce)
+                    else readAndSendImage(m.uri, null, viewOnce = edited.viewOnce)
+                is EditedMedia.Failed -> error = m.message
+            }
         }
     }
 
-    fun sendAttachSelection() {
+    fun sendAttachSelection(sendAt: java.time.Instant? = null) {
         val batch = attachSel.toList()
         attachSel.clear()
         showAttach = false
@@ -1290,9 +1384,9 @@ fun ChatScreen(nav: NavController, convId: String) {
             // own coroutine inside sendImage, so they overlap on the wire.
             batch.forEach { item ->
                 if (once) {
-                    if (item.isVideo) handleDocumentPicked(item.uri, viewOnce = true) else readAndSendImage(item.uri, null, viewOnce = true)
+                    if (item.isVideo) handleDocumentPicked(item.uri, viewOnce = true, sendAt = sendAt) else readAndSendImage(item.uri, null, viewOnce = true, sendAt = sendAt)
                 } else {
-                    if (item.isVideo) handleDocumentPicked(item.uri) else readAndSendImage(item.uri, album)
+                    if (item.isVideo) handleDocumentPicked(item.uri, sendAt = sendAt) else readAndSendImage(item.uri, album, sendAt = sendAt)
                 }
             }
         }
@@ -2336,6 +2430,16 @@ fun ChatScreen(nav: NavController, convId: String) {
                 onCancel = { id -> cancelScheduled(id) },
             )
         }
+        if (showScheduleMedia) {
+            ScheduleSheet(
+                onClose = { showScheduleMedia = false },
+                onPick = { at ->
+                    showScheduleMedia = false
+                    haptics.confirm()
+                    sendAttachSelection(sendAt = at)
+                },
+            )
+        }
         ReplyQuoteBar(replyTo, chatTheme) { replyTo = null }
         if (requestPending) {
             // Owner round 32 (item 38): message request — Accept or Block
@@ -2469,8 +2573,6 @@ fun ChatScreen(nav: NavController, convId: String) {
             onFinishRecord = { cancelled -> finishRecording(cancelled) },
             selectCount = selected.size,
             onSendSelection = { sendSelectedMedia() },
-            gridSelCount = attachSel.size,
-            onSendGrid = { sendAttachSelection() },
         )
         }
 
@@ -2482,6 +2584,16 @@ fun ChatScreen(nav: NavController, convId: String) {
                 sel = attachSel,
                 onSendBatch = { sendAttachSelection() },
                 onDismiss = { showAttach = false },
+                // Owner round 32 (item 19): hold the panel's Send → a time
+                // (item 18's sheet); Edit on a single pick → the light editor.
+                onScheduleBatch = { showScheduleMedia = true },
+                onEdit = { item ->
+                    val once = attachOnce
+                    attachSel.clear()
+                    attachOnce = false
+                    showAttach = false
+                    nav.navigate("mediaedit/$convId/${if (once) 1 else 0}/${statusPickArg(item)}")
+                },
                 viewOnce = attachOnce,
                 onViewOnce = { attachOnce = it },
                 onImagePicked = { uri -> handleImagePicked(uri) },
@@ -2651,8 +2763,6 @@ private fun Composer(
     onFinishRecord: (cancelled: Boolean) -> Unit,
     selectCount: Int = 0,
     onSendSelection: () -> Unit = {},
-    gridSelCount: Int = 0,
-    onSendGrid: () -> Unit = {},
     theme: String = "",
 ) {
     val accent = chatAccent(theme)
@@ -2793,9 +2903,11 @@ private fun Composer(
         }
         Spacer(Modifier.width(6.dp))
 
-        /* mic/send circle. Text typed OR media selected -> it's SEND;
-           otherwise a HOLD button: press = record, slide = cancel. */
-        if (!input.isBlank() || selectCount > 0 || gridSelCount > 0) {
+        /* mic/send circle. Text typed OR chat media selected (forward) ->
+           it's SEND; otherwise a HOLD button: press = record, slide = cancel.
+           Owner round 32 (item 19): a gallery pick no longer takes this slot
+           — the attach panel has its own Send under the mic. */
+        if (!input.isBlank() || selectCount > 0) {
             val sendInteraction = remember { MutableInteractionSource() }
             val sendPressed by sendInteraction.collectIsPressedAsState()
             Box(
@@ -2814,11 +2926,7 @@ private fun Composer(
                         indication = null,
                         onLongClick = if (input.isNotBlank()) onScheduleSend else null,
                     ) {
-                        when {
-                            input.isNotBlank() -> onSend()
-                            gridSelCount > 0 -> onSendGrid()
-                            else -> onSendSelection()
-                        }
+                        if (input.isNotBlank()) onSend() else onSendSelection()
                     },
                 contentAlignment = Alignment.Center,
             ) {

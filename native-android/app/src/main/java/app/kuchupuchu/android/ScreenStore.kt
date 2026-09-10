@@ -195,6 +195,10 @@ object ScreenStore {
     /** When set, ChatScreen opens in-chat search for this conversation. */
     var pendingChatSearch: String? = null
 
+    /** Owner round 32 (item 19): what the media editor hands back to the
+     *  chat it was opened from — consumed (nulled) by that chat on arrival. */
+    val pendingEdited = kotlinx.coroutines.flow.MutableStateFlow<EditedResult?>(null)
+
     /** Bumped on FCM so an open chat refreshes immediately. */
     var poke by mutableStateOf(0)
     fun pokeInbox() {

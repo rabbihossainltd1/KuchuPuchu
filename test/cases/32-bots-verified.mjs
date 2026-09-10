@@ -2658,10 +2658,10 @@ const convBetween = (db, a, b) =>
       "r31-16: a photo/video/audio picked through Document is SENT and SHOWN as a document (meta.document), opening in the app's own viewer/player or playing inline",
       // r32-17: both signatures grew a trailing viewOnce flag.
       chat.includes(
-        "fun handleDocumentPicked(uri: Uri, asDocument: Boolean = false, viewOnce: Boolean = false)",
+        "fun handleDocumentPicked(uri: Uri, asDocument: Boolean = false, viewOnce: Boolean = false, sendAt: java.time.Instant? = null)",
       ) &&
         chat.includes(
-          "fun sendFile(name: String, mime: String, file: File, asDocument: Boolean = false, viewOnce: Boolean = false)",
+          "fun sendFile(name: String, mime: String, file: File, asDocument: Boolean = false, viewOnce: Boolean = false, sendAt: java.time.Instant? = null)",
         ) &&
         chat.includes('asDocument -> JSONObject().put("document", true)') &&
         chat.includes(
@@ -3864,7 +3864,7 @@ const convBetween = (db, a, b) =>
         // r32-17: a view-once batch is never an album.
         chat.includes("val album = if (photos >= 2 && !once) newAlbumId() else null") &&
         chat.includes(
-          "fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false) {",
+          "fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {",
         ) &&
         chat.includes('if (album != null) o.put("album", album)') &&
         chat.includes('.also { row -> metaWith(0, 0)?.let { row.put("meta", it) } }') &&
@@ -3932,10 +3932,14 @@ const convBetween = (db, a, b) =>
       check(
         "r31-30: video — first minute preselected (VideoPlan.defaultWindow), a trim strip with slide/start/end handles, a crop overlay with Original/9:16/1:1/Free, the cut clip's real length goes up as `seconds`",
         share.includes("val (s, e) = VideoPlan.defaultWindow(src.durationMs)") &&
-          share.includes("private fun TrimStrip(") &&
+          share.includes("internal fun TrimStrip(") &&
           // r32-43: the drag is absolute (window at touch-down + total travel)
-          share.includes("1 -> VideoPlan.moveStart(grabS, grabE, durationMs, grabS + deltaMs)") &&
-          share.includes("2 -> VideoPlan.moveEnd(grabS, grabE, durationMs, grabE + deltaMs)") &&
+          share.includes(
+            "1 -> VideoPlan.moveStart(grabS, grabE, durationMs, grabS + deltaMs, maxMs)",
+          ) &&
+          share.includes(
+            "2 -> VideoPlan.moveEnd(grabS, grabE, durationMs, grabE + deltaMs, maxMs)",
+          ) &&
           share.includes("3 -> VideoPlan.slide(grabS, grabE, durationMs, deltaMs)") &&
           share.includes("private fun CropOverlay(") &&
           share.includes('listOf("Original", "9:16", "1:1", "Free").forEach { name ->') &&
@@ -4527,7 +4531,7 @@ const convBetween = (db, a, b) =>
   const chat32 = kt("ChatScreen.kt");
   const sendImageBody = chat32.slice(
     chat32.indexOf(
-      "fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false) {",
+      "fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {",
     ),
     chat32.indexOf("fun sendFile(name: String, mime: String, file: File"),
   );
@@ -4538,7 +4542,7 @@ const convBetween = (db, a, b) =>
   const sendTextBody = chat32.slice(
     chat32.indexOf('fun sendText(body: String, kind: String = "TEXT") {'),
     chat32.indexOf(
-      "fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false) {",
+      "fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {",
     ),
   );
   check(
@@ -4564,11 +4568,11 @@ const convBetween = (db, a, b) =>
         chat32,
       ) &&
       chat32.includes(
-        "suspend fun readAndSendImage(uri: Uri, album: String?, viewOnce: Boolean = false) {",
+        "suspend fun readAndSendImage(uri: Uri, album: String?, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {",
       ) &&
       chat32.includes("scope.launch { readAndSendImage(uri, album) }") &&
       chat32.includes(
-        "if (item.isVideo) handleDocumentPicked(item.uri) else readAndSendImage(item.uri, album)",
+        "if (item.isVideo) handleDocumentPicked(item.uri, sendAt = sendAt) else readAndSendImage(item.uri, album, sendAt = sendAt)",
       ) &&
       // refresh's forced scroll + the AI reveal loop survive an interrupted scroll too
       chat32.includes(
@@ -4594,10 +4598,10 @@ const convBetween = (db, a, b) =>
   const share32 = kt("StatusPhotoScreen.kt");
   const playerCls = share32.slice(
     share32.indexOf("private class TrimClipPlayer("),
-    share32.indexOf("private fun TrimStrip("),
+    share32.indexOf("internal fun TrimStrip("),
   );
   const stripFn = share32.slice(
-    share32.indexOf("private fun TrimStrip("),
+    share32.indexOf("internal fun TrimStrip("),
     share32.indexOf("private fun CropOverlay("),
   );
   const cropFn = share32.slice(share32.indexOf("private fun CropOverlay("));
@@ -5875,24 +5879,24 @@ const convBetween = (db, a, b) =>
         chat.includes("val once = attachOnce\n        attachOnce = false") &&
         chat.includes("val album = if (photos >= 2 && !once) newAlbumId() else null") &&
         chat.includes(
-          "if (item.isVideo) handleDocumentPicked(item.uri, viewOnce = true) else readAndSendImage(item.uri, null, viewOnce = true)",
+          "if (item.isVideo) handleDocumentPicked(item.uri, viewOnce = true, sendAt = sendAt) else readAndSendImage(item.uri, null, viewOnce = true, sendAt = sendAt)",
         ) &&
         chat.includes(
-          "fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false) {",
+          "fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {",
         ) &&
         chat.includes(
           'if (viewOnce) {\n                o.put("viewOnce", true)\n                return o\n            }',
         ) &&
         chat.includes('.also { row -> if (viewOnce) row.put("viewOnce", true) }') &&
         chat.includes(
-          "fun sendFile(name: String, mime: String, file: File, asDocument: Boolean = false, viewOnce: Boolean = false) {",
+          "fun sendFile(name: String, mime: String, file: File, asDocument: Boolean = false, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {",
         ) &&
         chat.includes('viewOnce -> JSONObject().put("viewOnce", true)') &&
         chat.includes(
-          "suspend fun readAndSendImage(uri: Uri, album: String?, viewOnce: Boolean = false) {",
+          "suspend fun readAndSendImage(uri: Uri, album: String?, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {",
         ) &&
         chat.includes(
-          "fun handleDocumentPicked(uri: Uri, asDocument: Boolean = false, viewOnce: Boolean = false) {",
+          "fun handleDocumentPicked(uri: Uri, asDocument: Boolean = false, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {",
         ),
     );
     const onceRow = chat.slice(
@@ -6095,6 +6099,128 @@ const convBetween = (db, a, b) =>
           'if (liveCid.isNotBlank() && scheduledRows.any { it.optString("clientId") == liveCid }) {',
         ) &&
         chat.includes("LaunchedEffect(rows.size) { if (rows.isEmpty()) onClose() }"),
+    );
+  }
+  // r32-19: attach flow — the mic stays the mic; the panel owns the media Send
+  // (tap = now, hold = later); one picked photo / video gets Edit → the light
+  // editor (pen for a photo, trim for a video).
+  {
+    const chat = kt("ChatScreen.kt");
+    const attach = kt("AttachSheet.kt");
+    const edit = kt("MediaEditScreen.kt");
+    const share = kt("StatusPhotoScreen.kt");
+    const plan = kt("VideoExport.kt");
+    const store = kt("ScreenStore.kt");
+    const app = kt("KpApp.kt");
+    const header = attach.slice(
+      attach.indexOf('sel.isNotEmpty() -> "${sel.size} selected"'),
+      attach.indexOf("if (foldersOpen) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore"),
+    );
+    check(
+      "r32-19: attach panel — the header reads 'N selected' with ①, x, Edit (ONLY for a single pick) and a real Send circle (ActionBlue, combinedClickable: tap = onSendBatch, hold = onScheduleBatch); the panel no longer relies on the composer's mic slot",
+      attach.includes("onScheduleBatch: () -> Unit = {},") &&
+        attach.includes("onEdit: (MediaItem) -> Unit = {},") &&
+        attach.includes(
+          "@OptIn(ExperimentalFoundationApi::class)\n@Composable\nfun AttachPanel(",
+        ) &&
+        header.includes("if (sel.size == 1) {") &&
+        header.includes("onEdit(sel[0])") &&
+        header.includes(
+          'Text("Edit", color = Ink, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)',
+        ) &&
+        header.includes(
+          ".size(38.dp)\n                        .clip(CircleShape)\n                        .background(ActionBlue)\n                        .combinedClickable(\n                            onLongClick = {\n                                haptics.tap()\n                                onScheduleBatch()\n                            },\n                        ) {\n                            haptics.tap()\n                            onSendBatch()\n                        },",
+        ) &&
+        header.includes('contentDescription = "Send",') &&
+        !attach.includes("the composer's mic IS the\n                // send button") &&
+        // the composer's circle is the MIC while a gallery pick is active
+        !chat.includes("gridSelCount") &&
+        !chat.includes("onSendGrid") &&
+        chat.includes("if (!input.isBlank() || selectCount > 0) {") &&
+        chat.includes("if (input.isNotBlank()) onSend() else onSendSelection()"),
+    );
+    check(
+      "r32-19: chat — the panel's hold opens item 18's ScheduleSheet for the batch (sendAttachSelection(sendAt)); a scheduled photo / video / document uploads now and parks on the server with sendAt (no bubble, the clock chip lists it); Edit clears the pick and opens mediaedit/{conv}/{once}/{arg}",
+      chat.includes("var showScheduleMedia by remember { mutableStateOf(false) }") &&
+        chat.includes("onScheduleBatch = { showScheduleMedia = true },") &&
+        chat.includes("                    sendAttachSelection(sendAt = at)") &&
+        chat.includes("fun sendAttachSelection(sendAt: java.time.Instant? = null) {") &&
+        chat.includes(
+          "if (item.isVideo) handleDocumentPicked(item.uri, viewOnce = true, sendAt = sendAt) else readAndSendImage(item.uri, null, viewOnce = true, sendAt = sendAt)",
+        ) &&
+        chat.includes(
+          "if (item.isVideo) handleDocumentPicked(item.uri, sendAt = sendAt) else readAndSendImage(item.uri, album, sendAt = sendAt)",
+        ) &&
+        (chat.match(/\.put\("sendAt", sendAt\.toString\(\)\)/g) || []).length === 2 &&
+        chat.includes(
+          'val up = withContext(Dispatchers.IO) { Api.upload("photo.jpg", "image/jpeg", jpeg) }',
+        ) &&
+        chat.includes(
+          "val up = withContext(Dispatchers.IO) { Api.uploadFile(name, mime, file) }",
+        ) &&
+        (chat.match(/res\.optJSONObject\("scheduled"\)\?\.let \{ row ->/g) || []).length === 3 &&
+        chat.includes(
+          'nav.navigate("mediaedit/$convId/${if (once) 1 else 0}/${statusPickArg(item)}")',
+        ) &&
+        app.includes('composable("mediaedit/{conv}/{once}/{arg}") { entry ->') &&
+        app.includes('viewOnce = entry.arguments?.getString("once") == "1",'),
+    );
+    check(
+      "r32-19: MediaEditScreen — own screen (black stage, media at its own aspect): a photo gets a pen (6 colours, 3 widths, undo, clear; strokes in normalised picture units, baked by bakePen at the picture's own resolution into a ≤380K JPEG data URL); a video gets the shared TrimStrip with NO minute cap (maxMs = Long.MAX_VALUE) + the loop preview; Send hands an EditedResult back via ScreenStore.pendingEdited (Photo / Video / Untouched / Failed) and the chat sends it like any pick, view-once kept",
+      edit.includes(
+        "fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, convId: String, viewOnce: Boolean) {",
+      ) &&
+        edit.includes("Box(Modifier.fillMaxSize().background(Color.Black)) {") &&
+        edit.includes(
+          "internal class PenStroke(val color: Color, val width: Float, val points: MutableList<Offset>)",
+        ) &&
+        edit.includes("private val PEN_WIDTHS = listOf(0.006f, 0.012f, 0.024f)") &&
+        (edit.match(/Color\(0xFF[0-9A-F]{6}\)/g) || []).length >= 6 &&
+        edit.includes(
+          "internal fun bakePen(bmp: ImageBitmap, strokes: List<PenStroke>): String? =",
+        ) &&
+        edit.includes("paint.strokeWidth = st.width * w") &&
+        edit.includes("if (bytes.size <= 380_000 * 3 / 4 || quality <= 45) break") &&
+        edit.includes("strokes.removeAt(strokes.size - 1)") &&
+        edit.includes("Icons.AutoMirrored.Filled.Undo") &&
+        edit.includes("maxMs = Long.MAX_VALUE,") &&
+        edit.includes(
+          "StatusTrimPreview(pickedUri, start, end, paused = false, scrubAt = scrub)",
+        ) &&
+        edit.includes("VideoExport.export(ctx, pickedUri, s, e, null, out)") &&
+        edit.includes("VideoExport.passthrough(ctx, pickedUri, s, e, out)") &&
+        edit.includes("ScreenStore.pendingEdited.value = EditedResult(convId, viewOnce, result)") &&
+        edit.includes(
+          "data class EditedResult(val convId: String, val viewOnce: Boolean, val media: EditedMedia)",
+        ) &&
+        [
+          "Photo(val dataUrl: String)",
+          "Video(val file: java.io.File, val mime: String)",
+          "Untouched(val uri: Uri, val isVideo: Boolean)",
+          "Failed(val message: String)",
+        ].every((l) => edit.includes(l)) &&
+        !edit.includes("AlertDialog") &&
+        !edit.includes("Toast") &&
+        store.includes(
+          "val pendingEdited = kotlinx.coroutines.flow.MutableStateFlow<EditedResult?>(null)",
+        ) &&
+        chat.includes("ScreenStore.pendingEdited.collect { edited ->") &&
+        chat.includes("if (edited == null || edited.convId != convId) return@collect") &&
+        chat.includes("is EditedMedia.Photo -> sendImage(m.dataUrl, null, edited.viewOnce)") &&
+        chat.includes(
+          'is EditedMedia.Video -> sendFile("video.mp4", m.mime, m.file, viewOnce = edited.viewOnce)',
+        ) &&
+        chat.includes("is EditedMedia.Failed -> error = m.message") &&
+        // the shared pieces: TrimStrip / StatusTrimPreview are internal, the cap is a parameter
+        share.includes("internal fun TrimStrip(") &&
+        share.includes("internal fun StatusTrimPreview(") &&
+        share.includes("maxMs: Long = VideoPlan.MAX_STATUS_MS,") &&
+        plan.includes(
+          "fun moveStart(start: Long, end: Long, durationMs: Long, newStart: Long, maxMs: Long = MAX_STATUS_MS): Pair<Long, Long> {",
+        ) &&
+        plan.includes(
+          "fun moveEnd(start: Long, end: Long, durationMs: Long, newEnd: Long, maxMs: Long = MAX_STATUS_MS): Pair<Long, Long> {",
+        ),
     );
   }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or

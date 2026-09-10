@@ -20,6 +20,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.ui.geometry.Offset
@@ -45,7 +47,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContactPage
@@ -112,11 +116,17 @@ private data class AttachAction(
  * with numbered badges); a send button appears once something is picked.
  * The chevron next to "Recent" opens device FOLDERS (Camera, Screenshots…).
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AttachPanel(
     sel: androidx.compose.runtime.snapshots.SnapshotStateList<MediaItem>,
     onSendBatch: () -> Unit,
     onDismiss: () -> Unit,
+    // Owner round 32 (item 19): the panel owns the media Send now (the
+    // composer's circle stays the mic) — hold it to pick a time; one picked
+    // photo / video also gets Edit (the light editor).
+    onScheduleBatch: () -> Unit = {},
+    onEdit: (MediaItem) -> Unit = {},
     // Owner round 32 (item 17): "View once" for the picked photos / videos —
     // a ① toggle next to "N selected"; on = the batch goes out view-once.
     viewOnce: Boolean = false,
@@ -439,19 +449,17 @@ fun AttachPanel(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                if (foldersOpen && folder != null) folder!! else "Recent",
+                when {
+                    sel.isNotEmpty() -> "${sel.size} selected"
+                    foldersOpen && folder != null -> folder!!
+                    else -> "Recent"
+                },
                 color = Ink,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
             )
             if (sel.isNotEmpty()) {
-                Text(
-                    "${sel.size} selected",
-                    color = Ink,
-                    fontSize = 12.5.sp,
-                )
-                Spacer(Modifier.size(6.dp))
                 // Owner round 32 (item 17): view once — filled accent circle
                 // when armed, plain outline otherwise. No label (the ① glyph
                 // is the WhatsApp-known mark for it).
@@ -475,9 +483,7 @@ fun AttachPanel(
                     )
                 }
                 Spacer(Modifier.size(4.dp))
-                // No send button here on purpose: the composer's mic IS the
-                // send button while a selection is active (same slot, same
-                // size). This tiny x just clears the selection.
+                // This tiny x just clears the selection.
                 Icon(
                     Icons.Filled.Close,
                     contentDescription = "Clear selection",
@@ -491,6 +497,53 @@ fun AttachPanel(
                         .padding(6.dp)
                         .size(18.dp),
                 )
+                // Owner round 32 (item 19): ONE picked photo / video → Edit
+                // (draw / trim) before it goes.
+                if (sel.size == 1) {
+                    Spacer(Modifier.size(4.dp))
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(ChipIdle)
+                            .clickable {
+                                haptics.tap()
+                                onEdit(sel[0])
+                            }
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.Brush, null, tint = Ink, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.size(4.dp))
+                        Text("Edit", color = Ink, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    }
+                }
+                Spacer(Modifier.size(6.dp))
+                // Owner round 32 (item 19): the media Send lives HERE, right
+                // under the composer's mic (which stays a mic). Tap = send
+                // now, hold = "send later" (item 18's sheet).
+                Box(
+                    Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(ActionBlue)
+                        .combinedClickable(
+                            onLongClick = {
+                                haptics.tap()
+                                onScheduleBatch()
+                            },
+                        ) {
+                            haptics.tap()
+                            onSendBatch()
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "Send",
+                        tint = ActionBlueInk,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
             } else {
                 Icon(
                     if (foldersOpen) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,

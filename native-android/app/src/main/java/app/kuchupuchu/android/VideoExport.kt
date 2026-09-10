@@ -106,19 +106,21 @@ object VideoPlan {
     /** Default selection: the first minute, or the whole clip when shorter. */
     fun defaultWindow(durationMs: Long): Pair<Long, Long> = 0L to durationMs.coerceAtMost(MAX_STATUS_MS)
 
-    /** Start handle: never past (end − 1s); a window over a minute pushes the end along. */
-    fun moveStart(start: Long, end: Long, durationMs: Long, newStart: Long): Pair<Long, Long> {
+    /** Start handle: never past (end − 1s); a window over the cap pushes the end along.
+     *  Owner round 32 (item 19): the cap is the status rule (a minute) — the chat's
+     *  video editor passes Long.MAX_VALUE and trims a clip of any length. */
+    fun moveStart(start: Long, end: Long, durationMs: Long, newStart: Long, maxMs: Long = MAX_STATUS_MS): Pair<Long, Long> {
         val e0 = end.coerceIn(MIN_STATUS_MS, durationMs.coerceAtLeast(MIN_STATUS_MS))
         val s = newStart.coerceIn(0L, e0 - MIN_STATUS_MS)
-        val e = if (e0 - s > MAX_STATUS_MS) s + MAX_STATUS_MS else e0
+        val e = if (e0 - s > maxMs) s + maxMs else e0
         return s to e
     }
 
-    /** End handle: never before (start + 1s); a window over a minute pulls the start along. */
-    fun moveEnd(start: Long, end: Long, durationMs: Long, newEnd: Long): Pair<Long, Long> {
+    /** End handle: never before (start + 1s); a window over the cap pulls the start along. */
+    fun moveEnd(start: Long, end: Long, durationMs: Long, newEnd: Long, maxMs: Long = MAX_STATUS_MS): Pair<Long, Long> {
         val s0 = start.coerceIn(0L, (durationMs - MIN_STATUS_MS).coerceAtLeast(0L))
         val e = newEnd.coerceIn(s0 + MIN_STATUS_MS, durationMs.coerceAtLeast(s0 + MIN_STATUS_MS))
-        val s = if (e - s0 > MAX_STATUS_MS) e - MAX_STATUS_MS else s0
+        val s = if (e - s0 > maxMs) e - maxMs else s0
         return s to e
     }
 
