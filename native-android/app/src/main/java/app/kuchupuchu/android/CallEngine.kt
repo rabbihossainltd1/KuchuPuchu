@@ -653,7 +653,10 @@ class CallEngine(private val app: Application) {
                 // Owner round 31 item 20: every ~10ms mic buffer passes through
                 // here before the encoder — the screen-share audio tap mixes
                 // the phone's playback into it (a no-op while nothing is tapped).
+                // Owner round 32 (item 41): voice isolation FIRST (the room
+                // noise goes before anything is mixed in), then the tap.
                 .setAudioRecordDataCallback { audioFormat, channelCount, sampleRate, audioBuffer ->
+                    VoiceIsolation.process(audioFormat, channelCount, sampleRate, audioBuffer)
                     SystemAudioTap.mixInto(audioFormat, channelCount, sampleRate, audioBuffer)
                 }
                 .createAudioDeviceModule()
@@ -992,6 +995,7 @@ class CallEngine(private val app: Application) {
         audioRoute = start
         speaker = start == AudioRoute.SPEAKER
         ensureFactory(app)
+        VoiceIsolation.prepare(app)
         activeSince = System.currentTimeMillis()
         active = CallUi("pending", kind, "RINGING", false, title, convId, otherAvatar = avatarRef, group = true)
         CallService.start(app, if (kind == "VIDEO") "Video calling $title" else "Calling $title")
@@ -1318,6 +1322,7 @@ class CallEngine(private val app: Application) {
         audioRoute = start
         speaker = start == AudioRoute.SPEAKER
         ensureFactory(app)
+        VoiceIsolation.prepare(app)
         activeSince = System.currentTimeMillis()
         active = CallUi("pending", kind, "RINGING", false, name, userId, otherAvatar = avatar)
         CallService.start(app, if (kind == "VIDEO") "Video calling $name" else "Calling $name")
@@ -1404,6 +1409,7 @@ class CallEngine(private val app: Application) {
         ringingId = null
         clearIncomingSuppression()
         ensureFactory(app)
+        VoiceIsolation.prepare(app)
         // Same rule as the caller: a connected personal output first, else
         // video → speaker, audio → earpiece.
         val start = AudioRouter.begin(app, rec.kind)
@@ -1885,6 +1891,7 @@ class CallEngine(private val app: Application) {
         // Release the audio stack: clear the communication device, close SCO,
         // drop out of MODE_IN_COMMUNICATION, stop watching for hot-plug.
         AudioRouter.end(app)
+        VoiceIsolation.release()
         muted = false
         cameraOff = false
         sharing = false

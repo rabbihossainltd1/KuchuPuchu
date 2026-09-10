@@ -6334,6 +6334,74 @@ const convBetween = (db, a, b) =>
         ),
     );
   }
+  // r32-41: voice isolation on calls — RNNoise (BSD, bundled source) behind a
+  // C wrapper + JNI, run on every 10 ms mic buffer BEFORE the encoder; on by
+  // default with one Privacy switch; a missing / refusing library passes the
+  // microphone through untouched.
+  {
+    const cpp = "native-android/app/src/main/cpp/";
+    const voice = readFileSync(cpp + "kp_voice.c", "utf8");
+    const jni = readFileSync(cpp + "kp_voice_jni.c", "utf8");
+    const cmake = readFileSync(cpp + "CMakeLists.txt", "utf8");
+    const iso = kt("VoiceIsolation.kt");
+    const engine = kt("CallEngine.kt");
+    const gradle = readFileSync("native-android/app/build.gradle.kts", "utf8");
+    const pro = readFileSync("native-android/app/proguard-rules.pro", "utf8");
+    check(
+      "r32-41: native — bundled RNNoise (COPYING + the 6 model/DSP sources), kp_voice wraps it: 10 ms chunks only (else -1, buffer untouched), down-mix → 48 kHz → rnnoise_process_frame → back to the mic rate → every channel, rounded + clamped; CMake builds ONE C library (gnu99, -O3, hidden visibility, no -ffast-math), no libc++",
+      existsSync(cpp + "rnnoise/COPYING") &&
+        ["denoise.c", "kiss_fft.c", "pitch.c", "celt_lpc.c", "rnn.c", "rnn_data.c"].every((f) =>
+          existsSync(cpp + "rnnoise/src/" + f),
+        ) &&
+        voice.includes("if (!v || !pcm || channels <= 0 || frames != v->frames10) return -1;") &&
+        voice.includes("float p = rnnoise_process_frame(v->st, v->out48, v->in48);") &&
+        voice.includes("kp_resample(v->mono, frames, v->in48, KP_RN_FRAME);") &&
+        voice.includes("kp_resample(v->out48, KP_RN_FRAME, v->mono, frames);") &&
+        voice.includes("for (c = 0; c < channels; c++) pcm[i * channels + c] = q;") &&
+        voice.includes(
+          "if (sample_rate < 8000 || sample_rate > 192000 || sample_rate % 100 != 0) return NULL;",
+        ) &&
+        jni.includes("Java_app_kuchupuchu_android_VoiceIsolation_nativeProcess(") &&
+        jni.includes("(*env)->GetDirectBufferAddress(env, buffer)") &&
+        jni.includes("if (cap < (jlong)frames * channels * 2) return -1.f;") &&
+        cmake.includes("add_library(\n    kp_voice SHARED") &&
+        cmake.includes("set(CMAKE_C_EXTENSIONS ON)") &&
+        cmake.includes('set(CMAKE_C_FLAGS_RELEASE "-O3 -DNDEBUG -fvisibility=hidden")') &&
+        !/CMAKE_C_FLAGS[A-Z_]* "[^"]*-ffast-math/.test(cmake) &&
+        cmake.includes("target_compile_definitions(kp_voice PRIVATE RNNOISE_BUILD=1 TRAINING=0)") &&
+        cmake.includes("target_link_libraries(kp_voice m)") &&
+        !cmake.includes("c++_shared") &&
+        gradle.includes('path = file("src/main/cpp/CMakeLists.txt")') &&
+        gradle.includes('version = "3.22.1"') &&
+        pro.includes(
+          "-keepclasseswithmembernames class app.kuchupuchu.android.VoiceIsolation {\n    native <methods>;\n}",
+        ),
+    );
+    check(
+      "r32-41: app — VoiceIsolation.process runs FIRST in the WebRTC record callback (before the screen-share mix), prepare() on every call start, release() at call end; pref on by default; lazy loadLibrary with a permanent pass-through on failure; only PCM16 direct 10 ms buffers are touched; the state is rebuilt when the rate changes; the audio thread never reads SharedPreferences",
+      engine.includes(
+        "VoiceIsolation.process(audioFormat, channelCount, sampleRate, audioBuffer)\n                    SystemAudioTap.mixInto(audioFormat, channelCount, sampleRate, audioBuffer)",
+      ) &&
+        (engine.match(/ensureFactory\(app\)\n        VoiceIsolation\.prepare\(app\)/g) || [])
+          .length === 3 &&
+        engine.includes("AudioRouter.end(app)\n        VoiceIsolation.release()") &&
+        iso.includes("getBoolean(PREF, true)") &&
+        iso.includes('System.loadLibrary("kp_voice")') &&
+        iso.includes("loadFailed.set(true)") &&
+        iso.includes("if (!wanted.get()) return") &&
+        iso.includes("if (!audioBuffer.isDirect) return") &&
+        iso.includes("if (frames != sampleRate / 100) return") &&
+        iso.includes("if (handle == 0L || handleRate != sampleRate) {") &&
+        iso.includes(
+          "@JvmStatic private external fun nativeProcess(handle: Long, buffer: ByteBuffer, frames: Int, channels: Int): Float",
+        ) &&
+        !iso.includes("Log.") &&
+        kt("SettingsScreen.kt").includes(
+          'ToggleRow(Icons.Filled.NoiseAware, "Voice isolation on calls", voiceIso) { on ->',
+        ) &&
+        kt("SettingsScreen.kt").includes("VoiceIsolation.setEnabled(ctx, on)"),
+    );
+  }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
   // a touch on blank list space closes it (main, archive and hidden lists).
   {

@@ -99,6 +99,15 @@ android {
     testOptions { unitTests.isIncludeAndroidResources = false }
     buildFeatures { compose = true }
     composeOptions { kotlinCompilerExtensionVersion = "1.5.15" }
+    // Owner round 32 (item 41): libkp_voice — RNNoise voice isolation for
+    // calls, built from src/main/cpp for the two shipped ABIs. CMake 3.22.1
+    // ships with the SDK's cmake package on the CI image.
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
         jniLibs.pickFirsts += listOf("**/libc++_shared.so", "**/libjingle_peerconnection_so.so")

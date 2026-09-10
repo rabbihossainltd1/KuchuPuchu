@@ -54,6 +54,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.NoiseAware
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Check
@@ -373,6 +374,13 @@ fun PrivacySettingsScreen(nav: NavController) {
                     sysAudio = on
                     SystemAudioTap.setEnabled(ctx, on)
                 }
+            }
+            // Owner round 32 (item 41): the call microphone's noise cleaner —
+            // on by default; off sends the raw microphone.
+            var voiceIso by remember { mutableStateOf(VoiceIsolation.isEnabled(ctx)) }
+            ToggleRow(Icons.Filled.NoiseAware, "Voice isolation on calls", voiceIso) { on ->
+                voiceIso = on
+                VoiceIsolation.setEnabled(ctx, on)
             }
         }
         Spacer(Modifier.height(12.dp))

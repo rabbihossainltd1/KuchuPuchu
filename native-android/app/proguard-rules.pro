@@ -23,3 +23,9 @@
 # Coil image loader.
 -keep class coil.** { *; }
 -dontwarn coil.**
+
+# Owner round 32 (item 41): libkp_voice binds these by JNI name — keep them
+# and their native methods exactly as declared.
+-keepclasseswithmembernames class app.kuchupuchu.android.VoiceIsolation {
+    native <methods>;
+}
