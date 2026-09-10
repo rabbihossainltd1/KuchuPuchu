@@ -202,6 +202,12 @@ fun ChatScreen(nav: NavController, convId: String) {
     var lastTypingPing by remember { mutableStateOf(0L) }
     var showAttach by remember { mutableStateOf(false) }
     var showStickers by remember { mutableStateOf(false) }
+    // Owner round 32 (item 18): hold Send → "send later". The sheet, and the
+    // chat's own parked rows (server truth: GET …/scheduled), shown as a
+    // clock chip above the composer.
+    var showSchedule by remember { mutableStateOf(false) }
+    var showScheduled by remember { mutableStateOf(false) }
+    val scheduledRows = remember { mutableStateListOf<JSONObject>() }
     var recording by remember { mutableStateOf(false) }
     var recMs by remember { mutableStateOf(0) }
     // Owner round 13: swipe a bubble right to quote-reply to it.
@@ -678,6 +684,11 @@ fun ChatScreen(nav: NavController, convId: String) {
                             val fresh = msgs.none { it.optString("id") == liveId }
                             if (fromOther && fresh) runCatching { KpSounds.receive(ctx) }
                             val liveCid = liveMsg.optString("clientId")
+                            // Owner round 32 (item 18): a parked message the
+                            // cron just sent — its chip row forgets it.
+                            if (liveCid.isNotBlank() && scheduledRows.any { it.optString("clientId") == liveCid }) {
+                                scheduledRows.removeAll { it.optString("clientId") == liveCid }
+                            }
                             val idxExisting = msgs.indexOfFirst { it.optString("id") == liveId }
                             when {
                                 // Same id already present -> replace the row, never
@@ -920,6 +931,54 @@ fun ChatScreen(nav: NavController, convId: String) {
             Drafts.clear(convId)
         }
     }
+
+    // Owner round 32 (item 18): the chat's parked "send later" rows — mine
+    // only, from the server (they live there, not on this device).
+    fun loadScheduled() {
+        scope.launch {
+            val rows = runCatching {
+                withContext(Dispatchers.IO) { Api.get("/api/conversations/$convId/scheduled", force = true) }
+            }.getOrNull()?.arr("items")?.objects() ?: return@launch
+            scheduledRows.clear()
+            scheduledRows.addAll(rows)
+        }
+    }
+
+    fun scheduleText(body: String, at: java.time.Instant) {
+        if (body.isBlank()) return
+        val clientId = "c_${java.util.UUID.randomUUID()}"
+        val payload =
+            JSONObject().put("kind", "TEXT").put("body", body).put("clientId", clientId).put("sendAt", at.toString())
+        replyTo?.optString("id")?.takeIf { it.isNotBlank() }?.let { payload.put("replyTo", it) }
+        replyTo = null
+        scope.launch {
+            runCatching { KpSounds.send(ctx) }
+            try {
+                val res = withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
+                res.optJSONObject("scheduled")?.let { row ->
+                    scheduledRows.removeAll { it.optString("id") == row.optString("id") }
+                    scheduledRows.add(row)
+                    scheduledRows.sortBy { it.optString("sendAt") }
+                }
+                runCatching { KpSounds.sent(ctx) }
+                Drafts.clear(convId)
+            } catch (e: Exception) {
+                error = (e as? ApiException)?.message?.takeIf { it.isNotBlank() } ?: "Could not schedule. Try again."
+                // The text comes back to the composer: nothing was stored.
+                if (input.isBlank()) input = body
+            }
+        }
+    }
+
+    fun cancelScheduled(id: String) {
+        scheduledRows.removeAll { it.optString("id") == id }
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { Api.delete("/api/scheduled/$id") } }
+            loadScheduled()
+        }
+    }
+    // Owner round 32 (item 18): this chat's parked "send later" rows.
+    LaunchedEffect(convId) { loadScheduled() }
 
     fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false) {
         val clientId = "c_${java.util.UUID.randomUUID()}"
@@ -2255,6 +2314,28 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
 
         /* ---------------- composer (doubles as the recording bar) ---------------- */
+        // Owner round 32 (item 18): the chat's parked "send later" rows.
+        ScheduledChip(scheduledRows, chatTheme) { showScheduled = true }
+        if (showSchedule) {
+            ScheduleSheet(
+                onClose = { showSchedule = false },
+                onPick = { at ->
+                    showSchedule = false
+                    haptics.confirm()
+                    showAttach = false
+                    showStickers = false
+                    scheduleText(input, at)
+                    input = ""
+                },
+            )
+        }
+        if (showScheduled) {
+            ScheduledSheet(
+                rows = scheduledRows,
+                onClose = { showScheduled = false },
+                onCancel = { id -> cancelScheduled(id) },
+            )
+        }
         ReplyQuoteBar(replyTo, chatTheme) { replyTo = null }
         if (requestPending) {
             // Owner round 32 (item 38): message request — Accept or Block
@@ -2371,6 +2452,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                 sendText(input)
                 input = ""
             },
+            // Owner round 32 (item 18): hold Send → pick a time.
+            onScheduleSend = { haptics.tap(); showSchedule = true },
             recording = recording,
             recMs = recMs,
             onStartRecord = {
@@ -2549,6 +2632,7 @@ private fun CoinWallpaper() {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun Composer(
     input: String,
@@ -2558,6 +2642,8 @@ private fun Composer(
     onAttach: () -> Unit,
     onSticker: () -> Unit,
     onSend: () -> Unit,
+    // Owner round 32 (item 18): long-press on Send (text typed) → schedule.
+    onScheduleSend: () -> Unit = {},
     recording: Boolean,
     recMs: Int,
     micEnabled: Boolean = true,
@@ -2721,9 +2807,12 @@ private fun Composer(
                     .shadow(4.dp, CircleShape)
                     .clip(CircleShape)
                     .background(accent)
-                    .clickable(
+                    // Owner round 32 (item 18): tap = send, hold = "send
+                    // later" (text only — media goes with its own flow, item 19).
+                    .combinedClickable(
                         interactionSource = sendInteraction,
                         indication = null,
+                        onLongClick = if (input.isNotBlank()) onScheduleSend else null,
                     ) {
                         when {
                             input.isNotBlank() -> onSend()
@@ -3385,6 +3474,232 @@ private fun StatusQuote(st: JSONObject, mine: Boolean, theme: String) {
 }
 
 /** Owner round 13e: the swipe-reply quote bar above the composer. */
+/** Owner round 32 (item 18): the chat's parked "send later" rows, as one
+ *  compact chip above the composer — count + the next time. Tap → the list. */
+@Composable
+private fun ScheduledChip(rows: List<JSONObject>, theme: String, onOpen: () -> Unit) {
+    if (rows.isEmpty()) return
+    val next = rows.minByOrNull { it.optString("sendAt") } ?: return
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.End,
+    ) {
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(14.dp))
+                .background(Card)
+                .border(1.dp, Line, RoundedCornerShape(14.dp))
+                .clickable(onClick = onOpen)
+                .padding(horizontal = 10.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.Schedule, null, tint = chatAccent(theme), modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(
+                (if (rows.size > 1) "${rows.size} · " else "") + scheduleStamp(next.optString("sendAt")),
+                color = Ink,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+/** "Today 9:30 PM" / "Tomorrow 8:00 AM" / "12 Sep 8:00 AM" — Bangladesh time. */
+internal fun scheduleStamp(iso: String): String {
+    val t = runCatching { java.time.Instant.parse(iso) }.getOrNull() ?: return ""
+    val z = atDhaka(t)
+    val now = dhakaNow()
+    val clock =
+        String.format(
+            "%d:%02d %s",
+            (z.hour % 12).let { if (it == 0) 12 else it },
+            z.minute,
+            if (z.hour >= 12) "PM" else "AM",
+        )
+    val day =
+        when (z.toLocalDate()) {
+            now.toLocalDate() -> "Today"
+            now.toLocalDate().plusDays(1) -> "Tomorrow"
+            else -> "${z.dayOfMonth} ${z.month.toString().take(3).let { m -> m[0] + m.substring(1).lowercase() }}"
+        }
+    return "$day $clock"
+}
+
+/** Owner round 32 (item 18): the "send later" sheet — quick picks first,
+ *  then a custom date + time (hour / minute wheels, no dialogs). */
+@Composable
+private fun ScheduleSheet(onClose: () -> Unit, onPick: (java.time.Instant) -> Unit) {
+    val now = dhakaNow().withSecond(0).withNano(0)
+    val quick =
+        listOf(
+            "In 1 hour" to now.plusHours(1),
+            "Tonight 9 PM" to now.withHour(21).withMinute(0).let { if (it.isAfter(now)) it else it.plusDays(1) },
+            "Tomorrow 8 AM" to now.plusDays(1).withHour(8).withMinute(0),
+            "Tomorrow 6 PM" to now.plusDays(1).withHour(18).withMinute(0),
+        )
+    var custom by remember { mutableStateOf(false) }
+    // Custom: day offset (0..29) + 12-hour clock.
+    var dayOff by remember { mutableStateOf(0) }
+    var hour12 by remember { mutableStateOf(((now.hour + 1) % 12).let { if (it == 0) 12 else it }) }
+    var minute by remember { mutableStateOf(0) }
+    var pm by remember { mutableStateOf((now.hour + 1) % 24 >= 12) }
+    val picked =
+        now.toLocalDate().plusDays(dayOff.toLong()).atTime((hour12 % 12) + if (pm) 12 else 0, minute).atZone(DHAKA)
+    val valid = picked.isAfter(now)
+    KpSheet(onDismiss = onClose, title = "Send later") {
+        if (!custom) {
+            quick.forEach { (label, at) ->
+                KpSheetRow(Icons.Filled.Schedule, label) { onPick(at.toInstant()) }
+            }
+            KpSheetRow(Icons.Filled.Edit, "Pick date & time") { custom = true }
+        } else {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                listOf(0 to "Today", 1 to "Tomorrow", 2 to "In 2 days", 7 to "In a week").forEach { (d, label) ->
+                    val on = dayOff == d
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (on) ChipSelected else ChipIdle)
+                            .clickable { dayOff = d }
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            label,
+                            color = if (on) ActionBlueDeep else Ink,
+                            fontSize = 12.sp,
+                            fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                NumberWheel(value = hour12, range = 1..12, modifier = Modifier.weight(1f)) { hour12 = it }
+                Text(":", color = Ink, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                NumberWheel(value = minute, range = 0..55 step 5, pad = true, modifier = Modifier.weight(1f)) { minute = it }
+                Column(Modifier.weight(0.8f), horizontalAlignment = Alignment.CenterHorizontally) {
+                    listOf(false to "AM", true to "PM").forEach { (isPm, label) ->
+                        val on = pm == isPm
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 2.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (on) ChipSelected else ChipIdle)
+                                .clickable { pm = isPm }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                label,
+                                color = if (on) ActionBlueDeep else Ink,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                    }
+                }
+            }
+            Text(
+                if (valid) scheduleStamp(picked.toInstant().toString()) else "Pick a later time",
+                color = if (valid) Ink else Red,
+                fontSize = 12.5.sp,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+                textAlign = TextAlign.Center,
+            )
+            GoldBtn(
+                "Schedule",
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
+                enabled = valid,
+            ) { onPick(picked.toInstant()) }
+        }
+    }
+}
+
+/** A small − N + stepper (no dialog, no keyboard) for the custom time. */
+@Composable
+private fun NumberWheel(
+    value: Int,
+    range: IntProgression,
+    modifier: Modifier = Modifier,
+    pad: Boolean = false,
+    onChange: (Int) -> Unit,
+) {
+    val values = range.toList()
+    val idx = values.indexOf(value).coerceAtLeast(0)
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(ChipIdle)
+                .clickable { onChange(values[(idx + 1) % values.size]) },
+            contentAlignment = Alignment.Center,
+        ) { Text("+", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.SemiBold) }
+        Text(
+            if (pad) String.format("%02d", value) else value.toString(),
+            color = Ink,
+            fontSize = 26.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(vertical = 4.dp),
+        )
+        Box(
+            Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(ChipIdle)
+                .clickable { onChange(values[(idx - 1 + values.size) % values.size]) },
+            contentAlignment = Alignment.Center,
+        ) { Text("−", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.SemiBold) }
+    }
+}
+
+/** Owner round 32 (item 18): the parked rows of this chat — preview · time,
+ *  X cancels (server-side; the row simply never goes out). */
+@Composable
+private fun ScheduledSheet(rows: List<JSONObject>, onClose: () -> Unit, onCancel: (String) -> Unit) {
+    LaunchedEffect(rows.size) { if (rows.isEmpty()) onClose() }
+    KpSheet(onDismiss = onClose, title = "Scheduled") {
+        rows.forEach { r ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Schedule, null, tint = Muted, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        r.optString("preview").ifBlank { r.optString("body") }.ifBlank { "Message" },
+                        color = Ink,
+                        fontSize = 14.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(scheduleStamp(r.optString("sendAt")), color = Muted, fontSize = 12.sp, maxLines = 1)
+                }
+                IconButton(onClick = { onCancel(r.optString("id")) }, modifier = Modifier.size(30.dp)) {
+                    Icon(Icons.Filled.Close, "Cancel", tint = Red, modifier = Modifier.size(16.dp))
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun ReplyQuoteBar(replyTo: JSONObject?, theme: String, onCancel: () -> Unit) {
     if (replyTo == null) return

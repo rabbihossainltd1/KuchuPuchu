@@ -2039,6 +2039,25 @@ async function ensureSchema(db: D1Database) {
     db,
     `CREATE INDEX IF NOT EXISTS idx_messages_undelivered ON messages(conv_id, created_at) WHERE delivered_at IS NULL`,
   );
+  // Owner round 32 (item 18): hold Send → "send later". The message body waits
+  // here (never in `messages`) until its minute; the cron posts it through the
+  // ordinary send path. `status`: PENDING → SENDING (claimed) → gone.
+  await runCatchingSql(
+    db,
+    `CREATE TABLE IF NOT EXISTS scheduled_messages (
+      id TEXT PRIMARY KEY, conv_id TEXT NOT NULL, sender_id TEXT NOT NULL,
+      body_json TEXT NOT NULL, send_at TEXT NOT NULL, created_at TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'PENDING', attempts INTEGER NOT NULL DEFAULT 0
+    )`,
+  );
+  await runCatchingSql(
+    db,
+    `CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_messages(status, send_at)`,
+  );
+  await runCatchingSql(
+    db,
+    `CREATE INDEX IF NOT EXISTS idx_scheduled_owner ON scheduled_messages(sender_id, conv_id, send_at)`,
+  );
   // Phone auth (email/password removal): columns for the OTP-less system.
   // Legacy users default to auth_status ACTIVE — they are working accounts;
   // only phone signups start PENDING and flip ACTIVE at Google binding.
@@ -2360,6 +2379,20 @@ function bearerToken(request: Request): string {
 }
 
 async function requireUser(db: D1Database, request: Request) {
+  // Owner round 32 (item 18): the cron replays a parked message through the
+  // ordinary send route as its author. The marker is honoured ONLY on the
+  // worker's own internal origin — a client request never carries this host,
+  // and the header alone (any real origin) is ignored.
+  const scheduledBy = request.headers.get("x-kp-scheduled");
+  if (
+    scheduledBy &&
+    new URL(request.url).host === "scheduled.internal" &&
+    request.headers.get("x-kp-scheduled-nonce") === SCHEDULE_NONCE
+  ) {
+    const author = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", scheduledBy);
+    if (!author) fail(404, "Not found.");
+    return { ...author, session_expires_at: nowIso(), session_device_id: null };
+  }
   const token = bearerToken(request);
   if (!token) fail(401, "Sign in first.", "UNAUTHENTICATED");
   const hash = await sha256Hex(token);
@@ -3941,6 +3974,16 @@ export default {
   ): Promise<void> {
     try {
       const reaped = await reapStaleCalls(env, env.DB, ctx);
+      // Owner round 32 (item 18): due "send later" rows (own try, see the helper).
+      let dispatched = 0;
+      try {
+        dispatched = await dispatchScheduledMessages(env, ctx);
+      } catch (sErr) {
+        console.error(
+          "cron_schedule_error",
+          JSON.stringify({ err: sErr instanceof Error ? sErr.message : String(sErr) }),
+        );
+      }
       // §52 daily rollups, hourly (the gate is a function so it can be tested
       // without waiting for an hour). Its own failure must not stop the pruning below
       // or vice versa, so it is measured inside its own try.
@@ -4009,6 +4052,7 @@ export default {
           devices: devs,
           metrics,
           lat,
+          dispatched,
         }),
       );
     } catch (err) {
@@ -6757,6 +6801,42 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       );
       if (hit) fail(403, "You can't reach this player.", "BLOCKED");
     }
+    // Owner round 32 (item 18): hold Send → a time. The checks above (member,
+    // request, one-way account, privacy, blocks) ran for the scheduling too;
+    // the body itself is validated by the very same route when the cron
+    // replays it, so nothing is trusted twice and nothing is trusted less.
+    if (typeof body.sendAt === "string" && body.sendAt) {
+      const when = scheduleTime(body.sendAt);
+      if (!when) fail(400, "Pick a time within the next 30 days.", "BAD_SEND_AT");
+      const { sendAt, ...payload } = body;
+      if (!String(payload.body || "").trim() && !payload.imageData && !payload.fileKey)
+        fail(400, "Write a message.");
+      const sid = id();
+      const createdAt = nowIso();
+      await run(
+        db,
+        "INSERT INTO scheduled_messages (id, conv_id, sender_id, body_json, send_at, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        sid,
+        convId,
+        uid,
+        JSON.stringify(payload),
+        when,
+        createdAt,
+      );
+      return json(
+        {
+          scheduled: scheduledFrom({
+            id: sid,
+            conv_id: convId,
+            sender_id: uid,
+            body_json: JSON.stringify(payload),
+            send_at: when,
+            created_at: createdAt,
+          }),
+        },
+        202,
+      );
+    }
     const text = String(body.body || "")
       .trim()
       .slice(0, MESSAGE_MAX_LENGTH);
@@ -7070,6 +7150,44 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (conv.kind === "SOLO" && members.some((m) => m.user_id === AI_BOT_ID))
       ctx.waitUntil(sendAiReply(env, db, ctx, convId, uid));
     return json({ message }, 201);
+  }
+
+  // Owner round 32 (item 18): the caller's own pending "send later" rows of
+  // one chat — the composer lists them under a clock chip; nobody else's.
+  const scheduledListMatch = path.match(/^\/api\/conversations\/([^/]+)\/scheduled$/);
+  if (scheduledListMatch && method === "GET") {
+    const convId = scheduledListMatch[1]!;
+    await requireMember(db, convId, uid);
+    const rows = await all<ScheduledRow>(
+      db,
+      "SELECT * FROM scheduled_messages WHERE sender_id = ? AND conv_id = ? AND status = 'PENDING' ORDER BY send_at ASC LIMIT 50",
+      uid,
+      convId,
+    );
+    return json({ items: rows.map(scheduledFrom) });
+  }
+  const scheduledMatch = path.match(/^\/api\/scheduled\/([^/]+)$/);
+  if (scheduledMatch && method === "DELETE") {
+    const row = await one<ScheduledRow>(
+      db,
+      "SELECT * FROM scheduled_messages WHERE id = ? AND sender_id = ?",
+      scheduledMatch[1]!,
+      uid,
+    );
+    if (!row) fail(404, "Not found.");
+    // Only a row nobody has claimed yet can be cancelled — a SENDING row is
+    // already on its way through the send path.
+    const gone = await run(
+      db,
+      "DELETE FROM scheduled_messages WHERE id = ? AND status = 'PENDING'",
+      row.id,
+    );
+    if (!gone) fail(409, "Already sent.", "ALREADY_SENT");
+    // An upload parked for later has no message row yet; if nothing else
+    // references it the object goes with the cancellation.
+    const key = String(parseJson<{ fileKey?: unknown }>(row.body_json, {}).fileKey || "");
+    if (key) await collectOrphanedMedia(env, db, [key]);
+    return json({ ok: true });
   }
 
   const msgDeleteMatch = path.match(/^\/api\/messages\/([^/]+)$/);
@@ -8430,6 +8548,126 @@ type MsgRow = {
   delivered_at?: string | null;
   reply_to?: string | null;
 };
+
+type ScheduledRow = {
+  id: string;
+  conv_id: string;
+  sender_id: string;
+  body_json: string;
+  send_at: string;
+  created_at: string;
+  status?: string;
+  attempts?: number;
+};
+
+/** Owner round 32 (item 18): a "send later" time — ISO, at least a minute
+ *  ahead (rounded down to the minute the cron will see) and within 30 days.
+ *  Anything else is rejected, never clamped. Returns the normalised ISO. */
+const SCHEDULE_MIN_MS = 60_000;
+const SCHEDULE_MAX_MS = 30 * 86_400_000;
+/** Per-isolate secret the cron's internal replay carries — a client can never
+ *  know it, so the identity header is worthless from outside. */
+const SCHEDULE_NONCE = crypto.randomUUID();
+function scheduleTime(raw: string): string | null {
+  const t = Date.parse(String(raw));
+  if (!Number.isFinite(t)) return null;
+  const at = Math.floor(t / 60_000) * 60_000;
+  const now = Date.now();
+  // The cron sees minutes: a time that rounds to the current minute (or an
+  // earlier one) is "now", and "now" is a plain send, not a scheduled one.
+  if (at < now + SCHEDULE_MIN_MS - 59_999 || at > now + SCHEDULE_MAX_MS) return null;
+  return new Date(at).toISOString();
+}
+
+/** What the composer shows for a parked message: its own preview shape (the
+ *  same words the chat list would use) plus the time. The stored body never
+ *  leaves the server whole — `imageData` in particular stays put. */
+function scheduledFrom(row: ScheduledRow) {
+  const b = parseJson<Record<string, unknown>>(row.body_json, {});
+  const kind = String(b.kind || "TEXT").toUpperCase();
+  const meta = (b.meta as Record<string, unknown> | undefined) ?? {};
+  const fileType = String(b.fileType || "");
+  const preview = previewOf({
+    id: row.id,
+    conv_id: row.conv_id,
+    sender_id: row.sender_id,
+    kind: b.imageData ? "IMAGE" : b.fileKey ? "FILE" : kind,
+    body: String(b.body || ""),
+    media: b.fileKey ? String(b.fileKey) : b.imageData ? "data:" : null,
+    meta_json: JSON.stringify({
+      ...(b.fileKey ? { name: String(b.fileName || "file"), type: fileType } : {}),
+      ...(meta.voice === true ? { voice: true } : {}),
+      ...(meta.document === true ? { document: true } : {}),
+      ...(meta.viewOnce === true ? { viewOnce: true } : {}),
+    }),
+    created_at: row.created_at,
+  });
+  return {
+    id: row.id,
+    conversationId: row.conv_id,
+    sendAt: row.send_at,
+    createdAt: row.created_at,
+    kind: b.imageData ? "IMAGE" : b.fileKey ? "FILE" : kind,
+    body: kind === "TEXT" || kind === "STICKER" ? String(b.body || "").slice(0, 400) : "",
+    preview: preview.slice(0, 120),
+    clientId: typeof b.clientId === "string" ? b.clientId : null,
+  };
+}
+
+/** Owner round 32 (item 18): the cron's half — due rows go out through the
+ *  ordinary POST /messages path (an in-worker request carrying the sender's
+ *  identity), so preview / unread / WS frame / push / AI reply are exactly the
+ *  normal ones. A row is CLAIMED first (conditional UPDATE) so two isolates
+ *  never send it twice; a 4xx answer drops it (the chat is gone, the sender
+ *  was blocked, the upload vanished), anything else waits for the next tick,
+ *  ten times at most. Runs every tick inside its own try in `scheduled()` — a
+ *  failure here must not skip the rollups / prunes, or vice versa — and is
+ *  index-served (idx_scheduled_due), so a quiet tick costs one seek. */
+async function dispatchScheduledMessages(env: Env, ctx: ExecutionContext): Promise<number> {
+  const db = env.DB;
+  const due = await all<ScheduledRow>(
+    db,
+    "SELECT * FROM scheduled_messages WHERE status = 'PENDING' AND send_at <= ? ORDER BY send_at ASC LIMIT 20",
+    nowIso(),
+  );
+  let sent = 0;
+  for (const row of due) {
+    const claimed = await run(
+      db,
+      "UPDATE scheduled_messages SET status = 'SENDING', attempts = attempts + 1 WHERE id = ? AND status = 'PENDING'",
+      row.id,
+    );
+    if (!claimed) continue;
+    let status = 0;
+    try {
+      const res = await handle(
+        new Request(`https://scheduled.internal/api/conversations/${row.conv_id}/messages`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-kp-scheduled": row.sender_id,
+            "x-kp-scheduled-nonce": SCHEDULE_NONCE,
+          },
+          body: row.body_json,
+        }),
+        env,
+        ctx,
+      );
+      status = res.status;
+    } catch (err) {
+      status = err instanceof ApiError ? err.status : 0;
+    }
+    if (status >= 200 && status < 300) {
+      await run(db, "DELETE FROM scheduled_messages WHERE id = ?", row.id);
+      sent++;
+    } else if ((status >= 400 && status < 500) || Number(row.attempts ?? 0) + 1 >= 10) {
+      await run(db, "DELETE FROM scheduled_messages WHERE id = ?", row.id);
+    } else {
+      await run(db, "UPDATE scheduled_messages SET status = 'PENDING' WHERE id = ?", row.id);
+    }
+  }
+  return sent;
+}
 
 /** Owner round 31 (item 29): the shared album id of a multi-photo send.
  *  Only on an IMAGE / image FILE row, only the `alb_<base36/hex>` shape,

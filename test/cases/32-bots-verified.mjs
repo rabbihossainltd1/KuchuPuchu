@@ -5958,6 +5958,145 @@ const convBetween = (db, a, b) =>
         list.includes('if (t == "Photo · View once" || t == "Video · View once") return t'),
     );
   }
+  // r32-18: hold Send → "send later" (scheduled messages).
+  {
+    const chat = kt("ChatScreen.kt");
+    const src = readFileSync("src/worker/index.ts", "utf8");
+    const t27 = readFileSync("test/cases/27-row-read-budget.mjs", "utf8");
+    check(
+      "r32-18: worker — POST /messages with `sendAt` parks the body in scheduled_messages (never in `messages`) AFTER the member / request / one-way / privacy / block checks, answers 202 { scheduled }, and the window is 1 min .. 30 days (400 BAD_SEND_AT otherwise, never clamped)",
+      src.includes(
+        "CREATE TABLE IF NOT EXISTS scheduled_messages (\n      id TEXT PRIMARY KEY, conv_id TEXT NOT NULL, sender_id TEXT NOT NULL,\n      body_json TEXT NOT NULL, send_at TEXT NOT NULL, created_at TEXT NOT NULL,\n      status TEXT NOT NULL DEFAULT 'PENDING', attempts INTEGER NOT NULL DEFAULT 0",
+      ) &&
+        src.includes(
+          "CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_messages(status, send_at)",
+        ) &&
+        src.includes('if (typeof body.sendAt === "string" && body.sendAt) {') &&
+        // the schedule branch sits after the block check and before the text parse
+        src.indexOf('if (typeof body.sendAt === "string" && body.sendAt) {') >
+          src.indexOf('if (hit) fail(403, "You can\'t reach this player.", "BLOCKED");') &&
+        src.indexOf('if (typeof body.sendAt === "string" && body.sendAt) {') <
+          src.indexOf('const requestedKind = String(body.kind || "TEXT").toUpperCase();') &&
+        src.includes(
+          'if (!when) fail(400, "Pick a time within the next 30 days.", "BAD_SEND_AT");',
+        ) &&
+        src.includes("const SCHEDULE_MIN_MS = 60_000;") &&
+        src.includes("const SCHEDULE_MAX_MS = 30 * 86_400_000;") &&
+        src.includes("function scheduleTime(raw: string): string | null {") &&
+        src.includes(
+          "INSERT INTO scheduled_messages (id, conv_id, sender_id, body_json, send_at, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        ) &&
+        src.includes("        202,\n      );") &&
+        src.includes("function scheduledFrom(row: ScheduledRow) {"),
+    );
+    check(
+      "r32-18: worker — GET /conversations/:id/scheduled lists the caller's own PENDING rows of that chat; DELETE /scheduled/:id cancels only an unclaimed row of the caller (404 for anyone else, 409 ALREADY_SENT once claimed) and collects a parked upload's object",
+      src.includes(
+        "const scheduledListMatch = path.match(/^\\/api\\/conversations\\/([^/]+)\\/scheduled$/);",
+      ) &&
+        src.includes(
+          "SELECT * FROM scheduled_messages WHERE sender_id = ? AND conv_id = ? AND status = 'PENDING' ORDER BY send_at ASC LIMIT 50",
+        ) &&
+        src.includes("const scheduledMatch = path.match(/^\\/api\\/scheduled\\/([^/]+)$/);") &&
+        src.includes("SELECT * FROM scheduled_messages WHERE id = ? AND sender_id = ?") &&
+        src.includes("DELETE FROM scheduled_messages WHERE id = ? AND status = 'PENDING'") &&
+        src.includes('if (!gone) fail(409, "Already sent.", "ALREADY_SENT");') &&
+        src.includes("if (key) await collectOrphanedMedia(env, db, [key]);"),
+    );
+    check(
+      "r32-18: worker — the cron dispatches due rows every tick (index-served, LIMIT 20), CLAIMS each with a conditional UPDATE, replays it through the ordinary POST /messages route as its author (internal origin + per-isolate nonce — the header alone opens nothing), deletes it on 2xx or 4xx, re-queues otherwise (10 attempts), and the cron log gained `dispatched`",
+      src.includes("dispatched = await dispatchScheduledMessages(env, ctx);") &&
+        src.includes('"cron_schedule_error"') &&
+        src.includes(
+          "SELECT * FROM scheduled_messages WHERE status = 'PENDING' AND send_at <= ? ORDER BY send_at ASC LIMIT 20",
+        ) &&
+        src.includes(
+          "UPDATE scheduled_messages SET status = 'SENDING', attempts = attempts + 1 WHERE id = ? AND status = 'PENDING'",
+        ) &&
+        src.includes("if (!claimed) continue;") &&
+        src.includes("`https://scheduled.internal/api/conversations/${row.conv_id}/messages`") &&
+        src.includes('"x-kp-scheduled": row.sender_id,') &&
+        src.includes('"x-kp-scheduled-nonce": SCHEDULE_NONCE,') &&
+        src.includes("const SCHEDULE_NONCE = crypto.randomUUID();") &&
+        src.includes('new URL(request.url).host === "scheduled.internal" &&') &&
+        src.includes('request.headers.get("x-kp-scheduled-nonce") === SCHEDULE_NONCE') &&
+        src.includes("if (status >= 200 && status < 300) {") &&
+        src.includes(
+          "} else if ((status >= 400 && status < 500) || Number(row.attempts ?? 0) + 1 >= 10) {",
+        ) &&
+        src.includes("UPDATE scheduled_messages SET status = 'PENDING' WHERE id = ?") &&
+        src.includes("          lat,\n          dispatched,\n        }),") &&
+        t27.includes('"reaped|pruneRan|pruned|devices|metrics|lat|dispatched"'),
+    );
+    check(
+      "r32-18: app — the send circle is combinedClickable: tap sends, HOLD (text typed only) opens the 'Send later' sheet — quick picks (In 1 hour / Tonight 9 PM / Tomorrow 8 AM / Tomorrow 6 PM) then 'Pick date & time' with day chips + hour / minute steppers + AM / PM, a Schedule button; the pick POSTs the text with sendAt (reply kept) and clears the composer; a refusal returns the text",
+      chat.includes("onScheduleSend: () -> Unit = {},") &&
+        chat.includes("onScheduleSend = { haptics.tap(); showSchedule = true },") &&
+        chat.includes(
+          ".combinedClickable(\n                        interactionSource = sendInteraction,\n                        indication = null,\n                        onLongClick = if (input.isNotBlank()) onScheduleSend else null,\n                    ) {",
+        ) &&
+        chat.includes(
+          "@OptIn(ExperimentalFoundationApi::class)\n@Composable\nprivate fun Composer(",
+        ) &&
+        chat.includes(
+          "private fun ScheduleSheet(onClose: () -> Unit, onPick: (java.time.Instant) -> Unit) {",
+        ) &&
+        chat.includes('KpSheet(onDismiss = onClose, title = "Send later") {') &&
+        [
+          '"In 1 hour"',
+          '"Tonight 9 PM"',
+          '"Tomorrow 8 AM"',
+          '"Tomorrow 6 PM"',
+          '"Pick date & time"',
+        ].every((l) => chat.includes(l)) &&
+        chat.includes(
+          'listOf(0 to "Today", 1 to "Tomorrow", 2 to "In 2 days", 7 to "In a week")',
+        ) &&
+        chat.includes("private fun NumberWheel(") &&
+        chat.includes(
+          "NumberWheel(value = hour12, range = 1..12, modifier = Modifier.weight(1f)) { hour12 = it }",
+        ) &&
+        chat.includes(
+          "NumberWheel(value = minute, range = 0..55 step 5, pad = true, modifier = Modifier.weight(1f)) { minute = it }",
+        ) &&
+        chat.includes('GoldBtn(\n                "Schedule",') &&
+        chat.includes("fun scheduleText(body: String, at: java.time.Instant) {") &&
+        chat.includes('.put("clientId", clientId).put("sendAt", at.toString())') &&
+        chat.includes(
+          '                    scheduleText(input, at)\n                    input = ""',
+        ) &&
+        chat.includes("if (input.isBlank()) input = body") &&
+        // the sheet is a bottom sheet, no dialog anywhere in it
+        !chat
+          .slice(
+            chat.indexOf("private fun ScheduleSheet("),
+            chat.indexOf("private fun ScheduledSheet("),
+          )
+          .includes("AlertDialog"),
+    );
+    check(
+      "r32-18: app — the chat's parked rows come from the server (GET …/scheduled on open, after every schedule / cancel) and show as ONE clock chip above the composer (count · next time, 'Today 9:30 PM' style in Bangladesh time); tap → 'Scheduled' sheet listing preview · time with X = DELETE /scheduled/:id; the cron's send (room frame with our clientId) drops the row from the chip",
+      chat.includes("val scheduledRows = remember { mutableStateListOf<JSONObject>() }") &&
+        chat.includes('Api.get("/api/conversations/$convId/scheduled", force = true)') &&
+        chat.includes("LaunchedEffect(convId) { loadScheduled() }") &&
+        chat.includes("ScheduledChip(scheduledRows, chatTheme) { showScheduled = true }") &&
+        chat.includes(
+          "private fun ScheduledChip(rows: List<JSONObject>, theme: String, onOpen: () -> Unit) {",
+        ) &&
+        chat.includes(
+          '(if (rows.size > 1) "${rows.size} · " else "") + scheduleStamp(next.optString("sendAt"))',
+        ) &&
+        chat.includes("internal fun scheduleStamp(iso: String): String {") &&
+        chat.includes('now.toLocalDate() -> "Today"') &&
+        chat.includes('now.toLocalDate().plusDays(1) -> "Tomorrow"') &&
+        chat.includes('KpSheet(onDismiss = onClose, title = "Scheduled") {') &&
+        chat.includes('Api.delete("/api/scheduled/$id")') &&
+        chat.includes(
+          'if (liveCid.isNotBlank() && scheduledRows.any { it.optString("clientId") == liveCid }) {',
+        ) &&
+        chat.includes("LaunchedEffect(rows.size) { if (rows.isEmpty()) onClose() }"),
+    );
+  }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
   // a touch on blank list space closes it (main, archive and hidden lists).
   {

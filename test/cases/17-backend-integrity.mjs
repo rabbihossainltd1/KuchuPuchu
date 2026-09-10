@@ -1843,6 +1843,408 @@ async function main() {
     );
   }
 
+  // ── r32-18. send later: hold Send → the message waits for its minute ─────
+  {
+    const h = await mk();
+    const frames = [];
+    h.env.CHAT_ROOM = {
+      idFromName: (name) => ({ toString: () => name, name }),
+      get: (id) => ({
+        fetch: async (_u, init) => {
+          if (init?.body) frames.push({ room: id.name, body: JSON.parse(init.body) });
+          return new Response(JSON.stringify({ ok: true, sent: 0 }), { status: 200 });
+        },
+      }),
+    };
+    const { A, B, cid } = await pair(h, "sl");
+    const C = await h.reg("slc");
+    {
+      const inMin = (m) => new Date(Date.now() + m * 60_000).toISOString();
+      const mark = h.traced.length;
+      const later = await h.call(
+        "POST",
+        `/api/conversations/${cid}/messages`,
+        { kind: "TEXT", body: "see you at nine", clientId: "c_sched_1", sendAt: inMin(5) },
+        A.token,
+      );
+      const sched = later.json.scheduled;
+      const inMessages = await h
+        .q("SELECT count(*) AS c FROM messages WHERE conv_id = ? AND sender_id = ?", cid, A.user.id)
+        .first();
+      const listNow = await h.call("GET", `/api/conversations/${cid}/messages`, undefined, B.token);
+      const convRow = await h
+        .q("SELECT last_message, last_message_at FROM conversations WHERE id = ?", cid)
+        .first();
+      const unreadB = await h
+        .q("SELECT unread FROM members WHERE conv_id = ? AND user_id = ?", cid, B.user.id)
+        .first();
+      check(
+        "r32-18: POST /messages with sendAt = 202 { scheduled } — nothing lands in `messages`, the recipient's page / the chat preview / unread stay untouched, no room frame, no push",
+        later.status === 202 &&
+          sched?.id &&
+          sched.conversationId === cid &&
+          sched.kind === "TEXT" &&
+          sched.body === "see you at nine" &&
+          sched.preview === "see you at nine" &&
+          sched.clientId === "c_sched_1" &&
+          Date.parse(sched.sendAt) > Date.now() + 3 * 60_000 &&
+          Date.parse(sched.sendAt) % 60_000 === 0 &&
+          Number(inMessages?.c) === 0 &&
+          (listNow.json.items ?? []).every((m) => m.body !== "see you at nine") &&
+          !convRow?.last_message &&
+          Number(unreadB?.unread ?? 0) === 0 &&
+          frames.length === 0 &&
+          !h.since(mark).some((q) => /INSERT INTO messages/.test(q)),
+        JSON.stringify({
+          status: later.status,
+          sched,
+          inMessages,
+          preview: convRow,
+          unreadB,
+          frames: frames.length,
+        }),
+      );
+
+      // ----- the composer's own list: mine, this chat, pending only -----
+      const other = await h.call(
+        "POST",
+        `/api/conversations/${cid}/messages`,
+        { kind: "TEXT", body: "second one", sendAt: inMin(9) },
+        A.token,
+      );
+      const mine = await h.call("GET", `/api/conversations/${cid}/scheduled`, undefined, A.token);
+      const theirs = await h.call("GET", `/api/conversations/${cid}/scheduled`, undefined, B.token);
+      const stranger = await h.call(
+        "GET",
+        `/api/conversations/${cid}/scheduled`,
+        undefined,
+        C.token,
+      );
+      check(
+        "r32-18: GET /conversations/:id/scheduled lists the caller's OWN pending rows of that chat oldest-first (the other member sees none of them; a non-member is 403)",
+        other.status === 202 &&
+          mine.status === 200 &&
+          (mine.json.items ?? []).map((i) => i.body).join("|") === "see you at nine|second one" &&
+          mine.json.items.every((i) => !("imageData" in i) && !("bodyJson" in i)) &&
+          theirs.status === 200 &&
+          (theirs.json.items ?? []).length === 0 &&
+          stranger.status === 403,
+        JSON.stringify({ mine: mine.json, theirs: theirs.json, stranger: stranger.status }),
+      );
+
+      // ----- validation: the window, an empty body, the plain send untouched -----
+      const past = await h.call(
+        "POST",
+        `/api/conversations/${cid}/messages`,
+        { kind: "TEXT", body: "too late", sendAt: inMin(-2) },
+        A.token,
+      );
+      const now = await h.call(
+        "POST",
+        `/api/conversations/${cid}/messages`,
+        { kind: "TEXT", body: "right now", sendAt: new Date(Date.now() + 5_000).toISOString() },
+        A.token,
+      );
+      const far = await h.call(
+        "POST",
+        `/api/conversations/${cid}/messages`,
+        { kind: "TEXT", body: "next season", sendAt: inMin(31 * 24 * 60) },
+        A.token,
+      );
+      const junk = await h.call(
+        "POST",
+        `/api/conversations/${cid}/messages`,
+        { kind: "TEXT", body: "junk", sendAt: "tomorrow-ish" },
+        A.token,
+      );
+      const empty = await h.call(
+        "POST",
+        `/api/conversations/${cid}/messages`,
+        { kind: "TEXT", body: "   ", sendAt: inMin(5) },
+        A.token,
+      );
+      const plain = await h.call(
+        "POST",
+        `/api/conversations/${cid}/messages`,
+        { kind: "TEXT", body: "plain send" },
+        A.token,
+      );
+      check(
+        "r32-18: sendAt in the past / inside the current minute / past 30 days / unparsable = 400 BAD_SEND_AT, an empty body = 400, and a send without sendAt is the ordinary 201",
+        past.status === 400 &&
+          past.json.error?.code === "BAD_SEND_AT" &&
+          now.status === 400 &&
+          far.status === 400 &&
+          far.json.error?.code === "BAD_SEND_AT" &&
+          junk.status === 400 &&
+          empty.status === 400 &&
+          plain.status === 201 &&
+          plain.json.message?.body === "plain send",
+        JSON.stringify({
+          past: past.status,
+          now: now.status,
+          far: far.status,
+          junk: junk.status,
+          empty: empty.status,
+          plain: plain.status,
+        }),
+      );
+
+      // ----- the checks of a normal send gate the scheduling too -----
+      await h.call("POST", "/api/blocks", { userId: A.user.id }, B.token);
+      const blocked = await h.call(
+        "POST",
+        `/api/conversations/${cid}/messages`,
+        { kind: "TEXT", body: "while blocked", sendAt: inMin(5) },
+        A.token,
+      );
+      await h.call("DELETE", `/api/blocks/${A.user.id}`, undefined, B.token);
+      const notMember = await h.call(
+        "POST",
+        `/api/conversations/${cid}/messages`,
+        { kind: "TEXT", body: "intruder", sendAt: inMin(5) },
+        C.token,
+      );
+      check(
+        "r32-18: a blocked sender (403 BLOCKED) or a non-member (403) cannot park a message either — the send checks run before the row is stored",
+        blocked.status === 403 &&
+          blocked.json.error?.code === "BLOCKED" &&
+          notMember.status === 403,
+        JSON.stringify({
+          blocked: blocked.status,
+          code: blocked.json.error?.code,
+          notMember: notMember.status,
+        }),
+      );
+
+      // ----- cancel: mine only, once -----
+      const cancelByB = await h.call("DELETE", `/api/scheduled/${sched.id}`, undefined, B.token);
+      const cancel = await h.call(
+        "DELETE",
+        `/api/scheduled/${other.json.scheduled.id}`,
+        undefined,
+        A.token,
+      );
+      const cancelAgain = await h.call(
+        "DELETE",
+        `/api/scheduled/${other.json.scheduled.id}`,
+        undefined,
+        A.token,
+      );
+      const afterCancel = await h.call(
+        "GET",
+        `/api/conversations/${cid}/scheduled`,
+        undefined,
+        A.token,
+      );
+      check(
+        "r32-18: DELETE /scheduled/:id cancels the caller's own row (someone else's id is 404, a second cancel is 404) and the list forgets it",
+        cancelByB.status === 404 &&
+          cancel.status === 200 &&
+          cancelAgain.status === 404 &&
+          (afterCancel.json.items ?? []).map((i) => i.id).join() === sched.id,
+        JSON.stringify({
+          cancelByB: cancelByB.status,
+          cancel: cancel.status,
+          again: cancelAgain.status,
+          left: afterCancel.json.items?.length,
+        }),
+      );
+
+      // ----- the cron: not before its minute, exactly once after -----
+      frames.length = 0;
+      const tick = () =>
+        h.worker.scheduled({ scheduledTime: Date.now(), cron: "* * * * *" }, h.env, h.ctx);
+      await tick();
+      await h.ctx.drain();
+      const early = await h
+        .q("SELECT status, attempts FROM scheduled_messages WHERE id = ?", sched.id)
+        .first();
+      const earlyMsgs = await h
+        .q(
+          "SELECT count(*) AS c FROM messages WHERE conv_id = ? AND body = ?",
+          cid,
+          "see you at nine",
+        )
+        .first();
+      await h
+        .q(
+          "UPDATE scheduled_messages SET send_at = ? WHERE id = ?",
+          new Date(Date.now() - 1_000).toISOString(),
+          sched.id,
+        )
+        .run();
+      const before = h.traced.length;
+      await tick();
+      await h.ctx.drain();
+      const cronStmts = h.since(before);
+      const landed = await h
+        .q("SELECT * FROM messages WHERE conv_id = ? AND body = ?", cid, "see you at nine")
+        .all();
+      const gone = await h
+        .q("SELECT count(*) AS c FROM scheduled_messages WHERE id = ?", sched.id)
+        .first();
+      const page = await h.call("GET", `/api/conversations/${cid}/messages`, undefined, B.token);
+      const row = (page.json.items ?? []).find((m) => m.body === "see you at nine");
+      const convAfter = await h
+        .q("SELECT last_message FROM conversations WHERE id = ?", cid)
+        .first();
+      const unreadAfter = await h
+        .q("SELECT unread FROM members WHERE conv_id = ? AND user_id = ?", cid, B.user.id)
+        .first();
+      const roomFrame = frames.find(
+        (f) =>
+          f.room === cid && f.body.type === "message" && f.body.message?.body === "see you at nine",
+      );
+      await tick();
+      await h.ctx.drain();
+      const stillOne = await h
+        .q(
+          "SELECT count(*) AS c FROM messages WHERE conv_id = ? AND body = ?",
+          cid,
+          "see you at nine",
+        )
+        .first();
+      check(
+        "r32-18: the cron leaves a row alone before its minute, then sends it ONCE through the ordinary path — a real message row by the author (clientId kept), the chat preview + the recipient's unread, the room 'message' frame lands, the parked row is gone, and the next tick does nothing more",
+        early?.status === "PENDING" &&
+          Number(early?.attempts) === 0 &&
+          Number(earlyMsgs?.c) === 0 &&
+          landed.results?.length === 1 &&
+          landed.results[0].sender_id === A.user.id &&
+          landed.results[0].client_id === "c_sched_1" &&
+          Number(gone?.c) === 0 &&
+          row?.senderId === A.user.id &&
+          convAfter?.last_message === "see you at nine" &&
+          Number(unreadAfter?.unread) >= 1 &&
+          !!roomFrame &&
+          Number(stillOne?.c) === 1 &&
+          cronStmts.some((q) =>
+            /FROM scheduled_messages WHERE status = 'PENDING' AND send_at <= \?/.test(q),
+          ),
+        JSON.stringify({
+          early,
+          earlyMsgs,
+          landed: landed.results?.length,
+          gone,
+          row: row?.senderId,
+          preview: convAfter,
+          unreadAfter,
+          roomFrame: !!roomFrame,
+          stillOne,
+        }),
+      );
+
+      // ----- a row the send path refuses is dropped, not retried forever -----
+      const doomed = await h.call(
+        "POST",
+        `/api/conversations/${cid}/messages`,
+        { kind: "TEXT", body: "never", sendAt: inMin(5) },
+        A.token,
+      );
+      await h.call("POST", "/api/blocks", { userId: A.user.id }, B.token);
+      await h
+        .q(
+          "UPDATE scheduled_messages SET send_at = ? WHERE id = ?",
+          new Date(Date.now() - 1_000).toISOString(),
+          doomed.json.scheduled.id,
+        )
+        .run();
+      await tick();
+      await h.ctx.drain();
+      const doomedRow = await h
+        .q("SELECT count(*) AS c FROM scheduled_messages WHERE id = ?", doomed.json.scheduled.id)
+        .first();
+      const doomedMsg = await h
+        .q("SELECT count(*) AS c FROM messages WHERE conv_id = ? AND body = ?", cid, "never")
+        .first();
+      await h.call("DELETE", `/api/blocks/${A.user.id}`, undefined, B.token);
+      // ----- the identity header alone opens nothing from outside -----
+      const forged = await h.call("POST", `/api/conversations/${cid}/messages`, {
+        kind: "TEXT",
+        body: "forged",
+      });
+      const forgedWithHeader = await h.worker.fetch(
+        new Request(`https://kp.test/api/conversations/${cid}/messages`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-kp-scheduled": A.user.id,
+          },
+          body: JSON.stringify({ kind: "TEXT", body: "forged" }),
+        }),
+        h.env,
+        h.ctx,
+      );
+      check(
+        "r32-18: a parked message the send path now refuses (the author got blocked meanwhile) is dropped on its tick — no message, no retry — and the cron's identity header is worthless from outside (401 without a session)",
+        doomed.status === 202 &&
+          Number(doomedRow?.c) === 0 &&
+          Number(doomedMsg?.c) === 0 &&
+          forged.status === 401 &&
+          forgedWithHeader.status === 401,
+        JSON.stringify({
+          doomed: doomed.status,
+          doomedRow,
+          doomedMsg,
+          forged: forged.status,
+          forgedWithHeader: forgedWithHeader.status,
+        }),
+      );
+
+      // ----- an upload parked for later: the object waits, a cancel collects it -----
+      const up = await h.call(
+        "POST",
+        "/api/files?name=later.jpg&type=image/jpeg",
+        new Uint8Array(Buffer.from("later-photo-bytes")),
+        A.token,
+      );
+      const key = up.json.fileKey;
+      const photoLater = await h.call(
+        "POST",
+        `/api/conversations/${cid}/messages`,
+        {
+          kind: "FILE",
+          fileKey: key,
+          fileName: "later.jpg",
+          fileType: "image/jpeg",
+          fileSize: 17,
+          sendAt: inMin(5),
+        },
+        A.token,
+      );
+      const listed = await h.call("GET", `/api/conversations/${cid}/scheduled`, undefined, A.token);
+      const photoItem = (listed.json.items ?? []).find(
+        (i) => i.id === photoLater.json.scheduled?.id,
+      );
+      const objBefore = await h.env.MEDIA.get(key);
+      const cancelPhoto = await h.call(
+        "DELETE",
+        `/api/scheduled/${photoLater.json.scheduled?.id}`,
+        undefined,
+        A.token,
+      );
+      const objAfter = await h.env.MEDIA.get(key);
+      check(
+        "r32-18: a photo parked for later reads 'Photo' in the composer's list (kind FILE, no body), its object waits in the bucket, and cancelling the row collects the object",
+        photoLater.status === 202 &&
+          photoItem?.kind === "FILE" &&
+          photoItem?.preview === "Photo" &&
+          photoItem?.body === "" &&
+          !!objBefore &&
+          cancelPhoto.status === 200 &&
+          !objAfter,
+        JSON.stringify({
+          photoLater: photoLater.status,
+          photoItem,
+          objBefore: !!objBefore,
+          cancel: cancelPhoto.status,
+          objAfter: !!objAfter,
+        }),
+      );
+    }
+  }
+
   process.stdout.write(lines.join("\n") + "\n");
   const broken = lines.filter((l) => l.startsWith("  BROKEN")).length;
   process.exit(broken ? 1 : 0);
