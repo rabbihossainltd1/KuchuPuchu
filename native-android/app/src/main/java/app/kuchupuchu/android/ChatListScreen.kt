@@ -1290,6 +1290,8 @@ private fun friendlyPreview(raw: String): String {
     val audioExts = listOf(".m4a", ".mp3", ".aac", ".ogg", ".wav", ".opus", ".flac")
     val docExts = listOf(".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".zip", ".rar", ".txt", ".csv")
     if (t == "Photo" || t == "📷 Photo") return "Photo"
+    // Owner round 32 (item 17): the worker's view-once preview passes through.
+    if (t == "Photo · View once" || t == "Video · View once") return t
     if (EmojiRepo.isCustomId(t)) return "Sticker"
     return when {
         lower.startsWith("voice_") || lower.startsWith("voice ") -> "Voice message"

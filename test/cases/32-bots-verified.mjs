@@ -1065,12 +1065,13 @@ const convBetween = (db, a, b) =>
           `KpSheetRow(Icons.${l === '"Reply"' ? "AutoMirrored.Filled.Reply" : l === '"Forward"' ? "AutoMirrored.Filled.Send" : l === '"Copy"' ? "Filled.ContentCopy" : l === '"Edit"' ? "Filled.Edit" : l === '"Delete for everyone"' ? "Filled.DeleteForever" : l === '"Delete for me"' ? "Filled.Delete" : "Filled.CheckCircle"}, ${l}`,
         ),
       ) &&
-      // r31-29: text, photo, video AND the grouped photo bubble (4 sites).
+      // r31-29: text, photo, video AND the grouped photo bubble (4 sites);
+      // r32-17: + the view-once card (5).
       (
         chat.match(
           /if \(selectedIds\.isNotEmpty\(\)\) onToggleSelect\(m\) else onLongPress\(m\)/g,
         ) || []
-      ).length === 4,
+      ).length === 5,
   );
   check(
     "r17-14: restoreChrome follows the theme (dark-blue keeps light icons)",
@@ -1126,8 +1127,9 @@ const convBetween = (db, a, b) =>
     "r18-6: PHOTOS render reaction chips too (MessageReactions wired into ImageMessageRow)",
     chat.indexOf("MessageReactions(m)") <
       chat.indexOf("Live upload fractions keyed by message clientId") &&
-      // r31-29: text, photo, video + the grouped photo bubble (4 sites).
-      chat.split("MessageReactions(m)").length - 1 === 4,
+      // r31-29: text, photo, video + the grouped photo bubble (4 sites);
+      // r32-17: + the view-once card (5).
+      chat.split("MessageReactions(m)").length - 1 === 5,
   );
   check(
     "r18-3/r25: unsent messages VANISH (no tombstone) — filtered before render",
@@ -2654,13 +2656,14 @@ const convBetween = (db, a, b) =>
   {
     check(
       "r31-16: a photo/video/audio picked through Document is SENT and SHOWN as a document (meta.document), opening in the app's own viewer/player or playing inline",
-      chat.includes("fun handleDocumentPicked(uri: Uri, asDocument: Boolean = false)") &&
+      // r32-17: both signatures grew a trailing viewOnce flag.
+      chat.includes(
+        "fun handleDocumentPicked(uri: Uri, asDocument: Boolean = false, viewOnce: Boolean = false)",
+      ) &&
         chat.includes(
-          "fun sendFile(name: String, mime: String, file: File, asDocument: Boolean = false)",
+          "fun sendFile(name: String, mime: String, file: File, asDocument: Boolean = false, viewOnce: Boolean = false)",
         ) &&
-        chat.includes(
-          'val docMeta = if (asDocument) JSONObject().put("document", true) else null',
-        ) &&
+        chat.includes('asDocument -> JSONObject().put("document", true)') &&
         chat.includes(
           "onDocumentPicked = { uri -> handleDocumentPicked(uri, asDocument = true) },",
         ) &&
@@ -2799,8 +2802,9 @@ const convBetween = (db, a, b) =>
         kt("KpSecure.kt").includes("fun privatePeer(conv: JSONObject?): Boolean =") &&
         chat.includes("val privateChat = KpSecure.privatePeer(c) || KpSecure.selfPrivate()") &&
         chat.includes("KpSecure.Guard(privateChat)") &&
-        chat.includes("if (!echo && !privateChat) {") &&
-        chat.includes("canSave = !privateChat,") &&
+        // r32-17: a view-once photo / video rides the same guards.
+        chat.includes("if (!echo && !privateChat && !isViewOnce(m)) {") &&
+        chat.includes("canSave = !privateChat && !once,") &&
         chat.includes('.put("kpPrivate", privateChat)') &&
         kt("CallScreens.kt").includes(
           "KpSecure.Guard(call.otherPrivate || KpSecure.selfPrivate())",
@@ -3848,7 +3852,8 @@ const convBetween = (db, a, b) =>
           src.includes(
             'if (kind !== "IMAGE" && !(kind === "FILE" && fileType.startsWith("image/"))) return null;',
           ) &&
-          src.includes("...(album ? { album } : {}),") &&
+          // r32-17: a view-once photo joins no album.
+          src.includes("...(album && !viewOnce ? { album } : {}),") &&
           src.includes("if (meta.document === true || meta.voice === true) return null;") &&
           src.includes("album?: string;"),
       );
@@ -3856,15 +3861,18 @@ const convBetween = (db, a, b) =>
     check(
       "r31-29: app — the grid send stamps ONE album id on 2+ photos (single photo: none), the pending row + both payloads carry it, a retry keeps it, forwarding 2+ photos re-groups them",
       chat.includes("internal fun newAlbumId(): String =") &&
-        chat.includes("val album = if (photos >= 2) newAlbumId() else null") &&
-        chat.includes("fun sendImage(dataUrl: String, album: String? = null) {") &&
+        // r32-17: a view-once batch is never an album.
+        chat.includes("val album = if (photos >= 2 && !once) newAlbumId() else null") &&
+        chat.includes(
+          "fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false) {",
+        ) &&
         chat.includes('if (album != null) o.put("album", album)') &&
         chat.includes('.also { row -> metaWith(0, 0)?.let { row.put("meta", it) } }') &&
         (chat.match(/metaWith\(shotW, shotH\)\?\.let \{ payload\.put\("meta", it\) \}/g) || [])
           .length === 2 &&
         chat.includes("fun handleImagePicked(uri: Uri, album: String? = null) {") &&
         chat.includes(
-          'url.isNotBlank() -> sendImage(url, p.optJSONObject("meta")?.optString("album")?.ifBlank { null })',
+          'url.isNotBlank() -> sendImage(url, p.optJSONObject("meta")?.optString("album")?.ifBlank { null }, isViewOnce(p))',
         ) &&
         chat.includes("val grouped = items.count { isPhotoMsg(it) } >= 2") &&
         (chat.match(/albumMeta\?\.let \{ body\.put\("meta", it\) \}/g) || []).length === 3,
@@ -4518,7 +4526,9 @@ const convBetween = (db, a, b) =>
   // the grid batch reads photos in selection order.
   const chat32 = kt("ChatScreen.kt");
   const sendImageBody = chat32.slice(
-    chat32.indexOf("fun sendImage(dataUrl: String, album: String? = null) {"),
+    chat32.indexOf(
+      "fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false) {",
+    ),
     chat32.indexOf("fun sendFile(name: String, mime: String, file: File"),
   );
   const sendVoiceBody = chat32.slice(
@@ -4527,7 +4537,9 @@ const convBetween = (db, a, b) =>
   );
   const sendTextBody = chat32.slice(
     chat32.indexOf('fun sendText(body: String, kind: String = "TEXT") {'),
-    chat32.indexOf("fun sendImage(dataUrl: String, album: String? = null) {"),
+    chat32.indexOf(
+      "fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false) {",
+    ),
   );
   check(
     "r32-48: no send path awaits a list scroll — sendImage / sendVoice / sendText launch the jump-to-bottom on a separate coroutine wrapped in runCatching, the upload coroutine never contains animateScrollToItem, and the grid batch decodes photos sequentially in tick order via readAndSendImage",
@@ -4551,7 +4563,9 @@ const convBetween = (db, a, b) =>
       !/scope\.launch \{\n\s+val total = msgs\.size \+ pending\.size\n\s+if \(total > 0\) listState\.animateScrollToItem/.test(
         chat32,
       ) &&
-      chat32.includes("suspend fun readAndSendImage(uri: Uri, album: String?) {") &&
+      chat32.includes(
+        "suspend fun readAndSendImage(uri: Uri, album: String?, viewOnce: Boolean = false) {",
+      ) &&
       chat32.includes("scope.launch { readAndSendImage(uri, album) }") &&
       chat32.includes(
         "if (item.isVideo) handleDocumentPicked(item.uri) else readAndSendImage(item.uri, album)",
@@ -5274,10 +5288,11 @@ const convBetween = (db, a, b) =>
       "r32-35: worker — send preview comes from previewOf (no 'photo.jpg'), image/video/audio media files read as words, Documents keep their name, push data carries kp_media only for a picture",
       src.includes("const preview = previewOf({") &&
         !src.includes('kind === "FILE" ? String(body.fileName || "File") : "Message"') &&
-        previewOf.includes('if (type.startsWith("image/")) return "Photo";') &&
-        previewOf.includes('if (type.startsWith("video/")) return "Video";') &&
+        // r32-17: "Photo · View once" rides the same lines.
+        previewOf.includes('if (type.startsWith("image/")) return `Photo${once}`;') &&
+        previewOf.includes('if (type.startsWith("video/")) return `Video${once}`;') &&
         previewOf.includes("if (meta.document !== true) {") &&
-        src.includes("const pictureUrl = message.hasImage") &&
+        src.includes("const pictureUrl =\n      message.hasImage && !message.viewOnce") &&
         src.includes("...(pictureUrl ? { kp_media: pictureUrl } : {}),"),
     );
     check(
@@ -5785,6 +5800,162 @@ const convBetween = (db, a, b) =>
         kt("MainActivity.kt").includes(
           'val kind = intent.getStringExtra("kp_callback_kind") ?: "AUDIO"',
         ),
+    );
+  }
+  // r32-17: "View once" for photos / videos. Worker: meta.viewOnce only on a
+  // photo / video message (no album, no dims), preview "Photo · View once",
+  // no push thumbnail, gallery skips it, POST /api/messages/:id/view spends
+  // the one opening (recipient only, once; media cleared + GC'd, room frame),
+  // spent rows expose no media, a recipient cannot re-post the key. App: ①
+  // toggle in the attach panel, ViewOnceRow card instead of a preview, viewer /
+  // player under capture guard with no Save / Forward, opening reported via
+  // ViewOnce.spend, no Forward in the sheet / selection bar, quotes + list say
+  // "Photo · View once".
+  {
+    const src = readFileSync("src/worker/index.ts", "utf8");
+    const chat = kt("ChatScreen.kt");
+    const attach = kt("AttachSheet.kt");
+    const viewer = kt("MediaViewer.kt");
+    const list = kt("ChatListScreen.kt");
+    const viewRoute = src.slice(
+      src.indexOf("const msgViewMatch = path.match(/^\\/api\\/messages\\/([^/]+)\\/view$/);"),
+      src.indexOf("  const statusMatch = path.match("),
+    );
+    check(
+      "r32-17: worker — viewOnceFlag admits the flag only on an IMAGE / image-or-video FILE that is not a document or voice note; a view-once row stores no album and no dims; the preview reads 'Photo · View once' / 'Video · View once'; the push carries no kp_media for it; the gallery skips it; msgFrom hides fileKey / mediaUrl / hasImage once spent and publishes viewOnce / viewedAt / viewedBy; the page marker folds viewedAt in",
+      src.includes("function viewOnceFlag(") &&
+        src.includes("if (meta.viewOnce !== true || !hasMedia) return false;") &&
+        src.includes("if (meta.document === true || meta.voice === true) return false;") &&
+        src.includes(
+          '(kind === "FILE" && (fileType.startsWith("image/") || fileType.startsWith("video/")))',
+        ) &&
+        src.includes("...(Object.keys(dims).length && !viewOnce ? dims : {}),") &&
+        src.includes("...(album && !viewOnce ? { album } : {}),") &&
+        src.includes("...(viewOnce ? { viewOnce: true } : {}),") &&
+        src.includes('const once = meta.viewOnce === true ? " · View once" : "";') &&
+        src.includes("message.hasImage && !message.viewOnce") &&
+        src.includes("if (m.viewOnce) continue;") &&
+        src.includes("const spent = viewOnceSpent(meta);") &&
+        src.includes('hasImage: !spent && ((row.kind === "IMAGE" && !!row.media) || imageFile),') &&
+        src.includes('fileKey: row.kind === "FILE" && !spent ? row.media : undefined,') &&
+        src.includes("viewOnce: meta.viewOnce === true ? true : undefined,") &&
+        src.includes("viewedAt: spent ? meta.viewedAt : undefined,") &&
+        src.includes("items.map((m) => [m.id, m.body, m.edited, m.deliveredAt, m.viewedAt]),"),
+    );
+    check(
+      "r32-17: worker — POST /api/messages/:id/view: member only, 400 NOT_VIEW_ONCE on an ordinary message, 403 OWN_MESSAGE for the sender, 410 VIEWED on a repeat; the UPDATE is conditional on media still being set (race-safe), the object is collected before the answer, and afterMessageChanged repaints every device; a recipient re-posting someone else's view-once key is 403 VIEW_ONCE",
+      viewRoute.includes("await requireMember(db, row.conv_id, uid);") &&
+        viewRoute.includes(
+          'if (meta.viewOnce !== true) fail(400, "Not a view-once message.", "NOT_VIEW_ONCE");',
+        ) &&
+        viewRoute.includes(
+          'if (row.sender_id === uid) fail(403, "You sent this.", "OWN_MESSAGE");',
+        ) &&
+        viewRoute.includes(
+          'if (viewOnceSpent(meta)) fail(410, "This was already opened.", "VIEWED");',
+        ) &&
+        viewRoute.includes(
+          '"UPDATE messages SET media = NULL, meta_json = ? WHERE id = ? AND media IS NOT NULL",',
+        ) &&
+        viewRoute.includes('if (!changed) fail(410, "This was already opened.", "VIEWED");') &&
+        viewRoute.includes("if (row.media) await collectOrphanedMedia(env, db, [row.media]);") &&
+        viewRoute.includes("ctx.waitUntil(afterMessageChanged(env, db, row.conv_id, message));") &&
+        src.includes('if (foreignOnce) fail(403, "This was sent as view once.", "VIEW_ONCE");') &&
+        src.includes('"SELECT sender_id, meta_json FROM messages WHERE media = ? LIMIT 8",'),
+    );
+    check(
+      "r32-17: app — the attach panel's ① toggle (viewOnce / onViewOnce next to 'N selected'); a view-once batch sends each photo / video with meta.viewOnce and no album, then disarms; sendImage / sendFile / readAndSendImage / handleDocumentPicked carry the flag; the pending echo is marked viewOnce so it draws as the card",
+      attach.includes("viewOnce: Boolean = false,") &&
+        attach.includes("onViewOnce: (Boolean) -> Unit = {},") &&
+        attach.includes("onViewOnce(!viewOnce)") &&
+        attach.includes(".background(if (viewOnce) ActionBlueDeep else Color.Transparent)") &&
+        chat.includes("var attachOnce by remember { mutableStateOf(false) }") &&
+        chat.includes("viewOnce = attachOnce,") &&
+        chat.includes("onViewOnce = { attachOnce = it },") &&
+        chat.includes("val once = attachOnce\n        attachOnce = false") &&
+        chat.includes("val album = if (photos >= 2 && !once) newAlbumId() else null") &&
+        chat.includes(
+          "if (item.isVideo) handleDocumentPicked(item.uri, viewOnce = true) else readAndSendImage(item.uri, null, viewOnce = true)",
+        ) &&
+        chat.includes(
+          "fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false) {",
+        ) &&
+        chat.includes(
+          'if (viewOnce) {\n                o.put("viewOnce", true)\n                return o\n            }',
+        ) &&
+        chat.includes('.also { row -> if (viewOnce) row.put("viewOnce", true) }') &&
+        chat.includes(
+          "fun sendFile(name: String, mime: String, file: File, asDocument: Boolean = false, viewOnce: Boolean = false) {",
+        ) &&
+        chat.includes('viewOnce -> JSONObject().put("viewOnce", true)') &&
+        chat.includes(
+          "suspend fun readAndSendImage(uri: Uri, album: String?, viewOnce: Boolean = false) {",
+        ) &&
+        chat.includes(
+          "fun handleDocumentPicked(uri: Uri, asDocument: Boolean = false, viewOnce: Boolean = false) {",
+        ),
+    );
+    const onceRow = chat.slice(
+      chat.indexOf("private fun ViewOnceRow("),
+      chat.indexOf("internal fun sentAsDocument(m: JSONObject): Boolean ="),
+    );
+    check(
+      "r32-17: app — a view-once message renders ViewOnceRow (no thumbnail: a ① card reading 'Photo · View once' / 'Video · View once', 'Opened' once spent); only the recipient can open it and only while unspent; the sender's tap does nothing; reply-drag + long-press intact; the album fold, resend and the media grid never take it",
+      chat.includes(
+        "if (isViewOnce(m)) {\n        ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)",
+      ) &&
+        chat.indexOf("if (isViewOnce(m)) {") <
+          chat.indexOf(
+            'if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {',
+          ) &&
+        onceRow.includes("val openable = !mine && !spent && !pendingEcho") &&
+        onceRow.includes('spent -> "Opened"') &&
+        onceRow.includes('video -> "Video · View once"') &&
+        onceRow.includes('else -> "Photo · View once"') &&
+        onceRow.includes("openable -> if (video) onOpenVideo(m) else onOpenImage(m)") &&
+        onceRow.includes("detectHorizontalDragGestures(") &&
+        onceRow.includes("if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)") &&
+        !onceRow.includes("ImageBubble(") &&
+        !onceRow.includes("AsyncImage(") &&
+        chat.includes("internal fun isViewOnce(m: JSONObject): Boolean =") &&
+        chat.includes("internal fun viewOnceSpent(m: JSONObject): Boolean =") &&
+        chat.includes('return if (a.isNotBlank() && isPhotoMsg(m) && !isViewOnce(m)) a else ""') &&
+        chat.includes(
+          '(it.optString("kind") == "IMAGE" || it.optString("kind") == "FILE") && !isViewOnce(it)',
+        ),
+    );
+    check(
+      "r32-17: app — the opening: the photo viewer gets onShown (fired by KpNetImage.onLoaded once the picture is really on screen, never on a failed load) → ViewOnce.spend(id) (process-level, de-duplicated, POST /api/messages/:id/view, retried on a network miss); the player spends a kpOnce clip once it is ready; both run under capture guard with Save / Forward withheld; Forward is absent from the long-press sheet and the selection bar for view-once rows; the quotes and the chat list read 'Photo · View once'",
+      viewer.includes("onShown: (() -> Unit)? = null,") &&
+        viewer.includes("onLoaded = onShown,") &&
+        kt("Ui.kt").includes("onLoaded: (() -> Unit)? = null,") &&
+        kt("Ui.kt").includes("onSuccess = onLoaded?.let { cb -> { _ -> cb() } },") &&
+        kt("Ui.kt").includes("LaunchedEffect(url) { onLoaded?.invoke() }") &&
+        viewer.includes('val onceClip = m?.optBoolean("kpOnce") == true') &&
+        viewer.includes(
+          'if (onceClip && state == 1) ViewOnce.spend(m?.optString("id").orEmpty())',
+        ) &&
+        chat.includes("object ViewOnce {") &&
+        chat.includes("if (messageId.isBlank() || !spent.add(messageId)) return") &&
+        chat.includes(
+          'runCatching { Api.post("/api/messages/$messageId/view", JSONObject()) }.isSuccess',
+        ) &&
+        chat.includes("if (!ok) spent.remove(messageId)") &&
+        chat.includes('onShown = if (once) ({ ViewOnce.spend(m.optString("id")) }) else null,') &&
+        chat.includes("canSave = !privateChat && !once,") &&
+        chat.includes("secure = privateChat || once,") &&
+        chat.includes("if (privateChat || once) {\n                        null") &&
+        chat.includes('.put("kpPrivate", privateChat || once)') &&
+        chat.includes('.also { if (once) it.put("kpOnce", true) }') &&
+        chat.includes("if (!echo && !privateChat && !isViewOnce(m)) {") &&
+        chat.includes("if (!privateChat && selectedMessages().none { isViewOnce(it) }) {") &&
+        chat.includes(
+          'if (q != null && isViewOnce(q)) (if (fileLooksVideo(q)) "Video · View once" else "Photo · View once")',
+        ) &&
+        chat.includes(
+          'if (isViewOnce(replyTo)) (if (fileLooksVideo(replyTo)) "Video · View once" else "Photo · View once")',
+        ) &&
+        list.includes('if (t == "Photo · View once" || t == "Video · View once") return t'),
     );
   }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or

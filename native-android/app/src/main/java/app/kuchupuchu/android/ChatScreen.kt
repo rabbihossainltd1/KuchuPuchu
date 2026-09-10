@@ -292,6 +292,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     // mic turns into SEND while the panel has picks (WhatsApp behaviour) —
     // the panel itself no longer carries its own send button.
     val attachSel = remember { mutableStateListOf<MediaItem>() }
+    // Owner round 32 (item 17): the attach panel's "view once" switch — armed
+    // for one batch, reset once it goes out.
+    var attachOnce by remember { mutableStateOf(false) }
     // System back during selection CLEARS the selection (WhatsApp) — it must
     // not fling the user out of the chat with bubbles still highlighted.
     androidx.activity.compose.BackHandler(enabled = selected.isNotEmpty()) {
@@ -918,12 +921,18 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
-    fun sendImage(dataUrl: String, album: String? = null) {
+    fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false) {
         val clientId = "c_${java.util.UUID.randomUUID()}"
         // Owner round 31 (item 29): photos picked together share one album id
         // (meta.album) — the list folds them into a single grouped bubble.
+        // Owner round 32 (item 17): a view-once photo carries meta.viewOnce
+        // instead — no album, no dimensions (the bubble is a card, not a preview).
         fun metaWith(w: Int, h: Int): JSONObject? {
             val o = JSONObject()
+            if (viewOnce) {
+                o.put("viewOnce", true)
+                return o
+            }
             if (w > 0 && h > 0) o.put("w", w).put("h", h)
             if (album != null) o.put("album", album)
             return if (o.length() > 0) o else null
@@ -940,6 +949,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .put("fileType", "image/jpeg")
                 .put("mediaUrl", dataUrl)
                 .also { row -> metaWith(0, 0)?.let { row.put("meta", it) } }
+                .also { row -> if (viewOnce) row.put("viewOnce", true) }
                 .put("createdAt", java.time.Instant.now().toString()),
         )
         // Owner round 32 (item 48): the jump-to-bottom is its own coroutine.
@@ -1037,7 +1047,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
-    fun sendFile(name: String, mime: String, file: File, asDocument: Boolean = false) {
+    fun sendFile(name: String, mime: String, file: File, asDocument: Boolean = false, viewOnce: Boolean = false) {
         // Owner round 32 (item 34): the server's 25 MB cap is checked HERE — a
         // bigger file used to upload for minutes and then fail on that check.
         if (file.length() > VideoPlan.UPLOAD_LIMIT) {
@@ -1048,7 +1058,13 @@ fun ChatScreen(nav: NavController, convId: String) {
         // Owner round 31 (item 16): a photo/video/audio picked through
         // "Document" travels as a document — meta.document keeps it out of the
         // photo / video bubbles on both sides.
-        val docMeta = if (asDocument) JSONObject().put("document", true) else null
+        val docMeta =
+            when {
+                asDocument -> JSONObject().put("document", true)
+                // Owner round 32 (item 17): a view-once video (never a document).
+                viewOnce -> JSONObject().put("viewOnce", true)
+                else -> null
+            }
         pending.add(
             JSONObject()
                 .put("id", clientId)
@@ -1062,7 +1078,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // only deleted once the send succeeds) — like voicePath.
                 .put("docPath", file.absolutePath)
                 .put("createdAt", java.time.Instant.now().toString())
-                .also { if (docMeta != null) it.put("meta", docMeta) },
+                .also { if (docMeta != null) it.put("meta", docMeta) }
+                .also { if (viewOnce && !asDocument) it.put("viewOnce", true) },
         )
         scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }
         runCatching { KpSounds.send(ctx) }
@@ -1155,7 +1172,7 @@ fun ChatScreen(nav: NavController, convId: String) {
        run on the *chat* screen's scope instead, which lives as long as the
        chat is open, so gallery / camera / document / audio / contact /
        location all survive the sheet closing. */
-    suspend fun readAndSendImage(uri: Uri, album: String?) {
+    suspend fun readAndSendImage(uri: Uri, album: String?, viewOnce: Boolean = false) {
         // 720px / ~100KB: the old 960px/220KB photos took minutes to send AND load
         // on slow mobile data (the "image loads forever" report).
         // High-quality photos: 1440px, ~380KB inline budget (server caps at 450K).
@@ -1164,7 +1181,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             error = "Could not read that photo — try another one."
         } else {
             error = ""
-            sendImage(dataUrl, album)
+            sendImage(dataUrl, album, viewOnce)
         }
     }
 
@@ -1172,7 +1189,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         scope.launch { readAndSendImage(uri, album) }
     }
 
-    fun handleDocumentPicked(uri: Uri, asDocument: Boolean = false) {
+    fun handleDocumentPicked(uri: Uri, asDocument: Boolean = false, viewOnce: Boolean = false) {
         scope.launch {
             val name = withContext(Dispatchers.IO) { queryName(ctx, uri) }
             // Owner round 32 (item 34): streamed into the cache, never read
@@ -1189,7 +1206,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 return@launch
             }
             error = ""
-            sendFile(name, mime, file, asDocument)
+            sendFile(name, mime, file, asDocument, viewOnce)
         }
     }
 
@@ -1197,10 +1214,15 @@ fun ChatScreen(nav: NavController, convId: String) {
         val batch = attachSel.toList()
         attachSel.clear()
         showAttach = false
+        // Owner round 32 (item 17): the panel's ① switch — this batch goes out
+        // view-once (no album: each photo is its own single opening), and the
+        // switch disarms itself for the next pick.
+        val once = attachOnce
+        attachOnce = false
         // Owner round 31 (item 29): two or more photos picked together go out
         // as ONE album — each still its own message row, sharing meta.album.
         val photos = batch.count { !it.isVideo }
-        val album = if (photos >= 2) newAlbumId() else null
+        val album = if (photos >= 2 && !once) newAlbumId() else null
         scope.launch {
             // Owner round 32 (item 48): photos are read one after another, in
             // the order they were ticked, so the pending rows (and the album's
@@ -1208,7 +1230,11 @@ fun ChatScreen(nav: NavController, convId: String) {
             // decode happened to finish first. Each upload still runs on its
             // own coroutine inside sendImage, so they overlap on the wire.
             batch.forEach { item ->
-                if (item.isVideo) handleDocumentPicked(item.uri) else readAndSendImage(item.uri, album)
+                if (once) {
+                    if (item.isVideo) handleDocumentPicked(item.uri, viewOnce = true) else readAndSendImage(item.uri, null, viewOnce = true)
+                } else {
+                    if (item.isVideo) handleDocumentPicked(item.uri) else readAndSendImage(item.uri, album)
+                }
             }
         }
     }
@@ -1298,7 +1324,7 @@ fun ChatScreen(nav: NavController, convId: String) {
      */
     fun sendSelectedMedia() {
         val items = selectedMessages().filter {
-            it.optString("kind") == "IMAGE" || it.optString("kind") == "FILE"
+            (it.optString("kind") == "IMAGE" || it.optString("kind") == "FILE") && !isViewOnce(it)
         }
         if (items.isEmpty()) return
         selected.clear()
@@ -1549,7 +1575,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         Icon(Icons.Filled.ContentCopy, "Copy", tint = Ink, modifier = Modifier.size(21.dp))
                     }
                 }
-                if (!privateChat) {
+                if (!privateChat && selectedMessages().none { isViewOnce(it) }) {
                     IconButton(onClick = { forwarding = true }) {
                         Icon(Icons.AutoMirrored.Filled.Send, "Forward", tint = ActionBlueDeep, modifier = Modifier.size(21.dp))
                     }
@@ -1968,7 +1994,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 val who =
                                     if (msg.optString("senderId") == Store.myId()) "You"
                                     else msg.optText("senderName").ifBlank { rawTitle }
-                                val arg = JSONObject(msg.toString()).put("kpTitle", who).put("kpPrivate", privateChat)
+                                // Owner round 32 (item 17): a view-once clip plays
+                                // under capture guard with no Save / Forward, and the
+                                // player spends the opening once the clip is on screen.
+                                val once = isViewOnce(msg)
+                                val arg =
+                                    JSONObject(msg.toString()).put("kpTitle", who).put("kpPrivate", privateChat || once)
+                                        .also { if (once) it.put("kpOnce", true) }
                                 nav.navigate("videoplayer/${mediaArg(arg)}")
                             },
                             // Owner round 32 (item 33): documents → the app's own viewer.
@@ -2073,8 +2105,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 val voicePath = p.optString("voicePath")
                                 val docPath = p.optString("docPath")
                                 when {
-                                    // A retried album photo keeps its album.
-                                    url.isNotBlank() -> sendImage(url, p.optJSONObject("meta")?.optString("album")?.ifBlank { null })
+                                    // A retried album photo keeps its album;
+                                    // a view-once one stays view-once (item 17).
+                                    url.isNotBlank() -> sendImage(url, p.optJSONObject("meta")?.optString("album")?.ifBlank { null }, isViewOnce(p))
                                     voicePath.isNotBlank() -> {
                                         val f = File(voicePath)
                                         if (f.exists()) {
@@ -2096,6 +2129,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                                                 p.optString("fileType").ifBlank { "application/octet-stream" },
                                                 f,
                                                 sentAsDocument(p),
+                                                isViewOnce(p),
                                             )
                                         }
                                     }
@@ -2183,7 +2217,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                     }
                 }
                 // Owner round 31 item 21: no forwarding out of a private chat.
-                if (!echo && !privateChat) {
+                // Owner round 32 (item 17): nor of a view-once photo / video.
+                if (!echo && !privateChat && !isViewOnce(m)) {
                     KpSheetRow(Icons.AutoMirrored.Filled.Send, "Forward") {
                         close()
                         selected.clear()
@@ -2364,6 +2399,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                 sel = attachSel,
                 onSendBatch = { sendAttachSelection() },
                 onDismiss = { showAttach = false },
+                viewOnce = attachOnce,
+                onViewOnce = { attachOnce = it },
                 onImagePicked = { uri -> handleImagePicked(uri) },
                 onDocumentPicked = { uri -> handleDocumentPicked(uri, asDocument = true) },
                 onContactPicked = ::handleContactPicked,
@@ -2431,13 +2468,17 @@ fun ChatScreen(nav: NavController, convId: String) {
             val who =
                 if (m.optString("senderId") == Store.myId()) "You"
                 else m.optText("senderName").ifBlank { rawTitle }
+            // Owner round 32 (item 17): a view-once photo — capture guard on,
+            // no Save / Forward, and the single opening is spent the moment the
+            // picture is on screen (the row flips to "Opened" everywhere).
+            val once = isViewOnce(m)
             KpPhotoViewer(
                 url = messageMediaUrl(m),
                 title = who,
-                subtitle = viewerStamp(m.optText("createdAt")),
+                subtitle = if (once) "View once" else viewerStamp(m.optText("createdAt")),
                 onClose = { viewerMsg = null },
                 onForward =
-                    if (privateChat) {
+                    if (privateChat || once) {
                         null
                     } else {
                         {
@@ -2447,8 +2488,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                             forwarding = true
                         }
                     },
-                canSave = !privateChat,
-                secure = privateChat,
+                canSave = !privateChat && !once,
+                secure = privateChat || once,
+                onShown = if (once) ({ ViewOnce.spend(m.optString("id")) }) else null,
             )
         }
         editing?.let { m ->
@@ -3379,7 +3421,10 @@ private fun ReplyQuoteBar(replyTo: JSONObject?, theme: String, onCancel: () -> U
                     )
                 }
                 append("  ")
-                append(((replyTo.optText("body") ?: "").ifBlank { "Media" }).take(80))
+                append(
+                    if (isViewOnce(replyTo)) (if (fileLooksVideo(replyTo)) "Video · View once" else "Photo · View once")
+                    else ((replyTo.optText("body") ?: "").ifBlank { "Media" }).take(80),
+                )
             },
             fontSize = 12.sp,
             // Owner round 17: gold-on-gold-soft was unreadable — full ink.
@@ -3471,6 +3516,13 @@ private fun MessageRow(
     // Owner round 31 (item 29): photos sent together = one grouped bubble.
     if (m.has("kpAlbum")) {
         AlbumMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenAlbum, onReply, onLongPress)
+        return
+    }
+    // Owner round 32 (item 17): a view-once photo / video never shows a
+    // preview — a card ("Photo · View once" / "Opened") that opens the media
+    // ONCE for the recipient; the sender only ever sees the card.
+    if (isViewOnce(m)) {
+        ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)
         return
     }
     if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {
@@ -3617,7 +3669,9 @@ private fun MessageRow(
                         val who =
                             if (q?.optString("senderId") == myId) "You"
                             else (q?.optText("senderName") ?: "").ifBlank { "Original" }
-                        val what = q?.optText("body")?.take(48)?.ifBlank { "Media" } ?: "Original message"
+                        val what =
+                            if (q != null && isViewOnce(q)) (if (fileLooksVideo(q)) "Video · View once" else "Photo · View once")
+                            else q?.optText("body")?.take(48)?.ifBlank { "Media" } ?: "Original message"
                         Row(
                             Modifier
                                 .padding(bottom = 2.dp)
@@ -4058,6 +4112,166 @@ private fun VideoMessageRow(
     }
 }
 
+/**
+ * Owner round 32 (item 17): the view-once bubble — a compact card in the chat
+ * accent with a ① mark and "Photo · View once" / "Video · View once"; after the
+ * opening it reads "Opened" (dimmed, no tap). The recipient's tap opens the
+ * app's own viewer / player under capture guard; the sender's tap does
+ * nothing (they cannot re-see it either). Reply-drag and long-press behave
+ * like every other bubble.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ViewOnceRow(
+    m: JSONObject,
+    mine: Boolean,
+    pendingEcho: Boolean,
+    otherReadAt: String?,
+    selectedIds: List<String>,
+    onToggleSelect: (JSONObject) -> Unit,
+    onOpenImage: (JSONObject) -> Unit,
+    onOpenVideo: (JSONObject) -> Unit,
+    onReply: (JSONObject) -> Unit,
+    onLongPress: (JSONObject) -> Unit,
+    theme: String,
+) {
+    val ctx = LocalContext.current
+    val haptics = rememberHaptics()
+    val video = fileLooksVideo(m)
+    val spent = viewOnceSpent(m)
+    // The recipient can open it while it is unspent; the sender never can.
+    val openable = !mine && !spent && !pendingEcho
+    val label =
+        when {
+            spent -> "Opened"
+            video -> "Video · View once"
+            else -> "Photo · View once"
+        }
+    var replyDrag by remember { mutableStateOf(0f) }
+    val replyOffset by animateFloatAsState(replyDrag, spring(stiffness = 1400f), label = "oncereplydrag")
+    val replyThreshold = with(LocalDensity.current) { 36.dp.toPx() }
+    val rowSelected = m.optString("id") in selectedIds
+    val bubbleShape =
+        RoundedCornerShape(
+            topStart = 16.dp,
+            topEnd = 16.dp,
+            bottomStart = if (mine) 16.dp else 5.dp,
+            bottomEnd = if (mine) 5.dp else 16.dp,
+        )
+    val ink = if (mine) Color.White else if (theme == "darkblue" || (theme == "night")) Color(0xFFE6EAF2) else Ink
+    val stampInk = if (mine) Color(0xD9FFFFFF) else if (theme == "darkblue" || theme == "night") Color(0xFFA9B4CC) else Muted
+    val upFrac = UploadProgress.fracs[m.optString("clientId")]
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
+    ) {
+        Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
+            Box(
+                Modifier
+                    .offset { IntOffset(replyOffset.roundToInt(), 0) }
+                    .pointerInput(m.optString("id")) {
+                        detectHorizontalDragGestures(
+                            onHorizontalDrag = { change, dragAmount ->
+                                change.consume()
+                                replyDrag =
+                                    if (mine) {
+                                        (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.4f, 0f)
+                                    } else {
+                                        (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.4f)
+                                    }
+                            },
+                            onDragEnd = {
+                                val armed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
+                                replyDrag = 0f
+                                if (armed) {
+                                    runCatching { KpSounds.replySwipe(ctx) }
+                                    onReply(m)
+                                }
+                            },
+                            onDragCancel = { replyDrag = 0f },
+                        )
+                    }
+                    .shadow(2.dp, bubbleShape)
+                    .clip(bubbleShape)
+                    .background(if (mine) chatMineFill(theme) else chatOtherFill(theme))
+                    .then(if (rowSelected) Modifier.background(ActionBlue.copy(alpha = 0.35f)) else Modifier)
+                    .combinedClickable(
+                        onClick = {
+                            when {
+                                pendingEcho -> {}
+                                selectedIds.isNotEmpty() -> onToggleSelect(m)
+                                openable -> if (video) onOpenVideo(m) else onOpenImage(m)
+                                else -> {}
+                            }
+                        },
+                        onLongClick = {
+                            if (!pendingEcho) {
+                                haptics.tap()
+                                if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)
+                            }
+                        },
+                    )
+                    .padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 6.dp),
+            ) {
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // ① mark — a ring with the digit; struck through once spent.
+                        Box(
+                            Modifier
+                                .size(30.dp)
+                                .clip(CircleShape)
+                                .border(1.5.dp, ink.copy(alpha = if (spent) 0.45f else 0.9f), CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (upFrac != null) {
+                                CircularProgressIndicator(
+                                    progress = { upFrac },
+                                    color = ink,
+                                    strokeWidth = 2.dp,
+                                    trackColor = ink.copy(alpha = 0.22f),
+                                    modifier = Modifier.size(26.dp),
+                                )
+                            } else {
+                                Text(
+                                    "1",
+                                    color = ink.copy(alpha = if (spent) 0.45f else 1f),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    textDecoration = if (spent) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(9.dp))
+                        Text(
+                            label,
+                            color = ink.copy(alpha = if (spent) 0.6f else 1f),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            fontStyle = if (spent) FontStyle.Italic else FontStyle.Normal,
+                            maxLines = 1,
+                            // the stamp row sits under the text's end
+                            modifier = Modifier.padding(end = 6.dp),
+                        )
+                    }
+                    Row(
+                        Modifier.align(Alignment.End).padding(top = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(msgStamp(m.optString("createdAt")), fontSize = 10.sp, color = stampInk)
+                        if (mine) {
+                            Spacer(Modifier.width(3.dp))
+                            TickIcon(m, pendingEcho, otherReadAt, onWallpaper = false, ink = stampInk)
+                        }
+                    }
+                }
+            }
+            MessageReactions(m)
+        }
+    }
+}
+
 /** Owner round 31 (item 16): picked via "Document" — never the photo/video bubble. */
 internal fun sentAsDocument(m: JSONObject): Boolean = m.optJSONObject("meta")?.optBoolean("document") == true
 
@@ -4306,7 +4520,39 @@ internal fun newAlbumId(): String = "alb_" + java.util.UUID.randomUUID().toStrin
 /** The album a photo row belongs to (meta.album), "" for anything else. */
 internal fun albumIdOf(m: JSONObject): String {
     val a = m.optJSONObject("meta")?.optString("album").orEmpty()
-    return if (a.isNotBlank() && isPhotoMsg(m)) a else ""
+    return if (a.isNotBlank() && isPhotoMsg(m) && !isViewOnce(m)) a else ""
+}
+
+/** Owner round 32 (item 17): a view-once photo / video (meta.viewOnce). */
+internal fun isViewOnce(m: JSONObject): Boolean =
+    m.optBoolean("viewOnce") || m.optJSONObject("meta")?.optBoolean("viewOnce") == true
+
+/** Already opened by the recipient (the object is gone). */
+internal fun viewOnceSpent(m: JSONObject): Boolean =
+    isViewOnce(m) && (m.optText("viewedAt").isNotBlank() || (m.optJSONObject("meta")?.optString("viewedAt").orEmpty().isNotBlank()))
+
+/**
+ * Owner round 32 (item 17): reports the single opening to the server (POST
+ * /api/messages/:id/view). Process-level and de-duplicated per id: the viewer
+ * calls it when the picture / clip is on screen, and a recomposition or a
+ * second tap in the same second must not fire twice. The room broadcast that
+ * follows repaints the bubble as "Opened" on every device (sender included).
+ */
+object ViewOnce {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val spent = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    fun spend(messageId: String) {
+        if (messageId.isBlank() || !spent.add(messageId)) return
+        scope.launch {
+            val ok = runCatching { Api.post("/api/messages/$messageId/view", JSONObject()) }.isSuccess
+            // A network blip must not leave the opening unreported forever —
+            // let the next viewing report again (the server refuses a repeat
+            // with 410, which is harmless).
+            if (!ok) spent.remove(messageId)
+            withContext(Dispatchers.Main) { ScreenStore.pokeInbox() }
+        }
+    }
 }
 
 /**

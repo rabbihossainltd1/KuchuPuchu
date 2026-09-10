@@ -1563,6 +1563,286 @@ async function main() {
     );
   }
 
+  // ── r32-17. view once: one opening, then the object is gone ──────────────
+  {
+    const h = await mk();
+    const frames = [];
+    h.env.CHAT_ROOM = {
+      idFromName: (name) => ({ toString: () => name, name }),
+      get: (id) => ({
+        fetch: async (_u, init) => {
+          if (init?.body) frames.push({ room: id.name, body: JSON.parse(init.body) });
+          return new Response(JSON.stringify({ ok: true, sent: 0 }), { status: 200 });
+        },
+      }),
+    };
+    const { A, B, cid } = await pair(h, "vo");
+    const conv = { id: cid };
+    const C = await h.reg("voc");
+    const upload = async (name, type, bytes) =>
+      (
+        await h.call(
+          "POST",
+          `/api/files?name=${name}&type=${type}`,
+          new Uint8Array(Buffer.from(bytes)),
+          A.token,
+        )
+      ).json.fileKey;
+    const photoKey = await upload("photo.jpg", "image/jpeg", "once-photo-bytes");
+    const sendOnce = (key, extra = {}) =>
+      h.call(
+        "POST",
+        `/api/conversations/${conv.id}/messages`,
+        {
+          kind: "FILE",
+          fileKey: key,
+          fileName: "photo.jpg",
+          fileType: "image/jpeg",
+          fileSize: 16,
+          meta: { viewOnce: true, w: 1200, h: 900, album: "alb_abcdef0123456789", ...extra },
+        },
+        A.token,
+      );
+    const sent = await sendOnce(photoKey);
+    const m = sent.json.message;
+    const listRow = (
+      await h.call("GET", "/api/conversations", undefined, B.token)
+    ).json.items?.find((c) => c.id === conv.id);
+    // the flag never lands on a document, a voice note or a text
+    const docKey = await upload("scan.jpg", "image/jpeg", "doc-bytes");
+    const asDoc = await h.call(
+      "POST",
+      `/api/conversations/${conv.id}/messages`,
+      {
+        kind: "FILE",
+        fileKey: docKey,
+        fileName: "scan.jpg",
+        fileType: "image/jpeg",
+        fileSize: 9,
+        meta: { viewOnce: true, document: true },
+      },
+      A.token,
+    );
+    const asText = await h.call(
+      "POST",
+      `/api/conversations/${conv.id}/messages`,
+      { kind: "TEXT", body: "hello", meta: { viewOnce: true } },
+      A.token,
+    );
+    check(
+      "r32-17: meta.viewOnce is stored only on a photo / video message — the row publishes viewOnce:true, no album, no dimensions; the chat-list preview reads 'Photo · View once'; a document / text with the flag stays an ordinary message",
+      sent.status === 201 &&
+        m?.viewOnce === true &&
+        m?.hasImage === true &&
+        m?.fileKey === photoKey &&
+        m?.mediaW === undefined &&
+        m?.meta?.album === undefined &&
+        m?.viewedAt === undefined &&
+        listRow?.lastMessage === "Photo · View once" &&
+        asDoc.status === 201 &&
+        asDoc.json.message?.viewOnce === undefined &&
+        asText.status === 201 &&
+        asText.json.message?.viewOnce === undefined,
+      JSON.stringify({
+        sent: sent.status,
+        m,
+        preview: listRow?.lastMessage,
+        doc: asDoc.json.message?.viewOnce,
+        text: asText.json.message?.viewOnce,
+      }),
+    );
+
+    // ----- the gallery never lists it; the push carries no picture -----
+    const gallery = await h.call("GET", `/api/conversations/${conv.id}/media`, undefined, B.token);
+    check(
+      "r32-17: the shared-media gallery skips view-once rows (before and after the opening)",
+      gallery.status === 200 &&
+        !(gallery.json.images ?? []).some((x) => x.id === m.id) &&
+        !(gallery.json.docs ?? []).some((x) => x.id === m.id),
+      JSON.stringify(gallery.json.images?.map((x) => x.id)),
+    );
+
+    // ----- the opening: sender refused, stranger refused, recipient once -----
+    const ownTap = await h.call("POST", `/api/messages/${m.id}/view`, {}, A.token);
+    const strangerTap = await h.call("POST", `/api/messages/${m.id}/view`, {}, C.token);
+    const before = await h.call("GET", `/api/files/${photoKey}`, undefined, B.token);
+    frames.length = 0;
+    const opened = await h.call("POST", `/api/messages/${m.id}/view`, {}, B.token);
+    const again = await h.call("POST", `/api/messages/${m.id}/view`, {}, B.token);
+    const after = await h.call("GET", `/api/files/${photoKey}`, undefined, B.token);
+    const senderAfter = await h.call("GET", `/api/files/${photoKey}`, undefined, A.token);
+    const row = await h.q("SELECT media, meta_json FROM messages WHERE id = ?", m.id).first();
+    const page = (
+      await h.call("GET", `/api/conversations/${conv.id}/messages`, undefined, A.token)
+    ).json.items?.find((x) => x.id === m.id);
+    const frame = frames.find(
+      (f) => f.room === conv.id && f.body.type === "message" && f.body.message?.id === m.id,
+    );
+    check(
+      "r32-17: POST /api/messages/:id/view — the sender (403 OWN_MESSAGE) and a non-member (403) cannot spend it; the recipient's first call stamps viewedAt/viewedBy and clears the media, the second is 410 VIEWED; afterwards the bytes are gone for everyone (the key answers 403/404 to sender and recipient alike), the row exposes no fileKey / mediaUrl / hasImage, and the chat room got the 'message' frame that repaints the sender's bubble as opened",
+      ownTap.status === 403 &&
+        ownTap.json.error?.code === "OWN_MESSAGE" &&
+        strangerTap.status === 403 &&
+        before.status === 200 &&
+        opened.status === 200 &&
+        opened.json.message?.viewOnce === true &&
+        typeof opened.json.message?.viewedAt === "string" &&
+        opened.json.message?.viewedBy === B.user.id &&
+        opened.json.message?.fileKey === undefined &&
+        opened.json.message?.hasImage === false &&
+        again.status === 410 &&
+        again.json.error?.code === "VIEWED" &&
+        [403, 404].includes(after.status) &&
+        [403, 404].includes(senderAfter.status) &&
+        row?.media === null &&
+        JSON.parse(row?.meta_json ?? "{}").viewedBy === B.user.id &&
+        page?.viewedAt === opened.json.message.viewedAt &&
+        page?.fileKey === undefined &&
+        frame?.body.message?.viewedAt === opened.json.message.viewedAt,
+      JSON.stringify({
+        own: ownTap.status,
+        stranger: strangerTap.status,
+        before: before.status,
+        opened: opened.status,
+        msg: opened.json.message,
+        again: again.status,
+        after: after.status,
+        senderAfter: senderAfter.status,
+        row,
+        page,
+        frame: frame?.body.message?.viewedAt,
+      }),
+    );
+
+    // ----- not forwardable by the recipient; a plain photo still is -----
+    const plainKey = await upload("plain.jpg", "image/jpeg", "plain-bytes");
+    const onceKey2 = await upload("once2.jpg", "image/jpeg", "once2-bytes");
+    await h.call(
+      "POST",
+      `/api/conversations/${conv.id}/messages`,
+      {
+        kind: "FILE",
+        fileKey: plainKey,
+        fileName: "plain.jpg",
+        fileType: "image/jpeg",
+        fileSize: 11,
+      },
+      A.token,
+    );
+    const once2 = await sendOnce(onceKey2);
+    const convBC = (await h.call("POST", "/api/conversations", { userId: C.user.id }, B.token)).json
+      .conversation;
+    const fwdOnce = await h.call(
+      "POST",
+      `/api/conversations/${convBC.id}/messages`,
+      {
+        kind: "FILE",
+        fileKey: onceKey2,
+        fileName: "once2.jpg",
+        fileType: "image/jpeg",
+        fileSize: 11,
+      },
+      B.token,
+    );
+    const fwdPlain = await h.call(
+      "POST",
+      `/api/conversations/${convBC.id}/messages`,
+      {
+        kind: "FILE",
+        fileKey: plainKey,
+        fileName: "plain.jpg",
+        fileType: "image/jpeg",
+        fileSize: 11,
+      },
+      B.token,
+    );
+    // the object survives the opening while the sender's own forward references it
+    const convAC = (await h.call("POST", "/api/conversations", { userId: C.user.id }, A.token)).json
+      .conversation;
+    const ownFwd = await h.call(
+      "POST",
+      `/api/conversations/${convAC.id}/messages`,
+      {
+        kind: "FILE",
+        fileKey: onceKey2,
+        fileName: "once2.jpg",
+        fileType: "image/jpeg",
+        fileSize: 11,
+      },
+      A.token,
+    );
+    const open2 = await h.call("POST", `/api/messages/${once2.json.message.id}/view`, {}, B.token);
+    const stillThere = await h.call("GET", `/api/files/${onceKey2}`, undefined, C.token);
+    check(
+      "r32-17: the recipient cannot re-post a view-once key into another chat (403 VIEW_ONCE) while an ordinary photo forwards as before; the sender's own re-send of the same key is allowed and keeps the object alive past the opening (GC only when no row references it)",
+      once2.status === 201 &&
+        fwdOnce.status === 403 &&
+        fwdOnce.json.error?.code === "VIEW_ONCE" &&
+        fwdPlain.status === 201 &&
+        ownFwd.status === 201 &&
+        open2.status === 200 &&
+        stillThere.status === 200,
+      JSON.stringify({
+        once2: once2.status,
+        fwdOnce: fwdOnce.status,
+        code: fwdOnce.json.error?.code,
+        fwdPlain: fwdPlain.status,
+        ownFwd: ownFwd.status,
+        open2: open2.status,
+        stillThere: stillThere.status,
+      }),
+    );
+
+    // ----- an inline IMAGE (data URL) goes through the same door -----
+    const inline = await h.call(
+      "POST",
+      `/api/conversations/${conv.id}/messages`,
+      {
+        kind: "IMAGE",
+        imageData: `data:image/jpeg;base64,${Buffer.from("inline-once").toString("base64")}`,
+        meta: { viewOnce: true, w: 640, h: 480 },
+      },
+      A.token,
+    );
+    const im = inline.json.message;
+    const inlineBefore = await h.call("GET", `/api/messages/${im?.id}/media`, undefined, B.token);
+    const inlineOpen = await h.call("POST", `/api/messages/${im?.id}/view`, {}, B.token);
+    const inlineAfter = await h.call("GET", `/api/messages/${im?.id}/media`, undefined, B.token);
+    check(
+      "r32-17: an inline IMAGE sent view-once behaves the same — mediaUrl until the opening, then the media route is 404 and the row carries no mediaUrl / hasImage",
+      inline.status === 201 &&
+        im?.viewOnce === true &&
+        typeof im?.mediaUrl === "string" &&
+        im?.mediaW === undefined &&
+        inlineBefore.status === 200 &&
+        inlineOpen.status === 200 &&
+        inlineOpen.json.message?.mediaUrl === undefined &&
+        inlineOpen.json.message?.hasImage === false &&
+        inlineAfter.status === 404,
+      JSON.stringify({
+        inline: inline.status,
+        im,
+        before: inlineBefore.status,
+        open: inlineOpen.status,
+        after: inlineAfter.status,
+      }),
+    );
+
+    // ----- the delete path still works on a spent row -----
+    const del = await h.call("DELETE", `/api/messages/${m.id}`, undefined, A.token);
+    const notOnce = await h.call(
+      "POST",
+      `/api/messages/${asText.json.message.id}/view`,
+      {},
+      B.token,
+    );
+    check(
+      "r32-17: 'Delete for everyone' still works on an opened view-once row, and /view on an ordinary message is 400 NOT_VIEW_ONCE",
+      del.status === 200 && notOnce.status === 400 && notOnce.json.error?.code === "NOT_VIEW_ONCE",
+      JSON.stringify({ del: del.status, notOnce: notOnce.status, code: notOnce.json.error?.code }),
+    );
+  }
+
   process.stdout.write(lines.join("\n") + "\n");
   const broken = lines.filter((l) => l.startsWith("  BROKEN")).length;
   process.exit(broken ? 1 : 0);

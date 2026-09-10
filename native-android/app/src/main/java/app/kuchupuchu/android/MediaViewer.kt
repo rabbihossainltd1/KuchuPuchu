@@ -165,6 +165,9 @@ fun KpPhotoViewer(
     onForward: (() -> Unit)? = null,
     canSave: Boolean = true,
     secure: Boolean = false,
+    // Owner round 32 (item 17): fired once the picture is on screen (a failed
+    // load never fires it) — the chat uses it to spend a view-once opening.
+    onShown: (() -> Unit)? = null,
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -314,6 +317,7 @@ fun KpPhotoViewer(
                             translationY = offY + drag.value,
                         ),
                     ContentScale.Fit,
+                    onLoaded = onShown,
                 )
             }
             if (chromeAlpha > 0.01f) {
@@ -429,6 +433,9 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
     // capture, no Save (the chat passes `kpPrivate` along in the argument).
     val privateClip = m?.optBoolean("kpPrivate") == true
     KpSecure.Guard(privateClip)
+    // Owner round 32 (item 17): a view-once clip — the opening is spent the
+    // moment the clip is on screen; kpPrivate already withholds Save / Forward.
+    val onceClip = m?.optBoolean("kpOnce") == true
     val sub = m?.let { viewerStamp(it.optText("createdAt")) } ?: ""
     // 0 loading · 1 ready · -1 failed
     var state by remember(b64) { mutableIntStateOf(if (dest != null && dest.exists() && dest.length() > 0L) 1 else 0) }
@@ -516,6 +523,9 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
                 }.getOrDefault(false)
             }
         state = if (ok) 1 else -1
+    }
+    LaunchedEffect(state) {
+        if (onceClip && state == 1) ViewOnce.spend(m?.optString("id").orEmpty())
     }
     LaunchedEffect(player) {
         val p = player ?: return@LaunchedEffect

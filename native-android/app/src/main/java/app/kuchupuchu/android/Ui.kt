@@ -546,11 +546,16 @@ fun KpNetImage(
     contentDescription: String?,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Crop,
+    // Owner round 32 (item 17): fired once the picture is actually on screen
+    // (decoded / fetched) — the view-once viewer spends the opening only then,
+    // never on a load that failed.
+    onLoaded: (() -> Unit)? = null,
 ) {
     if (url.isNullOrBlank()) return
     if (url.startsWith("data:")) {
         val bmp = rememberBitmap(url)
         if (bmp != null) {
+            LaunchedEffect(url) { onLoaded?.invoke() }
             Image(bmp, contentDescription = contentDescription, modifier = modifier, contentScale = contentScale)
         }
         return
@@ -564,6 +569,7 @@ fun KpNetImage(
         contentDescription = contentDescription,
         modifier = modifier,
         contentScale = contentScale,
+        onSuccess = onLoaded?.let { cb -> { _ -> cb() } },
     )
 }
 

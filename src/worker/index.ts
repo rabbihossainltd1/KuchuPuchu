@@ -5896,6 +5896,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const urlRe = /https?:\/\/[^\s]+/gi;
     for (const row of rows) {
       const m = msgFrom(row);
+      // Owner round 32 (item 17): a view-once photo / video is not part of
+      // the shared media — not before its opening, not after.
+      if (m.viewOnce) continue;
       if (row.kind === "IMAGE" || m.hasImage) images.push(m);
       else if (row.kind === "FILE") docs.push(m);
       else if (row.body && urlRe.test(row.body)) {
@@ -6681,7 +6684,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // read + typing, so every field the client consumes participates in the
     // check - including repeat edits of the same row.
     const marker = hashSig(
-      JSON.stringify([items.map((m) => [m.id, m.body, m.edited, m.deliveredAt]), readAt, typingAt]),
+      JSON.stringify([
+        items.map((m) => [m.id, m.body, m.edited, m.deliveredAt, m.viewedAt]),
+        readAt,
+        typingAt,
+      ]),
     );
     const clientMarker = url.searchParams.get("marker");
     if (clientMarker && clientMarker === marker) return json({ marker, unchanged: true });
@@ -6807,6 +6814,23 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       );
       if (dup) return json({ message: msgFrom(dup), duplicate: true }, 200);
     }
+    // Owner round 32 (item 17): a key that belongs to someone else's
+    // view-once message is not forwardable — the recipient gets one opening,
+    // not a reference they can re-post into another chat. One indexed seek
+    // (idx_messages_media), only on uploads.
+    if (fileKey) {
+      const refs = await all<{ sender_id: string; meta_json: string | null }>(
+        db,
+        "SELECT sender_id, meta_json FROM messages WHERE media = ? LIMIT 8",
+        fileKey,
+      );
+      const foreignOnce = refs.some(
+        (r) =>
+          r.sender_id !== uid &&
+          parseJson<{ viewOnce?: unknown }>(r.meta_json, {}).viewOnce === true,
+      );
+      if (foreignOnce) fail(403, "This was sent as view once.", "VIEW_ONCE");
+    }
     const mid = id();
     const incomingMeta = (body.meta as Record<string, unknown> | undefined) ?? {};
     const dims = imageDims(kind, imageData ?? fileKey, incomingMeta);
@@ -6815,6 +6839,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // its own row (unsend / forward / react per photo keep working); the id
     // is opaque client text, pinned to the `alb_` shape and a short length.
     const album = albumId(kind, imageData ?? fileKey, String(body.fileType || ""), incomingMeta);
+    // Owner round 32 (item 17): a view-once photo / video. It never joins an
+    // album (one tap = one opening) and publishes no dimensions — the bubble
+    // is a placeholder card, not a preview, so nothing about the picture
+    // leaks before the single opening.
+    const viewOnce = viewOnceFlag(
+      kind,
+      imageData ?? fileKey,
+      String(body.fileType || ""),
+      incomingMeta,
+    );
     const metaObj: Record<string, unknown> = {
       ...(kind === "FILE" && fileKey
         ? {
@@ -6831,8 +6865,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             ...voiceWaveform(incomingMeta),
           }
         : {}),
-      ...(Object.keys(dims).length ? dims : {}),
-      ...(album ? { album } : {}),
+      ...(Object.keys(dims).length && !viewOnce ? dims : {}),
+      ...(album && !viewOnce ? { album } : {}),
+      ...(viewOnce ? { viewOnce: true } : {}),
       ...(await statusQuote(db, kind, incomingMeta)),
     };
     if (clientId) metaObj.clientId = clientId;
@@ -6941,11 +6976,14 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // (the same authorized path the chat itself loads, fetched with the
     // recipient's session), so the recipient's card can carry the thumbnail.
     // Documents that happen to be images stay file rows: no picture.
-    const pictureUrl = message.hasImage
-      ? message.fileKey
-        ? `/api/files/${message.fileKey}`
-        : message.mediaUrl
-      : undefined;
+    // Owner round 32 (item 17): a view-once photo shows nothing before its
+    // one opening — the push card gets no picture either.
+    const pictureUrl =
+      message.hasImage && !message.viewOnce
+        ? message.fileKey
+          ? `/api/files/${message.fileKey}`
+          : message.mediaUrl
+        : undefined;
     // Push: every other member gets a high-priority message. The chat-list poke
     // doubles as a live-connectivity probe, and its answer decides whether the
     // push is data-only (app connected -> our rich card with actions) or
@@ -7457,6 +7495,42 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (!row || !row.media) fail(404, "Media not found.");
     await requireMember(db, row.conv_id, uid);
     return storedMediaResponse(env, row.media, row.kind === "VIDEO" ? "video/mp4" : "image/jpeg");
+  }
+
+  // Owner round 32 (item 17): the single opening of a view-once message. The
+  // recipient's viewer calls this the moment it has the bytes on screen: the
+  // row is stamped viewedAt/viewedBy, the object is deleted from the bucket
+  // (unless another row still references the key), and everyone in the chat
+  // — the sender included — gets the "message" frame that turns the bubble
+  // into "Opened". Only a member other than the sender can spend it; the
+  // sender's own tap and a second opening are refused, never counted twice.
+  const msgViewMatch = path.match(/^\/api\/messages\/([^/]+)\/view$/);
+  if (msgViewMatch && method === "POST") {
+    const row = await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", msgViewMatch[1]!);
+    if (!row || row.kind === "DELETED") fail(404, "Message not found.");
+    await requireMember(db, row.conv_id, uid);
+    const meta = parseJson<Record<string, unknown>>(row.meta_json, {});
+    if (meta.viewOnce !== true) fail(400, "Not a view-once message.", "NOT_VIEW_ONCE");
+    if (row.sender_id === uid) fail(403, "You sent this.", "OWN_MESSAGE");
+    if (viewOnceSpent(meta)) fail(410, "This was already opened.", "VIEWED");
+    const viewedAt = nowIso();
+    const next = { ...meta, viewedAt, viewedBy: uid };
+    // Conditional on the row still being unspent: two devices racing the same
+    // opening cannot both win (the loser sees 410 like any later tap).
+    const changed = await run(
+      db,
+      "UPDATE messages SET media = NULL, meta_json = ? WHERE id = ? AND media IS NOT NULL",
+      JSON.stringify(next),
+      row.id,
+    );
+    if (!changed) fail(410, "This was already opened.", "VIEWED");
+    // Awaited, not waitUntil: "gone" must be true by the time this answers —
+    // no window in which a second device could still fetch the key.
+    if (row.media) await collectOrphanedMedia(env, db, [row.media]);
+    const fresh = (await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", row.id))!;
+    const message = msgFrom(fresh);
+    ctx.waitUntil(afterMessageChanged(env, db, row.conv_id, message));
+    return json({ message });
   }
 
   const statusMatch = path.match(/^\/api\/statuses\/([^/]+)$/);
@@ -8374,6 +8448,33 @@ function albumId(
   return ALBUM_ID_RE.test(raw) ? raw : null;
 }
 
+/**
+ * Owner round 32 (item 17): "View once" — the sender's `meta.viewOnce: true`
+ * on a PHOTO or VIDEO message (an inline IMAGE, or an image / video FILE not
+ * sent as a document). Anything else (a text, a voice note, a document, a
+ * sticker) never carries the flag. The recipient opens it exactly once
+ * (POST /api/messages/:id/view), after which the media object is gone for
+ * good and the row keeps only `meta.viewOnce` + `meta.viewedAt`.
+ */
+function viewOnceFlag(
+  kind: string,
+  hasMedia: unknown,
+  fileType: string,
+  meta: Record<string, unknown>,
+): boolean {
+  if (meta.viewOnce !== true || !hasMedia) return false;
+  if (meta.document === true || meta.voice === true) return false;
+  return (
+    kind === "IMAGE" ||
+    (kind === "FILE" && (fileType.startsWith("image/") || fileType.startsWith("video/")))
+  );
+}
+
+/** A view-once message whose single opening already happened (media gone). */
+function viewOnceSpent(meta: { viewOnce?: unknown; viewedAt?: unknown }): boolean {
+  return meta.viewOnce === true && typeof meta.viewedAt === "string" && meta.viewedAt.length > 0;
+}
+
 /** Owner round 31 (item 27): a voice note's bars. Only with `voice: true`,
  *  integers clamped to 0..100, at most VOICE_WAVEFORM_MAX of them — anything
  *  else (a document, a string, a 10k-entry array) is dropped, not stored. */
@@ -8460,23 +8561,32 @@ function msgFrom(row: MsgRow) {
     w?: number;
     h?: number;
     status?: { id: string; kind: string; text: string };
+    viewOnce?: boolean;
+    viewedAt?: string;
+    viewedBy?: string;
   }>(row.meta_json, {});
   const imageFile =
     row.kind === "FILE" && String(meta.type || "").startsWith("image/") && meta.document !== true;
+  // Owner round 32 (item 17): once a view-once message has been opened its
+  // object is deleted and the row stops advertising media at all — no
+  // mediaUrl, no fileKey, hasImage false — so no client path (bubble,
+  // gallery, forward, notification) can reach for a picture that is gone.
+  const spent = viewOnceSpent(meta);
   return {
     id: row.id,
     senderId: row.sender_id,
     kind: row.kind,
     body: row.body,
     replyTo: row.reply_to || undefined,
-    hasImage: (row.kind === "IMAGE" && !!row.media) || imageFile,
-    mediaUrl: row.kind === "IMAGE" && row.media ? `/api/messages/${row.id}/media` : undefined,
+    hasImage: !spent && ((row.kind === "IMAGE" && !!row.media) || imageFile),
+    mediaUrl:
+      row.kind === "IMAGE" && row.media && !spent ? `/api/messages/${row.id}/media` : undefined,
     // Set only when the sender supplied usable dimensions (see imageDims). The
     // client seeds its ratio cache from these, so even the very first view of a
     // photo on a brand-new device reserves the right box.
     mediaW: meta.w,
     mediaH: meta.h,
-    fileKey: row.kind === "FILE" ? row.media : undefined,
+    fileKey: row.kind === "FILE" && !spent ? row.media : undefined,
     fileName: meta.name,
     fileType: meta.type,
     fileSize: meta.size,
@@ -8485,6 +8595,13 @@ function msgFrom(row: MsgRow) {
     deliveredAt: row.delivered_at ? row.delivered_at : undefined,
     createdAt: row.created_at,
     edited: !!meta.edited,
+    // Owner round 32 (item 17): view-once state — `viewOnce` marks the
+    // message, `viewedAt` (+ who) is set by the single opening. The sender's
+    // bubble reads "Opened" from it; the recipient's reads "Photo · View once"
+    // until they tap, then "Opened".
+    viewOnce: meta.viewOnce === true ? true : undefined,
+    viewedAt: spent ? meta.viewedAt : undefined,
+    viewedBy: spent ? meta.viewedBy : undefined,
   };
 }
 
@@ -8908,26 +9025,32 @@ async function sweepExpiredStatuses(env: Env, db: D1Database): Promise<number> {
 
 /** Chat-list preview text for a stored row — mirrors what the send path writes. */
 function previewOf(row: MsgRow): string {
-  const meta = parseJson<{ name?: string; type?: string; voice?: boolean; document?: boolean }>(
-    row.meta_json,
-    {},
-  );
+  const meta = parseJson<{
+    name?: string;
+    type?: string;
+    voice?: boolean;
+    document?: boolean;
+    viewOnce?: boolean;
+  }>(row.meta_json, {});
+  // Owner round 32 (item 17): a view-once photo / video says so in the chat
+  // list and in the push — never a caption, never a thumbnail.
+  const once = meta.viewOnce === true ? " · View once" : "";
   switch (row.kind) {
     case "STICKER":
       return "Sticker";
     case "IMAGE":
-      return row.body || "Photo";
+      return once ? `Photo${once}` : row.body || "Photo";
     case "VIDEO":
       return row.body || "Video";
     case "FILE": {
-      if (row.body) return row.body;
+      if (row.body && !once) return row.body;
       if (meta.voice) return "Voice message";
       // Owner round 32 (item 35): media picked as media reads as what it is;
       // only a Document keeps its file name (the bubble draws it as a file row).
       const type = String(meta.type || "");
       if (meta.document !== true) {
-        if (type.startsWith("image/")) return "Photo";
-        if (type.startsWith("video/")) return "Video";
+        if (type.startsWith("image/")) return `Photo${once}`;
+        if (type.startsWith("video/")) return `Video${once}`;
         if (type.startsWith("audio/")) return "Voice message";
       }
       return String(meta.name || "File");

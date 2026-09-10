@@ -117,6 +117,10 @@ fun AttachPanel(
     sel: androidx.compose.runtime.snapshots.SnapshotStateList<MediaItem>,
     onSendBatch: () -> Unit,
     onDismiss: () -> Unit,
+    // Owner round 32 (item 17): "View once" for the picked photos / videos —
+    // a ① toggle next to "N selected"; on = the batch goes out view-once.
+    viewOnce: Boolean = false,
+    onViewOnce: (Boolean) -> Unit = {},
     onImagePicked: (Uri) -> Unit,
     onDocumentPicked: (Uri) -> Unit,
     onContactPicked: (Uri) -> Unit,
@@ -448,6 +452,29 @@ fun AttachPanel(
                     fontSize = 12.5.sp,
                 )
                 Spacer(Modifier.size(6.dp))
+                // Owner round 32 (item 17): view once — filled accent circle
+                // when armed, plain outline otherwise. No label (the ① glyph
+                // is the WhatsApp-known mark for it).
+                Box(
+                    Modifier
+                        .clip(CircleShape)
+                        .background(if (viewOnce) ActionBlueDeep else Color.Transparent)
+                        .border(1.5.dp, if (viewOnce) ActionBlueDeep else Muted, CircleShape)
+                        .clickable {
+                            haptics.tap()
+                            onViewOnce(!viewOnce)
+                        }
+                        .size(24.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "1",
+                        color = if (viewOnce) Color.White else Muted,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                Spacer(Modifier.size(4.dp))
                 // No send button here on purpose: the composer's mic IS the
                 // send button while a selection is active (same slot, same
                 // size). This tiny x just clears the selection.
