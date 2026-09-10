@@ -1809,13 +1809,52 @@ async function sweepSessions(db: D1Database) {
   await run(db, `DELETE FROM users WHERE auth_status = 'PENDING' AND created_at < ?`, cutoff);
 }
 
+/** The one `schema_meta` row: the fingerprint of the migration list this build applied. */
+const SCHEMA_META_KEY = "fingerprint";
+
+/** Legacy rows carry clientId only inside meta_json; the column is authoritative since. */
+const CLIENT_ID_BACKFILL = `UPDATE messages SET client_id = json_extract(meta_json, '$.clientId')
+       WHERE client_id IS NULL AND meta_json IS NOT NULL`;
+
 /**
- * DDL + idempotent migrations, sent as a single batch.
+ * One indexed read: has this exact build's schema already been applied here?
+ * A database from before the fingerprint existed (or an empty one) has no
+ * `schema_meta` table at all — that throws, and the answer is simply "walk".
+ */
+async function schemaApplied(db: D1Database, fingerprint: string): Promise<boolean> {
+  try {
+    const row = await one<{ value: string }>(
+      db,
+      "SELECT value FROM schema_meta WHERE key = ?",
+      SCHEMA_META_KEY,
+    );
+    return row?.value === fingerprint;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * DDL + idempotent migrations.
  *
  * Every statement used to be its own awaited round-trip, so a cold isolate paid
  * ~21 sequential D1 hops on the very first request. One batch does the same work
  * in one hop. Migrations are kept in the batch as `CREATE … IF NOT EXISTS`
  * plus best-effort `ALTER`s that we swallow when the column already exists.
+ *
+ * v132 hotfix: the additive list below had grown to 60 sequential hops, each one
+ * failing with "duplicate column" on every isolate after the very first — and
+ * D1 answers a failing ALTER no faster than a working one. Measured after the
+ * v132 deploy: 12–24 s for the first request of every cold isolate, from every
+ * colo; the hourly latency probe (5 s budget) had not passed once since 09-03
+ * (`lat.count` 0, `lat.err` 36–72 a day). A phone opening the app after an idle
+ * spell sat on its 10 s connect timeout. So the whole list (DDL, migrations,
+ * backfill) is fingerprinted and the fingerprint stored in `schema_meta`; an
+ * isolate that finds its own fingerprint skips the walk in one read. Only the
+ * first isolate after a deploy that CHANGED the list pays it, and only when
+ * every statement applied cleanly — a quota-day failure records nothing, so the
+ * next cold isolate retries exactly as before (`DELETE FROM schema_meta` forces
+ * a re-walk by hand).
  */
 async function ensureSchema(db: D1Database) {
   if (schemaReady) return;
@@ -1925,6 +1964,8 @@ async function ensureSchema(db: D1Database) {
       PRIMARY KEY (day, key)
     ) WITHOUT ROWID`,
     `CREATE TABLE IF NOT EXISTS metrics_wm (source TEXT PRIMARY KEY, hi INTEGER NOT NULL) WITHOUT ROWID`,
+    // v132 hotfix: the one row a booting isolate reads to skip the migration walk.
+    `CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL) WITHOUT ROWID`,
     `CREATE INDEX IF NOT EXISTS idx_members_user ON members(user_id)`,
     `CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conv_id, created_at)`,
     `CREATE INDEX IF NOT EXISTS idx_messages_media ON messages(media)`,
@@ -1934,214 +1975,184 @@ async function ensureSchema(db: D1Database) {
     `CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id)`,
     `CREATE INDEX IF NOT EXISTS idx_files_owner ON files(owner_id)`,
   ];
-  await db.batch(statements.map((sql) => db.prepare(sql)));
-  // Every cleanup DELETE needs its own index, or D1 bills a full table scan for
-  // it: the free tier counts `row reads` as rows *looked at*, not rows returned.
-  // On 2026-09-02 production hit that 5 M/day ceiling before midnight and every
-  // cron tick after it died with `D1_ERROR: ... free tier daily row read limit`.
-  // The burner was this worker's own bookkeeping: the per-tick stale-RINGING
-  // SELECT plus the sweeps over `error_log`, `devices`, `sessions`, `typing` and
-  // `statuses` had no usable index (idx_status_user leads on user_id, so a bare
-  // `expires_at <` filter still scans), and 7 days of retained `error_log` at
-  // ~3.2 k rows/day is ~23 k rows per tick — ~33 M/day across 1 440 ticks.
-  // `EXPLAIN QUERY PLAN` on the shipped DDL, before: `SCAN error_log`; after:
-  // `SEARCH error_log USING INDEX (created_at<?)`.
-  //
-  // Outside the batch on purpose, like the ALTERs below: building an index reads
-  // the table, so on a day when D1's row-read ceiling is already hit the statement
-  // errors — and in a batch that error would take the CREATE TABLEs with it and
-  // every request would fail until midnight. Here it is just one swallowed line,
-  // retried by the next cold isolate (which is the point: the schema heals itself
-  // the moment the quota resets, with nothing to run by hand).
-  for (const sql of [
+  // Additive migrations: columns and indexes added after the first deploy. Run
+  // one by one and never inside the batch — a duplicate-column error must not
+  // roll the CREATE TABLEs back — and each one is individually tolerant.
+  const migrations = [
+    // Every cleanup DELETE needs its own index, or D1 bills a full table scan for
+    // it: the free tier counts `row reads` as rows *looked at*, not rows returned.
+    // On 2026-09-02 production hit that 5 M/day ceiling before midnight and every
+    // cron tick after it died with `D1_ERROR: ... free tier daily row read limit`.
+    // The burner was this worker's own bookkeeping: the per-tick stale-RINGING
+    // SELECT plus the sweeps over `error_log`, `devices`, `sessions`, `typing` and
+    // `statuses` had no usable index (idx_status_user leads on user_id, so a bare
+    // `expires_at <` filter still scans), and 7 days of retained `error_log` at
+    // ~3.2 k rows/day is ~23 k rows per tick — ~33 M/day across 1 440 ticks.
+    // `EXPLAIN QUERY PLAN` on the shipped DDL, before: `SCAN error_log`; after:
+    // `SEARCH error_log USING INDEX (created_at<?)`.
+    //
+    // Outside the batch on purpose, like the ALTERs below: building an index reads
+    // the table, so on a day when D1's row-read ceiling is already hit the statement
+    // errors — and in a batch that error would take the CREATE TABLEs with it and
+    // every request would fail until midnight. Here it is just one swallowed line,
+    // retried by the next cold isolate (which is the point: the schema heals itself
+    // the moment the quota resets, with nothing to run by hand).
     `CREATE INDEX IF NOT EXISTS idx_calls_status_created ON calls(status, created_at)`,
     `CREATE INDEX IF NOT EXISTS idx_errorlog_created ON error_log(created_at)`,
     `CREATE INDEX IF NOT EXISTS idx_devices_updated ON devices(updated_at)`,
     `CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)`,
     `CREATE INDEX IF NOT EXISTS idx_typing_at ON typing(at)`,
     `CREATE INDEX IF NOT EXISTS idx_statuses_expires ON statuses(expires_at)`,
-  ]) {
-    await runCatchingSql(db, sql);
-  }
-  // Lightweight migrations: columns added after the first deploy. These are
-  // deliberately outside the batch — a duplicate-column error must not roll the
-  // whole batch back — and each one is individually tolerant.
-  await runCatchingSql(db, `ALTER TABLE messages ADD COLUMN delivered_at TEXT`);
-  // Owner round 32 item 4: where each signed-in device last came from.
-  await runCatchingSql(db, `ALTER TABLE auth_devices ADD COLUMN ip TEXT`);
-  await runCatchingSql(db, `ALTER TABLE auth_devices ADD COLUMN city TEXT`);
-  await runCatchingSql(db, `ALTER TABLE auth_devices ADD COLUMN country TEXT`);
-  // Owner round 25: status reactions — stored on the view row (a reaction
-  // implies a view). No inbox message: the owner sees it in the viewer list.
-  await runCatchingSql(db, `ALTER TABLE status_views ADD COLUMN reaction TEXT`);
-  await runCatchingSql(db, `ALTER TABLE calls ADD COLUMN answer_sdp TEXT`);
-  await runCatchingSql(db, `ALTER TABLE calls ADD COLUMN reoffer_sdp TEXT`);
-  await runCatchingSql(db, `ALTER TABLE calls ADD COLUMN reoffer_from TEXT`);
-  await runCatchingSql(db, `ALTER TABLE calls ADD COLUMN reanswer_sdp TEXT`);
-  // Owner round 31 item 19: per-user live media flags ({ [userId]: { camera, screen } }).
-  await runCatchingSql(db, `ALTER TABLE calls ADD COLUMN media_json TEXT`);
-  // Owner round 32 (item 5b): who an ICE candidate is FOR. NULL on a 1:1
-  // call (the only other participant); the peer's id on a group call.
-  await runCatchingSql(db, `ALTER TABLE call_ice ADD COLUMN target_id TEXT`);
-  await runCatchingSql(
-    db,
+    // Lightweight migrations: columns added after the first deploy. These are
+    // deliberately outside the batch — a duplicate-column error must not roll the
+    // whole batch back — and each one is individually tolerant.
+    `ALTER TABLE messages ADD COLUMN delivered_at TEXT`,
+    // Owner round 32 item 4: where each signed-in device last came from.
+    `ALTER TABLE auth_devices ADD COLUMN ip TEXT`,
+    `ALTER TABLE auth_devices ADD COLUMN city TEXT`,
+    `ALTER TABLE auth_devices ADD COLUMN country TEXT`,
+    // Owner round 25: status reactions — stored on the view row (a reaction
+    // implies a view). No inbox message: the owner sees it in the viewer list.
+    `ALTER TABLE status_views ADD COLUMN reaction TEXT`,
+    `ALTER TABLE calls ADD COLUMN answer_sdp TEXT`,
+    `ALTER TABLE calls ADD COLUMN reoffer_sdp TEXT`,
+    `ALTER TABLE calls ADD COLUMN reoffer_from TEXT`,
+    `ALTER TABLE calls ADD COLUMN reanswer_sdp TEXT`,
+    // Owner round 31 item 19: per-user live media flags ({ [userId]: { camera, screen } }).
+    `ALTER TABLE calls ADD COLUMN media_json TEXT`,
+    // Owner round 32 (item 5b): who an ICE candidate is FOR. NULL on a 1:1
+    // call (the only other participant); the peer's id on a group call.
+    `ALTER TABLE call_ice ADD COLUMN target_id TEXT`,
     `CREATE INDEX IF NOT EXISTS idx_call_ice_target ON call_ice(call_id, target_id, created_at)`,
-  );
-  await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN disappear_seconds INTEGER`);
-  await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN theme TEXT`);
-  // Owner round 31 (item 26): "Hide chat" — per-member, like `muted`.
-  await runCatchingSql(db, `ALTER TABLE members ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`);
-  await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN disappear_since TEXT`);
-  // Owner round 32 (item 38): a 1:1 chat opened by a stranger is a message
-  // REQUEST until the other side accepts — the user id of whoever opened it,
-  // NULL once accepted (or when the two already knew each other).
-  await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN request_from TEXT`);
-  // Owner round 31: real groups — a group picture (same inline data-URI shape
-  // as a profile photo) with a per-version cache token like user avatars.
-  await runCatchingSql(db, `ALTER TABLE conversations ADD COLUMN avatar_url TEXT`);
-  await runCatchingSql(
-    db,
+    `ALTER TABLE conversations ADD COLUMN disappear_seconds INTEGER`,
+    `ALTER TABLE conversations ADD COLUMN theme TEXT`,
+    // Owner round 31 (item 26): "Hide chat" — per-member, like `muted`.
+    `ALTER TABLE members ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE conversations ADD COLUMN disappear_since TEXT`,
+    // Owner round 32 (item 38): a 1:1 chat opened by a stranger is a message
+    // REQUEST until the other side accepts — the user id of whoever opened it,
+    // NULL once accepted (or when the two already knew each other).
+    `ALTER TABLE conversations ADD COLUMN request_from TEXT`,
+    // Owner round 31: real groups — a group picture (same inline data-URI shape
+    // as a profile photo) with a per-version cache token like user avatars.
+    `ALTER TABLE conversations ADD COLUMN avatar_url TEXT`,
     `ALTER TABLE conversations ADD COLUMN avatar_version INTEGER NOT NULL DEFAULT 0`,
-  );
-  // Owner round 32 (item 5): "Private group" — admin switch that closes the
-  // shared-media gallery, call recording and new-member additions.
-  await runCatchingSql(
-    db,
+    // Owner round 32 (item 5): "Private group" — admin switch that closes the
+    // shared-media gallery, call recording and new-member additions.
     `ALTER TABLE conversations ADD COLUMN private_group INTEGER NOT NULL DEFAULT 0`,
-  );
-  await runCatchingSql(db, `ALTER TABLE messages ADD COLUMN client_id TEXT`);
-  // Bumped whenever the profile photo changes; it backs the lightweight
-  // avatarRef token in list responses so clients cache avatars per version.
-  await runCatchingSql(
-    db,
+    `ALTER TABLE messages ADD COLUMN client_id TEXT`,
+    // Bumped whenever the profile photo changes; it backs the lightweight
+    // avatarRef token in list responses so clients cache avatars per version.
     `ALTER TABLE users ADD COLUMN avatar_version INTEGER NOT NULL DEFAULT 0`,
-  );
-  // §16 device identity: one row per install, so signing out on the phone in your
-  // hand can be expressed as "remove THIS device" instead of only "remove them all".
-  await runCatchingSql(db, `ALTER TABLE devices ADD COLUMN device_id TEXT`);
-  await runCatchingSql(db, `ALTER TABLE devices ADD COLUMN platform TEXT`);
-  await runCatchingSql(db, `ALTER TABLE devices ADD COLUMN app_version TEXT`);
-  await runCatchingSql(db, `ALTER TABLE devices ADD COLUMN last_seen_at TEXT`);
-  // Owner round 13: swipe-to-reply quote threading.
-  await runCatchingSql(db, `ALTER TABLE messages ADD COLUMN reply_to TEXT`);
-  await runCatchingSql(
-    db,
+    // §16 device identity: one row per install, so signing out on the phone in your
+    // hand can be expressed as "remove THIS device" instead of only "remove them all".
+    `ALTER TABLE devices ADD COLUMN device_id TEXT`,
+    `ALTER TABLE devices ADD COLUMN platform TEXT`,
+    `ALTER TABLE devices ADD COLUMN app_version TEXT`,
+    `ALTER TABLE devices ADD COLUMN last_seen_at TEXT`,
+    // Owner round 13: swipe-to-reply quote threading.
+    `ALTER TABLE messages ADD COLUMN reply_to TEXT`,
     `CREATE INDEX IF NOT EXISTS idx_devices_user_dev ON devices(user_id, device_id)`,
-  );
-  await runCatchingSql(
-    db,
     `CREATE INDEX IF NOT EXISTS idx_messages_dedupe ON messages(conv_id, sender_id, client_id)`,
-  );
-  // Owner round 32 (item 28): the reconnect catch-up (markInboxDelivered)
-  // scans only rows that are STILL undelivered — a partial index keeps that
-  // scan proportional to the backlog, never to the table.
-  await runCatchingSql(
-    db,
+    // Owner round 32 (item 28): the reconnect catch-up (markInboxDelivered)
+    // scans only rows that are STILL undelivered — a partial index keeps that
+    // scan proportional to the backlog, never to the table.
     `CREATE INDEX IF NOT EXISTS idx_messages_undelivered ON messages(conv_id, created_at) WHERE delivered_at IS NULL`,
-  );
-  // Owner round 32 (item 18): hold Send → "send later". The message body waits
-  // here (never in `messages`) until its minute; the cron posts it through the
-  // ordinary send path. `status`: PENDING → SENDING (claimed) → gone.
-  await runCatchingSql(
-    db,
+    // Owner round 32 (item 18): hold Send → "send later". The message body waits
+    // here (never in `messages`) until its minute; the cron posts it through the
+    // ordinary send path. `status`: PENDING → SENDING (claimed) → gone.
     `CREATE TABLE IF NOT EXISTS scheduled_messages (
       id TEXT PRIMARY KEY, conv_id TEXT NOT NULL, sender_id TEXT NOT NULL,
       body_json TEXT NOT NULL, send_at TEXT NOT NULL, created_at TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'PENDING', attempts INTEGER NOT NULL DEFAULT 0
     )`,
-  );
-  await runCatchingSql(
-    db,
     `CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_messages(status, send_at)`,
-  );
-  await runCatchingSql(
-    db,
     `CREATE INDEX IF NOT EXISTS idx_scheduled_owner ON scheduled_messages(sender_id, conv_id, send_at)`,
-  );
-  // Phone auth (email/password removal): columns for the OTP-less system.
-  // Legacy users default to auth_status ACTIVE — they are working accounts;
-  // only phone signups start PENDING and flip ACTIVE at Google binding.
-  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN phone_e164 TEXT`);
-  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN phone_verified_at TEXT`);
-  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN phone_verification_method TEXT`);
-  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN google_subject TEXT`);
-  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN google_email TEXT`);
-  await runCatchingSql(
-    db,
+    // Phone auth (email/password removal): columns for the OTP-less system.
+    // Legacy users default to auth_status ACTIVE — they are working accounts;
+    // only phone signups start PENDING and flip ACTIVE at Google binding.
+    `ALTER TABLE users ADD COLUMN phone_e164 TEXT`,
+    `ALTER TABLE users ADD COLUMN phone_verified_at TEXT`,
+    `ALTER TABLE users ADD COLUMN phone_verification_method TEXT`,
+    `ALTER TABLE users ADD COLUMN google_subject TEXT`,
+    `ALTER TABLE users ADD COLUMN google_email TEXT`,
     `ALTER TABLE users ADD COLUMN auth_status TEXT NOT NULL DEFAULT 'ACTIVE'`,
-  );
-  // Verified badge (owner decision): official notification account,
-  // KuchuPuchu AI and the owner account carry a tick; everyone else 0.
-  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN verified INTEGER`);
-  // Moderator badge (owner round 2026-09-04): @fsleader carries the crossed-
-  // tools badge; independent of verified so the two never collide.
-  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN moderator INTEGER`);
-  // Owner round 32 (item 31): which badge a multi-badge account shows —
-  // 'verified' | 'moderator' | 'none'; NULL = all the badges it holds.
-  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN badge TEXT`);
-  // Owner round 30: privacy settings. Each visibility column is one of
-  // 'nobody' | 'contacts' | 'public' ("contact" = the two share a 1:1
-  // conversation — see isContact). The number defaults to contacts, the rest
-  // to public, which is exactly what the app did before the settings existed.
-  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN priv_phone TEXT`);
-  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN priv_avatar TEXT`);
-  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN priv_messages TEXT`);
-  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN priv_last_seen TEXT`);
-  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN priv_groups TEXT`);
-  // Owner round 32 (item 20): who can view this account's status updates —
-  // 'public' (default) = everyone sharing a chat with the author, groups
-  // included (exactly the pre-round rule), 'contacts' = 1:1 contacts only,
-  // 'nobody' = the author alone.
-  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN priv_status TEXT`);
-  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN read_receipts INTEGER`);
-  await runCatchingSql(db, `ALTER TABLE users ADD COLUMN private_profile INTEGER`);
-  await runCatchingSql(db, `ALTER TABLE sessions ADD COLUMN device_id TEXT`);
-  await runCatchingSql(db, `ALTER TABLE login_requests ADD COLUMN new_device_name TEXT`);
-  // Uniqueness the legacy schema cannot express: one phone → one account,
-  // one Google subject → one account (§9/§22). Partial indexes so legacy
-  // NULL rows never collide; fresh DBs got these constraints in the CREATE,
-  // migrated DBs get them here. Outside the batch like the other index
-  // builds above.
-  await runCatchingSql(
-    db,
+    // Verified badge (owner decision): official notification account,
+    // KuchuPuchu AI and the owner account carry a tick; everyone else 0.
+    `ALTER TABLE users ADD COLUMN verified INTEGER`,
+    // Moderator badge (owner round 2026-09-04): @fsleader carries the crossed-
+    // tools badge; independent of verified so the two never collide.
+    `ALTER TABLE users ADD COLUMN moderator INTEGER`,
+    // Owner round 32 (item 31): which badge a multi-badge account shows —
+    // 'verified' | 'moderator' | 'none'; NULL = all the badges it holds.
+    `ALTER TABLE users ADD COLUMN badge TEXT`,
+    // Owner round 30: privacy settings. Each visibility column is one of
+    // 'nobody' | 'contacts' | 'public' ("contact" = the two share a 1:1
+    // conversation — see isContact). The number defaults to contacts, the rest
+    // to public, which is exactly what the app did before the settings existed.
+    `ALTER TABLE users ADD COLUMN priv_phone TEXT`,
+    `ALTER TABLE users ADD COLUMN priv_avatar TEXT`,
+    `ALTER TABLE users ADD COLUMN priv_messages TEXT`,
+    `ALTER TABLE users ADD COLUMN priv_last_seen TEXT`,
+    `ALTER TABLE users ADD COLUMN priv_groups TEXT`,
+    // Owner round 32 (item 20): who can view this account's status updates —
+    // 'public' (default) = everyone sharing a chat with the author, groups
+    // included (exactly the pre-round rule), 'contacts' = 1:1 contacts only,
+    // 'nobody' = the author alone.
+    `ALTER TABLE users ADD COLUMN priv_status TEXT`,
+    `ALTER TABLE users ADD COLUMN read_receipts INTEGER`,
+    `ALTER TABLE users ADD COLUMN private_profile INTEGER`,
+    `ALTER TABLE sessions ADD COLUMN device_id TEXT`,
+    `ALTER TABLE login_requests ADD COLUMN new_device_name TEXT`,
+    // Uniqueness the legacy schema cannot express: one phone → one account,
+    // one Google subject → one account (§9/§22). Partial indexes so legacy
+    // NULL rows never collide; fresh DBs got these constraints in the CREATE,
+    // migrated DBs get them here. Outside the batch like the other index
+    // builds above.
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone ON users(phone_e164) WHERE phone_e164 IS NOT NULL`,
-  );
-  await runCatchingSql(
-    db,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_gsub ON users(google_subject) WHERE google_subject IS NOT NULL`,
-  );
-  await runCatchingSql(
-    db,
     `CREATE INDEX IF NOT EXISTS idx_authdevices_user ON auth_devices(user_id, status)`,
-  );
-  await runCatchingSql(
-    db,
     `CREATE INDEX IF NOT EXISTS idx_loginreq_user ON login_requests(user_id, status)`,
-  );
-  await runCatchingSql(
-    db,
     `CREATE INDEX IF NOT EXISTS idx_recoveryreq_user ON recovery_requests(user_id, status)`,
-  );
-  await runCatchingSql(
-    db,
     `CREATE INDEX IF NOT EXISTS idx_users_pending_gc ON users(created_at) WHERE auth_status = 'PENDING'`,
+  ];
+  const fingerprint = await sha256Hex(
+    [...statements, ...migrations, CLIENT_ID_BACKFILL].join("\n"),
   );
+  if (await schemaApplied(db, fingerprint)) {
+    schemaReady = true;
+    return;
+  }
+  await db.batch(statements.map((sql) => db.prepare(sql)));
+  let allApplied = true;
+  for (const sql of migrations) {
+    if (!(await runCatchingSql(db, sql))) allApplied = false;
+  }
   // One-time backfill: legacy rows carry clientId only inside meta_json.
   // After this, every row has the column (future INSERTs always set it), so
   // the WHERE matches nothing and this stays a cheap no-op on later boots.
   try {
-    await run(
-      db,
-      `UPDATE messages SET client_id = json_extract(meta_json, '$.clientId')
-       WHERE client_id IS NULL AND meta_json IS NOT NULL`,
-    );
+    await run(db, CLIENT_ID_BACKFILL);
   } catch (err) {
+    allApplied = false;
     console.error(`client_id backfill failed: ${err instanceof Error ? err.message : err}`);
+  }
+  if (allApplied) {
+    try {
+      await run(
+        db,
+        `INSERT OR REPLACE INTO schema_meta (key, value, updated_at) VALUES (?, ?, ?)`,
+        SCHEMA_META_KEY,
+        fingerprint,
+        nowIso(),
+      );
+    } catch (err) {
+      console.error(`schema fingerprint not recorded: ${err instanceof Error ? err.message : err}`);
+    }
   }
   schemaReady = true;
 }
 
-/** Runs a migration statement, ignoring "already exists" style failures. */
 /**
  * Best-effort DDL for the additive migrations.
  *
@@ -2149,14 +2160,20 @@ async function ensureSchema(db: D1Database) {
  * there, which is the expected case on every isolate after the first. Anything
  * else is a real failure and used to be swallowed silently, so a migration that
  * broke for another reason looked identical to one that had already run.
+ *
+ * @returns true when the statement is in place (applied now or already there);
+ *   false on a real failure, which keeps the schema fingerprint unrecorded so
+ *   the next cold isolate retries.
  */
-async function runCatchingSql(db: D1Database, sql: string) {
+async function runCatchingSql(db: D1Database, sql: string): Promise<boolean> {
   try {
     await run(db, sql);
+    return true;
   } catch (err) {
     const msg = String(err instanceof Error ? err.message : err);
-    if (/duplicate column|duplicate index|already exists/i.test(msg)) return;
+    if (/duplicate column|duplicate index|already exists/i.test(msg)) return true;
     console.error(`migration failed: ${sql} -> ${msg}`);
+    return false;
   }
 }
 

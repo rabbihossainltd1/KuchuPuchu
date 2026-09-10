@@ -263,5 +263,109 @@ const plan = (raw, sql, ...bind) =>
   );
 }
 
+// ------------------------------------- 4. v132 hotfix: the cold-isolate schema walk
+// After the v132 deploy every cold isolate's first request took 12–24 s: the
+// additive migration list had reached 60 sequential D1 hops, each one failing
+// with "duplicate column" as slowly as a real statement. The list is now
+// fingerprinted into `schema_meta`, so an isolate that finds its own
+// fingerprint skips the walk with a single indexed read.
+{
+  const hit = async (mod, env) => {
+    const ctx = makeCtx();
+    const res = await mod.default.fetch(new Request("https://kp.test/api/health"), env, ctx);
+    await ctx.drain();
+    return res.status;
+  };
+  const env = { DB: makeD1(), MEDIA: makeR2(), SELF_ORIGIN: "https://kp.test" };
+  await hit(await fresh(), env);
+  const cold = { reads: env.DB._stats.reads, writes: env.DB._stats.writes };
+  const row = env.DB._db.prepare("SELECT key, value FROM schema_meta").get();
+  check(
+    "the first isolate walks the schema once and records a fingerprint",
+    cold.writes > 50 && row?.key === "fingerprint" && /^[0-9a-f]{64}$/.test(row?.value ?? ""),
+    JSON.stringify({ cold, row }),
+  );
+  env.DB._stats.reset();
+  const warm = await hit(await fresh(), env);
+  check(
+    "the next cold isolate costs ONE read and no writes (the walk is skipped)",
+    warm === 200 && env.DB._stats.reads === 1 && env.DB._stats.writes === 0,
+    `reads=${env.DB._stats.reads} writes=${env.DB._stats.writes}`,
+  );
+  env.DB._db.exec("DELETE FROM schema_meta");
+  env.DB._stats.reset();
+  await hit(await fresh(), env);
+  check(
+    "DELETE FROM schema_meta forces a full re-walk by hand",
+    env.DB._stats.writes === cold.writes,
+    `writes=${env.DB._stats.writes} vs ${cold.writes}`,
+  );
+
+  // A quota-day failure on any one statement must leave the fingerprint
+  // unrecorded, so the next cold isolate retries the whole list.
+  const env2 = { DB: makeD1(), MEDIA: makeR2() };
+  const origPrepare = env2.DB.prepare.bind(env2.DB);
+  let failOnce = true;
+  env2.DB.prepare = (sql) => {
+    if (failOnce && sql.includes("idx_users_pending_gc")) {
+      failOnce = false;
+      return {
+        bind: () => ({
+          run: async () => {
+            throw new Error("D1_ERROR: free tier daily row read limit");
+          },
+        }),
+      };
+    }
+    return origPrepare(sql);
+  };
+  const silenced = console.error;
+  console.error = () => {};
+  await hit(await fresh(), env2);
+  console.error = silenced;
+  const recordedAfterFailure = !!env2.DB._db.prepare("SELECT 1 FROM schema_meta").get();
+  env2.DB._stats.reset();
+  await hit(await fresh(), env2);
+  check(
+    "a failed migration records nothing; the next isolate re-walks and then records",
+    !recordedAfterFailure &&
+      env2.DB._stats.writes > 50 &&
+      !!env2.DB._db.prepare("SELECT 1 FROM schema_meta").get(),
+    `recordedAfterFailure=${recordedAfterFailure} writes=${env2.DB._stats.writes}`,
+  );
+
+  // Production today has no schema_meta table at all: the lookup throws, and
+  // that must read as "walk", never as an error.
+  const env3 = { DB: makeD1(), MEDIA: makeR2() };
+  await hit(await fresh(), env3);
+  env3.DB._db.exec("DROP TABLE schema_meta");
+  env3.DB._stats.reset();
+  const legacy = await hit(await fresh(), env3);
+  check(
+    "a database from before the fingerprint walks once and is fingerprinted",
+    legacy === 200 &&
+      env3.DB._stats.writes > 50 &&
+      !!env3.DB._db.prepare("SELECT 1 FROM schema_meta").get(),
+    `status=${legacy} writes=${env3.DB._stats.writes}`,
+  );
+  check(
+    "the fingerprint covers the DDL, every migration and the backfill (a changed list re-walks)",
+    /sha256Hex\(\s*\[\.\.\.statements, \.\.\.migrations, CLIENT_ID_BACKFILL\]\.join\("\\n"\),?\s*\)/.test(
+      src,
+    ) &&
+      /if \(await schemaApplied\(db, fingerprint\)\) \{\s*schemaReady = true;\s*return;\s*\}/.test(
+        src,
+      ) &&
+      /INSERT OR REPLACE INTO schema_meta/.test(src) &&
+      !/for \(const sql of \[\s*`CREATE INDEX IF NOT EXISTS idx_calls_status_created/.test(src),
+  );
+  check(
+    "runCatchingSql reports a real failure (false) so the fingerprint is withheld",
+    /async function runCatchingSql\(db: D1Database, sql: string\): Promise<boolean>/.test(src) &&
+      /already exists\/i\.test\(msg\)\) return true;/.test(src) &&
+      /if \(!\(await runCatchingSql\(db, sql\)\)\) allApplied = false;/.test(src),
+  );
+}
+
 process.stdout.write(lines.join("\n") + "\n");
 process.exit(lines.some((l) => l.startsWith("  BROKEN")) ? 1 : 0);
