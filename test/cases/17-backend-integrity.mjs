@@ -1942,7 +1942,13 @@ async function main() {
       const now = await h.call(
         "POST",
         `/api/conversations/${cid}/messages`,
-        { kind: "TEXT", body: "right now", sendAt: new Date(Date.now() + 5_000).toISOString() },
+        {
+          kind: "TEXT",
+          body: "right now",
+          // The last second of the CURRENT minute — never "+5 s", which at :56
+          // rounds into the next minute and is a legitimate schedule (CI flaked).
+          sendAt: new Date(Math.floor(Date.now() / 60_000) * 60_000 + 59_000).toISOString(),
+        },
         A.token,
       );
       const far = await h.call(
