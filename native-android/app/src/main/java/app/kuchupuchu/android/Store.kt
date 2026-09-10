@@ -98,3 +98,33 @@ object Store {
         Api.saveToken(ctx, null)
     }
 }
+
+/**
+ * Owner round 33 (item 26): forces class-init of every singleton that holds
+ * `mutableStateOf` / `mutableStateListOf` / `mutableStateMapOf` state, so
+ * their state records are created on the main thread from the global snapshot.
+ *
+ * Reading each object's cheapest member is enough — Kotlin initialises an
+ * `object` (and a `companion object`) on first access, and it is that first
+ * access that decides which snapshot the records belong to. Called once from
+ * MainActivity.onCreate before any background thread starts; every member read
+ * here is a plain field or trivial getter, never I/O.
+ */
+object SnapshotSingletons {
+    @Volatile
+    private var warmed = false
+
+    fun warm() {
+        if (warmed) return
+        warmed = true
+        runCatching {
+            KpUpdate.checking
+            ScreenStore.poke
+            VoiceNote.livePeaks
+            LinkPreviews.size()
+            PhoneBook.syncing.value
+            UploadProgress.fracs.size
+            CallEngine.instance
+        }
+    }
+}

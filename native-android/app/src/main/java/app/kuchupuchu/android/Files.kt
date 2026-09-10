@@ -63,12 +63,18 @@ object FilesUtil {
 
     /** Opens an already-on-disk file with the system viewer. */
     fun openFile(ctx: Context, name: String, f: File, mime: String): Boolean {
-        return openUri(
-            ctx,
-            androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f),
-            name,
-            mime,
-        )
+        // Owner round 33 (item 23): a file outside the provider's roots threw
+        // IllegalArgumentException straight through a tap handler and killed
+        // the app; a miss is a toast now, never a crash.
+        val uri =
+            runCatching {
+                androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)
+            }.getOrNull()
+        if (uri == null) {
+            android.widget.Toast.makeText(ctx, "Could not open", android.widget.Toast.LENGTH_SHORT).show()
+            return false
+        }
+        return openUri(ctx, uri, name, mime)
     }
 
     /**

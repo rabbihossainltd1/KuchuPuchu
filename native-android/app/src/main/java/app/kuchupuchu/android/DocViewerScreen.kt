@@ -233,7 +233,10 @@ internal fun docCacheFile(ctx: android.content.Context, m: org.json.JSONObject):
     val key = m.optText("fileKey").ifBlank { m.optText("mediaUrl") }.ifBlank { "d" }
     val safe = key.replace(Regex("[^A-Za-z0-9._-]"), "_").takeLast(80)
     val ext = m.optText("fileName").substringAfterLast('.', "").lowercase().take(6).replace(Regex("[^a-z0-9]"), "")
-    return File(File(ctx.filesDir, "kp-doc-cache").apply { mkdirs() }, if (ext.isBlank()) safe else "$safe.$ext")
+    // Owner round 33 (item 23): a key that already carries the extension
+    // ("f_….html") used to become "f_….html.html".
+    val named = if (ext.isBlank() || safe.endsWith(".$ext")) safe else "$safe.$ext"
+    return File(File(ctx.filesDir, "kp-doc-cache").apply { mkdirs() }, named)
 }
 
 private enum class DocKind { PDF, TEXT, IMAGE, SVG, TIFF, ARCHIVE, OTHER }

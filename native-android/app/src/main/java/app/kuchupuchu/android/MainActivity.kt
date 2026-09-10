@@ -132,6 +132,19 @@ class MainActivity : ComponentActivity() {
             priority = Thread.MIN_PRIORITY
             start()
         }
+        // Owner round 33 (item 26): every singleton that owns Compose state is
+        // touched HERE, on the main thread, before any other thread (Store.init
+        // starts the cache loader) can be the first to load it. A state record
+        // takes the id of whatever snapshot the creating thread is in; when the
+        // starter thread below (or a push, or the share activity) was the first
+        // to load `KpUpdate` / `CallEngine.Companion`, the class-init records
+        // could be born inside a snapshot Compose had not applied yet, and the
+        // first composition that read them died with "Reading a state that was
+        // created after the snapshot was taken" — the update sheet's Install
+        // tap restarted the process, the fresh process raced the same way and
+        // fell over in KpUpdateGate (the crash log's empty route/crumbs is the
+        // tell: it happened before the first frame).
+        SnapshotSingletons.warm()
         Store.init(this)
         // The retry clock must run for the whole process, not just while a chat
         // is open: queued sends are the one thing the user cannot see working.

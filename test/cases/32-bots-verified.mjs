@@ -6405,6 +6405,51 @@ const convBetween = (db, a, b) =>
         kt("SettingsScreen.kt").includes("VoiceIsolation.setEnabled(ctx, on)"),
     );
   }
+  // r33-26 / r33-23: the two crash reports after v132 — the update sheet's
+  // Install tap (snapshot race on singleton Compose state in a fresh process)
+  // and the document viewer's "Open with" (FileProvider root miss).
+  {
+    const main = kt("MainActivity.kt");
+    const store = kt("Store.kt");
+    const files = kt("Files.kt");
+    const doc = kt("DocViewerScreen.kt");
+    const paths = readFileSync("native-android/app/src/main/res/xml/file_paths.xml", "utf8");
+    check(
+      "r33-26: every singleton holding Compose state is class-initialised on the main thread before Store.init / the starter thread (SnapshotSingletons.warm — KpUpdate, ScreenStore, VoiceNote, LinkPreviews, PhoneBook, UploadProgress, CallEngine.Companion)",
+      store.includes("object SnapshotSingletons {") &&
+        [
+          "KpUpdate.checking",
+          "ScreenStore.poke",
+          "VoiceNote.livePeaks",
+          "LinkPreviews.size()",
+          "PhoneBook.syncing.value",
+          "UploadProgress.fracs.size",
+          "CallEngine.instance",
+        ].every((m) => store.includes(m)) &&
+        main.indexOf("SnapshotSingletons.warm()") > 0 &&
+        main.indexOf("SnapshotSingletons.warm()") < main.indexOf("Store.init(this)") &&
+        main.indexOf("SnapshotSingletons.warm()") <
+          main.indexOf("val engine = CallEngine(application)") &&
+        main.indexOf("SnapshotSingletons.warm()") < main.indexOf("KpUpdate.check(application)"),
+    );
+    check(
+      "r33-23: the FileProvider exports filesDir/kp-doc-cache (the viewer's cache), the cache name no longer doubles the extension, and a provider miss is a toast instead of an uncaught IllegalArgumentException",
+      /<files-path name="docs" path="kp-doc-cache\/" \/>/.test(paths) &&
+        doc.includes(
+          'val named = if (ext.isBlank() || safe.endsWith(".$ext")) safe else "$safe.$ext"',
+        ) &&
+        files.includes(
+          'androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)',
+        ) &&
+        /val uri =\s*runCatching \{\s*androidx\.core\.content\.FileProvider\.getUriForFile/.test(
+          files,
+        ) &&
+        files.includes(
+          'android.widget.Toast.makeText(ctx, "Could not open", android.widget.Toast.LENGTH_SHORT).show()',
+        ),
+    );
+  }
+
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
   // a touch on blank list space closes it (main, archive and hidden lists).
   {

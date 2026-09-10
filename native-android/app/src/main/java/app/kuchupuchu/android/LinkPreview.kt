@@ -115,6 +115,9 @@ object LinkPreviews {
     private var file: File? = null
     private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /** Cards known so far (item 26: read once at start-up to class-init this object on the main thread). */
+    fun size(): Int = cards.size
+
     /** Called from Cache.init's loader thread — reads the file right there. */
     fun init(ctx: Context) {
         val f = File(ctx.applicationContext.filesDir, "kp-link-cards.json")

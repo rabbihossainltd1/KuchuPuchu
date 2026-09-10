@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <cache-path name="shared" path="." />
+    <!-- Owner round 33 (item 23): the in-app document viewer caches under
+         filesDir/kp-doc-cache; "Open with" hands that file to another app
+         through this provider, which only knew cacheDir and threw
+         "Failed to find configured root". -->
+    <files-path name="docs" path="kp-doc-cache/" />
 </paths>
