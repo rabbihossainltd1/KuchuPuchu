@@ -6615,6 +6615,11 @@ const convBetween = (db, a, b) =>
         cache.includes('meta?.optBoolean("voice") == true -> row.put("voicePath", p)') &&
         cache.includes('row.put("mediaUrl", "file://$p")') &&
         cache.includes('else -> row.put("docPath", p)') &&
+        // a refusal takes the temp copy with it; orphan JPEGs are swept on load
+        cache.includes("private fun dropLocal(item: JSONObject) {") &&
+        (cache.match(/dropLocal\(it(?:em)?\)/g) || []).length === 2 &&
+        cache.includes("private fun sweepMedia() {") &&
+        chat33.includes('url.startsWith("file://") -> scope.launch {') &&
         ui33.includes(
           'url.startsWith("file://") -> java.io.File(url.removePrefix("file://")).takeIf { it.exists() }?.readBytes()',
         ) &&

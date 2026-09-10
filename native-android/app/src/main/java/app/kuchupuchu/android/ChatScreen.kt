@@ -2283,6 +2283,17 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 val voicePath = p.optString("voicePath")
                                 val docPath = p.optString("docPath")
                                 when {
+                                    // Owner round 33 (item 3): a queued photo's
+                                    // local copy (re-entry echo) re-sends from disk.
+                                    url.startsWith("file://") -> scope.launch {
+                                        val data = withContext(Dispatchers.IO) {
+                                            runCatching {
+                                                "data:image/jpeg;base64," +
+                                                    android.util.Base64.encodeToString(File(url.removePrefix("file://")).readBytes(), android.util.Base64.NO_WRAP)
+                                            }.getOrNull()
+                                        }
+                                        if (data != null) sendImage(data, p.optJSONObject("meta")?.optString("album")?.ifBlank { null }, isViewOnce(p))
+                                    }
                                     // A retried album photo keeps its album;
                                     // a view-once one stays view-once (item 17).
                                     url.isNotBlank() -> sendImage(url, p.optJSONObject("meta")?.optString("album")?.ifBlank { null }, isViewOnce(p))

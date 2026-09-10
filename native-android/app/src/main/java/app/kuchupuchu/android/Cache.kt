@@ -203,6 +203,7 @@ object Outbox {
     }
 
     private fun loadQueue() {
+        runCatching { sweepMedia() }
         runCatching {
             val raw = file?.takeIf { it.exists() }?.readText() ?: return
                 val arr = JSONArray(raw)
@@ -223,6 +224,18 @@ object Outbox {
                     if (have.isNotEmpty()) save()
                 }
             }
+    }
+
+    /** Queued-photo JPEGs (Uploads.sendPhoto) that no queue entry references
+     *  any more — a kill between the write and the enqueue, or a refusal the
+     *  process did not live to clean — are swept after a day. */
+    private fun sweepMedia() {
+        val dir = File(file?.parentFile ?: return, "kp-outbox-media")
+        val dayAgo = System.currentTimeMillis() - 86_400_000L
+        val raw = file?.takeIf { it.exists() }?.readText().orEmpty()
+        dir.listFiles()?.forEach { f ->
+            if (f.lastModified() < dayAgo && !raw.contains(f.name)) runCatching { f.delete() }
+        }
     }
 
     /** Blocks (briefly) until the queue file has been read — never call on Main. */
@@ -407,9 +420,19 @@ object Outbox {
 
     @Synchronized
     private fun refuse(clientId: String) {
-        items.firstOrNull { it.optString("clientId") == clientId }?.let { markDropped(it) }
+        items.firstOrNull { it.optString("clientId") == clientId }?.let {
+            markDropped(it)
+            dropLocal(it)
+        }
         items.removeAll { it.optString("clientId") == clientId }
         save()
+    }
+
+    /** A refused entry's temp copy (queued photo JPEG, voice take, doc copy) goes with it. */
+    private fun dropLocal(item: JSONObject) {
+        val local = item.optJSONObject("local") ?: return
+        if (!local.optBoolean("temp")) return
+        local.optString("path").takeIf { it.isNotBlank() }?.let { runCatching { File(it).delete() } }
     }
 
     @Synchronized
@@ -562,6 +585,7 @@ object Outbox {
                     val status = (e as? ApiException)?.status ?: 0
                     if (status in 400..499 && status != 408 && status != 429) {
                         markDropped(item)
+                        dropLocal(item)
                         remove(clientId)
                         refused++
                         continue
