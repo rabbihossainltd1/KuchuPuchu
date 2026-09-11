@@ -16,6 +16,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextLayoutResult
@@ -742,6 +744,8 @@ fun KpInputField(
     leading: (@Composable () -> Unit)? = null,
     /** Fixed border (e.g. the username live-check green / red); null = focus-driven. */
     borderColor: Color? = null,
+    /** Owner round 33 (item 6): lets a sheet focus the field (and raise the keyboard) as it opens. */
+    focusRequester: FocusRequester? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
     Row(
@@ -766,7 +770,11 @@ fun KpInputField(
             cursorBrush = SolidColor(ActionBlue),
             keyboardOptions = keyboardOptions,
             keyboardActions = keyboardActions,
-            modifier = Modifier.weight(1f).onFocusChanged { focused = it.isFocused },
+            modifier =
+                Modifier
+                    .weight(1f)
+                    .let { m -> if (focusRequester != null) m.focusRequester(focusRequester) else m }
+                    .onFocusChanged { focused = it.isFocused },
             decorationBox = { inner ->
                 Box(contentAlignment = Alignment.CenterStart) {
                     if (value.isEmpty()) Text(placeholder, color = Muted.copy(alpha = 0.7f), fontSize = 15.sp, maxLines = 1)

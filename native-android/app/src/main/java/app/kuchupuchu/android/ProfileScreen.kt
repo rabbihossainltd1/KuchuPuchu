@@ -119,9 +119,41 @@ fun ProfileScreen(nav: NavController, userId: String) {
         // owner's account and the bots never get Block at all.
         var moreOpen by remember { mutableStateOf(false) }
         var confirmReport by remember { mutableStateOf(false) }
+        // Owner round 33 (item 6): Hide asks for the secret key in its own sheet.
+        var askHideKey by remember { mutableStateOf(false) }
         val ctx = LocalContext.current
         val peerConvForMenu = ScreenStore.convs.firstOrNull { !it.optBoolean("isGroup") && it.optJSONObject("other")?.optString("id") == userId }
         val unblockable = isMe || isKpBot(userId) || user?.optText("username") == "rabbihossainltd"
+        fun withConv(block: (String) -> Unit) {
+            val cached = peerConvForMenu?.optString("id") ?: ScreenStore.convIdForUser[userId]
+            if (cached != null) {
+                block(cached)
+                return
+            }
+            scope.launch {
+                runCatching {
+                    val data = withContext(Dispatchers.IO) { Api.post("/api/conversations", JSONObject().put("userId", userId)) }
+                    val cid = data.optJSONObject("conversation")?.optString("id").orEmpty()
+                    if (cid.isNotBlank()) {
+                        ScreenStore.convIdForUser[userId] = cid
+                        block(cid)
+                    }
+                }
+            }
+        }
+        // Optimistic flip (+ the key's hash on a hide); the server confirms,
+        // a failed call puts the previous state back.
+        fun setHidden(cid: String, next: Boolean, key: String?) {
+            val hash = key?.let { ScreenStore.hiddenKeyHash(it) }
+            val prev = ScreenStore.hiddenKeyOf(cid)
+            ScreenStore.setHidden(cid, next, hash)
+            android.widget.Toast.makeText(ctx, if (next) "Chat hidden" else "Chat unhidden", android.widget.Toast.LENGTH_SHORT).show()
+            scope.launch {
+                runCatching {
+                    withContext(Dispatchers.IO) { Api.post("/api/conversations/$cid/hide", JSONObject().put("hidden", next).put("key", hash)) }
+                }.onFailure { ScreenStore.setHidden(cid, !next, prev) }
+            }
+        }
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -171,23 +203,6 @@ fun ProfileScreen(nav: NavController, userId: String) {
             val inBook = PhoneBook.entries.any { it.user?.optString("id") == userId }
             val muted = peerConvForMenu?.optBoolean("muted") == true || (peerConvForMenu != null && ScreenStore.isMuted(peerConvForMenu.optString("id")))
             val hidden = peerConvForMenu != null && ScreenStore.isHidden(peerConvForMenu.optString("id"))
-            fun withConv(block: (String) -> Unit) {
-                val cached = peerConvForMenu?.optString("id") ?: ScreenStore.convIdForUser[userId]
-                if (cached != null) {
-                    block(cached)
-                    return
-                }
-                scope.launch {
-                    runCatching {
-                        val data = withContext(Dispatchers.IO) { Api.post("/api/conversations", JSONObject().put("userId", userId)) }
-                        val cid = data.optJSONObject("conversation")?.optString("id").orEmpty()
-                        if (cid.isNotBlank()) {
-                            ScreenStore.convIdForUser[userId] = cid
-                            block(cid)
-                        }
-                    }
-                }
-            }
             KpSheet(onDismiss = { moreOpen = false }) {
                 if (!inBook) {
                     KpSheetRow(Icons.Filled.PersonAdd, "Add contact") {
@@ -216,15 +231,11 @@ fun ProfileScreen(nav: NavController, userId: String) {
                 }
                 KpSheetRow(Icons.Filled.VisibilityOff, if (hidden) "Unhide" else "Hide") {
                     moreOpen = false
-                    withConv { cid ->
-                        val next = !hidden
-                        ScreenStore.setHidden(cid, next)
-                        android.widget.Toast.makeText(ctx, if (next) "Chat hidden" else "Chat unhidden", android.widget.Toast.LENGTH_SHORT).show()
-                        scope.launch {
-                            runCatching {
-                                withContext(Dispatchers.IO) { Api.post("/api/conversations/$cid/hide", JSONObject().put("hidden", next)) }
-                            }.onFailure { ScreenStore.setHidden(cid, !next) }
-                        }
+                    // Owner round 33 (item 6): a hide asks for the key first.
+                    if (hidden) {
+                        withConv { cid -> setHidden(cid, false, null) }
+                    } else {
+                        askHideKey = true
                     }
                 }
                 KpSheetRow(Icons.Filled.NotificationsOff, if (muted) "Unmute" else "Mute") {
@@ -243,6 +254,12 @@ fun ProfileScreen(nav: NavController, userId: String) {
                     moreOpen = false
                     confirmReport = true
                 }
+            }
+        }
+        if (askHideKey) {
+            HideKeySheet(onDismiss = { askHideKey = false }) { key ->
+                askHideKey = false
+                withConv { cid -> setHidden(cid, true, key) }
             }
         }
         if (confirmReport) {

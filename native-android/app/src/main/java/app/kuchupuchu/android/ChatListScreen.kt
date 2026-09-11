@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -48,7 +49,6 @@ import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Unarchive
-import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material.icons.filled.Notifications
@@ -79,7 +79,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
@@ -682,76 +686,6 @@ fun ArchiveScreen(nav: NavController) {
 }
 
 /**
- * Owner round 31 (item 26): hidden chats — swipe a chat right in the main
- * list and tap Hide. Reached ONLY by a three-finger double-tap on the chat
- * list (no menu entry, no hint). Same swipe language: left = Unhide, right
- * = Mute / Delete. Rows come from the same list cache; the flag is the
- * server's `hidden` (members.hidden), so no push ever fires for them.
- */
-@Composable
-fun HiddenChatsScreen(nav: NavController) {
-    val convs = ScreenStore.convs
-    var rev by remember { mutableStateOf(0) }
-    val hidden = remember(rev, convs.size, ScreenStore.convsRaw) { convs.filter { it.optBoolean("hidden") } }
-    Column(Modifier.fillMaxSize().background(Cream).statusBarsPadding()) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = { nav.popBackStack() }) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink)
-            }
-            Text("Hidden", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
-            Spacer(Modifier.width(8.dp))
-            Text("(${hidden.size})", fontSize = 15.sp, color = Muted)
-        }
-        // Owner round 32 (item 23): the calls with those people live here too
-        // (they leave the Calls tab the moment the chat is hidden).
-        val hiddenCalls = remember(rev, ScreenStore.callsRaw, ScreenStore.convsRaw) { ScreenStore.calls.filter { ScreenStore.isHiddenCall(it) } }
-        if (hidden.isEmpty() && hiddenCalls.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                EmptyState(
-                    icon = Icons.Filled.VisibilityOff,
-                    title = "No hidden chats",
-                    note = "Swipe a chat right to hide it",
-                )
-            }
-        } else {
-            val hiddenList = rememberLazyListState()
-            CloseSwipeOnScroll(hiddenList)
-            LazyColumn(
-                Modifier.fillMaxSize().then(swipeFocusList()),
-                state = hiddenList,
-                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(hidden, key = { it.optString("id") }) { conv ->
-                    SwipeConvRow(conv, nav, { rev++ }, hiddenMode = true)
-                }
-                if (hiddenCalls.isNotEmpty()) {
-                    item(key = "hidden_calls_head") {
-                        Text(
-                            "Calls",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Muted,
-                            modifier = Modifier.padding(start = 8.dp, top = 10.dp, bottom = 2.dp),
-                        )
-                    }
-                    items(hiddenCalls, key = { "call_" + it.optString("id") }) { call ->
-                        CallRow(call) {
-                            val gid = if (call.optBoolean("group")) call.optText("conversationId") else ""
-                            if (gid.isNotBlank()) nav.navigate("chat/$gid")
-                            else ScreenStore.convIdForUser[callPeerId(call)]?.let { nav.navigate("chat/$it") }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
  * Owner round 32 (item 11): at most ONE swipe row is open at a time. `id` is
  * the row whose actions are showing; every SwipeConvRow watches it and slides
  * shut the moment it is no longer the one. It moves to null when the list
@@ -778,50 +712,18 @@ private fun swipeFocusTouch(id: String): Modifier =
 
 /**
  * On the list: a touch that reached no row (blank space) closes the open
- * row — and, owner round 32 (item 23), THREE quick such taps open the hidden
- * chats. One finger, no drag, each tap within 600ms of the last. A tap that
- * landed on a row (that row's observer ran first — Main pass, child before
- * parent — and set `downOn`) never counts and resets the run, so tapping
- * chats can never open the hidden screen; the old three-finger detector
- * fired on ordinary multi-touch and opened chats underneath it. One observer
- * reads `downOn` exactly once per gesture, so the two jobs cannot race.
+ * row. A touch that landed on a row (that row's observer ran first — Main
+ * pass, child before parent — and set `downOn`) leaves it alone. Owner
+ * round 33 (item 6): the three-tap hidden-chats opener that lived here is
+ * gone — a hidden chat comes back through its secret key typed in Search.
  */
-private fun swipeFocusList(onTripleTapBlank: (() -> Unit)? = null): Modifier =
-    Modifier.pointerInput(onTripleTapBlank) {
-        var taps = 0
-        var lastUp = 0L
-        val slop = viewConfiguration.touchSlop
+private fun swipeFocusList(): Modifier =
+    Modifier.pointerInput(Unit) {
         awaitEachGesture {
-            val down = awaitFirstDown(requireUnconsumed = false)
+            awaitFirstDown(requireUnconsumed = false)
             val onRow = SwipeOpen.downOn != null
             SwipeOpen.downOn = null
             if (!onRow) SwipeOpen.id = null
-            if (onTripleTapBlank == null) return@awaitEachGesture
-            val start = down.position
-            var fingers = 1
-            var moved = false
-            val downAt = System.currentTimeMillis()
-            while (true) {
-                val event = awaitPointerEvent()
-                fingers = maxOf(fingers, event.changes.count { it.pressed })
-                event.changes.firstOrNull { it.id == down.id }?.let {
-                    if ((it.position - start).getDistance() > slop) moved = true
-                }
-                if (event.changes.all { !it.pressed }) break
-            }
-            val now = System.currentTimeMillis()
-            val tap = !onRow && !moved && fingers == 1 && now - downAt < 300
-            if (tap && (taps == 0 || now - lastUp < 600)) {
-                taps++
-                lastUp = now
-                if (taps >= 3) {
-                    taps = 0
-                    onTripleTapBlank()
-                }
-            } else {
-                taps = if (tap) 1 else 0
-                lastUp = now
-            }
         }
     }
 
@@ -830,6 +732,39 @@ private fun swipeFocusList(onTripleTapBlank: (() -> Unit)? = null): Modifier =
 private fun CloseSwipeOnScroll(listState: LazyListState) {
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress }.collect { if (it) SwipeOpen.id = null }
+    }
+}
+
+/**
+ * Owner round 33 (item 6): EVERY hide asks for a secret key — any text,
+ * emoji, dots, no format — and typing that exact key in Search is the way
+ * back to the chat. One field, one button; the field takes focus as the
+ * sheet opens so the keyboard is already up. `onHide` gets the trimmed key;
+ * the caller hashes it (ScreenStore.hiddenKeyHash) — the key itself is
+ * never stored or sent.
+ */
+@Composable
+internal fun HideKeySheet(onDismiss: () -> Unit, onHide: (String) -> Unit) {
+    var key by remember { mutableStateOf("") }
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        delay(200)
+        runCatching { focus.requestFocus() }
+    }
+    KpSheet(onDismiss = onDismiss, title = "Hide chat") {
+        Column(Modifier.padding(horizontal = 14.dp).imePadding()) {
+            KpInputField(
+                key,
+                { key = it.take(64) },
+                placeholder = "Secret key",
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { if (key.isNotBlank()) onHide(key.trim()) }),
+                focusRequester = focus,
+            )
+            Spacer(Modifier.height(12.dp))
+            GoldBtn("Hide", Modifier.fillMaxWidth(), enabled = key.isNotBlank()) { onHide(key.trim()) }
+            Spacer(Modifier.height(4.dp))
+        }
     }
 }
 
@@ -946,10 +881,9 @@ private fun ChatListBody(
     listState: LazyListState,
     archivePull: ArchivePullState,
 ) {
-    val haptics = rememberHaptics()
     // Archived chats live in their own list (pull down on this list to open).
-    // Owner round 31 (item 26): hidden chats leave the list as well — they
-    // sit behind the three-finger double-tap (see the detector below).
+    // Owner round 31 (item 26): hidden chats leave the list as well — owner
+    // round 33 (item 6): their secret key typed in Search brings them back.
     // Owner round 32 (item 12): pinned chats first (their own recency order),
     // then everything else exactly as the server ordered it.
     val pinned = ScreenStore.pinnedConvIds
@@ -958,7 +892,7 @@ private fun ChatListBody(
             .filter { !ScreenStore.isArchived(it.optString("id")) && !it.optBoolean("hidden") }
             .sortedByDescending { if (it.optString("id") in pinned) 1 else 0 }
     if (visible.isEmpty()) {
-        Box(Modifier.fillMaxSize().then(swipeFocusList { haptics.confirm(); nav.navigate("hidden") }), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxSize().then(swipeFocusList()), contentAlignment = Alignment.Center) {
             if (loading) {
                 CircularProgressIndicator(color = ActionBlue)
             } else {
@@ -978,7 +912,7 @@ private fun ChatListBody(
     LazyColumn(
         Modifier
             .fillMaxSize()
-            .then(swipeFocusList { haptics.confirm(); nav.navigate("hidden") })
+            .then(swipeFocusList())
             // Owner round 19: THE archive feed — a non-consuming vertical
             // drag observer. It sees drags that start ON TOP OF ROWS (the
             // nested-scroll chain never reliably delivered those on the
@@ -1029,7 +963,6 @@ private fun SwipeConvRow(
     nav: NavController,
     onChange: () -> Unit,
     archivedMode: Boolean = false,
-    hiddenMode: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
     val haptics = rememberHaptics()
@@ -1040,19 +973,23 @@ private fun SwipeConvRow(
     // leaves (or re-enters) the main list at once, the worker stops (or
     // resumes) pushing for it, and the list poll confirms.
     var dragged by remember { mutableStateOf(0f) }
-    fun setHidden(hidden: Boolean) {
+    // Owner round 33 (item 6): the Hide slot opens the key sheet; the hide
+    // itself carries the key's hash (server + every device of the account).
+    var askKey by remember { mutableStateOf(false) }
+    fun hide(key: String) {
         haptics.confirm()
         val id = conv.optString("id")
-        ScreenStore.setHidden(id, hidden)
-        android.widget.Toast.makeText(ctx, if (hidden) "Chat hidden" else "Chat unhidden", android.widget.Toast.LENGTH_SHORT).show()
+        val hash = ScreenStore.hiddenKeyHash(key)
+        ScreenStore.setHidden(id, true, hash)
+        android.widget.Toast.makeText(ctx, "Chat hidden", android.widget.Toast.LENGTH_SHORT).show()
         dragged = 0f
         onChange()
         scope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
-                    Api.post("/api/conversations/$id/hide", JSONObject().put("hidden", hidden))
+                    Api.post("/api/conversations/$id/hide", JSONObject().put("hidden", true).put("key", hash))
                 }
-            }.onFailure { ScreenStore.setHidden(id, !hidden) }
+            }.onFailure { ScreenStore.setHidden(id, false) }
         }
     }
     val offset by animateFloatAsState(dragged, tween(160), label = "swipe")
@@ -1062,6 +999,12 @@ private fun SwipeConvRow(
     val convId = conv.optString("id")
     LaunchedEffect(SwipeOpen.id) {
         if (SwipeOpen.id != convId && dragged != 0f) dragged = 0f
+    }
+    if (askKey) {
+        HideKeySheet(onDismiss = { askKey = false }) { key ->
+            askKey = false
+            hide(key)
+        }
     }
 
     Box(Modifier.fillMaxWidth().height(76.dp).then(swipeFocusTouch(convId))) {
@@ -1119,7 +1062,7 @@ private fun SwipeConvRow(
                         }
                     }
                 }
-                if (offset < 0f && !archivedMode && !hiddenMode) {
+                if (offset < 0f && !archivedMode) {
                     ActionSlot(
                         icon = Icons.Filled.Archive,
                         bg = SwipeArchiveBg,
@@ -1133,20 +1076,18 @@ private fun SwipeConvRow(
                         onChange()
                     }
                     // Owner round 31 (item 26): Hide sits beside Archive.
+                    // Owner round 33 (item 6): it asks for the secret key first.
                     ActionSlot(
                         icon = Icons.Filled.VisibilityOff,
                         bg = ActionBlue.copy(alpha = 0.18f),
                         tint = ActionBlueDeep,
                         label = "Hide",
-                    ) { setHidden(true) }
-                }
-                if (offset < 0f && hiddenMode) {
-                    ActionSlot(
-                        icon = Icons.Filled.Visibility,
-                        bg = ActionBlue.copy(alpha = 0.18f),
-                        tint = ActionBlueDeep,
-                        label = "Unhide",
-                    ) { setHidden(false) }
+                    ) {
+                        haptics.tap()
+                        dragged = 0f
+                        if (SwipeOpen.id == convId) SwipeOpen.id = null
+                        askKey = true
+                    }
                 }
             }
             // right slot (revealed by swiping left)

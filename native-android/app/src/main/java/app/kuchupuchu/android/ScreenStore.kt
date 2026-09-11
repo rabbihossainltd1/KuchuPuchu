@@ -95,7 +95,10 @@ object ScreenStore {
      * Owner round 31 (item 26): "Hide chat" — the SERVER flag (members.hidden,
      * `hidden` on every list row) so the worker never pushes for it. A hidden
      * chat is gone from the main list, never alerts (no card, no in-app tone)
-     * and lives behind the three-finger double-tap screen. Optimistic local
+     * and — owner round 33 (item 6) — comes back only through its secret key
+     * typed in Search. The row carries `hiddenKey` = SHA-256 of that key
+     * (the server's members.hidden_key, so every device of the account can
+     * match it); the key itself never leaves the phone. Optimistic local
      * flip; the list poll confirms.
      */
     fun isHidden(id: String): Boolean {
@@ -103,11 +106,35 @@ object ScreenStore {
         return i >= 0 && convs[i].optBoolean("hidden", false)
     }
 
-    fun setHidden(convId: String, hidden: Boolean) {
+    fun setHidden(convId: String, hidden: Boolean, keyHash: String? = null) {
         val i = convs.indexOfFirst { it.optString("id") == convId }
-        if (i >= 0) convs[i] = JSONObject(convs[i].toString()).put("hidden", hidden)
+        if (i >= 0) {
+            val row = JSONObject(convs[i].toString()).put("hidden", hidden)
+            if (hidden && keyHash != null) row.put("hiddenKey", keyHash) else row.remove("hiddenKey")
+            convs[i] = row
+        }
         persist()
     }
+
+    /** The stored key hash of a hidden chat (null when not hidden / no key). */
+    fun hiddenKeyOf(convId: String): String? {
+        val i = convs.indexOfFirst { it.optString("id") == convId }
+        return if (i >= 0) convs[i].optIso("hiddenKey") else null
+    }
+
+    /**
+     * Owner round 33 (item 6): SHA-256 hex of a secret key — what a hide
+     * sends to the server and what Search compares the typed text with.
+     * Trimmed, otherwise exact: any characters, any length.
+     */
+    fun hiddenKeyHash(key: String): String =
+        java.security.MessageDigest.getInstance("SHA-256")
+            .digest(key.trim().toByteArray())
+            .joinToString("") { "%02x".format(it) }
+
+    /** The hidden chats whose key hash is `hash` — Search's reveal. */
+    fun hiddenFor(hash: String): List<JSONObject> =
+        convs.filter { it.optBoolean("hidden", false) && it.optIso("hiddenKey") == hash }
 
     /** True when the chat must stay silent: muted OR hidden. */
     fun isSilenced(convId: String): Boolean = isMuted(convId) || isHidden(convId)
@@ -115,15 +142,17 @@ object ScreenStore {
     /** Owner round 32 (item 23): a call row belongs to a hidden chat when the
      *  1:1 conversation with its other party is hidden. */
     fun isHiddenCall(call: JSONObject): Boolean {
-        // Owner round 32 (item 5b): a group call belongs to its group chat.
-        if (call.optBoolean("group")) {
-            val gid = call.optText("conversationId")
-            return gid.isNotBlank() && isHidden(gid)
-        }
-        val uid = callPeerId(call)
-        if (uid.isBlank()) return false
-        val cid = convIdForUser[uid] ?: return false
+        val cid = hiddenCallConv(call) ?: return false
         return isHidden(cid)
+    }
+
+    /** The chat a call row belongs to: the group chat, or the 1:1 with its other party. */
+    fun hiddenCallConv(call: JSONObject): String? {
+        // Owner round 32 (item 5b): a group call belongs to its group chat.
+        if (call.optBoolean("group")) return call.optText("conversationId").takeIf { it.isNotBlank() }
+        val uid = callPeerId(call)
+        if (uid.isBlank()) return null
+        return convIdForUser[uid]
     }
 
     private fun saveArchive() {
@@ -480,6 +509,7 @@ object ScreenStore {
             append(c.optInt("unread")).append('|')
             append(c.optBoolean("muted")).append('|')
             append(c.optBoolean("hidden")).append('|')
+            append(c.optString("hiddenKey")).append('|')
             append(other?.optString("displayName")).append('|')
             append(other?.optString("avatarUrl")).append('|')
             append(other?.optBoolean("online"))

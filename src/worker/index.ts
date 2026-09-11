@@ -2028,6 +2028,10 @@ async function ensureSchema(db: D1Database) {
     `ALTER TABLE conversations ADD COLUMN theme TEXT`,
     // Owner round 31 (item 26): "Hide chat" — per-member, like `muted`.
     `ALTER TABLE members ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`,
+    // Owner round 33 (item 6): the hidden chat's secret key — the SHA-256 the
+    // app computed, never the key itself; NULL once unhidden. Lives here so
+    // every device of the account (and a reinstall) can match it.
+    `ALTER TABLE members ADD COLUMN hidden_key TEXT`,
     `ALTER TABLE conversations ADD COLUMN disappear_since TEXT`,
     // Owner round 32 (item 38): a 1:1 chat opened by a stranger is a message
     // REQUEST until the other side accepts — the user id of whoever opened it,
@@ -5758,6 +5762,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           c.requestFrom,
           c.muted,
           c.hidden,
+          c.hiddenKey,
           c.title,
           c.other
             ? [
@@ -6088,18 +6093,26 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   }
 
   // Owner round 31 (item 26): "Hide chat" — a per-member flag like mute. A
-  // hidden chat leaves the main list (the app keeps it behind the three-finger
-  // double-tap screen) and gets NO message push from this server, so it stays
-  // silent even while the app process is dead.
+  // hidden chat leaves the main list (owner round 33, item 6: it comes back
+  // only through its secret key typed in Search) and gets NO message push
+  // from this server, so it stays silent even while the app process is dead.
   const hideMatch = path.match(/^\/api\/conversations\/([^/]+)\/hide$/);
   if (hideMatch && method === "POST") {
     const convId = hideMatch[1]!;
     await requireMember(db, convId, uid);
     const hidden = body.hidden ? 1 : 0;
+    // Owner round 33 (item 6): a hide carries the key's hash (opaque here —
+    // the app hashes; the key never reaches the server); an unhide clears it.
+    const rawKey = body.key;
+    const key =
+      hidden === 1 && typeof rawKey === "string" && rawKey.trim()
+        ? rawKey.trim().slice(0, 128)
+        : null;
     await run(
       db,
-      "UPDATE members SET hidden = ? WHERE conv_id = ? AND user_id = ?",
+      "UPDATE members SET hidden = ?, hidden_key = ? WHERE conv_id = ? AND user_id = ?",
       hidden,
+      key,
       convId,
       uid,
     );
@@ -8502,7 +8515,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const msgRows = await all<MsgRow & { title: string | null; kind_c: string }>(
       db,
       `SELECT m.*, c.title FROM messages m
-       JOIN members mem ON mem.conv_id = m.conv_id AND mem.user_id = ?
+       JOIN members mem ON mem.conv_id = m.conv_id AND mem.user_id = ? AND COALESCE(mem.hidden, 0) = 0
        JOIN conversations c ON c.id = m.conv_id
        WHERE m.kind IN ('TEXT','IMAGE','FILE') AND LOWER(m.body) LIKE ?${ESCAPED_LIKE}
        ORDER BY m.created_at DESC, m.rowid DESC LIMIT 20`,
@@ -9135,11 +9148,12 @@ type ConvMemberRow = {
   unread: number;
   last_read_at: string | null;
   hidden?: number | null;
+  hidden_key?: string | null;
 };
 
 const CONV_COLS =
   "id, kind, title, owner_id, created_at, last_message_at, last_message, disappear_seconds, theme, hidden_json, avatar_url, avatar_version, request_from, private_group";
-const MEMBER_COLS = "conv_id, user_id, role, muted, unread, last_read_at, hidden";
+const MEMBER_COLS = "conv_id, user_id, role, muted, unread, last_read_at, hidden, hidden_key";
 
 /** Placeholder list for an IN(...) clause. */
 const inSql = (n: number) => Array.from({ length: n }, () => "?").join(",");
@@ -9405,6 +9419,7 @@ function buildConvDetail(
   let other = null;
   let meMuted = false;
   let meHidden = false;
+  let meHiddenKey: string | null = null;
   let unread = 0;
   // Owner round 30: in a 1:1 chat the two ARE contacts (privacy view), and a
   // switched-off read receipt (either side) hides the peer's read mark.
@@ -9434,6 +9449,7 @@ function buildConvDetail(
     if (row.user_id === uid) {
       meMuted = row.muted === 1;
       meHidden = Number(row.hidden ?? 0) === 1;
+      meHiddenKey = meHidden ? (row.hidden_key ?? null) : null;
       unread = row.unread;
     }
   }
@@ -9462,6 +9478,8 @@ function buildConvDetail(
     muted: meMuted,
     // Owner round 31 (item 26): the caller hid this chat (their flag only).
     hidden: meHidden,
+    // Owner round 33 (item 6): the hash of the key that reveals it (theirs only).
+    hiddenKey: meHiddenKey,
     unread,
     isGroup: conv.kind === "GROUP",
     // Owner round 31: group picture. Token `g:<convId>@v<n>` — the "g:" prefix

@@ -235,7 +235,6 @@ fun KpApp() {
                     DocViewerScreen(nav, entry.arguments?.getString("b64") ?: "")
                 }
                 composable("archive") { ArchiveScreen(nav) }
-                composable("hidden") { HiddenChatsScreen(nav) }
                 composable("profile/{id}") { entry ->
                     ProfileScreen(nav, entry.arguments?.getString("id") ?: "")
                 }

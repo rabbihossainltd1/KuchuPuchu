@@ -3240,13 +3240,18 @@ const convBetween = (db, a, b) =>
         const before = pushesTo("fcm-hide-a");
         const list0 = await call("GET", "/api/conversations", undefined, a.token);
         const marker0 = list0.json.marker;
-        // a hides the chat
+        // a hides the chat — r33-6: with the secret key's hash
+        const keyHash = "3".repeat(64);
         const hide = await call(
           "POST",
           `/api/conversations/${cid}/hide`,
-          { hidden: true },
+          { hidden: true, key: keyHash },
           a.token,
         );
+        // r33-6: while hidden, message search must not surface the chat's
+        // messages to a (b still finds them)
+        const searchA = await call("GET", "/api/search?q=one", undefined, a.token);
+        const searchB = await call("GET", "/api/search?q=one", undefined, b.token);
         const listA = await call("GET", "/api/conversations", undefined, a.token);
         const rowA = (listA.json.items ?? []).find((x) => x.id === cid);
         const listB = await call("GET", "/api/conversations", undefined, b.token);
@@ -3302,6 +3307,21 @@ const convBetween = (db, a, b) =>
           }),
         );
         check(
+          "r33-6: the hide carries the secret key's hash — stored per member (members.hidden_key), echoed on the caller's list row as `hiddenKey` (never on the other member's), cleared by unhide; message search skips the hider's hidden chats and nobody else's",
+          rowA?.hiddenKey === keyHash &&
+            rowB?.hiddenKey === null &&
+            rowA2?.hiddenKey === null &&
+            (searchA.json.messages ?? []).every((m) => m.convoId !== cid) &&
+            (searchB.json.messages ?? []).some((m) => m.convoId === cid),
+          JSON.stringify({
+            a: rowA?.hiddenKey,
+            b: rowB?.hiddenKey,
+            after: rowA2?.hiddenKey,
+            searchA: (searchA.json.messages ?? []).length,
+            searchB: (searchB.json.messages ?? []).length,
+          }),
+        );
+        check(
           "r31-26: a hidden chat gets NO message push for that member (not even the dead-process tray card) while the other member keeps theirs; unhide restores pushes",
           before === 1 && whileHidden === 0 && bStill === 1 && after === 1,
           JSON.stringify({ before, whileHidden, bStill, after }),
@@ -3315,19 +3335,41 @@ const convBetween = (db, a, b) =>
             ) &&
             readFileSync("src/worker/index.ts", "utf8").includes("          c.hidden,\n"),
         );
+        {
+          const w = readFileSync("src/worker/index.ts", "utf8");
+          check(
+            "r33-6: worker — members.hidden_key migration, MEMBER_COLS carries it, /hide writes hidden + hidden_key in one UPDATE (key only on a hide, trimmed, ≤128), the detail exposes hiddenKey for the caller only, the marker moves with it, /api/search joins members with hidden = 0",
+            w.includes("`ALTER TABLE members ADD COLUMN hidden_key TEXT`,") &&
+              w.includes(
+                'const MEMBER_COLS = "conv_id, user_id, role, muted, unread, last_read_at, hidden, hidden_key";',
+              ) &&
+              w.includes(
+                '"UPDATE members SET hidden = ?, hidden_key = ? WHERE conv_id = ? AND user_id = ?",',
+              ) &&
+              w.includes('hidden === 1 && typeof rawKey === "string" && rawKey.trim()') &&
+              w.includes("? rawKey.trim().slice(0, 128)") &&
+              w.includes("meHiddenKey = meHidden ? (row.hidden_key ?? null) : null;") &&
+              w.includes("hiddenKey: meHiddenKey,") &&
+              w.includes("          c.hiddenKey,\n") &&
+              w.includes(
+                "JOIN members mem ON mem.conv_id = m.conv_id AND mem.user_id = ? AND COALESCE(mem.hidden, 0) = 0",
+              ),
+          );
+        }
         const cl = kt("ChatListScreen.kt");
         const row = cl.slice(
           cl.indexOf("private fun SwipeConvRow("),
           cl.indexOf("private fun RowScope.ActionSlot("),
         );
         check(
-          "r31-26: app — swipe right shows Hide beside Archive (main list), Unhide on the hidden screen; hidden rows leave the main list AND the archive; the badge ignores them",
+          "r31-26: app — swipe right shows Hide beside Archive (main list); hidden rows leave the main list AND the archive; the badge ignores them (r33-6: no Unhide slot, no hiddenMode — Search unhides)",
           row.includes('label = "Hide",') &&
-            row.includes('label = "Unhide",') &&
+            !row.includes('label = "Unhide",') &&
+            !row.includes("hiddenMode") &&
             row.includes(
-              'Api.post("/api/conversations/$id/hide", JSONObject().put("hidden", hidden))',
+              'Api.post("/api/conversations/$id/hide", JSONObject().put("hidden", true).put("key", hash))',
             ) &&
-            row.includes("if (offset < 0f && !archivedMode && !hiddenMode) {") &&
+            row.includes("if (offset < 0f && !archivedMode) {") &&
             cl.includes(
               '.filter { !ScreenStore.isArchived(it.optString("id")) && !it.optBoolean("hidden") }',
             ) &&
@@ -3338,38 +3380,136 @@ const convBetween = (db, a, b) =>
               'convs.filter { !it.optBoolean("hidden") }.sumOf { it.optInt("unread", 0) }',
             ),
         );
+        // r33-6: the owner's new system. No gesture, no Hidden screen, no
+        // `hidden` route: EVERY hide asks for a free-form secret key (sheet
+        // with one field + one button), the app stores SHA-256(key) on the
+        // row (server: members.hidden_key), and typing the FULL key in
+        // Search reveals exactly the chats hidden with it — before the
+        // two-character server guard, so a one-emoji key works.
+        const store = kt("ScreenStore.kt");
+        const search = kt("SearchScreen.kt");
+        const profile = kt("ProfileScreen.kt");
         check(
-          "r31-26/r32-23: app — hidden chats screen opens ONLY by three quick taps on BLANK chat-list space (one finger, no drag, row taps reset the run; pass-through, no menu entry); route `hidden`",
-          cl.includes("fun HiddenChatsScreen(nav: NavController) {") &&
-            cl.includes(
-              "private fun swipeFocusList(onTripleTapBlank: (() -> Unit)? = null): Modifier =",
-            ) &&
+          "r33-6: the three-tap-blank opener, HiddenChatsScreen and the `hidden` route are gone; swipeFocusList() keeps only the row-closing job",
+          !cl.includes("HiddenChatsScreen") &&
+            !cl.includes("onTripleTapBlank") &&
+            !cl.includes("if (taps >= 3) {") &&
+            !cl.includes('nav.navigate("hidden")') &&
+            !kt("KpApp.kt").includes('composable("hidden")') &&
+            !kt("KpApp.kt").includes("HiddenChatsScreen") &&
+            cl.includes("private fun swipeFocusList(): Modifier =") &&
             cl.includes("val onRow = SwipeOpen.downOn != null") &&
-            cl.includes("val tap = !onRow && !moved && fingers == 1 && now - downAt < 300") &&
-            cl.includes("if (tap && (taps == 0 || now - lastUp < 600)) {") &&
-            cl.includes("if (taps >= 3) {") &&
-            (
-              cl.match(/swipeFocusList \{ haptics\.confirm\(\); nav\.navigate\("hidden"\) \}/g) ||
-              []
-            ).length === 2 &&
             !cl.includes("threeFingerDoubleTap") &&
             !cl.includes("maxFingers >= 3") &&
-            kt("KpApp.kt").includes('composable("hidden") { HiddenChatsScreen(nav) }') &&
             !cl.includes('"Hidden chats"') &&
             !cl.includes("HomeMenuItem(Icons.Filled.VisibilityOff"),
         );
         check(
-          "r32-23: hidden calls — call rows whose 1:1 peer chat is hidden leave the Calls tab and show under a Calls heading on the Hidden screen (ScreenStore.isHiddenCall via convIdForUser)",
-          kt("ScreenStore.kt").includes("fun isHiddenCall(call: JSONObject): Boolean {") &&
-            kt("ScreenStore.kt").includes("fun callPeerId(call: JSONObject): String =") &&
+          "r33-6: HideKeySheet — KpSheet 'Hide chat' with ONE KpInputField (placeholder 'Secret key', ≤64 chars, focused on open, IME Done submits) + one 'Hide' button (disabled while blank), imePadding; both hide entry points use it: the swipe Hide slot (ChatListScreen) and the profile ⋮ Hide (ProfileScreen); unhide from the profile needs no key",
+          cl.includes(
+            "internal fun HideKeySheet(onDismiss: () -> Unit, onHide: (String) -> Unit) {",
+          ) &&
+            cl.includes('KpSheet(onDismiss = onDismiss, title = "Hide chat") {') &&
+            cl.includes("Column(Modifier.padding(horizontal = 14.dp).imePadding()) {") &&
+            cl.includes('placeholder = "Secret key",') &&
+            cl.includes("{ key = it.take(64) },") &&
+            cl.includes("focusRequester = focus,") &&
+            cl.includes(
+              "keyboardActions = KeyboardActions(onDone = { if (key.isNotBlank()) onHide(key.trim()) }),",
+            ) &&
+            cl.includes(
+              'GoldBtn("Hide", Modifier.fillMaxWidth(), enabled = key.isNotBlank()) { onHide(key.trim()) }',
+            ) &&
+            row.includes("var askKey by remember { mutableStateOf(false) }") &&
+            row.includes("HideKeySheet(onDismiss = { askKey = false }) { key ->") &&
+            row.includes("val hash = ScreenStore.hiddenKeyHash(key)") &&
+            row.includes("ScreenStore.setHidden(id, true, hash)") &&
+            profile.includes("var askHideKey by remember { mutableStateOf(false) }") &&
+            profile.includes("HideKeySheet(onDismiss = { askHideKey = false }) { key ->") &&
+            profile.includes("withConv { cid -> setHidden(cid, true, key) }") &&
+            profile.includes("withConv { cid -> setHidden(cid, false, null) }") &&
+            profile.includes(
+              'Api.post("/api/conversations/$cid/hide", JSONObject().put("hidden", next).put("key", hash))',
+            ) &&
+            kt("Ui.kt").includes("focusRequester: FocusRequester? = null,") &&
+            kt("Ui.kt").includes(
+              ".let { m -> if (focusRequester != null) m.focusRequester(focusRequester) else m }",
+            ),
+        );
+        check(
+          "r33-6: ScreenStore — setHidden(convId, hidden, keyHash) keeps `hiddenKey` on the row (dropped on unhide), hiddenKeyHash = SHA-256 hex of the trimmed key, hiddenFor(hash) lists the chats hidden with it, hiddenKeyOf / hiddenCallConv helpers; the key hash is part of the list signature",
+          store.includes(
+            "fun setHidden(convId: String, hidden: Boolean, keyHash: String? = null) {",
+          ) &&
+            store.includes(
+              'if (hidden && keyHash != null) row.put("hiddenKey", keyHash) else row.remove("hiddenKey")',
+            ) &&
+            store.includes("fun hiddenKeyHash(key: String): String =") &&
+            store.includes('java.security.MessageDigest.getInstance("SHA-256")') &&
+            store.includes(".digest(key.trim().toByteArray())") &&
+            store.includes("fun hiddenFor(hash: String): List<JSONObject> =") &&
+            store.includes(
+              'convs.filter { it.optBoolean("hidden", false) && it.optIso("hiddenKey") == hash }',
+            ) &&
+            store.includes("fun hiddenKeyOf(convId: String): String? {") &&
+            store.includes("fun hiddenCallConv(call: JSONObject): String? {") &&
+            store.includes("append(c.optString(\"hiddenKey\")).append('|')"),
+        );
+        check(
+          "r33-6: Search — SHA-256(query.trim()) is matched against the hidden chats BEFORE the ≥2-char server guard; matches render under 'Hidden' (HiddenChatRow: tap opens chat/{id}, eye unhides → POST /hide {hidden:false}, rollback keeps the old hash) plus the calls with those people; every other hidden chat is concealed from People / Chats / Media / Docs / Messages",
+          search.includes(
+            "val keyHash = remember(query) { query.trim().takeIf { it.isNotEmpty() }?.let { ScreenStore.hiddenKeyHash(it) } }",
+          ) &&
+            search.includes(
+              "val revealed = if (keyHash == null) emptyList() else ScreenStore.hiddenFor(keyHash)",
+            ) &&
+            search.includes(
+              "fun concealed(convId: String): Boolean = convId.isNotBlank() && convId !in revealedIds && ScreenStore.isHidden(convId)",
+            ) &&
+            search.includes(
+              '.filter { u -> !concealed(ScreenStore.convIdForUser[u.optString("id")].orEmpty()) }',
+            ) &&
+            search.includes(
+              'val chats = (result?.arr("chats")?.objects() ?: emptyList()).filter { !concealed(it.optString("id")) }',
+            ) &&
+            search.includes(
+              'val allMessages = (result?.arr("messages")?.objects() ?: emptyList()).filter { !concealed(it.optString("convoId")) }',
+            ) &&
+            search.includes("val typed = query.trim().length >= 2") &&
+            search.includes("if (!typed && revealed.isEmpty()) {") &&
+            search.includes('item { SectionLabel("Hidden") }') &&
+            search.includes(
+              'items(revealed, key = { "h" + it.optString("id") }) { c -> HiddenChatRow(c, nav) }',
+            ) &&
+            search.includes(
+              'items(revealedCalls, key = { "call_" + it.optString("id") }) { call ->',
+            ) &&
+            search.includes("private fun HiddenChatRow(conv: JSONObject, nav: NavController) {") &&
+            search.includes(
+              'ResultCard(onClick = { haptics.tap(); nav.navigate("chat/$id") { popUpTo("main") } }) {',
+            ) &&
+            search.includes(
+              'withContext(Dispatchers.IO) { Api.post("/api/conversations/$id/hide", JSONObject().put("hidden", false)) }',
+            ) &&
+            search.includes("}.onFailure { ScreenStore.setHidden(id, true, prev) }") &&
+            search.includes(
+              'Icon(Icons.Filled.Visibility, "Unhide", tint = ActionBlueDeep, modifier = Modifier.size(22.dp))',
+            ),
+        );
+        check(
+          "r32-23: hidden calls — call rows whose chat is hidden leave the Calls tab (ScreenStore.isHiddenCall via hiddenCallConv / convIdForUser) and come back with the chat under a Calls heading in Search",
+          store.includes("fun isHiddenCall(call: JSONObject): Boolean {") &&
+            store.includes("val cid = hiddenCallConv(call) ?: return false") &&
+            store.includes("fun callPeerId(call: JSONObject): String =") &&
             kt("CallsTabScreen.kt").includes("calls.filter { !ScreenStore.isHiddenCall(it) }") &&
             kt("CallsTabScreen.kt").includes("} else if (shown.isEmpty()) {") &&
             kt("CallsTabScreen.kt").includes(
               "internal fun CallRow(call: JSONObject, onOpenChat: () -> Unit) {",
             ) &&
-            cl.includes("ScreenStore.calls.filter { ScreenStore.isHiddenCall(it) }") &&
-            cl.includes('items(hiddenCalls, key = { "call_" + it.optString("id") }) { call ->') &&
-            cl.includes("if (hidden.isEmpty() && hiddenCalls.isEmpty()) {"),
+            search.includes(
+              "else ScreenStore.calls.filter { call -> ScreenStore.hiddenCallConv(call)?.let { it in revealedIds } == true }",
+            ) &&
+            search.includes('item { SectionLabel("Calls") }'),
         );
         check(
           "r31-26: app — no notification card, no in-app tone, no list alert for a hidden chat (push handler drops it; the tone + list paths use isSilenced = muted || hidden)",
@@ -6821,11 +6961,12 @@ const convBetween = (db, a, b) =>
     );
   }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
-  // a touch on blank list space closes it (main, archive and hidden lists).
+  // a touch on blank list space closes it (main and archive lists; r33-6
+  // retired the hidden list).
   {
     const cl = kt("ChatListScreen.kt");
     check(
-      "r32-11: chat-list swipe reveal auto-closes — SwipeOpen focus holder, row watcher (LaunchedEffect on SwipeOpen.id), touch-on-other-row / blank-space / scroll observers on all three lists",
+      "r32-11: chat-list swipe reveal auto-closes — SwipeOpen focus holder, row watcher (LaunchedEffect on SwipeOpen.id), touch-on-other-row / blank-space / scroll observers on both lists",
       cl.includes("private object SwipeOpen {") &&
         cl.includes("var id by mutableStateOf<String?>(null)") &&
         cl.includes("if (SwipeOpen.id != convId && dragged != 0f) dragged = 0f") &&
@@ -6835,8 +6976,8 @@ const convBetween = (db, a, b) =>
           "snapshotFlow { listState.isScrollInProgress }.collect { if (it) SwipeOpen.id = null }",
         ) &&
         cl.includes("if (dragged != 0f) SwipeOpen.id = convId") &&
-        (cl.match(/CloseSwipeOnScroll\(/g) || []).length === 4 &&
-        (cl.match(/swipeFocusList[ ]?[({]/g) || []).length === 5 &&
+        (cl.match(/CloseSwipeOnScroll\(/g) || []).length === 3 &&
+        (cl.match(/swipeFocusList[ ]?[({]/g) || []).length === 4 &&
         cl.includes(".then(swipeFocusTouch(convId))"),
     );
   }
