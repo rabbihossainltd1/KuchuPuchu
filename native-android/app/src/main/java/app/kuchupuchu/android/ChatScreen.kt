@@ -4053,6 +4053,10 @@ private fun MessageRow(
             // and a document row's size line — share ONE line with the stamp,
             // so FILE bubbles keep no bottom band (photos / videos never get here).
             val fileRow = kind == "FILE"
+            // Owner round 33 (item 5): text-like bodies (text, emoji-only,
+            // sticker, deleted) carry their stamp INSIDE the column, placed by
+            // measurement (KpStamped) — no reserve, no overlay, no band.
+            val textLike = kind == "TEXT" || kind == "STICKER" || kind == "DELETED"
             val bubbleShape =
                 RoundedCornerShape(
                     topStart = 16.dp,
@@ -4143,7 +4147,7 @@ private fun MessageRow(
                     // the text. Other kinds keep the small bottom band —
                     // except FILE rows (items 45 / 34), whose second line
                     // already leaves the stamp its corner.
-                    .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (fileRow) 4.dp else if (kind == "TEXT" && emojiOnly == 0) 0.dp else 15.dp),
+                    .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp),
             ) {
                 val senderName = m.optText("senderName")
                 Column {
@@ -4195,91 +4199,101 @@ private fun MessageRow(
                         Text(senderName, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = GoldDeep)
                     }
                     when (kind) {
-                        "STICKER" -> {
+                        "STICKER" -> KpStamped(
+                            below = true,
+                            stamp = { BubbleStamp(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk) },
+                        ) { _ ->
                             val st = m.optString("body")
                             if (EmojiRepo.isCustomId(st)) CustomEmojiOrFallback(st)
                             else Text(st, fontSize = 56.sp)
                         }
                         "FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc)
-                        "DELETED" -> Text(
-                            // Owner round 18: the same trailing reserve the
-                            // text path uses — the stamp sat ON the deleted
-                            // text before (normal bubbles: untouched).
-                            "This message was deleted" + if (mine) "                  " else "            ",
-                            fontSize = 13.5.sp,
-                            fontStyle = FontStyle.Italic,
-                            color = Color(0xFF4A463F),
-                        )
-                        else -> if (emojiOnly > 0) {
-                            // Owner round 32 (item 8): the stamp row sits in the
-                            // 15 dp bottom band below the glyph (never over it);
-                            // a little end room keeps a wide tick row clear too.
+                        // Owner round 33 (item 5): the stamp is placed by
+                        // measurement after the last line (KpStamped) — the
+                        // old no-break-space reserve is gone from every text
+                        // body: it only fit Roboto, so Bangla and emoji had
+                        // the time / ticks on the glyphs.
+                        "DELETED" -> KpStamped(
+                            stamp = { BubbleStamp(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk) },
+                        ) { onLayout ->
                             Text(
-                                m.optText("body").trim(),
-                                fontSize = if (emojiOnly == 1) 44.sp else 34.sp,
-                                lineHeight = if (emojiOnly == 1) 52.sp else 40.sp,
-                                modifier = Modifier.padding(start = 2.dp, end = if (mine) 30.dp else 10.dp, bottom = 3.dp),
+                                "This message was deleted",
+                                fontSize = 13.5.sp,
+                                fontStyle = FontStyle.Italic,
+                                color = Color(0xFF4A463F),
+                                onTextLayout = onLayout,
                             )
-                        } else {
-                            //   runs glue to the last word, so the stamp's
-                            // spot travels WITH the final line — no separate
-                            // line, no overlap, no drifting left.
-                            val reserve = if (mine) "                 " else "            "
-                            val full = m.optText("body") + reserve
-                            if (revealChars != null && revealChars < full.length) {
-                                // The AI reply is still typing itself out —
-                                // reveal up to the current word + a caret.
+                        }
+                        else -> if (emojiOnly > 0) {
+                            // Owner round 32 (item 8): big glyph, stamp under
+                            // it (never over it) — now on a measured row.
+                            KpStamped(
+                                below = true,
+                                stamp = { BubbleStamp(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk) },
+                            ) { onLayout ->
                                 Text(
-                                    full.take(revealChars) + " ▍",
-                                    fontSize = 14.5.sp,
-                                    lineHeight = 19.sp,
-                                    color = bodyInk,
+                                    m.optText("body").trim(),
+                                    fontSize = if (emojiOnly == 1) 44.sp else 34.sp,
+                                    lineHeight = if (emojiOnly == 1) 52.sp else 40.sp,
+                                    modifier = Modifier.padding(start = 2.dp, end = 2.dp),
+                                    onTextLayout = onLayout,
                                 )
-                            } else {
-                                // Owner round 32 (item 32): a link in the text
-                                // is a real link (underlined, tap opens it) and
-                                // the first one gets a preview card above the
-                                // text. In select mode taps stay with the bubble.
-                                val selecting = selectedIds.isNotEmpty()
-                                val linked =
-                                    remember(full, bodyInk, selecting) {
-                                        if (selecting) null
-                                        else Links.annotate(full, bodyInk) { u -> Links.open(ctx, u) }
-                                    }
-                                val firstLink = remember(full) { Links.first(full) }
-                                if (firstLink != null) {
-                                    LinkPreviewCard(
-                                        url = firstLink,
-                                        mine = mine,
-                                        ink = bodyInk,
-                                        onOpen = if (selecting) null else ({ Links.open(ctx, firstLink) }),
-                                    )
+                            }
+                        } else {
+                            val full = m.optText("body")
+                            // Owner round 32 (item 32): a link in the text
+                            // is a real link (underlined, tap opens it) and
+                            // the first one gets a preview card above the
+                            // text. In select mode taps stay with the bubble.
+                            val selecting = selectedIds.isNotEmpty()
+                            val linked =
+                                remember(full, bodyInk, selecting) {
+                                    if (selecting) null
+                                    else Links.annotate(full, bodyInk) { u -> Links.open(ctx, u) }
                                 }
-                                if (linked != null) Text(linked, fontSize = 14.5.sp, lineHeight = 19.sp, color = bodyInk)
-                                else Text(full, fontSize = 14.5.sp, lineHeight = 19.sp, color = bodyInk)
+                            val firstLink = remember(full) { Links.first(full) }
+                            if (firstLink != null) {
+                                LinkPreviewCard(
+                                    url = firstLink,
+                                    mine = mine,
+                                    ink = bodyInk,
+                                    onOpen = if (selecting) null else ({ Links.open(ctx, firstLink) }),
+                                )
+                            }
+                            KpStamped(
+                                stamp = { BubbleStamp(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk) },
+                            ) { onLayout ->
+                                if (revealChars != null && revealChars < full.length) {
+                                    // The AI reply is still typing itself out —
+                                    // reveal up to the current word + a caret.
+                                    Text(
+                                        full.take(revealChars) + " ▍",
+                                        fontSize = 14.5.sp,
+                                        lineHeight = 19.sp,
+                                        color = bodyInk,
+                                        onTextLayout = onLayout,
+                                    )
+                                } else if (linked != null) {
+                                    Text(linked, fontSize = 14.5.sp, lineHeight = 19.sp, color = bodyInk, onTextLayout = onLayout)
+                                } else {
+                                    Text(full, fontSize = 14.5.sp, lineHeight = 19.sp, color = bodyInk, onTextLayout = onLayout)
+                                }
                             }
                         }
                     }
                 }
                 // Owner round 12: one pinned stamp row for every bubble,
-                // directly in the Box scope — it sits in the reserved bottom
-                // band (TEXT) or over the bottom edge (photos keep their
-                // scrim), always at the bottom-END corner, never on its own
-                // text line.
-                Row(
-                    Modifier.align(Alignment.BottomEnd).padding(end = 2.dp, bottom = if (kind == "TEXT" && emojiOnly == 0) 3.dp else 1.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        msgStamp(m.optString("createdAt")),
-                        fontSize = 10.sp,
-                        // r32-8: no bubble under an emoji — the stamp reads in
-                        // the wallpaper's ink instead of bubble-white.
-                        color = if (mine && emojiOnly == 0) Color(0xD9FFFFFF) else stampInk,
-                    )
-                    if (mine) {
-                        Spacer(Modifier.width(3.dp))
-                        TickIcon(m, pendingEcho, otherReadAt, onWallpaper = emojiOnly > 0, ink = stampInk)
+                // directly in the Box scope — over the bottom edge (photos
+                // keep their scrim), always at the bottom-END corner, never
+                // on its own text line. Owner round 33 (item 5): text-like
+                // bodies place it by measurement inside the column instead
+                // (BubbleStamp via KpStamped) — see the TEXT branch above.
+                if (!textLike) {
+                    Row(
+                        Modifier.align(Alignment.BottomEnd).padding(end = 2.dp, bottom = 1.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        BubbleStamp(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk)
                     }
                 }
             }
@@ -6116,6 +6130,37 @@ private fun TickIcon(
         seen -> Icon(Icons.Filled.DoneAll, "Seen", tint = Color(0xFF53BDEB), modifier = Modifier.size(13.dp))
         delivered -> Icon(Icons.Filled.DoneAll, "Delivered", tint = grey, modifier = Modifier.size(13.dp))
         else -> Icon(Icons.Filled.Done, "Sent", tint = grey, modifier = Modifier.size(13.dp))
+    }
+}
+
+/**
+ * Owner round 33 (item 5): the time (+ ticks for our own rows) of a bubble —
+ * ONE definition for the pinned overlay (photos, files) and the measured
+ * in-column placement of text bodies (KpStamped). r32-8: no bubble under an
+ * emoji-only body, so its stamp reads in the wallpaper's ink.
+ */
+@Composable
+private fun BubbleStamp(
+    m: JSONObject,
+    mine: Boolean,
+    pendingEcho: Boolean,
+    otherReadAt: String?,
+    emojiOnly: Int,
+    stampInk: Color,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            msgStamp(m.optString("createdAt")),
+            fontSize = 10.sp,
+            lineHeight = 12.sp,
+            maxLines = 1,
+            softWrap = false,
+            color = if (mine && emojiOnly == 0) Color(0xD9FFFFFF) else stampInk,
+        )
+        if (mine) {
+            Spacer(Modifier.width(3.dp))
+            TickIcon(m, pendingEcho, otherReadAt, onWallpaper = emojiOnly > 0, ink = stampInk)
+        }
     }
 }
 

@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -59,16 +60,22 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.AlignmentLine
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LastBaseline
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import androidx.compose.ui.text.style.ResolvedTextDirection
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.ceil
+import kotlin.math.floor
 import org.json.JSONObject
 
 /**
@@ -1231,3 +1238,70 @@ fun KpKeepTop(listState: LazyListState, headKey: Any?) {
         if (nearTop) listState.requestScrollToItem(0)
     }
 }
+
+/** The last TextLayoutResult a [KpStamped] body reported (a plain holder —
+ *  the read happens in the measure pass, never in composition). */
+class KpTextLayoutHolder {
+    var result: TextLayoutResult? = null
+    val onLayout: (TextLayoutResult) -> Unit = { result = it }
+}
+
+/**
+ * Owner round 33 (item 5): the time + tick stamp of a text bubble, placed by
+ * MEASUREMENT instead of guesswork. The old bubble glued a run of no-break
+ * spaces to the body and painted the stamp over that gap: right for Roboto,
+ * wrong for a body shaped by Noto Sans Bengali (different space width, a
+ * deeper last-line descent from the matras, a taller first-line ascent) and
+ * for emoji — so Bangla and emoji bodies had the stamp on the glyphs and sat
+ * lower in the bubble than English. Here the body lays itself out, its LAST
+ * LINE's end is read from the TextLayoutResult, and the stamp goes on that
+ * line when it fits (its baseline on the body's last baseline) or on its own
+ * row under the text. Works for any script, RTL included, and needs no reserve.
+ */
+@Composable
+fun KpStamped(
+    modifier: Modifier = Modifier,
+    below: Boolean = false,
+    gap: Dp = 7.dp,
+    stamp: @Composable () -> Unit,
+    text: @Composable (onLayout: (TextLayoutResult) -> Unit) -> Unit,
+) {
+    val holder = remember { KpTextLayoutHolder() }
+    Layout(contents = listOf({ text(holder.onLayout) }, stamp), modifier = modifier) { measurables, constraints ->
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val textP = measurables[0].firstOrNull()?.measure(loose)
+        val stampP = measurables[1].firstOrNull()?.measure(loose)
+        if (textP == null || stampP == null) {
+            val p = textP ?: stampP
+            layout(p?.width ?: 0, p?.height ?: 0) { p?.place(0, 0) }
+        } else {
+            val tl = holder.result
+            val line = (tl?.lineCount ?: 1) - 1
+            val rtl = tl != null && tl.getParagraphDirection(tl.getLineStart(line)) == ResolvedTextDirection.Rtl
+            val maxW = if (constraints.hasBoundedWidth) constraints.maxWidth else Int.MAX_VALUE
+            // The last line's END in the text's own box (RTL lines grow leftwards).
+            val tailEnd =
+                when {
+                    tl == null -> textP.width
+                    rtl -> textP.width - floor(tl.getLineLeft(line)).toInt()
+                    else -> ceil(tl.getLineRight(line)).toInt()
+                }
+            val need = tailEnd + gap.roundToPx() + stampP.width
+            val inline = !below && need <= maxW
+            // Inline: the stamp's baseline sits on the body's LAST baseline
+            // (a 10 sp stamp bottom-aligned to a 14.5 sp box reads sunk).
+            val textBase = textP[LastBaseline].let { if (it == AlignmentLine.Unspecified) textP.height else it }
+            val stampBase = stampP[LastBaseline].let { if (it == AlignmentLine.Unspecified) stampP.height else it }
+            val stampY = if (inline) (textBase - stampBase).coerceAtLeast(0) else textP.height + 2.dp.roundToPx()
+            val width = if (inline) maxOf(textP.width, need) else maxOf(textP.width, stampP.width)
+            val height = maxOf(textP.height, stampY + stampP.height)
+            val w = width.coerceIn(constraints.minWidth, constraints.maxWidth)
+            val h = height.coerceIn(constraints.minHeight, constraints.maxHeight)
+            layout(w, h) {
+                textP.place(if (rtl) w - textP.width else 0, 0)
+                stampP.place(if (rtl) 0 else w - stampP.width, stampY)
+            }
+        }
+    }
+}
+
