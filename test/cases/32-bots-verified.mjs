@@ -5754,8 +5754,9 @@ const convBetween = (db, a, b) =>
           'CallEngine.instance?.startGroupCall(otherId, if (video) "VIDEO" else "AUDIO", name, avatarRef ?: "")',
         ) &&
         tab.includes('group && missed -> "Missed group ${if (video) "video" else "voice"} call"') &&
-        tab.includes(
-          'if (groupConv.isNotBlank()) {\n                            nav.navigate("chat/$groupConv")',
+        // r33-2 re-indented the tab's LazyColumn (state + KpKeepTop); whitespace-tolerant.
+        /if \(groupConv\.isNotBlank\(\)\) \{\s*\n\s*nav\.navigate\("chat\/\$groupConv"\)/.test(
+          tab,
         ) &&
         store.includes('call.optBoolean("group") -> ""') &&
         kt("KpPush.kt").includes('group = data["group"] == "1",') &&
@@ -6657,6 +6658,111 @@ const convBetween = (db, a, b) =>
         // sendAt (scheduled) paths still post directly — they are not optimistic bubbles
         (sendImage33.match(/Api\.post\(/g) || []).length === 1 &&
         (chat33.match(/outcome\.onSuccess \{ row -> paintSent\(row\) \}/g) || []).length === 4,
+    );
+  }
+  // r33 item 2: auto-scroll to the new thing everywhere. Keyed LazyColumns
+  // pin the first VISIBLE KEY across a data-set change, so a row that moved
+  // to the head landed above the fold; KpKeepTop (one helper) lands the list
+  // on index 0 during that remeasure when the viewport was already at the
+  // top and nobody is dragging. The chat's socket fast-paint and paintSent
+  // follow the thread when near the bottom. Calls re-sync on call end;
+  // the status tab gets a live trigger + newest-first order.
+  {
+    const ui = kt("Ui.kt");
+    const list = kt("ChatListScreen.kt");
+    const tab = kt("CallsTabScreen.kt");
+    const status = kt("StatusScreens.kt");
+    const chat = kt("ChatScreen.kt");
+    const store = kt("ScreenStore.kt");
+    const eng = kt("CallEngine.kt");
+    const push = kt("KpPush.kt");
+    const keepTop = ui.slice(
+      ui.indexOf("fun KpKeepTop(listState: LazyListState, headKey: Any?) {"),
+    );
+    check(
+      "r33-2: KpKeepTop — a head-key change lands a keyed list on index 0 in the same remeasure (requestScrollToItem, no animation), only when the viewport is at / one row from the top and no drag is in progress; chat list, calls tab and status tab all use it",
+      ui.includes("import androidx.compose.runtime.SideEffect") &&
+        keepTop.includes("SideEffect {") &&
+        keepTop.includes(
+          "if (headKey == null || prev == null || prev == headKey) return@SideEffect",
+        ) &&
+        keepTop.includes("if (listState.isScrollInProgress) return@SideEffect") &&
+        keepTop.includes("val nearTop = first == null || first.index <= 1") &&
+        keepTop.includes("if (nearTop) listState.requestScrollToItem(0)") &&
+        !keepTop.includes("animateScrollToItem") &&
+        list.includes('KpKeepTop(listState, visible.firstOrNull()?.optString("id"))') &&
+        list.indexOf("KpKeepTop(listState") < list.indexOf("state = listState,") &&
+        tab.includes('KpKeepTop(callsList, shown.firstOrNull()?.optString("id"))') &&
+        tab.includes("state = callsList,") &&
+        status.includes(
+          'KpKeepTop(statusList, others.firstOrNull()?.optJSONObject("user")?.optString("id"))',
+        ) &&
+        status.includes("state = statusList,"),
+    );
+    const fastPaint = chat.slice(
+      chat.indexOf("// New inbound message: chronological = append at the"),
+      chat.indexOf(
+        "ScreenStore.setMsgs(convId, msgs.toList())\n                        }\n                        // Viewed live with the chat open",
+      ),
+    );
+    const paintSent = chat.slice(
+      chat.indexOf("fun paintSent(row: JSONObject) {"),
+      chat.indexOf('fun sendText(body: String, kind: String = "TEXT") {'),
+    );
+    check(
+      "r33-2: chat — the socket fast-paint and paintSent decide 'near the bottom' BEFORE the rows move (last visible index >= total - 2, no drag) and then follow the thread in their own coroutine; a reader scrolled up is left alone",
+      fastPaint.includes("val info = listState.layoutInfo") &&
+        fastPaint.indexOf("val follow =") < fastPaint.indexOf("msgs.add(liveMsg)") &&
+        fastPaint.includes(
+          "info.visibleItemsInfo.lastOrNull()?.index?.let { it >= info.totalItemsCount - 2 } == true",
+        ) &&
+        fastPaint.includes(
+          "if (follow) {\n                                        scope.launch {\n                                            val total = msgs.size + pending.size\n                                            if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }",
+        ) &&
+        paintSent.indexOf("val follow =") <
+          paintSent.indexOf("if (idx >= 0) msgs[idx] = row else msgs.add(row)") &&
+        paintSent.includes("!listState.isScrollInProgress &&") &&
+        paintSent.includes(
+          "if (follow) {\n            scope.launch {\n                val total = msgs.size + pending.size\n                if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }",
+        ),
+    );
+    check(
+      "r33-2: calls — ScreenStore.callsVersion (warmed) is bumped 1.5s after an engine teardown and by the missed-call push; the tab's effect keys on it and forces the history GET past the 20s cache; status — inbox pokes and a 12s foreground tick re-read /api/statuses (forced), contacts are ordered newest-update-first",
+      store.includes("var callsVersion by mutableStateOf(0)") &&
+        store.includes("fun pokeCalls() {") &&
+        kt("Store.kt").includes("ScreenStore.poke\n            ScreenStore.callsVersion"),
+    );
+    check(
+      "r33-2: calls tab / engine / push wiring",
+      eng.includes(
+        "if (active != null) Handler(Looper.getMainLooper()).postDelayed({ ScreenStore.pokeCalls() }, 1_500)",
+      ) &&
+        eng.indexOf("postDelayed({ ScreenStore.pokeCalls() }, 1_500)") <
+          eng.indexOf("        active = null\n") &&
+        push.includes(
+          "ScreenStore.pokeInbox()\n        // Owner round 33 (item 2): a missed call is a new history row.\n        ScreenStore.pokeCalls()",
+        ) &&
+        tab.includes("LaunchedEffect(ScreenStore.callsVersion) {") &&
+        tab.includes(
+          "val forced = ScreenStore.callsVersion > 0 && ScreenStore.callsVersion != lastCallsVersion",
+        ) &&
+        tab.includes('Api.get("/api/calls/history", force = forced)') &&
+        tab.includes("private var lastCallsVersion = 0") &&
+        !tab.includes("LaunchedEffect(Unit) {"),
+    );
+    check(
+      "r33-2: status tab wiring",
+      status.includes("fun refresh(force: Boolean = false) {") &&
+        status.includes('Api.get("/api/statuses", force)') &&
+        status.includes(
+          "LaunchedEffect(ScreenStore.poke) {\n        if (ScreenStore.poke > 0 && Store.foreground) refresh(force = true)",
+        ) &&
+        status.includes(
+          "delay(12_000)\n            if (Store.foreground && !Api.inCooldown()) refresh(force = true)",
+        ) &&
+        status.includes(
+          '.sortedByDescending { g -> g.arr("statuses").objects().maxOfOrNull { it.optString("createdAt") } ?: "" }',
+        ),
     );
   }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or

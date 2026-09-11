@@ -1912,6 +1912,10 @@ class CallEngine(private val app: Application) {
         pendingAccept = false
         clearIncomingSuppression()
         Handler(Looper.getMainLooper()).post { MainActivity.current?.restoreChrome() }
+        // Owner round 33 (item 2): the Calls tab learns about the row this
+        // call just left behind (its own history GET, forced). A beat later,
+        // so the /end POST that follows hangupLocal() has landed first.
+        if (active != null) Handler(Looper.getMainLooper()).postDelayed({ ScreenStore.pokeCalls() }, 1_500)
         active = null
         // Publishing here as well (not only from the callers that reach hangupLocal by
         // accident) is what guarantees the §31 mirror cannot outlive the call: the poll

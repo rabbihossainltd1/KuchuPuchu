@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -88,10 +89,10 @@ fun StatusScreen(nav: NavController) {
     var composeText by remember { mutableStateOf(false) }
     val haptics = rememberHaptics()
 
-    fun refresh() {
+    fun refresh(force: Boolean = false) {
         scope.launch {
             try {
-                val data = withContext(Dispatchers.IO) { Api.get("/api/statuses") }
+                val data = withContext(Dispatchers.IO) { Api.get("/api/statuses", force) }
                 ScreenStore.setStatuses(data.arr("items").objects())
             } catch (_: Exception) {
             }
@@ -101,14 +102,36 @@ fun StatusScreen(nav: NavController) {
     LaunchedEffect(Unit) {
         refresh()
     }
+    // Owner round 33 (item 2): the tab had no live trigger at all — a status
+    // posted while it was open only appeared after leaving and coming back.
+    // Every inbox poke (socket "conv" / push / resume) re-reads the feed, and
+    // a foreground safety tick keeps it fresh while the tab stays open.
+    LaunchedEffect(ScreenStore.poke) {
+        if (ScreenStore.poke > 0 && Store.foreground) refresh(force = true)
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(12_000)
+            if (Store.foreground && !Api.inCooldown()) refresh(force = true)
+        }
+    }
 
     val mine = groups.firstOrNull { it.optBoolean("mine") }
-    val others = groups.filter { !it.optBoolean("mine") && it.optJSONObject("user")?.optString("id") !in ScreenStore.hiddenStatusUserIds }
+    // Newest update first: the server groups per author in author order, so a
+    // contact who just posted stayed wherever their row already was.
+    val others = groups
+        .filter { !it.optBoolean("mine") && it.optJSONObject("user")?.optString("id") !in ScreenStore.hiddenStatusUserIds }
+        .sortedByDescending { g -> g.arr("statuses").objects().maxOfOrNull { it.optString("createdAt") } ?: "" }
+    val statusList = rememberLazyListState()
+    // Index 0 is "my status", index 1 the "Recent updates" header, so the
+    // newest contact row is index 2: keep the head in view when it changes.
+    KpKeepTop(statusList, others.firstOrNull()?.optJSONObject("user")?.optString("id"))
 
     Box(Modifier.fillMaxSize().background(Cream)) {
         Column(Modifier.fillMaxSize()) {
             LazyColumn(
                 Modifier.fillMaxSize(),
+                state = statusList,
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
                     start = 8.dp, end = 8.dp, bottom = 24.dp,
                 ),

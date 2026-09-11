@@ -23,6 +23,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,6 +45,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -1199,5 +1201,33 @@ fun ActionBtn(
             maxLines = 1,
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
         )
+    }
+}
+
+
+/**
+ * Owner round 33 (item 2): a keyed LazyColumn keeps the FIRST VISIBLE KEY
+ * anchored across a data-set change. When a conversation / status / call
+ * moves to the head of the list, the row that was at the top stays at the
+ * top and the new head lands ABOVE the fold — the user had to scroll up to
+ * see what just arrived. This watches the head key and asks the list to
+ * land on index 0 during the very remeasure that applies the change
+ * (`requestScrollToItem` schedules it, no animation to cancel), but only
+ * when the viewport was already at (or one row from) the top and no drag
+ * is in progress: a reader who scrolled down is never yanked.
+ */
+@Composable
+fun KpKeepTop(listState: LazyListState, headKey: Any?) {
+    val last = remember { arrayOfNulls<Any?>(1) }
+    SideEffect {
+        val prev = last[0]
+        last[0] = headKey
+        if (headKey == null || prev == null || prev == headKey) return@SideEffect
+        if (listState.isScrollInProgress) return@SideEffect
+        val first = listState.layoutInfo.visibleItemsInfo.firstOrNull()
+        // Not measured yet, at the head, or one row below it (the old head's
+        // key is what the list would otherwise pin to).
+        val nearTop = first == null || first.index <= 1
+        if (nearTop) listState.requestScrollToItem(0)
     }
 }

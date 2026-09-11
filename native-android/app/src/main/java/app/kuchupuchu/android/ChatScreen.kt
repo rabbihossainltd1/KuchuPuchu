@@ -726,10 +726,27 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 // New inbound message: chronological = append at the
                                 // end (the thread is oldest-first).
                                 else -> {
+                                    // Owner round 33 (item 2): the fast paint
+                                    // appended the bubble but never moved the
+                                    // viewport — and the marker GET that
+                                    // followed saw nothing "new" to scroll for.
+                                    // Follow the thread when the reader was at
+                                    // (or one bubble from) the bottom; a reader
+                                    // scrolled up is left alone.
+                                    val info = listState.layoutInfo
+                                    val follow =
+                                        !listState.isScrollInProgress &&
+                                            info.visibleItemsInfo.lastOrNull()?.index?.let { it >= info.totalItemsCount - 2 } == true
                                     msgs.add(liveMsg)
                                     // Our own optimistic bubble from a previous send
                                     // that the server just confirmed.
                                     pending.removeAll { it.optString("clientId") == liveCid }
+                                    if (follow) {
+                                        scope.launch {
+                                            val total = msgs.size + pending.size
+                                            if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }
+                                        }
+                                    }
                                 }
                             }
                             ScreenStore.setMsgs(convId, msgs.toList())
@@ -925,11 +942,22 @@ fun ChatScreen(nav: NavController, convId: String) {
         val cid = row.optString("clientId")
         if (id.isBlank()) return
         val idx = msgs.indexOfFirst { it.optString("id") == id || (cid.isNotBlank() && it.optString("clientId") == cid) }
+        // Owner round 33 (item 2): decided BEFORE the rows move.
+        val info = listState.layoutInfo
+        val follow =
+            !listState.isScrollInProgress &&
+                info.visibleItemsInfo.lastOrNull()?.index?.let { it >= info.totalItemsCount - 2 } == true
         if (idx >= 0) msgs[idx] = row else msgs.add(row)
         pending.removeAll { it.optString("clientId") == cid || it.optString("id") == id }
         // Painted here = not "new" for the next marker GET (no second scroll / read post).
         if (idx < 0) lastTopId = id
         ScreenStore.setMsgs(convId, msgs.toList())
+        if (follow) {
+            scope.launch {
+                val total = msgs.size + pending.size
+                if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }
+            }
+        }
     }
 
     fun sendText(body: String, kind: String = "TEXT") {

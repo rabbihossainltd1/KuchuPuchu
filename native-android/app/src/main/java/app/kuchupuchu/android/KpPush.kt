@@ -312,6 +312,8 @@ class KpPushService : FirebaseMessagingService() {
         val onCallScreen =
             Store.foreground && CallEngine.instance?.active?.let { it.id == callId || it.status == "RINGING" } == true
         ScreenStore.pokeInbox()
+        // Owner round 33 (item 2): a missed call is a new history row.
+        ScreenStore.pokeCalls()
         if (onCallScreen) {
             return
         }

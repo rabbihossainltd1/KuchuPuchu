@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -54,6 +55,9 @@ import org.json.JSONObject
 /** Owner round 13: when /api/calls/history was last fetched (ms). */
 private var lastCallsFetch = 0L
 
+/** Owner round 33 (item 2): the callsVersion the last fetch answered. */
+private var lastCallsVersion = 0
+
 @Composable
 fun CallsScreen(nav: NavController) {
     val scope = rememberCoroutineScope()
@@ -61,16 +65,21 @@ fun CallsScreen(nav: NavController) {
     var loading by remember { mutableStateOf(!ScreenStore.callsLoaded) }
     val haptics = rememberHaptics()
 
-    LaunchedEffect(Unit) {
+    // Owner round 33 (item 2): a call that just ended (engine teardown /
+    // missed-call push bumps callsVersion) re-syncs the history at once —
+    // the new row used to wait for a fresh visit past the 20s cache.
+    LaunchedEffect(ScreenStore.callsVersion) {
         // Owner round 13: the tab refetched the whole history on EVERY visit
         // and that read as lag. Show the cached list at once and only hit the
         // network when the cache is stale (>20s) or empty.
-        if (ScreenStore.callsLoaded && calls.isNotEmpty() && System.currentTimeMillis() - lastCallsFetch < 20_000) {
+        val forced = ScreenStore.callsVersion > 0 && ScreenStore.callsVersion != lastCallsVersion
+        lastCallsVersion = ScreenStore.callsVersion
+        if (!forced && ScreenStore.callsLoaded && calls.isNotEmpty() && System.currentTimeMillis() - lastCallsFetch < 20_000) {
             loading = false
             return@LaunchedEffect
         }
         try {
-            val data = withContext(Dispatchers.IO) { Api.get("/api/calls/history") }
+            val data = withContext(Dispatchers.IO) { Api.get("/api/calls/history", force = forced) }
             ScreenStore.setCalls(data.arr("items").objects())
             lastCallsFetch = System.currentTimeMillis()
         } catch (_: Exception) {
@@ -106,41 +115,49 @@ fun CallsScreen(nav: NavController) {
                     note = "Start a voice or video call from any chat",
                 )
             }
-        } else LazyColumn(
-            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 96.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            sections.forEach { (day, items) ->
-                item(key = "day_$day") {
-                    Text(
-                        day,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Muted,
-                        modifier = Modifier.padding(start = 8.dp, top = 12.dp, bottom = 4.dp),
-                    )
-                }
-                items(items, key = { it.optString("id") }) { call ->
-                    CallRow(call) {
-                        // open chat with the other person on row tap
-                        val otherId = callPeerId(call)
-                        // Owner round 32 (item 5b): a group call row opens the group.
-                        val groupConv = if (call.optBoolean("group")) call.optText("conversationId") else ""
-                        if (groupConv.isNotBlank()) {
-                            nav.navigate("chat/$groupConv")
-                        } else if (otherId.isNotBlank()) {
-                            val cached = ScreenStore.convIdForUser[otherId]
-                            if (cached != null) {
-                                nav.navigate("chat/$cached")
-                            } else {
-                                scope.launch {
-                                    runCatching {
-                                        val conv = withContext(Dispatchers.IO) {
-                                            Api.post("/api/conversations", JSONObject().put("userId", otherId))
-                                        }
-                                        conv.optJSONObject("conversation")?.optString("id")?.let {
-                                            ScreenStore.convIdForUser[otherId] = it
-                                            nav.navigate("chat/$it")
+        } else {
+            val callsList = rememberLazyListState()
+            // Owner round 33 (item 2): the newest call lands in view (the day
+            // header is index 0, the newest row index 1 — KpKeepTop keys on
+            // the newest row's id and lands the list on its head).
+            KpKeepTop(callsList, shown.firstOrNull()?.optString("id"))
+            LazyColumn(
+                state = callsList,
+                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 96.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                sections.forEach { (day, items) ->
+                    item(key = "day_$day") {
+                        Text(
+                            day,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Muted,
+                            modifier = Modifier.padding(start = 8.dp, top = 12.dp, bottom = 4.dp),
+                        )
+                    }
+                    items(items, key = { it.optString("id") }) { call ->
+                        CallRow(call) {
+                            // open chat with the other person on row tap
+                            val otherId = callPeerId(call)
+                            // Owner round 32 (item 5b): a group call row opens the group.
+                            val groupConv = if (call.optBoolean("group")) call.optText("conversationId") else ""
+                            if (groupConv.isNotBlank()) {
+                                nav.navigate("chat/$groupConv")
+                            } else if (otherId.isNotBlank()) {
+                                val cached = ScreenStore.convIdForUser[otherId]
+                                if (cached != null) {
+                                    nav.navigate("chat/$cached")
+                                } else {
+                                    scope.launch {
+                                        runCatching {
+                                            val conv = withContext(Dispatchers.IO) {
+                                                Api.post("/api/conversations", JSONObject().put("userId", otherId))
+                                            }
+                                            conv.optJSONObject("conversation")?.optString("id")?.let {
+                                                ScreenStore.convIdForUser[otherId] = it
+                                                nav.navigate("chat/$it")
+                                            }
                                         }
                                     }
                                 }

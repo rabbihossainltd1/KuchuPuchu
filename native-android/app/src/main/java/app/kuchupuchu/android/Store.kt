@@ -120,6 +120,7 @@ object SnapshotSingletons {
         runCatching {
             KpUpdate.checking
             ScreenStore.poke
+            ScreenStore.callsVersion
             VoiceNote.livePeaks
             LinkPreviews.size()
             PhoneBook.syncing.value

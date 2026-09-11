@@ -972,6 +972,9 @@ private fun ChatListBody(
         return
     }
     CloseSwipeOnScroll(listState)
+    // Owner round 33 (item 2): a chat that just moved to the top is shown,
+    // not hidden above the fold (see KpKeepTop).
+    KpKeepTop(listState, visible.firstOrNull()?.optString("id"))
     LazyColumn(
         Modifier
             .fillMaxSize()

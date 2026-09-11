@@ -205,6 +205,14 @@ object ScreenStore {
         poke++
     }
 
+    /** Owner round 33 (item 2): bumped when a call of ours ended (engine
+     *  teardown, missed-call push) — the Calls tab re-syncs its history at
+     *  once instead of waiting for a fresh visit past the 20s cache. */
+    var callsVersion by mutableStateOf(0)
+    fun pokeCalls() {
+        callsVersion++
+    }
+
     /** Owner round 31 (item 18): bumped when a peer's (or our own) name /
      *  username / about / picture changed — profile pages, chat headers and
      *  the list re-read the user the moment the "profile" frame lands. */
