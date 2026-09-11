@@ -476,7 +476,9 @@ class KpPushService : FirebaseMessagingService() {
         KpNotify.message(
             this,
             data["fromName"] ?: data["from"] ?: "KuchuPuchu",
-            data["body"] ?: "New message",
+            // Owner round 33 (item 12): the card reads Photo / Voice message /
+            // Video / Document like the list row, never a file name.
+            friendlyPreview(data["body"] ?: "New message"),
             convoId,
             muted = muted,
             mid = mid,

@@ -322,8 +322,8 @@ async function mk() {
   const list = await call("GET", "/api/conversations", undefined, B.token);
   const row = (list.json.items || list.json.conversations || []).find((c) => c.id === cid);
   check(
-    "chat-list preview of the document is its file name",
-    !!row && row.lastMessage === "scan.jpg",
+    "r33-12: chat-list preview of the document reads 'Document' (never its file name)",
+    !!row && row.lastMessage === "Document",
     JSON.stringify(row).slice(0, 200),
   );
   const plain = await call(

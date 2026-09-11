@@ -204,7 +204,7 @@ fun ChatListScreen(nav: NavController) {
                         val name =
                             if (c.optBoolean("isGroup")) c.optString("title").ifBlank { "Group" }
                             else c.optJSONObject("other")?.optText("displayName")?.ifBlank { "KuchuPuchu" } ?: "KuchuPuchu"
-                        KpNotify.message(ctx, name, c.optString("lastMessage"), id)
+                        KpNotify.message(ctx, name, friendlyPreview(c.optString("lastMessage")), id)
                     }
                 }
                 ScreenStore.setConvs(items)
@@ -1229,7 +1229,13 @@ private fun RowScope.ActionSlot(
  * becomes "Voice message", anything photo/video/doc likewise. Text passes
  * through untouched.
  */
-private fun friendlyPreview(raw: String): String {
+/**
+ * Chat-list / notification preview for a stored `lastMessage` / push body.
+ * Owner round 33 (item 12): media reads as what it is — Photo / Voice message
+ * / Video / Document — never as a file name; the worker writes these words
+ * for new rows (previewOf) and this covers older rows + pushes the same way.
+ */
+internal fun friendlyPreview(raw: String): String {
     val t = raw.trim()
     if (t.isBlank()) return "No messages yet"
     val lower = t.lowercase()
@@ -1241,13 +1247,16 @@ private fun friendlyPreview(raw: String): String {
     // Owner round 32 (item 17): the worker's view-once preview passes through.
     if (t == "Photo · View once" || t == "Video · View once") return t
     if (EmojiRepo.isCustomId(t)) return "Sticker"
+    // A link or a sentence is text even when it ends like a file name.
+    val fileLike = !t.contains("://") && !t.contains('\n')
     return when {
         lower.startsWith("voice_") || lower.startsWith("voice ") -> "Voice message"
-        lower == "video" -> "🎬 Video"
-        photoExts.any { lower.endsWith(it) } || lower.startsWith("photo_") -> "Photo"
-        videoExts.any { lower.endsWith(it) } -> "🎬 Video"
-        audioExts.any { lower.endsWith(it) } -> "Voice message"
-        docExts.any { lower.endsWith(it) } -> "📄 Document"
+        lower == "video" || lower == "🎬 video" -> "Video"
+        lower == "document" || lower == "📄 document" -> "Document"
+        fileLike && (photoExts.any { lower.endsWith(it) } || lower.startsWith("photo_")) -> "Photo"
+        fileLike && videoExts.any { lower.endsWith(it) } -> "Video"
+        fileLike && audioExts.any { lower.endsWith(it) } -> "Voice message"
+        fileLike && docExts.any { lower.endsWith(it) } -> "Document"
         else -> t
     }
 }

@@ -1151,7 +1151,7 @@ async function sendAiReply(
             db,
             "UPDATE conversations SET last_message_at = ?, last_message = ? WHERE id = ?",
             imgCreated,
-            "📷 Photo",
+            "Photo",
             convId,
           );
           await run(
@@ -9328,7 +9328,9 @@ function previewOf(row: MsgRow): string {
         if (type.startsWith("video/")) return `Video${once}`;
         if (type.startsWith("audio/")) return "Voice message";
       }
-      return String(meta.name || "File");
+      // Owner round 33 (item 12): a document reads "Document" in the chat
+      // list and in the push — never its file name (the bubble shows that).
+      return "Document";
     }
     case "CALL":
       return row.body || "Call";

@@ -226,8 +226,8 @@ async function main() {
     );
     const doc = sent.find((m) => m.message?.android?.data?.type === "message");
     check(
-      "r32-35: a photo sent as a Document keeps its file name and carries no picture",
-      doc?.message?.android?.data?.body === "scan.jpg" &&
+      "r32-35 / r33-12: a photo sent as a Document pushes as 'Document' (never its file name) and carries no picture",
+      doc?.message?.android?.data?.body === "Document" &&
         doc?.message?.android?.data?.kp_media === undefined,
       JSON.stringify(doc?.message?.android?.data ?? {}),
     );

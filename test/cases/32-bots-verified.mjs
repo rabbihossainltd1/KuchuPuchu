@@ -5432,7 +5432,7 @@ const convBetween = (db, a, b) =>
       src.indexOf("async function fanOutProfileChange("),
     );
     check(
-      "r32-35: worker — send preview comes from previewOf (no 'photo.jpg'), image/video/audio media files read as words, Documents keep their name, push data carries kp_media only for a picture",
+      "r32-35: worker — send preview comes from previewOf (no 'photo.jpg'), image/video/audio media files read as words (r33-12: Documents read 'Document'), push data carries kp_media only for a picture",
       src.includes("const preview = previewOf({") &&
         !src.includes('kind === "FILE" ? String(body.fileName || "File") : "Message"') &&
         // r32-17: "Photo · View once" rides the same lines.
@@ -6973,6 +6973,46 @@ const convBetween = (db, a, b) =>
       like.includes('.put("body", "\\uD83D\\uDC4D")') &&
         !like.includes("Liked your message") &&
         !notify.includes("Liked your message"),
+    );
+  }
+  // r33 item 12: media from others read "photo.jpg / voice.m4a / video.mp4"
+  // in the chat list and in notifications. The words come from the worker
+  // (previewOf) for every new row and push; the app maps older rows and
+  // every push body the same way, everywhere a preview is drawn.
+  {
+    const src = readFileSync("src/worker/index.ts", "utf8");
+    const previewOf = src.slice(
+      src.indexOf("function previewOf(row: MsgRow): string {"),
+      src.indexOf("async function fanOutProfileChange("),
+    );
+    const cl = kt("ChatListScreen.kt");
+    const fp = cl.slice(
+      cl.indexOf("internal fun friendlyPreview(raw: String): String {"),
+      cl.indexOf("private fun ConvCard("),
+    );
+    check(
+      "r33-12: worker — a document previews as 'Document' (never meta.name); media files as Photo / Video / Voice message; the AI photo row says 'Photo' without an emoji",
+      previewOf.includes('return "Document";') &&
+        !previewOf.includes("meta.name") &&
+        previewOf.includes('if (meta.voice) return "Voice message";') &&
+        !src.includes('"📷 Photo"'),
+    );
+    check(
+      "r33-12: app — friendlyPreview is shared (internal), returns Photo / Voice message / Video / Document with no emoji, treats links and multi-line text as text, and is applied to the list row, both Search chat rows, the push card and the poll fallback card",
+      fp.length > 0 &&
+        fp.includes('lower == "video" || lower == "🎬 video" -> "Video"') &&
+        fp.includes('lower == "document" || lower == "📄 document" -> "Document"') &&
+        fp.includes('fileLike && videoExts.any { lower.endsWith(it) } -> "Video"') &&
+        fp.includes('fileLike && docExts.any { lower.endsWith(it) } -> "Document"') &&
+        fp.includes("val fileLike = !t.contains(\"://\") && !t.contains('\\n')") &&
+        !fp.includes('"🎬 Video"') &&
+        !fp.includes('"📄 Document"') &&
+        cl.includes('val preview = friendlyPreview(conv.optText("lastMessage"))') &&
+        cl.includes(
+          'KpNotify.message(ctx, name, friendlyPreview(c.optString("lastMessage")), id)',
+        ) &&
+        kt("KpPush.kt").includes('friendlyPreview(data["body"] ?: "New message"),') &&
+        (kt("SearchScreen.kt").match(/friendlyPreview\(/g) || []).length === 2,
     );
   }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or

@@ -271,7 +271,7 @@ fun SearchScreen(nav: NavController) {
                                 Spacer(Modifier.width(12.dp))
                                 Column {
                                     Highlight(title, query)
-                                    Text(c.optString("lastMessage"), fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(friendlyPreview(c.optString("lastMessage")), fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
                             }
                         }
@@ -385,7 +385,7 @@ private fun HiddenChatRow(conv: JSONObject, nav: NavController) {
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(name, fontSize = 14.sp, color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(conv.optText("lastMessage"), fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(friendlyPreview(conv.optText("lastMessage")), fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         IconButton(onClick = {
             haptics.confirm()
