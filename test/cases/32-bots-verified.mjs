@@ -6960,6 +6960,21 @@ const convBetween = (db, a, b) =>
         ),
     );
   }
+  // r33 item 7: the notification's Like action used to send the sentence
+  // "Liked your message"; the owner wants a thumbs-up.
+  {
+    const notify = kt("KpNotify.kt");
+    const like = notify.slice(
+      notify.indexOf("ACTION_LIKE -> {"),
+      notify.indexOf("ACTION_DECLINE_LOGIN -> {"),
+    );
+    check(
+      "r33-7: notification Like action posts a TEXT message whose body is 👍 (U+1F44D), never 'Liked your message'",
+      like.includes('.put("body", "\\uD83D\\uDC4D")') &&
+        !like.includes("Liked your message") &&
+        !notify.includes("Liked your message"),
+    );
+  }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
   // a touch on blank list space closes it (main and archive lists; r33-6
   // retired the hidden list).

@@ -578,9 +578,9 @@ class KpNotifActionReceiver : android.content.BroadcastReceiver() {
                             "/api/conversations/$convoId/messages",
                             org.json.JSONObject()
                                 .put("kind", "TEXT")
-                                // Owner round 13: no emoji anywhere in app UI/messaging surfaces —
-                                    // the Like action now sends plain text.
-                                    .put("body", "Liked your message")
+                                // Owner round 33 (item 7): the Like action sends a
+                                // thumbs-up emoji, not a sentence.
+                                .put("body", "\uD83D\uDC4D")
                                 .put("clientId", "c_${java.util.UUID.randomUUID()}"),
                         )
                     }
