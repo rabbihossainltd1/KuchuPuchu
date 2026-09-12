@@ -7208,6 +7208,61 @@ const convBetween = (db, a, b) =>
         chat.includes("if (idx == 0 && scrolling) loadOlder()"),
     );
   }
+  // Item 19: a video send shows its upload progress (photo-style ring with
+  // the percentage), and the video bubble carries the time + ticks; a sent
+  // clip's local copy is kept as its cache entry.
+  {
+    const chat = kt("ChatScreen.kt");
+    const cache = kt("Cache.kt");
+    const vid = chat.slice(
+      chat.indexOf("private fun VideoMessageRow("),
+      chat.indexOf("private fun ViewOnceRow("),
+    );
+    check(
+      "r33-19: video bubble — VideoMessageRow takes pendingEcho + otherReadAt, reads UploadProgress for its clientId, decodes the pending frame from the local copy (docPath), swaps the play circle for a determinate ring + percentage while sending (indeterminate during the POST), ignores taps on the echo, and draws a scrim with the time and TickIcon (sending / sent / delivered / seen) like a photo; the duration moves to the top-start corner",
+      chat.includes(
+        "VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo)",
+      ) &&
+        vid.includes(
+          "    pendingEcho: Boolean,\n    otherReadAt: String?,\n    selectedIds: List<String>,",
+        ) &&
+        vid.includes('val upFrac = UploadProgress.fracs[m.optString("clientId")]') &&
+        vid.includes(
+          'm.optString("docPath").takeIf { it.isNotBlank() }?.let { File(it) }?.takeIf { it.exists() } ?: dest',
+        ) &&
+        vid.includes("if (!source.exists()) return@produceState") &&
+        vid.includes("r.setDataSource(source.absolutePath)") &&
+        vid.includes("if (pendingEcho) return@combinedClickable") &&
+        vid.includes("progress = { upFrac },") &&
+        vid.includes(
+          'Text("${(upFrac * 100).toInt()}%", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)',
+        ) &&
+        vid.includes("TickIcon(m, pendingEcho, otherReadAt)") &&
+        vid.includes('msgStamp(m.optString("createdAt")),') &&
+        vid.includes("listOf(Color.Transparent, Color.Transparent, Color(0x73000000)),") &&
+        vid.includes(".align(Alignment.TopStart)") &&
+        vid.includes(
+          'Icon(Icons.Filled.PlayArrow, "Play video", tint = Color.White, modifier = Modifier.size(30.dp))',
+        ),
+    );
+    check(
+      "r33-19: a sent clip's local copy becomes its cache entry — Outbox.keepVideoCopy (video/, not a document) copies the temp file to videoCacheFileFor(fileKey) BEFORE the temp delete on both send paths; the queue keeps the application context from init",
+      chat.includes(
+        "internal fun videoCacheFileFor(ctx: android.content.Context, fileKey: String): java.io.File =",
+      ) &&
+        cache.includes("private fun keepVideoCopy(body: JSONObject, local: JSONObject?) {") &&
+        cache.includes('if (!body.optString("fileType").startsWith("video/")) return') &&
+        cache.includes('if (body.optJSONObject("meta")?.optBoolean("document") == true) return') &&
+        cache.includes("val dst = videoCacheFileFor(ctx, key)") &&
+        cache.includes(
+          'keepVideoCopy(ready, local)\n                    local?.optString("path")?.takeIf { it.isNotBlank() && local.optBoolean("temp") }?.let { File(it).delete() }',
+        ) &&
+        cache.includes(
+          'keepVideoCopy(body, local)\n                    local?.optString("path")?.takeIf { it.isNotBlank() && local.optBoolean("temp") }?.let { File(it).delete() }',
+        ) &&
+        cache.includes("appCtx = ctx.applicationContext"),
+    );
+  }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
   // a touch on blank list space closes it (main and archive lists; r33-6
   // retired the hidden list).

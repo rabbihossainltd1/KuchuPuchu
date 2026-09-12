@@ -182,7 +182,10 @@ object Outbox {
     // The retry clock itself lives in OutboxPolicy, so it can be unit-tested
     // (and so `waitMs` cannot be handed an attempt count it would index out of bounds).
 
+    private var appCtx: Context? = null
+
     fun init(ctx: Context) {
+        appCtx = ctx.applicationContext
         // `file` synchronously (a queue() call in the first milliseconds must
         // be able to persist), the READ off the main thread — init runs in
         // Activity.onCreate, and parsing the queue JSON there is exactly the
@@ -345,6 +348,7 @@ object Outbox {
                     val ready = materialize(clientId, body, local)
                     val row = Api.post("/api/conversations/$convId/messages", ready).optJSONObject("message") ?: JSONObject()
                     remove(clientId)
+                    keepVideoCopy(ready, local)
                     local?.optString("path")?.takeIf { it.isNotBlank() && local.optBoolean("temp") }?.let { File(it).delete() }
                     Result.success(row)
                 } catch (e: kotlinx.coroutines.CancellationException) {
@@ -426,6 +430,27 @@ object Outbox {
         }
         items.removeAll { it.optString("clientId") == clientId }
         save()
+    }
+
+    /**
+     * Owner round 33 (item 19): a SENT video's local copy becomes its clip-cache
+     * entry (keyed by the file key the server row will carry) before the temp
+     * copy is deleted — the bubble keeps its frame across the echo → row swap
+     * and the player never downloads what this phone just uploaded. Documents
+     * and voice notes are untouched. Best-effort: a failed copy changes nothing.
+     */
+    private fun keepVideoCopy(body: JSONObject, local: JSONObject?) {
+        val path = local?.optString("path").orEmpty()
+        val key = body.optString("fileKey")
+        if (path.isBlank() || key.isBlank()) return
+        if (!body.optString("fileType").startsWith("video/")) return
+        if (body.optJSONObject("meta")?.optBoolean("document") == true) return
+        val ctx = appCtx ?: return
+        runCatching {
+            val src = File(path).takeIf { it.exists() } ?: return
+            val dst = videoCacheFileFor(ctx, key)
+            if (!dst.exists() || dst.length() != src.length()) src.copyTo(dst, overwrite = true)
+        }
     }
 
     /** A refused entry's temp copy (queued photo JPEG, voice take, doc copy) goes with it. */
@@ -577,6 +602,7 @@ object Outbox {
                         Api.post("/api/conversations/$convId/messages", materialize(clientId, body, local))
                     }
                     remove(clientId)
+                    keepVideoCopy(body, local)
                     local?.optString("path")?.takeIf { it.isNotBlank() && local.optBoolean("temp") }?.let { File(it).delete() }
                     sent++
                 } catch (e: kotlinx.coroutines.CancellationException) {

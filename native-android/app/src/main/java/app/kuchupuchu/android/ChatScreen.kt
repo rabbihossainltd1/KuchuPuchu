@@ -4144,7 +4144,7 @@ private fun MessageRow(
     // Owner round 20: videos render as a tappable video bubble and play
     // IN-APP (the system player could never stream these auth-only files).
     if (kind == "FILE" && fileLooksVideo(m) && !sentAsDocument(m)) {
-        VideoMessageRow(m, mine, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo)
+        VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo)
         return
     }
 
@@ -4598,6 +4598,8 @@ internal object VideoThumbs {
 private fun VideoMessageRow(
     m: JSONObject,
     mine: Boolean,
+    pendingEcho: Boolean,
+    otherReadAt: String?,
     selectedIds: List<String>,
     onToggleSelect: (JSONObject) -> Unit,
     onReply: (JSONObject) -> Unit,
@@ -4608,6 +4610,13 @@ private fun VideoMessageRow(
     val haptics = rememberHaptics()
     val dest = remember(m.optString("id")) { videoCacheFile(ctx, m) }
     val cacheKey = remember(m.optString("id")) { dest.absolutePath }
+    // Owner round 33 (item 19): while the clip is still going out, its frame
+    // comes from the local copy (docPath) — the cache file only exists once
+    // the upload has finished (Outbox.keepVideoCopy) or a download ran.
+    val source = remember(m.optString("id"), m.optString("docPath")) {
+        m.optString("docPath").takeIf { it.isNotBlank() }?.let { File(it) }?.takeIf { it.exists() } ?: dest
+    }
+    val upFrac = UploadProgress.fracs[m.optString("clientId")]
     // Round 23: seed ratio/duration from the PERSISTENT meta when it exists,
     // so the first frame already carries the video's own aspect ratio instead
     // of flashing 16:9 and jumping once the decoder reports the real size.
@@ -4622,7 +4631,7 @@ private fun VideoMessageRow(
         m.optString("id"),
     ) {
         if (value != null) return@produceState
-        if (!dest.exists()) return@produceState
+        if (!source.exists()) return@produceState
         // w, h, durationMs captured out of the IO block for the disk meta.
         var w0 = 0f
         var h0 = 0f
@@ -4631,7 +4640,7 @@ private fun VideoMessageRow(
             // No .use{}: close() is API 29+; release() is safe everywhere.
             val r = android.media.MediaMetadataRetriever()
             try {
-                r.setDataSource(dest.absolutePath)
+                r.setDataSource(source.absolutePath)
                 val bmp = r.getFrameAtTime(0L, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                 if (bmp != null) {
                     w0 = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toFloatOrNull() ?: 0f
@@ -4697,9 +4706,11 @@ private fun VideoMessageRow(
                 }
                 .combinedClickable(
                     onClick = {
+                        if (pendingEcho) return@combinedClickable
                         if (selectedIds.isNotEmpty()) onToggleSelect(m) else onOpen(m)
                     },
                     onLongClick = {
+                        if (pendingEcho) return@combinedClickable
                         haptics.tap()
                         if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)
                     },
@@ -4729,27 +4740,85 @@ private fun VideoMessageRow(
                         modifier = Modifier.size(34.dp),
                     )
                 }
+                // Owner round 33 (item 19): a clip still going out shows the
+                // determinate upload ring (photo-style) where the play circle
+                // sits — with the percentage — then the POST's own wait.
+                if (pendingEcho) {
+                    Box(
+                        Modifier
+                            .size(46.dp)
+                            .clip(CircleShape)
+                            .background(Color(0x99000000)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (upFrac != null) {
+                            CircularProgressIndicator(
+                                progress = { upFrac },
+                                color = Color.White,
+                                strokeWidth = 3.dp,
+                                trackColor = Color(0x40FFFFFF),
+                                modifier = Modifier.size(40.dp),
+                            )
+                            Text("${(upFrac * 100).toInt()}%", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        } else {
+                            CircularProgressIndicator(
+                                color = Color.White,
+                                strokeWidth = 3.dp,
+                                modifier = Modifier.size(40.dp),
+                            )
+                        }
+                    }
+                } else {
+                    Box(
+                        Modifier
+                            .size(46.dp)
+                            .clip(CircleShape)
+                            .background(Color(0x99000000)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.PlayArrow, "Play video", tint = Color.White, modifier = Modifier.size(30.dp))
+                    }
+                }
+                // Owner round 33 (item 19): photo-style stamp — a soft scrim, the
+                // time and (for our own clips) the sending / sent / delivered /
+                // seen ticks; the duration moves to the top-start corner.
                 Box(
                     Modifier
-                        .size(46.dp)
-                        .clip(CircleShape)
-                        .background(Color(0x99000000)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Filled.PlayArrow, "Play video", tint = Color.White, modifier = Modifier.size(30.dp))
-                }
+                        .matchParentSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.Transparent, Color.Transparent, Color(0x73000000)),
+                            ),
+                        ),
+                )
                 if (duration.isNotBlank()) {
                     Text(
                         duration,
                         color = Color.White,
                         fontSize = 11.sp,
                         modifier = Modifier
-                            .align(Alignment.BottomEnd)
+                            .align(Alignment.TopStart)
                             .padding(6.dp)
                             .clip(RoundedCornerShape(6.dp))
                             .background(Color(0x88000000))
                             .padding(horizontal = 5.dp, vertical = 1.dp),
                     )
+                }
+                Row(
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        msgStamp(m.optString("createdAt")),
+                        fontSize = 10.sp,
+                        color = Color.White,
+                    )
+                    if (mine) {
+                        Spacer(Modifier.width(3.dp))
+                        TickIcon(m, pendingEcho, otherReadAt)
+                    }
                 }
                 if (rowSelected) {
                     Box(
@@ -4952,6 +5021,13 @@ internal fun fileLooksVideo(m: JSONObject): Boolean {
 
 /** Owner round 20: videos download to a local cache (files need the auth
  *  header, so a raw URL can never work in a system player) and play in-app. */
+/** Owner round 33 (item 19): the cache path for a clip by its file KEY —
+ *  the same file videoCacheFile() resolves for the server row, so a sent
+ *  clip's local copy can be kept as its cache entry (no re-download, and
+ *  the bubble's frame survives the swap from echo to server row). */
+internal fun videoCacheFileFor(ctx: android.content.Context, fileKey: String): java.io.File =
+    videoCacheFile(ctx, JSONObject().put("fileKey", fileKey))
+
 internal fun videoCacheFile(ctx: android.content.Context, m: JSONObject): java.io.File {
     val key = m.optText("fileKey").ifBlank {
         m.optText("mediaUrl").replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "v" }
