@@ -3,6 +3,7 @@ package app.kuchupuchu.android
 import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import org.json.JSONArray
@@ -486,6 +487,19 @@ object ScreenStore {
     fun convDetailOf(convId: String): JSONObject? = convDetail[convId]
 
     val statuses = mutableStateListOf<JSONObject>()
+
+    /**
+     * Owner round 33 (item 25): viewed-by lists per status id, process-wide —
+     * the viewer screen used to keep them in a remember{} map that died with
+     * the screen, so every open of "My status" reloaded the sheet. A re-open
+     * now paints the last list instantly and refreshes it behind.
+     */
+    val statusViewers = mutableStateMapOf<String, List<JSONObject>>()
+
+    /** The larger of the feed's count and the last fetched list — the feed's
+     *  number can lag a poll behind the sheet. */
+    fun statusViewCount(s: JSONObject): Int =
+        maxOf(s.optInt("viewers", 0), statusViewers[s.optString("id")]?.size ?: 0)
     var statusesRaw by mutableStateOf("")
     var statusesLoaded by mutableStateOf(false)
     var statusesFetchedAt by mutableStateOf(0L)
@@ -653,6 +667,7 @@ object ScreenStore {
         callsRaw = ""
         statuses.clear()
         statusesRaw = ""
+        statusViewers.clear()
         lastNotifiedAt.clear()
         convIdForUser.clear()
         loginApprovals.clear()
@@ -663,7 +678,24 @@ object ScreenStore {
 
     @Synchronized
     fun setStatuses(list: List<JSONObject>) {
-        val raw = list.joinToString(",") { it.optString("id") + ":" + (it.optJSONObject("user")?.optString("id") ?: "") + ":" + it.arr("statuses").length() }
+        // Owner round 33 (item 25): the change signature keyed on ids + lengths
+        // only, so a poll that brought "3 views" (or "all viewed", or a new
+        // photo) for the SAME statuses was thrown away — the author's count sat
+        // on the 0 from the moment of posting (and survived restarts via the
+        // persisted snapshot). The counts, the seen flag and the author's
+        // avatar token / name are part of it now.
+        val raw = list.joinToString(",") { g ->
+            val u = g.optJSONObject("user")
+            listOf(
+                g.optString("id"),
+                u?.optString("id").orEmpty(),
+                g.arr("statuses").length(),
+                if (g.optBoolean("allViewed")) 1 else 0,
+                g.arr("statuses").objects().sumOf { it.optInt("viewers", 0) },
+                u?.optString("avatarRef").orEmpty(),
+                u?.optString("displayName").orEmpty(),
+            ).joinToString(":")
+        }
         val changed = raw != statusesRaw || statuses.isEmpty()
         if (changed) {
             statusesRaw = raw

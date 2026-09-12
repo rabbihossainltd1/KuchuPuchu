@@ -212,7 +212,7 @@ fun StatusScreen(nav: NavController) {
                                 when {
                                     myStatuses.isEmpty() -> "Tap to add a status update"
                                     else -> {
-                                        val views = myStatuses.sumOf { it.optInt("viewers", 0) }
+                                        val views = myStatuses.sumOf { ScreenStore.statusViewCount(it) }
                                         val last = myStatuses.maxOfOrNull { it.optString("createdAt") } ?: ""
                                         "My updates · ${statusStampShort(last)}" +
                                             (if (views > 0) " · $views view${if (views == 1) "" else "s"}" else "")
@@ -516,9 +516,9 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
     var confirmDelete by remember { mutableStateOf(false) }
     var videoReady by remember { mutableStateOf(false) }
     var videoProgress by remember { mutableStateOf(0f) }
-    // Viewed-by lists are cached per status: reopening the sheet must not
-    // re-fetch ("viewers list bar bar load hocche").
-    val viewersCache = remember { HashMap<String, List<JSONObject>>() }
+    // Viewed-by lists are cached per status in ScreenStore.statusViewers
+    // (owner round 33, item 25: the cache used to live in this screen and
+    // died with it, so every open of "My status" reloaded the sheet).
     // New status => new clip: the readiness flag must reset or the next
     // video's bar would start before its own buffering finished.
     LaunchedEffect(idx) {
@@ -706,21 +706,20 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
         val id = statuses[idx].optString("id")
         showViewers = true
         viewersError = false
-        val cached = viewersCache[id]
-        if (cached != null) {
-            viewers = cached
-            viewersLoading = false
-            return
-        }
-        viewers = emptyList()
-        viewersLoading = true
+        // Owner round 33 (item 25): the last list paints at once (no
+        // "Loading…" on a re-open); a fresh copy is fetched behind it every
+        // time so new viewers still appear. Only a first-ever load spins,
+        // and only a first-ever failure shows the error line.
+        val cached = ScreenStore.statusViewers[id]
+        viewers = cached ?: emptyList()
+        viewersLoading = cached == null
         scope.launch {
             runCatching {
                 val data = withContext(Dispatchers.IO) { Api.get("/api/statuses/$id/viewers", true) }
                 val list = data.arr("viewers").objects()
-                viewersCache[id] = list
+                ScreenStore.statusViewers[id] = list
                 viewers = list
-            }.onFailure { viewersError = true }
+            }.onFailure { if (cached == null) viewersError = true }
                 .also { viewersLoading = false }
         }
     }
@@ -993,8 +992,11 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                             modifier = Modifier.size(18.dp),
                         )
                         Spacer(Modifier.width(5.dp))
+                        // Owner round 33 (item 25): the real count — the feed's
+                        // number or the fetched list, whichever is larger.
+                        val views = ScreenStore.statusViewCount(s)
                         Text(
-                            "${s.optInt("viewers", 0)} view${if (s.optInt("viewers", 0) == 1) "" else "s"}",
+                            "$views view${if (views == 1) "" else "s"}",
                             color = Color.White,
                             fontSize = 13.sp,
                         )

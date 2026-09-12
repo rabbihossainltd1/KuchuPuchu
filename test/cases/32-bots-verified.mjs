@@ -7300,6 +7300,44 @@ const convBetween = (db, a, b) =>
         prof.includes('else KpNetImage(url, "Shared photo", Modifier.fillMaxSize())'),
     );
   }
+  // Item 25: status viewers always showed 0 and the viewed-by sheet reloaded on
+  // every open. Root causes: ScreenStore.setStatuses keyed its change signature
+  // on ids + lengths only (a poll carrying the real counts was discarded, and
+  // the persisted 0 survived restarts); the sheet cache was a remember{} map
+  // that died with the viewer screen.
+  {
+    const store = kt("ScreenStore.kt");
+    const status = kt("StatusScreens.kt");
+    const setStatuses = store.slice(
+      store.indexOf("fun setStatuses(list: List<JSONObject>) {"),
+      store.indexOf("fun setCalls(list: List<JSONObject>) {"),
+    );
+    check(
+      "r33-25: ScreenStore — the statuses change signature includes the seen flag, the per-status view counts and the author's avatar token / name; a process-wide statusViewers map (mutableStateMapOf, cleared with the account) and statusViewCount() = max(feed count, fetched list size)",
+      setStatuses.includes('if (g.optBoolean("allViewed")) 1 else 0,') &&
+        setStatuses.includes('g.arr("statuses").objects().sumOf { it.optInt("viewers", 0) },') &&
+        setStatuses.includes('u?.optString("avatarRef").orEmpty(),') &&
+        store.includes("val statusViewers = mutableStateMapOf<String, List<JSONObject>>()") &&
+        store.includes(
+          'maxOf(s.optInt("viewers", 0), statusViewers[s.optString("id")]?.size ?: 0)',
+        ) &&
+        store.includes('statusesRaw = ""\n        statusViewers.clear()'),
+    );
+    check(
+      "r33-25: viewer screen — openViewers paints the cached list at once (loading only on a first-ever load), always refreshes behind it into ScreenStore.statusViewers, an error shows only without a cache; the eye row and the 'My status' row read statusViewCount",
+      !status.includes("val viewersCache = remember") &&
+        status.includes("val cached = ScreenStore.statusViewers[id]") &&
+        status.includes(
+          "viewers = cached ?: emptyList()\n        viewersLoading = cached == null",
+        ) &&
+        status.includes("ScreenStore.statusViewers[id] = list") &&
+        status.includes("}.onFailure { if (cached == null) viewersError = true }") &&
+        status.includes("val views = ScreenStore.statusViewCount(s)") &&
+        status.includes('"$views view${if (views == 1) "" else "s"}",') &&
+        status.includes("val views = myStatuses.sumOf { ScreenStore.statusViewCount(it) }") &&
+        !status.includes('s.optInt("viewers", 0)'),
+    );
+  }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
   // a touch on blank list space closes it (main and archive lists; r33-6
   // retired the hidden list).
