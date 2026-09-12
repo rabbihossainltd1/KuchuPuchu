@@ -942,7 +942,7 @@ class CallEngine(private val app: Application) {
                 CallNotify.cancelIncoming(app)
                 ringingId = null
             }
-            CallService.start(app, "In a call with ${ui.otherName}")
+            fgTitle("In a call with ${ui.otherName}")
         }
         if (isGroup) {
             // Owner round 32 (item 5c): each member's camera flag from the row
@@ -1004,7 +1004,7 @@ class CallEngine(private val app: Application) {
         VoiceIsolation.prepare(app)
         activeSince = System.currentTimeMillis()
         active = CallUi("pending", kind, "RINGING", false, title, convId, otherAvatar = avatarRef, group = true)
-        CallService.start(app, if (kind == "VIDEO") "Video calling $title" else "Calling $title")
+        fgTitle(if (kind == "VIDEO") "Video calling $title" else "Calling $title")
         scope.launch {
             try {
                 val streamOk = withContext(Dispatchers.IO) { capture(kind == "VIDEO") }
@@ -1222,7 +1222,7 @@ class CallEngine(private val app: Application) {
                                 )
                                 publishChange()
                                 updateProximityLock()
-                                CallService.start(app, "In a call with ${cur.otherName}")
+                                fgTitle("In a call with ${cur.otherName}")
                             }
                             PeerConnection.IceConnectionState.FAILED ->
                                 Handler(Looper.getMainLooper()).post {
@@ -1276,7 +1276,12 @@ class CallEngine(private val app: Application) {
         val cam = videoTrack
         if (cam != null) {
             peer.addTrack(cam, listOf("kp"))
-        } else {
+        } else if (Store.myId() < peerId) {
+            // Owner round 33 (item 21): only the OFFERING leg (the lexically
+            // smaller id, see groupSync) pre-adds the m-line. The answering leg
+            // gets its video transceiver from the offer and turns it sendrecv
+            // in groupSync; a second, dangling one here was where this side's
+            // camera track went (setTrack on an m-line that never existed).
             runCatching {
                 peer.addTransceiver(
                     MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO,
@@ -1327,7 +1332,7 @@ class CallEngine(private val app: Application) {
         VoiceIsolation.prepare(app)
         activeSince = System.currentTimeMillis()
         active = CallUi("pending", kind, "RINGING", false, name, userId, otherAvatar = avatar)
-        CallService.start(app, if (kind == "VIDEO") "Video calling $name" else "Calling $name")
+        fgTitle(if (kind == "VIDEO") "Video calling $name" else "Calling $name")
         scope.launch {
             try {
                 val streamOk = withContext(Dispatchers.IO) { capture(kind == "VIDEO") }
@@ -1417,7 +1422,7 @@ class CallEngine(private val app: Application) {
         val start = AudioRouter.begin(app, rec.kind)
         audioRoute = start
         speaker = start == AudioRoute.SPEAKER
-        CallService.start(app, "In a call with ${rec.otherName}")
+        fgTitle("In a call with ${rec.otherName}")
         // startedAt stays 0 (unknown): the timer runs from the SERVER's
         // started_at (parsed from the answer response / poll) so both phones
         // show the exact same duration.
@@ -1471,11 +1476,15 @@ class CallEngine(private val app: Application) {
                 }
                 capturing.await()
                 iceCallId = rec.id
-                val peer = newPc()
+                val peer = newPc(preaddVideo = false)
                 peer.setRemoteDescriptionAwait(SessionDescription(SessionDescription.Type.OFFER, offer))
-                // Belt & braces: the answering side must also offer to SEND
-                // video from the start — a recvonly answer would make any
-                // later camera/screen track silently droppable.
+                // The answering side must also offer to SEND video from the
+                // start — a recvonly answer would make any later camera/screen
+                // track silently droppable. Owner round 33 (item 21): this now
+                // reaches the transceiver the offer created (the only video one
+                // on a voice call), so the answer really is sendrecv and both
+                // phones share ONE video m-line — no renegotiation, and the
+                // receiver each side binds is the one the other side sends on.
                 runCatching {
                     peer.transceivers
                         .firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO }
@@ -1590,7 +1599,7 @@ class CallEngine(private val app: Application) {
                                 ?: peer.transceivers
                                     .firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO }
                                     ?.sender
-                        runCatching { if (sender != null) sender.setTrack(track, true) else peer.addTrack(track, listOf("kp")) }
+                        runCatching { if (sender != null) sender.setTrack(track, false) else peer.addTrack(track, listOf("kp")) }
                     }
                     localView?.let { runCatching { track.addSink(it) } }
                     cameraOff = false
@@ -1626,7 +1635,7 @@ class CallEngine(private val app: Application) {
                         pc?.transceivers
                             ?.firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO }
                             ?.sender
-                    if (sender != null) sender.setTrack(track, true) else pc?.addTrack(track)
+                    if (sender != null) sender.setTrack(track, false) else pc?.addTrack(track)
                     localView?.let { runCatching { track.addSink(it) } }
                 }
                 cameraOff = false
@@ -1690,10 +1699,12 @@ class CallEngine(private val app: Application) {
                                 // Announced early, never started: take it back
                                 // or the other phone keeps an empty preview.
                                 postMedia(screen = false)
+                                dropShareFgs()
                             }
                         }
                         .onFailure {
                         postMedia(screen = false)
+                        dropShareFgs()
                         // Named so the user's next report tells us exactly
                         // which stage broke (service/FGS/projection/capturer).
                         notify("Screen share failed (${it.javaClass.simpleName}). Please try again.")
@@ -1705,6 +1716,44 @@ class CallEngine(private val app: Application) {
 
     private var cameraBeforeShare = false
     private var routeBeforeShare = AudioRoute.EARPIECE
+
+    /**
+     * Owner round 33 (items 21/22): true from the moment a screen share is being
+     * brought up until it is torn down. [CallService] keeps the mediaProjection
+     * foreground type declared while this is set - see [fgTitle].
+     */
+    @Volatile var shareFgs = false
+        private set
+
+    /**
+     * Every ongoing-notification update goes through here. Android 13-16 compare
+     * the process's declared foreground-service types on every startForeground();
+     * the old per-tick "In a call with ..." re-post declared microphone + camera
+     * only, so seconds into a share the system saw mediaProjection disappear and
+     * stopped the projection: the far side's preview card went black (item 21)
+     * and the system-audio tap died with the projection (item 22). While a share
+     * is up the title stays "Sharing screen" and the type stays declared.
+     */
+    private fun fgTitle(title: String) {
+        CallService.start(app, if (shareFgs) "Sharing screen" else title, share = shareFgs)
+    }
+
+    /** The plain ongoing title for the current row. */
+    private fun callTitle(): String {
+        val cur = active ?: return "Call in progress"
+        return when {
+            cur.status == "ACTIVE" -> "In a call with ${cur.otherName}"
+            cur.kind == "VIDEO" -> "Video calling ${cur.otherName}"
+            else -> "Calling ${cur.otherName}"
+        }
+    }
+
+    /** The share is over (or never came up): back to microphone + camera only. */
+    private fun dropShareFgs() {
+        if (!shareFgs) return
+        shareFgs = false
+        if (active != null) fgTitle(callTitle())
+    }
 
     private suspend fun startShare(data: Intent) {
         // Owner round 21: his screen-share sound (plays when it really starts).
@@ -1718,19 +1767,17 @@ class CallEngine(private val app: Application) {
         // Android 14+: the foreground service must re-declare the
         // mediaProjection type BEFORE getMediaProjection() is called, so
         // restart the service with share=true and wait for it to be ready.
-        CallService.start(app, "Sharing screen", share = true)
+        // Owner round 33 (item 21): the flag stays up for the whole share so no
+        // later notification refresh can drop the type again (see fgTitle).
+        shareFgs = true
+        fgTitle("Sharing screen")
         var waits = 0
         while (!CallService.fgReady.get() && waits++ < 60) delay(50)
         if (!CallService.fgReady.get()) {
             notify("Screen share couldn't start. Try again.")
+            dropShareFgs()
             return
         }
-        try {
-            capturer?.stopCapture()
-        } catch (_: Exception) {
-        }
-        capturer?.dispose()
-        videoTrack?.let { track -> localView?.let { runCatching { track.removeSink(it) } } }
         val screen =
             KpScreenCapturer(app, data) {
                 scope.launch { if (sharing) stopShare() }
@@ -1738,7 +1785,24 @@ class CallEngine(private val app: Application) {
         val src = factory?.createVideoSource(true) ?: return
         val nextHelper = SurfaceTextureHelper.create("kp-share", egl.eglBaseContext)
         screen.initialize(nextHelper, app, src.capturerObserver)
-        screen.startCapture(720, 1280, 20)
+        try {
+            screen.startCapture(720, 1280, 20)
+        } catch (e: Exception) {
+            // Owner round 33 (item 21): a projection that would not open leaves
+            // nothing behind - no half-built capturer, and no camera stopped for
+            // a share that never began (toggleShare names the failure).
+            runCatching { screen.dispose() }
+            runCatching { nextHelper.dispose() }
+            runCatching { src.dispose() }
+            throw e
+        }
+        // Only now, with the projection up, does the camera make way.
+        try {
+            capturer?.stopCapture()
+        } catch (_: Exception) {
+        }
+        capturer?.dispose()
+        videoTrack?.let { track -> localView?.let { runCatching { track.removeSink(it) } } }
         val track = factory!!.createVideoTrack("kp-share", src)
         val sender = pc?.senders?.find { it.track()?.kind() == "video" }
             ?: // Voice call: the always-created sendrecv video transceiver
@@ -1746,11 +1810,14 @@ class CallEngine(private val app: Application) {
             pc?.transceivers
                 ?.firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO }
                 ?.sender
-        if (sender != null) sender.setTrack(track, true) else pc?.addTrack(track)
+        if (sender != null) sender.setTrack(track, false) else pc?.addTrack(track)
         helper?.dispose()
         helper = nextHelper
         runCatching { videoSource?.dispose() }
         videoSource = src
+        // Owner round 33 (item 21): the camera track wrapper is ours to release -
+        // the sender no longer owns the tracks it carries (see setTrack below).
+        runCatching { videoTrack?.dispose() }
         videoTrack = track
         capturer = screen
         sharing = true
@@ -1775,7 +1842,10 @@ class CallEngine(private val app: Application) {
         }
         capturer?.dispose()
         capturer = null
-        videoTrack?.let { track -> localView?.let { runCatching { track.removeSink(it) } } }
+        videoTrack?.let { track ->
+            localView?.let { runCatching { track.removeSink(it) } }
+            runCatching { track.dispose() }
+        }
         runCatching { videoSource?.dispose() }
         videoSource = null
         helper?.dispose()
@@ -1791,7 +1861,7 @@ class CallEngine(private val app: Application) {
                 ?.sender
         val track = videoTrack
         if (track != null) {
-            if (sender != null) sender.setTrack(track, true) else pc?.addTrack(track)
+            if (sender != null) sender.setTrack(track, false) else pc?.addTrack(track)
             localView?.setMirror(currentFacingFront)
             localView?.let { runCatching { track.addSink(it) } }
         } else {
@@ -1805,6 +1875,9 @@ class CallEngine(private val app: Application) {
         }
         publishChange()
         postMedia(camera = track != null, screen = false)
+        // Owner round 33 (item 21): the projection is gone, so the foreground
+        // service goes back to microphone + camera.
+        dropShareFgs()
     }
 
     fun attachLocal(view: SurfaceViewRenderer) {
@@ -1865,6 +1938,7 @@ class CallEngine(private val app: Application) {
             runCatching { v.release() }
         }
         audioTrack = null
+        runCatching { videoTrack?.dispose() }
         videoTrack = null
         remoteVideo = null
         localView = null
@@ -1898,6 +1972,7 @@ class CallEngine(private val app: Application) {
         muted = false
         cameraOff = false
         sharing = false
+        shareFgs = false
         onHold = false
         hasRemote = false
         resetPeerMedia()
@@ -2149,7 +2224,7 @@ class CallEngine(private val app: Application) {
         publishChange()
         updateProximityLock()
         // Rebuild the ongoing notification with the media-ready chronometer epoch.
-        CallService.start(app, "In a call with ${cur.otherName}")
+        fgTitle("In a call with ${cur.otherName}")
     }
 
     /** The offer a RINGING row delivered, for [answer] (call id → SDP). */
@@ -2253,7 +2328,7 @@ class CallEngine(private val app: Application) {
             mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
         }
 
-    private fun newPc(): PeerConnection {
+    private fun newPc(preaddVideo: Boolean = true): PeerConnection {
         val rtc =
             PeerConnection.RTCConfiguration(iceServers()).apply {
                 sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
@@ -2417,11 +2492,19 @@ override fun onRenegotiationNeeded() {
             )!!
         audioTrack?.let { peer.addTrack(it, listOf("kp")) }
         videoTrack?.let { peer.addTrack(it, listOf("kp")) }
-        if (videoTrack == null) {
+        if (videoTrack == null && preaddVideo) {
             // Voice calls still get a sendrecv VIDEO m-line: without it there
             // is nowhere to put a screen-share track later, and mid-call
             // addTrack would need renegotiation (which we don't do) — the
             // other phone then saw nothing at all.
+            // Owner round 33 (item 21): the CALLER adds it. The callee must
+            // not: WebRTC only reuses addTrack-made transceivers for a remote
+            // offer, so its copy could never match the caller's m-line and the
+            // callee ended up with two video transceivers - one the offer
+            // created (answered recvonly), one dangling, which forced an extra
+            // renegotiation and left "the first video receiver" (what both
+            // phones rendered) on an m-line that never carried a frame.
+            // answer() turns the offer's own m-line sendrecv instead.
             runCatching {
                 peer.addTransceiver(
                     MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO,
@@ -2568,25 +2651,20 @@ override fun onRenegotiationNeeded() {
         }
     }
 
-    /** setTrack() swaps don't re-fire onAddTrack — re-detect replaced video. */
+    /**
+     * Keeps the renderer on the far side's video track. Owner round 33 (item
+     * 21): that track is the one onAddTrack handed over and nothing else. This
+     * used to re-scan the receiver list on every tick and bind "the first video
+     * receiver" - on a voice call a placeholder m-line that never carried a
+     * frame (the other phone's camera/screen arrived on the second one), so the
+     * preview card stayed black; worse, every such read disposes the wrappers
+     * the previous read returned, and with them the sinks the renderer was
+     * attached through. addSink is idempotent, so this stays cheap per tick.
+     */
     private fun rebindRemoteVideo() {
-        val peer = pc ?: return
-        val current =
-            peer.receivers
-                .firstNotNullOfOrNull { it.track() as? VideoTrack }
-                ?: return
-        // A voice call already carries an empty placeholder video track (the
-        // sendrecv transceiver), and a mid-call setTrack() — screen share, or
-        // the other side switching their camera on — can keep that SAME track
-        // object. Nothing to rebind then, but a track the audio-only answer
-        // left disabled delivers no frames, so the first-frame gate (and with
-        // it the whole voice→video promotion) would never fire: this is why an
-        // incoming screen share showed nothing on a voice call.
-        if (current === remoteVideo) {
-            if (!hasRemote) runCatching { current.setEnabled(true) }
-            return
-        }
-        bindRemote(current)
+        if (pc == null) return
+        val track = remoteVideo ?: return
+        remoteView?.let { runCatching { track.addSink(it) } }
     }
 
     private fun flushIce() {

@@ -470,6 +470,14 @@ class CallService : Service() {
             val call = CallEngine.instance?.active
             val callStartedAt = call?.startedAt ?: 0L
             val callKind = call?.kind
+            // Owner round 33 (items 21/22): while the engine holds a screen share
+            // (or is bringing one up) the mediaProjection service type must stay
+            // declared, whoever posts the update. Android 13-16 compare the
+            // process's declared types on every startForeground(); a plain title
+            // refresh that said "microphone + camera" made the system stop the
+            // projection within seconds - black card on the far side, dead
+            // system-audio tap.
+            val keepShare = share || CallEngine.instance?.shareFgs == true
             if (started) {
                 // Only skip when there is genuinely nothing to change. This
                 // used to compare `share` alone, so the second start() of every
@@ -477,31 +485,31 @@ class CallService : Service() {
                 // with Alice" once the callee picks up - was dropped and the
                 // notification stayed frozen on the ringing text for the whole
                 // call.
-                if (share == lastShare && title == lastTitle &&
+                if (keepShare == lastShare && title == lastTitle &&
                     callStartedAt == lastStartedAt && callKind == lastKind
                 ) return
                 // Reset fgReady so callers wait for onStartCommand to
                 // re-declare the service types (Android 14+ requires the
                 // mediaProjection type before getMediaProjection()).
-                lastShare = share
+                lastShare = keepShare
                 lastTitle = title
                 lastStartedAt = callStartedAt
                 lastKind = callKind
                 fgReady.set(false)
                 runCatching {
                     ctx.startService(
-                        Intent(ctx, CallService::class.java).putExtra("title", title).putExtra("share", share),
+                        Intent(ctx, CallService::class.java).putExtra("title", title).putExtra("share", keepShare),
                     )
                 }
                 return
             }
             started = true
-            lastShare = share
+            lastShare = keepShare
             lastTitle = title
             lastStartedAt = callStartedAt
             lastKind = callKind
             fgReady.set(false)
-            val intent = Intent(ctx, CallService::class.java).putExtra("title", title).putExtra("share", share)
+            val intent = Intent(ctx, CallService::class.java).putExtra("title", title).putExtra("share", keepShare)
             runCatching {
                 if (Build.VERSION.SDK_INT >= 29) {
                     ctx.startForegroundService(intent)

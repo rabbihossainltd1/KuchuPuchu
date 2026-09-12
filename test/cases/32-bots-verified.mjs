@@ -5927,7 +5927,7 @@ const convBetween = (db, a, b) =>
         ) &&
         eng.includes("if (active?.group == true) applyGroupPeerMedia(who, camera, kind)") &&
         eng.includes(
-          'runCatching { if (sender != null) sender.setTrack(track, true) else peer.addTrack(track, listOf("kp")) }',
+          'runCatching { if (sender != null) sender.setTrack(track, false) else peer.addTrack(track, listOf("kp")) }',
         ) &&
         !eng.includes("Group video calling is coming in the next update."),
     );
@@ -7070,6 +7070,57 @@ const convBetween = (db, a, b) =>
         eng.includes("armIceWatchdog(if (recentNetworkChange()) 800L else 4_000L)") &&
         api.includes("fun bounceAll() {") &&
         api.includes("runCatching { old?.cancel() }"),
+    );
+  }
+  // Items 21 + 22: audio call + screen share — the far side's card was black and
+  // the system-audio tap died. Two causes: every per-tick "In a call with …"
+  // re-post of the ongoing notification re-declared the foreground service
+  // WITHOUT the mediaProjection type, so Android 13–16 stopped the projection
+  // within seconds; and on a voice call both phones rendered "the first video
+  // receiver", an m-line that never carried a frame.
+  {
+    const eng = kt("CallEngine.kt");
+    const svc = kt("CallNotify.kt");
+    const cap = kt("KpScreenCapturer.kt");
+    check(
+      "r33-21: the foreground service keeps the mediaProjection type for the whole share — every notification update goes through fgTitle(), the type stays declared while shareFgs is up, CallService.start() cannot drop it, stopShare / aborted starts release it, hangup resets it",
+      eng.includes("@Volatile var shareFgs = false") &&
+        eng.includes("private fun fgTitle(title: String) {") &&
+        eng.includes(
+          'CallService.start(app, if (shareFgs) "Sharing screen" else title, share = shareFgs)',
+        ) &&
+        eng.includes("private fun dropShareFgs() {") &&
+        eng.includes("if (active != null) fgTitle(callTitle())") &&
+        eng.includes('shareFgs = true\n        fgTitle("Sharing screen")') &&
+        (eng.match(/CallService\.start\(/g) ?? []).length === 1 &&
+        (eng.match(/dropShareFgs\(\)/g) ?? []).length >= 5 &&
+        eng.includes("sharing = false\n        shareFgs = false") &&
+        svc.includes("val keepShare = share || CallEngine.instance?.shareFgs == true") &&
+        svc.includes('.putExtra("share", keepShare)') &&
+        !svc.includes('.putExtra("share", share)'),
+    );
+    check(
+      "r33-21: one video m-line per call, bound from onAddTrack — the answering side (1:1 callee, group answering leg) no longer pre-adds a second video transceiver, rebindRemoteVideo() never re-scans the receiver list, senders do not own the track wrappers they carry, a projection that will not open fails loudly instead of sharing black, and the camera is only stopped once the projection is up",
+      eng.includes("private fun newPc(preaddVideo: Boolean = true): PeerConnection {") &&
+        eng.includes("val peer = newPc(preaddVideo = false)") &&
+        eng.includes("if (videoTrack == null && preaddVideo) {") &&
+        eng.includes("} else if (Store.myId() < peerId) {") &&
+        !eng.includes("firstNotNullOfOrNull { it.track() as? VideoTrack }") &&
+        !eng.includes(".receivers") &&
+        eng.includes(
+          "val track = remoteVideo ?: return\n        remoteView?.let { runCatching { track.addSink(it) } }",
+        ) &&
+        !eng.includes("setTrack(track, true)") &&
+        (eng.match(/setTrack\(track, false\)/g) ?? []).length === 4 &&
+        eng.indexOf("screen.startCapture(720, 1280, 20)") <
+          eng.indexOf("// Only now, with the projection up, does the camera make way.") &&
+        cap.includes('?: throw IllegalStateException("No media projection")'),
+    );
+    check(
+      "r33-22: system audio over screen share rides the same projection — the tap starts on the projection before the virtual display and is mixed in the mic callback (unchanged), so keeping the mediaProjection type declared (r33-21) is what keeps it alive",
+      cap.includes("SystemAudioTap.start(app, mp)") &&
+        cap.indexOf("SystemAudioTap.start(app, mp)") < cap.indexOf("mp.createVirtualDisplay(") &&
+        eng.includes("SystemAudioTap.mixInto(audioFormat, channelCount, sampleRate, audioBuffer)"),
     );
   }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or

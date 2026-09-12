@@ -45,7 +45,10 @@ class KpScreenCapturer(
         this.height = height
         val helper = helper ?: return
         val mgr = app.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        val mp = mgr.getMediaProjection(Activity.RESULT_OK, resultData) ?: return
+        // Owner round 33 (item 21): a projection that will not open is a failure
+        // the user gets told about (toggleShare names it) - not a share that
+        // quietly sends black.
+        val mp = mgr.getMediaProjection(Activity.RESULT_OK, resultData) ?: throw IllegalStateException("No media projection")
         mp.registerCallback(callback, main)
         projection = mp
         // Owner round 31 item 20: with "Share audio via screen share" on, the
