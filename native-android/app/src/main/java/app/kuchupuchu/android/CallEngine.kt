@@ -4,6 +4,8 @@ import android.app.Activity
 import android.app.Application
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.runtime.getValue
@@ -19,7 +21,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import org.webrtc.AudioSource
 import org.webrtc.AudioTrack
@@ -527,6 +529,8 @@ class CallEngine(private val app: Application) {
         // rather than on the first ring when there is no time to spare.
         runCatching { KpTelecom.ensureAccount(app) }
         loadIceConfig()
+        // Owner round 33 (item 13): Wi-Fi ↔ data / VPN changes move the call.
+        watchNetwork(ctx)
         // PeerConnectionFactory.initialize + factory creation used to happen
         // inside the first startCall()/answer() — 100-200ms of it landed on
         // the "Connecting…" path of the very first call of every session.
@@ -567,6 +571,12 @@ class CallEngine(private val app: Application) {
                         }
                         pokeTick()
                     }
+                    // Owner round 33 (item 15): the frame carries the candidate —
+                    // apply it now instead of spending two round trips (row +
+                    // /ice) to fetch it; our own echo needs nothing at all.
+                    t == "ice" && cid.isNotBlank() && cid == mine && active?.group != true -> {
+                        if (!applyIceFrame(ev)) pokeTick()
+                    }
                     cid.isNotBlank() && cid == mine -> pokeTick()
                 }
             }
@@ -583,7 +593,10 @@ class CallEngine(private val app: Application) {
                     while (isActive) {
                         // A throw out of tick() used to kill this coroutine, which
                         // meant no more call polling at all for the process.
-                        runCatching { tick() }.onFailure { notify("Call update failed. Retrying.") }
+                        // Owner round 33 (item 13): a failed tick is retried by
+                        // the very next one — no toast for a single miss; a real
+                        // outage surfaces as "Reconnecting…" (netFailStreak).
+                        runCatching { tick() }
                         // Once a second, ask the framework whether the call is
                         // still where the button says it is — and make it stop
                         // carrying the audio anywhere else. OEM stacks move
@@ -593,6 +606,11 @@ class CallEngine(private val app: Application) {
                         val wsId =
                             active?.id?.takeIf { it.isNotBlank() && !it.startsWith("pending") }
                                 ?: iceCallId.takeIf { it.isNotBlank() }
+                        // Owner round 33 (item 15): until media is up (ringing,
+                        // connecting) the net stays tight even with a live
+                        // socket — one lost ANSWER frame used to cost the caller
+                        // a 5 s wait ("the caller connects 6–7 s later").
+                        val mediaUp = active?.let { it.status == "ACTIVE" && !it.connecting } == true
                         delay(
                             when {
                                 // Signalling socket live: the timer is a
@@ -600,7 +618,8 @@ class CallEngine(private val app: Application) {
                                 // 5s, not 500ms: with live frames the net
                                 // only covers missed-edge cases, but it stays
                                 // low enough that a dropped frame is bounded.
-                                wsId != null && KpSocket.callLive(wsId) -> 5_000L
+                                wsId != null && KpSocket.callLive(wsId) && mediaUp -> 5_000L
+                                wsId != null && KpSocket.callLive(wsId) -> 1_500L
                                 active != null -> 500L
                                 // Round 24: back to 1.5s — the r23 2s cadence
                                 // added up to half a second of ring latency;
@@ -722,7 +741,7 @@ class CallEngine(private val app: Application) {
         // Owner round 23: 6s held the whole loop hostage on one slow
         // mobile-data request; 4.5s fails faster and retries sooner.
         val data =
-            withTimeout(4_500) {
+            withTimeoutOrNull(4_500) {
                 withContext(Dispatchers.IO) {
                     runCatching { Api.get("/api/calls/active", true) }.getOrNull()
                 }
@@ -790,6 +809,11 @@ class CallEngine(private val app: Application) {
         if (!incoming && status == "RINGING" && answerSdp.isNotBlank()) {
             status = "ACTIVE"
         }
+        // Owner round 33 (item 15): the ring already carries the offer — keep
+        // it so Accept never spends a round trip fetching it again.
+        if (incoming && !isGroup) {
+            next.optIso("offerSdp")?.takeIf { it.isNotBlank() }?.let { offerCache = next.optString("id") to it }
+        }
         val suppressed = isIncomingSuppressed()
         val autoAnswer = incoming && status == "RINGING" && (pendingAccept || suppressed)
         // Owner round 31 item 19: our camera just came on and the row has not
@@ -828,35 +852,17 @@ class CallEngine(private val app: Application) {
                 group = isGroup,
                 starterName = if (isGroup) other.optString("displayName") else "",
                 participants = if (isGroup) participants else emptyList(),
+                // Owner round 33 (item 15): the clock is the moment THIS phone's
+                // media came up (markConnected stamps it), never the server's
+                // answer timestamp — that seeded the caller's timer at 0:07 and
+                // ran the callee's while the caller still heard ringback. Until
+                // then an ACTIVE row is "Connecting…" on both sides.
                 startedAt =
-                    when {
-                        status != "ACTIVE" -> 0L
-                        // The SERVER's started_at is the single clock both
-                        // phones share — local clocks made the callee's timer
-                        // start instantly while the caller still rang (2-3s skew).
-                        else -> {
-                            val serverMs =
-                                runCatching {
-                                    java.time.Instant.parse(next.optIso("startedAt")).toEpochMilli()
-                                }.getOrDefault(0L)
-                            when {
-                                // Once ICE establishes the local display epoch,
-                                // polling must not replace it with the earlier
-                                // server answer timestamp and jump the clock.
-                                current?.connecting == false && (current.startedAt > 0L) -> current.startedAt
-                                serverMs > 0L -> serverMs
-                                (current?.startedAt ?: 0L) > 0L -> current!!.startedAt
-                                else -> 0L
-                            }
-                        }
-                    },
+                    if (status == "ACTIVE" && current?.connecting == false && current.startedAt > 0L) current.startedAt
+                    else 0L,
                 connecting =
-                    autoAnswer ||
-                        (status == "ACTIVE" && next.optIso("startedAt").isNullOrBlank()) ||
-                        // Polling must not clear the media gate merely because
-                        // answer-time startedAt has arrived. ICE owns the
-                        // transition from Connecting to the running timer.
-                        current?.connecting == true,
+                    status == "ACTIVE" &&
+                        !(current?.connecting == false && (current?.startedAt ?: 0L) > 0L),
             )
         if (current?.id != ui.id) activeSince = System.currentTimeMillis()
         if (current?.id?.startsWith("pending") == true) {
@@ -1067,10 +1073,6 @@ class CallEngine(private val app: Application) {
             return
         }
         answering.set(false)
-        runCatching {
-            val ms = java.time.Instant.parse(call.optIso("startedAt")).toEpochMilli()
-            if (ms > 0L) active = active?.copy(startedAt = ms)
-        }
         active = active?.copy(status = "ACTIVE", participants = call.arr("participants").objects())
         publishChange()
         if (cameraLive) postMedia(camera = true)
@@ -1216,7 +1218,7 @@ class CallEngine(private val app: Application) {
                                 hasRemote = true
                                 active = cur.copy(
                                     connecting = false,
-                                    startedAt = if (cur.startedAt > 0L) cur.startedAt else System.currentTimeMillis(),
+                                    startedAt = if (!cur.connecting && cur.startedAt > 0L) cur.startedAt else System.currentTimeMillis(),
                                 )
                                 publishChange()
                                 updateProximityLock()
@@ -1443,8 +1445,10 @@ class CallEngine(private val app: Application) {
                 // capture now, in parallel with fetching the offer, and join
                 // before the answer is built.
                 val capturing = async(Dispatchers.IO) { runCatching { capture(rec.kind == "VIDEO") } }
-                var offer = ""
+                // Owner round 33 (item 15): the ring already delivered the offer.
+                var offer = cachedOffer(rec.id)
                 for (attempt in 0 until 100) {
+                    if (offer.isNotBlank() || left.get()) break
                     offer =
                         withContext(Dispatchers.IO) {
                             Api.get("/api/calls/active", true).arr("items").objects()
@@ -1480,22 +1484,18 @@ class CallEngine(private val app: Application) {
                 val answer = peer.createAnswerAwait(sdpConstraints())
                 peer.setLocalDescriptionAwait(answer)
                 flushIce()
-                val answered =
-                    withContext(Dispatchers.IO) {
-                        Api.post("/api/calls/${rec.id}/answer", JSONObject().put("answerSdp", answer.description))
+                // Owner round 33 (item 15): the caller's candidates have been on
+                // the server since the ring began — apply them while the answer
+                // travels, instead of after it. The timer stays on "Connecting…"
+                // until markConnected() (ICE + DTLS up on this phone).
+                val posting =
+                    async(Dispatchers.IO) {
+                        runCatching {
+                            Api.post("/api/calls/${rec.id}/answer", JSONObject().put("answerSdp", answer.description))
+                        }
                     }
-                // Adopt the server clock for the call timer (both sides identical).
-                runCatching {
-                    val ms = java.time.Instant.parse(answered.optJSONObject("call")?.optIso("startedAt")).toEpochMilli()
-                    if (ms > 0L) {
-                        // Answer time is the shared timer base, but media may
-                        // not be connected yet. Keep the UI on Connecting
-                        // until ICE explicitly reports CONNECTED/COMPLETED.
-                        active = active?.copy(startedAt = ms, connecting = true)
-                        publishChange()
-                    }
-                }
                 pullIce(rec.id)
+                posting.await().getOrThrow()
             } catch (e: Exception) {
                 answering.set(false)
                 notify("Couldn't connect the call. Try again.")
@@ -1884,6 +1884,9 @@ class CallEngine(private val app: Application) {
         seenIce.clear()
         iceWatchdog?.let { Handler(Looper.getMainLooper()).removeCallbacks(it) }
         iceWatchdog = null
+        iceRestartCount = 0
+        iceRestarting.set(false)
+        offerCache = null
         speaker = false
         audioRoute = AudioRoute.EARPIECE
         proximityLock?.let { if (it.isHeld) runCatching { it.release() } }
@@ -2057,44 +2060,168 @@ class CallEngine(private val app: Application) {
      * ICE can get permanently stuck in CHECKING on weak/asymmetric mobile
      * networks (one bar, carrier NAT) with no callback ever firing again —
      * that left the callee's screen on "Connecting…" forever with nothing
-     * to recover it. If we're not CONNECTED within 12s of entering
-     * CHECKING/DISCONNECTED, force an ICE restart (fresh candidates,
-     * same call) instead of hanging silently.
+     * to recover it. If we're not CONNECTED within [delayMs] (12s from a
+     * fresh CHECKING), force an ICE restart (fresh candidates, same call)
+     * instead of hanging silently.
+     *
+     * Owner round 33 (item 13): a call that WAS up and lost its path (Wi-Fi ↔
+     * data, a VPN coming up) is repaired too — the old `connecting` guard
+     * skipped every mid-call disconnect, so a switched network was never
+     * restarted — and it is repaired fast (see the DISCONNECTED branch).
      */
-    private fun armIceWatchdog() {
+    private fun armIceWatchdog(delayMs: Long = 12_000L) {
         iceWatchdog?.let { Handler(Looper.getMainLooper()).removeCallbacks(it) }
         val callId = active?.id ?: return
         val runnable = Runnable {
             if (active?.id != callId) return@Runnable
-            if (active?.connecting != true) return@Runnable
-            val peer = pc ?: return@Runnable
-            if (peer.iceConnectionState() == PeerConnection.IceConnectionState.CONNECTED ||
-                peer.iceConnectionState() == PeerConnection.IceConnectionState.COMPLETED
-            ) {
-                return@Runnable
-            }
-            notify("Reconnecting…")
-            scope.launch {
-                try {
-                    if (peer.signalingState() != PeerConnection.SignalingState.STABLE) return@launch
-                    val constraints = sdpConstraints().apply {
-                        mandatory.add(MediaConstraints.KeyValuePair("IceRestart", "true"))
-                    }
-                    val offer = peer.createOfferAwait(constraints)
-                    peer.setLocalDescriptionAwait(offer)
-                    withContext(Dispatchers.IO) {
-                        Api.post("/api/calls/$callId/reoffer", JSONObject().put("sdp", offer.description))
-                    }
-                    awaitingReanswer = true
-                    // If the restart itself doesn't recover either, don't
-                    // loop forever — one retry is enough to not leave the
-                    // user stuck with no recourse but hanging up.
-                } catch (_: Exception) {
-                }
-            }
+            if (iceUp()) return@Runnable
+            restartIce("Reconnecting…")
         }
         iceWatchdog = runnable
-        Handler(Looper.getMainLooper()).postDelayed(runnable, 12_000L)
+        Handler(Looper.getMainLooper()).postDelayed(runnable, delayMs)
+    }
+
+    private fun iceUp(): Boolean {
+        val s = pc?.iceConnectionState() ?: return false
+        return s == PeerConnection.IceConnectionState.CONNECTED || s == PeerConnection.IceConnectionState.COMPLETED
+    }
+
+    /** Restarts per outage (reset when media comes back); beyond this the user is told. */
+    private val MAX_ICE_RESTARTS = 6
+    private var iceRestartCount = 0
+    private val iceRestarting = AtomicBoolean(false)
+
+    /**
+     * Owner round 33 (item 13): ICE restart on the live call — a fresh offer
+     * with new candidates through the same reoffer/reanswer path a screen
+     * share uses; the peer answers it in place. Bounded so a dead network
+     * cannot loop forever.
+     */
+    private fun restartIce(reason: String) {
+        val callId = active?.id?.takeIf { it.isNotBlank() && !it.startsWith("pending") } ?: return
+        val peer = pc ?: return
+        if (iceRestartCount >= MAX_ICE_RESTARTS) {
+            notify("Call connection failed. Check your internet and try again.")
+            return
+        }
+        if (iceRestarting.getAndSet(true)) return
+        iceRestartCount += 1
+        if (reason.isNotBlank()) notify(reason)
+        scope.launch {
+            try {
+                if (peer.signalingState() != PeerConnection.SignalingState.STABLE) {
+                    // A renegotiation is mid-flight: let it settle first.
+                    delay(1_500)
+                    if (peer.signalingState() != PeerConnection.SignalingState.STABLE) return@launch
+                }
+                val constraints = sdpConstraints().apply {
+                    mandatory.add(MediaConstraints.KeyValuePair("IceRestart", "true"))
+                }
+                val offer = peer.createOfferAwait(constraints)
+                peer.setLocalDescriptionAwait(offer)
+                withContext(Dispatchers.IO) {
+                    Api.post("/api/calls/$callId/reoffer", JSONObject().put("sdp", offer.description))
+                }
+                awaitingReanswer = true
+            } catch (_: Exception) {
+            } finally {
+                iceRestarting.set(false)
+            }
+        }
+    }
+
+    /**
+     * Owner round 33 (item 15): the timer starts when the call is REALLY up —
+     * PeerConnectionState.CONNECTED, i.e. ICE *and* DTLS. ICE alone fired on
+     * the callee the instant its checks reached the caller, before the caller
+     * had even applied the answer (the callee's clock ran while the caller
+     * still heard ringback); and both sides then based the clock on the
+     * server's answer timestamp, so the caller's timer opened at 0:07. DTLS
+     * completes within one round trip on both phones, and each stamps its own
+     * connect moment, so the two clocks agree. A re-connect (ICE restart,
+     * renegotiation) never rewinds a running clock.
+     */
+    private fun markConnected() {
+        val cur = active ?: return
+        iceRestartCount = 0
+        if (!cur.connecting && cur.startedAt > 0L) return
+        active = cur.copy(connecting = false, startedAt = System.currentTimeMillis())
+        publishChange()
+        updateProximityLock()
+        // Rebuild the ongoing notification with the media-ready chronometer epoch.
+        CallService.start(app, "In a call with ${cur.otherName}")
+    }
+
+    /** The offer a RINGING row delivered, for [answer] (call id → SDP). */
+    @Volatile private var offerCache: Pair<String, String>? = null
+
+    private fun cachedOffer(callId: String): String = offerCache?.takeIf { it.first == callId }?.second.orEmpty()
+
+    /** A socket `ice` frame applied straight to the peer; false = fetch it the slow way. */
+    private fun applyIceFrame(ev: JSONObject): Boolean {
+        val peer = pc ?: return false
+        if (peer.remoteDescription == null) return false
+        if (ev.optString("from") == Store.myId()) return true
+        val c = ev.optJSONObject("candidate") ?: return false
+        val cand = c.optString("candidate")
+        if (cand.isBlank()) return false
+        if (cand in seenIce) return true
+        val ok = runCatching { peer.addIceCandidate(IceCandidate(c.optString("sdpMid"), c.optInt("sdpMLineIndex"), cand)) }.isSuccess
+        if (ok) seenIce.add(cand)
+        return ok
+    }
+
+    /* ---- Owner round 33 (item 13): follow the phone's default network ---- */
+
+    @Volatile private var lastNetwork: Network? = null
+    @Volatile private var networkLost = false
+    @Volatile private var networkChangedAt = 0L
+    private var netCallback: ConnectivityManager.NetworkCallback? = null
+
+    private fun recentNetworkChange(): Boolean = System.currentTimeMillis() - networkChangedAt < 60_000L
+
+    private fun watchNetwork(ctx: Context) {
+        if (netCallback != null) return
+        val mgr = ctx.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+        val cb =
+            object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    val prev = lastNetwork
+                    lastNetwork = network
+                    // The registration echo is the baseline, not a change.
+                    if (prev == null) return
+                    if (prev == network && !networkLost) return
+                    networkLost = false
+                    Handler(Looper.getMainLooper()).post { onNetworkChanged() }
+                }
+
+                override fun onLost(network: Network) {
+                    if (network == lastNetwork) networkLost = true
+                }
+            }
+        runCatching {
+            mgr.registerDefaultNetworkCallback(cb)
+            netCallback = cb
+        }
+    }
+
+    /**
+     * Wi-Fi ↔ data, a VPN coming up or going away: every socket and pooled
+     * HTTP connection sits on a dead path until a 20 s ping notices, and the
+     * media path is gone with it. Reconnect signalling at once; give the
+     * peer connection's own re-gathering a moment, then restart ICE if media
+     * is not back — instead of the call sitting mute until it fails.
+     */
+    private fun onNetworkChanged() {
+        networkChangedAt = System.currentTimeMillis()
+        scope.launch(Dispatchers.IO) { runCatching { Api.http.connectionPool.evictAll() } }
+        KpSocket.bounceAll()
+        if (active == null) return
+        pokeTick()
+        scope.launch {
+            delay(1_500)
+            if (active != null && pc != null && !iceUp()) restartIce("Reconnecting…")
+        }
     }
 
     /**
@@ -2143,6 +2270,13 @@ class CallEngine(private val app: Application) {
                 rtc,
                 object : PeerConnection.Observer {
                     override fun onSignalingChange(p0: PeerConnection.SignalingState?) {}
+                    // Owner round 33 (item 15): ICE + DTLS up = the call is really
+                    // connected on this phone; this is what starts the timer.
+                    override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {
+                        if (newState == PeerConnection.PeerConnectionState.CONNECTED) {
+                            Handler(Looper.getMainLooper()).post { markConnected() }
+                        }
+                    }
                     override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
                         when (state) {
                             PeerConnection.IceConnectionState.CHECKING ->
@@ -2152,27 +2286,6 @@ class CallEngine(private val app: Application) {
                             -> Handler(Looper.getMainLooper()).post {
                                 iceWatchdog?.let { Handler(Looper.getMainLooper()).removeCallbacks(it) }
                                 val cur = active ?: return@post
-                                active = cur.copy(
-                                    // The visible duration starts when media is
-                                    // actually usable, not at answer time. This
-                                    // prevents Connecting from revealing a
-                                    // counter already at 0:05/0:06.
-                                    connecting = false,
-                                    // …but only the FIRST time media is live.
-                                    // CONNECTED/COMPLETED re-fires after every ICE
-                                    // restart, Wi-Fi→data handover and every
-                                    // mid-call renegotiation (screen share, camera
-                                    // on). Re-stamping the epoch there rewound the
-                                    // running timer to 0:00 minutes into a call —
-                                    // the "2 minute er beshi hole time reset hoye
-                                    // jay / wrong time" report — and hangup()
-                                    // derives the stored duration from the same
-                                    // field, so the call HISTORY was wrong too.
-                                    startedAt =
-                                        if (cur.startedAt > 0L) cur.startedAt
-                                        else System.currentTimeMillis(),
-                                )
-                                publishChange()
                                 // The far side may have swapped a track in via
                                 // setTrack() (screen share on a voice call),
                                 // which never re-fires onAddTrack — re-detect.
@@ -2187,9 +2300,17 @@ class CallEngine(private val app: Application) {
                                 // route button. Arm it the instant media is
                                 // actually live.
                                 updateProximityLock()
-                                // Rebuild the ongoing notification with the
-                                // media-ready chronometer epoch and call kind.
-                                CallService.start(app, "In a call with ${cur.otherName}")
+                                // Belt and braces for the clock: should the
+                                // connection-state callback be missed, the
+                                // state itself is asked a moment later.
+                                val id = cur.id
+                                Handler(Looper.getMainLooper()).postDelayed({
+                                    if (active?.id == id && active?.connecting == true &&
+                                        pc?.connectionState() == PeerConnection.PeerConnectionState.CONNECTED
+                                    ) {
+                                        markConnected()
+                                    }
+                                }, 3_000L)
                             }
                             PeerConnection.IceConnectionState.FAILED ->
                                 Handler(Looper.getMainLooper()).post {
@@ -2231,10 +2352,18 @@ class CallEngine(private val app: Application) {
                                         }
                                         return@post
                                     }
-                                    notify("Call connection failed. Check your internet and try again.")
+                                    // Owner round 33 (item 13): a later failure
+                                    // (network switched again) restarts too,
+                                    // bounded, instead of giving up on the call.
+                                    restartIce("Reconnecting…")
                                 }
                             PeerConnection.IceConnectionState.DISCONNECTED ->
-                                Handler(Looper.getMainLooper()).post { armIceWatchdog() }
+                                Handler(Looper.getMainLooper()).post {
+                                    // Mid-call: the clock keeps running; the path
+                                    // is repaired quickly — at once after a network
+                                    // change, else after a short grace for a blip.
+                                    armIceWatchdog(if (recentNetworkChange()) 800L else 4_000L)
+                                }
                             else -> {}
                         }
                     }
@@ -2491,10 +2620,13 @@ override fun onRenegotiationNeeded() {
             }
             val c = item.optJSONObject("candidate") ?: continue
             val cand = c.optString("candidate")
-            if (cand.isBlank()) continue
+            // Owner round 33 (item 15): a candidate the socket frame already
+            // applied is not added twice (seenIce holds ids AND candidates).
+            if (cand.isBlank() || cand in seenIce) continue
             try {
                 pc.addIceCandidate(IceCandidate(c.optString("sdpMid"), c.optInt("sdpMLineIndex"), cand))
                 if (id.isNotBlank()) seenIce.add(id)
+                seenIce.add(cand)
             } catch (_: Exception) {
             }
         }

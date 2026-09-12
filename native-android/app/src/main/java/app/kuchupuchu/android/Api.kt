@@ -500,6 +500,30 @@ object KpSocket {
         conns.keys.toList().forEach { leave(it) }
     }
 
+    /**
+     * Owner round 33 (item 13): the default network changed under us — every
+     * open socket sits on a dead path until OkHttp's 20 s ping notices, and
+     * `callLive()` keeps saying "live" meanwhile (so the call poll stays on
+     * its slow cadence and frames are lost). Reconnect every wanted channel
+     * now, from a fresh backoff.
+     */
+    fun bounceAll() {
+        conns.values.forEach { c ->
+            if (!c.want) return@forEach
+            val old = c.ws
+            c.ws = null
+            c.connecting = false
+            c.live.value = false
+            c.hbJob?.cancel()
+            c.hbJob = null
+            c.reconnectJob?.cancel()
+            c.attempts = 0
+            // The old socket's late callbacks see `webSocket !== c.ws` and are ignored.
+            runCatching { old?.cancel() }
+            connect(c)
+        }
+    }
+
     fun leave(path: String) {
         val c = conns.remove(path) ?: return
         c.want = false

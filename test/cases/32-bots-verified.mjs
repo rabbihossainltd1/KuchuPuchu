@@ -1629,7 +1629,7 @@ const convBetween = (db, a, b) =>
   check(
     "r23: in-app incoming ring is INSTANT — kickPoll fires for NEW calls (active==null), not just the live one",
     engine23.includes("if (active?.id == callId || active == null)") &&
-      engine23.includes("withTimeout(4_500)"),
+      engine23.includes("withTimeoutOrNull(4_500)"),
   );
   check(
     "r23/r31-11: call bubble matches the CHAT theme — the same fills as a text bubble (dark-blue default = blue, never amber), icon circle in the chat accent",
@@ -7013,6 +7013,63 @@ const convBetween = (db, a, b) =>
         ) &&
         kt("KpPush.kt").includes('friendlyPreview(data["body"] ?: "New message"),') &&
         (kt("SearchScreen.kt").match(/friendlyPreview\(/g) || []).length === 2,
+    );
+  }
+  // r33 items 13 + 15: "Call update failed" toasts, calls stuck on
+  // Connecting, dropped on Wi-Fi ↔ data / VPN; the callee's timer running
+  // while the caller still rings and the caller's clock opening at 0:07.
+  {
+    const eng = kt("CallEngine.kt");
+    const api = kt("Api.kt");
+    check(
+      "r33-15: the timer starts at the REAL connection on each side — PeerConnectionState.CONNECTED (ICE + DTLS) stamps this phone's own connect moment, a re-connect never rewinds it, and neither the poll nor the answer response seeds the clock from the server's answer timestamp",
+      eng.includes(
+        "override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {",
+      ) &&
+        eng.includes("private fun markConnected() {") &&
+        eng.includes("if (!cur.connecting && cur.startedAt > 0L) return") &&
+        eng.includes(
+          "active = cur.copy(connecting = false, startedAt = System.currentTimeMillis())",
+        ) &&
+        eng.includes(
+          'if (status == "ACTIVE" && current?.connecting == false && current.startedAt > 0L) current.startedAt',
+        ) &&
+        !eng.includes("serverMs") &&
+        !eng.includes("active = active?.copy(startedAt = ms, connecting = true)") &&
+        !eng.includes("if (ms > 0L) active = active?.copy(startedAt = ms)") &&
+        eng.includes(
+          "startedAt = if (!cur.connecting && cur.startedAt > 0L) cur.startedAt else System.currentTimeMillis(),",
+        ),
+    );
+    check(
+      "r33-15: faster connect — Accept answers from the offer the ring already carried (no extra /active round trip), pulls the caller's candidates while the answer posts, socket ICE frames are applied directly (own echo = no tick), and the safety-net poll stays at 1.5 s until media is up",
+      eng.includes("private fun cachedOffer(callId: String): String") &&
+        eng.includes("var offer = cachedOffer(rec.id)") &&
+        eng.includes("val posting =\n                    async(Dispatchers.IO) {") &&
+        eng.includes("pullIce(rec.id)\n                posting.await().getOrThrow()") &&
+        eng.includes("private fun applyIceFrame(ev: JSONObject): Boolean {") &&
+        eng.includes('if (ev.optString("from") == Store.myId()) return true') &&
+        eng.includes(
+          't == "ice" && cid.isNotBlank() && cid == mine && active?.group != true -> {',
+        ) &&
+        eng.includes("wsId != null && KpSocket.callLive(wsId) && mediaUp -> 5_000L") &&
+        eng.includes("wsId != null && KpSocket.callLive(wsId) -> 1_500L"),
+    );
+    check(
+      "r33-13: no 'Call update failed' toast (a slow /active is a counted miss, the loop retries silently); the default-network watch reconnects every socket, drops pooled HTTP connections and restarts ICE when media is not back; the watchdog repairs MID-CALL disconnects too (no `connecting` guard) and fast after a network change; ICE FAILED after the relay retry restarts (bounded) instead of giving up",
+      !eng.includes("Call update failed") &&
+        eng.includes("withTimeoutOrNull(4_500)") &&
+        eng.includes("mgr.registerDefaultNetworkCallback(cb)") &&
+        eng.includes("private fun onNetworkChanged() {") &&
+        eng.includes("KpSocket.bounceAll()") &&
+        eng.includes("Api.http.connectionPool.evictAll()") &&
+        eng.includes("private fun restartIce(reason: String) {") &&
+        eng.includes("if (iceRestartCount >= MAX_ICE_RESTARTS) {") &&
+        eng.includes("private fun armIceWatchdog(delayMs: Long = 12_000L) {") &&
+        !eng.includes("if (active?.connecting != true) return@Runnable") &&
+        eng.includes("armIceWatchdog(if (recentNetworkChange()) 800L else 4_000L)") &&
+        api.includes("fun bounceAll() {") &&
+        api.includes("runCatching { old?.cancel() }"),
     );
   }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
