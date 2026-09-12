@@ -1067,12 +1067,13 @@ const convBetween = (db, a, b) =>
         ),
       ) &&
       // r31-29: text, photo, video AND the grouped photo bubble (4 sites);
-      // r32-17: + the view-once card (5).
+      // r32-17: + the view-once card (5); r33-17: + the tappable quote inside
+      // a bubble, whose long-press still opens the bubble's sheet (6).
       (
         chat.match(
           /if \(selectedIds\.isNotEmpty\(\)\) onToggleSelect\(m\) else onLongPress\(m\)/g,
         ) || []
-      ).length === 5,
+      ).length === 6,
   );
   check(
     "r17-14: restoreChrome follows the theme (dark-blue keeps light icons)",
@@ -4914,16 +4915,18 @@ const convBetween = (db, a, b) =>
       src.includes("...(await statusQuote(db, kind, incomingMeta)),"),
   );
   check(
-    "r32-22: compact reply preview — in-bubble quote is ONE annotated line (name bold + text) with a 20 dp stripe and 3 dp vertical padding; the composer's ReplyQuoteBar is one line with a 22 dp stripe",
+    "r32-22: compact reply preview — in-bubble quote is ONE annotated line (name bold + text) with a 20 dp stripe and 3 dp vertical padding; the composer's ReplyQuoteBar is one line with a 22 dp stripe (r33-17: 34 dp when a media card sits beside it)",
     chat1516.includes(
-      "Box(Modifier.width(2.5.dp).height(20.dp).clip(RoundedCornerShape(2.dp)).background(chatAccent(theme)))",
+      "Box(Modifier.width(2.5.dp).height(if (thumbed) 34.dp else 20.dp).clip(RoundedCornerShape(2.dp)).background(chatAccent(theme)))",
     ) &&
       chat1516.includes(".padding(start = 6.dp, end = 8.dp, top = 3.dp, bottom = 3.dp),") &&
       (chat1516.match(/withStyle\(SpanStyle\(fontWeight = FontWeight\.SemiBold\)\)/g) || [])
         .length >= 2 &&
       !chat1516.includes("Box(Modifier.width(2.5.dp).height(26.dp)") &&
       !chat1516.includes(".height(30.dp)\n                .clip(RoundedCornerShape(2.dp))") &&
-      chat1516.includes(".height(22.dp)\n                .clip(RoundedCornerShape(2.dp))"),
+      chat1516.includes(
+        ".height(if (thumbed) 34.dp else 22.dp)\n                .clip(RoundedCornerShape(2.dp))",
+      ),
   );
   // Item 8: an emoji-only message has NO bubble (no lift, no fill, no 72 dp
   // minimum); the stamp sits in the band under the glyph in the wallpaper's
@@ -7149,6 +7152,60 @@ const convBetween = (db, a, b) =>
         !ui.includes(
           "horizontalArrangement = Arrangement.SpaceEvenly,\n            verticalAlignment = Alignment.CenterVertically,\n        ) {\n            val routeAction",
         ),
+    );
+  }
+  // Item 17: a media reply shows a small content card (photo / video frame /
+  // mic / file) in the composer bar and in the bubble quote; tapping the
+  // bubble quote jumps to the original (paging back when needed) and flashes it.
+  {
+    const chat = kt("ChatScreen.kt");
+    const bar = chat.slice(
+      chat.indexOf("private fun ReplyQuoteBar("),
+      chat.indexOf("private fun ReplyQuoteBar(") + 3200,
+    );
+    const thumb = chat.slice(
+      chat.indexOf("private fun QuoteThumb("),
+      chat.indexOf("private fun QuoteThumb(") + 1900,
+    );
+    const lo = chat.slice(
+      chat.indexOf("suspend fun loadOlder()"),
+      chat.indexOf("suspend fun loadOlder()") + 1900,
+    );
+    check(
+      "r33-17: media reply card — quoteKind / quoteText name a photo / video / voice / document (caption kept), QuoteThumb draws the photo (photoUrlOf), the video's cached frame or a mic / file glyph at 34 dp and nothing for a view-once; the composer bar and the bubble quote both carry it beside a 34 dp stripe",
+      chat.includes("internal fun quoteKind(m: JSONObject): String {") &&
+        chat.includes("internal fun quoteText(m: JSONObject): String {") &&
+        chat.includes("internal fun photoUrlOf(m: JSONObject): String? =") &&
+        thumb.includes("if (kind.isBlank() || isViewOnce(m)) return") &&
+        thumb.includes('"Photo" -> KpNetImage(photoUrlOf(m), "Photo", Modifier.fillMaxSize())') &&
+        thumb.includes("VideoThumbs.get(key) ?: VideoThumbs.readThumb(key)") &&
+        thumb.includes("Icons.Filled.Mic") &&
+        thumb.includes("Icons.Filled.InsertDriveFile") &&
+        thumb.includes("Modifier.size(34.dp).clip(RoundedCornerShape(6.dp))") &&
+        bar.includes("val thumbed = !isViewOnce(replyTo) && quoteKind(replyTo).isNotBlank()") &&
+        bar.includes("else quoteText(replyTo).take(80),") &&
+        bar.includes("if (thumbed) QuoteThumb(replyTo, Ink)") &&
+        chat.includes("val thumbed = q != null && !isViewOnce(q) && quoteKind(q).isNotBlank()") &&
+        chat.includes('else q?.let { quoteText(it).take(48) } ?: "Original message"') &&
+        chat.includes(
+          "if (thumbed && q != null) QuoteThumb(q, if (mine) Color(0xE6FFFFFF) else Ink)",
+        ),
+    );
+    check(
+      "r33-17: tap the bubble quote → the original: MessageRow.onJumpTo, a no-ripple combinedClickable on the quote (long-press still = the bubble's sheet), jumpTo pages back through history (suspend loadOlder, bounded) until the row is on the list, scrolls to it with head room and flashes the row once; deleted originals are left alone",
+      chat.includes("onJumpTo: (String) -> Unit = {},") &&
+        (chat.match(/onJumpTo = \{ jumpTo\(it\) \},/g) ?? []).length === 2 &&
+        chat.includes("onJumpTo(rid)") &&
+        lo.includes("if (!loadingOlder.compareAndSet(false, true)) return") &&
+        !lo.includes("scope.launch") &&
+        chat.includes("fun jumpTo(id: String) {") &&
+        chat.includes('if (msgs.any { it.optString("id") == id }) break') &&
+        chat.includes("listState.animateScrollToItem(i, -jumpPad)") &&
+        chat.includes('var flashId by remember { mutableStateOf("") }') &&
+        chat.includes(
+          'val flashing = flashId.isNotBlank() && albumPhotos(m).any { it.optString("id") == flashId }',
+        ) &&
+        chat.includes("if (idx == 0 && scrolling) loadOlder()"),
     );
   }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or

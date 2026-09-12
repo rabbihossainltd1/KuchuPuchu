@@ -216,6 +216,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     // Owner round 15: swipe-to-reply now also OPENS the keyboard — a bump
     // here drives the composer's focus+IME (0 = never).
     var replyFocusNonce by remember { mutableStateOf(0) }
+    // Owner round 33 (item 17): the row a quote tap just jumped to (it
+    // flashes once in the chat accent); "" = nothing flashing.
+    var flashId by remember { mutableStateOf("") }
     // Owner round 16: message reactions. Long-press still selects (unchanged)
     // AND raises the quick-emoji bar; "+" opens the full emoji sheet.
     var reactionFor by remember { mutableStateOf<JSONObject?>(null) }
@@ -877,43 +880,44 @@ fun ChatScreen(nav: NavController, convId: String) {
      * 50-message JSON files behind for no benefit — the merged list already lives in
      * ScreenStore, which is what paints offline.
      */
-    fun loadOlder() {
+    // Owner round 33 (item 17): suspending — the scroll trigger below runs
+    // it from its collector, and the quote jump awaits page after page until
+    // the original message is on the list.
+    suspend fun loadOlder() {
         val cur = olderCursor ?: return
         if (!hasMoreOlder) return
         if (!loadingOlder.compareAndSet(false, true)) return
-        scope.launch {
-            try {
-                val data = withContext(Dispatchers.IO) {
-                    Api.request(
-                        "/api/conversations/$convId/messages?before=" +
-                            java.net.URLEncoder.encode(cur.optString("at"), "UTF-8") +
-                            "&beforeRowid=" + cur.optLong("rowid"),
-                        "GET",
-                        null,
-                    )
-                }
-                val page = data.arr("items").objects()
-                val have = msgs.mapTo(HashSet()) { it.optString("id") }
-                val freshOld =
-                    page.filter {
-                        it.optString("id") !in have && it.optString("id") !in ScreenStore.hiddenMsgIds
-                    }
-                if (freshOld.isNotEmpty()) {
-                    olderIds.addAll(freshOld.map { it.optString("id") })
-                    ScreenStore.setMsgs(convId, freshOld + msgs.toList())
-                    paintFromStore()
-                    // The list grew at the TOP by N rows; without this the viewport
-                    // keeps the same index and the user is thrown N rows down.
-                    listState.scrollToItem(freshOld.size)
-                }
-                hasMoreOlder = data.optBoolean("hasMore")
-                data.optJSONObject("oldest")?.let { olderCursor = it }
-            } catch (_: Exception) {
-                // A failed page keeps hasMoreOlder true: the next scroll-up tries
-                // again. Swallowing it is right — the visible history is unaffected.
-            } finally {
-                loadingOlder.set(false)
+        try {
+            val data = withContext(Dispatchers.IO) {
+                Api.request(
+                    "/api/conversations/$convId/messages?before=" +
+                        java.net.URLEncoder.encode(cur.optString("at"), "UTF-8") +
+                        "&beforeRowid=" + cur.optLong("rowid"),
+                    "GET",
+                    null,
+                )
             }
+            val page = data.arr("items").objects()
+            val have = msgs.mapTo(HashSet()) { it.optString("id") }
+            val freshOld =
+                page.filter {
+                    it.optString("id") !in have && it.optString("id") !in ScreenStore.hiddenMsgIds
+                }
+            if (freshOld.isNotEmpty()) {
+                olderIds.addAll(freshOld.map { it.optString("id") })
+                ScreenStore.setMsgs(convId, freshOld + msgs.toList())
+                paintFromStore()
+                // The list grew at the TOP by N rows; without this the viewport
+                // keeps the same index and the user is thrown N rows down.
+                listState.scrollToItem(freshOld.size)
+            }
+            hasMoreOlder = data.optBoolean("hasMore")
+            data.optJSONObject("oldest")?.let { olderCursor = it }
+        } catch (_: Exception) {
+            // A failed page keeps hasMoreOlder true: the next scroll-up tries
+            // again. Swallowing it is right — the visible history is unaffected.
+        } finally {
+            loadingOlder.set(false)
         }
     }
 
@@ -2141,6 +2145,36 @@ fun ChatScreen(nav: NavController, convId: String) {
             val groupedMsgs by remember {
                 androidx.compose.runtime.derivedStateOf { foldAlbums(visibleMsgs) }
             }
+            // Owner round 33 (item 17): tap a quote → scroll to the original
+            // (paging back through history when it is not loaded yet, bounded)
+            // and flash its row once. A deleted / hidden original is left alone.
+            val jumpPad = with(LocalDensity.current) { 72.dp.roundToPx() }
+            fun jumpTo(id: String) {
+                scope.launch {
+                    if (pending.any { it.optString("id") == id || it.optString("clientId") == id }) return@launch
+                    fun rowOf() = groupedMsgs.indexOfFirst { row -> albumPhotos(row).any { it.optString("id") == id } }
+                    var i = rowOf()
+                    var pages = 0
+                    var waits = 0
+                    while (i < 0 && pages < 10 && waits < 50) {
+                        if (msgs.any { it.optString("id") == id }) break
+                        if (!hasMoreOlder) break
+                        if (loadingOlder.get()) {
+                            waits++
+                            delay(100)
+                        } else {
+                            loadOlder()
+                            pages++
+                        }
+                        i = rowOf()
+                    }
+                    if (i < 0) return@launch
+                    runCatching { listState.animateScrollToItem(i, -jumpPad) }
+                    flashId = id
+                    delay(1500)
+                    if (flashId == id) flashId = ""
+                }
+            }
             if (visibleMsgs.isEmpty() && pending.isEmpty() && initialLoad) {
                 // Owner round 13: Facebook-feed style skeletons while the
                 // first page loads — never a blank, silent screen.
@@ -2226,7 +2260,16 @@ fun ChatScreen(nav: NavController, convId: String) {
                             quoteFor = { rid -> (msgs + pending).firstOrNull { it.optString("id") == rid } },
                             onMessageOwner = { ownerId -> openChatWithUser(ownerId) },
                             theme = chatTheme,
+                            onJumpTo = { jumpTo(it) },
                         )
+                        // Owner round 33 (item 17): the jumped-to row flashes once.
+                        val flashing = flashId.isNotBlank() && albumPhotos(m).any { it.optString("id") == flashId }
+                        val flashAlpha by animateFloatAsState(
+                            if (flashing) 0.24f else 0f,
+                            tween(if (flashing) 180 else 700),
+                            label = "quoteflash",
+                        )
+                        if (flashAlpha > 0.004f) Box(Modifier.matchParentSize().background(chatAccent(chatTheme).copy(alpha = flashAlpha)))
                     }
                 }
                 items(
@@ -2247,6 +2290,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                         pendingEcho = true,
                         theme = chatTheme,
                         onOpenAlbum = { msg -> albumMsg = msg },
+                        quoteFor = { rid -> (msgs + pending).firstOrNull { it.optString("id") == rid } },
+                        onJumpTo = { jumpTo(it) },
                     )
                 }
                 // Owner round 4: one pretty bouncing-dots bubble whenever
@@ -3645,6 +3690,78 @@ private fun StatusQuote(st: JSONObject, mine: Boolean, theme: String) {
     }
 }
 
+/** Owner round 33 (item 17): what a quoted message IS — "Photo" / "Video" /
+ *  "Voice message" / "Document" for media, "" for anything that reads as text. */
+internal fun quoteKind(m: JSONObject): String {
+    val kind = m.optString("kind")
+    if (kind == "IMAGE") return "Photo"
+    if (kind == "VIDEO") return "Video"
+    if (kind != "FILE") return ""
+    return when {
+        sentAsDocument(m) -> "Document"
+        fileLooksVoice(m) -> "Voice message"
+        fileLooksImage(m) -> "Photo"
+        fileLooksVideo(m) -> "Video"
+        else -> "Document"
+    }
+}
+
+/** The quote's words: the body for text, the media word (plus its caption
+ *  when there is one) for media, "Sticker" for a custom sticker. */
+internal fun quoteText(m: JSONObject): String {
+    val body = m.optText("body")
+    if (m.optString("kind") == "STICKER" && EmojiRepo.isCustomId(body)) return "Sticker"
+    val kind = quoteKind(m)
+    if (kind.isBlank()) return body.ifBlank { "Message" }
+    return if (body.isBlank()) kind else "$kind \u00b7 $body"
+}
+
+/** The picture behind a photo message — mediaUrl, an inline data URL while
+ *  pending, or the file key as an /api/files path. */
+internal fun photoUrlOf(m: JSONObject): String? =
+    m.optText("mediaUrl").takeIf { it.isNotBlank() }
+        ?: m.optText("fileKey").takeIf { it.isNotBlank() }?.let { key ->
+            if (key.startsWith("data:") || key.startsWith("http") || key.startsWith("/")) key
+            else "/api/files/$key"
+        }
+
+/** Owner round 33 (item 17): the small content card beside a quote — the
+ *  photo itself, the video's cached frame under a play glyph, a mic for a
+ *  voice note, a file glyph for a document. A view-once original shows
+ *  nothing (its words already say what it is). */
+@Composable
+private fun QuoteThumb(m: JSONObject, ink: Color) {
+    val kind = quoteKind(m)
+    if (kind.isBlank() || isViewOnce(m)) return
+    val ctx = LocalContext.current
+    Spacer(Modifier.width(8.dp))
+    Box(
+        Modifier.size(34.dp).clip(RoundedCornerShape(6.dp)).background(Color(0x22000000)),
+        contentAlignment = Alignment.Center,
+    ) {
+        when (kind) {
+            "Photo" -> KpNetImage(photoUrlOf(m), "Photo", Modifier.fillMaxSize())
+            "Video" -> {
+                val key = remember(m.optString("id")) { videoCacheFile(ctx, m).absolutePath }
+                val frame = remember(key) { VideoThumbs.get(key) ?: VideoThumbs.readThumb(key) }
+                if (frame != null) {
+                    Image(
+                        bitmap = frame.asImageBitmap(),
+                        contentDescription = "Video",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                    )
+                    Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                } else {
+                    Icon(Icons.Filled.Videocam, null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(18.dp))
+                }
+            }
+            "Voice message" -> Icon(Icons.Filled.Mic, null, tint = ink, modifier = Modifier.size(18.dp))
+            else -> Icon(Icons.Filled.InsertDriveFile, null, tint = ink, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
 /** Owner round 13e: the swipe-reply quote bar above the composer. */
 /** Owner round 32 (item 18): the chat's parked "send later" rows, as one
  *  compact chip above the composer — count + the next time. Tap → the list. */
@@ -3878,6 +3995,9 @@ private fun ScheduledSheet(rows: List<JSONObject>, onClose: () -> Unit, onCancel
 @Composable
 private fun ReplyQuoteBar(replyTo: JSONObject?, theme: String, onCancel: () -> Unit) {
     if (replyTo == null) return
+    // Owner round 33 (item 17): a media original shows its small content
+    // card at the end of the bar (never for a view-once).
+    val thumbed = !isViewOnce(replyTo) && quoteKind(replyTo).isNotBlank()
     // Owner round 16: the old GoldSoft card + Muted text was unreadable —
     // a card surface with a gold bar and full-ink text.
     Row(
@@ -3893,7 +4013,7 @@ private fun ReplyQuoteBar(replyTo: JSONObject?, theme: String, onCancel: () -> U
         Box(
             Modifier
                 .width(3.dp)
-                .height(22.dp)
+                .height(if (thumbed) 34.dp else 22.dp)
                 .clip(RoundedCornerShape(2.dp))
                 // Owner round 31: the reply "I" bar takes the CHAT's accent
                 // (it stayed app-blue under a mint/rose/cream chat).
@@ -3913,7 +4033,7 @@ private fun ReplyQuoteBar(replyTo: JSONObject?, theme: String, onCancel: () -> U
                 append("  ")
                 append(
                     if (isViewOnce(replyTo)) (if (fileLooksVideo(replyTo)) "Video · View once" else "Photo · View once")
-                    else ((replyTo.optText("body") ?: "").ifBlank { "Media" }).take(80),
+                    else quoteText(replyTo).take(80),
                 )
             },
             fontSize = 12.sp,
@@ -3923,6 +4043,7 @@ private fun ReplyQuoteBar(replyTo: JSONObject?, theme: String, onCancel: () -> U
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
+        if (thumbed) QuoteThumb(replyTo, Ink)
         IconButton(onClick = onCancel, modifier = Modifier.size(26.dp)) {
             Icon(Icons.Filled.Close, "Cancel reply", tint = Muted, modifier = Modifier.size(15.dp))
         }
@@ -3950,6 +4071,7 @@ private fun MessageRow(
     onOpenVideo: (JSONObject) -> Unit = {},
     onOpenAlbum: (JSONObject) -> Unit = {},
     onOpenDoc: (JSONObject) -> Unit = {},
+    onJumpTo: (String) -> Unit = {},
 ) {
     val mine = m.optString("senderId") == myId
     val kind = m.optString("kind")
@@ -4169,17 +4291,39 @@ private fun MessageRow(
                             else (q?.optText("senderName") ?: "").ifBlank { "Original" }
                         val what =
                             if (q != null && isViewOnce(q)) (if (fileLooksVideo(q)) "Video · View once" else "Photo · View once")
-                            else q?.optText("body")?.take(48)?.ifBlank { "Media" } ?: "Original message"
+                            else q?.let { quoteText(it).take(48) } ?: "Original message"
+                        // Owner round 33 (item 17): a media original gets a small
+                        // content card beside the words (never for a view-once).
+                        val thumbed = q != null && !isViewOnce(q) && quoteKind(q).isNotBlank()
                         Row(
                             Modifier
                                 .padding(bottom = 2.dp)
                                 .clip(RoundedCornerShape(6.dp))
                                 .background(if (mine) Color(0x26FFFFFF) else if (KpThemeMode.darkBlue) ActionBlue.copy(alpha = 0.18f) else GoldSoft)
+                                // Owner round 33 (item 17): tap the quote → the original
+                                // message; a long-press still opens the bubble's sheet.
+                                .combinedClickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                    onLongClick = {
+                                        if (!pendingEcho) {
+                                            haptics.tap()
+                                            if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)
+                                        }
+                                    },
+                                ) {
+                                    if (selectedIds.isNotEmpty()) {
+                                        if (!pendingEcho) onToggleSelect(m)
+                                    } else {
+                                        haptics.tap()
+                                        onJumpTo(rid)
+                                    }
+                                }
                                 .padding(start = 6.dp, end = 8.dp, top = 3.dp, bottom = 3.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             // Owner round 21: the quote bar takes the chat accent.
-                            Box(Modifier.width(2.5.dp).height(20.dp).clip(RoundedCornerShape(2.dp)).background(chatAccent(theme)))
+                            Box(Modifier.width(2.5.dp).height(if (thumbed) 34.dp else 20.dp).clip(RoundedCornerShape(2.dp)).background(chatAccent(theme)))
                             Spacer(Modifier.width(6.dp))
                             Text(
                                 buildAnnotatedString {
@@ -4192,7 +4336,9 @@ private fun MessageRow(
                                 color = if (mine) Color(0xE6FFFFFF) else Ink,
                                 maxLines = 1,
                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
                             )
+                            if (thumbed && q != null) QuoteThumb(q, if (mine) Color(0xE6FFFFFF) else Ink)
                         }
                     }
                     if (!mine && isGroup && senderName.isNotBlank()) {
