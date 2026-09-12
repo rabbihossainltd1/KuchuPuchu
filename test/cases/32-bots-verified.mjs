@@ -7123,6 +7123,24 @@ const convBetween = (db, a, b) =>
         eng.includes("SystemAudioTap.mixInto(audioFormat, channelCount, sampleRate, audioBuffer)"),
     );
   }
+  // Item 16: video-call UI — no touch effect on the surface, icon-only compact
+  // action buttons (no caption under the circles).
+  {
+    const ui = kt("CallScreens.kt");
+    const strip = ui.slice(ui.indexOf("private fun StripAction("), ui.indexOf("private fun StripAction(") + 2200);
+    check(
+      "r33-16: the video surface toggles its controls with indication = null (no ripple over the picture), the strip buttons are icon-only circles (label = content description, no Text under them, no ripple), and the pill is compact (spacedBy, wraps its content)",
+      (ui.match(/\) \{ controlsVisible = !controlsVisible \},/g) ?? []).length === 2 &&
+        (ui.match(/interactionSource = remember \{ MutableInteractionSource\(\) \},\n\s+indication = null,\n\s+\) \{ controlsVisible = !controlsVisible \},/g) ?? []).length === 2 &&
+        !ui.includes(".clickable { controlsVisible = !controlsVisible },") &&
+        !strip.includes("Text(label") &&
+        !strip.includes("Column(") &&
+        strip.includes("contentDescription = label,") &&
+        strip.includes("indication = null,") &&
+        (ui.match(/horizontalArrangement = Arrangement\.spacedBy\(12\.dp\),/g) ?? []).length === 3 &&
+        !ui.includes("horizontalArrangement = Arrangement.SpaceEvenly,\n            verticalAlignment = Alignment.CenterVertically,\n        ) {\n            val routeAction"),
+    );
+  }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
   // a touch on blank list space closes it (main and archive lists; r33-6
   // retired the hidden list).

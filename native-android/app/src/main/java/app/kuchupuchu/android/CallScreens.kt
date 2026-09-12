@@ -16,6 +16,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -83,7 +84,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -759,13 +759,12 @@ fun OutgoingVideoScreen(call: CallUi) {
         Row(
             Modifier
                 .align(Alignment.BottomCenter)
-                .fillMaxWidth()
                 .navigationBarsPadding()
                 .padding(horizontal = 12.dp, vertical = 14.dp)
-                .clip(RoundedCornerShape(26.dp))
+                .clip(RoundedCornerShape(30.dp))
                 .background(Color(0x99000000))
-                .padding(horizontal = 8.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val routeAction = rememberRouteAction(engine)
@@ -830,7 +829,12 @@ fun InCallVideoScreen(call: CallUi) {
             .background(Dark)
             // Consume the full video surface so taps never fall through to
             // the chat below; the same gesture toggles the controls.
-            .clickable { controlsVisible = !controlsVisible },
+            // Owner round 33 (item 16): the surface toggles the controls with
+            // no touch effect at all - no ripple flashing over the video.
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) { controlsVisible = !controlsVisible },
     ) {
         /* Either feed can be promoted full-screen by tapping the PiP — but an
          * off camera is never promotable, or the whole screen goes black and
@@ -975,13 +979,12 @@ fun InCallVideoScreen(call: CallUi) {
         if (controlsVisible) Row(
             Modifier
                 .align(Alignment.BottomCenter)
-                .fillMaxWidth()
                 .navigationBarsPadding()
                 .padding(horizontal = 12.dp, vertical = 14.dp)
-                .clip(RoundedCornerShape(26.dp))
+                .clip(RoundedCornerShape(30.dp))
                 .background(Color(0x99000000))
-                .padding(horizontal = 8.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val routeAction = rememberRouteAction(engine)
@@ -1039,7 +1042,12 @@ fun GroupVideoScreen(call: CallUi) {
         Modifier
             .fillMaxSize()
             .background(Dark)
-            .clickable { controlsVisible = !controlsVisible },
+            // Owner round 33 (item 16): the surface toggles the controls with
+            // no touch effect at all - no ripple flashing over the video.
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) { controlsVisible = !controlsVisible },
     ) {
         if (others.isEmpty()) {
             // Alone (everyone still ringing, or all left): the group picture,
@@ -1132,13 +1140,12 @@ fun GroupVideoScreen(call: CallUi) {
         if (controlsVisible) Row(
             Modifier
                 .align(Alignment.BottomCenter)
-                .fillMaxWidth()
                 .navigationBarsPadding()
                 .padding(horizontal = 12.dp, vertical = 14.dp)
-                .clip(RoundedCornerShape(26.dp))
+                .clip(RoundedCornerShape(30.dp))
                 .background(Color(0x99000000))
-                .padding(horizontal = 8.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val routeAction = rememberRouteAction(engine)
@@ -1363,6 +1370,11 @@ private fun CallCircle(
     ) { icon() }
 }
 
+/**
+ * One control of the video-call strip. Owner round 33 (item 16): icon only -
+ * no caption under the circle (the label is the content description) and no
+ * press ripple; the circle itself is the whole touch target.
+ */
 @Composable
 private fun StripAction(
     icon: ImageVector,
@@ -1372,46 +1384,43 @@ private fun StripAction(
     onClick: () -> Unit,
 ) {
     val haptics = rememberHaptics()
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.clickable { haptics.tap(); onClick() }.padding(horizontal = 2.dp),
-    ) {
-        Box(
-            Modifier
-                .size(46.dp)
-                .shadow(5.dp, CircleShape)
-                .clip(CircleShape)
-                .background(
-                    when {
-                        danger -> Brush.verticalGradient(
-                            listOf(
-                                androidx.compose.ui.graphics.lerp(Red, Color.White, 0.28f),
-                                Red,
-                                androidx.compose.ui.graphics.lerp(Red, Color.Black, 0.2f),
-                            ),
-                        )
-                        active -> Brush.verticalGradient(
-                            listOf(
-                                androidx.compose.ui.graphics.lerp(ActionBlue, Color.White, 0.3f),
-                                ActionBlue,
-                                androidx.compose.ui.graphics.lerp(ActionBlue, Color.Black, 0.2f),
-                            ),
-                        )
-                        else -> Brush.verticalGradient(listOf(Color(0x3DFFFFFF), Color(0x14FFFFFF)))
-                    },
-                )
-                .border(1.dp, Color.White.copy(alpha = 0.3f), CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                icon,
-                contentDescription = label,
-                tint = Color.White,
-                modifier = Modifier.size(21.dp),
+    Box(
+        Modifier
+            .size(46.dp)
+            .shadow(5.dp, CircleShape)
+            .clip(CircleShape)
+            .background(
+                when {
+                    danger -> Brush.verticalGradient(
+                        listOf(
+                            androidx.compose.ui.graphics.lerp(Red, Color.White, 0.28f),
+                            Red,
+                            androidx.compose.ui.graphics.lerp(Red, Color.Black, 0.2f),
+                        ),
+                    )
+                    active -> Brush.verticalGradient(
+                        listOf(
+                            androidx.compose.ui.graphics.lerp(ActionBlue, Color.White, 0.3f),
+                            ActionBlue,
+                            androidx.compose.ui.graphics.lerp(ActionBlue, Color.Black, 0.2f),
+                        ),
+                    )
+                    else -> Brush.verticalGradient(listOf(Color(0x3DFFFFFF), Color(0x14FFFFFF)))
+                },
             )
-        }
-        Spacer(Modifier.height(4.dp))
-        Text(label, color = Color(0x99FFFFFF), fontSize = 9.5.sp, textAlign = TextAlign.Center)
+            .border(1.dp, Color.White.copy(alpha = 0.3f), CircleShape)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) { haptics.tap(); onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            icon,
+            contentDescription = label,
+            tint = Color.White,
+            modifier = Modifier.size(21.dp),
+        )
     }
 }
 
