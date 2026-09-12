@@ -1,5 +1,6 @@
 package app.kuchupuchu.android
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -20,11 +21,13 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -40,6 +43,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
@@ -57,6 +62,8 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
     val haptics = rememberHaptics()
     var tab by remember { mutableIntStateOf(0) }
     var images by remember { mutableStateOf(listOf<JSONObject>()) }
+    // Owner round 33 (item 20): videos share the grid with the photos.
+    var videos by remember { mutableStateOf(listOf<JSONObject>()) }
     var docs by remember { mutableStateOf(listOf<JSONObject>()) }
     var links by remember { mutableStateOf(listOf<JSONObject>()) }
     val uri = LocalUriHandler.current
@@ -102,6 +109,7 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
         runCatching {
             val data = withContext(Dispatchers.IO) { Api.get("/api/conversations/$convId/media", true) }
             images = data.arr("images").objects()
+            videos = data.arr("videos").objects()
             docs = data.arr("docs").objects()
             links = data.arr("links").objects()
         }
@@ -143,8 +151,13 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
         Spacer(Modifier.height(8.dp))
         when (tab) {
             0 -> {
-                if (images.isEmpty()) {
-                    EmptyState(Icons.Filled.InsertDriveFile, "No photos", "Photos sent in this chat show up here")
+                // Owner round 33 (item 20): one grid, newest first, photos and
+                // videos together (the server lists each newest-first already).
+                val grid = remember(images, videos) {
+                    (images + videos).sortedByDescending { it.optString("createdAt") }
+                }
+                if (grid.isEmpty()) {
+                    EmptyState(Icons.Filled.InsertDriveFile, "No media", "Photos and videos sent in this chat show up here")
                 } else {
                     // weight(1f) bounds the grid to the space below the tabs —
                     // unconstrained, the last rows could run past the bottom.
@@ -155,16 +168,25 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        items(images, key = { it.optString("id") }) { m ->
+                        items(grid, key = { it.optString("id") }) { m ->
                             val url = messageMediaUrl(m)
+                            val isVideo = fileLooksVideo(m)
                             Box(
                                 Modifier
                                     .height(110.dp)
                                     .clip(RoundedCornerShape(8.dp))
-                                    .background(Line)
-                                    .clickable(enabled = url.isNotBlank()) { viewer = m },
+                                    .background(if (isVideo) Color(0xFF101A2E) else Line)
+                                    .clickable(enabled = url.isNotBlank()) {
+                                        if (isVideo) nav.navigate("videoplayer/${mediaArg(JSONObject(m.toString()).put("kpTitle", "Video").put("kpPrivate", privateChat))}")
+                                        else viewer = m
+                                    },
+                                contentAlignment = Alignment.Center,
                             ) {
-                                if (url.isNotBlank()) {
+                                if (isVideo) {
+                                    // Owner round 33 (item 20): a video tile — its cached
+                                    // frame when this phone has one, a play glyph always.
+                                    VideoTile(m)
+                                } else if (url.isNotBlank()) {
                                     KpNetImage(
                                         url,
                                         "Photo",
@@ -237,3 +259,34 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
 }
 
 private fun msgTime(iso: String) = listStamp(iso)
+
+/**
+ * Owner round 33 (item 20): a shared-media video tile — the clip's cached
+ * first frame when this phone has decoded it (VideoThumbs, filled by the chat
+ * bubble / the player), a dark tile otherwise, and a play circle over either.
+ * Shared by the Media tab grid and the profile's shared-media strip.
+ */
+@Composable
+internal fun VideoTile(m: JSONObject, playSize: Int = 30) {
+    val ctx = LocalContext.current
+    val key = remember(m.optString("id")) { videoCacheFile(ctx, m).absolutePath }
+    val frame = remember(key) { VideoThumbs.get(key) ?: VideoThumbs.readThumb(key) }
+    Box(Modifier.fillMaxSize().background(Color(0xFF101A2E)), contentAlignment = Alignment.Center) {
+        if (frame != null) {
+            Image(
+                bitmap = frame.asImageBitmap(),
+                contentDescription = "Video",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            )
+        } else {
+            Icon(Icons.Filled.Videocam, null, tint = Color.White.copy(alpha = 0.35f), modifier = Modifier.size((playSize + 4).dp))
+        }
+        Box(
+            Modifier.size((playSize + 10).dp).clip(CircleShape).background(Color(0x99000000)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.PlayArrow, "Play video", tint = Color.White, modifier = Modifier.size(playSize.dp))
+        }
+    }
+}

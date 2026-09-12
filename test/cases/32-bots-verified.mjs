@@ -1287,7 +1287,9 @@ const convBetween = (db, a, b) =>
         profileKt.includes("KpPhotoViewer(") &&
         !profileKt.includes("ProfilePhotoDialog") &&
         groupKt.includes("shownAvatar?.takeIf { it.isNotBlank() }?.let { viewerUrl = it }") &&
-        mediaTab.includes(".clickable(enabled = url.isNotBlank()) { viewer = m }") &&
+        // r33-20: the tile's tap branches — a video → the app's player, a photo → the viewer.
+        mediaTab.includes(".clickable(enabled = url.isNotBlank()) {") &&
+        mediaTab.includes("else viewer = m") &&
         mediaTab.includes('nav.navigate("videoplayer/${mediaArg(') &&
         rd("Files.kt").includes("fun openUri(") &&
         !chat.includes("FilesUtil.openUri("),
@@ -7261,6 +7263,41 @@ const convBetween = (db, a, b) =>
           'keepVideoCopy(body, local)\n                    local?.optString("path")?.takeIf { it.isNotBlank() && local.optBoolean("temp") }?.let { File(it).delete() }',
         ) &&
         cache.includes("appCtx = ctx.applicationContext"),
+    );
+  }
+  // Item 20: shared media includes videos — the worker's gallery lists them
+  // (their own array, never as docs), the Media tab grid mixes them with the
+  // photos, and the profile strip shows them; each video tile = play glyph.
+  {
+    const src = readFileSync("src/worker/index.ts", "utf8");
+    const tab = kt("ChatMediaScreen.kt");
+    const prof = kt("ProfileScreen.kt");
+    check(
+      "r33-20: worker — GET /api/conversations/:id/media returns { images, videos, docs, links }; a video FILE that is not a document goes to videos (not docs); view-once rows stay out",
+      src.includes("const videos: ReturnType<typeof msgFrom>[] = [];") &&
+        src.includes(
+          'String(m.fileType || "").startsWith("video/") &&\n        m.meta?.document !== true\n      )\n        videos.push(m);',
+        ) &&
+        src.includes("return json({ images, videos, docs, links });") &&
+        !src.includes("return json({ images, docs, links });"),
+    );
+    check(
+      "r33-20: app — the Media tab grid is photos + videos newest-first (video tile = VideoTile with the cached frame + play circle, tap → the app's player), and the friend profile's shared-media strip includes videos (VideoTile, view-once / documents excluded)",
+      tab.includes('videos = data.arr("videos").objects()') &&
+        tab.includes('(images + videos).sortedByDescending { it.optString("createdAt") }') &&
+        tab.includes('items(grid, key = { it.optString("id") }) { m ->') &&
+        tab.includes("internal fun VideoTile(m: JSONObject, playSize: Int = 30) {") &&
+        tab.includes("VideoThumbs.get(key) ?: VideoThumbs.readThumb(key)") &&
+        tab.includes(
+          'Icon(Icons.Filled.PlayArrow, "Play video", tint = Color.White, modifier = Modifier.size(playSize.dp))',
+        ) &&
+        tab.includes(
+          'if (isVideo) nav.navigate("videoplayer/${mediaArg(JSONObject(m.toString()).put("kpTitle", "Video").put("kpPrivate", privateChat))}")\n                                        else viewer = m',
+        ) &&
+        prof.includes('(k == "FILE" && fileLooksVideo(m))') &&
+        prof.includes("!isViewOnce(m) && !sentAsDocument(m) && (") &&
+        prof.includes("if (isVideo) VideoTile(m, playSize = 22)") &&
+        prof.includes('else KpNetImage(url, "Shared photo", Modifier.fillMaxSize())'),
     );
   }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or

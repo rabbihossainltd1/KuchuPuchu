@@ -1653,13 +1653,52 @@ async function main() {
     );
 
     // ----- the gallery never lists it; the push carries no picture -----
+    // r33-20: a video is shared media (its own list); a video picked as a
+    // Document stays a document.
+    const clipKey = await upload("clip.mp4", "video/mp4", "clip-bytes");
+    const clipMsg = await h.call(
+      "POST",
+      `/api/conversations/${conv.id}/messages`,
+      { kind: "FILE", fileKey: clipKey, fileName: "clip.mp4", fileType: "video/mp4", fileSize: 10 },
+      A.token,
+    );
+    const clipDocKey = await upload("raw.mp4", "video/mp4", "raw-bytes");
+    const clipDoc = await h.call(
+      "POST",
+      `/api/conversations/${conv.id}/messages`,
+      {
+        kind: "FILE",
+        fileKey: clipDocKey,
+        fileName: "raw.mp4",
+        fileType: "video/mp4",
+        fileSize: 9,
+        meta: { document: true },
+      },
+      A.token,
+    );
     const gallery = await h.call("GET", `/api/conversations/${conv.id}/media`, undefined, B.token);
     check(
       "r32-17: the shared-media gallery skips view-once rows (before and after the opening)",
       gallery.status === 200 &&
         !(gallery.json.images ?? []).some((x) => x.id === m.id) &&
+        !(gallery.json.videos ?? []).some((x) => x.id === m.id) &&
         !(gallery.json.docs ?? []).some((x) => x.id === m.id),
       JSON.stringify(gallery.json.images?.map((x) => x.id)),
+    );
+    check(
+      "r33-20: the gallery lists a video under videos (not docs); a video sent as a Document stays under docs",
+      clipMsg.status === 201 &&
+        clipDoc.status === 201 &&
+        (gallery.json.videos ?? []).some((x) => x.id === clipMsg.json.message.id) &&
+        !(gallery.json.docs ?? []).some((x) => x.id === clipMsg.json.message.id) &&
+        (gallery.json.docs ?? []).some((x) => x.id === clipDoc.json.message.id) &&
+        !(gallery.json.videos ?? []).some((x) => x.id === clipDoc.json.message.id),
+      JSON.stringify({
+        clip: clipMsg.status,
+        doc: clipDoc.status,
+        videos: gallery.json.videos?.map((x) => x.id),
+        docs: gallery.json.docs?.map((x) => x.id),
+      }),
     );
 
     // ----- the opening: sender refused, stranger refused, recipient once -----

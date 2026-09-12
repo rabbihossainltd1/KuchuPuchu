@@ -5957,6 +5957,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       convId,
     );
     const images: ReturnType<typeof msgFrom>[] = [];
+    // Owner round 33 (item 20): videos are shared media too — their own
+    // list (the photo grid and the profile strip draw them with a play
+    // glyph); a video picked as a Document stays a document.
+    const videos: ReturnType<typeof msgFrom>[] = [];
     const docs: ReturnType<typeof msgFrom>[] = [];
     const links: ReturnType<typeof msgFrom>[] = [];
     const urlRe = /https?:\/\/[^\s]+/gi;
@@ -5966,13 +5970,19 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       // the shared media — not before its opening, not after.
       if (m.viewOnce) continue;
       if (row.kind === "IMAGE" || m.hasImage) images.push(m);
+      else if (
+        row.kind === "FILE" &&
+        String(m.fileType || "").startsWith("video/") &&
+        m.meta?.document !== true
+      )
+        videos.push(m);
       else if (row.kind === "FILE") docs.push(m);
       else if (row.body && urlRe.test(row.body)) {
         urlRe.lastIndex = 0;
         links.push(m);
       }
     }
-    return json({ images, docs, links });
+    return json({ images, videos, docs, links });
   }
 
   const memberAddMatch = path.match(/^\/api\/conversations\/([^/]+)\/members$/);

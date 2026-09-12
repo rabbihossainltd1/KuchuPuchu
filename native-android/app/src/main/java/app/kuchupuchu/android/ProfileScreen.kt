@@ -597,7 +597,8 @@ fun ProfileScreen(nav: NavController, userId: String) {
         }
         Spacer(Modifier.height(16.dp))
         if (!isMe && !requestOpen) Column(Modifier.padding(horizontal = 16.dp)) {
-            // Real shared-media strip: recent photos from this user's chat.
+            // Real shared-media strip: recent photos AND videos from this
+            // user's chat (owner round 33, item 20: videos were missing).
             // (The card here used to be a dead placeholder.)
             val convId0 = ScreenStore.convs
                 .firstOrNull { !it.optBoolean("isGroup") && it.optJSONObject("other")?.optString("id") == userId }
@@ -606,9 +607,12 @@ fun ProfileScreen(nav: NavController, userId: String) {
                 if (convId0 == null) emptyList()
                 else ScreenStore.msgsOf(convId0).filter { m ->
                     val k = m.optString("kind")
-                    (k == "IMAGE" && m.optText("mediaUrl").isNotBlank()) ||
-                        (k == "FILE" && (m.optText("fileType").startsWith("image") ||
-                            listOf(".jpg", ".jpeg", ".png", ".webp").any { m.optText("fileName").lowercase().endsWith(it) }))
+                    !isViewOnce(m) && !sentAsDocument(m) && (
+                        (k == "IMAGE" && m.optText("mediaUrl").isNotBlank()) ||
+                            (k == "FILE" && (m.optText("fileType").startsWith("image") ||
+                                listOf(".jpg", ".jpeg", ".png", ".webp").any { m.optText("fileName").lowercase().endsWith(it) })) ||
+                            (k == "FILE" && fileLooksVideo(m))
+                    )
                 }.takeLast(9).reversed()
             }
             if (convId0 != null) {
@@ -623,13 +627,15 @@ fun ProfileScreen(nav: NavController, userId: String) {
                                     ?: m.optText("fileKey").takeIf { it.isNotBlank() }?.let { k ->
                                         if (k.startsWith("data:") || k.startsWith("http") || k.startsWith("/")) k else "/api/files/$k"
                                     } ?: ""
+                            val isVideo = fileLooksVideo(m)
                             Box(
                                 Modifier
                                     .size(86.dp)
                                     .clip(RoundedCornerShape(12.dp))
                                     .clickable { nav.navigate("chatmedia/$convId0") },
                             ) {
-                                KpNetImage(url, "Shared photo", Modifier.fillMaxSize())
+                                if (isVideo) VideoTile(m, playSize = 22)
+                                else KpNetImage(url, "Shared photo", Modifier.fillMaxSize())
                             }
                         }
                     }
@@ -641,7 +647,7 @@ fun ProfileScreen(nav: NavController, userId: String) {
                         modifier = Modifier.clickable { nav.navigate("chatmedia/$convId0") },
                     )
                 } else {
-                    Text("No shared media yet — photos you send will appear here.", color = Muted, fontSize = 13.sp)
+                    Text("No shared media yet — photos and videos you send will appear here.", color = Muted, fontSize = 13.sp)
                 }
             }
             Spacer(Modifier.height(10.dp))
