@@ -7416,6 +7416,60 @@ const convBetween = (db, a, b) =>
         edit.includes("onPosition = { playAt = it })"),
     );
   }
+  // Item 9: the chat-list PICTURE is its own tap target — a live status opens
+  // directly, otherwise a small profile sheet (message · voice · video ·
+  // profile); the row itself still opens the chat.
+  {
+    const cl = kt("ChatListScreen.kt");
+    const card = cl.slice(
+      cl.indexOf("private fun ConvCard("),
+      cl.indexOf("private fun ChatRowSheet("),
+    );
+    const peek = cl.slice(cl.indexOf("private fun ProfilePeekSheet("));
+    check(
+      "r33-9: ConvCard — the avatar Box has its own combinedClickable (no ripple): swipe arm open → collapse, select mode → tick, a live status → statusview/<user>, otherwise the peek sheet; long-press on the picture still opens the row's select sheet; the row tap still opens the chat",
+      card.includes("if (peek) ProfilePeekSheet(conv, nav) { peek = false }") &&
+        card.includes("onLongClick = { if (revealed) onCollapse() else longPress() },") &&
+        card.includes(
+          'statusGroup != null -> {\n                            haptics.tap()\n                            nav.navigate("statusview/${other?.optString("id")}")',
+        ) &&
+        card.includes(
+          "else -> {\n                            haptics.tap()\n                            peek = true",
+        ) &&
+        card.includes(
+          "selecting -> {\n                            haptics.tap()\n                            ListSelect.toggle(id)",
+        ) &&
+        card.includes('else -> nav.navigate("chat/$id")') &&
+        card.includes("val longPress = {") &&
+        card.includes("ListSelect.sheetFor = conv"),
+    );
+    check(
+      "r33-9: ProfilePeekSheet — KpSheet (no dialog) with an 84 dp avatar, name + badges, @handle or member count, about (2 lines), and icon-only raised actions Message / Voice call / Video call / Profile-or-Group info; calls hidden for bots and open message requests; a group gets group calls + group/<id>",
+      peek.includes("KpSheet(onDismiss = onDismiss) {") &&
+        peek.includes("KpAvatar(name, avatarUrl, 84.dp, avatarRef = avatarRef)") &&
+        peek.includes("if (!isGroup) UserBadges(other)") &&
+        peek.includes(
+          'other?.optText("username").orEmpty().let { if (it.isNotBlank()) "@$it" else "" }',
+        ) &&
+        peek.includes(
+          "val callable = isGroup || (otherId.isNotBlank() && !isKpBot(otherId) && !requestOpen)",
+        ) &&
+        (peek.match(/PeekAction\(/g) || []).length === 5 &&
+        peek.includes('nav.navigate("chat/$id")') &&
+        peek.includes(
+          'else CallEngine.instance?.startCall(otherId, "AUDIO", name, avatarUrl ?: "")',
+        ) &&
+        peek.includes(
+          'if (isGroup) CallEngine.instance?.startGroupCall(id, "VIDEO", name, avatarRef ?: "")',
+        ) &&
+        peek.includes('nav.navigate(if (isGroup) "group/$id" else "profile/$otherId")') &&
+        !peek.includes("KpSheetRow(") &&
+        !peek.includes("AlertDialog") &&
+        peek.includes(
+          "private fun PeekAction(icon: ImageVector, label: String, onClick: () -> Unit) {",
+        ),
+    );
+  }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
   // a touch on blank list space closes it (main and archive lists; r33-6
   // retired the hidden list).

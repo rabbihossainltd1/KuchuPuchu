@@ -7,6 +7,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -63,6 +64,8 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -96,6 +99,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -1286,6 +1290,27 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
     val unread = conv.optInt("unread", 0)
     val muted = conv.optBoolean("muted")
     val online = !isGroup && other?.optBoolean("online") == true
+    // Owner round 26: a contact with a live status wears the status
+    // ring right in the chat list ("user status share korleo chat
+    // list a profile border ashe na"). Dark blue while unseen, gray
+    // once everything of theirs has been viewed.
+    val statusGroup =
+        if (!isGroup) {
+            ScreenStore.statuses.firstOrNull {
+                !it.optBoolean("mine") && it.optJSONObject("user")?.optString("id") == other?.optString("id")
+            }
+        } else {
+            null
+        }
+    // Owner round 33 (item 9): the small profile sheet behind the picture.
+    var peek by remember { mutableStateOf(false) }
+    if (peek) ProfilePeekSheet(conv, nav) { peek = false }
+    val longPress = {
+        haptics.heavy()
+        ListSelect.active = true
+        if (id !in ListSelect.ids) ListSelect.ids.add(id)
+        ListSelect.sheetFor = conv
+    }
 
     Row(
         Modifier
@@ -1306,10 +1331,7 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
                         onCollapse()
                         return@combinedClickable
                     }
-                    haptics.heavy()
-                    ListSelect.active = true
-                    if (id !in ListSelect.ids) ListSelect.ids.add(id)
-                    ListSelect.sheetFor = conv
+                    longPress()
                 },
             )
             .padding(horizontal = 14.dp, vertical = 10.dp),
@@ -1329,19 +1351,34 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
             }
             Spacer(Modifier.width(12.dp))
         }
-        Box {
-            // Owner round 26: a contact with a live status wears the status
-            // ring right in the chat list ("user status share korleo chat
-            // list a profile border ashe na"). Dark blue while unseen, gray
-            // once everything of theirs has been viewed.
-            val statusGroup =
-                if (!isGroup) {
-                    ScreenStore.statuses.firstOrNull {
-                        !it.optBoolean("mine") && it.optJSONObject("user")?.optString("id") == other?.optString("id")
+        Box(
+            // Owner round 33 (item 9): the picture is its own tap target — a
+            // live status opens straight away, otherwise the small profile
+            // sheet. Long-press keeps the row's select sheet, select mode
+            // keeps the tick, an open swipe arm collapses first.
+            Modifier.combinedClickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onLongClick = { if (revealed) onCollapse() else longPress() },
+                onClick = {
+                    when {
+                        revealed -> onCollapse()
+                        selecting -> {
+                            haptics.tap()
+                            ListSelect.toggle(id)
+                        }
+                        statusGroup != null -> {
+                            haptics.tap()
+                            nav.navigate("statusview/${other?.optString("id")}")
+                        }
+                        else -> {
+                            haptics.tap()
+                            peek = true
+                        }
                     }
-                } else {
-                    null
-                }
+                },
+            ),
+        ) {
             if (statusGroup != null) {
                 StatusRingAvatar(
                     name,
@@ -1564,4 +1601,111 @@ private fun HomeMenuItem(icon: ImageVector, label: String, onClick: () -> Unit) 
         leadingIcon = { Icon(icon, null, tint = ActionBlueDeep, modifier = Modifier.size(22.dp)) },
         onClick = onClick,
     )
+}
+
+/**
+ * Owner round 33 (item 9): the small profile sheet behind a chat-list
+ * picture — photo, name, handle (or member count), about, and icon-only
+ * actions: message · voice call · video call · profile. Calls are offered
+ * where the chat header offers them (never for a bot or an open message
+ * request); a group gets its group calls and the group profile.
+ */
+@Composable
+private fun ProfilePeekSheet(conv: JSONObject, nav: NavController, onDismiss: () -> Unit) {
+    val id = conv.optString("id")
+    val isGroup = conv.optBoolean("isGroup")
+    val other = conv.optJSONObject("other")
+    val otherId = other?.optString("id").orEmpty()
+    val name =
+        if (isGroup) conv.optText("title").ifBlank { "Group" }
+        else other?.optText("displayName")?.takeIf { it.isNotBlank() } ?: "Chat"
+    val avatarUrl = if (isGroup) conv.optIso("avatarUrl") else other?.optIso("avatarUrl")
+    val avatarRef = if (isGroup) conv.optIso("avatarRef") else other?.optIso("avatarRef")
+    val sub =
+        if (isGroup) {
+            val n = conv.optJSONArray("members")?.length() ?: 0
+            if (n > 0) "$n members" else ""
+        } else {
+            other?.optText("username").orEmpty().let { if (it.isNotBlank()) "@$it" else "" }
+        }
+    val about = if (isGroup) "" else other?.optText("about").orEmpty()
+    val requestOpen = !isGroup && (conv.optBoolean("requestPending") || conv.optText("requestFrom").isNotBlank())
+    val callable = isGroup || (otherId.isNotBlank() && !isKpBot(otherId) && !requestOpen)
+    KpSheet(onDismiss = onDismiss) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            KpAvatar(name, avatarUrl, 84.dp, avatarRef = avatarRef)
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    name,
+                    color = Ink,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (!isGroup) UserBadges(other)
+            }
+            if (sub.isNotBlank()) Text(sub, color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (about.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
+                Text(about, color = Ink, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            }
+            Spacer(Modifier.height(14.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                PeekAction(Icons.Filled.Chat, "Message") {
+                    onDismiss()
+                    nav.navigate("chat/$id")
+                }
+                if (callable) {
+                    PeekAction(Icons.Filled.Call, "Voice call") {
+                        onDismiss()
+                        gateMicCamera(video = false) {
+                            if (isGroup) CallEngine.instance?.startGroupCall(id, "AUDIO", name, avatarRef ?: "")
+                            else CallEngine.instance?.startCall(otherId, "AUDIO", name, avatarUrl ?: "")
+                        }
+                    }
+                    PeekAction(Icons.Filled.Videocam, "Video call") {
+                        onDismiss()
+                        gateMicCamera(video = true) {
+                            if (isGroup) CallEngine.instance?.startGroupCall(id, "VIDEO", name, avatarRef ?: "")
+                            else CallEngine.instance?.startCall(otherId, "VIDEO", name, avatarUrl ?: "")
+                        }
+                    }
+                }
+                if (isGroup || otherId.isNotBlank()) {
+                    PeekAction(if (isGroup) Icons.Filled.Info else Icons.Filled.Person, if (isGroup) "Group info" else "Profile") {
+                        onDismiss()
+                        nav.navigate(if (isGroup) "group/$id" else "profile/$otherId")
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** One raised circle action of the profile peek sheet — icon only. */
+@Composable
+private fun PeekAction(icon: ImageVector, label: String, onClick: () -> Unit) {
+    val haptics = rememberHaptics()
+    Box(
+        Modifier
+            .padding(horizontal = 10.dp)
+            .size(50.dp)
+            .shadow(5.dp, CircleShape)
+            .clip(CircleShape)
+            .background(circleButtonFill())
+            .border(1.dp, CircleButtonEdge, CircleShape)
+            .clickable {
+                haptics.tap()
+                onClick()
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, label, tint = ActionBlueDeep, modifier = Modifier.size(24.dp))
+    }
 }
