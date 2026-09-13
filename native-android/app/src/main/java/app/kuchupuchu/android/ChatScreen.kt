@@ -39,7 +39,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -101,6 +102,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -121,6 +123,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalDensity
@@ -5602,20 +5605,60 @@ internal fun VoiceWave(
     rest: Color,
     modifier: Modifier = Modifier,
     onSeek: (Float) -> Unit = {},
+    onScrub: ((Float?) -> Unit)? = null,
 ) {
+    // Owner round 33 (item 1): the gesture reads the CURRENT callbacks — the
+    // pointerInput is keyed on the bars only, so the progress recompositions
+    // (12x a second while playing) never restart a drag in flight.
+    val seek by rememberUpdatedState(onSeek)
+    val scrub by rememberUpdatedState(onScrub)
     Canvas(
         // A quick tap seeks; the down is NOT consumed, so the bubble's own
-        // long-press (action sheet) and the reply swipe keep working on the
-        // bars — only the tap's up is taken, which also stops the bubble
-        // from treating it as a select tap.
+        // long-press (action sheet) keeps working on the bars — only the
+        // tap's up is taken, which also stops the bubble from treating it
+        // as a select tap.
+        // Owner round 33 (item 1): a LEFT/RIGHT drag on the bars SCRUBS the
+        // note instead of arming the reply swipe. The wave sits inside the
+        // bubble's pointerInput, so it sees every event first on the Main
+        // pass: it claims the horizontal slop, paints the finger's fraction
+        // while the drag runs and seeks there on release; the bubble's own
+        // swipe sees a consumed change and stands down. Dragging the bubble
+        // body around the wave still replies; vertical movement is left to
+        // the list; a finger held still past the long-press timeout belongs
+        // to the bubble's long-press.
         modifier.pointerInput(bars) {
             awaitEachGesture {
-                awaitFirstDown(requireUnconsumed = false)
+                val down = awaitFirstDown(requireUnconsumed = false)
+                var dragged = false
+                var last = (down.position.x / size.width).coerceIn(0f, 1f)
                 // AwaitPointerEventScope's own withTimeoutOrNull (frame-clock aware).
-                val up = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) { waitForUpOrCancellation() }
-                if (up != null) {
+                val slop =
+                    withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                        awaitHorizontalTouchSlopOrCancellation(down.id) { change, _ ->
+                            change.consume()
+                            dragged = true
+                            last = (change.position.x / size.width).coerceIn(0f, 1f)
+                            scrub?.invoke(last)
+                        }
+                    }
+                if (slop != null) {
+                    horizontalDrag(slop.id) { change ->
+                        change.consume()
+                        last = (change.position.x / size.width).coerceIn(0f, 1f)
+                        scrub?.invoke(last)
+                    }
+                    scrub?.invoke(null)
+                    seek(last)
+                    return@awaitEachGesture
+                }
+                if (dragged) scrub?.invoke(null)
+                // No drag: an up before the slop (and before the long-press
+                // timeout) is a tap — seek there. A cancelled or timed-out
+                // gesture (list scroll, long-press) seeks nothing.
+                val up = currentEvent.changes.firstOrNull { it.id == down.id }
+                if (!dragged && up != null && up.changedToUp()) {
                     up.consume()
-                    onSeek((up.position.x / size.width).coerceIn(0f, 1f))
+                    seek((up.position.x / size.width).coerceIn(0f, 1f))
                 }
             }
         },
@@ -5897,7 +5940,11 @@ private fun FileBubble(
         val paused = player.pausedId == id
         val active = playing || paused
         val bars = remember(id) { voiceWaveOf(m).ifEmpty { VoiceWaveform.pseudo(id) } }
-        val progress = if (active) player.progress else 0f
+        // Owner round 33 (item 1): while the finger scrubs the bars, the
+        // painted fraction (and the time line) follow the finger, not the
+        // player; the seek lands on release.
+        var scrubAt by remember(id) { mutableStateOf<Float?>(null) }
+        val progress = scrubAt ?: if (active) player.progress else 0f
         val ink = if (mine) Color.White else chatAccent(theme)
         val faint = if (mine) Color(0x66FFFFFF) else chatAccent(theme).copy(alpha = 0.35f)
         // Owner round 32 (item 45): compact — a 36dp button against a 22dp
@@ -5905,7 +5952,13 @@ private fun FileBubble(
         // duration line's right end (the bubble keeps no bottom band for
         // voice notes). It used to be a 30dp wave over a duration line over
         // a blank 15dp band: a 64dp bubble for one line of audio.
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // Owner round 33 (item 1): the wave used to sit HIGHER than the play
+        // button — the row centred the whole column (wave + time line) on
+        // the button, so the wave itself rode 8dp above its middle. The row
+        // is top-aligned now and the column starts 7dp down: the 22dp wave's
+        // centre lands exactly on the 36dp button's centre, the time line
+        // hangs under it (bubble 45dp, was 38).
+        Row(verticalAlignment = Alignment.Top) {
             val interaction = remember { MutableInteractionSource() }
             val pressed by interaction.collectIsPressedAsState()
             Box(
@@ -5944,7 +5997,7 @@ private fun FileBubble(
             Spacer(Modifier.width(8.dp))
             // Owner round 25: no side padding — the tick+time stamp sits at
             // the right end of the duration line, under the wave.
-            Column {
+            Column(Modifier.padding(top = 7.dp)) {
                 VoiceWave(
                     bars = bars,
                     progress = progress,
@@ -5954,6 +6007,9 @@ private fun FileBubble(
                     onSeek = { frac ->
                         if (!pendingEcho && fileKey.isNotBlank()) player.seekTo(ctx, id, fileKey, frac)
                     },
+                    onScrub = { frac ->
+                        scrubAt = if (!pendingEcho && fileKey.isNotBlank()) frac else null
+                    },
                 )
                 Spacer(Modifier.height(1.dp))
                 val secs = m.optJSONObject("meta")?.optInt("seconds") ?: 0
@@ -5961,8 +6017,9 @@ private fun FileBubble(
                 Text(
                     when {
                         vFrac != null -> "Sending · ${(vFrac * 100).toInt()}%"
-                        // While it plays, the line counts the elapsed seconds.
-                        active && secs > 0 -> {
+                        // While it plays (or the finger scrubs), the line
+                        // counts the elapsed seconds.
+                        (active || scrubAt != null) && secs > 0 -> {
                             val at = (progress * secs).toInt()
                             "%d:%02d".format(at / 60, at % 60)
                         }

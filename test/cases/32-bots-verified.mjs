@@ -3752,11 +3752,13 @@ const convBetween = (db, a, b) =>
           ) &&
           chat.includes("color = if (x <= playedUntil) played else rest,") &&
           chat.includes("cap = StrokeCap.Round,") &&
-          chat.includes("onSeek((up.position.x / size.width).coerceIn(0f, 1f))") &&
+          // r33-1: the tap seek reads the rememberUpdatedState holder (`seek`).
+          chat.includes("seek((up.position.x / size.width).coerceIn(0f, 1f))") &&
           chat.includes(
             "if (!pendingEcho && fileKey.isNotBlank()) player.seekTo(ctx, id, fileKey, frac)",
           ) &&
-          chat.includes("active && secs > 0 -> {") &&
+          // r33-1: the time line also follows a scrub on the bars.
+          chat.includes("(active || scrubAt != null) && secs > 0 -> {") &&
           !chat.includes('Text("Voice message", fontSize = 14.sp, color = Ink)') &&
           chat.includes(
             "fun sendVoice(file: File, seconds: Int, name: String, waveform: List<Int> = emptyList()) {",
@@ -7336,6 +7338,49 @@ const convBetween = (db, a, b) =>
         status.includes('"$views view${if (views == 1) "" else "s"}",') &&
         status.includes("val views = myStatuses.sumOf { ScreenStore.statusViewCount(it) }") &&
         !status.includes('s.optInt("viewers", 0)'),
+    );
+  }
+  // Item 1: voice bubble — the wave is centred on the play button, and a
+  // horizontal drag on the WAVE scrubs the note (the bubble body around it
+  // keeps swipe-to-reply).
+  {
+    const chat = kt("ChatScreen.kt");
+    const wave = chat.slice(
+      chat.indexOf("internal fun VoiceWave("),
+      chat.indexOf("private fun LiveVoiceWave("),
+    );
+    check(
+      "r33-1: VoiceWave claims the horizontal slop on the bars (awaitHorizontalTouchSlopOrCancellation → horizontalDrag), reports the finger's fraction through onScrub while dragging and seeks there on release; a plain tap still seeks; callbacks read through rememberUpdatedState so the progress ticks never restart the gesture",
+      chat.includes(
+        "import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation",
+      ) &&
+        chat.includes("import androidx.compose.foundation.gestures.horizontalDrag") &&
+        wave.includes("onScrub: ((Float?) -> Unit)? = null,") &&
+        wave.includes("val seek by rememberUpdatedState(onSeek)") &&
+        wave.includes("val scrub by rememberUpdatedState(onScrub)") &&
+        wave.includes("awaitHorizontalTouchSlopOrCancellation(down.id) { change, _ ->") &&
+        wave.includes("horizontalDrag(slop.id) { change ->") &&
+        wave.includes("scrub?.invoke(null)\n                    seek(last)") &&
+        wave.includes("seek((up.position.x / size.width).coerceIn(0f, 1f))") &&
+        wave.includes("if (!dragged && up != null && up.changedToUp()) {") &&
+        wave.includes(
+          "withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {\n                        awaitHorizontalTouchSlopOrCancellation(down.id)",
+        ) &&
+        wave.includes("modifier.pointerInput(bars) {"),
+    );
+    check(
+      "r33-1: the voice bubble keeps a scrub fraction (painted + time line follow the finger), passes onScrub, and centres the 22dp wave on the 36dp button (top-aligned row, column offset 7dp)",
+      chat.includes("var scrubAt by remember(id) { mutableStateOf<Float?>(null) }") &&
+        chat.includes("val progress = scrubAt ?: if (active) player.progress else 0f") &&
+        chat.includes(
+          "onScrub = { frac ->\n                        scrubAt = if (!pendingEcho && fileKey.isNotBlank()) frac else null\n                    },",
+        ) &&
+        chat.includes("(active || scrubAt != null) && secs > 0 -> {") &&
+        chat.includes(
+          "Row(verticalAlignment = Alignment.Top) {\n            val interaction = remember { MutableInteractionSource() }",
+        ) &&
+        chat.includes("Column(Modifier.padding(top = 7.dp)) {\n                VoiceWave(") &&
+        chat.includes("modifier = Modifier.width(150.dp).height(22.dp),"),
     );
   }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
