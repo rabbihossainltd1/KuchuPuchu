@@ -4684,7 +4684,6 @@ private fun VideoMessageRow(
         Box(
             Modifier
                 .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                .widthIn(max = 235.dp)
                 .shadow(2.dp, RoundedCornerShape(12.dp))
                 .clip(RoundedCornerShape(12.dp))
                 .background(Color(0xFF0B1220))
@@ -4726,9 +4725,11 @@ private fun VideoMessageRow(
                 ),
         ) {
             // the frame keeps the video's OWN aspect ratio (16:9 until known)
+            // inside the same 120 x 160 dp box as a photo (round 33, item 18)
             Box(
                 Modifier
-                    .fillMaxWidth(0.62f)
+                    .widthIn(max = 120.dp)
+                    .heightIn(max = 160.dp)
                     .aspectRatio(ratio)
                     .background(Color(0xFF101A2E)),
                 contentAlignment = Alignment.Center,
@@ -4755,7 +4756,7 @@ private fun VideoMessageRow(
                 if (pendingEcho) {
                     Box(
                         Modifier
-                            .size(46.dp)
+                            .size(38.dp)
                             .clip(CircleShape)
                             .background(Color(0x99000000)),
                         contentAlignment = Alignment.Center,
@@ -4766,26 +4767,26 @@ private fun VideoMessageRow(
                                 color = Color.White,
                                 strokeWidth = 3.dp,
                                 trackColor = Color(0x40FFFFFF),
-                                modifier = Modifier.size(40.dp),
+                                modifier = Modifier.size(32.dp),
                             )
                             Text("${(upFrac * 100).toInt()}%", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                         } else {
                             CircularProgressIndicator(
                                 color = Color.White,
                                 strokeWidth = 3.dp,
-                                modifier = Modifier.size(40.dp),
+                                modifier = Modifier.size(32.dp),
                             )
                         }
                     }
                 } else {
                     Box(
                         Modifier
-                            .size(46.dp)
+                            .size(38.dp)
                             .clip(CircleShape)
                             .background(Color(0x99000000)),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(Icons.Filled.PlayArrow, "Play video", tint = Color.White, modifier = Modifier.size(30.dp))
+                        Icon(Icons.Filled.PlayArrow, "Play video", tint = Color.White, modifier = Modifier.size(26.dp))
                     }
                 }
                 // Owner round 33 (item 19): photo-style stamp — a soft scrim, the
@@ -5097,7 +5098,7 @@ private fun ImageMessageRow(
         Box(
             Modifier
                 .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                .widthIn(max = 150.dp) // Owner round 25 / round 32 item 29: smaller inline preview
+                .widthIn(max = 120.dp) // Owner round 25 / 32 item 29 / 33 item 18: smaller inline preview
                 // Owner round 10: photos float too — 3D lift + the round-8
                 // thin border.
                 .shadow(2.dp, RoundedCornerShape(12.dp))
@@ -5380,7 +5381,7 @@ private fun AlbumMessageRow(
     val replyThreshold = with(LocalDensity.current) { 36.dp.toPx() }
     val shape = RoundedCornerShape(12.dp)
     val gap = 2.dp
-    val albumWidth = 264.dp
+    val albumWidth = 208.dp // Owner round 33 (item 18): narrower, like the single photo
     fun longPress() {
         if (!pendingEcho) {
             haptics.tap()
@@ -5828,19 +5829,21 @@ private fun ImageBubble(m: JSONObject, mine: Boolean) {
     val dataBmp = if (url?.startsWith("data:") == true || url?.startsWith("file://") == true) rememberBitmap(url) else null
     Box(
         Modifier
-            // Owner round 32 (item 29): a smaller inline preview — 150 dp wide,
-            // never taller than 200 dp (portrait shots used to run 280 dp tall).
-            // Tap still opens the full-screen viewer.
-            .widthIn(max = 150.dp)
+            // Owner round 32 (item 29) / round 33 (item 18): a small inline
+            // preview — at most 120 dp wide and 160 dp tall. The height cap sits
+            // BEFORE aspectRatio on purpose: aspectRatio hands its child FIXED
+            // constraints, so a heightIn placed after it never applied and
+            // portrait shots still ran 267 dp tall. Tap opens the full viewer.
+            .widthIn(max = 120.dp)
             .then(
                 if (ratio > 0f) {
                     Modifier
+                        .heightIn(max = 160.dp)
                         .aspectRatio(ratio)
-                        .heightIn(max = 200.dp)
                 } else {
                     Modifier
-                        .widthIn(min = 120.dp)
-                        .height(140.dp)
+                        .widthIn(min = 96.dp)
+                        .height(120.dp)
                 },
             )
             .clip(RoundedCornerShape(12.dp))
@@ -5896,10 +5899,10 @@ private fun ImageBubble(m: JSONObject, mine: Boolean) {
                         progress = { upFrac },
                         color = Color.White,
                         strokeWidth = 3.dp,
-                        modifier = Modifier.size(42.dp),
+                        modifier = Modifier.size(34.dp),
                     )
-                    Spacer(Modifier.height(4.dp))
-                    Text("${(upFrac * 100).toInt()}%", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(3.dp))
+                    Text("${(upFrac * 100).toInt()}%", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         }

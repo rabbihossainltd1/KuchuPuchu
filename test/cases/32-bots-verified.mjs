@@ -1740,10 +1740,11 @@ const convBetween = (db, a, b) =>
       !src.includes("status_reaction_inbox"),
   );
   check(
-    "r25/r32-29: photos smaller (150dp inline preview, ≤200dp tall) + JPEG quality 90; voice/call stamps bottom-right; ONE back closes reaction+selection",
-    (chat.match(/\.widthIn\(max = 150\.dp\)/g) || []).length === 2 &&
-      chat.includes(".heightIn(max = 200.dp)") &&
+    "r25/r32-29/r33-18: photos smaller (120dp inline preview, ≤160dp tall) + JPEG quality 90; voice/call stamps bottom-right; ONE back closes reaction+selection",
+    (chat.match(/\.widthIn\(max = 120\.dp\)/g) || []).length === 3 &&
+      (chat.match(/\.heightIn\(max = 160\.dp\)/g) || []).length === 2 &&
       !chat.includes(".widthIn(max = 185.dp)") &&
+      !chat.includes(".widthIn(max = 150.dp)") &&
       readFileSync(
         "native-android/app/src/main/java/app/kuchupuchu/android/Files.kt",
         "utf8",
@@ -7246,7 +7247,7 @@ const convBetween = (db, a, b) =>
         vid.includes("listOf(Color.Transparent, Color.Transparent, Color(0x73000000)),") &&
         vid.includes(".align(Alignment.TopStart)") &&
         vid.includes(
-          'Icon(Icons.Filled.PlayArrow, "Play video", tint = Color.White, modifier = Modifier.size(30.dp))',
+          'Icon(Icons.Filled.PlayArrow, "Play video", tint = Color.White, modifier = Modifier.size(26.dp))',
         ),
     );
     check(
@@ -7586,6 +7587,40 @@ const convBetween = (db, a, b) =>
         ),
     );
   }
+  // Item 18: photo / video cards even smaller — 120 dp wide, never taller than
+  // 160 dp. The height cap now sits BEFORE aspectRatio (after it, aspectRatio's
+  // fixed child constraints made the cap a no-op, so portrait shots still ran
+  // 267 dp tall). Videos share the same box, albums narrow to 208 dp.
+  {
+    const chat = kt("ChatScreen.kt");
+    const img = chat.slice(
+      chat.indexOf("private fun ImageBubble("),
+      chat.indexOf("private fun FileBubble("),
+    );
+    const vid = chat.slice(
+      chat.indexOf("private fun VideoMessageRow("),
+      chat.indexOf("private fun ViewOnceRow("),
+    );
+    check(
+      "r33-18: photo bubble ≤120×160 with heightIn BEFORE aspectRatio, unknown-ratio placeholder 96×120, smaller upload ring; video frame shares the 120×160 caps (no 235 dp box, no 0.62 fraction) with a 38 dp play circle; album 208 dp",
+      img.includes(
+        "            .widthIn(max = 120.dp)\n            .then(\n                if (ratio > 0f) {\n                    Modifier\n                        .heightIn(max = 160.dp)\n                        .aspectRatio(ratio)\n                } else {\n                    Modifier\n                        .widthIn(min = 96.dp)\n                        .height(120.dp)\n                },\n            )",
+      ) &&
+        !img.includes(".aspectRatio(ratio)\n                        .heightIn(") &&
+        img.includes("modifier = Modifier.size(34.dp),") &&
+        vid.includes(
+          "                    .widthIn(max = 120.dp)\n                    .heightIn(max = 160.dp)\n                    .aspectRatio(ratio)\n                    .background(Color(0xFF101A2E)),",
+        ) &&
+        !vid.includes("235.dp") &&
+        !vid.includes("fillMaxWidth(0.62f)") &&
+        (vid.match(/\.size\(38\.dp\)/g) || []).length === 2 &&
+        (vid.match(/modifier = Modifier\.size\(32\.dp\),/g) || []).length === 2 &&
+        !chat.includes(".size(46.dp)") &&
+        chat.includes("val albumWidth = 208.dp") &&
+        !chat.includes("264.dp"),
+    );
+  }
+
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
   // a touch on blank list space closes it (main and archive lists; r33-6
   // retired the hidden list).
