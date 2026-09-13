@@ -4246,7 +4246,7 @@ const convBetween = (db, a, b) =>
   check(
     "r30-7: press-and-hold pauses the status viewer (clock, bar, clip) until release; tap still steps",
     kt("StatusScreens.kt").includes(
-      "onPress = {\n                                    holding = true\n                                    tryAwaitRelease()\n                                    holding = false",
+      "onPress = {\n                                    pressedAt = android.os.SystemClock.uptimeMillis()\n                                    holding = true\n                                    tryAwaitRelease()\n                                    holding = false",
     ) &&
       kt("StatusScreens.kt").includes("|| !Store.foreground || holding) {") &&
       kt("StatusScreens.kt").includes(
@@ -7468,6 +7468,41 @@ const convBetween = (db, a, b) =>
         peek.includes(
           "private fun PeekAction(icon: ImageVector, label: String, onClick: () -> Unit) {",
         ),
+    );
+  }
+  // Item 10: status viewer — readable header on every theme / frame, the
+  // picture at full strength, and a hold that resumes on release.
+  {
+    const ss = kt("StatusScreens.kt");
+    const viewer = ss.slice(
+      ss.indexOf("fun StatusViewerScreen(nav: NavController, whose: String) {"),
+      ss.indexOf("private fun StatusVideoPlayer("),
+    );
+    check(
+      "r33-10: no 40% dim over the photo / video; top (150 dp) and bottom (170 dp) gradient scrims behind the header and the reply row; the progress fill is WHITE (Card was navy in dark-blue)",
+      !viewer.includes("Box(Modifier.fillMaxSize().background(Color(0x66000000)))") &&
+        viewer.includes(
+          ".height(150.dp)\n                    .align(Alignment.TopStart)\n                    .background(Brush.verticalGradient(listOf(Color(0xA6000000), Color.Transparent))),",
+        ) &&
+        viewer.includes(
+          ".height(170.dp)\n                    .align(Alignment.BottomStart)\n                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0x99000000)))),",
+        ) &&
+        viewer.includes(
+          ".fillMaxWidth(progressTo(i, idx, progress))\n                                    .height(3.dp)\n                                    .background(Color.White),",
+        ) &&
+        !viewer.includes(".background(Card),\n"),
+    );
+    check(
+      "r33-10: a hold's release only resumes — the tap handler bails when the press lasted the long-press timeout or more (pressedAt stamped in onPress), so it never steps or closes the viewer; short taps still step and a swipe still cancels the press",
+      viewer.includes("var pressedAt = 0L") &&
+        viewer.includes(
+          "pressedAt = android.os.SystemClock.uptimeMillis()\n                                    holding = true",
+        ) &&
+        viewer.includes(
+          "if (android.os.SystemClock.uptimeMillis() - pressedAt >= viewConfiguration.longPressTimeoutMillis) return@detectTapGestures",
+        ) &&
+        viewer.includes("if (idx + 1 < statuses.size) idx++ else nav.popBackStack()") &&
+        !viewer.includes("onLongPress = {"),
     );
   }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or

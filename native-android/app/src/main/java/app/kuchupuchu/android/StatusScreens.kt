@@ -800,7 +800,6 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                         androidx.compose.ui.layout.ContentScale.Fit,
                     )
                 }
-                Box(Modifier.fillMaxSize().background(Color(0x66000000)))
             } else {
                 val gradients = mapOf(
                     "amber" to listOf(Color(0xFFFDE68A), Color(0xFFF59E0B)),
@@ -824,6 +823,26 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                     )
                 }
             }
+            /* Owner round 33 (item 10): the whole picture used to sit under a
+               40% black dim (the status looked washed out — "opacity low")
+               and the header still fought a bright photo. The picture keeps
+               its colours now; the header and the reply row rest on soft
+               top / bottom gradients instead, so the white text reads on any
+               frame. */
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(150.dp)
+                    .align(Alignment.TopStart)
+                    .background(Brush.verticalGradient(listOf(Color(0xA6000000), Color.Transparent))),
+            )
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(170.dp)
+                    .align(Alignment.BottomStart)
+                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0x99000000)))),
+            )
 
             /* progress segments + header.
              *
@@ -853,11 +872,13 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                                 .clip(RoundedCornerShape(2.dp))
                                 .background(Color.White.copy(alpha = 0.35f)),
                         ) {
+                            // Owner round 33 (item 10): WHITE, not Card — Card is
+                            // navy in dark-blue, so the filled part was invisible.
                             Box(
                                 Modifier
                                     .fillMaxWidth(progressTo(i, idx, progress))
                                     .height(3.dp)
-                                    .background(Card),
+                                    .background(Color.White),
                             )
                         }
                     }
@@ -947,16 +968,24 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                             }
                         }
                         .pointerInput("tapzone") {
+                            // Owner round 33 (item 10): a HOLD is not a tap. The
+                            // release of a press that lasted the long-press timeout
+                            // or more only resumes — it used to count as a tap and
+                            // step to the next status, which CLOSED the viewer on
+                            // the last one (where a video usually sits).
+                            var pressedAt = 0L
                             detectTapGestures(
                                 // Owner round 30: press-and-hold pauses the status
                                 // (and its progress bar) until the finger lifts;
                                 // a plain tap still steps back / forward.
                                 onPress = {
+                                    pressedAt = android.os.SystemClock.uptimeMillis()
                                     holding = true
                                     tryAwaitRelease()
                                     holding = false
                                 },
                             ) { pos ->
+                                if (android.os.SystemClock.uptimeMillis() - pressedAt >= viewConfiguration.longPressTimeoutMillis) return@detectTapGestures
                                 progress = 0f
                                 if (pos.x < size.width / 2f) {
                                     if (idx > 0) idx--
