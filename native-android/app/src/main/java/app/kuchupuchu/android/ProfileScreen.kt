@@ -200,7 +200,8 @@ fun ProfileScreen(nav: NavController, userId: String) {
         }
         if (moreOpen && user != null) {
             val uMenu = user!!
-            val inBook = PhoneBook.entries.any { it.user?.optString("id") == userId }
+            // Owner round 33 (item 14): their number in the book counts too.
+            val inBook = PhoneBook.entries.any { it.user?.optString("id") == userId } || PhoneBook.hasNumber(uMenu.optText("phone"))
             val muted = peerConvForMenu?.optBoolean("muted") == true || (peerConvForMenu != null && ScreenStore.isMuted(peerConvForMenu.optString("id")))
             val hidden = peerConvForMenu != null && ScreenStore.isHidden(peerConvForMenu.optString("id"))
             KpSheet(onDismiss = { moreOpen = false }) {

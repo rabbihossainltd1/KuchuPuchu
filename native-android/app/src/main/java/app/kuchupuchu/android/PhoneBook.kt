@@ -34,8 +34,37 @@ object PhoneBook {
     val syncedAt = mutableStateOf(0L)
     private var file: java.io.File? = null
 
+    /**
+     * Owner round 33 (item 14): the phone book changed — or the last match
+     * request failed — since the last sync, so the next [sync] ignores the
+     * 10-minute throttle. Set by [markDirty] ("Add contact" hands the person
+     * to the phone's Contacts app: the book changes AFTER we come back), by
+     * the contacts ContentObserver below, and by a sync that could not reach
+     * the server. Before this, a friend saved to the phone book kept showing
+     * "Add contact" until the next cold start.
+     */
+    @Volatile
+    private var dirty = false
+
+    fun markDirty() {
+        dirty = true
+    }
+
     fun init(ctx: Context) {
         file = java.io.File(ctx.applicationContext.filesDir, "kp-contacts.json")
+        // Best-effort: a change in the phone's contacts (any app) flags the
+        // match stale; the resume sync picks it up.
+        runCatching {
+            ctx.applicationContext.contentResolver.registerContentObserver(
+                ContactsContract.Contacts.CONTENT_URI,
+                true,
+                object : android.database.ContentObserver(null) {
+                    override fun onChange(selfChange: Boolean) {
+                        dirty = true
+                    }
+                },
+            )
+        }
         val f = file ?: return
         Thread {
             runCatching {
@@ -68,6 +97,18 @@ object PhoneBook {
         entries.firstOrNull { it.user?.optString("id") == userId }?.name
 
     /**
+     * Owner round 33 (item 14): the NUMBER itself is in the phone book — the
+     * second way to know a person, for when the server match is stale or
+     * their account carries a number the match could not hit.
+     */
+    fun hasNumber(phone: String?): Boolean {
+        val p = phone?.trim().orEmpty()
+        if (p.isBlank()) return false
+        val e164 = toE164(p, DEFAULT_COUNTRY) ?: p
+        return entries.any { it.phone == e164 || it.phone == p }
+    }
+
+    /**
      * Phone-book KP users whose contact name, display name or username contains
      * `q` — the search screen merges these into the server's "People" section.
      */
@@ -91,31 +132,46 @@ object PhoneBook {
         val app = ctx.applicationContext
         if (!granted(app)) return
         if (syncing.value) return
-        if (!force && System.currentTimeMillis() - syncedAt.value < 10 * 60_000L && entries.isNotEmpty()) return
+        val fresh = System.currentTimeMillis() - syncedAt.value < 10 * 60_000L
+        if (!force && !dirty && fresh && entries.isNotEmpty()) return
         syncing.value = true
+        dirty = false
         try {
             val book = readPhoneBook(app)
             val phones = book.map { it.phone }.distinct()
             val users = HashMap<String, JSONObject>()
+            // Owner round 33 (item 14): a chunk whose match request failed (an
+            // offline launch) keeps the users the LAST sync found for those
+            // numbers and leaves the sync dirty, so the next one retries. The
+            // whole book used to come back with nobody matched and the
+            // 10-minute throttle then pinned "Add contact" on every friend.
+            val previous = entries.associateBy({ it.phone }, { it.user })
+            var failed = false
             // 500 numbers per request keeps the body small on slow links; the
             // server accepts up to 2000.
             phones.chunked(500).forEach { chunk ->
                 runCatching {
                     val res = Api.post("/api/contacts/match", JSONObject().put("phones", JSONArray(chunk)))
                     res.arr("users").objects().forEach { u -> users[u.optString("phone")] = u }
+                }.onFailure {
+                    failed = true
+                    chunk.forEach { p -> previous[p]?.let { users[p] = it } }
                 }
             }
             book.forEach { e -> e.user = users[e.phone] }
             val sorted =
                 book.sortedWith(compareBy<Entry>({ it.user == null }, { it.name.lowercase() }))
+            val stamp = if (failed) syncedAt.value else System.currentTimeMillis()
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 entries.clear()
                 entries.addAll(sorted)
-                syncedAt.value = System.currentTimeMillis()
+                syncedAt.value = stamp
                 syncing.value = false
             }
-            persist(sorted)
+            if (failed) dirty = true
+            persist(sorted, stamp)
         } catch (_: Exception) {
+            dirty = true
             android.os.Handler(android.os.Looper.getMainLooper()).post { syncing.value = false }
         }
     }
@@ -126,7 +182,7 @@ object PhoneBook {
         runCatching { file?.delete() }
     }
 
-    private fun persist(list: List<Entry>) {
+    private fun persist(list: List<Entry>, at: Long) {
         val f = file ?: return
         runCatching {
             val arr = JSONArray()
@@ -135,7 +191,7 @@ object PhoneBook {
                     JSONObject().put("name", e.name).put("phone", e.phone).apply { e.user?.let { put("user", it) } },
                 )
             }
-            f.writeText(JSONObject().put("at", System.currentTimeMillis()).put("items", arr).toString())
+            f.writeText(JSONObject().put("at", at).put("items", arr).toString())
         }
     }
 
@@ -187,7 +243,17 @@ object PhoneBook {
      * codes, star codes, service numbers).
      */
     fun toE164(raw: String, home: KpCountry): String? {
-        var d = raw.filter { it.isDigit() || it == '+' }
+        // Owner round 33 (item 14): Bengali / Arabic-Indic digits (a number
+        // saved from a Bangla keyboard) become ASCII — they used to fail the
+        // ASCII regex below and the contact silently dropped out of the match.
+        var d =
+            raw.mapNotNull { c ->
+                when {
+                    c == '+' -> c
+                    c.isDigit() -> Character.digit(c, 10).takeIf { it >= 0 }?.let { '0' + it }
+                    else -> null
+                }
+            }.joinToString("")
         if (d.isEmpty()) return null
         if (d.startsWith("00")) d = "+" + d.drop(2)
         val full =

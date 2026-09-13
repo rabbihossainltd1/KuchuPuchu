@@ -325,8 +325,10 @@ fun NewContactScreen(nav: NavController, initialName: String = "", initialPhone:
                 .putExtra(android.provider.ContactsContract.Intents.Insert.NAME, name.trim())
                 .putExtra(android.provider.ContactsContract.Intents.Insert.PHONE, p)
         runCatching { ctx.startActivity(intent) }.onFailure { error = "No contacts app found on this phone." }
-        // The phone book changed (or is about to) — refresh the match list.
-        scope.launch(Dispatchers.IO) { PhoneBook.sync(ctx, force = true) }
+        // Owner round 33 (item 14): the book changes AFTER the Contacts app
+        // saves — a sync fired now read the OLD book and the throttle then
+        // hid the new contact for ten minutes. Flag it; the resume re-matches.
+        PhoneBook.markDirty()
     }
 
     Column(

@@ -7538,6 +7538,54 @@ const convBetween = (db, a, b) =>
         chat.includes("padForIme = !showAttach && !showStickers,"),
     );
   }
+  // Item 14: a person in the phone book must never show "Add contact".
+  {
+    const pb = kt("PhoneBook.kt");
+    const act = kt("MainActivity.kt");
+    const resume = act.slice(
+      act.indexOf("override fun onResume()"),
+      act.indexOf("override fun onPause()"),
+    );
+    const contacts = kt("ContactsScreens.kt");
+    const save = contacts.slice(
+      contacts.indexOf("fun saveToPhone() {"),
+      contacts.indexOf("fun saveToPhone() {") + 1400,
+    );
+    const chat = kt("ChatScreen.kt");
+    const profile = kt("ProfileScreen.kt");
+    check(
+      "r33-14: PhoneBook re-matches when the book CHANGED — a dirty flag (markDirty, a contacts ContentObserver registered in init, a failed match) bypasses the 10-minute throttle; a failed match chunk keeps the previous users and leaves the sync dirty (syncedAt / the persisted stamp do not advance); Bengali digits normalise; hasNumber() knows a person by their number",
+      pb.includes("private var dirty = false") &&
+        pb.includes("fun markDirty() {") &&
+        pb.includes(
+          "ContactsContract.Contacts.CONTENT_URI,\n                true,\n                object : android.database.ContentObserver(null) {",
+        ) &&
+        pb.includes("if (!force && !dirty && fresh && entries.isNotEmpty()) return") &&
+        pb.includes("val previous = entries.associateBy({ it.phone }, { it.user })") &&
+        pb.includes(
+          "}.onFailure {\n                    failed = true\n                    chunk.forEach { p -> previous[p]?.let { users[p] = it } }",
+        ) &&
+        pb.includes("val stamp = if (failed) syncedAt.value else System.currentTimeMillis()") &&
+        pb.includes("if (failed) dirty = true\n            persist(sorted, stamp)") &&
+        pb.includes('f.writeText(JSONObject().put("at", at).put("items", arr).toString())') &&
+        pb.includes("c.isDigit() -> Character.digit(c, 10).takeIf { it >= 0 }?.let { '0' + it }") &&
+        pb.includes("fun hasNumber(phone: String?): Boolean {"),
+    );
+    check(
+      "r33-14: onResume re-syncs the book (throttled, off the main thread); Add contact → the Contacts app hand-off only flags dirty (no premature sync); the chat ⋮ and the profile ⋮ also count the peer's number being in the book (View contact / no Add contact)",
+      resume.includes(
+        "Thread { runCatching { if (!Api.token.isNullOrBlank()) PhoneBook.sync(application) } }.start()",
+      ) &&
+        save.includes("PhoneBook.markDirty()") &&
+        !save.includes("PhoneBook.sync(ctx, force = true)") &&
+        chat.includes(
+          'val inBook = PhoneBook.entries.any { it.user?.optString("id") == otherUserId } ||\n                                PhoneBook.hasNumber(c?.optJSONObject("other")?.optText("phone"))',
+        ) &&
+        profile.includes(
+          'val inBook = PhoneBook.entries.any { it.user?.optString("id") == userId } || PhoneBook.hasNumber(uMenu.optText("phone"))',
+        ),
+    );
+  }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
   // a touch on blank list space closes it (main and archive lists; r33-6
   // retired the hidden list).

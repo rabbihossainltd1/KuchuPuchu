@@ -289,6 +289,10 @@ class MainActivity : ComponentActivity() {
         // is a network call), once per foreground, and the server only writes when the
         // expiry is actually near — so this costs a request, not a D1 row.
         Thread { runCatching { Api.refreshSession() } }.start()
+        // Owner round 33 (item 14): the phone book may have changed while we
+        // were away ("Add contact" hands off to the Contacts app) — re-match
+        // when it did (dirty) or the last match is stale; a no-op otherwise.
+        Thread { runCatching { if (!Api.token.isNullOrBlank()) PhoneBook.sync(application) } }.start()
         // Owner round 31 (item 32, reverses round 16): coming back to the app
         // with a call connected must NOT auto-jump to the call screen — the
         // user picks: the top "Return to call" banner (item 33) or the ongoing

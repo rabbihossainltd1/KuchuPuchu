@@ -2015,7 +2015,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                             // Owner round 30: "View contact" only when this person is
                             // already in the phone book; otherwise offer to add them
                             // (name — and number, when they share it — pre-filled).
-                            val inBook = PhoneBook.entries.any { it.user?.optString("id") == otherUserId }
+                            // Owner round 33 (item 14): their number in the book counts too.
+                            val inBook = PhoneBook.entries.any { it.user?.optString("id") == otherUserId } ||
+                                PhoneBook.hasNumber(c?.optJSONObject("other")?.optText("phone"))
                             KpSheetRow(if (inBook) Icons.Filled.Person else Icons.Filled.PersonAdd, if (inBook) "View contact" else "Add contact") {
                                 menuOpen = false
                                 if (inBook) {
