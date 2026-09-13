@@ -771,7 +771,7 @@ const convBetween = (db, a, b) =>
   // ---- Owner round 12 (2026-09-05): 5 device reports ----
   check(
     "AI budget 900 tokens: Bengali script no longer dies mid-message",
-    src.includes("geminiComplete(env, prompt + voicePrompt, 900, voiceParts)"),
+    src.includes("geminiComplete(env, prompt + voicePrompt + photoPrompt, 900, ["),
   );
   check(
     "callee in a call → 486 LINE_BUSY (pair-redial never blocked)",
@@ -2704,7 +2704,7 @@ const convBetween = (db, a, b) =>
           "contents: [{ parts: [{ text: prompt }, ...extraParts] }],",
         ) &&
         readFileSync("src/worker/index.ts", "utf8").includes(
-          "(await geminiComplete(env, prompt + voicePrompt, 900, voiceParts)) ?? AI_REPLY_FALLBACK",
+          "(await geminiComplete(env, prompt + voicePrompt + photoPrompt, 900, [\n        ...voiceParts,\n        ...photoParts,\n      ])) ?? AI_REPLY_FALLBACK",
         ),
     );
 
@@ -7619,6 +7619,333 @@ const convBetween = (db, a, b) =>
         chat.includes("val albumWidth = 208.dp") &&
         !chat.includes("264.dp"),
     );
+  }
+
+  // Item 11a: the AI reads photos and creates / edits pictures. Behavioural
+  // probe with a fake Gemini: a photo + "ki dekhte paccho" must reach the text
+  // model as an inline image part; "ekta chobi banao" must reach the image
+  // model and come back as an IMAGE from the bot (with the model's caption);
+  // a photo followed by "background remove koro" must go to the image model
+  // WITH the photo bytes. Static locks on the intent regexes and the persona.
+  {
+    const src = readFileSync("src/worker/index.ts", "utf8");
+    const ai = src.slice(
+      src.indexOf("async function sendAiReply("),
+      src.indexOf("async function all<T>("),
+    );
+    check(
+      "r33-11a: sendAiReply — the transcript names photos / voice notes, a bare photo or a question about one rides along as an inline part (READ), a change request edits the nearby photo (a NEW-picture request still creates), a Banglish creation request draws, an owner-photo request never draws; a failed image tool makes the text reply apologise; the bot's picture goes out with a kp_media push",
+      ai.includes(
+        "WHERE conv_id = ? AND kind IN ('TEXT', 'IMAGE', 'FILE') ORDER BY rowid DESC LIMIT 12",
+      ) &&
+        ai.includes('return `[sent a photo]${r.body ? ` ${r.body}` : ""}`;') &&
+        ai.includes(
+          'newest && newest.kind === "TEXT" && newest.sender_id === userId ? (newest.body ?? "") : "";',
+        ) &&
+        ai.includes("const photoParts: unknown[] = [];") &&
+        ai.includes("if (!parts) readSource = newestPhoto;") &&
+        ai.includes("readSource = recentPhoto; // a follow-up question about the photo") &&
+        ai.includes("if (recentPhoto && wantsEdit(newestText)) {") &&
+        ai.includes("IMAGE_MAKE_VERB.test(t) && IMAGE_NOUN.test(t) && !OWNER_PHOTO_ASK.test(t);") &&
+        ai.includes("IMAGE_EDIT_HINT.test(t) && (IMAGE_REF.test(t) || !FRESH_NOUN.test(t));") &&
+        ai.includes("but the image tool failed this time") &&
+        ai.includes("but picture creation is switched off on this server") &&
+        src.includes("let imageQuotaBlockedUntil = 0;") &&
+        src.includes("if (res.status === 429 && /limit:\\s*0\\b/.test(await res.text())) {") &&
+        src.includes(
+          "if (Date.now() < imageQuotaBlockedUntil) return { image: null, quota: true };",
+        ) &&
+        ai.includes("Never say you cannot see images.") &&
+        ai.includes("if (caption && (IMAGE_EDIT_HINT.test(caption) || wantsPicture(caption))) {") &&
+        ai.includes("VALUES (?, ?, ?, 'IMAGE', NULL, ?, ?)`") &&
+        ai.includes("kp_media: `/api/messages/${imgMid}/media`,") &&
+        ai.includes(
+          "(await geminiComplete(env, prompt + voicePrompt + photoPrompt, 900, [\n        ...voiceParts,\n        ...photoParts,\n      ])) ?? AI_REPLY_FALLBACK",
+        ) &&
+        src.includes(
+          "Abilities: you CAN see photos the user sends and you CAN create or edit pictures on request",
+        ) &&
+        src.includes('const GEMINI_IMAGE_MODELS = [\n  "gemini-3.1-flash-lite-image",') &&
+        src.includes("setTimeout(() => ctrl.abort(), Math.min(remaining, 14_000))") &&
+        src.includes("async function aiPhotoPart(") &&
+        src.includes("const AI_PHOTO_MAX_BYTES = 7_000_000;"),
+    );
+    // the intent regexes, evaluated the way the worker does
+    const rx = (name) => {
+      const m = src.match(new RegExp(`const ${name} =\\n  (/.*?/i);`, "s"));
+      return m ? eval(m[1]) : null;
+    };
+    const verb = rx("IMAGE_MAKE_VERB");
+    const noun = rx("IMAGE_NOUN");
+    const edit = rx("IMAGE_EDIT_HINT");
+    const ref = rx("IMAGE_REF");
+    const fresh = rx("FRESH_NOUN");
+    const ownerAsk = rx("OWNER_PHOTO_ASK");
+    const wants = (s) =>
+      !!verb && !!noun && !!ownerAsk && verb.test(s) && noun.test(s) && !ownerAsk.test(s);
+    const wantsEdit = (s) =>
+      !!edit && !!ref && !!fresh && edit.test(s) && (ref.test(s) || !fresh.test(s));
+    check(
+      "r33-11a: creation intent — Banglish / Bengali / English requests match, plain chat about photos does not",
+      wants("ekta chobi banao — a cat in space") &&
+        wants("amar jonno ekta sundor wallpaper toiri koro") &&
+        wants("একটা বিড়ালের ছবি এঁকে দাও") &&
+        wants("ekta logo design koro KuchuPuchu er") &&
+        wants("draw me a picture of a lighthouse") &&
+        wants("ekta cartoon chobi chai") &&
+        wants("amake ekta bagher chobi baniye dao") &&
+        wants("make me a poster for eid") &&
+        !wants("tomar owner er photo dao") &&
+        !wants("tomar chobi dao") &&
+        !wants("তোমার ছবি দাও") &&
+        !wants("rabbi hossain er picture dekhao") &&
+        !wants("photo pathalam dekho") &&
+        !wants("ki dekhte paccho") &&
+        !wants("tomar owner ke?") &&
+        !wants("kemon acho") &&
+        wantsEdit("background remove koro") &&
+        wantsEdit("eta ke cartoon banao") &&
+        wantsEdit("cartoon banao") &&
+        wantsEdit("ছবিটা আরও সুন্দর করে দাও") &&
+        wantsEdit("amar chobi ta sundor koro") &&
+        wantsEdit("make it brighter") &&
+        !wantsEdit("ekta chobi banao — a cat in space") &&
+        !wantsEdit("amar jonno ekta logo banao") &&
+        !wantsEdit("eta ki?") &&
+        !wantsEdit("ki dekhte paccho"),
+    );
+  }
+  {
+    // behavioural probe: a fake generativelanguage endpoint records what each
+    // model was asked and answers text / image accordingly
+    const seen = [];
+    const realFetch = globalThis.fetch;
+    const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+    globalThis.fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : input.url;
+      if (url.startsWith("https://generativelanguage.googleapis.com/")) {
+        const model = url.split("/models/")[1].split(":")[0];
+        const req = JSON.parse(init.body);
+        const parts = req.contents?.[0]?.parts ?? [];
+        seen.push({
+          model,
+          image: model.includes("-image"),
+          hasInline: parts.some((p) => p.inlineData?.mimeType?.startsWith("image/")),
+          text: parts
+            .filter((p) => typeof p.text === "string")
+            .map((p) => p.text)
+            .join("\n"),
+        });
+        const body = model.includes("-image")
+          ? {
+              candidates: [
+                {
+                  content: {
+                    parts: [
+                      { text: "Here is your cat in space!" },
+                      { inlineData: { mimeType: "image/png", data: pngBytes.toString("base64") } },
+                    ],
+                  },
+                },
+              ],
+            }
+          : {
+              candidates: [{ content: { parts: [{ text: "Ami ekta lal phool dekhte pacchi." }] } }],
+            };
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return realFetch(input, init);
+    };
+    try {
+      const worker = await freshWorker();
+      const db = makeD1();
+      const r2 = makeR2();
+      const env = {
+        DB: db,
+        MEDIA: r2,
+        GOOGLE_WEB_CLIENT_ID: "kp-test-web-client",
+        GEMINI_API_KEY: "test-key",
+      };
+      const ctx = makeCtx();
+      let ipSeq = 0;
+      const call = async (method, path, body, token, raw) => {
+        const headers = { "content-type": "application/json" };
+        if (path.startsWith("/api/auth/"))
+          headers["cf-connecting-ip"] = `203.33.${Math.floor(ipSeq / 250)}.${(ipSeq++ % 250) + 1}`;
+        if (token) headers.authorization = `Bearer ${token}`;
+        let init = { method, headers };
+        if (raw) {
+          init = {
+            method,
+            headers: { ...raw.headers, authorization: `Bearer ${token}` },
+            body: raw.body,
+          };
+        } else if (body !== undefined && method !== "GET") init.body = JSON.stringify(body);
+        const res = await worker.fetch(new Request(`https://kp.test${path}`, init), env, ctx);
+        const t = await res.text();
+        await ctx.drain();
+        let j = {};
+        try {
+          j = t ? JSON.parse(t) : {};
+        } catch {
+          j = {};
+        }
+        return { status: res.status, json: j };
+      };
+      const reg = makeReg(call);
+      const a = await reg("ai-eyes@x.com", "aieyes");
+      await call("POST", "/api/ai/welcome", {}, a.token);
+      seen.length = 0; // the welcome text call is not under test
+      const conv = convBetween(db, "kp_ai_bot", a.user.id);
+      const botRows = () =>
+        db._db
+          .prepare(
+            "SELECT kind, body, media FROM messages WHERE conv_id = ? AND sender_id = 'kp_ai_bot' ORDER BY rowid",
+          )
+          .all(conv.id);
+      const upload = async (name, type) =>
+        (
+          await call("POST", `/api/files?name=${name}&type=${type}`, undefined, a.token, {
+            headers: { "content-type": "application/octet-stream" },
+            body: Buffer.from(`jpeg-bytes-of-${name}`),
+          })
+        ).json.fileKey;
+
+      // 1. READ: a bare photo, then "ki dekhte paccho"
+      const k1 = await upload("flower.jpg", "image/jpeg");
+      await call(
+        "POST",
+        `/api/conversations/${conv.id}/messages`,
+        {
+          kind: "FILE",
+          fileKey: k1,
+          fileName: "flower.jpg",
+          fileType: "image/jpeg",
+          clientId: "ai-p1",
+        },
+        a.token,
+      );
+      const afterPhoto = seen.splice(0);
+      await call(
+        "POST",
+        `/api/conversations/${conv.id}/messages`,
+        { kind: "TEXT", body: "ki dekhte paccho", clientId: "ai-q1" },
+        a.token,
+      );
+      const afterAsk = seen.splice(0);
+      check(
+        "r33-11a: a bare photo goes to the TEXT model with the picture attached (the bot describes it), and the follow-up question still carries that photo",
+        afterPhoto.length >= 1 &&
+          afterPhoto.every((c) => !c.image) &&
+          afterPhoto[0].hasInline &&
+          afterPhoto[0].text.includes("[sent a photo]") &&
+          afterPhoto[0].text.includes("The attached PHOTO is the one the user sent") &&
+          afterAsk.length >= 1 &&
+          afterAsk.every((c) => !c.image) &&
+          afterAsk[0].hasInline &&
+          afterAsk[0].text.includes("just before their latest message") &&
+          botRows().filter((r) => r.kind === "TEXT").length >= 2,
+        JSON.stringify({ afterPhoto, afterAsk, rows: botRows() }).slice(0, 600),
+      );
+
+      // 2. CREATE while the photo is still 4 rows back: a NEW-picture request
+      //    must draw fresh (text-only prompt), not edit the photo
+      const before = botRows().length;
+      await call(
+        "POST",
+        `/api/conversations/${conv.id}/messages`,
+        { kind: "TEXT", body: "ekta chobi banao — a cat in space", clientId: "ai-c1" },
+        a.token,
+      );
+      const afterCreate = seen.splice(0);
+      const rowsNow = botRows();
+      const created = rowsNow[rowsNow.length - 1];
+      const convRow = db._db
+        .prepare("SELECT last_message FROM conversations WHERE id = ?")
+        .get(conv.id);
+      check(
+        "r33-11a: 'ekta chobi banao' (a photo 4 rows up) → the image model draws from a text-only prompt, the bot's IMAGE lands, the chat list reads Photo",
+        afterCreate.length >= 1 &&
+          afterCreate[0].image &&
+          !afterCreate[0].hasInline &&
+          afterCreate[0].text.includes("ekta chobi banao") &&
+          rowsNow.length === before + 1 &&
+          created.kind === "IMAGE" &&
+          created.body === null &&
+          !!created.media &&
+          !!(await r2.get(created.media)) &&
+          convRow.last_message === "Photo",
+        JSON.stringify({ afterCreate, created, convRow }).slice(0, 500),
+      );
+
+      // 3. EDIT: a change request with the user's photo 6 rows back → image
+      //    model WITH the photo bytes
+      await call(
+        "POST",
+        `/api/conversations/${conv.id}/messages`,
+        { kind: "TEXT", body: "background remove kore dao", clientId: "ai-e1" },
+        a.token,
+      );
+      const afterEdit = seen.splice(0);
+      const edited = botRows().filter((r) => r.kind === "IMAGE");
+      check(
+        "r33-11a: 'background remove kore dao' after a photo → the image model gets the photo + the instruction and the bot answers with a new IMAGE",
+        afterEdit.length >= 1 &&
+          afterEdit[0].image &&
+          afterEdit[0].hasInline &&
+          afterEdit[0].text.startsWith(
+            "Edit this photo as requested: background remove kore dao",
+          ) &&
+          edited.length === 2 &&
+          !!edited[1].media &&
+          edited[1].media !== edited[0].media &&
+          !!(await r2.get(edited[1].media)),
+        JSON.stringify({ afterEdit, edited }).slice(0, 500),
+      );
+
+      // 3b. an owner-photo request is the card's job — never a generation
+      await call(
+        "POST",
+        `/api/conversations/${conv.id}/messages`,
+        { kind: "TEXT", body: "tomar owner er photo dao", clientId: "ai-o1" },
+        a.token,
+      );
+      const afterOwner = seen.splice(0);
+      check(
+        "r33-11a: 'tomar owner er photo dao' → text model only (no image generation)",
+        afterOwner.length >= 1 && afterOwner.every((c) => !c.image),
+        JSON.stringify(afterOwner).slice(0, 300),
+      );
+
+      // 4. the bot's picture is readable by the user through the normal media route
+      const list = await call("GET", `/api/conversations/${conv.id}/messages`, undefined, a.token);
+      const botImg = (list.json.items ?? []).find(
+        (m) => m.senderId === "kp_ai_bot" && m.kind === "IMAGE",
+      );
+      const media = botImg
+        ? await worker.fetch(
+            new Request(`https://kp.test${botImg.mediaUrl}`, {
+              headers: { authorization: `Bearer ${a.token}` },
+            }),
+            env,
+            ctx,
+          )
+        : null;
+      check(
+        "r33-11a: the bot's IMAGE row is served to the user via /api/messages/:id/media with hasImage",
+        !!botImg &&
+          botImg.hasImage === true &&
+          typeof botImg.mediaUrl === "string" &&
+          media?.status === 200 &&
+          (media.headers.get("content-type") || "").startsWith("image/"),
+        JSON.stringify({ botImg, status: media?.status }).slice(0, 300),
+      );
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   }
 
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or

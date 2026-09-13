@@ -862,10 +862,73 @@ const OWNER_INTENT =
 // "make me a photo of…" style requests → the image generation flow. Both a
 // creation verb AND a picture noun must appear, so ordinary chat about photos
 // ("photo pathalam") never triggers a generation.
+// Owner round 33 (item 11a): the verb family grows — "ekta chobi dao / koro /
+// design koro / ready koro / চাই" are how the owner's users actually ask; the
+// old list needed an English-style "make", so nearly every Banglish request
+// fell through to a text answer ("ami chobi banate pari na").
 const IMAGE_MAKE_VERB =
-  /(make|create|draw|generate|paint|banao|banai|banan|banabe|আঁকো|আঁকা|বানাও|বানান|বানাবে)/i;
+  /(make|create|draw|generate|paint|design|render|produce|sketch|imagine|banao|banai|banan|banabe|banaiya|baniye|baniya|banate|banano|banabo|anko|ako|akte|eke|kore\s*dao|kore\s*den|koro|korun|toiri|tairi|ready|dao\b|den\b|dekhao|chai\b|lagbe|আঁকো|আঁকুন|আঁকা|এঁকে|বানাও|বানান|বানাবে|বানিয়ে|বানাতে|তৈরি|করে\s*দাও|করে\s*দিন|করো|করুন|দাও|দিন|দেখাও|চাই|লাগবে)/i;
 const IMAGE_NOUN =
-  /(photo|picture|image|drawing|painting|illustration|logo|avatar|poster|art|ছবি|ড্রয়িং|পোস্টার|লোগো)/i;
+  /(photo|picture|pic\b|pics\b|image|img\b|drawing|painting|illustration|logo|avatar|poster|banner|wallpaper|thumbnail|sticker|cartoon|anime|portrait|sketch|art\b|artwork|design|chobi|chhobi|sobi|ছবি|ফটো|পিকচার|ড্রয়িং|পোস্টার|লোগো|ব্যানার|ওয়ালপেপার|স্টিকার|কার্টুন|ডিজাইন)/i;
+// A message that is only about a picture ALREADY in the thread ("edit", "make
+// it brighter", "remove the background") never counts as a creation request —
+// it is routed to the edit flow when a photo is close by.
+const IMAGE_EDIT_HINT =
+  /(edit|change|remove|replace|add\b|fix|improve|enhance|brighten|darken|blur|crop|resize|background|colou?r|style|cartoon|anime|filter|retouch|restore|upscale|sharpen|makeover|paint|convert|turn|transform|swap|erase|clean|make|create|draw|generate|kore\s*dao|kore\s*den|banao|banai|koro|korun|bodl|bodla|kato|muche|muchhe|felo|shundor|sundor|bhalo|উন্নত|বদল|বদলাও|মুছে|সরাও|যোগ|ঠিক|সুন্দর|ভালো|রং|রঙ|ব্যাকগ্রাউন্ড|স্টাইল|কার্টুন|এডিট|ফিল্টার|বানাও|বানিয়ে|করো|করুন|করে\s*দাও)/i;
+// "this one / the photo / amar chobi ta" — the words that point at a picture
+// already in the thread.
+const IMAGE_REF =
+  /(\b(eta|eita|etar|etake|eke|ei\s*ta)\b|\bei\s*(chobi|chhobi|photo|pic|picture|image)|\b(chobi|chhobi|photo|pic|picture|image|selfie)\s*(ta|ti|take|tar|te)\b|\bamar\s*(chobi|chhobi|photo|pic|selfie)|\bthis\b|\bit\b|\bits\b|\bthe\s*(photo|picture|pic|image|selfie)|\bmy\s*(photo|picture|pic|selfie|face)|\bselfie\b|এটা|এটাকে|এইটা|এইটাকে|এই\s*(ছবি|ফটো)|(ছবি|ফটো)(টা|টি|টাকে|টার|তে)|আমার\s*(ছবি|ফটো|সেলফি))/i;
+// "tomar chobi dao" / "owner er photo" — the owner's (or the bot's own) photo
+// is the profile card's job, never a generation. Kept tight on purpose:
+// OWNER_INTENT itself lists "banao" (as in "ke banaiyeche") and would swallow
+// every "ekta chobi banao".
+const OWNER_PHOTO_ASK =
+  /((owner|malik|rabbi|hossain|developer|creator|founder|মালিক|রবি|রাব্বি|ডেভেলপার|প্রতিষ্ঠাতা)[^।.!?]{0,30}(ছবি|ফটো|প্রোফাইল|photo|pic\b|picture|avatar|selfie|chobi|chhobi)|\b(tomar|tor|apnar|your)\s+(own\s+|ekta\s+|nijer\s+|ei\s+)?(ছবি|ফটো|প্রোফাইল|photo|pic\b|picture|avatar|selfie|chobi|chhobi|face)|(তোমার|আপনার|তোর)\s*(নিজের\s*)?(ছবি|ফটো|প্রোফাইল|সেলফি))/i;
+// A picture noun that reads as a NEW picture ("ekta chobi", "a logo") — with a
+// photo nearby and no reference to it, such a request creates instead of edits.
+const FRESH_NOUN =
+  /(photo|picture|pic\b|pics\b|image|img\b|chobi|chhobi|sobi|logo|poster|banner|wallpaper|thumbnail|ছবি|ফটো|পিকচার|লোগো|পোস্টার|ব্যানার|ওয়ালপেপার|থাম্বনেইল)/i;
+
+/** The mime a stored photo row advertises (uploads carry meta.type; inline
+ *  IMAGE rows carry nothing — the bucket's own type decides then). */
+function photoMime(r: { kind: string; meta_json: string | null }): string {
+  if (r.kind !== "FILE") return "";
+  return String(parseJson<{ type?: string }>(r.meta_json, {}).type || "").toLowerCase();
+}
+
+/** A photo the user sent to the AI, in Gemini's inline shape (or null when the
+ *  object is missing / not an image / too large). Never throws. */
+const AI_PHOTO_MAX_BYTES = 7_000_000;
+async function aiPhotoPart(
+  env: Env,
+  media: string | null | undefined,
+  hint: string,
+): Promise<{ inlineData: { mimeType: string; data: string } } | null> {
+  if (!media || !env.MEDIA) return null;
+  try {
+    const obj = await env.MEDIA.get(media);
+    if (!obj) return null;
+    const buf = await new Response(obj.body).arrayBuffer();
+    if (buf.byteLength <= 0 || buf.byteLength > AI_PHOTO_MAX_BYTES) return null;
+    const stored = String(obj.httpMetadata?.contentType || "")
+      .toLowerCase()
+      .split(";")[0]!
+      .trim();
+    const mime = stored.startsWith("image/")
+      ? stored
+      : hint.startsWith("image/")
+        ? hint
+        : /\.png$/i.test(media)
+          ? "image/png"
+          : /\.webp$/i.test(media)
+            ? "image/webp"
+            : "image/jpeg";
+    return { inlineData: { mimeType: mime, data: arrayBufferToBase64(buf) } };
+  } catch {
+    return null;
+  }
+}
 
 function arrayBufferToBase64(buf: ArrayBuffer): string {
   let bin = "";
@@ -901,23 +964,36 @@ function geminiAudioMime(type: string): string {
 const AI_VOICE_MAX_BYTES = 6_000_000;
 
 /** One bounded Gemini image call: tries the image models under the shared
- *  wall-clock budget, returns raw bytes + mime or null. Never throws. */
+ *  wall-clock budget, returns raw bytes + mime (plus any caption the model
+ *  wrote) or null. Never throws.
+ *  Owner round 33 (item 11a): the fast Nano Banana 2 models go first (the
+ *  legacy 2.5 model retires in October 2026 and is the slowest); each model
+ *  gets its own slice of the budget so a stalling first model no longer eats
+ *  the whole window; a 1K output keeps the reply well inside waitUntil. */
+const GEMINI_IMAGE_MODELS = [
+  "gemini-3.1-flash-lite-image",
+  "gemini-3.1-flash-image",
+  "gemini-2.5-flash-image",
+];
+type AiImage = { bytes: Uint8Array; mime: string; text: string };
+/** Set when Gemini answered "limit: 0" for the image models (a key without
+ *  image quota — the free tier). Image requests skip the calls until then. */
+let imageQuotaBlockedUntil = 0;
+const IMAGE_QUOTA_BLOCK_MS = 10 * 60_000;
 async function geminiImage(
   env: Env,
   parts: unknown[],
-): Promise<{ bytes: Uint8Array; mime: string } | null> {
-  if (!env.GEMINI_API_KEY) return null;
+): Promise<{ image: AiImage | null; quota: boolean }> {
+  if (!env.GEMINI_API_KEY) return { image: null, quota: false };
+  if (Date.now() < imageQuotaBlockedUntil) return { image: null, quota: true };
+  let quota = false;
   const started = Date.now();
-  for (const model of [
-    "gemini-2.5-flash-image",
-    "gemini-3.1-flash-lite-image",
-    "gemini-3.1-flash-image",
-  ]) {
+  for (const model of GEMINI_IMAGE_MODELS) {
     const remaining = GEMINI_CALL_BUDGET_MS - (Date.now() - started);
     if (remaining < 6_000) break;
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), remaining);
+      const timer = setTimeout(() => ctrl.abort(), Math.min(remaining, 14_000));
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
         {
@@ -931,28 +1007,50 @@ async function geminiImage(
         },
       );
       clearTimeout(timer);
-      if (!res.ok) continue;
+      if (!res.ok) {
+        // Owner round 33 (item 11a): a 429 whose quota line reads "limit: 0"
+        // means this key's tier has NO image quota at all (the free tier
+        // has none) — remember that for a while so the next requests get
+        // the honest answer at once instead of three doomed calls.
+        if (res.status === 429 && /limit:\s*0\b/.test(await res.text())) {
+          imageQuotaBlockedUntil = Date.now() + IMAGE_QUOTA_BLOCK_MS;
+          quota = true;
+        }
+        continue;
+      }
       const data = (await res.json()) as {
         candidates?: {
-          content?: { parts?: { inlineData?: { mimeType?: string; data?: string } }[] };
+          content?: {
+            parts?: {
+              text?: string;
+              thought?: boolean;
+              inlineData?: { mimeType?: string; data?: string };
+            }[];
+          };
         }[];
       };
-      for (const part of data.candidates?.[0]?.content?.parts ?? []) {
+      const answer = data.candidates?.[0]?.content?.parts ?? [];
+      const text = answer
+        .filter((p) => !p.thought && typeof p.text === "string")
+        .map((p) => p.text ?? "")
+        .join(" ")
+        .trim()
+        .slice(0, 300);
+      for (const part of answer) {
         const inline = part.inlineData;
-        if (inline?.data) {
-          const bin = atob(inline.data);
-          if (bin.length > 0 && bin.length < 9_500_000) {
-            const bytes = new Uint8Array(bin.length);
-            for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
-            return { bytes, mime: inline.mimeType || "image/png" };
-          }
+        if (part.thought || !inline?.data) continue;
+        const bin = atob(inline.data);
+        if (bin.length > 0 && bin.length < 9_500_000) {
+          const bytes = new Uint8Array(bin.length);
+          for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+          return { image: { bytes, mime: inline.mimeType || "image/png", text }, quota: false };
         }
       }
     } catch {
       /* next model if budget allows */
     }
   }
-  return null;
+  return { image: null, quota };
 }
 
 /** KuchuPuchu AI answers a user message in its chat (owner feature). Runs in
@@ -972,15 +1070,40 @@ async function sendAiReply(
     } catch {
       return; // rate-limited: no reply this time
     }
-    const rows = await all<{ sender_id: string; body: string | null }>(
+    // Owner round 33 (item 11a): photos (and voice notes) are part of the
+    // conversation now, so the transcript names them — "[sent a photo]" —
+    // and the model knows what "this one" / "the photo above" refers to.
+    const rows = await all<{
+      sender_id: string;
+      kind: string;
+      body: string | null;
+      media: string | null;
+      meta_json: string | null;
+    }>(
       db,
-      `SELECT sender_id, body FROM messages
-        WHERE conv_id = ? AND kind = 'TEXT' ORDER BY rowid DESC LIMIT 12`,
+      `SELECT sender_id, kind, body, media, meta_json FROM messages
+        WHERE conv_id = ? AND kind IN ('TEXT', 'IMAGE', 'FILE') ORDER BY rowid DESC LIMIT 12`,
       convId,
     );
+    const isPhotoRow = (r: { kind: string; media: string | null; meta_json: string | null }) => {
+      if (!r.media) return false;
+      if (r.kind === "IMAGE") return true;
+      if (r.kind !== "FILE") return false;
+      const fm = parseJson<{ type?: string; document?: boolean; voice?: boolean }>(r.meta_json, {});
+      return String(fm.type || "").startsWith("image/") && fm.document !== true;
+    };
+    const rowText = (r: (typeof rows)[number]) => {
+      if (r.kind === "TEXT") return r.body ?? "";
+      if (isPhotoRow(r)) return `[sent a photo]${r.body ? ` ${r.body}` : ""}`;
+      const fm = parseJson<{ voice?: boolean; type?: string; name?: string }>(r.meta_json, {});
+      if (fm.voice === true || String(fm.type || "").startsWith("audio/"))
+        return "[sent a voice note]";
+      return `[sent a file${fm.name ? `: ${fm.name}` : ""}]`;
+    };
     const transcript = rows
+      .slice()
       .reverse()
-      .map((r) => `${r.sender_id === AI_BOT_ID ? "KuchuPuchu AI" : "User"}: ${r.body ?? ""}`)
+      .map((r) => `${r.sender_id === AI_BOT_ID ? "KuchuPuchu AI" : "User"}: ${rowText(r)}`)
       .join("\n");
     const prompt =
       "You are KuchuPuchu AI, the friendly assistant inside KuchuPuchu, a Bangladeshi messaging app. " +
@@ -1019,7 +1142,11 @@ async function sendAiReply(
       'letters — "MD Rabbi Hossain" or "Rabbihossainltd". Writing his name in ' +
       "Bengali script (রাব্বি হোসেন or similar) is strictly forbidden, even inside an " +
       "otherwise-Bengali reply. " +
-      "No hashtags, no signature line. Reply with the message text only.";
+      "No hashtags, no signature line. Reply with the message text only. " +
+      // Owner round 33 (item 11a): the bot used to deny having eyes or a
+      // brush. It can do both now, so it must never claim otherwise.
+      "Abilities: you CAN see photos the user sends and you CAN create or edit pictures on request " +
+      "(the picture arrives as a separate message). Never say you cannot see images or cannot make images.";
     // Owner round 2026-09-04: photo creation + editing. The NEWEST message is
     // the user's: an IMAGE with a caption = edit request; a TEXT with a
     // creation verb + a picture noun = generation request. The result is
@@ -1080,136 +1207,203 @@ async function sendAiReply(
         }
       }
     }
-    if (newest && newest.sender_id === userId && env.MEDIA) {
-      let parts: unknown[] | null = null;
-      let editSource: string | null = null;
-      let editInstruction = "";
-      if (newest.kind === "IMAGE" && (newest.body ?? "").trim()) {
-        // Photo sent WITH a caption — the caption is the edit request.
-        editSource = newest.media;
-        editInstruction = newest.body ?? "";
-      } else if (
-        newest.kind === "TEXT" &&
-        previous &&
-        previous.sender_id === userId &&
-        previous.kind === "IMAGE" &&
-        (newest.body ?? "").trim()
-      ) {
-        // Photo sent first, then a follow-up text — the text is the edit
-        // request for the photo right above it.
-        editSource = previous.media;
-        editInstruction = newest.body ?? "";
+    // Owner round 2026-09-04 / round 33 (item 11a): photos in the AI chat.
+    // Three flows, decided from the NEWEST message (always the user's):
+    //  • CREATE — a text with a creation verb + a picture noun ("ekta chobi
+    //    banao", "একটা বিড়ালের ছবি এঁকে দাও") → the image model draws it and
+    //    the picture is sent as an IMAGE from the bot.
+    //  • EDIT — a photo with a caption asking for a change, or a change
+    //    request ("background remove koro", "eta cartoon banao") typed after a
+    //    photo → the photo + instruction go to the image model; the result
+    //    comes back as a new IMAGE. A NEW-picture request ("ekta chobi banao")
+    //    typed after a photo still CREATES unless it points at the photo.
+    //  • READ — a bare photo, a question in its caption, or a follow-up right
+    //    after it ("eta ki", "ki dekhte paccho") → the photo rides along with
+    //    the text prompt as an inline part and the answer describes / answers
+    //    what is in it. Before, the model never saw the bytes and said "ami
+    //    kono chobi dekhte pacchi na".
+    // Every failure (no key, model refusal, no media bucket) falls through to
+    // the text reply — the user is never left silent; when a picture was
+    // asked for and the image tool failed, the text model is told so it
+    // apologises instead of promising a picture that never arrives.
+    const photoOf = (r: (typeof rows)[number] | undefined) =>
+      r && r.sender_id === userId && isPhotoRow(r) ? r : null;
+    const newestPhoto = photoOf(newest);
+    // the most recent photo the user sent before their newest message, and
+    // how far back it sits (1 = the row right above)
+    let recentPhoto: (typeof rows)[number] | null = null;
+    let recentPhotoDistance = 0;
+    if (newest && newest.kind === "TEXT" && newest.sender_id === userId) {
+      for (let i = 1; i < rows.length; i++) {
+        const p = photoOf(rows[i]);
+        if (p) {
+          recentPhoto = p;
+          recentPhotoDistance = i;
+          break;
+        }
       }
-      if (editSource) {
-        const obj = await env.MEDIA.get(editSource);
-        if (obj) {
+    }
+    const newestText = newest && newest.kind === "TEXT" ? (newest.body ?? "").trim() : "";
+    // asking for the OWNER's / the bot's own photo is the profile card's job
+    const wantsPicture = (t: string) =>
+      IMAGE_MAKE_VERB.test(t) && IMAGE_NOUN.test(t) && !OWNER_PHOTO_ASK.test(t);
+    const wantsEdit = (t: string) =>
+      IMAGE_EDIT_HINT.test(t) && (IMAGE_REF.test(t) || !FRESH_NOUN.test(t));
+    const photoParts: unknown[] = [];
+    let photoPrompt = "";
+    const bucket = env.MEDIA;
+    if (newest && newest.sender_id === userId && bucket) {
+      const sendBotImage = async (img: AiImage) => {
+        const ext = img.mime.includes("jpeg") ? "jpg" : img.mime.includes("webp") ? "webp" : "png";
+        const key = `f/${id()}.${ext}`;
+        await bucket.put(key, img.bytes, { httpMetadata: { contentType: img.mime } });
+        const imgBotId = await ensureAiBot(db);
+        await run(
+          db,
+          "INSERT OR REPLACE INTO files (key, owner_id, conv_id, created_at) VALUES (?, ?, ?, ?)",
+          key,
+          imgBotId,
+          convId,
+          nowIso(),
+        );
+        const imgMid = id();
+        const imgCreated = nowIso();
+        await run(
+          db,
+          `INSERT INTO messages (id, conv_id, sender_id, kind, body, media, created_at)
+           VALUES (?, ?, ?, 'IMAGE', NULL, ?, ?)`,
+          imgMid,
+          convId,
+          imgBotId,
+          key,
+          imgCreated,
+        );
+        await run(
+          db,
+          "UPDATE conversations SET last_message_at = ?, last_message = ? WHERE id = ?",
+          imgCreated,
+          "Photo",
+          convId,
+        );
+        await run(
+          db,
+          "UPDATE members SET unread = unread + 1 WHERE conv_id = ? AND user_id = ?",
+          convId,
+          userId,
+        );
+        ctx.waitUntil(
+          broadcastRoomEvent(env, convId, {
+            type: "message",
+            conversationId: convId,
+            message: msgFrom({
+              id: imgMid,
+              conv_id: convId,
+              sender_id: imgBotId,
+              kind: "IMAGE",
+              body: null,
+              media: key,
+              meta_json: null,
+              created_at: imgCreated,
+              delivered_at: null,
+            } as MsgRow),
+          }),
+        );
+        ctx.waitUntil(
+          broadcastRoomEvent(env, `user:${userId}`, {
+            type: "conv",
+            conversationId: convId,
+            msg: 1,
+          }),
+        );
+        ctx.waitUntil(
+          pushMessageUnlessHidden(
+            env,
+            db,
+            userId,
+            convId,
+            {
+              type: "message",
+              convoId: convId,
+              mid: imgMid,
+              kind: "SOLO",
+              fromName: "KuchuPuchu AI",
+              body: "Photo",
+              kp_chat: convId,
+              muted: "0",
+              kp_media: `/api/messages/${imgMid}/media`,
+            },
+            { title: "KuchuPuchu AI", body: "Photo", channel: "kp_messages_v2" },
+          ),
+        );
+      };
+      let parts: unknown[] | null = null;
+      let readSource: (typeof rows)[number] | null = null;
+      let readIsPrior = false;
+      if (newestPhoto) {
+        const caption = (newestPhoto.body ?? "").trim();
+        if (caption && (IMAGE_EDIT_HINT.test(caption) || wantsPicture(caption))) {
+          // photo + a caption that asks for a change → edit
+          const src = await aiPhotoPart(env, newestPhoto.media, photoMime(newestPhoto));
+          if (src) parts = [src, { text: `Edit this photo as requested: ${caption}` }];
+        }
+        if (!parts) readSource = newestPhoto; // bare photo / a question about it
+      } else if (newestText) {
+        if (recentPhoto && wantsEdit(newestText)) {
+          // photo first, then the instruction → edit that photo
+          const src = await aiPhotoPart(env, recentPhoto.media, photoMime(recentPhoto));
+          if (src) parts = [src, { text: `Edit this photo as requested: ${newestText}` }];
+        } else if (wantsPicture(newestText)) {
           parts = [
             {
-              inlineData: {
-                mimeType: obj.httpMetadata?.contentType || "image/png",
-                data: arrayBufferToBase64(await new Response(obj.body).arrayBuffer()),
-              },
+              text:
+                "Generate one image for this request (it may be written in Bengali or Banglish): " +
+                newestText,
             },
-            { text: `Edit this photo as requested: ${editInstruction}` },
           ];
+        } else if (
+          recentPhoto &&
+          // the photo is the user's previous turn (photo → reply → this text),
+          // or the text points at a picture ("eta", "chobi ta", "dekho")
+          (recentPhotoDistance <= 2 ||
+            IMAGE_REF.test(newestText) ||
+            IMAGE_NOUN.test(newestText) ||
+            /dekh|দেখ/i.test(newestText))
+        ) {
+          readSource = recentPhoto; // a follow-up question about the photo
+          readIsPrior = true;
         }
-      } else if (
-        newest.kind === "TEXT" &&
-        IMAGE_MAKE_VERB.test(newest.body ?? "") &&
-        IMAGE_NOUN.test(newest.body ?? "")
-      ) {
-        parts = [{ text: `Generate an image for this request: ${newest.body}` }];
       }
       if (parts) {
-        const img = await geminiImage(env, parts);
-        if (img) {
-          const ext = img.mime.includes("jpeg") ? "jpg" : "png";
-          const key = `f/${id()}.${ext}`;
-          await env.MEDIA.put(key, img.bytes, { httpMetadata: { contentType: img.mime } });
-          const imgBotId = await ensureAiBot(db);
-          await run(
-            db,
-            "INSERT OR REPLACE INTO files (key, owner_id, conv_id, created_at) VALUES (?, ?, ?, ?)",
-            key,
-            imgBotId,
-            convId,
-            nowIso(),
-          );
-          const imgMid = id();
-          const imgCreated = nowIso();
-          await run(
-            db,
-            `INSERT INTO messages (id, conv_id, sender_id, kind, body, media, created_at)
-             VALUES (?, ?, ?, 'IMAGE', NULL, ?, ?)`,
-            imgMid,
-            convId,
-            imgBotId,
-            key,
-            imgCreated,
-          );
-          await run(
-            db,
-            "UPDATE conversations SET last_message_at = ?, last_message = ? WHERE id = ?",
-            imgCreated,
-            "Photo",
-            convId,
-          );
-          await run(
-            db,
-            "UPDATE members SET unread = unread + 1 WHERE conv_id = ? AND user_id = ?",
-            convId,
-            userId,
-          );
-          ctx.waitUntil(
-            broadcastRoomEvent(env, convId, {
-              type: "message",
-              conversationId: convId,
-              message: msgFrom({
-                id: imgMid,
-                conv_id: convId,
-                sender_id: imgBotId,
-                kind: "IMAGE",
-                body: null,
-                media: key,
-                meta_json: null,
-                created_at: imgCreated,
-                delivered_at: null,
-              } as MsgRow),
-            }),
-          );
-          ctx.waitUntil(
-            broadcastRoomEvent(env, `user:${userId}`, {
-              type: "conv",
-              conversationId: convId,
-              msg: 1,
-            }),
-          );
-          ctx.waitUntil(
-            pushMessageUnlessHidden(
-              env,
-              db,
-              userId,
-              convId,
-              {
-                type: "message",
-                convoId: convId,
-                mid: imgMid,
-                kind: "SOLO",
-                fromName: "KuchuPuchu AI",
-                body: "Photo",
-                kp_chat: convId,
-                muted: "0",
-              },
-              { title: "KuchuPuchu AI", body: "Photo", channel: "kp_messages_v2" },
-            ),
-          );
+        const drawn = await geminiImage(env, parts);
+        if (drawn.image) {
+          await sendBotImage(drawn.image);
           return;
+        }
+        photoPrompt = drawn.quota
+          ? " The user asked you for a picture, but picture creation is switched off on this server " +
+            "right now: say so in one short honest line (no apology loop, do not tell them to try " +
+            "again later) and offer to help with words instead. Do not describe a picture."
+          : " The user asked you for a picture but the image tool failed this time: apologise in one " +
+            "short line and ask them to try again in a moment or rephrase. Do not describe a picture.";
+      } else if (readSource) {
+        const src = await aiPhotoPart(env, readSource.media, photoMime(readSource));
+        if (src) {
+          photoParts.push(src);
+          photoPrompt =
+            " The attached PHOTO is the one the user sent" +
+            (readIsPrior ? " just before their latest message" : "") +
+            ". Look at it carefully and answer about it: describe what you see, read any text in it, " +
+            "answer their question about it, or react to it naturally. If their latest message is " +
+            "clearly about something else, answer that instead. Never say you cannot see images.";
         }
       }
     }
 
     const body =
-      (await geminiComplete(env, prompt + voicePrompt, 900, voiceParts)) ?? AI_REPLY_FALLBACK;
+      (await geminiComplete(env, prompt + voicePrompt + photoPrompt, 900, [
+        ...voiceParts,
+        ...photoParts,
+      ])) ?? AI_REPLY_FALLBACK;
     const botId = await ensureAiBot(db);
     const mid = id();
     const created = nowIso();
@@ -1241,7 +1435,8 @@ async function sendAiReply(
     // under the answer. Deduped: at most one card per 10-message window, so
     // a long conversation about the owner never spams cards. Broadcast only
     // — the text reply above already did unread/push/last_message.
-    const asked = rows.length ? (rows[rows.length - 1]?.body ?? "") : "";
+    const asked =
+      newest && newest.kind === "TEXT" && newest.sender_id === userId ? (newest.body ?? "") : "";
     if (OWNER_INTENT.test(asked)) {
       // Owner round 4 (2026-09-04): the old 10-message window let a NEW card
       // land at the bottom every few exchanges, so a card was practically
