@@ -7505,6 +7505,39 @@ const convBetween = (db, a, b) =>
         !viewer.includes("onLongPress = {"),
     );
   }
+  // Item 11c: sticker panel — emoji + GIF tabs only; the search keyboard lifts
+  // the panel (compact strip), never the message bar.
+  {
+    const sticker = kt("StickerSheet.kt");
+    const chat = kt("ChatScreen.kt");
+    check(
+      "r33-11c: tabs are 🙂 and GIF only — the ⬜ sticker-art and KP custom-emoji tabs (and the KP grid, EmojiRepo reads, Image/asImageBitmap) are gone from the panel; existing KP emoji messages still render through ChatScreen's CustomEmojiOrFallback",
+      sticker.includes('listOf("🙂", "GIF").forEachIndexed { i, label ->') &&
+        !sticker.includes('"KP"') &&
+        !sticker.includes('"⬜"') &&
+        !sticker.includes("tab == 3") &&
+        !sticker.includes("tab == 2") &&
+        !sticker.includes("EmojiRepo") &&
+        !sticker.includes("import androidx.compose.foundation.Image\n") &&
+        chat.includes("if (EmojiRepo.isCustomId(st)) CustomEmojiOrFallback(st)"),
+    );
+    check(
+      "r33-11c: the panel carries the imePadding and goes compact (search row + one 44 dp LazyRow of results, no bottom row) while the keyboard is up (isImeVisible read in composition via a tiny @OptIn helper); the composer skips its own imePadding while a panel is open (padForIme = !showAttach && !showStickers); pack-name search (heart → Hearts)",
+      sticker.includes("private fun imeShowing(): Boolean = WindowInsets.isImeVisible") &&
+        sticker.includes("val searching = imeShowing()") &&
+        sticker.includes(".background(Card)\n            .imePadding()\n") &&
+        sticker.includes("if (searching) {") &&
+        sticker.includes("modifier = Modifier.fillMaxWidth().height(44.dp),") &&
+        sticker.includes("if (!searching) {") &&
+        sticker.includes("private fun stickerMatches(query: String, pack: Int): List<String> {") &&
+        sticker.includes(
+          "Stickers.packs.filter { it.first.contains(q, ignoreCase = true) }.flatMap { it.second }",
+        ) &&
+        chat.includes("padForIme: Boolean = true,") &&
+        chat.includes(".then(if (padForIme) Modifier.imePadding() else Modifier)") &&
+        chat.includes("padForIme = !showAttach && !showStickers,"),
+    );
+  }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
   // a touch on blank list space closes it (main and archive lists; r33-6
   // retired the hidden list).

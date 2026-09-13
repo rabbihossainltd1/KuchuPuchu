@@ -2682,6 +2682,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             // worker feeds the clip to Gemini), so the mic works here too.
             micEnabled = true,
             theme = chatTheme,
+            padForIme = !showAttach && !showStickers,
             onFinishRecord = { cancelled -> finishRecording(cancelled) },
             selectCount = selected.size,
             onSendSelection = { sendSelectedMedia() },
@@ -2876,6 +2877,9 @@ private fun Composer(
     selectCount: Int = 0,
     onSendSelection: () -> Unit = {},
     theme: String = "",
+    // Owner round 33 (item 11c): false while an inline panel is open — the
+    // panel carries the keyboard padding then (its search box opens the IME).
+    padForIme: Boolean = true,
 ) {
     val accent = chatAccent(theme)
     // Attach/sticker MUST close the keyboard first — otherwise both the IME
@@ -2902,7 +2906,7 @@ private fun Composer(
             // Owner round 15: the bar itself is TRANSPARENT — the themed
             // wallpaper (which spans the whole screen) shows through; only
             // the input pill and the send button keep their own surfaces.
-            .imePadding()
+            .then(if (padForIme) Modifier.imePadding() else Modifier)
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

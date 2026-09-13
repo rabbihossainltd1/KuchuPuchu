@@ -1,6 +1,5 @@
 package app.kuchupuchu.android
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -11,11 +10,15 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -40,7 +43,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -60,7 +62,7 @@ fun StickerPanel(
 ) {
     val haptics = rememberHaptics()
     val ctx = LocalContext.current
-    var tab by remember { mutableStateOf(0) } // 0 emoji-stickers, 1 GIF, 2 sticker-art
+    var tab by remember { mutableStateOf(0) } // 0 emoji, 1 GIF (owner round 33, item 11c: no ⬜ / KP tabs)
     var query by remember { mutableStateOf("") }
     var pack by remember { mutableStateOf(0) }
     var recents by remember { mutableStateOf(listOf<String>()) }
@@ -69,13 +71,21 @@ fun StickerPanel(
         recents = loadStickerRecents()
     }
 
+    // Owner round 33 (item 11c): the search box opens the keyboard. The
+    // composer used to carry the imePadding while this panel sat BELOW it,
+    // so the keyboard covered the search field and the message bar floated a
+    // keyboard-height up over a blank gap. Now the PANEL rides on the
+    // keyboard (imePadding here, none on the composer while a panel is
+    // open) and goes compact — the search row plus one strip of results.
+    val searching = imeShowing()
     Column(
         Modifier
             .fillMaxWidth()
             .background(Card)
+            .imePadding()
             .padding(top = 6.dp, bottom = 4.dp),
     ) {
-        /* top row: search, segmented tabs (emoji | GIF | stickers), edit */
+        /* top row: search, segmented tabs (emoji | GIF), edit */
         Row(
             Modifier
                 .fillMaxWidth()
@@ -105,14 +115,14 @@ fun StickerPanel(
                 },
             )
             Spacer(Modifier.width(8.dp))
-            /* segmented emoji / GIF / sticker switch */
+            /* segmented emoji / GIF switch */
             Row(
                 Modifier
                     .clip(RoundedCornerShape(14.dp))
                     .background(ChipIdle)
                     .padding(2.dp),
             ) {
-                listOf("🙂", "GIF", "⬜", "KP").forEachIndexed { i, label ->
+                listOf("🙂", "GIF").forEachIndexed { i, label ->
                     val sel = tab == i
                     Box(
                         Modifier
@@ -147,7 +157,36 @@ fun StickerPanel(
             )
         }
 
-        if (tab == 0 || tab == 2) {
+        val matches = stickerMatches(query, pack)
+        if (searching) {
+            /* Owner round 33 (item 11c): compact — one strip of results on the keyboard */
+            val strip = if (query.isBlank()) (recents + matches).distinct() else matches
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.fillMaxWidth().height(44.dp),
+            ) {
+                items(strip.size) { i ->
+                    val sticker = strip[i]
+                    val interaction = remember { MutableInteractionSource() }
+                    val pressed by interaction.collectIsPressedAsState()
+                    Box(
+                        Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (pressed) ChipIdle else Color.Transparent)
+                            .clickable(interactionSource = interaction, indication = null) {
+                                haptics.confirm()
+                                saveStickerRecent(sticker)
+                                onSend(sticker)
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(sticker, fontSize = 20.sp, modifier = Modifier.scale(if (pressed) 1.25f else 1f))
+                    }
+                }
+            }
+        } else if (tab == 0) {
             /* recents strip */
             if (recents.isNotEmpty()) {
                 Row(
@@ -209,17 +248,7 @@ fun StickerPanel(
                     }
                 }
             }
-            val list =
-                if (query.isBlank()) {
-                    Stickers.packs[pack.coerceIn(0, Stickers.packs.size - 1)].second
-                } else {
-                    Stickers.packs.asSequence()
-                        .flatMap { it.second }
-                        .filter { it.contains(query) }
-                        .distinct()
-                        .take(40)
-                        .toList()
-                }
+            val list = matches
             LazyVerticalGrid(
                 columns = GridCells.Fixed(5),
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
@@ -253,129 +282,6 @@ fun StickerPanel(
                     }
                 }
             }
-        } else if (tab == 3) {
-            /* KP custom emoji: bundled pack, category chips + recents */
-            val emojis =
-                remember(query) {
-                    if (query.isBlank()) EmojiRepo.all(ctx)
-                    else EmojiRepo.search(ctx, query)
-                }
-            val cats = remember { EmojiRepo.categories(ctx) }
-            var emojiCat by remember { mutableStateOf("") } // "" = recent/all view
-            val emojiRecents = remember { mutableStateOf(EmojiRepo.recent(ctx)) }
-            if (emojiRecents.value.isNotEmpty() && emojiCat.isEmpty() && query.isBlank()) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 1.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    emojiRecents.value.take(6).forEach { id ->
-                        val bmp = rememberEmojiBitmap(id)
-                        Box(
-                            Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .clickable {
-                                    haptics.confirm()
-                                    EmojiRepo.recordRecent(ctx, id)
-                                    emojiRecents.value = EmojiRepo.recent(ctx)
-                                    onSend(id)
-                                }
-                                .padding(3.dp),
-                        ) {
-                            if (bmp != null) {
-                                Image(bitmap = bmp.asImageBitmap(), contentDescription = id, modifier = Modifier.size(24.dp))
-                            } else {
-                                Text("🙂", fontSize = 18.sp)
-                            }
-                        }
-                    }
-                    Icon(
-                        Icons.Filled.Schedule,
-                        contentDescription = "Recents",
-                        tint = Color(0x66FFFFFF),
-                        modifier = Modifier
-                            .align(Alignment.CenterVertically)
-                            .size(14.dp),
-                    )
-                }
-            }
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 1.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                listOf("" to "All") + cats.map { it to it.replaceFirstChar { c -> c.uppercase() } }.forEach { (cat, label) ->
-                    val selected = emojiCat == cat
-                    Box(
-                        Modifier
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(if (selected) ChipSelected else ChipIdle)
-                            .clickable {
-                                haptics.tap()
-                                emojiCat = cat
-                            }
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
-                    ) {
-                        Text(
-                            label,
-                            color = if (selected) ActionBlueDeep else Muted,
-                            fontSize = 11.5.sp,
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                            maxLines = 1,
-                        )
-                    }
-                }
-            }
-            val gridList =
-                when {
-                    query.isNotBlank() -> emojis
-                    emojiCat.isBlank() -> emojis
-                    else -> EmojiRepo.inCategory(ctx, emojiCat)
-                }
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(5),
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(152.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                items(gridList) { e ->
-                    val bmp = rememberEmojiBitmap(e.id)
-                    val interaction = remember { MutableInteractionSource() }
-                    val pressed by interaction.collectIsPressedAsState()
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .height(36.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (pressed) ChipIdle else Color.Transparent)
-                            .clickable(interactionSource = interaction, indication = null) {
-                                haptics.confirm()
-                                EmojiRepo.recordRecent(ctx, e.id)
-                                emojiRecents.value = EmojiRepo.recent(ctx)
-                                onSend(e.id)
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (bmp != null) {
-                            Image(
-                                bitmap = bmp.asImageBitmap(),
-                                contentDescription = e.id,
-                                modifier = Modifier
-                                    .size(30.dp)
-                                    .scale(if (pressed) 1.25f else 1f),
-                            )
-                        } else {
-                            Text("🙂", fontSize = 20.sp)
-                        }
-                    }
-                }
-            }
         } else {
             Box(
                 Modifier
@@ -387,47 +293,66 @@ fun StickerPanel(
             }
         }
 
-        /* bottom row: recents / star / pack dots / add */
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 3.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Icon(
-                Icons.Filled.Schedule,
-                contentDescription = "Recent",
-                tint = Muted,
-                modifier = Modifier.size(18.dp),
-            )
-            Icon(
-                Icons.Filled.Star,
-                contentDescription = "Favourites",
-                tint = Muted,
-                modifier = Modifier.size(18.dp),
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                Stickers.packs.forEachIndexed { i, _ ->
-                    Box(
-                        Modifier
-                            .size(6.dp)
-                            .clip(CircleShape)
-                            .background(if (pack == i) ActionBlue else Line),
-                    )
-                }
-            }
-            Box(
+        if (!searching) {
+            /* bottom row: recents / star / pack dots / add */
+            Row(
                 Modifier
-                    .size(24.dp)
-                    .clip(CircleShape)
-                    .background(ChipIdle),
-                contentAlignment = Alignment.Center,
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text("+", color = Muted, fontSize = 14.sp)
+                Icon(
+                    Icons.Filled.Schedule,
+                    contentDescription = "Recent",
+                    tint = Muted,
+                    modifier = Modifier.size(18.dp),
+                )
+                Icon(
+                    Icons.Filled.Star,
+                    contentDescription = "Favourites",
+                    tint = Muted,
+                    modifier = Modifier.size(18.dp),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Stickers.packs.forEachIndexed { i, _ ->
+                        Box(
+                            Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(if (pack == i) ActionBlue else Line),
+                        )
+                    }
+                }
+                Box(
+                    Modifier
+                        .size(24.dp)
+                        .clip(CircleShape)
+                        .background(ChipIdle),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("+", color = Muted, fontSize = 14.sp)
+                }
             }
         }
     }
+}
+
+/** Owner round 33 (item 11c): the keyboard's visibility, read in composition
+ *  (the safe form — see KpImeAutoScroll in ChatScreen). */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun imeShowing(): Boolean = WindowInsets.isImeVisible
+
+/** The stickers for the search box: the chosen pack while it is blank;
+ *  otherwise every pack whose NAME matches (heart → Hearts) plus any sticker
+ *  containing the typed text (an emoji pasted in). */
+private fun stickerMatches(query: String, pack: Int): List<String> {
+    val q = query.trim()
+    if (q.isBlank()) return Stickers.packs[pack.coerceIn(0, Stickers.packs.size - 1)].second
+    val byName = Stickers.packs.filter { it.first.contains(q, ignoreCase = true) }.flatMap { it.second }
+    val byGlyph = Stickers.packs.asSequence().flatMap { it.second }.filter { it.contains(q) }.toList()
+    return (byName + byGlyph).distinct().take(60)
 }
 
 private fun loadStickerRecents(): List<String> =
