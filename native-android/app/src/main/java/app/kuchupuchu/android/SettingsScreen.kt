@@ -112,10 +112,11 @@ private fun SectionCard(content: @Composable () -> Unit) {
 /** Owner round 31: compact — one line of label, value on the right, 12dp tall. */
 @Composable
 private fun SettingRow(
-    icon: ImageVector,
+    icon: ImageVector?,
     label: String,
     value: String,
     clickable: Boolean = true,
+    statusGlyph: Boolean = false,
     onClick: () -> Unit,
 ) {
     val haptics = rememberHaptics()
@@ -126,7 +127,11 @@ private fun SettingRow(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = label, tint = ActionBlueDeep, modifier = Modifier.size(20.dp))
+        if (statusGlyph) {
+            StatusGlyphIcon(ActionBlueDeep, 20.dp)
+        } else {
+            Icon(icon!!, contentDescription = label, tint = ActionBlueDeep, modifier = Modifier.size(20.dp))
+        }
         Spacer(Modifier.width(12.dp))
         Text(label, fontSize = 14.5.sp, color = Ink, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.weight(1f))
         Text(value, fontSize = 13.sp, color = Muted, maxLines = 1, modifier = Modifier.padding(start = 8.dp))
@@ -354,7 +359,7 @@ fun PrivacySettingsScreen(nav: NavController) {
             SettingRow(Icons.Filled.Schedule, "Last seen", privacyLabel(level("lastSeen", "public"))) { picker = "privLastSeen" }
             SettingRow(Icons.Filled.GroupAdd, "Add to groups", privacyLabel(level("groups", "public"))) { picker = "privGroups" }
             // Owner round 32 (item 20): who can view this account's status updates.
-            SettingRow(Icons.Filled.Circle, "Status updates", privacyLabel(level("status", "public"))) { picker = "privStatus" }
+            SettingRow(icon = null, statusGlyph = true, label = "Status updates", value = privacyLabel(level("status", "public"))) { picker = "privStatus" }
         }
         Spacer(Modifier.height(12.dp))
         SectionCard {
