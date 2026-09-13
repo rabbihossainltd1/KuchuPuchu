@@ -926,14 +926,10 @@ fun Modifier.pressScale(interactionSource: MutableInteractionSource): Modifier {
 }
 
 /**
- * WhatsApp-style status glyph drawn on canvas: a ring with a dot in the
- * middle. (The old tab icon was Icons.Filled.Circle — literally just a dot.)
- */
-@Composable
-/**
  * Broadcast-style status glyph drawn on canvas: a ring with four short
  * bracket arcs floating around it (N/S/E/W). Matches the app's custom
- * status icon artwork.
+ * status icon artwork. (Owner, 2026-09-13: replaced the ring-with-a-dot;
+ * the old tab icon before that was Icons.Filled.Circle — just a dot.)
  */
 @Composable
 fun StatusGlyphIcon(tint: Color, size: Dp) {

@@ -5350,7 +5350,7 @@ const convBetween = (db, a, b) =>
     check(
       "r32-20: Privacy has a 'Status updates' row (default Public) → sheet 'Who Can View Your Status?' → PATCH /api/me privStatus; worker: priv_status column, privacy.status in /api/me, canSeeStatusOf + the feed honour it (public = anyone sharing a chat, contacts = 1:1, nobody)",
       priv.includes(
-        'SettingRow(Icons.Filled.Circle, "Status updates", privacyLabel(level("status", "public"))) { picker = "privStatus" }',
+        'SettingRow(icon = null, statusGlyph = true, label = "Status updates", value = privacyLabel(level("status", "public"))) { picker = "privStatus" }',
       ) &&
         priv.includes('"privStatus" -> "Who Can View Your Status?"') &&
         priv.includes('"privStatus" -> "status"') &&
