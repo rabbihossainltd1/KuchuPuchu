@@ -110,6 +110,8 @@ fun StatusPhotoScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean
     // Owner round 32 (item 43): the handle being dragged, as a clip position —
     // the preview freezes on that exact frame while the finger is down.
     var scrub by remember { mutableStateOf<Long?>(null) }
+    // Owner round 33 (item 8): the preview's play position for the strip's playhead.
+    var playAt by remember { mutableStateOf<Long?>(null) }
     val thumbs = remember { mutableStateListOf<ImageBitmap?>() }
 
     LaunchedEffect(picked) {
@@ -252,7 +254,7 @@ fun StatusPhotoScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean
                             if (shot != null) {
                                 Image(shot, contentDescription = "Status photo", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
                             } else {
-                                StatusTrimPreview(pickedUri, start, end, paused = cropping, scrubAt = scrub)
+                                StatusTrimPreview(pickedUri, start, end, paused = cropping, scrubAt = scrub, onPosition = { playAt = it })
                             }
                             if (cropping) {
                                 CropOverlay(
@@ -310,6 +312,7 @@ fun StatusPhotoScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean
                         end = e
                     },
                     onScrub = { scrub = it },
+                    positionMs = playAt,
                 )
             }
             Row(
@@ -413,16 +416,27 @@ private fun readVideo(
  *  trim handle is being dragged ([scrubAt]) the picture holds the frame under
  *  that handle — the release restarts playback from the start handle. */
 @Composable
-internal fun StatusTrimPreview(uri: Uri, start: Long, end: Long, paused: Boolean, scrubAt: Long? = null) {
+internal fun StatusTrimPreview(
+    uri: Uri,
+    start: Long,
+    end: Long,
+    paused: Boolean,
+    scrubAt: Long? = null,
+    // Owner round 33 (item 8): the play position (ms in the clip) on
+    // every tick — the trim strip draws its playhead from it.
+    onPosition: (Long) -> Unit = {},
+) {
     var player by remember(uri) { mutableStateOf<TrimClipPlayer?>(null) }
     var userPaused by remember { mutableStateOf(false) }
     val haptics = rememberHaptics()
     LaunchedEffect(player, start, end, scrubAt) { player?.setWindow(start, end, scrubAt ?: -1L) }
     LaunchedEffect(player, paused, userPaused, scrubAt) { player?.setPaused(paused || userPaused || scrubAt != null) }
+    val positionCb = rememberUpdatedState(onPosition)
     LaunchedEffect(player) {
         val p = player ?: return@LaunchedEffect
         while (true) {
             p.tick()
+            positionCb.value(p.positionMs())
             delay(120)
         }
     }
@@ -570,6 +584,16 @@ private class TrimClipPlayer(
         }
     }
 
+    /** Owner round 33 (item 8): where the picture is right now (ms in the
+     *  clip) — the target of a seek still in flight, the start handle
+     *  before the player is ready; never throws. */
+    fun positionMs(): Long {
+        val m = mp ?: return startMs
+        if (!prepared) return startMs
+        if (pendingSeek >= 0L) return pendingSeek
+        return runCatching { m.currentPosition.toLong() }.getOrDefault(startMs)
+    }
+
     /** ~8×/s: applies a pending seek (never while one is in flight) and loops at the end handle. */
     fun tick() {
         val m = mp ?: return
@@ -642,6 +666,9 @@ internal fun TrimStrip(
     // Owner round 32 (item 19): the window cap — a minute for a status, none
     // for a chat video (MediaEditScreen).
     maxMs: Long = VideoPlan.MAX_STATUS_MS,
+    // Owner round 33 (item 8): the preview's play position (ms in the clip,
+    // null = unknown) — drawn as a thin white playhead inside the window.
+    positionMs: Long? = null,
 ) {
     var widthPx by remember { mutableStateOf(1f) }
     var mode by remember { mutableStateOf(0) } // 0 idle · 1 start · 2 end · 3 slide
@@ -741,6 +768,16 @@ internal fun TrimStrip(
                     Offset(x, size.height * 0.68f),
                     strokeWidth = edge,
                 )
+            }
+            // Owner round 33 (item 8): the playhead — a white line with a
+            // dark outline (visible over any frame), inside the window only,
+            // hidden while a handle is held (the handle IS the position then).
+            val head = positionMs
+            if (head != null && mode == 0) {
+                val px = (head.coerceIn(s, e) / total * size.width).coerceIn(sx + hw / 2f, ex - hw / 2f)
+                drawLine(Color(0x99000000), Offset(px, 0f), Offset(px, size.height), strokeWidth = edge * 2f)
+                drawLine(Color.White, Offset(px, 0f), Offset(px, size.height), strokeWidth = edge)
+                drawCircle(Color.White, radius = 3.dp.toPx(), center = Offset(px, 3.dp.toPx()))
             }
         }
     }

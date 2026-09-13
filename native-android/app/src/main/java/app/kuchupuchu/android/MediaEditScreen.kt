@@ -95,6 +95,8 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
     var start by remember { mutableStateOf(0L) }
     var end by remember { mutableStateOf(0L) }
     var scrub by remember { mutableStateOf<Long?>(null) }
+    // Owner round 33 (item 8): the preview's play position for the strip's playhead.
+    var playAt by remember { mutableStateOf<Long?>(null) }
     var busy by remember { mutableStateOf(false) }
     val thumbs = remember { mutableStateListOf<ImageBitmap?>() }
     // Pen: strokes in normalised picture units; the live one is drawn as it grows.
@@ -250,7 +252,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                                     (strokes + listOfNotNull(live)).forEach { st -> drawPen(st, size.width, size.height) }
                                 }
                             } else {
-                                StatusTrimPreview(pickedUri, start, end, paused = false, scrubAt = scrub)
+                                StatusTrimPreview(pickedUri, start, end, paused = false, scrubAt = scrub, onPosition = { playAt = it })
                             }
                         }
                     }
@@ -308,6 +310,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                         end = e
                     },
                     onScrub = { scrub = it },
+                    positionMs = playAt,
                 )
             }
             Row(

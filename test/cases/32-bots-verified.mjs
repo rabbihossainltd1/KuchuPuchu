@@ -4770,7 +4770,7 @@ const convBetween = (db, a, b) =>
       ) &&
       share32.includes("player?.setPaused(paused || userPaused || scrubAt != null)") &&
       share32.includes(
-        "StatusTrimPreview(pickedUri, start, end, paused = cropping, scrubAt = scrub)",
+        "StatusTrimPreview(pickedUri, start, end, paused = cropping, scrubAt = scrub, onPosition = { playAt = it })",
       ),
   );
   check(
@@ -6339,7 +6339,7 @@ const convBetween = (db, a, b) =>
         edit.includes("Icons.AutoMirrored.Filled.Undo") &&
         edit.includes("maxMs = Long.MAX_VALUE,") &&
         edit.includes(
-          "StatusTrimPreview(pickedUri, start, end, paused = false, scrubAt = scrub)",
+          "StatusTrimPreview(pickedUri, start, end, paused = false, scrubAt = scrub, onPosition = { playAt = it })",
         ) &&
         edit.includes("VideoExport.export(ctx, pickedUri, s, e, null, out)") &&
         edit.includes("VideoExport.passthrough(ctx, pickedUri, s, e, out)") &&
@@ -7381,6 +7381,39 @@ const convBetween = (db, a, b) =>
         ) &&
         chat.includes("Column(Modifier.padding(top = 7.dp)) {\n                VoiceWave(") &&
         chat.includes("modifier = Modifier.width(150.dp).height(22.dp),"),
+    );
+  }
+  // Item 8: the status / chat-video trim strip shows a playhead — the
+  // preview reports its position every tick and the strip draws it.
+  {
+    const share = kt("StatusPhotoScreen.kt");
+    const edit = kt("MediaEditScreen.kt");
+    const playerCls = share.slice(
+      share.indexOf("private class TrimClipPlayer("),
+      share.indexOf("internal fun TrimStrip("),
+    );
+    const stripFn = share.slice(
+      share.indexOf("internal fun TrimStrip("),
+      share.indexOf("private fun CropOverlay("),
+    );
+    check(
+      "r33-8: trim playhead — TrimClipPlayer.positionMs() (seek target while in flight, start handle before ready), StatusTrimPreview reports it through onPosition every tick, TrimStrip draws a white outlined playhead inside the window (hidden while a handle is held), and both the status share screen and MediaEditScreen wire playAt through",
+      playerCls.includes("fun positionMs(): Long {") &&
+        playerCls.includes("if (pendingSeek >= 0L) return pendingSeek") &&
+        share.includes("    onPosition: (Long) -> Unit = {},\n) {") &&
+        share.includes("positionCb.value(p.positionMs())") &&
+        stripFn.includes("positionMs: Long? = null,") &&
+        stripFn.includes("if (head != null && mode == 0) {") &&
+        stripFn.includes(
+          "val px = (head.coerceIn(s, e) / total * size.width).coerceIn(sx + hw / 2f, ex - hw / 2f)",
+        ) &&
+        stripFn.includes(
+          "drawLine(Color.White, Offset(px, 0f), Offset(px, size.height), strokeWidth = edge)",
+        ) &&
+        (share.match(/positionMs = playAt,/g) || []).length === 1 &&
+        (edit.match(/positionMs = playAt,/g) || []).length === 1 &&
+        share.includes("onPosition = { playAt = it })") &&
+        edit.includes("onPosition = { playAt = it })"),
     );
   }
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
