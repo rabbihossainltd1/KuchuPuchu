@@ -2381,7 +2381,21 @@ const convBetween = (db, a, b) =>
       ["editfield/name", "editfield/username", "editfield/about", "editfield/phone"].every((r) =>
         profile.includes(`nav.navigate("${r}")`),
       ) &&
-      profile.includes("PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)"),
+      profile.includes("AvatarGallerySheet(") &&
+      profile.includes("loadMediaPool(ctx)") &&
+      !profile.includes("PickVisualMedia"),
+  );
+  check(
+    "r34-1: profile photo opens the app's own attach-style gallery (pool + cells, images only), never the system picker",
+    profile.includes("fun AvatarGallerySheet(") &&
+      profile.includes("loadMediaPool(ctx)") &&
+      profile.includes("MediaCell(") &&
+      profile.includes("filter { !it.isVideo }") &&
+      profile.includes("RequestMultiplePermissions") &&
+      profile.includes("onPick(item.uri)") &&
+      profile.includes("FilesUtil.imageToDataUrl") &&
+      profile.includes("galleryOpen = true") &&
+      !profile.includes("PickVisualMedia"),
   );
   check(
     "r28-5: About Us is a real screen (build, founder, links, update check)",
