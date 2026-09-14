@@ -40,7 +40,10 @@ database_id = "28f6c033-4334-4fc0-ba1c-441ab42cf9a0"
 # (worker + D1 round trip). Unset means the probe reports `lat.err` instead of guessing.
 [vars]
 SELF_ORIGIN = "https://kuchupuchu-api.kuchupuchu.workers.dev"
+CF_ACCOUNT_ID = "92081fac7caf54a46a756c382081544b"
 
 [[r2_buckets]]
 binding = "MEDIA"
 bucket_name = "kp-media"
+
+# Owner round 34 (item 4): Workers AI binding — the AI draws pictures with

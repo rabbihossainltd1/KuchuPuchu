@@ -55,6 +55,11 @@ export type Env = {
   /** Gemini API key (AI Studio) — powers the KuchuPuchu AI welcome message.
    *  Unset ⇒ the welcome falls back to a fixed friendly line, never a hole. */
   GEMINI_API_KEY?: string;
+  /** Workers AI binding (wrangler `[ai]`) — the KuchuPuchu AI draws its
+   *  pictures with FLUX (create + edit); text + photo reading stay on Gemini.
+   *  Unset ⇒ picture requests answer "switched off", never a hole. */
+  CF_AI_TOKEN: string;
+  CF_ACCOUNT_ID: string;
 };
 
 type Json = Record<string, unknown>;
@@ -900,11 +905,11 @@ function photoMime(r: { kind: string; meta_json: string | null }): string {
 /** A photo the user sent to the AI, in Gemini's inline shape (or null when the
  *  object is missing / not an image / too large). Never throws. */
 const AI_PHOTO_MAX_BYTES = 7_000_000;
-async function aiPhotoPart(
+async function aiPhotoBytes(
   env: Env,
   media: string | null | undefined,
   hint: string,
-): Promise<{ inlineData: { mimeType: string; data: string } } | null> {
+): Promise<AiPhotoSrc | null> {
   if (!media || !env.MEDIA) return null;
   try {
     const obj = await env.MEDIA.get(media);
@@ -924,10 +929,22 @@ async function aiPhotoPart(
           : /\.webp$/i.test(media)
             ? "image/webp"
             : "image/jpeg";
-    return { inlineData: { mimeType: mime, data: arrayBufferToBase64(buf) } };
+    return { bytes: new Uint8Array(buf), mime };
   } catch {
     return null;
   }
+}
+
+async function aiPhotoPart(
+  env: Env,
+  media: string | null | undefined,
+  hint: string,
+): Promise<{ inlineData: { mimeType: string; data: string } } | null> {
+  const src = await aiPhotoBytes(env, media, hint);
+  if (!src) return null;
+  return {
+    inlineData: { mimeType: src.mime, data: arrayBufferToBase64(src.bytes.buffer) },
+  };
 }
 
 function arrayBufferToBase64(buf: ArrayBuffer): string {
@@ -963,92 +980,109 @@ function geminiAudioMime(type: string): string {
 /** Voice-note bytes ≤ this go to Gemini inline (a 60s note is ~0.5 MB). */
 const AI_VOICE_MAX_BYTES = 6_000_000;
 
-/** One bounded Gemini image call: tries the image models under the shared
- *  wall-clock budget, returns raw bytes + mime (plus any caption the model
- *  wrote) or null. Never throws.
- *  Owner round 33 (item 11a): the fast Nano Banana 2 models go first (the
- *  legacy 2.5 model retires in October 2026 and is the slowest); each model
- *  gets its own slice of the budget so a stalling first model no longer eats
- *  the whole window; a 1K output keeps the reply well inside waitUntil. */
-const GEMINI_IMAGE_MODELS = [
-  "gemini-3.1-flash-lite-image",
-  "gemini-3.1-flash-image",
-  "gemini-2.5-flash-image",
-];
+/** Workers AI picture call (owner round 34, item 4): Gemini's free tier has
+ *  NO quota for any image model ("limit: 0"), so create + edit moved to the
+ *  account's Workers AI REST endpoint (a scoped CF_AI_TOKEN secret) — FLUX.2
+ *  klein draws AND edits in one model,
+ *  the schnell model is the prompt-only safety net (an edit degrades to a
+ *  text variation). Text + photo READING stay on Gemini. Never throws. */
+const CF_IMAGE_MODEL = "@cf/black-forest-labs/flux-2-klein-9b";
+const CF_IMAGE_MODEL_FALLBACK = "@cf/black-forest-labs/flux-1-schnell";
+const CF_IMAGE_BUDGET_MS = 25_000;
 type AiImage = { bytes: Uint8Array; mime: string; text: string };
-/** Set when Gemini answered "limit: 0" for the image models (a key without
- *  image quota — the free tier). Image requests skip the calls until then. */
-let imageQuotaBlockedUntil = 0;
-const IMAGE_QUOTA_BLOCK_MS = 10 * 60_000;
-async function geminiImage(
+type AiPhotoSrc = { bytes: Uint8Array<ArrayBuffer>; mime: string };
+function base64ToBytes(s: string): Uint8Array<ArrayBuffer> | null {
+  try {
+    const bin = atob(s);
+    if (bin.length === 0) return null;
+    const bytes = new Uint8Array(bin.length);
+    for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+/** klein answers `{ result: { image: "<base64>" } }`; schnell answers raw
+ *  image bytes. A failure is JSON `{ success: false, errors: [...] }` (or a
+ *  non-2xx status), which throws so the next model gets its turn. */
+function cfAiUrl(env: Env, model: string): string {
+  return `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/ai/run/${model}`;
+}
+async function cfImageBytes(res: Response): Promise<AiImage | null> {
+  const sniff = (bytes: Uint8Array) =>
+    bytes[0] === 0x89 && bytes[1] === 0x50
+      ? "image/png"
+      : bytes[0] === 0xff && bytes[1] === 0xd8
+        ? "image/jpeg"
+        : "image/png";
+  const ct = res.headers.get("content-type") || "";
+  if (ct.includes("application/json")) {
+    const data = (await res.json()) as {
+      success?: boolean;
+      errors?: Array<{ message?: string }>;
+      result?: { image?: string };
+    };
+    if (!data.success || typeof data.result?.image !== "string") {
+      throw new Error(data.errors?.[0]?.message || "cf-image-failed");
+    }
+    const bytes = base64ToBytes(data.result.image.replace(/^data:[^,]+,/, ""));
+    if (!bytes || bytes.length === 0 || bytes.length > 9_500_000) return null;
+    return { bytes, mime: sniff(bytes), text: "" };
+  }
+  if (!res.ok) throw new Error(`cf-image-http-${res.status}`);
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (bytes.length === 0 || bytes.length > 9_500_000) return null;
+  return { bytes, mime: sniff(bytes), text: "" };
+}
+async function cfImage(
   env: Env,
-  parts: unknown[],
-): Promise<{ image: AiImage | null; quota: boolean }> {
-  if (!env.GEMINI_API_KEY) return { image: null, quota: false };
-  if (Date.now() < imageQuotaBlockedUntil) return { image: null, quota: true };
-  let quota = false;
+  parts: { text: string; raw: string; src: AiPhotoSrc | null },
+): Promise<{ image: AiImage | null; off: boolean }> {
+  if (!env.CF_AI_TOKEN) return { image: null, off: true };
   const started = Date.now();
-  for (const model of GEMINI_IMAGE_MODELS) {
-    const remaining = GEMINI_CALL_BUDGET_MS - (Date.now() - started);
-    if (remaining < 6_000) break;
+  const remaining = () => CF_IMAGE_BUDGET_MS - (Date.now() - started);
+  const auth = { Authorization: `Bearer ${env.CF_AI_TOKEN}` };
+  if (remaining() >= 5_000) {
     try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), Math.min(remaining, 14_000));
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
-          body: JSON.stringify({
-            contents: [{ parts }],
-            generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
-          }),
-          signal: ctrl.signal,
-        },
-      );
-      clearTimeout(timer);
-      if (!res.ok) {
-        // Owner round 33 (item 11a): a 429 whose quota line reads "limit: 0"
-        // means this key's tier has NO quota for that model (the free tier
-        // has none for any image model). The other models still get their
-        // turn; if none draws, the block below spares the next requests.
-        if (res.status === 429 && /limit:\s*0\b/.test(await res.text())) quota = true;
-        continue;
+      // klein's contract is a multipart form: prompt + width/height, and
+      // `input_image_0` holding the source photo for an edit.
+      const form = new FormData();
+      form.append("prompt", parts.text);
+      form.append("width", "1024");
+      form.append("height", "1024");
+      if (parts.src) {
+        const blob = new Blob([parts.src.bytes], { type: parts.src.mime });
+        form.append("input_image_0", blob, "src.png");
       }
-      const data = (await res.json()) as {
-        candidates?: {
-          content?: {
-            parts?: {
-              text?: string;
-              thought?: boolean;
-              inlineData?: { mimeType?: string; data?: string };
-            }[];
-          };
-        }[];
-      };
-      const answer = data.candidates?.[0]?.content?.parts ?? [];
-      const text = answer
-        .filter((p) => !p.thought && typeof p.text === "string")
-        .map((p) => p.text ?? "")
-        .join(" ")
-        .trim()
-        .slice(0, 300);
-      for (const part of answer) {
-        const inline = part.inlineData;
-        if (part.thought || !inline?.data) continue;
-        const bin = atob(inline.data);
-        if (bin.length > 0 && bin.length < 9_500_000) {
-          const bytes = new Uint8Array(bin.length);
-          for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
-          return { image: { bytes, mime: inline.mimeType || "image/png", text }, quota: false };
-        }
-      }
+      const res = await fetch(cfAiUrl(env, CF_IMAGE_MODEL), {
+        method: "POST",
+        headers: auth,
+        body: form,
+        signal: AbortSignal.timeout(Math.min(remaining(), 20_000)),
+      });
+      const img = await cfImageBytes(res);
+      if (img) return { image: img, off: false };
     } catch {
-      /* next model if budget allows */
+      /* klein down or rejected: schnell gets its turn below */
     }
   }
-  if (quota) imageQuotaBlockedUntil = Date.now() + IMAGE_QUOTA_BLOCK_MS;
-  return { image: null, quota };
+  if (remaining() >= 5_000) {
+    try {
+      const res = await fetch(cfAiUrl(env, CF_IMAGE_MODEL_FALLBACK), {
+        method: "POST",
+        headers: { ...auth, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: parts.src ? `Create one image: ${parts.raw}` : parts.text,
+        }),
+        signal: AbortSignal.timeout(Math.min(remaining(), 20_000)),
+      });
+      const img = await cfImageBytes(res);
+      if (img) return { image: img, off: false };
+    } catch {
+      /* CF fully down: honest failure below */
+    }
+  }
+  return { image: null, off: false };
 }
 
 /** KuchuPuchu AI answers a user message in its chat (owner feature). Runs in
@@ -1338,30 +1372,31 @@ async function sendAiReply(
           ),
         );
       };
-      let parts: unknown[] | null = null;
+      let parts: { text: string; raw: string; src: AiPhotoSrc | null } | null = null;
       let readSource: (typeof rows)[number] | null = null;
       let readIsPrior = false;
       if (newestPhoto) {
         const caption = (newestPhoto.body ?? "").trim();
         if (caption && (IMAGE_EDIT_HINT.test(caption) || wantsPicture(caption))) {
           // photo + a caption that asks for a change → edit
-          const src = await aiPhotoPart(env, newestPhoto.media, photoMime(newestPhoto));
-          if (src) parts = [src, { text: `Edit this photo as requested: ${caption}` }];
+          const src = await aiPhotoBytes(env, newestPhoto.media, photoMime(newestPhoto));
+          if (src) parts = { text: `Edit this photo as requested: ${caption}`, raw: caption, src };
         }
         if (!parts) readSource = newestPhoto; // bare photo / a question about it
       } else if (newestText) {
         if (recentPhoto && wantsEdit(newestText)) {
           // photo first, then the instruction → edit that photo
-          const src = await aiPhotoPart(env, recentPhoto.media, photoMime(recentPhoto));
-          if (src) parts = [src, { text: `Edit this photo as requested: ${newestText}` }];
+          const src = await aiPhotoBytes(env, recentPhoto.media, photoMime(recentPhoto));
+          if (src)
+            parts = { text: `Edit this photo as requested: ${newestText}`, raw: newestText, src };
         } else if (wantsPicture(newestText)) {
-          parts = [
-            {
-              text:
-                "Generate one image for this request (it may be written in Bengali or Banglish): " +
-                newestText,
-            },
-          ];
+          parts = {
+            text:
+              "Generate one image for this request (it may be written in Bengali or Banglish): " +
+              newestText,
+            raw: newestText,
+            src: null,
+          };
         } else if (
           recentPhoto &&
           // the photo is the user's previous turn (photo → reply → this text),
@@ -1377,12 +1412,12 @@ async function sendAiReply(
       }
       if (parts) {
         pictureTurn = true;
-        const drawn = await geminiImage(env, parts);
+        const drawn = await cfImage(env, parts);
         if (drawn.image) {
           await sendBotImage(drawn.image);
           return;
         }
-        photoPrompt = drawn.quota
+        photoPrompt = drawn.off
           ? " The user asked you for a picture, but picture creation is switched off on this server " +
             "right now: say so in one short honest line (no apology loop, do not tell them to try " +
             "again later) and offer to help with words instead. Do not describe a picture."

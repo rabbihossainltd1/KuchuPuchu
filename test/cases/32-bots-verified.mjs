@@ -7664,16 +7664,8 @@ const convBetween = (db, a, b) =>
         ai.includes("IMAGE_EDIT_HINT.test(t) && (IMAGE_REF.test(t) || !FRESH_NOUN.test(t));") &&
         ai.includes("but the image tool failed this time") &&
         ai.includes("but picture creation is switched off on this server") &&
-        src.includes("let imageQuotaBlockedUntil = 0;") &&
         src.includes("let pictureTurn = false;") &&
         src.includes("if (!pictureTurn && OWNER_INTENT.test(asked)) {") &&
-        src.includes(
-          "if (res.status === 429 && /limit:\\s*0\\b/.test(await res.text())) quota = true;",
-        ) &&
-        src.includes("if (quota) imageQuotaBlockedUntil = Date.now() + IMAGE_QUOTA_BLOCK_MS;") &&
-        src.includes(
-          "if (Date.now() < imageQuotaBlockedUntil) return { image: null, quota: true };",
-        ) &&
         ai.includes("Never say you cannot see images.") &&
         ai.includes("if (caption && (IMAGE_EDIT_HINT.test(caption) || wantsPicture(caption))) {") &&
         ai.includes("VALUES (?, ?, ?, 'IMAGE', NULL, ?, ?)`") &&
@@ -7684,8 +7676,17 @@ const convBetween = (db, a, b) =>
         src.includes(
           "Abilities: you CAN see photos the user sends and you CAN create or edit pictures on request",
         ) &&
-        src.includes('const GEMINI_IMAGE_MODELS = [\n  "gemini-3.1-flash-lite-image",') &&
-        src.includes("setTimeout(() => ctrl.abort(), Math.min(remaining, 14_000))") &&
+        src.includes('const CF_IMAGE_MODEL = "@cf/black-forest-labs/flux-2-klein-9b";') &&
+        src.includes('const CF_IMAGE_MODEL_FALLBACK = "@cf/black-forest-labs/flux-1-schnell";') &&
+        src.includes("async function cfImage(") &&
+        src.includes("async function aiPhotoBytes(") &&
+        src.includes("type AiPhotoSrc = { bytes: Uint8Array<ArrayBuffer>; mime: string };") &&
+        src.includes('form.append("input_image_0"') &&
+        src.includes("AbortSignal.timeout(") &&
+        src.includes("/ai/run/") &&
+        src.includes("CF_AI_TOKEN") &&
+        src.includes("const drawn = await cfImage(env, parts);") &&
+        !src.includes("geminiImage(") &&
         src.includes("async function aiPhotoPart(") &&
         src.includes("const AI_PHOTO_MAX_BYTES = 7_000_000;"),
     );
@@ -7735,63 +7736,63 @@ const convBetween = (db, a, b) =>
     );
   }
   {
-    // behavioural probe: a fake generativelanguage endpoint records what each
-    // model was asked and answers text / image accordingly
+    // behavioural probe: a fake generativelanguage endpoint answers the TEXT
+    // model; the Workers AI REST endpoint (/ai/run/) is faked below and
+    // records what each image model was asked
     const seen = [];
     const realFetch = globalThis.fetch;
     const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
-    // flipped to true later: the image models answer like a key without image
-    // quota (the live free-tier failure — HTTP 429, "limit: 0")
-    let imageQuotaOut = false;
+    // r34-4: flipped by the failure checks — cfImagesDown = every image model
+    // throws; kleinDown = only klein throws (schnell fallback must still draw)
+    let cfImagesDown = false;
+    let kleinDown = false;
     globalThis.fetch = async (input, init) => {
       const url = typeof input === "string" ? input : input.url;
+      if (url.includes("/ai/run/")) {
+        const model = url.split("/ai/run/")[1];
+        let prompt = "";
+        let hasInline = false;
+        if (typeof init.body === "string") {
+          prompt = String(JSON.parse(init.body).prompt ?? "");
+        } else if (init.body && typeof init.body.get === "function") {
+          prompt = String(init.body.get("prompt") ?? "");
+          hasInline = init.body.has("input_image_0");
+        }
+        seen.push({ model, image: true, hasInline, text: prompt });
+        if (cfImagesDown) throw new Error("Workers AI is down");
+        if (kleinDown && model.includes("klein")) throw new Error("klein is down");
+        if (model.includes("schnell"))
+          return new Response(pngBytes, {
+            status: 200,
+            headers: { "content-type": "image/png" },
+          });
+        return new Response(
+          JSON.stringify({ success: true, result: { image: pngBytes.toString("base64") } }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
       if (url.startsWith("https://generativelanguage.googleapis.com/")) {
         const model = url.split("/models/")[1].split(":")[0];
         const req = JSON.parse(init.body);
         const parts = req.contents?.[0]?.parts ?? [];
         seen.push({
           model,
-          image: model.includes("-image"),
+          image: false,
           hasInline: parts.some((p) => p.inlineData?.mimeType?.startsWith("image/")),
           text: parts
             .filter((p) => typeof p.text === "string")
             .map((p) => p.text)
             .join("\n"),
         });
-        if (imageQuotaOut && model.includes("-image")) {
-          return new Response(
-            JSON.stringify({
-              error: {
-                code: 429,
-                message:
-                  "You exceeded your current quota. * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: " +
-                  model,
-                status: "RESOURCE_EXHAUSTED",
-              },
-            }),
-            { status: 429, headers: { "content-type": "application/json" } },
-          );
-        }
-        const body = model.includes("-image")
-          ? {
-              candidates: [
-                {
-                  content: {
-                    parts: [
-                      { text: "Here is your cat in space!" },
-                      { inlineData: { mimeType: "image/png", data: pngBytes.toString("base64") } },
-                    ],
-                  },
-                },
-              ],
-            }
-          : {
-              candidates: [{ content: { parts: [{ text: "Ami ekta lal phool dekhte pacchi." }] } }],
-            };
-        return new Response(JSON.stringify(body), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({
+            candidates: [{ content: { parts: [{ text: "Ami ekta lal phool dekhte pacchi." }] } }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
       }
       return realFetch(input, init);
     };
@@ -7804,6 +7805,8 @@ const convBetween = (db, a, b) =>
         MEDIA: r2,
         GOOGLE_WEB_CLIENT_ID: "kp-test-web-client",
         GEMINI_API_KEY: "test-key",
+        CF_AI_TOKEN: "test-ai-token",
+        CF_ACCOUNT_ID: "test-acct",
       };
       const ctx = makeCtx();
       let ipSeq = 0;
@@ -7981,11 +7984,10 @@ const convBetween = (db, a, b) =>
         JSON.stringify({ botImg, status: media?.status }).slice(0, 300),
       );
 
-      // 5. a key without image quota (the live free-tier answer): the first
-      // request gives every image model its turn (each 429 "limit: 0"), and
-      // the text model is told to say picture creation is off; the next
-      // request within the block window skips the image models entirely.
-      imageQuotaOut = true;
+      // 5. r34-4: Workers AI down (both models throw) → the text model is
+      // told the image tool failed (honest line); nothing is blocked — the
+      // retry right after draws fine.
+      cfImagesDown = true;
       const botCountBefore = botRows().length;
       await call(
         "POST",
@@ -7993,28 +7995,52 @@ const convBetween = (db, a, b) =>
         { kind: "TEXT", body: "ekta logo design kore dao", clientId: "ai-c2" },
         a.token,
       );
-      const afterQuota = seen.splice(0);
+      const afterDown = seen.splice(0);
+      cfImagesDown = false;
       await call(
         "POST",
         `/api/conversations/${conv.id}/messages`,
         { kind: "TEXT", body: "draw a picture of a blue cat please", clientId: "ai-c3" },
         a.token,
       );
-      const afterQuota2 = seen.splice(0);
-      const quotaRows = botRows().slice(botCountBefore);
+      const afterRetry = seen.splice(0);
+      const downRows = botRows().slice(botCountBefore);
       check(
-        "r33-11a: image quota 'limit: 0' on every image model → the text model is told picture creation is switched off (honest line, no retry loop); the next request skips the image models while the block lasts; both replies are TEXT rows",
-        afterQuota.filter((c) => c.image).length === 3 &&
-          afterQuota.some(
-            (c) => !c.image && c.text.includes("picture creation is switched off on this server"),
+        "r34-4: Workers AI down → both models tried, the text reply says the image tool failed (TEXT row, no IMAGE); the retry draws (no block window)",
+        afterDown.filter((c) => c.image).length === 2 &&
+          afterDown.some(
+            (c) => !c.image && c.text.includes("but the image tool failed this time"),
           ) &&
-          afterQuota2.every((c) => !c.image) &&
-          afterQuota2.some(
-            (c) => !c.image && c.text.includes("picture creation is switched off on this server"),
-          ) &&
-          quotaRows.length === 2 &&
-          quotaRows.every((r) => r.kind === "TEXT"),
-        JSON.stringify({ afterQuota, afterQuota2, quotaRows }).slice(0, 600),
+          downRows.length === 2 &&
+          downRows[0].kind === "TEXT" &&
+          downRows[1].kind === "IMAGE" &&
+          afterRetry.some((c) => c.image) &&
+          !!(await r2.get(downRows[1].media)),
+        JSON.stringify({ afterDown, afterRetry, downRows }).slice(0, 600),
+      );
+
+      // 5b. r34-4: klein down but schnell alive → the fallback draws (the
+      // IMAGE lands, served from the schnell bytes).
+      kleinDown = true;
+      const botCountBeforeFb = botRows().length;
+      await call(
+        "POST",
+        `/api/conversations/${conv.id}/messages`,
+        { kind: "TEXT", body: "ekta sunset er chobi banao please", clientId: "ai-c4" },
+        a.token,
+      );
+      const afterFb = seen.splice(0);
+      kleinDown = false;
+      const fbRows = botRows().slice(botCountBeforeFb);
+      check(
+        "r34-4: klein down → schnell fallback draws (klein attempted, schnell answered, IMAGE lands)",
+        afterFb.filter((c) => c.image).length === 2 &&
+          afterFb.some((c) => c.image && c.model.includes("klein")) &&
+          afterFb.some((c) => c.image && c.model.includes("schnell")) &&
+          fbRows.length === 1 &&
+          fbRows[0].kind === "IMAGE" &&
+          !!(await r2.get(fbRows[0].media)),
+        JSON.stringify({ afterFb, fbRows }).slice(0, 500),
       );
     } finally {
       globalThis.fetch = realFetch;
