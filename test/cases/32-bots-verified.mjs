@@ -8045,7 +8045,7 @@ const convBetween = (db, a, b) =>
         ui.includes("import androidx.compose.ui.graphics.graphicsLayer"),
     );
     check(
-      "r33-11b: chat — bornKeys marks my text / photo / file / voice sends and live socket arrivals; each list row (thread + pending) consumes its key once (remember(rowKey) { bornKeys.remove(rowKey) }) and rises in; deletes go through vanishingIds → vanishOut before the rows leave (unsend refresh / delete-for-me repaint after 200 ms)",
+      "r33-11b: chat — bornKeys marks my text / photo / file / voice sends and live socket arrivals; each list row (thread + pending) consumes its key once (remember(rowKey) { bornKeys.remove(rowKey) }) and rises in; deletes go through vanishingIds → vanishOut before the rows leave (r34-3: explicit 190 ms windows)",
       chat.includes("val bornKeys = remember { HashSet<String>() }") &&
         chat.includes("val vanishingIds = remember { mutableStateListOf<String>() }") &&
         (chat.match(/bornKeys\.add\(clientId\)/g) || []).length === 4 &&
@@ -8060,9 +8060,26 @@ const convBetween = (db, a, b) =>
         chat.includes("Box(Modifier.fillMaxWidth().riseIn(born)) {") &&
         (chat.match(/vanishingIds\.addAll\(ids\)/g) || []).length === 2 &&
         chat.includes(
-          "        ids.forEach { ScreenStore.hideMessage(it) }\n        scope.launch {\n            delay(200)\n            paintFromStore()\n        }",
+          "        vanishingIds.addAll(ids)\n        scope.launch {\n            delay(190)\n            ids.forEach { ScreenStore.hideMessage(it) }\n            paintFromStore()\n        }",
         ) &&
         chat.includes('val vanishing = albumPhotos(m).any { it.optString("id") in vanishingIds }'),
+    );
+    check(
+      "r34-3: every delete plays the vanish — explicit 190 ms windows, paintFromStore holds mid-vanish + peer-deleted rows (vanishedOnce, no ghosts), vanishOut resets when gone flips back",
+      (chat.match(/delay\(190\)/g) || []).length === 2 &&
+        chat.includes("val vanishedOnce = remember { HashSet<String>() }") &&
+        chat.includes('vanishedOnce.removeAll(next.map { it.optString("id") }.toSet())') &&
+        chat.includes(
+          "val hold = oldIds.filter { it.isNotBlank() && it !in newIds && it !in ScreenStore.hiddenMsgIds && (it in vanishingIds || it !in vanishedOnce) }",
+        ) &&
+        chat.includes("vanishingIds.addAll(fresh)") &&
+        chat.includes("vanishedOnce.addAll(fresh)") &&
+        chat.includes(
+          'val merged = (next + keep).sortedBy { pos[it.optString("id")] ?: Int.MAX_VALUE }',
+        ) &&
+        chat.includes("vanishingIds.removeAll(hold.toSet())") &&
+        ui.includes("} else {\n            // Owner round 34 (item 3)") &&
+        ui.includes("t.snapTo(1f)"),
     );
     check(
       "r33-11b: chat — the attach and sticker panels pop up (Box(Modifier.popUp())); a cancelled recording bumps voiceBinNonce, the composer swaps the strip for VoiceBinDrop (lid open → note drops → lid shut, 520 ms) before the pill returns",

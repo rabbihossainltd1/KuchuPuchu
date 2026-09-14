@@ -224,6 +224,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     // Item 11b: a message that is being deleted shrinks away first; the
     // rows themselves leave when the vanish has played.
     val vanishingIds = remember { mutableStateListOf<String>() }
+    // Owner round 34 (item 3): ids whose vanish already played (a departed
+    // row animates once, never loops).
+    val vanishedOnce = remember { HashSet<String>() }
     // Owner round 13: swipe a bubble right to quote-reply to it.
     var replyTo by remember { mutableStateOf<JSONObject?>(null) }
     // Owner round 15: swipe-to-reply now also OPENS the keyboard — a bump
@@ -407,6 +410,9 @@ fun ChatScreen(nav: NavController, convId: String) {
 
     fun paintFromStore() {
         val next = ScreenStore.msgsOf(convId).filter { it.optString("id") !in ScreenStore.hiddenMsgIds }
+        // Owner round 34 (item 3): a row that came back may vanish again if
+        // it departs again — only the currently missing stay remembered.
+        vanishedOnce.removeAll(next.map { it.optString("id") }.toSet())
         if (msgs.isEmpty()) {
             msgs.addAll(next)
             return
@@ -424,6 +430,29 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
         if (newIds.size > oldIds.size && newIds.take(oldIds.size) == oldIds) {
             msgs.addAll(next.drop(oldIds.size))
+            return
+        }
+        // Owner round 34 (item 3): rows mid-vanish (my delete) and rows the
+        // PEER just deleted hold their place for the 180 ms shrink instead
+        // of popping instantly — a poll tick landing mid-animation used to
+        // drop them early, and peer-deletes never animated at all.
+        val hold = oldIds.filter { it.isNotBlank() && it !in newIds && it !in ScreenStore.hiddenMsgIds && (it in vanishingIds || it !in vanishedOnce) }
+        if (hold.isNotEmpty()) {
+            val fresh = hold.filter { it !in vanishingIds }
+            vanishingIds.addAll(fresh)
+            vanishedOnce.addAll(fresh)
+            val keep = msgs.filter { it.optString("id") in hold }
+            val pos = msgs.map { it.optString("id") }.withIndex().associate { it.value to it.index }
+            val merged = (next + keep).sortedBy { pos[it.optString("id")] ?: Int.MAX_VALUE }
+            msgs.clear()
+            msgs.addAll(merged)
+            scope.launch {
+                delay(200)
+                // Off-screen rows never play (no onDone): force-release so a
+                // later paint drops them instead of holding ghosts.
+                vanishingIds.removeAll(hold.toSet())
+                paintFromStore()
+            }
             return
         }
         msgs.clear()
@@ -1607,6 +1636,9 @@ fun ChatScreen(nav: NavController, convId: String) {
             ids.forEach { id ->
                 runCatching { withContext(Dispatchers.IO) { Api.delete("/api/messages/$id") } }
             }
+            // Owner round 34 (item 3): the shrink's window is explicit — even
+            // an instant server must not repaint before the 180 ms played.
+            delay(190)
             refreshMessages()
         }
     }
@@ -1616,12 +1648,14 @@ fun ChatScreen(nav: NavController, convId: String) {
         selected.clear()
         reactionFor = null
         showEmojiSheet = false
-        // Owner round 33 (item 11b): vanish first; the rows leave when the
-        // shrink has played (see the list's vanishOut callback).
+        // Owner round 34 (item 3): the shrink gets an EXPLICIT window — the
+        // rows hide only after it played. They used to hide instantly and
+        // the repaint raced the 180 ms animation, so deletes popped with
+        // no vanish at all.
         vanishingIds.addAll(ids)
-        ids.forEach { ScreenStore.hideMessage(it) }
         scope.launch {
-            delay(200)
+            delay(190)
+            ids.forEach { ScreenStore.hideMessage(it) }
             paintFromStore()
         }
     }

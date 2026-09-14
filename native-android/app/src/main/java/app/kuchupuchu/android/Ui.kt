@@ -954,6 +954,10 @@ fun Modifier.vanishOut(gone: Boolean, onDone: () -> Unit): Modifier {
         if (gone) {
             t.animateTo(0f, tween(180))
             done.value()
+        } else {
+            // Owner round 34 (item 3): a row that is held and released while
+            // still on screen resets instead of sitting invisible.
+            t.snapTo(1f)
         }
     }
     val v = t.value
