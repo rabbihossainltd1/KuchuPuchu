@@ -5638,7 +5638,7 @@ const convBetween = (db, a, b) =>
         ) &&
         profile.includes("if (!isMe && !isKpBot(userId) && !requestOpen) {") &&
         profile.includes(
-          "if (!isMe && !requestOpen) Column(Modifier.padding(horizontal = 16.dp)) {",
+          "if (!isMe && !requestOpen) Column(Modifier.padding(horizontal = 16.dp).weight(1f)) {",
         ),
     );
   }
@@ -7323,7 +7323,7 @@ const convBetween = (db, a, b) =>
         !src.includes("return json({ images, docs, links });"),
     );
     check(
-      "r33-20: app — the Media tab grid is photos + videos newest-first (video tile = VideoTile with the cached frame + play circle, tap → the app's player), and the friend profile's shared-media strip includes videos (VideoTile, view-once / documents excluded)",
+      "r33-20: app — the Media tab grid is photos + videos newest-first (video tile = VideoTile with the cached frame + play circle, tap → the app's player), and the friend profile's shared-media grid (r34-11: vertical, all of it) includes videos (VideoTile, view-once / documents excluded)",
       tab.includes('videos = data.arr("videos").objects()') &&
         tab.includes('(images + videos).sortedByDescending { it.optString("createdAt") }') &&
         tab.includes('items(grid, key = { it.optString("id") }) { m ->') &&
@@ -7339,6 +7339,17 @@ const convBetween = (db, a, b) =>
         prof.includes("!isViewOnce(m) && !sentAsDocument(m) && (") &&
         prof.includes("if (isVideo) VideoTile(m, playSize = 22)") &&
         prof.includes('else KpNetImage(url, "Shared photo", Modifier.fillMaxSize())'),
+    );
+  }
+  {
+    const prof11 = kt("ProfileScreen.kt");
+    check(
+      "r34-11: friend profile media is a vertical 3-column grid of everything (no sideways strip, no 9-cap)",
+      prof11.includes("LazyVerticalGrid(") &&
+        prof11.includes("columns = GridCells.Fixed(3),") &&
+        prof11.includes(".aspectRatio(1f)") &&
+        !prof11.includes("LazyRow(") &&
+        !prof11.includes("takeLast(9)"),
     );
   }
   // Item 25: status viewers always showed 0 and the viewed-by sheet reloaded on

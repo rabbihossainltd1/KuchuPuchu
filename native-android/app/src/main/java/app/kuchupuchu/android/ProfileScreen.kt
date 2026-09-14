@@ -12,7 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -612,10 +612,14 @@ fun ProfileScreen(nav: NavController, userId: String) {
             }
         }
         Spacer(Modifier.height(16.dp))
-        if (!isMe && !requestOpen) Column(Modifier.padding(horizontal = 16.dp)) {
-            // Real shared-media strip: recent photos AND videos from this
-            // user's chat (owner round 33, item 20: videos were missing).
-            // (The card here used to be a dead placeholder.)
+        // Owner round 34 (item 11): the media section owns the rest of the
+        // screen and scrolls down, not sideways.
+        if (!isMe && !requestOpen) Column(Modifier.padding(horizontal = 16.dp).weight(1f)) {
+            // Real shared media: every photo AND video from this user's
+            // chat (owner round 33, item 20: videos were missing), newest
+            // first in a grid the user swipes DOWN through (round 34 item 11:
+            // the sideways strip stood up). (The card here used to be a dead
+            // placeholder.)
             val convId0 = ScreenStore.convs
                 .firstOrNull { !it.optBoolean("isGroup") && it.optJSONObject("other")?.optString("id") == userId }
                 ?.optString("id")
@@ -629,12 +633,17 @@ fun ProfileScreen(nav: NavController, userId: String) {
                                 listOf(".jpg", ".jpeg", ".png", ".webp").any { m.optText("fileName").lowercase().endsWith(it) })) ||
                             (k == "FILE" && fileLooksVideo(m))
                     )
-                }.takeLast(9).reversed()
+                }.reversed()
             }
             if (convId0 != null) {
                 if (photos.isNotEmpty()) {
-                    LazyRow(
-                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+                    Text("Shared media", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+                    Spacer(Modifier.height(8.dp))
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(3),
+                        modifier = Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         items(photos.size) { i ->
                             val m = photos[i]
@@ -646,7 +655,8 @@ fun ProfileScreen(nav: NavController, userId: String) {
                             val isVideo = fileLooksVideo(m)
                             Box(
                                 Modifier
-                                    .size(86.dp)
+                                    .fillMaxWidth()
+                                    .aspectRatio(1f)
                                     .clip(RoundedCornerShape(12.dp))
                                     .clickable { nav.navigate("chatmedia/$convId0") },
                             ) {
@@ -657,7 +667,7 @@ fun ProfileScreen(nav: NavController, userId: String) {
                     }
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Shared media — tap to see all",
+                        "Open the full media view",
                         color = Muted,
                         fontSize = 12.sp,
                         modifier = Modifier.clickable { nav.navigate("chatmedia/$convId0") },
