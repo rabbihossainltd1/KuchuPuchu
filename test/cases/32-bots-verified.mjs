@@ -8082,7 +8082,9 @@ const convBetween = (db, a, b) =>
         (chat.match(/val born = remember\(rowKey\) \{ bornKeys\.remove\(rowKey\) \}/g) || [])
           .length === 2 &&
         chat.includes("DeleteRowShell(") &&
-        chat.includes("                            m = m,\n                            rowKey = rowKey,") &&
+        chat.includes(
+          "                            m = m,\n                            rowKey = rowKey,",
+        ) &&
         chat.includes("vanishingIds.removeAll(gone.toSet())") &&
         chat.includes("Box(Modifier.fillMaxWidth().riseIn(born)) {") &&
         (chat.match(/vanishingIds\.addAll\(ids\)/g) || []).length === 2 &&

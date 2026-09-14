@@ -188,7 +188,11 @@ lacks(
   "java.net.URL(url).openStream()",
   "avatar save goes through Api.download (auth header + timeout)",
 );
-has(viewer, "Api.download(pageUrl)", "…including absolute URLs (r34-6: save acts on the current page)");
+has(
+  viewer,
+  "Api.download(pageUrl)",
+  "…including absolute URLs (r34-6: save acts on the current page)",
+);
 has(profile, "KpPhotoViewer(", "the profile photo opens in the app's own viewer");
 
 // ── NewChatScreen: cancellation is not an error, and errors are visible ─────
