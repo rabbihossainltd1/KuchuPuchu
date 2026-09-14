@@ -7651,7 +7651,12 @@ const convBetween = (db, a, b) =>
         ai.includes("but the image tool failed this time") &&
         ai.includes("but picture creation is switched off on this server") &&
         src.includes("let imageQuotaBlockedUntil = 0;") &&
-        src.includes("if (res.status === 429 && /limit:\\s*0\\b/.test(await res.text())) {") &&
+        src.includes("let pictureTurn = false;") &&
+        src.includes("if (!pictureTurn && OWNER_INTENT.test(asked)) {") &&
+        src.includes(
+          "if (res.status === 429 && /limit:\\s*0\\b/.test(await res.text())) quota = true;",
+        ) &&
+        src.includes("if (quota) imageQuotaBlockedUntil = Date.now() + IMAGE_QUOTA_BLOCK_MS;") &&
         src.includes(
           "if (Date.now() < imageQuotaBlockedUntil) return { image: null, quota: true };",
         ) &&
@@ -7721,6 +7726,9 @@ const convBetween = (db, a, b) =>
     const seen = [];
     const realFetch = globalThis.fetch;
     const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+    // flipped to true later: the image models answer like a key without image
+    // quota (the live free-tier failure — HTTP 429, "limit: 0")
+    let imageQuotaOut = false;
     globalThis.fetch = async (input, init) => {
       const url = typeof input === "string" ? input : input.url;
       if (url.startsWith("https://generativelanguage.googleapis.com/")) {
@@ -7736,6 +7744,20 @@ const convBetween = (db, a, b) =>
             .map((p) => p.text)
             .join("\n"),
         });
+        if (imageQuotaOut && model.includes("-image")) {
+          return new Response(
+            JSON.stringify({
+              error: {
+                code: 429,
+                message:
+                  "You exceeded your current quota. * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: " +
+                  model,
+                status: "RESOURCE_EXHAUSTED",
+              },
+            }),
+            { status: 429, headers: { "content-type": "application/json" } },
+          );
+        }
         const body = model.includes("-image")
           ? {
               candidates: [
@@ -7867,7 +7889,7 @@ const convBetween = (db, a, b) =>
         .prepare("SELECT last_message FROM conversations WHERE id = ?")
         .get(conv.id);
       check(
-        "r33-11a: 'ekta chobi banao' (a photo 4 rows up) → the image model draws from a text-only prompt, the bot's IMAGE lands, the chat list reads Photo",
+        "r33-11a: 'ekta chobi banao' (a photo 4 rows up) → the image model draws from a text-only prompt, the bot's IMAGE lands, the chat list reads Photo — and no OWNER_CARD rides along ('banao' also matches the owner intent)",
         afterCreate.length >= 1 &&
           afterCreate[0].image &&
           !afterCreate[0].hasInline &&
@@ -7877,7 +7899,8 @@ const convBetween = (db, a, b) =>
           created.body === null &&
           !!created.media &&
           !!(await r2.get(created.media)) &&
-          convRow.last_message === "Photo",
+          convRow.last_message === "Photo" &&
+          rowsNow.every((r) => r.kind !== "OWNER_CARD"),
         JSON.stringify({ afterCreate, created, convRow }).slice(0, 500),
       );
 
@@ -7942,6 +7965,42 @@ const convBetween = (db, a, b) =>
           media?.status === 200 &&
           (media.headers.get("content-type") || "").startsWith("image/"),
         JSON.stringify({ botImg, status: media?.status }).slice(0, 300),
+      );
+
+      // 5. a key without image quota (the live free-tier answer): the first
+      // request gives every image model its turn (each 429 "limit: 0"), and
+      // the text model is told to say picture creation is off; the next
+      // request within the block window skips the image models entirely.
+      imageQuotaOut = true;
+      const botCountBefore = botRows().length;
+      await call(
+        "POST",
+        `/api/conversations/${conv.id}/messages`,
+        { kind: "TEXT", body: "ekta logo design kore dao", clientId: "ai-c2" },
+        a.token,
+      );
+      const afterQuota = seen.splice(0);
+      await call(
+        "POST",
+        `/api/conversations/${conv.id}/messages`,
+        { kind: "TEXT", body: "draw a picture of a blue cat please", clientId: "ai-c3" },
+        a.token,
+      );
+      const afterQuota2 = seen.splice(0);
+      const quotaRows = botRows().slice(botCountBefore);
+      check(
+        "r33-11a: image quota 'limit: 0' on every image model → the text model is told picture creation is switched off (honest line, no retry loop); the next request skips the image models while the block lasts; both replies are TEXT rows",
+        afterQuota.filter((c) => c.image).length === 3 &&
+          afterQuota.some(
+            (c) => !c.image && c.text.includes("picture creation is switched off on this server"),
+          ) &&
+          afterQuota2.every((c) => !c.image) &&
+          afterQuota2.some(
+            (c) => !c.image && c.text.includes("picture creation is switched off on this server"),
+          ) &&
+          quotaRows.length === 2 &&
+          quotaRows.every((r) => r.kind === "TEXT"),
+        JSON.stringify({ afterQuota, afterQuota2, quotaRows }).slice(0, 600),
       );
     } finally {
       globalThis.fetch = realFetch;

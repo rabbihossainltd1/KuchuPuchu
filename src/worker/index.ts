@@ -1009,13 +1009,10 @@ async function geminiImage(
       clearTimeout(timer);
       if (!res.ok) {
         // Owner round 33 (item 11a): a 429 whose quota line reads "limit: 0"
-        // means this key's tier has NO image quota at all (the free tier
-        // has none) — remember that for a while so the next requests get
-        // the honest answer at once instead of three doomed calls.
-        if (res.status === 429 && /limit:\s*0\b/.test(await res.text())) {
-          imageQuotaBlockedUntil = Date.now() + IMAGE_QUOTA_BLOCK_MS;
-          quota = true;
-        }
+        // means this key's tier has NO quota for that model (the free tier
+        // has none for any image model). The other models still get their
+        // turn; if none draws, the block below spares the next requests.
+        if (res.status === 429 && /limit:\s*0\b/.test(await res.text())) quota = true;
         continue;
       }
       const data = (await res.json()) as {
@@ -1050,6 +1047,7 @@ async function geminiImage(
       /* next model if budget allows */
     }
   }
+  if (quota) imageQuotaBlockedUntil = Date.now() + IMAGE_QUOTA_BLOCK_MS;
   return { image: null, quota };
 }
 
@@ -1251,6 +1249,10 @@ async function sendAiReply(
       IMAGE_EDIT_HINT.test(t) && (IMAGE_REF.test(t) || !FRESH_NOUN.test(t));
     const photoParts: unknown[] = [];
     let photoPrompt = "";
+    // Owner round 33 (item 11a): "ekta chobi banao" also matches the owner
+    // intent ("banao"); a message that took the picture path is an image
+    // request, not a question about the owner — no card for it.
+    let pictureTurn = false;
     const bucket = env.MEDIA;
     if (newest && newest.sender_id === userId && bucket) {
       const sendBotImage = async (img: AiImage) => {
@@ -1374,6 +1376,7 @@ async function sendAiReply(
         }
       }
       if (parts) {
+        pictureTurn = true;
         const drawn = await geminiImage(env, parts);
         if (drawn.image) {
           await sendBotImage(drawn.image);
@@ -1437,7 +1440,7 @@ async function sendAiReply(
     // — the text reply above already did unread/push/last_message.
     const asked =
       newest && newest.kind === "TEXT" && newest.sender_id === userId ? (newest.body ?? "") : "";
-    if (OWNER_INTENT.test(asked)) {
+    if (!pictureTurn && OWNER_INTENT.test(asked)) {
       // Owner round 4 (2026-09-04): the old 10-message window let a NEW card
       // land at the bottom every few exchanges, so a card was practically
       // ALWAYS the newest thing in an owner-heavy thread. One card per
