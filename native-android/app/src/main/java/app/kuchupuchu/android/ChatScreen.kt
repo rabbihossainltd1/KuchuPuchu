@@ -117,6 +117,8 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -447,7 +449,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             msgs.clear()
             msgs.addAll(merged)
             scope.launch {
-                delay(200)
+                delay(DeleteAnim.GRACE_MS)
                 // Off-screen rows never play (no onDone): force-release so a
                 // later paint drops them instead of holding ghosts.
                 vanishingIds.removeAll(hold.toSet())
@@ -1629,16 +1631,16 @@ fun ChatScreen(nav: NavController, convId: String) {
         // with the quick emojis still floating over it.
         reactionFor = null
         showEmojiSheet = false
-        // Owner round 33 (item 11b): the bubbles shrink away (180 ms) while
-        // the server delete runs; the list drops them on the next paint.
+        // Owner round 33 (item 11b): the bubbles explode while the server
+        // delete runs; the list drops them on the next paint.
         vanishingIds.addAll(ids)
         scope.launch {
             ids.forEach { id ->
                 runCatching { withContext(Dispatchers.IO) { Api.delete("/api/messages/$id") } }
             }
-            // Owner round 34 (item 3): the shrink's window is explicit — even
-            // an instant server must not repaint before the 180 ms played.
-            delay(190)
+            // Owner round 34 (item 3): the window is explicit — even an
+            // instant server must not repaint before the show played.
+            delay(DeleteAnim.GRACE_MS)
             refreshMessages()
         }
     }
@@ -1648,13 +1650,12 @@ fun ChatScreen(nav: NavController, convId: String) {
         selected.clear()
         reactionFor = null
         showEmojiSheet = false
-        // Owner round 34 (item 3): the shrink gets an EXPLICIT window — the
+        // Owner round 34 (item 3): the show gets an EXPLICIT window — the
         // rows hide only after it played. They used to hide instantly and
-        // the repaint raced the 180 ms animation, so deletes popped with
-        // no vanish at all.
+        // the repaint raced the animation, so deletes popped with no show.
         vanishingIds.addAll(ids)
         scope.launch {
-            delay(190)
+            delay(DeleteAnim.GRACE_MS)
             ids.forEach { ScreenStore.hideMessage(it) }
             paintFromStore()
         }
@@ -2269,21 +2270,30 @@ fun ChatScreen(nav: NavController, convId: String) {
                     val rowSelected = m.optString("id") in selected
                     // Owner round 33 (item 11b): a row born after open rises in
                     // once (the key leaves the set so a recomposition never
-                    // replays it); a row being deleted shrinks away first.
+                    // replays it); a row being deleted explodes first.
                     val rowKey = m.optString("clientId").ifBlank { m.optString("id") }
                     val born = remember(rowKey) { bornKeys.remove(rowKey) }
                     val vanishing = albumPhotos(m).any { it.optString("id") in vanishingIds }
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .riseIn(born)
-                            .vanishOut(vanishing) {
+                    // Owner round 33 (item 17): the jumped-to row flashes once.
+                    val flashing = flashId.isNotBlank() && albumPhotos(m).any { it.optString("id") == flashId }
+                    val flashAlpha by animateFloatAsState(
+                        if (flashing) 0.24f else 0f,
+                        tween(if (flashing) 180 else 700),
+                        label = "quoteflash",
+                    )
+                    Box(Modifier.fillMaxWidth()) {
+                        DeleteRowShell(
+                            m = m,
+                            rowKey = rowKey,
+                            born = born,
+                            rowSelected = rowSelected,
+                            vanishing = vanishing,
+                            onGone = {
                                 val gone = albumPhotos(m).map { it.optString("id") }
                                 vanishingIds.removeAll(gone.toSet())
                                 if (gone.any { it in ScreenStore.hiddenMsgIds }) paintFromStore()
-                            }
-                            .background(if (rowSelected) ActionBlue.copy(alpha = 0.16f) else Color.Transparent),
-                    ) {
+                            },
+                        ) {
                         MessageRow(
                             m,
                             isGroup,
@@ -2340,13 +2350,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             theme = chatTheme,
                             onJumpTo = { jumpTo(it) },
                         )
-                        // Owner round 33 (item 17): the jumped-to row flashes once.
-                        val flashing = flashId.isNotBlank() && albumPhotos(m).any { it.optString("id") == flashId }
-                        val flashAlpha by animateFloatAsState(
-                            if (flashing) 0.24f else 0f,
-                            tween(if (flashing) 180 else 700),
-                            label = "quoteflash",
-                        )
+                    }
                         if (flashAlpha > 0.004f) Box(Modifier.matchParentSize().background(chatAccent(chatTheme).copy(alpha = flashAlpha)))
                     }
                 }
@@ -4365,6 +4369,7 @@ private fun MessageRow(
                 )
             Box(
                 Modifier
+                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
                     // Owner round 13b: the hand-rolled awaitEachGesture fought
                     // the list's vertical scrolling (jank + crash on device).
@@ -4854,6 +4859,7 @@ private fun VideoMessageRow(
                 .offset { IntOffset(replyOffset.roundToInt(), 0) }
                 .shadow(2.dp, RoundedCornerShape(12.dp))
                 .clip(RoundedCornerShape(12.dp))
+                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
                 .background(Color(0xFF0B1220))
                 .border(1.dp, if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444), RoundedCornerShape(12.dp))
                 .pointerInput(m.optString("id")) {
@@ -5073,6 +5079,7 @@ private fun ViewOnceRow(
         Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
             Box(
                 Modifier
+                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
                     .pointerInput(m.optString("id")) {
                         detectHorizontalDragGestures(
@@ -5266,6 +5273,7 @@ private fun ImageMessageRow(
         Box(
             Modifier
                 .offset { IntOffset(replyOffset.roundToInt(), 0) }
+                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
                 .widthIn(max = 120.dp) // Owner round 25 / 32 item 29 / 33 item 18: smaller inline preview
                 // Owner round 10: photos float too — 3D lift + the round-8
                 // thin border.
@@ -5574,6 +5582,7 @@ private fun AlbumMessageRow(
             Box(
                 Modifier
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
+                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
                     .width(albumWidth)
                     .shadow(2.dp, shape)
                     .clip(shape)

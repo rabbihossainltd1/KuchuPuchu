@@ -5113,8 +5113,8 @@ const convBetween = (db, a, b) =>
         chat.includes(
           'Icon(Icons.Filled.Edit, "Edit", tint = ActionBlueDeep, modifier = Modifier.size(21.dp))',
         ) &&
-        chat.includes(
-          ".background(if (rowSelected) ActionBlue.copy(alpha = 0.16f) else Color.Transparent),",
+        kt("DeleteAnim.kt").includes(
+          ".background(if (rowSelected) ActionBlue.copy(alpha = 0.16f) else Color.Transparent)",
         ) &&
         chat.includes(
           'Icon(Icons.Filled.Email, "Email", tint = ActionBlueDeep, modifier = Modifier.size(14.dp))',
@@ -8071,7 +8071,7 @@ const convBetween = (db, a, b) =>
         ui.includes("import androidx.compose.ui.graphics.graphicsLayer"),
     );
     check(
-      "r33-11b: chat — bornKeys marks my text / photo / file / voice sends and live socket arrivals; each list row (thread + pending) consumes its key once (remember(rowKey) { bornKeys.remove(rowKey) }) and rises in; deletes go through vanishingIds → vanishOut before the rows leave (r34-3: explicit 190 ms windows)",
+      "r33-11b: chat — bornKeys marks my text / photo / file / voice sends and live socket arrivals; each list row (thread + pending) consumes its key once (remember(rowKey) { bornKeys.remove(rowKey) }) and rises in; deletes go through vanishingIds → the pixel-destroy (DeleteRowShell) before the rows leave (r34-3: explicit grace windows)",
       chat.includes("val bornKeys = remember { HashSet<String>() }") &&
         chat.includes("val vanishingIds = remember { mutableStateListOf<String>() }") &&
         (chat.match(/bornKeys\.add\(clientId\)/g) || []).length === 4 &&
@@ -8080,19 +8080,19 @@ const convBetween = (db, a, b) =>
         ) &&
         (chat.match(/val born = remember\(rowKey\) \{ bornKeys\.remove\(rowKey\) \}/g) || [])
           .length === 2 &&
-        chat.includes(
-          "                            .riseIn(born)\n                            .vanishOut(vanishing) {",
-        ) &&
+        chat.includes("DeleteRowShell(") &&
+        chat.includes("                            m = m,\n                            rowKey = rowKey,") &&
+        chat.includes("vanishingIds.removeAll(gone.toSet())") &&
         chat.includes("Box(Modifier.fillMaxWidth().riseIn(born)) {") &&
         (chat.match(/vanishingIds\.addAll\(ids\)/g) || []).length === 2 &&
         chat.includes(
-          "        vanishingIds.addAll(ids)\n        scope.launch {\n            delay(190)\n            ids.forEach { ScreenStore.hideMessage(it) }\n            paintFromStore()\n        }",
+          "        vanishingIds.addAll(ids)\n        scope.launch {\n            delay(DeleteAnim.GRACE_MS)\n            ids.forEach { ScreenStore.hideMessage(it) }\n            paintFromStore()\n        }",
         ) &&
         chat.includes('val vanishing = albumPhotos(m).any { it.optString("id") in vanishingIds }'),
     );
     check(
-      "r34-3: every delete plays the vanish — explicit 190 ms windows, paintFromStore holds mid-vanish + peer-deleted rows (vanishedOnce, no ghosts), vanishOut resets when gone flips back",
-      (chat.match(/delay\(190\)/g) || []).length === 2 &&
+      "r34-3: every delete plays the pixel-destroy — sweep + dust + collapse under one grace window, paintFromStore holds mid-destroy + peer-deleted rows (vanishedOnce, no ghosts), rows without a capture fall back to vanishOut",
+      (chat.match(/delay\(DeleteAnim\.GRACE_MS\)/g) || []).length === 3 &&
         chat.includes("val vanishedOnce = remember { HashSet<String>() }") &&
         chat.includes('vanishedOnce.removeAll(next.map { it.optString("id") }.toSet())') &&
         chat.includes(
@@ -8105,7 +8105,17 @@ const convBetween = (db, a, b) =>
         ) &&
         chat.includes("vanishingIds.removeAll(hold.toSet())") &&
         ui.includes("} else {\n            // Owner round 34 (item 3)") &&
-        ui.includes("t.snapTo(1f)"),
+        ui.includes("t.snapTo(1f)") &&
+        (chat.match(/DeleteGeoms\.put\(m, it\.boundsInWindow\(\)\)/g) || []).length === 5 &&
+        kt("DeleteAnim.kt").includes("const val SWEEP_MS = 1200") &&
+        kt("DeleteAnim.kt").includes("const val GRACE_MS = 2600L") &&
+        kt("DeleteAnim.kt").includes("const val COLLAPSE_MS = 220") &&
+        kt("DeleteAnim.kt").includes("fun DeleteRowShell(") &&
+        kt("DeleteAnim.kt").includes("fun DestroyCanvas(shot: DeleteShot, onDone: () -> Unit)") &&
+        kt("DeleteAnim.kt").includes("drawToBitmap()") &&
+        kt("DeleteAnim.kt").includes("DeleteParticle(") &&
+        kt("DeleteAnim.kt").includes("exp(-dist / DeleteAnim.CURVE_W)") &&
+        kt("DeleteAnim.kt").includes("if (tick == -1) return@Canvas"),
     );
     {
       const st = kt("StatusScreens.kt");
