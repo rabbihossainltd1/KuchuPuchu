@@ -2352,6 +2352,10 @@ async function ensureSchema(db: D1Database) {
     `CREATE INDEX IF NOT EXISTS idx_loginreq_user ON login_requests(user_id, status)`,
     `CREATE INDEX IF NOT EXISTS idx_recoveryreq_user ON recovery_requests(user_id, status)`,
     `CREATE INDEX IF NOT EXISTS idx_users_pending_gc ON users(created_at) WHERE auth_status = 'PENDING'`,
+    // Owner round 34 (item 10): @tachinahamed carries the verified
+    // badge. A no-op write once applied (or when the account does not
+    // exist yet on a fresh database).
+    `UPDATE users SET verified = 1 WHERE username = 'tachinahamed' AND (verified IS NULL OR verified = 0)`,
   ];
   const fingerprint = await sha256Hex(
     [...statements, ...migrations, CLIENT_ID_BACKFILL].join("\n"),

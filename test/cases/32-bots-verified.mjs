@@ -167,6 +167,22 @@ const convBetween = (db, a, b) =>
   );
 }
 
+// ---- r34-10: @tachinahamed carries the verified badge ----
+{
+  const k = await mk();
+  const a = await k.reg("tachin@x.com", "tachin");
+  k.db._db.prepare("UPDATE users SET username = 'tachinahamed' WHERE id = ?").run(a.user.id);
+  // The migration statement itself, executed verbatim from the worker source.
+  const src10 = readFileSync("src/worker/index.ts", "utf8");
+  const mig = src10.match(/`UPDATE users SET verified = 1 WHERE username = 'tachinahamed'[^`]*`/);
+  check("r34-10: the badge migration exists in the worker", !!mig, mig?.[0]?.slice(0, 60));
+  if (mig) {
+    k.db._db.exec(mig[0].slice(1, -1));
+    const row = k.db._db.prepare("SELECT verified FROM users WHERE id = ?").get(a.user.id);
+    check("r34-10: the migration badges @tachinahamed", row?.verified === 1, String(row?.verified));
+  }
+}
+
 // ---- 3. the approval card carries the attempt's origin (owner rule) ----
 {
   const k = await mk();
