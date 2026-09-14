@@ -8094,6 +8094,71 @@ const convBetween = (db, a, b) =>
     );
   }
 
+  // Owner round 33 (item 24): html / md documents open as the rendered
+  // preview (offline WebView, live parts stripped; Markdown via the app's own
+  // MarkdownLite), and the ⋮ sheet switches Code / Preview.
+  {
+    const doc = kt("DocViewerScreen.kt");
+    const md = kt("MarkdownLite.kt");
+    const mdTest = readFileSync(
+      "native-android/app/src/test/java/app/kuchupuchu/android/MarkdownLiteTest.kt",
+      "utf8",
+    );
+    check(
+      "r33-24: DocViewerScreen — docPreviewKind (html/htm/xhtml, md/markdown) → PreviewDoc first (showCode false on open); the ⋮ sheet offers Code (Icons.Filled.Code) while previewing and Preview (Icons.Filled.Visibility) while on the source, before Save / Forward / Open with; PreviewDoc keeps the SVG sandbox (JS off, network + file access blocked, every request intercepted, links never navigate) and previewPage strips script/iframe/object/embed/base/meta-refresh tags and on* handlers from HTML, converts Markdown through MarkdownLite, and follows the app theme",
+      doc.includes("private enum class PreviewKind { HTML, MARKDOWN }") &&
+        doc.includes("private fun docPreviewKind(name: String, mime: String): PreviewKind? {") &&
+        doc.includes("var showCode by remember(b64) { mutableStateOf(false) }") &&
+        doc.includes(
+          'KpSheetRow(Icons.Filled.Visibility, "Preview") { menuOpen = false; showCode = false }',
+        ) &&
+        doc.includes(
+          'KpSheetRow(Icons.Filled.Code, "Code") { menuOpen = false; showCode = true }',
+        ) &&
+        doc.indexOf('KpSheetRow(Icons.Filled.Code, "Code")') <
+          doc.indexOf('KpSheetRow(Icons.Filled.Download, "Save")') &&
+        doc.includes("else -> DocBody(dest, name, mime, size, code = showCode)") &&
+        doc.includes(
+          "    if (preview != null && !code) {\n        PreviewDoc(file, preview)\n        return\n    }",
+        ) &&
+        doc.includes("private fun PreviewDoc(file: File, kind: PreviewKind) {") &&
+        doc.includes(
+          "private fun previewPage(raw: String, kind: PreviewKind, dark: Boolean): String {",
+        ) &&
+        doc.includes(
+          'val cleaned = onAttrRe.replace(activeTagRe.replace(activeBlockRe.replace(raw, ""), ""), "")',
+        ) &&
+        doc.includes("private val activeBlockRe = Regex(") &&
+        !doc.includes("update = { it.loadDataWithBaseURL(") &&
+        doc.includes('css + "</head><body>" + MarkdownLite.toHtml(raw) + "</body></html>"') &&
+        (doc.match(/settings\.javaScriptEnabled = false/g) || []).length === 2 &&
+        (doc.match(/settings\.blockNetworkLoads = true/g) || []).length === 2 &&
+        (
+          doc.match(
+            /override fun shouldOverrideUrlLoading\(view: android\.webkit\.WebView\?, request: android\.webkit\.WebResourceRequest\?\): Boolean = true/g,
+          ) || []
+        ).length === 2 &&
+        doc.includes("import androidx.compose.material.icons.filled.Code") &&
+        doc.includes("import androidx.compose.material.icons.filled.Visibility"),
+    );
+    check(
+      "r33-24: MarkdownLite — dependency-free Markdown → HTML (headings, setext, paragraphs, emphasis, inline + fenced + indented code, links, images → alt, lists incl. tasks, quotes, tables, rules), every character HTML-escaped before any tag is added; the unit test pins rendering and the no-raw-HTML guarantee",
+      md.includes("internal object MarkdownLite {") &&
+        md.includes("fun toHtml(md: String): String {") &&
+        md.includes("internal fun inline(src: String): String {") &&
+        md.includes("internal fun escape(s: String): String {") &&
+        md.includes("'&' -> sb.append(\"&amp;\")") &&
+        md.includes("'<' -> sb.append(\"&lt;\")") &&
+        md.includes("sb.append(styled(escape(p)))") &&
+        md.includes('sb.append("<code>").append(escape(p)).append("</code>")') &&
+        md.includes("private val tableSepRe") &&
+        md.includes("private val taskRe") &&
+        mdTest.includes("class MarkdownLiteTest {") &&
+        mdTest.includes("fun `raw html in the file is escaped never emitted`()") &&
+        mdTest.includes('assertFalse(html.contains("<script"))'),
+    );
+  }
+
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
   // a touch on blank list space closes it (main and archive lists; r33-6
   // retired the hidden list).

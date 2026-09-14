@@ -36,11 +36,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -87,6 +89,10 @@ import kotlinx.coroutines.withContext
  *  - PDF          → the platform PdfRenderer, every page in a scrolling list,
  *                    pinch to zoom;
  *  - text / code  → selectable monospace text (first 400 KB);
+ *  - HTML / Markdown → owner round 33 (item 24): the rendered PREVIEW first
+ *                    (offline WebView, scripts stripped, no network / file
+ *                    access; Markdown through MarkdownLite), the ⋮ sheet
+ *                    switches Code / Preview;
  *  - JPEG / PNG / WebP / GIF / BMP / HEIC → a picture (BitmapFactory,
  *                    bounded), pinch to zoom;
  *  - SVG          → drawn by an offline WebView with scripts, network and
@@ -124,6 +130,10 @@ fun DocViewerScreen(nav: NavController, b64: String) {
     var saving by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
     val canForward = m != null && !privateDoc && m.optText("fileKey").isNotBlank()
+    // Owner round 33 (item 24): html / md open as the rendered preview; the
+    // ⋮ sheet flips to the source and back.
+    val previewable = remember(name, mime) { docPreviewKind(name, mime) != null }
+    var showCode by remember(b64) { mutableStateOf(false) }
 
     LaunchedEffect(b64) {
         if (m == null || dest == null || key.isBlank()) {
@@ -167,6 +177,13 @@ fun DocViewerScreen(nav: NavController, b64: String) {
 
     if (menuOpen) {
         KpSheet(onDismiss = { menuOpen = false }) {
+            if (previewable) {
+                if (showCode) {
+                    KpSheetRow(Icons.Filled.Visibility, "Preview") { menuOpen = false; showCode = false }
+                } else {
+                    KpSheetRow(Icons.Filled.Code, "Code") { menuOpen = false; showCode = true }
+                }
+            }
             if (!privateDoc && !saved) KpSheetRow(Icons.Filled.Download, "Save") { menuOpen = false; saveDoc() }
             if (canForward) KpSheetRow(Icons.AutoMirrored.Filled.Send, "Forward") { menuOpen = false; forwarding = true }
             if (!privateDoc) KpSheetRow(Icons.AutoMirrored.Filled.OpenInNew, "Open with") { menuOpen = false; openWith() }
@@ -222,7 +239,7 @@ fun DocViewerScreen(nav: NavController, b64: String) {
                         Spacer(Modifier.height(10.dp))
                         Text("Loading…", color = Muted, fontSize = 13.sp)
                     }
-                else -> DocBody(dest, name, mime, size)
+                else -> DocBody(dest, name, mime, size, code = showCode)
             }
         }
     }
@@ -241,6 +258,18 @@ internal fun docCacheFile(ctx: android.content.Context, m: org.json.JSONObject):
 
 private enum class DocKind { PDF, TEXT, IMAGE, SVG, TIFF, ARCHIVE, OTHER }
 
+/** Owner round 33 (item 24): files that have a rendered preview besides their source. */
+private enum class PreviewKind { HTML, MARKDOWN }
+
+private fun docPreviewKind(name: String, mime: String): PreviewKind? {
+    val ext = name.lowercase().substringAfterLast('.', "")
+    return when {
+        ext == "html" || ext == "htm" || ext == "xhtml" || mime == "text/html" || mime == "application/xhtml+xml" -> PreviewKind.HTML
+        ext == "md" || ext == "markdown" || ext == "mdown" || mime == "text/markdown" -> PreviewKind.MARKDOWN
+        else -> null
+    }
+}
+
 private fun docKind(f: File, name: String, mime: String): DocKind {
     val n = name.lowercase()
     val ext = n.substringAfterLast('.', "")
@@ -258,8 +287,14 @@ private fun docKind(f: File, name: String, mime: String): DocKind {
 }
 
 @Composable
-private fun DocBody(file: File, name: String, mime: String, size: Int) {
+private fun DocBody(file: File, name: String, mime: String, size: Int, code: Boolean = false) {
     val kind = remember(file.path) { docKind(file, name, mime) }
+    // Owner round 33 (item 24): html / md → the preview unless Code was picked.
+    val preview = remember(name, mime) { docPreviewKind(name, mime) }
+    if (preview != null && !code) {
+        PreviewDoc(file, preview)
+        return
+    }
     when (kind) {
         DocKind.PDF -> PdfPages(file)
         DocKind.TEXT -> TextDoc(file)
@@ -496,6 +531,104 @@ private fun PictureBody(bmp: Bitmap?, failed: Boolean) {
                     Image(bmp.asImageBitmap(), null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
                 }
             }
+    }
+}
+
+/* ------------------------------ HTML / MARKDOWN PREVIEW ------------------------------ */
+
+/**
+ * Owner round 33 (item 24): the rendered page for an HTML or Markdown
+ * document. Same sandbox as the SVG path — JavaScript off, every request
+ * blocked, links do not navigate, scripts / iframes / objects stripped —
+ * so a shared file can show itself but never run, load or call anything.
+ * Markdown goes through MarkdownLite (escaped first) into a small readable
+ * stylesheet that follows the app theme.
+ */
+@Composable
+private fun PreviewDoc(file: File, kind: PreviewKind) {
+    var page by remember(file.path, kind) { mutableStateOf<String?>(null) }
+    val dark = KpThemeMode.darkBlue
+    LaunchedEffect(file.path, kind) {
+        page =
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val raw = if (file.length() > 3_000_000L) "" else file.readText()
+                    if (raw.isBlank()) "" else previewPage(raw, kind, dark)
+                }.getOrDefault("")
+            }
+    }
+    val html = page
+    when {
+        html == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = if (dark) ActionBlue else Gold) }
+        html.isBlank() -> EmptyState(Icons.Filled.InsertDriveFile, "Could not open", "This file could not be read")
+        else ->
+            AndroidView(
+                factory = { c ->
+                    android.webkit.WebView(c).apply {
+                        settings.javaScriptEnabled = false
+                        settings.allowFileAccess = false
+                        settings.allowContentAccess = false
+                        settings.blockNetworkLoads = true
+                        settings.blockNetworkImage = true
+                        settings.builtInZoomControls = true
+                        settings.displayZoomControls = false
+                        settings.loadWithOverviewMode = true
+                        settings.useWideViewPort = true
+                        setBackgroundColor(if (dark) android.graphics.Color.rgb(13, 21, 36) else android.graphics.Color.WHITE)
+                        webViewClient =
+                            object : android.webkit.WebViewClient() {
+                                override fun shouldOverrideUrlLoading(view: android.webkit.WebView?, request: android.webkit.WebResourceRequest?): Boolean = true
+
+                                override fun shouldInterceptRequest(view: android.webkit.WebView?, request: android.webkit.WebResourceRequest?): android.webkit.WebResourceResponse? =
+                                    android.webkit.WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
+                            }
+                        loadDataWithBaseURL("about:blank", html, "text/html", "utf-8", null)
+                    }
+                },
+                onRelease = { it.destroy() },
+                modifier = Modifier.fillMaxSize(),
+            )
+    }
+}
+
+/** Container elements whose CONTENT goes too — a script body is not text to show. */
+private val activeBlockRe = Regex("<(script|iframe|object|applet|frameset)\\b[\\s\\S]*?</\\1\\s*>", RegexOption.IGNORE_CASE)
+
+/** The remaining live tags: void ones, unclosed ones and stray closers. */
+private val activeTagRe = Regex("</?(script|iframe|object|embed|frame|frameset|applet|base|link|meta)\\b[^>]*>", RegexOption.IGNORE_CASE)
+private val onAttrRe = Regex("\\son[a-z]+\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>]+)", RegexOption.IGNORE_CASE)
+
+/** The document with its live parts removed (HTML) or converted (Markdown), wrapped in the viewer's stylesheet. */
+private fun previewPage(raw: String, kind: PreviewKind, dark: Boolean): String {
+    val fg = if (dark) "#e9edf6" else "#1c1917"
+    val bg = if (dark) "#0d1524" else "#ffffff"
+    val mute = if (dark) "#8a97b2" else "#7a6f63"
+    val line = if (dark) "#233150" else "#e8e4de"
+    val codeBg = if (dark) "#16213a" else "#f3f1ee"
+    val link = if (dark) "#7fb2ff" else "#1d4ed8"
+    val css =
+        "<style>html{-webkit-text-size-adjust:100%}body{margin:0;padding:16px;background:$bg;color:$fg;font:15px/1.55 -apple-system,Roboto,sans-serif;word-wrap:break-word}" +
+            "h1,h2,h3,h4,h5,h6{line-height:1.25;margin:1.2em 0 .5em}h1{font-size:1.7em;border-bottom:1px solid $line;padding-bottom:.3em}h2{font-size:1.4em;border-bottom:1px solid $line;padding-bottom:.25em}h3{font-size:1.2em}" +
+            "p,ul,ol,table,pre,blockquote{margin:0 0 1em}a{color:$link;text-decoration:none}img{max-width:100%;height:auto}" +
+            "code{font-family:monospace;font-size:.92em;background:$codeBg;padding:.15em .35em;border-radius:4px}pre{background:$codeBg;padding:12px;border-radius:8px;overflow:auto}pre code{background:none;padding:0}" +
+            "blockquote{border-left:4px solid $line;color:$mute;padding:.1em 0 .1em 12px}hr{border:0;border-top:1px solid $line;margin:1.5em 0}" +
+            "table{border-collapse:collapse;display:block;overflow:auto;max-width:100%}th,td{border:1px solid $line;padding:6px 10px;text-align:left}th{background:$codeBg}</style>"
+    return when (kind) {
+        PreviewKind.MARKDOWN ->
+            "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
+                css + "</head><body>" + MarkdownLite.toHtml(raw) + "</body></html>"
+        PreviewKind.HTML -> {
+            val cleaned = onAttrRe.replace(activeTagRe.replace(activeBlockRe.replace(raw, ""), ""), "")
+            // a bare fragment gets the viewport + a base style; a full page keeps its own head
+            if (cleaned.contains("<html", ignoreCase = true)) {
+                val head = Regex("<head[^>]*>", RegexOption.IGNORE_CASE).find(cleaned)
+                if (head == null) cleaned
+                else cleaned.substring(0, head.range.last + 1) + "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" + cleaned.substring(head.range.last + 1)
+            } else {
+                "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
+                    css + "</head><body>" + cleaned + "</body></html>"
+            }
+        }
     }
 }
 
