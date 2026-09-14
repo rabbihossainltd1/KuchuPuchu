@@ -8159,6 +8159,246 @@ const convBetween = (db, a, b) =>
     );
   }
 
+  // Owner round 33 (item 4): sending felt slow. From Bangladesh every D1
+  // statement is a hop to the Singapore primary, and a text send awaited
+  // eight of them one after another. The route now reads in two parallel
+  // waves (membership + member list + block join, then reply / dedupe /
+  // upload lookups) and writes in ONE batch (row + upload binding + preview
+  // + unread), so a send is four trip-times instead of eight to twelve. The
+  // shim counts trips and waves; the checks below pin the numbers and prove
+  // nothing about the semantics moved (dedupe race, reply, upload, block).
+  {
+    const src = readFileSync("src/worker/index.ts", "utf8");
+    const post = src.slice(
+      src.indexOf('if (msgMatch && method === "POST") {'),
+      src.indexOf("const scheduledListMatch = path.match("),
+    );
+    check(
+      "r33-4: worker — POST /messages reads membership, the member list and a blocks JOIN in one Promise.all, then the reply target / dedupe probe / upload refs in a second; the INSERT guards itself against a racing twin (NOT EXISTS on the dedupe index) and travels in one db.batch with the files binding, the preview UPDATE and the unread bump (both conditional on the row); a lost race answers the winner's row as duplicate",
+      post.includes(
+        "const [{ conv }, members, hit] = await Promise.all([\n      requireMember(db, convId, uid),\n      membersOf(db, convId),",
+      ) &&
+        post.includes(
+          "JOIN blocks b ON (b.owner_id = ? AND b.target_id = m.user_id)\n                         OR (b.target_id = ? AND b.owner_id = m.user_id)\n          WHERE m.conv_id = ? AND m.user_id != ?\n          LIMIT 1`,",
+        ) &&
+        post.includes('if (hit) fail(403, "You can\'t reach this player.", "BLOCKED");') &&
+        post.includes("const [replyTarget, dup, refs] = await Promise.all([") &&
+        post.includes(
+          "SELECT id FROM messages WHERE id = ? AND conv_id = ? AND kind != 'DELETED' LIMIT 1",
+        ) &&
+        post.includes(
+          "SELECT * FROM messages WHERE conv_id = ? AND sender_id = ? AND client_id = ? LIMIT 1",
+        ) &&
+        post.includes('"SELECT sender_id, meta_json FROM messages WHERE media = ? LIMIT 8",') &&
+        post.includes("if (dup) return json({ message: msgFrom(dup), duplicate: true }, 200);") &&
+        post.includes("const replyTo: string | null = replyTarget ? rawReplyTo : null;") &&
+        post.includes("const written = (await db.batch([") &&
+        post.includes(
+          "INSERT INTO messages (id, conv_id, sender_id, kind, body, media, meta_json, created_at, client_id, reply_to)\n           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?\n            WHERE NOT EXISTS (SELECT 1 FROM messages WHERE conv_id = ? AND sender_id = ? AND client_id = ?)`,",
+        ) &&
+        post.includes(
+          '"UPDATE files SET conv_id = ? WHERE key = ? AND owner_id = ? AND conv_id IS NULL",',
+        ) &&
+        post.includes("WHERE id = ? AND EXISTS (SELECT 1 FROM messages WHERE id = ?)`,") &&
+        post.includes(
+          '"UPDATE members SET unread = unread + 1 WHERE conv_id = ? AND user_id != ? AND EXISTS (SELECT 1 FROM messages WHERE id = ?)",',
+        ) &&
+        post.includes("if ((written[0]?.meta?.changes ?? 1) === 0) {") &&
+        post.includes("return json({ message: msgFrom(winner), duplicate: true }, 200);") &&
+        !post.includes("for (const group of chunked(others)) {") &&
+        !post.includes('await run(\n        db,\n        "INSERT INTO messages') &&
+        (post.match(/await run\(/g) || []).length === 3,
+      `awaited runs=${(post.match(/await run\(/g) || []).length}`,
+    );
+    const k = await mk();
+    const a = await k.reg("fast-a@x.com", "fasta");
+    const b = await k.reg("fast-b@x.com", "fastb");
+    const c = await k.reg("fast-c@x.com", "fastc");
+    const cid = (await k.call("POST", "/api/conversations", { userId: b.user.id }, a.token)).json
+      .conversation.id;
+    const send = async (body, tok = a.token) => {
+      k.db._stats.reset();
+      const r = await k.call("POST", `/api/conversations/${cid}/messages`, body, tok);
+      return { r, ...k.db._stats };
+    };
+    // The isolate's one-time push diagnostics row (no FCM secret here) is not
+    // part of a send's cost: pay it once, off the measurement.
+    await send({ kind: "TEXT", body: "warm", clientId: "fast_0" });
+    const t1 = await send({ kind: "TEXT", body: "fast one", clientId: "fast_1" });
+    const rowB = () =>
+      k.db._db
+        .prepare("SELECT unread FROM members WHERE conv_id = ? AND user_id = ?")
+        .get(cid, b.user.id);
+    const convRow = () =>
+      k.db._db
+        .prepare("SELECT last_message, last_message_at FROM conversations WHERE id = ?")
+        .get(cid);
+    check(
+      "r33-4: a text send is 201 with the row, lands the preview + the recipient's unread, and costs FOUR D1 trip-times (auth, then two parallel read waves, then ONE write batch) — the reads overlap up to three at a time, never past the runtime's six",
+      t1.r.status === 201 &&
+        t1.r.json.message?.body === "fast one" &&
+        t1.r.json.message?.clientId === "fast_1" &&
+        convRow()?.last_message === "fast one" &&
+        convRow()?.last_message_at === t1.r.json.message?.createdAt &&
+        Number(rowB()?.unread) === 2 &&
+        t1.waves === 4 &&
+        t1.trips === 6 &&
+        t1.concurrent === 3,
+      JSON.stringify({ s: t1.r.status, w: t1.waves, t: t1.trips, c: t1.concurrent }),
+    );
+    const again = await send({ kind: "TEXT", body: "fast one", clientId: "fast_1" });
+    check(
+      "r33-4: the retried POST (same clientId) still answers the ORIGINAL row as duplicate, writes nothing, and no second row exists",
+      again.r.status === 200 &&
+        again.r.json.duplicate === true &&
+        again.r.json.message?.id === t1.r.json.message?.id &&
+        again.writes === 0 &&
+        Number(rowB()?.unread) === 2 &&
+        Number(
+          k.db._db
+            .prepare("SELECT count(*) AS c FROM messages WHERE conv_id = ? AND client_id = ?")
+            .get(cid, "fast_1")?.c,
+        ) === 1,
+      JSON.stringify({ s: again.r.status, dup: again.r.json.duplicate, w: again.writes }),
+    );
+    // The race the probe cannot see: a twin that lands between the dedupe
+    // read and the write batch. Plant the twin row after the probe by
+    // slipping it in through the batch's own entry point.
+    {
+      const realBatch = k.db.batch.bind(k.db);
+      let planted = false;
+      k.db.batch = async (stmts) => {
+        if (!planted && stmts.some((st) => /INSERT INTO messages/.test(st.sql))) {
+          planted = true;
+          k.db._db
+            .prepare(
+              "INSERT INTO messages (id, conv_id, sender_id, kind, body, created_at, client_id) VALUES (?, ?, ?, 'TEXT', ?, ?, ?)",
+            )
+            .run("m_twin", cid, a.user.id, "fast twin", new Date().toISOString(), "fast_2");
+        }
+        return realBatch(stmts);
+      };
+      const unreadBefore = Number(rowB()?.unread);
+      const lost = await send({ kind: "TEXT", body: "fast twin", clientId: "fast_2" });
+      k.db.batch = realBatch;
+      const rows = k.db._db
+        .prepare("SELECT id FROM messages WHERE conv_id = ? AND client_id = ?")
+        .all(cid, "fast_2");
+      check(
+        "r33-4: a twin that lands AFTER the dedupe probe loses the race inside the batch — exactly one row, the answer is the winner marked duplicate (200), the preview and the unread do not move for the loser",
+        planted &&
+          lost.r.status === 200 &&
+          lost.r.json.duplicate === true &&
+          lost.r.json.message?.id === "m_twin" &&
+          rows.length === 1 &&
+          rows[0].id === "m_twin" &&
+          Number(rowB()?.unread) === unreadBefore &&
+          convRow()?.last_message === "fast one",
+        JSON.stringify({
+          planted,
+          s: lost.r.status,
+          dup: lost.r.json.duplicate,
+          rows: rows.length,
+        }),
+      );
+    }
+    const reply = await send({
+      kind: "TEXT",
+      body: "fast reply",
+      clientId: "fast_3",
+      replyTo: t1.r.json.message.id,
+    });
+    const ghost = await send({
+      kind: "TEXT",
+      body: "ghost reply",
+      clientId: "fast_4",
+      replyTo: "m_none",
+    });
+    check(
+      "r33-4: a reply still threads (replyTo verified in the same read wave — no extra trip-time) and an unknown / foreign quote is dropped, not trusted",
+      reply.r.status === 201 &&
+        reply.r.json.message?.replyTo === t1.r.json.message.id &&
+        reply.waves === 4 &&
+        ghost.r.status === 201 &&
+        ghost.r.json.message?.replyTo === undefined,
+      JSON.stringify({
+        rep: reply.r.json.message?.replyTo,
+        w: reply.waves,
+        ghost: ghost.r.json.message?.replyTo,
+      }),
+    );
+    const noId = await send({ kind: "TEXT", body: "no client id" });
+    const noIdAgain = await send({ kind: "TEXT", body: "no client id" });
+    check(
+      "r33-4: a send without a clientId (old client / bot path) skips the probe (three trip-times) and never dedupes against another id-less row",
+      noId.r.status === 201 &&
+        noIdAgain.r.status === 201 &&
+        noId.r.json.message?.id !== noIdAgain.r.json.message?.id &&
+        noId.waves === 3 &&
+        Number(
+          k.db._db
+            .prepare(
+              "SELECT count(*) AS c FROM messages WHERE conv_id = ? AND body = 'no client id'",
+            )
+            .get(cid)?.c,
+        ) === 2,
+      JSON.stringify({ s: [noId.r.status, noIdAgain.r.status], w: noId.waves }),
+    );
+    // Upload path: the files row is bound in the same batch; a sticker is a
+    // plain kind; the block join refuses in either direction.
+    const up = await k.call(
+      "POST",
+      "/api/files?name=doc.pdf&type=application/pdf",
+      "pdf-bytes",
+      a.token,
+    );
+    const fileKey = up.json.fileKey;
+    const filed = await send({
+      kind: "FILE",
+      fileKey,
+      fileName: "doc.pdf",
+      fileType: "application/pdf",
+      fileSize: 3,
+      clientId: "fast_5",
+    });
+    const bound = k.db._db.prepare("SELECT conv_id FROM files WHERE key = ?").get(fileKey);
+    check(
+      "r33-4: an upload send binds files.conv_id inside the write batch (still four trip-times) and the recipient can fetch the object",
+      up.status === 201 &&
+        filed.r.status === 201 &&
+        filed.r.json.message?.fileKey === fileKey &&
+        filed.waves === 4 &&
+        bound?.conv_id === cid &&
+        (await k.call("GET", `/api/files/${fileKey}`, undefined, b.token)).status === 200,
+      JSON.stringify({ up: up.status, s: filed.r.status, w: filed.waves, bound: bound?.conv_id }),
+    );
+    await k.call("POST", "/api/blocks", { userId: a.user.id }, b.token);
+    const blockedByB = await send({ kind: "TEXT", body: "blocked?", clientId: "fast_6" });
+    await k.call("DELETE", `/api/blocks/${a.user.id}`, undefined, b.token);
+    await k.call("POST", "/api/blocks", { userId: b.user.id }, a.token);
+    const blockedByA = await send({ kind: "TEXT", body: "blocked?", clientId: "fast_7" });
+    await k.call("DELETE", `/api/blocks/${b.user.id}`, undefined, a.token);
+    const outsider = await send({ kind: "TEXT", body: "intruder", clientId: "fast_8" }, c.token);
+    const afterAll = await send({ kind: "TEXT", body: "clear again", clientId: "fast_9" });
+    check(
+      "r33-4: the block JOIN refuses in BOTH directions (403 BLOCKED, nothing written), a non-member is still 403 from requireMember, and an unblocked pair sends again",
+      blockedByB.r.status === 403 &&
+        blockedByB.r.json.error?.code === "BLOCKED" &&
+        blockedByB.writes === 0 &&
+        blockedByA.r.status === 403 &&
+        blockedByA.r.json.error?.code === "BLOCKED" &&
+        outsider.r.status === 403 &&
+        outsider.writes === 0 &&
+        afterAll.r.status === 201,
+      JSON.stringify({
+        b: [blockedByB.r.status, blockedByB.r.json.error?.code],
+        a: [blockedByA.r.status, blockedByA.r.json.error?.code],
+        c: outsider.r.status,
+        ok: afterAll.r.status,
+      }),
+    );
+  }
+
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
   // a touch on blank list space closes it (main and archive lists; r33-6
   // retired the hidden list).

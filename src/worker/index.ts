@@ -6991,8 +6991,32 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   if (msgMatch && method === "POST") {
     const convId = msgMatch[1]!;
-    const { conv } = await requireMember(db, convId, uid);
-    const members = await membersOf(db, convId);
+    // Owner round 33 (item 4): a send used to be eight D1 round trips in a
+    // row (membership, member list, blocks, dedupe, insert, preview, unread
+    // — plus the reply / upload lookups), and from Bangladesh every one of
+    // them is a hop to the Singapore primary. The independent reads now
+    // travel together and the writes land in one batch: four trip-times
+    // instead of eight to twelve. The block check joins `blocks` against the
+    // member rows directly (either direction, LIMIT 1), so it no longer
+    // waits for the member ids. Nothing about the checks' precedence moved:
+    // requireMember is the only one of the three that can refuse, and the
+    // rest are decided in the same order as before once all three land.
+    const [{ conv }, members, hit] = await Promise.all([
+      requireMember(db, convId, uid),
+      membersOf(db, convId),
+      one(
+        db,
+        `SELECT b.owner_id FROM members m
+           JOIN blocks b ON (b.owner_id = ? AND b.target_id = m.user_id)
+                         OR (b.target_id = ? AND b.owner_id = m.user_id)
+          WHERE m.conv_id = ? AND m.user_id != ?
+          LIMIT 1`,
+        uid,
+        uid,
+        convId,
+        uid,
+      ),
+    ]);
     // Owner round 32 (item 38): the recipient of a message request writing
     // back IS the acceptance (no prompt tap needed). The opener's open chat
     // re-reads the detail (a conv frame without `msg`) and gains calls /
@@ -7023,22 +7047,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     )
       fail(403, "This user isn't accepting messages.", "MSG_PRIVACY");
     // Block check for the whole member list in ONE statement (either
-    // direction), instead of a blockedBetween() round trip per member.
-    const others = members.map((m) => m.user_id).filter((mid) => mid !== uid);
-    for (const group of chunked(others)) {
-      const hit = await one(
-        db,
-        `SELECT owner_id FROM blocks
-          WHERE (owner_id = ? AND target_id IN (${inSql(group.length)}))
-             OR (target_id = ? AND owner_id IN (${inSql(group.length)}))
-          LIMIT 1`,
-        uid,
-        ...group,
-        uid,
-        ...group,
-      );
-      if (hit) fail(403, "You can't reach this player.", "BLOCKED");
-    }
+    // direction) — read alongside the membership above, decided here.
+    if (hit) fail(403, "You can't reach this player.", "BLOCKED");
     // Owner round 32 (item 18): hold Send → a time. The checks above (member,
     // request, one-way account, privacy, blocks) ran for the scheduling too;
     // the body itself is validated by the very same route when the cron
@@ -7084,20 +7094,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const requestedKind = String(body.kind || "TEXT").toUpperCase();
     const kind = ALLOWED_MESSAGE_KINDS.has(requestedKind) ? requestedKind : "TEXT";
     // Owner round 13: swipe-to-reply — replyTo must reference a message in
-    // THIS conversation, else it is dropped (never trusted blind).
-    let replyTo: string | null = null;
+    // THIS conversation, else it is dropped (never trusted blind). Round 27:
+    // ... and must not be an unsent row — a quote of a vanished message
+    // would render an empty reply header. Looked up below, with the others.
     const rawReplyTo = String(body.replyTo || "").slice(0, 64);
-    if (rawReplyTo) {
-      // Round 27: ... and must not be an unsent row — a quote of a vanished
-      // message would render an empty reply header.
-      const target = await one<{ id: string }>(
-        db,
-        "SELECT id FROM messages WHERE id = ? AND conv_id = ? AND kind != 'DELETED' LIMIT 1",
-        rawReplyTo,
-        convId,
-      );
-      replyTo = target ? rawReplyTo : null;
-    }
     const imageData =
       typeof body.imageData === "string" && isSafeDataUrl(body.imageData) ? body.imageData : null;
     if (typeof body.imageData === "string" && body.imageData.startsWith("data:") && !imageData) {
@@ -7115,40 +7115,53 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       typeof body.clientId === "string" && body.clientId.trim()
         ? body.clientId.trim().slice(0, 64)
         : null;
-    // Idempotent send: a retried POST (timeout after the row already landed,
-    // Outbox flush after a kill) used to insert a SECOND row carrying the
-    // same clientId — the app keys its list items by clientId, so that
-    // duplicate crashed the chat on open ("Key was already used").
-    if (clientId) {
-      // Exact indexed lookup (client_id column). The earlier meta_json LIKE
-      // probe blew up on real conversations — D1 raised "LIKE or GLOB pattern
-      // too complex", which turned EVERY send in a busy chat into a 500.
-      const dup = await one<MsgRow>(
-        db,
-        "SELECT * FROM messages WHERE conv_id = ? AND sender_id = ? AND client_id = ? LIMIT 1",
-        convId,
-        uid,
-        clientId,
-      );
-      if (dup) return json({ message: msgFrom(dup), duplicate: true }, 200);
-    }
-    // Owner round 32 (item 17): a key that belongs to someone else's
-    // view-once message is not forwardable — the recipient gets one opening,
-    // not a reference they can re-post into another chat. One indexed seek
-    // (idx_messages_media), only on uploads.
-    if (fileKey) {
-      const refs = await all<{ sender_id: string; meta_json: string | null }>(
-        db,
-        "SELECT sender_id, meta_json FROM messages WHERE media = ? LIMIT 8",
-        fileKey,
-      );
-      const foreignOnce = refs.some(
-        (r) =>
-          r.sender_id !== uid &&
-          parseJson<{ viewOnce?: unknown }>(r.meta_json, {}).viewOnce === true,
-      );
-      if (foreignOnce) fail(403, "This was sent as view once.", "VIEW_ONCE");
-    }
+    // Owner round 33 (item 4): the lookups a send may need are independent
+    // of each other, so they go out together (one trip-time, not three):
+    // the reply target; the idempotency probe — a retried POST (timeout
+    // after the row already landed, Outbox flush after a kill) used to
+    // insert a SECOND row carrying the same clientId, and the app keys its
+    // list items by clientId, so that duplicate crashed the chat on open
+    // ("Key was already used"); it is an exact indexed lookup (client_id
+    // column) because the earlier meta_json LIKE probe blew up on real
+    // conversations ("LIKE or GLOB pattern too complex" — every send in a
+    // busy chat a 500); and, owner round 32 (item 17), the ownership of an
+    // uploaded key — a key that belongs to someone else's view-once message
+    // is not forwardable: the recipient gets one opening, not a reference
+    // they can re-post into another chat (one indexed seek on
+    // idx_messages_media, only on uploads).
+    const [replyTarget, dup, refs] = await Promise.all([
+      rawReplyTo
+        ? one<{ id: string }>(
+            db,
+            "SELECT id FROM messages WHERE id = ? AND conv_id = ? AND kind != 'DELETED' LIMIT 1",
+            rawReplyTo,
+            convId,
+          )
+        : null,
+      clientId
+        ? one<MsgRow>(
+            db,
+            "SELECT * FROM messages WHERE conv_id = ? AND sender_id = ? AND client_id = ? LIMIT 1",
+            convId,
+            uid,
+            clientId,
+          )
+        : null,
+      fileKey
+        ? all<{ sender_id: string; meta_json: string | null }>(
+            db,
+            "SELECT sender_id, meta_json FROM messages WHERE media = ? LIMIT 8",
+            fileKey,
+          )
+        : [],
+    ]);
+    if (dup) return json({ message: msgFrom(dup), duplicate: true }, 200);
+    const replyTo: string | null = replyTarget ? rawReplyTo : null;
+    const foreignOnce = refs.some(
+      (r) =>
+        r.sender_id !== uid && parseJson<{ viewOnce?: unknown }>(r.meta_json, {}).viewOnce === true,
+    );
+    if (foreignOnce) fail(403, "This was sent as view once.", "VIEW_ONCE");
     const mid = id();
     const incomingMeta = (body.meta as Record<string, unknown> | undefined) ?? {};
     const dims = imageDims(kind, imageData ?? fileKey, incomingMeta);
@@ -7190,93 +7203,106 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     };
     if (clientId) metaObj.clientId = clientId;
     const meta = Object.keys(metaObj).length ? JSON.stringify(metaObj) : null;
-    try {
-      await run(
-        db,
-        "INSERT INTO messages (id, conv_id, sender_id, kind, body, media, meta_json, created_at, client_id, reply_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        mid,
-        convId,
-        uid,
-        imageData ? "IMAGE" : fileKey ? "FILE" : kind,
-        text,
-        imageData ?? fileKey ?? null,
-        meta,
-        created,
-        clientId,
-        replyTo,
-      );
-    } catch (err) {
-      // Two identical POSTs racing past the dup check: the UNIQUE index lets
-      // exactly one win — the loser returns the winner's row (never a 500).
-      if (!/UNIQUE/i.test(String(err instanceof Error ? err.message : err))) throw err;
-      const winner = await one<MsgRow>(
-        db,
-        "SELECT * FROM messages WHERE conv_id = ? AND sender_id = ? AND client_id = ? LIMIT 1",
-        convId,
-        uid,
-        clientId ?? "",
-      );
-      if (winner) return json({ message: msgFrom(winner), duplicate: true }, 200);
-      throw err;
-    }
-    // Bind the uploaded object to this conversation so GET /api/files/:key can
-    // authorize every other member. Without this the authz check would reject
-    // the recipient, who is not the uploader.
-    if (fileKey) {
-      await run(
-        db,
-        "UPDATE files SET conv_id = ? WHERE key = ? AND owner_id = ? AND conv_id IS NULL",
-        convId,
-        fileKey,
-        uid,
-      );
-    }
     // Owner round 32 (item 35): the preview is derived from the stored shape
     // (previewOf, the same function the delete path uses), so a photo sent as
     // an upload reads "Photo" in the chat list AND in the push — it used to be
     // the upload's file name ("photo.jpg") because this branch only knew the
     // inline-data path.
+    const storedKind = imageData ? "IMAGE" : fileKey ? "FILE" : kind;
     const preview = previewOf({
       id: mid,
       conv_id: convId,
       sender_id: uid,
-      kind: imageData ? "IMAGE" : fileKey ? "FILE" : kind,
+      kind: storedKind,
       body: text,
       media: imageData ?? fileKey ?? null,
       meta_json: meta,
       created_at: created,
     });
-    // A new message has to un-hide the conversation for everyone, but it must
-    // not erase the other members' delete watermarks: those are what keep the
-    // history they deleted away when the chat reappears. The old statement
-    // reset hidden_json to '{}' wholesale, so one member sending a message
-    // silently undeleted the chat for everybody. Only the sender's own entry
-    // is cleared - they just wrote into it, so it is obviously visible again.
-    await run(
-      db,
-      `UPDATE conversations
-         SET last_message = ?, last_message_at = ?, hidden_json = json_remove(hidden_json, ?)
-       WHERE id = ?`,
-      preview.slice(0, 120),
-      created,
-      `$."${uid}"`,
-      convId,
-    );
-    // One statement bumps unread for every other member — the per-member
-    // UPDATE loop was one D1 round trip per recipient on every send.
-    await run(
-      db,
-      "UPDATE members SET unread = unread + 1 WHERE conv_id = ? AND user_id != ?",
-      convId,
-      uid,
-    );
+    // Owner round 33 (item 4): ONE batch for everything the send writes —
+    // the row, the upload's binding, the chat preview and the unread bumps
+    // — instead of one awaited statement each.
+    //   - The INSERT carries its own dedupe guard: two identical POSTs racing
+    //     past the probe above (idx_messages_dedupe is a plain index, so
+    //     nothing else refuses the second row) let exactly one land; the
+    //     preview / unread statements are conditional on that row, so the
+    //     loser moves nothing and answers with the winner's row (below).
+    //   - Bind the uploaded object to this conversation so GET /api/files/:key
+    //     can authorize every other member. Without this the authz check
+    //     would reject the recipient, who is not the uploader.
+    //   - A new message has to un-hide the conversation for everyone, but it
+    //     must not erase the other members' delete watermarks: those are
+    //     what keep the history they deleted away when the chat reappears.
+    //     Only the sender's own entry is cleared — they just wrote into it,
+    //     so it is obviously visible again.
+    //   - One statement bumps unread for every other member (the per-member
+    //     UPDATE loop was one D1 round trip per recipient on every send).
+    const written = (await db.batch([
+      db
+        .prepare(
+          `INSERT INTO messages (id, conv_id, sender_id, kind, body, media, meta_json, created_at, client_id, reply_to)
+           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            WHERE NOT EXISTS (SELECT 1 FROM messages WHERE conv_id = ? AND sender_id = ? AND client_id = ?)`,
+        )
+        .bind(
+          mid,
+          convId,
+          uid,
+          storedKind,
+          text,
+          imageData ?? fileKey ?? null,
+          meta,
+          created,
+          clientId,
+          replyTo,
+          convId,
+          uid,
+          clientId,
+        ),
+      ...(fileKey
+        ? [
+            db
+              .prepare(
+                "UPDATE files SET conv_id = ? WHERE key = ? AND owner_id = ? AND conv_id IS NULL",
+              )
+              .bind(convId, fileKey, uid),
+          ]
+        : []),
+      db
+        .prepare(
+          `UPDATE conversations
+              SET last_message = ?, last_message_at = ?, hidden_json = json_remove(hidden_json, ?)
+            WHERE id = ? AND EXISTS (SELECT 1 FROM messages WHERE id = ?)`,
+        )
+        .bind(preview.slice(0, 120), created, `$."${uid}"`, convId, mid),
+      db
+        .prepare(
+          "UPDATE members SET unread = unread + 1 WHERE conv_id = ? AND user_id != ? AND EXISTS (SELECT 1 FROM messages WHERE id = ?)",
+        )
+        .bind(convId, uid, mid),
+    ])) as { meta?: { changes?: number } }[];
+    if ((written[0]?.meta?.changes ?? 1) === 0) {
+      // The race lost to a twin (never a second row, never a 500): hand back
+      // the row that did land, marked as the duplicate it is.
+      const winner = clientId
+        ? await one<MsgRow>(
+            db,
+            "SELECT * FROM messages WHERE conv_id = ? AND sender_id = ? AND client_id = ? LIMIT 1",
+            convId,
+            uid,
+            clientId,
+          )
+        : null;
+      if (!winner) throw new Error("message insert landed nowhere");
+      return json({ message: msgFrom(winner), duplicate: true }, 200);
+    }
     // The response row is exactly what we just wrote (a fresh insert has no
     // delivered_at), so re-SELECTing it cost one more round trip per send.
     const message = msgFrom({
       id: mid,
       conv_id: convId,
       sender_id: uid,
-      kind: imageData ? "IMAGE" : fileKey ? "FILE" : kind,
+      kind: storedKind,
       body: text,
       media: imageData ?? fileKey ?? null,
       meta_json: meta,
