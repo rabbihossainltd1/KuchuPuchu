@@ -2394,7 +2394,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // EITHER side is typing — the AI composing, or the other
                 // person's typing lease (the header used to carry this).
                 if (aiTyping || typingLeaseActive) {
-                    item(key = "typing-bubble") { TypingBubble() }
+                    item(key = "typing-bubble") { TypingBubble(chatAccent(chatTheme)) }
                 }
                 if (uploading > 0) {
                     item {
@@ -6752,7 +6752,9 @@ private fun CallLogBubble(m: JSONObject, mine: Boolean, pendingEcho: Boolean, th
  * dots stepping gold while the reply is being generated, WhatsApp-style.
  */
 @Composable
-private fun TypingBubble() {
+// Owner round 34 (item 7): the dots ride the chat's accent — they were
+// fixed amber (GoldDeep) and glowed cream on the dark-blue theme.
+private fun TypingBubble(dot: Color) {
     val phase by rememberInfiniteTransition(label = "typing").animateFloat(
         initialValue = 0f,
         targetValue = 3f,
@@ -6783,7 +6785,7 @@ private fun TypingBubble() {
                             .size(8.dp)
                             .graphicsLayer { translationY = -4.dp.toPx() * lift }
                             .clip(CircleShape)
-                            .background(GoldDeep.copy(alpha = 0.35f + 0.65f * lift)),
+                            .background(dot.copy(alpha = 0.35f + 0.65f * lift)),
                     )
                 }
             }

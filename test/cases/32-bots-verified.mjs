@@ -514,7 +514,7 @@ const convBetween = (db, a, b) =>
   check(
     "typing bubble: one shared bouncing-dots indicator, header typing text removed",
     chat.includes("aiTyping || typingLeaseActive") &&
-      chat.includes("TypingBubble()") &&
+      chat.includes("TypingBubble(chatAccent(chatTheme))") &&
       !chat.includes('typingNow -> "typing..."'),
   );
   check(
@@ -8157,6 +8157,12 @@ const convBetween = (db, a, b) =>
           chat.includes("val m = viewerPhotos[viewerAt.coerceIn(viewerPhotos.indices)]"),
       );
     }
+    check(
+      "r34-7: typing dots follow the chat theme — TypingBubble takes the dot color, the row passes chatAccent(chatTheme), no fixed amber in the indicator",
+      chat.includes("private fun TypingBubble(dot: Color) {") &&
+        chat.includes(".background(dot.copy(alpha = 0.35f + 0.65f * lift))") &&
+        !chat.includes("GoldDeep.copy(alpha = 0.35f"),
+    );
     check(
       "r33-11b: chat — the attach and sticker panels pop up (Box(Modifier.popUp())); a cancelled recording bumps voiceBinNonce, the composer swaps the strip for VoiceBinDrop (lid open → note drops → lid shut, 520 ms) before the pill returns",
       (chat.match(/Box\(Modifier\.popUp\(\)\) \{/g) || []).length === 2 &&
