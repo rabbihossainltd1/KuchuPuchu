@@ -100,30 +100,30 @@
 | 9 | Session token in plain SharedPreferences | `Api.kt` prefs "kp" (allowBackup=false mitigates) | OPEN hardening (EncryptedSharedPreferences) | — |
 
 ## 7. IN-PROGRESS HANDOFF  ← most important section for a new session
-- **Current branch:** `chore/audit-project-understanding` (created from clean `main` @ `32a5240`).
-- **Exact state of the work:** Full Phase-1 audit DONE (read-only investigation + every local check
-  executed). Added three documentation/hygiene commits' worth of changes, all uncommitted at handoff:
-  1. NEW `PROJECT_UNDERSTANDING.md` (full §11.2 audit incl. 13-item risk register).
-  2. NEW `memory.md` (this file).
-  3. `.gitignore` — added `.scratch/`, `.venv/`, `venv/`, `__pycache__/`.
-  4. `README.md` — one-line delta: D1 name `kuchupuchu-v3` → `kuchupuchu-v3-apac (primary Singapore)`.
-  NO product/source code was changed in this audit (findings logged, not fixed).
-- **Verified (real output 2026-09-14):** `npm run typecheck` pass; `npm test` 32/32, 1,447 assertions;
-  `format:check` pass BEFORE adding new files (re-run `npm run format` on the new docs then
-  `format:check`); `security:secrets` pass; `validate:android` pass; ktlint clean; prod dep audit 0;
-  `wrangler deploy --dry-run` = 277 KiB; live `/api/health` all-true; v132 APK signer cert parsed and
-  matched to committed debug.keystore; no PAT/CF token in full git history.
-- **Not yet verified:** Android compile / lint / JVM unit tests (need JDK 17 + Android SDK — CI gate
-  only); worker deploy (not performed — owner action).
+- **Current branch:** `chore/audit-project-understanding` (from `main` @ `32a5240`), PUSHED.
+  **PR #56: https://github.com/rabbihossainltd1/KuchuPuchu/pull/56** (base `main`, docs-only).
+- **Exact state of the work:** Full Phase-1 audit COMPLETE and delivered as PR #56. Two commits:
+  (1) `9ce9f8b` adds `PROJECT_UNDERSTANDING.md` (13-item risk register) + this `memory.md`,
+  `.gitignore` scratch/venv entries, README D1-name delta; (2) this handoff/log update.
+  NO product, worker, or Android source code changed (findings logged, not fixed).
+- **Verified (real output 2026-09-14):** local full gate green — typecheck pass; `npm test` 32/32,
+  1,447 assertions; prettier pass (new docs already conform); secret scan pass; android validation
+  pass; ktlint clean; prod dep audit 0; `wrangler deploy --dry-run` 277 KiB; live `/api/health`
+  all-cap true; v132 debug+release APK signer cert parsed (v2 APK Signing Block) and matched the
+  committed `debug.keystore` (`39:19:0B:0F…CD:2E`, CN=KuchuPuchu); full git history has no
+  PAT/CF token (only legacy Firebase public web key in deleted v2 paths). PR CI: **Worker job
+  success**; `apk` job was still running at report time (docs-only, cannot affect the APK).
+- **Not yet verified:** Android compile / lint / JVM unit tests (need JDK 17 + Android SDK + NDK —
+  CI `apk` job only); worker deploy (not performed — owner action); the eventual `apk` job conclusion
+  on PR #56 (check the PR checks page).
 - **Next 3 steps, in order:**
-  1. Run `npx prettier --write memory.md PROJECT_UNDERSTANDING.md README.md` then the FULL local
-     gate (`npm run ci` + ktlint) so the branch is green; commit (Conventional Commit, e.g.
-     `docs: add project understanding + agent memory from full audit`).
-  2. Push via GIT_ASKPASS helper reading `/home/user/.env` (no token in remote/log), open PR against
-     `main` (no `gh` → compare URL + paste body), report in Bangla.
-  3. Wait for owner decisions on §13 open questions (APK signing strategy; branch cleanup; whether to
-     fix §6 #2/#5 now). Then await the actual tasks ("baki kotha").
-- **Blockers:** none for the docs PR. APK-level verification is gated by missing JDK17/Android SDK.
+  1. Owner reviews/merges PR #56 (docs only, zero runtime risk; revert = one `git revert`).
+  2. Get owner decisions on the three §13 questions — especially APK signing (keep+pin committed key
+     vs move to KP keystore, which forces one manual reinstall), and remote-branch cleanup.
+  3. If approved, do the small safe fixes as separate branches/PRs: pin updater asset name
+     (`KpUpdate.kt:84-87`) + signer verify; delete dead v2 constants in `src/shared/constants.ts`.
+- **Blockers:** none. APK-level verification permanently gated here by missing JDK17/Android SDK
+  (use CI). Real fixes await the owner's "baki kotha" tasks and the §13 decisions.
 
 ## 8. Pending Requests To Owner
 | Item | Why needed | How owner gets it | Requested | Status |
@@ -147,4 +147,4 @@
 ## 10. Session Log (keep last 10 only — delete older rows)
 | Date | Task | Root cause | Outcome | PR |
 |---|---|---|---|---|
-| 2026-09-14 | Full Phase-1 audit + bootstrap (repo cloned from GitHub) | n/a (new project) | All local checks green (32/32, 1,447 assertions); 13-item risk register; top finding = shipped release signed by committed debug.keystore (cert verified); added PROJECT_UNDERSTANDING.md + memory.md + .gitignore/README delta | pending (chore/audit-project-understanding) |
+| 2026-09-14 | Full Phase-1 audit + bootstrap (repo cloned from GitHub) | n/a (new project) | All local checks green (32/32, 1,447 assertions); 13-item risk register; top finding = shipped release signed by committed debug.keystore (cert verified); added PROJECT_UNDERSTANDING.md + memory.md + .gitignore/README delta | **PR #56** (Worker CI green; apk running) |
