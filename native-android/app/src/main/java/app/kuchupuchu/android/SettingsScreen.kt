@@ -64,6 +64,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -679,19 +680,29 @@ private fun DevicesSection() {
     } else if (list.isEmpty()) {
         Text(if (failed) "Offline" else "No devices", color = Muted, fontSize = 13.5.sp, modifier = Modifier.padding(16.dp))
     } else {
-        list.forEach { d ->
+        // Owner round 34 (item 8): one device per separated row.
+        list.forEachIndexed { i, d ->
             val current = d.optBoolean("current") || d.optString("deviceId") == myDevice
             val active = d.optBoolean("active")
+            if (i > 0) HorizontalDivider(color = Line, thickness = 0.75.dp, modifier = Modifier.padding(horizontal = 16.dp))
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 11.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    Icons.Filled.PhoneAndroid,
-                    null,
-                    tint = if (active) ActionBlueDeep else Muted,
-                    modifier = Modifier.size(21.dp),
-                )
+                Box(
+                    Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(if (active) ActionBlue.copy(alpha = 0.14f) else Line.copy(alpha = 0.6f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.PhoneAndroid,
+                        null,
+                        tint = if (active) ActionBlueDeep else Muted,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -704,15 +715,16 @@ private fun DevicesSection() {
                         )
                         if (current) {
                             Spacer(Modifier.width(8.dp))
+                            // Owner round 34 (item 8): the badge shrinks to a whisper.
                             Text(
                                 "This device",
-                                fontSize = 11.sp,
+                                fontSize = 9.sp,
                                 color = ActionBlueInk,
                                 modifier =
                                     Modifier
-                                        .clip(RoundedCornerShape(8.dp))
+                                        .clip(RoundedCornerShape(6.dp))
                                         .background(ActionBlue)
-                                        .padding(horizontal = 7.dp, vertical = 2.dp),
+                                        .padding(horizontal = 5.dp, vertical = 1.dp),
                             )
                         }
                     }

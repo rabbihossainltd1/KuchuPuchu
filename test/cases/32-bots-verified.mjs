@@ -8163,6 +8163,17 @@ const convBetween = (db, a, b) =>
         chat.includes(".background(dot.copy(alpha = 0.35f + 0.65f * lift))") &&
         !chat.includes("GoldDeep.copy(alpha = 0.35f"),
     );
+    {
+      const ss = kt("SettingsScreen.kt");
+      check(
+        "r34-8: device list separates rows (divider), the phone icon sits in a tint disc, the This-device badge is tiny",
+        ss.includes("list.forEachIndexed { i, d ->") &&
+          ss.includes("if (i > 0) HorizontalDivider(color = Line") &&
+          ss.includes(".size(38.dp)") &&
+          ss.includes('"This device",') &&
+          ss.includes("fontSize = 9.sp,"),
+      );
+    }
     check(
       "r33-11b: chat — the attach and sticker panels pop up (Box(Modifier.popUp())); a cancelled recording bumps voiceBinNonce, the composer swaps the strip for VoiceBinDrop (lid open → note drops → lid shut, 520 ms) before the pill returns",
       (chat.match(/Box\(Modifier\.popUp\(\)\) \{/g) || []).length === 2 &&
