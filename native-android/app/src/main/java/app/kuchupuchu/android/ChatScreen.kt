@@ -2155,6 +2155,28 @@ fun ChatScreen(nav: NavController, convId: String) {
         /* ---------------- message list on coin wallpaper ---------------- */
         Box(Modifier.weight(1f).fillMaxWidth()) {
             CoinWallpaper()
+            // A retried send used to leave TWO server rows with the same
+            // clientId; keys collide and the chat crashed on open ("Key ...
+            // was already used"). Render only the first of any duplicate —
+            // this also heals chats that already contain dup rows.
+            // `derivedStateOf` (not a plain filter) so this list keeps its
+            // IDENTITY across recompositions that don't actually touch `msgs`
+            // (typing pings, read-receipt polls, header repaints, etc.) —
+            // a fresh List every recomposition was defeating LazyColumn's
+            // skip-unchanged-items optimisation and read as scroll jank.
+            val visibleMsgs by remember {
+                androidx.compose.runtime.derivedStateOf {
+                    val seenKeys = HashSet<String>()
+                    msgs.filter { m ->
+                        // Owner round 25: unsent messages VANISH — no
+                        // "This message was deleted" tombstone any more.
+                        m.optString("kind") != "DELETED" && run {
+                            val k = m.optString("clientId").ifBlank { m.optString("id") }
+                            k.isNotBlank() && seenKeys.add(k)
+                        }
+                    }
+                }
+            }
             // Owner round 31 (item 29): photos that share meta.album collapse
             // into ONE grouped bubble (the album's first row carries the
             // others under "kpAlbum"); a lone photo of an album — the rest
@@ -2226,28 +2248,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                         title = "No messages yet",
                         note = "Say hi, send a sticker or a photo",
                     )
-                }
-            }
-            // A retried send used to leave TWO server rows with the same
-            // clientId; keys collide and the chat crashed on open ("Key ...
-            // was already used"). Render only the first of any duplicate —
-            // this also heals chats that already contain dup rows.
-            // `derivedStateOf` (not a plain filter) so this list keeps its
-            // IDENTITY across recompositions that don't actually touch `msgs`
-            // (typing pings, read-receipt polls, header repaints, etc.) —
-            // a fresh List every recomposition was defeating LazyColumn's
-            // skip-unchanged-items optimisation and read as scroll jank.
-            val visibleMsgs by remember {
-                androidx.compose.runtime.derivedStateOf {
-                    val seenKeys = HashSet<String>()
-                    msgs.filter { m ->
-                        // Owner round 25: unsent messages VANISH — no
-                        // "This message was deleted" tombstone any more.
-                        m.optString("kind") != "DELETED" && run {
-                            val k = m.optString("clientId").ifBlank { m.optString("id") }
-                            k.isNotBlank() && seenKeys.add(k)
-                        }
-                    }
                 }
             }
             if (visibleMsgs.isEmpty() && pending.isEmpty() && initialLoad) {
