@@ -513,6 +513,13 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
     var menuOpen by remember { mutableStateOf(false) }
     // Owner round 30: finger held on the status = paused (clock, bar and clip).
     var holding by remember { mutableStateOf(false) }
+    // Owner round 34 (item 5): swipe-down-to-close. The screen follows the
+    // finger (translationY + a touch of fade); past 260px it flings off the
+    // bottom and pops, otherwise it snaps back. The reads stay inside the
+    // graphicsLayer block so the drag never recomposes — only re-lays-out.
+    var swipePx by remember { mutableStateOf(0f) }
+    var swipeTotal by remember { mutableStateOf(0f) }
+    val settleAnim = remember { androidx.compose.animation.core.Animatable(0f) }
     var confirmDelete by remember { mutableStateOf(false) }
     var videoReady by remember { mutableStateOf(false) }
     var videoProgress by remember { mutableStateOf(0f) }
@@ -747,7 +754,65 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
         }
     }
 
-    Box(Modifier.fillMaxSize().background(Dark)) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Dark)
+            .graphicsLayer {
+                val off = swipePx + settleAnim.value
+                translationY = off
+                alpha = 1f - (off / 1400f).coerceIn(0f, 1f) * 0.45f
+            }
+            .pointerInput("vdismiss", isMine) {
+                detectVerticalDragGestures(
+                    onDragStart = {
+                        swipeTotal = 0f
+                        focusManager.clearFocus()
+                    },
+                    onDragEnd = {
+                        if (settleAnim.isRunning) return@detectVerticalDragGestures
+                        val off = swipePx
+                        val total = swipeTotal
+                        swipePx = 0f
+                        swipeTotal = 0f
+                        if (off > 260f) {
+                            scope.launch {
+                                settleAnim.snapTo(off)
+                                settleAnim.animateTo(
+                                    off + 1400f,
+                                    androidx.compose.animation.core.tween(
+                                        240,
+                                        easing = androidx.compose.animation.core.FastOutSlowInEasing,
+                                    ),
+                                )
+                                nav.popBackStack()
+                            }
+                        } else {
+                            if (total < -130f && isMine) openViewers()
+                            scope.launch {
+                                settleAnim.snapTo(off)
+                                settleAnim.animateTo(0f, androidx.compose.animation.core.tween(200))
+                                settleAnim.snapTo(0f)
+                            }
+                        }
+                    },
+                    onDragCancel = {
+                        val off = swipePx
+                        swipePx = 0f
+                        swipeTotal = 0f
+                        scope.launch {
+                            settleAnim.snapTo(off)
+                            settleAnim.animateTo(0f, androidx.compose.animation.core.tween(200))
+                            settleAnim.snapTo(0f)
+                        }
+                    },
+                ) { _, amount ->
+                    if (settleAnim.isRunning) return@detectVerticalDragGestures
+                    swipeTotal += amount
+                    swipePx = (swipePx + amount).coerceAtLeast(0f)
+                }
+            },
+    ) {
         if (statuses.isEmpty()) {
             Column(
                 Modifier.fillMaxSize(),
@@ -940,33 +1005,17 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    IconButton(onClick = { nav.popBackStack() }) {
-                        Icon(Icons.Filled.Close, "Close", tint = Color.White)
-                    }
                     IconButton(onClick = { menuOpen = true }) {
                         Icon(Icons.Filled.MoreVert, "Menu", tint = Color.White)
                     }
                 }
                 /* tap zones: left = previous, right = next — they fill the
                    middle area only, so header + reply stay tappable.
-                   Vertical swipes: DOWN closes the viewer, UP opens the
-                   viewers list (own status) — like WhatsApp. */
-                var vDrag by remember { mutableStateOf(0f) }
+                   (Vertical swipes live on the root Box now — item 5.) */
                 Row(
                     Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .pointerInput("vswipe", isMine) {
-                            detectVerticalDragGestures(
-                                onDragEnd = {
-                                    if (vDrag > 130f) nav.popBackStack()
-                                    else if (vDrag < -130f && isMine) openViewers()
-                                    vDrag = 0f
-                                },
-                            ) { _, amount ->
-                                vDrag += amount
-                            }
-                        }
                         .pointerInput("tapzone") {
                             // Owner round 33 (item 10): a HOLD is not a tap. The
                             // release of a press that lasted the long-press timeout

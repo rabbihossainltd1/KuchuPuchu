@@ -8107,6 +8107,26 @@ const convBetween = (db, a, b) =>
         ui.includes("} else {\n            // Owner round 34 (item 3)") &&
         ui.includes("t.snapTo(1f)"),
     );
+    {
+      const st = kt("StatusScreens.kt");
+      const vw = st.slice(
+        st.indexOf("fun StatusViewerScreen("),
+        st.indexOf("private fun StatusMenuSheet("),
+      );
+      check(
+        "r34-5: status viewer — no X button; the screen follows a downward drag (graphicsLayer translationY + fade, phase reads) and flings off + pops past 260px, else snaps back; an upward flick still opens the viewers sheet",
+        !vw.includes("Icons.Filled.Close") &&
+          !vw.includes('"vswipe"') &&
+          vw.includes('.pointerInput("vdismiss", isMine)') &&
+          vw.includes(
+            "val settleAnim = remember { androidx.compose.animation.core.Animatable(0f) }",
+          ) &&
+          vw.includes("translationY = off") &&
+          vw.includes("if (off > 260f) {") &&
+          vw.includes("off + 1400f,") &&
+          vw.includes("if (total < -130f && isMine) openViewers()"),
+      );
+    }
     check(
       "r33-11b: chat — the attach and sticker panels pop up (Box(Modifier.popUp())); a cancelled recording bumps voiceBinNonce, the composer swaps the strip for VoiceBinDrop (lid open → note drops → lid shut, 520 ms) before the pill returns",
       (chat.match(/Box\(Modifier\.popUp\(\)\) \{/g) || []).length === 2 &&
