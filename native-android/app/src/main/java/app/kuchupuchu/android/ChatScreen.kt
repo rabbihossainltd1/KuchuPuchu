@@ -2155,6 +2155,45 @@ fun ChatScreen(nav: NavController, convId: String) {
         /* ---------------- message list on coin wallpaper ---------------- */
         Box(Modifier.weight(1f).fillMaxWidth()) {
             CoinWallpaper()
+            // Owner round 31 (item 29): photos that share meta.album collapse
+            // into ONE grouped bubble (the album's first row carries the
+            // others under "kpAlbum"); a lone photo of an album — the rest
+            // unsent — is just a photo again.
+            val groupedMsgs by remember {
+                androidx.compose.runtime.derivedStateOf { foldAlbums(visibleMsgs) }
+            }
+            // Owner round 33 (item 17): tap a quote → scroll to the original
+            // (paging back through history when it is not loaded yet, bounded)
+            // and flash its row once. A deleted / hidden original is left alone.
+            // Owner round 34 (item 12): the in-chat search picks ride this too
+            // (it sits above the search sheet so the sheet can reach it).
+            val jumpPad = with(LocalDensity.current) { 72.dp.roundToPx() }
+            fun jumpTo(id: String) {
+                scope.launch {
+                    if (pending.any { it.optString("id") == id || it.optString("clientId") == id }) return@launch
+                    fun rowOf() = groupedMsgs.indexOfFirst { row -> albumPhotos(row).any { it.optString("id") == id } }
+                    var i = rowOf()
+                    var pages = 0
+                    var waits = 0
+                    while (i < 0 && pages < 10 && waits < 50) {
+                        if (msgs.any { it.optString("id") == id }) break
+                        if (!hasMoreOlder) break
+                        if (loadingOlder.get()) {
+                            waits++
+                            delay(100)
+                        } else {
+                            loadOlder()
+                            pages++
+                        }
+                        i = rowOf()
+                    }
+                    if (i < 0) return@launch
+                    runCatching { listState.animateScrollToItem(i, -jumpPad) }
+                    flashId = id
+                    delay(1500)
+                    if (flashId == id) flashId = ""
+                }
+            }
             /* ---------------- in-chat search (Owner round 14: moved to the
                TOP of the screen, floating over the messages, with a rounded
                pill input instead of a flat box strip) ---------------- */
@@ -2168,10 +2207,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                     hits = searchHits,
                     onHits = { searchHits = it },
                     onClose = { showChatSearch = false; searchQ = ""; searchHits = emptyList() },
+                    // Owner round 34 (item 12): a search hit rides the
+                    // quote-tap path — page back when unloaded, land on the
+                    // folded row, flash it once.
                     onPick = { id ->
                         showChatSearch = false
-                        val i = msgs.indexOfFirst { it.optString("id") == id }
-                        if (i >= 0) scope.launch { listState.animateScrollToItem(i) }
+                        jumpTo(id)
                     },
                 )
             }
@@ -2207,43 +2248,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                             k.isNotBlank() && seenKeys.add(k)
                         }
                     }
-                }
-            }
-            // Owner round 31 (item 29): photos that share meta.album collapse
-            // into ONE grouped bubble (the album's first row carries the
-            // others under "kpAlbum"); a lone photo of an album — the rest
-            // unsent — is just a photo again.
-            val groupedMsgs by remember {
-                androidx.compose.runtime.derivedStateOf { foldAlbums(visibleMsgs) }
-            }
-            // Owner round 33 (item 17): tap a quote → scroll to the original
-            // (paging back through history when it is not loaded yet, bounded)
-            // and flash its row once. A deleted / hidden original is left alone.
-            val jumpPad = with(LocalDensity.current) { 72.dp.roundToPx() }
-            fun jumpTo(id: String) {
-                scope.launch {
-                    if (pending.any { it.optString("id") == id || it.optString("clientId") == id }) return@launch
-                    fun rowOf() = groupedMsgs.indexOfFirst { row -> albumPhotos(row).any { it.optString("id") == id } }
-                    var i = rowOf()
-                    var pages = 0
-                    var waits = 0
-                    while (i < 0 && pages < 10 && waits < 50) {
-                        if (msgs.any { it.optString("id") == id }) break
-                        if (!hasMoreOlder) break
-                        if (loadingOlder.get()) {
-                            waits++
-                            delay(100)
-                        } else {
-                            loadOlder()
-                            pages++
-                        }
-                        i = rowOf()
-                    }
-                    if (i < 0) return@launch
-                    runCatching { listState.animateScrollToItem(i, -jumpPad) }
-                    flashId = id
-                    delay(1500)
-                    if (flashId == id) flashId = ""
                 }
             }
             if (visibleMsgs.isEmpty() && pending.isEmpty() && initialLoad) {
