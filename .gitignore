@@ -26,3 +26,8 @@ local.properties
 ci-watch.log
 .ci-seen
 scripts/.gh-token
+# Agent scratch (downloads, dumps, screenshots — never committed)
+.scratch/
+.venv/
+venv/
+__pycache__/
