@@ -6545,28 +6545,35 @@ const convBetween = (db, a, b) =>
         ),
     );
     check(
-      "r32-41: app — VoiceIsolation.process runs FIRST in the WebRTC record callback (before the screen-share mix), prepare() on every call start, release() at call end; pref on by default; lazy loadLibrary with a permanent pass-through on failure; only PCM16 direct 10 ms buffers are touched; the state is rebuilt when the rate changes; the audio thread never reads SharedPreferences",
+      "r32-41: app — VoiceIsolation.process runs FIRST in the WebRTC record callback (before the screen-share mix), prepare() on every call start, release() at call end; r34-9: strength in 3 steps (Normal/Medium/Aggressive, pref default Medium, live mid-call) with per-call cleaned/skipped counters; lazy loadLibrary with a permanent pass-through on failure; only PCM16 direct 10 ms buffers are touched; the state is rebuilt when the rate changes; the audio thread never reads SharedPreferences",
       engine.includes(
         "VoiceIsolation.process(audioFormat, channelCount, sampleRate, audioBuffer)\n                    SystemAudioTap.mixInto(audioFormat, channelCount, sampleRate, audioBuffer)",
       ) &&
         (engine.match(/ensureFactory\(app\)\n        VoiceIsolation\.prepare\(app\)/g) || [])
           .length === 3 &&
         engine.includes("AudioRouter.end(app)\n        VoiceIsolation.release()") &&
-        iso.includes("getBoolean(PREF, true)") &&
+        iso.includes("getInt(LEVEL_PREF, 1)") &&
         iso.includes('System.loadLibrary("kp_voice")') &&
         iso.includes("loadFailed.set(true)") &&
         iso.includes("if (!wanted.get()) return") &&
-        iso.includes("if (!audioBuffer.isDirect) return") &&
-        iso.includes("if (frames != sampleRate / 100) return") &&
+        iso.includes('if (!audioBuffer.isDirect) {\n            skip("buffer")') &&
+        iso.includes('if (frames != sampleRate / 100) {\n            skip("length")') &&
         iso.includes("if (handle == 0L || handleRate != sampleRate) {") &&
         iso.includes(
           "@JvmStatic private external fun nativeProcess(handle: Long, buffer: ByteBuffer, frames: Int, channels: Int): Float",
         ) &&
         !iso.includes("Log.") &&
-        kt("SettingsScreen.kt").includes(
-          'ToggleRow(Icons.Filled.NoiseAware, "Voice isolation on calls", voiceIso) { on ->',
-        ) &&
-        kt("SettingsScreen.kt").includes("VoiceIsolation.setEnabled(ctx, on)"),
+        iso.includes("chunksOk.incrementAndGet()") &&
+        iso.includes("fun diag(): String {") &&
+        iso.includes("private external fun nativeSetLevel(handle: Long, level: Int)") &&
+        voice.includes("void kp_voice_set_level(KpVoice *v, int level) {") &&
+        voice.includes("static const float wet[3] = { 0.55f, 0.8f, 1.f };") &&
+        voice.includes("v->gate += (target - v->gate) * rate;") &&
+        jni.includes("Java_app_kuchupuchu_android_VoiceIsolation_nativeSetLevel(") &&
+        kt("SettingsScreen.kt").includes('listOf("Normal", "Medium", "Aggressive")') &&
+        kt("SettingsScreen.kt").includes("VoiceIsolation.setLevel(ctx, i)") &&
+        kt("SettingsScreen.kt").includes("VoiceIsolation.diag()") &&
+        !kt("SettingsScreen.kt").includes('Voice isolation on calls", voiceIso)'),
     );
   }
   // r33-26 / r33-23: the two crash reports after v132 — the update sheet's

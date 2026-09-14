@@ -25,6 +25,14 @@ Java_app_kuchupuchu_android_VoiceIsolation_nativeDestroy(JNIEnv *env, jclass cls
     kp_voice_destroy((KpVoice *)(intptr_t)handle);
 }
 
+/* Owner round 34 (item 9): cleaning strength 0/1/2, live from Settings. */
+JNIEXPORT void JNICALL
+Java_app_kuchupuchu_android_VoiceIsolation_nativeSetLevel(JNIEnv *env, jclass cls, jlong handle, jint level) {
+    (void)env;
+    (void)cls;
+    kp_voice_set_level((KpVoice *)(intptr_t)handle, (int)level);
+}
+
 /* Returns the speech probability (0..1) for the chunk, or -1 when it was left untouched. */
 JNIEXPORT jfloat JNICALL
 Java_app_kuchupuchu_android_VoiceIsolation_nativeProcess(

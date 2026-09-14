@@ -380,12 +380,45 @@ fun PrivacySettingsScreen(nav: NavController) {
                     SystemAudioTap.setEnabled(ctx, on)
                 }
             }
-            // Owner round 32 (item 41): the call microphone's noise cleaner —
-            // on by default; off sends the raw microphone.
-            var voiceIso by remember { mutableStateOf(VoiceIsolation.isEnabled(ctx)) }
-            ToggleRow(Icons.Filled.NoiseAware, "Voice isolation on calls", voiceIso) { on ->
-                voiceIso = on
-                VoiceIsolation.setEnabled(ctx, on)
+            // Owner round 34 (item 9): isolation strength in three steps, not
+            // a switch — Normal hushes the room, Medium cleans it, Aggressive
+            // gates it. The line below proves the cleaner runs on real calls.
+            var isoLevel by remember { mutableStateOf(VoiceIsolation.getLevel(ctx)) }
+            val isoHaptics = rememberHaptics()
+            Column(Modifier.fillMaxWidth().padding(start = 16.dp, top = 6.dp, bottom = 8.dp, end = 16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.NoiseAware, "Voice isolation on calls", tint = ActionBlueDeep, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text("Voice isolation on calls", fontSize = 14.5.sp, color = Ink, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.weight(1f))
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Line.copy(alpha = 0.5f))
+                        .padding(3.dp),
+                ) {
+                    listOf("Normal", "Medium", "Aggressive").forEachIndexed { i, name ->
+                        val sel = isoLevel == i
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (sel) ActionBlue else Color.Transparent)
+                                .clickable {
+                                    isoHaptics.tap()
+                                    isoLevel = i
+                                    VoiceIsolation.setLevel(ctx, i)
+                                }
+                                .padding(vertical = 7.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(name, fontSize = 13.sp, color = if (sel) ActionBlueInk else Muted, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Medium)
+                        }
+                    }
+                }
+                Text(VoiceIsolation.diag(), fontSize = 11.5.sp, color = Muted, maxLines = 1, modifier = Modifier.padding(top = 6.dp, start = 32.dp))
             }
         }
         Spacer(Modifier.height(12.dp))

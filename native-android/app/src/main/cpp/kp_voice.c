@@ -13,6 +13,8 @@ struct KpVoice {
     DenoiseState *st;
     int rate;
     int frames10; /* one 10 ms chunk at `rate` */
+    int level;    /* owner round 34 (item 9): 0 Normal, 1 Medium, 2 Aggressive */
+    float gate;   /* smoothed VAD gain 0..1 (fast attack, slow release) */
     /* Mono working buffers: `mono` is the chunk at the microphone rate,
        `in48` / `out48` one RNNoise frame. Sized once in create(). */
     float *mono;
@@ -31,6 +33,8 @@ KpVoice *kp_voice_create(int sample_rate) {
     }
     v->rate = sample_rate;
     v->frames10 = sample_rate / 100;
+    v->level = 1;
+    v->gate = 1.f;
     v->mono = (float *)calloc((size_t)v->frames10, sizeof(float));
     if (!v->mono) {
         rnnoise_destroy(v->st);
@@ -38,6 +42,10 @@ KpVoice *kp_voice_create(int sample_rate) {
         return NULL;
     }
     return v;
+}
+
+void kp_voice_set_level(KpVoice *v, int level) {
+    if (v) v->level = level;
 }
 
 void kp_voice_destroy(KpVoice *v) {
@@ -85,6 +93,22 @@ int kp_voice_process(KpVoice *v, short *pcm, int frames, int channels, float *va
     /* 3. the model: per-band gains + pitch filtering, voice bands untouched */
     float p = rnnoise_process_frame(v->st, v->out48, v->in48);
     if (vad) *vad = p;
+    /* 3b. owner round 34 (item 9): the user's level. The cleaned frame is
+       mixed with the noisy one (RNNoise has no strength knob of its own),
+       then a VAD gate rides the whole frame down when nobody speaks —
+       attack ~20 ms, release ~150 ms, so it never clicks. */
+    {
+        static const float wet[3] = { 0.55f, 0.8f, 1.f };
+        static const float thr[3] = { 0.25f, 0.4f, 0.5f };
+        static const float floor_[3] = { 0.35f, 0.15f, 0.f };
+        int lv = v->level < 0 ? 0 : v->level > 2 ? 2 : v->level;
+        float target = p >= thr[lv] ? 1.f : floor_[lv];
+        float rate = target < v->gate ? 0.5f : 1.f / 15.f;
+        v->gate += (target - v->gate) * rate;
+        float w = wet[lv];
+        float g = v->gate;
+        for (i = 0; i < KP_RN_FRAME; i++) v->out48[i] = (v->in48[i] + (v->out48[i] - v->in48[i]) * w) * g;
+    }
     /* 4. back to the microphone rate */
     kp_resample(v->out48, KP_RN_FRAME, v->mono, frames);
     /* 5. write the cleaned voice back to every channel, rounded + clamped */

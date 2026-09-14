@@ -26,6 +26,14 @@ KpVoice *kp_voice_create(int sample_rate);
 void kp_voice_destroy(KpVoice *v);
 
 /*
+ * Owner round 34 (item 9): cleaning strength — 0 Normal (a gentle mix
+ * that hushes the room), 1 Medium (stronger mix + a soft VAD gate),
+ * 2 Aggressive (full RNNoise + the gate down to silence). Safe to call
+ * from any thread; the audio thread picks it up on the next chunk.
+ */
+void kp_voice_set_level(KpVoice *v, int level);
+
+/*
  * Clean one buffer of interleaved 16-bit PCM in place.
  *   frames   samples per channel (a 10 ms buffer: sample_rate / 100)
  *   channels 1 for a phone microphone; more are down-mixed to one voice and

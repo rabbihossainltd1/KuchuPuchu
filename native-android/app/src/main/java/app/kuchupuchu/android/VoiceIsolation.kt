@@ -3,6 +3,8 @@ package app.kuchupuchu.android
 import android.content.Context
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Owner round 32 (item 41): voice isolation on calls — "only human voice is
@@ -21,25 +23,35 @@ import java.util.concurrent.atomic.AtomicBoolean
  * suppressor — keeps running after it; this sits in front and does the heavy
  * lifting.)
  *
- * On by default, one switch in Settings › Privacy ("Voice isolation on calls")
- * for the rare device where the user prefers the raw microphone. The library
- * is loaded lazily on the first call; if the native library is missing or
- * refuses the device's audio format the microphone simply passes through
- * unchanged — a call is never broken by the cleaner.
+ * Owner round 34 (item 9): strength in three steps, not a switch — Normal
+ * hushes the room (a gentle wet/dry mix), Medium cleans it (stronger mix +
+ * a soft voice gate), Aggressive gates it (full RNNoise + the gate down to
+ * silence). RNNoise has no strength knob of its own, so the C layer mixes
+ * the cleaned frame with the noisy one and rides a smoothed VAD gain over
+ * the whole frame. The library is loaded lazily on the first call; if the
+ * native library is missing or refuses the device's audio format the
+ * microphone simply passes through unchanged — a call is never broken by
+ * the cleaner. [diag] counts cleaned vs skipped chunks per call (with the
+ * skip reason), so a silent cleaner can never hide again.
  */
 object VoiceIsolation {
-    private const val PREF = "voice_isolation"
+    private const val LEVEL_PREF = "voice_iso_level"
 
-    fun isEnabled(ctx: Context): Boolean = ctx.getSharedPreferences("kp", 0).getBoolean(PREF, true)
+    /** Cleaning strength: 0 Normal, 1 Medium, 2 Aggressive. */
+    fun getLevel(ctx: Context): Int = ctx.getSharedPreferences("kp", 0).getInt(LEVEL_PREF, 1).coerceIn(0, 2)
 
-    fun setEnabled(ctx: Context, on: Boolean) {
-        ctx.getSharedPreferences("kp", 0).edit().putBoolean(PREF, on).apply()
-        wanted.set(on)
-        if (!on) release()
+    fun setLevel(ctx: Context, lv: Int) {
+        val v = lv.coerceIn(0, 2)
+        ctx.getSharedPreferences("kp", 0).edit().putInt(LEVEL_PREF, v).apply()
+        level.set(v)
+        // Live mid-call: one aligned int the audio thread picks up next chunk.
+        val h = handle
+        if (h != 0L) runCatching { nativeSetLevel(h, v) }
     }
 
     /** Mirrors the pref so the audio thread never touches SharedPreferences. */
     private val wanted = AtomicBoolean(true)
+    private val level = AtomicInteger(1)
     private val loaded = AtomicBoolean(false)
     private val loadFailed = AtomicBoolean(false)
 
@@ -54,15 +66,35 @@ object VoiceIsolation {
     @Volatile var speechProbability = 0f
         private set
 
+    /** Per-call counters: cleaned vs skipped chunks + the latest skip reason. */
+    private val chunksOk = AtomicLong(0)
+    private val chunksSkipped = AtomicLong(0)
+
+    @Volatile private var lastSkip = ""
+
+    @Volatile private var ranOnce = false
+
     /** Called once when a call starts, from the engine (any thread). */
     fun prepare(ctx: Context) {
-        wanted.set(isEnabled(ctx))
+        wanted.set(true)
+        level.set(getLevel(ctx))
+        chunksOk.set(0)
+        chunksSkipped.set(0)
+        lastSkip = ""
         ensureLoaded()
     }
 
     /** Called when the call ends: drop the model state so the next call starts clean. */
     fun release() {
         dropRequested = true
+    }
+
+    /** One line for Settings: what the cleaner did on this call, and why not. */
+    fun diag(): String {
+        val ok = chunksOk.get()
+        val skip = chunksSkipped.get()
+        if (!ranOnce && ok == 0L && skip == 0L) return "Not run yet — start a call"
+        return "This call: $ok cleaned · $skip skipped (${lastSkip.ifBlank { "none" }})"
     }
 
     /**
@@ -79,19 +111,46 @@ object VoiceIsolation {
             handleRate = 0
         }
         if (!wanted.get()) return
-        if (audioFormat != android.media.AudioFormat.ENCODING_PCM_16BIT || channelCount <= 0 || sampleRate <= 0) return
-        if (!audioBuffer.isDirect) return
-        if (!ensureLoaded()) return
+        if (audioFormat != android.media.AudioFormat.ENCODING_PCM_16BIT || channelCount <= 0 || sampleRate <= 0) {
+            skip("format")
+            return
+        }
+        if (!audioBuffer.isDirect) {
+            skip("buffer")
+            return
+        }
+        if (!ensureLoaded()) {
+            skip("library")
+            return
+        }
         val frames = audioBuffer.capacity() / 2 / channelCount
-        if (frames != sampleRate / 100) return
+        if (frames != sampleRate / 100) {
+            skip("length")
+            return
+        }
         if (handle == 0L || handleRate != sampleRate) {
             if (handle != 0L) runCatching { nativeDestroy(handle) }
             handle = runCatching { nativeCreate(sampleRate) }.getOrDefault(0L)
             handleRate = sampleRate
-            if (handle == 0L) return
+            if (handle != 0L) runCatching { nativeSetLevel(handle, level.get()) }
+            if (handle == 0L) {
+                skip("create")
+                return
+            }
         }
         val p = runCatching { nativeProcess(handle, audioBuffer, frames, channelCount) }.getOrDefault(-1f)
-        if (p >= 0f) speechProbability = p
+        if (p >= 0f) {
+            speechProbability = p
+            ranOnce = true
+            chunksOk.incrementAndGet()
+        } else {
+            skip("native")
+        }
+    }
+
+    private fun skip(why: String) {
+        lastSkip = why
+        chunksSkipped.incrementAndGet()
     }
 
     private fun ensureLoaded(): Boolean {
@@ -110,6 +169,8 @@ object VoiceIsolation {
     @JvmStatic private external fun nativeCreate(sampleRate: Int): Long
 
     @JvmStatic private external fun nativeDestroy(handle: Long)
+
+    @JvmStatic private external fun nativeSetLevel(handle: Long, level: Int)
 
     @JvmStatic private external fun nativeProcess(handle: Long, buffer: ByteBuffer, frames: Int, channels: Int): Float
 }
