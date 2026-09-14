@@ -29,6 +29,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
@@ -168,6 +170,12 @@ fun KpPhotoViewer(
     // Owner round 32 (item 17): fired once the picture is on screen (a failed
     // load never fires it) — the chat uses it to spend a view-once opening.
     onShown: (() -> Unit)? = null,
+    // Owner round 34 (item 6): album paging — the chat passes every photo +
+    // the tapped index; single-photo callers keep the old params, one page.
+    urls: List<String> = emptyList(),
+    subtitles: List<String> = emptyList(),
+    startIndex: Int = 0,
+    onPageChanged: ((Int) -> Unit)? = null,
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -180,17 +188,27 @@ fun KpPhotoViewer(
     // Owner round 32 (item 46): the viewer's ⋮ opens a sheet with Save /
     // Forward (nothing else); the old always-visible bottom strip is gone.
     var menuOpen by remember { mutableStateOf(false) }
+    // Owner round 34 (item 6): one page per photo; zoom resets on each flip.
+    val pages = urls.ifEmpty { listOf(url) }
+    val pager = rememberPagerState(initialPage = startIndex.coerceIn(pages.indices)) { pages.size }
+    LaunchedEffect(pager.currentPage) {
+        scale = 1f
+        offX = 0f
+        offY = 0f
+        onPageChanged?.invoke(pager.currentPage)
+    }
     fun savePhoto() {
         if (saving) return
+        val pageUrl = pages[pager.currentPage]
         scope.launch {
             saving = true
             val bytes =
                 withContext(Dispatchers.IO) {
                     runCatching {
-                        if (url.startsWith("data:")) {
-                            android.util.Base64.decode(url.substringAfter(","), android.util.Base64.DEFAULT)
+                        if (pageUrl.startsWith("data:")) {
+                            android.util.Base64.decode(pageUrl.substringAfter(","), android.util.Base64.DEFAULT)
                         } else {
-                            Api.download(url)
+                            Api.download(pageUrl)
                         }
                     }.getOrNull()
                 }
@@ -305,22 +323,31 @@ fun KpPhotoViewer(
                     },
                 contentAlignment = Alignment.Center,
             ) {
-                KpNetImage(
-                    url,
-                    title,
-                    Modifier
-                        .fillMaxSize()
-                        .graphicsLayer(
-                            scaleX = scale,
-                            scaleY = scale,
-                            translationX = offX,
-                            translationY = offY + drag.value,
-                        ),
-                    ContentScale.Fit,
-                    onLoaded = onShown,
-                )
+                // Owner round 34 (item 6): swipe between the album's photos;
+                // a zoomed photo holds the gesture (no accidental page flip).
+                HorizontalPager(
+                    state = pager,
+                    modifier = Modifier.fillMaxSize(),
+                    userScrollEnabled = scale <= 1.01f,
+                ) { page ->
+                    KpNetImage(
+                        pages[page],
+                        title,
+                        Modifier
+                            .fillMaxSize()
+                            .graphicsLayer(
+                                scaleX = scale,
+                                scaleY = scale,
+                                translationX = offX,
+                                translationY = offY + drag.value,
+                            ),
+                        ContentScale.Fit,
+                        onLoaded = onShown,
+                    )
+                }
             }
             if (chromeAlpha > 0.01f) {
+                val pageSubtitle = subtitles.getOrElse(pager.currentPage) { subtitle }
                 Row(
                     Modifier
                         .align(Alignment.TopCenter)
@@ -344,8 +371,8 @@ fun KpPhotoViewer(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        if (subtitle.isNotBlank()) {
-                            Text(subtitle, color = Color(0xB3FFFFFF), fontSize = 11.5.sp, maxLines = 1)
+                        if (pageSubtitle.isNotBlank()) {
+                            Text(pageSubtitle, color = Color(0xB3FFFFFF), fontSize = 11.5.sp, maxLines = 1)
                         }
                     }
                     Spacer(Modifier.width(8.dp))
@@ -355,6 +382,23 @@ fun KpPhotoViewer(
                         IconButton(onClick = { menuOpen = true }) {
                             Icon(Icons.Filled.MoreVert, "More", tint = Color.White, modifier = Modifier.size(24.dp))
                         }
+                    }
+                }
+                // Owner round 34 (item 6): album position, riding the chrome.
+                if (pages.size > 1) {
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .navigationBarsPadding()
+                            .padding(bottom = 18.dp)
+                            .background(Color(0x99000000), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                    ) {
+                        Text(
+                            "${pager.currentPage + 1} / ${pages.size}",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                        )
                     }
                 }
             }

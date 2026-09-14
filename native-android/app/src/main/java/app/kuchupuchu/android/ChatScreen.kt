@@ -359,7 +359,11 @@ fun ChatScreen(nav: NavController, convId: String) {
             }.start()
         }
     }
-    var viewerMsg by remember { mutableStateOf<JSONObject?>(null) }
+    // Owner round 34 (item 6): the viewer pages through these photos;
+    // viewerAt tracks the page the chrome acts on (single photos: one).
+    var viewerPhotos by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var viewerStart by remember { mutableStateOf(0) }
+    var viewerAt by remember { mutableStateOf(0) }
     // Owner round 31 (item 29): "See all" of a grouped photo bubble.
     var albumMsg by remember { mutableStateOf<JSONObject?>(null) }
     var editing by remember { mutableStateOf<JSONObject?>(null) }
@@ -2312,7 +2316,11 @@ fun ChatScreen(nav: NavController, convId: String) {
                                     else ids.forEach { if (it !in selected) selected.add(it) }
                                 }
                             },
-                            onOpenImage = { msg -> viewerMsg = msg },
+                            onOpenImage = { msg ->
+                                viewerPhotos = listOf(msg)
+                                viewerStart = 0
+                                viewerAt = 0
+                            },
                             onOpenAlbum = { msg -> albumMsg = msg },
                             onOpenVideo = { msg ->
                                 // Owner round 31: the app's own player (MediaViewer.kt);
@@ -2858,11 +2866,15 @@ fun ChatScreen(nav: NavController, convId: String) {
                 onClose = { albumMsg = null },
                 onOpen = { photo ->
                     albumMsg = null
-                    viewerMsg = photo
+                    val all = albumPhotos(m)
+                    viewerPhotos = all
+                    viewerStart = all.indexOfFirst { it.optString("id") == photo.optString("id") }.coerceAtLeast(0)
+                    viewerAt = viewerStart
                 },
             )
         }
-        viewerMsg?.let { m ->
+        if (viewerPhotos.isNotEmpty()) {
+            val m = viewerPhotos[viewerAt.coerceIn(viewerPhotos.indices)]
             // Owner round 31: the app's own photo viewer (MediaViewer.kt).
             val who =
                 if (m.optString("senderId") == Store.myId()) "You"
@@ -2875,13 +2887,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                 url = messageMediaUrl(m),
                 title = who,
                 subtitle = if (once) "View once" else viewerStamp(m.optText("createdAt")),
-                onClose = { viewerMsg = null },
+                onClose = { viewerPhotos = emptyList() },
                 onForward =
                     if (privateChat || once) {
                         null
                     } else {
                         {
-                            viewerMsg = null
+                            viewerPhotos = emptyList()
                             if (m.optString("id") !in selected) selected.clear()
                             selected.add(m.optString("id"))
                             forwarding = true
@@ -2890,6 +2902,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                 canSave = !privateChat && !once,
                 secure = privateChat || once,
                 onShown = if (once) ({ ViewOnce.spend(m.optString("id")) }) else null,
+                urls = viewerPhotos.map { messageMediaUrl(it) },
+                subtitles = viewerPhotos.map { if (isViewOnce(it)) "View once" else viewerStamp(it.optText("createdAt")) },
+                startIndex = viewerStart,
+                onPageChanged = { viewerAt = it },
             )
         }
         editing?.let { m ->

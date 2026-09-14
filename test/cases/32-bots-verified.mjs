@@ -5169,7 +5169,8 @@ const convBetween = (db, a, b) =>
         (mv.match(/KpSheetRow\(/g) || []).length === 2 &&
         (mv.match(/Icons\.Filled\.MoreVert, "More"/g) || []).length === 2 &&
         !mv.includes("private fun ViewerAction(") &&
-        (mv.match(/\.align\(Alignment\.BottomCenter\)/g) || []).length === 1 &&
+        // r34-6: the album position pill joins the player's seek bar at the bottom.
+        (mv.match(/\.align\(Alignment\.BottomCenter\)/g) || []).length === 2 &&
         mv.includes("onForward = onForward?.let { f -> { menuOpen = false; f() } },") &&
         mv.includes(
           "onForward = if (canForward) ({ menuOpen = false; forwarding = true }) else null,",
@@ -8135,6 +8136,23 @@ const convBetween = (db, a, b) =>
           vw.includes("if (off > 260f) {") &&
           vw.includes("off + 1400f,") &&
           vw.includes("if (total < -130f && isMine) openViewers()"),
+      );
+    }
+    {
+      const mv = kt("MediaViewer.kt");
+      check(
+        "r34-6: album viewer pages — KpPhotoViewer takes urls + startIndex, swipes between photos (zoom resets per page, no swipe while zoomed), per-photo subtitle + position pill, forward/save/once act on the current photo",
+        mv.includes("urls: List<String> = emptyList(),") &&
+          mv.includes("startIndex: Int = 0,") &&
+          mv.includes("onPageChanged: ((Int) -> Unit)? = null,") &&
+          mv.includes("rememberPagerState(initialPage = startIndex.coerceIn(pages.indices))") &&
+          mv.includes("userScrollEnabled = scale <= 1.01f,") &&
+          mv.includes("${pager.currentPage + 1} / ${pages.size}") &&
+          mv.includes("val pageUrl = pages[pager.currentPage]") &&
+          chat.includes("viewerPhotos = all") &&
+          chat.includes("viewerStart = all.indexOfFirst") &&
+          chat.includes("onPageChanged = { viewerAt = it },") &&
+          chat.includes("val m = viewerPhotos[viewerAt.coerceIn(viewerPhotos.indices)]"),
       );
     }
     check(
