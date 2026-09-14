@@ -51,7 +51,11 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
+      # No setup-android: v3's sdkmanager run requests the long-obsolete
+      # `tools` package and fails hard now that it is gone from the repo
+      # ("Failed to find package 'tools'", exit 1 — red since 2026-09-14
+      # ~20:47 UTC). ubuntu-22.04 already ships the SDK (platform 35,
+      # build-tools, licences accepted); AGP downloads anything else.
       # §50 puts unit tests and lint before the build, and until now neither rung
       # actually ran: `lint { abortOnError = true }` was configured but no CI step
       # invoked a lint task, and the module had no test sources at all.
