@@ -977,6 +977,9 @@ private fun SwipeConvRow(
     // leaves (or re-enters) the main list at once, the worker stops (or
     // resumes) pushing for it, and the list poll confirms.
     var dragged by remember { mutableStateOf(0f) }
+    // Owner round 33 (item 11b): a deleted chat shrinks away before its row
+    // leaves the list (the server delete runs meanwhile).
+    var vanishing by remember { mutableStateOf(false) }
     // Owner round 33 (item 6): the Hide slot opens the key sheet; the hide
     // itself carries the key's hash (server + every device of the account).
     var askKey by remember { mutableStateOf(false) }
@@ -1011,7 +1014,7 @@ private fun SwipeConvRow(
         }
     }
 
-    Box(Modifier.fillMaxWidth().height(76.dp).then(swipeFocusTouch(convId))) {
+    Box(Modifier.fillMaxWidth().height(76.dp).vanishOut(vanishing) {}.then(swipeFocusTouch(convId))) {
         /* revealed actions: delete/mute sit on the RIGHT of the card,
            archive sits on the LEFT */
         Row(Modifier.matchParentSize()) {
@@ -1054,6 +1057,9 @@ private fun SwipeConvRow(
                             // Vanish NOW — the server delete runs behind. The old
                             // flow waited for the next poll, so the row sat there
                             // long enough to look like "delete hoi na".
+                            // Owner round 33 (item 11b): 180 ms shrink first.
+                            vanishing = true
+                            delay(190)
                             ScreenStore.dropConv(conv.optString("id"))
                             android.widget.Toast.makeText(ctx, "Chat deleted", android.widget.Toast.LENGTH_SHORT).show()
                             dragged = 0f
@@ -1147,6 +1153,9 @@ private fun SwipeConvRow(
                             // Vanish NOW — the server delete runs behind. The old
                             // flow waited for the next poll, so the row sat there
                             // long enough to look like "delete hoi na".
+                            // Owner round 33 (item 11b): 180 ms shrink first.
+                            vanishing = true
+                            delay(190)
                             ScreenStore.dropConv(conv.optString("id"))
                             android.widget.Toast.makeText(ctx, "Chat deleted", android.widget.Toast.LENGTH_SHORT).show()
                             dragged = 0f

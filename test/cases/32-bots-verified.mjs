@@ -8007,6 +8007,93 @@ const convBetween = (db, a, b) =>
     }
   }
 
+  // Owner round 33 (item 11b): the short motion set — new rows rise into
+  // the thread (my sends + live arrivals; store paints stay still), deleted
+  // messages / chats shrink away before they leave, the attach / sticker
+  // panels pop up from the bar, a cancelled voice note drops into a dustbin
+  // whose lid opens and shuts, and the status viewer slides down on exit.
+  {
+    const ui = kt("Ui.kt");
+    const chat = kt("ChatScreen.kt");
+    const cl = kt("ChatListScreen.kt");
+    const app = kt("KpApp.kt");
+    check(
+      "r33-11b: Ui.kt — riseIn (220 ms, graphicsLayer alpha/scale/translate, no-op when off), vanishOut (180 ms shrink, then onDone) and popUp (180 ms) are shared modifiers",
+      ui.includes("fun Modifier.riseIn(on: Boolean, fromBelow: Boolean = true): Modifier {") &&
+        ui.includes(
+          "    if (!on) return this\n    val t = remember { Animatable(0f) }\n    LaunchedEffect(Unit) { t.animateTo(1f, tween(220)) }",
+        ) &&
+        ui.includes("fun Modifier.vanishOut(gone: Boolean, onDone: () -> Unit): Modifier {") &&
+        ui.includes("            t.animateTo(0f, tween(180))\n            done.value()") &&
+        ui.includes("fun Modifier.popUp(): Modifier {") &&
+        ui.includes("    LaunchedEffect(Unit) { t.animateTo(1f, tween(180)) }") &&
+        ui.includes("import androidx.compose.animation.core.Animatable") &&
+        ui.includes("import androidx.compose.ui.graphics.graphicsLayer"),
+    );
+    check(
+      "r33-11b: chat — bornKeys marks my text / photo / file / voice sends and live socket arrivals; each list row (thread + pending) consumes its key once (remember(rowKey) { bornKeys.remove(rowKey) }) and rises in; deletes go through vanishingIds → vanishOut before the rows leave (unsend refresh / delete-for-me repaint after 200 ms)",
+      chat.includes("val bornKeys = remember { HashSet<String>() }") &&
+        chat.includes("val vanishingIds = remember { mutableStateListOf<String>() }") &&
+        (chat.match(/bornKeys\.add\(clientId\)/g) || []).length === 4 &&
+        chat.includes(
+          'bornKeys.add(liveMsg.optString("clientId").ifBlank { liveMsg.optString("id") })',
+        ) &&
+        (chat.match(/val born = remember\(rowKey\) \{ bornKeys\.remove\(rowKey\) \}/g) || [])
+          .length === 2 &&
+        chat.includes(
+          "                            .riseIn(born)\n                            .vanishOut(vanishing) {",
+        ) &&
+        chat.includes("Box(Modifier.fillMaxWidth().riseIn(born)) {") &&
+        (chat.match(/vanishingIds\.addAll\(ids\)/g) || []).length === 2 &&
+        chat.includes(
+          "        ids.forEach { ScreenStore.hideMessage(it) }\n        scope.launch {\n            delay(200)\n            paintFromStore()\n        }",
+        ) &&
+        chat.includes('val vanishing = albumPhotos(m).any { it.optString("id") in vanishingIds }'),
+    );
+    check(
+      "r33-11b: chat — the attach and sticker panels pop up (Box(Modifier.popUp())); a cancelled recording bumps voiceBinNonce, the composer swaps the strip for VoiceBinDrop (lid open → note drops → lid shut, 520 ms) before the pill returns",
+      (chat.match(/Box\(Modifier\.popUp\(\)\) \{/g) || []).length === 2 &&
+        chat.includes("var voiceBinNonce by remember { mutableStateOf(0) }") &&
+        chat.includes(
+          "            VoiceNote.cancel()\n            // Owner round 33 (item 11b): the strip plays the bin drop.\n            voiceBinNonce++",
+        ) &&
+        chat.includes("voiceBinNonce = voiceBinNonce,") &&
+        chat.includes("    voiceBinNonce: Int = 0,") &&
+        chat.includes(
+          "            binPlaying = true\n            delay(520)\n            binPlaying = false",
+        ) &&
+        chat.includes("        if (binPlaying && !recording) {") &&
+        chat.includes("                VoiceBinDrop(accent)") &&
+        chat.includes("internal fun VoiceBinDrop(accent: Color) {") &&
+        chat.includes(
+          "LaunchedEffect(Unit) { t.animateTo(1f, tween(520, easing = LinearEasing)) }",
+        ) &&
+        chat.includes("withTransform({ rotate(-55f * lid, hinge) }) {") &&
+        chat.includes("import androidx.compose.ui.graphics.drawscope.withTransform") &&
+        chat.includes("import androidx.compose.animation.core.Animatable"),
+    );
+    check(
+      "r33-11b: chat list — a swiped-away chat shrinks (vanishOut on the 76 dp row, 190 ms) before dropConv in both delete slots; status viewer route slides up on enter and down on pop",
+      cl.includes("var vanishing by remember { mutableStateOf(false) }") &&
+        (
+          cl.match(
+            /vanishing = true\n\s+delay\(190\)\n\s+ScreenStore\.dropConv\(conv\.optString\("id"\)\)/g,
+          ) || []
+        ).length === 2 &&
+        cl.includes(
+          "Box(Modifier.fillMaxWidth().height(76.dp).vanishOut(vanishing) {}.then(swipeFocusTouch(convId))) {",
+        ) &&
+        app.includes(
+          '                    "statusview/{whose}",\n                    enterTransition = { slideInVertically(tween(240)) { it } },',
+        ) &&
+        app.includes(
+          "                    popExitTransition = { slideOutVertically(tween(240)) { it } },",
+        ) &&
+        app.includes("import androidx.compose.animation.slideInVertically") &&
+        app.includes("import androidx.compose.animation.slideOutVertically"),
+    );
+  }
+
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
   // a touch on blank list space closes it (main and archive lists; r33-6
   // retired the hidden list).

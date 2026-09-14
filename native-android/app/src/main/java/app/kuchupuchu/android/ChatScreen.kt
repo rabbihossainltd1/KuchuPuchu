@@ -1,5 +1,6 @@
 package app.kuchupuchu.android
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -122,6 +123,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.platform.LocalContext
@@ -214,6 +216,14 @@ fun ChatScreen(nav: NavController, convId: String) {
     val scheduledRows = remember { mutableStateListOf<JSONObject>() }
     var recording by remember { mutableStateOf(false) }
     var recMs by remember { mutableStateOf(0) }
+    var voiceBinNonce by remember { mutableStateOf(0) }
+    // Owner round 33 (item 11b): rows that appeared AFTER the chat opened
+    // (my sends, live arrivals) rise into the list; rows painted from the
+    // store or a page fetch stay still. Keyed by clientId-or-id, one shot.
+    val bornKeys = remember { HashSet<String>() }
+    // Item 11b: a message that is being deleted shrinks away first; the
+    // rows themselves leave when the vanish has played.
+    val vanishingIds = remember { mutableStateListOf<String>() }
     // Owner round 13: swipe a bubble right to quote-reply to it.
     var replyTo by remember { mutableStateOf<JSONObject?>(null) }
     // Owner round 15: swipe-to-reply now also OPENS the keyboard — a bump
@@ -743,6 +753,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                                     val follow =
                                         !listState.isScrollInProgress &&
                                             info.visibleItemsInfo.lastOrNull()?.index?.let { it >= info.totalItemsCount - 2 } == true
+                                    // Owner round 33 (item 11b): a live arrival rises in.
+                                    bornKeys.add(liveMsg.optString("clientId").ifBlank { liveMsg.optString("id") })
                                     msgs.add(liveMsg)
                                     // Our own optimistic bubble from a previous send
                                     // that the server just confirmed.
@@ -974,6 +986,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         // Owner round 13: attach the quoted message when replying.
         replyTo?.optString("id")?.takeIf { it.isNotBlank() }?.let { payload.put("replyTo", it) }
         replyTo = null
+        bornKeys.add(clientId)
         pending.add(
             JSONObject()
                 .put("id", clientId)
@@ -1123,6 +1136,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             if (album != null) o.put("album", album)
             return if (o.length() > 0) o else null
         }
+        bornKeys.add(clientId)
         pending.add(
             JSONObject()
                 .put("id", clientId)
@@ -1261,6 +1275,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 viewOnce -> JSONObject().put("viewOnce", true)
                 else -> null
             }
+        bornKeys.add(clientId)
         pending.add(
             JSONObject()
                 .put("id", clientId)
@@ -1311,6 +1326,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         fun voiceMeta() =
             JSONObject().put("voice", true).put("seconds", seconds).put("clientId", clientId)
                 .also { if (waveform.isNotEmpty()) it.put("waveform", JSONArray(waveform)) }
+        bornKeys.add(clientId)
         pending.add(
             JSONObject()
                 .put("id", clientId)
@@ -1496,6 +1512,8 @@ fun ChatScreen(nav: NavController, convId: String) {
             // Owner round 21: his voice-cancel sound.
             runCatching { KpSounds.voiceCancel(ctx) }
             VoiceNote.cancel()
+            // Owner round 33 (item 11b): the strip plays the bin drop.
+            voiceBinNonce++
             return
         }
         if (VoiceNote.elapsedMs() < 1000) {
@@ -1582,6 +1600,9 @@ fun ChatScreen(nav: NavController, convId: String) {
         // with the quick emojis still floating over it.
         reactionFor = null
         showEmojiSheet = false
+        // Owner round 33 (item 11b): the bubbles shrink away (180 ms) while
+        // the server delete runs; the list drops them on the next paint.
+        vanishingIds.addAll(ids)
         scope.launch {
             ids.forEach { id ->
                 runCatching { withContext(Dispatchers.IO) { Api.delete("/api/messages/$id") } }
@@ -1595,8 +1616,14 @@ fun ChatScreen(nav: NavController, convId: String) {
         selected.clear()
         reactionFor = null
         showEmojiSheet = false
+        // Owner round 33 (item 11b): vanish first; the rows leave when the
+        // shrink has played (see the list's vanishOut callback).
+        vanishingIds.addAll(ids)
         ids.forEach { ScreenStore.hideMessage(it) }
-        paintFromStore()
+        scope.launch {
+            delay(200)
+            paintFromStore()
+        }
     }
 
     fun forwardSelected(targets: List<String>) {
@@ -2206,9 +2233,21 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // WhatsApp-style selection: the whole ROW gets a translucent
                     // highlight strip, edge to edge — not just the bubble.
                     val rowSelected = m.optString("id") in selected
+                    // Owner round 33 (item 11b): a row born after open rises in
+                    // once (the key leaves the set so a recomposition never
+                    // replays it); a row being deleted shrinks away first.
+                    val rowKey = m.optString("clientId").ifBlank { m.optString("id") }
+                    val born = remember(rowKey) { bornKeys.remove(rowKey) }
+                    val vanishing = albumPhotos(m).any { it.optString("id") in vanishingIds }
                     Box(
                         Modifier
                             .fillMaxWidth()
+                            .riseIn(born)
+                            .vanishOut(vanishing) {
+                                val gone = albumPhotos(m).map { it.optString("id") }
+                                vanishingIds.removeAll(gone.toSet())
+                                if (gone.any { it in ScreenStore.hiddenMsgIds }) paintFromStore()
+                            }
                             .background(if (rowSelected) ActionBlue.copy(alpha = 0.16f) else Color.Transparent),
                     ) {
                         MessageRow(
@@ -2286,18 +2325,24 @@ fun ChatScreen(nav: NavController, convId: String) {
                     ),
                     key = { it.optString("clientId").ifBlank { it.optString("id") } },
                 ) { m ->
-                    MessageRow(
-                        m,
-                        isGroup,
-                        Store.myId(),
-                        otherReadAt,
-                        player,
-                        pendingEcho = true,
-                        theme = chatTheme,
-                        onOpenAlbum = { msg -> albumMsg = msg },
-                        quoteFor = { rid -> (msgs + pending).firstOrNull { it.optString("id") == rid } },
-                        onJumpTo = { jumpTo(it) },
-                    )
+                    // Owner round 33 (item 11b): my fresh send rises from the
+                    // composer's side into the list.
+                    val rowKey = m.optString("clientId").ifBlank { m.optString("id") }
+                    val born = remember(rowKey) { bornKeys.remove(rowKey) }
+                    Box(Modifier.fillMaxWidth().riseIn(born)) {
+                        MessageRow(
+                            m,
+                            isGroup,
+                            Store.myId(),
+                            otherReadAt,
+                            player,
+                            pendingEcho = true,
+                            theme = chatTheme,
+                            onOpenAlbum = { msg -> albumMsg = msg },
+                            quoteFor = { rid -> (msgs + pending).firstOrNull { it.optString("id") == rid } },
+                            onJumpTo = { jumpTo(it) },
+                        )
+                    }
                 }
                 // Owner round 4: one pretty bouncing-dots bubble whenever
                 // EITHER side is typing — the AI composing, or the other
@@ -2686,6 +2731,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             theme = chatTheme,
             padForIme = !showAttach && !showStickers,
             onFinishRecord = { cancelled -> finishRecording(cancelled) },
+            voiceBinNonce = voiceBinNonce,
             selectCount = selected.size,
             onSendSelection = { sendSelectedMedia() },
         )
@@ -2695,6 +2741,8 @@ fun ChatScreen(nav: NavController, convId: String) {
            style: the bar rides on top of the panel; the panel is NOT
            fullscreen until the user taps/swipes the handle up ---------------- */
         if (showAttach) {
+            // Owner round 33 (item 11b): the panel pops up from the bar.
+            Box(Modifier.popUp()) {
             AttachPanel(
                 sel = attachSel,
                 onSendBatch = { sendAttachSelection() },
@@ -2716,8 +2764,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                 onContactPicked = ::handleContactPicked,
                 onLocationRequested = ::handleLocationRequested,
             )
+            }
         }
         if (showStickers) {
+            Box(Modifier.popUp()) {
             StickerPanel(
                 onDismiss = { showStickers = false },
                 onSend = {
@@ -2725,6 +2775,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     sendText(it, "STICKER")
                 },
             )
+            }
         }
         androidx.activity.compose.BackHandler(enabled = showAttach || showStickers) {
             showAttach = false
@@ -2876,6 +2927,9 @@ private fun Composer(
     micEnabled: Boolean = true,
     onStartRecord: () -> Unit,
     onFinishRecord: (cancelled: Boolean) -> Unit,
+    // Owner round 33 (item 11b): counts up on every cancelled recording —
+    // the strip plays the bin drop for that many ms before the pill returns.
+    voiceBinNonce: Int = 0,
     selectCount: Int = 0,
     onSendSelection: () -> Unit = {},
     theme: String = "",
@@ -2902,6 +2956,17 @@ private fun Composer(
         keyboard?.hide()
         focusManager.clearFocus(force = true)
     }
+    // Owner round 33 (item 11b): a cancelled recording plays the bin for
+    // 520 ms in the strip's place — the lid lifts, the note drops in, the
+    // lid closes — and only then does the pill come back.
+    var binPlaying by remember { mutableStateOf(false) }
+    LaunchedEffect(voiceBinNonce) {
+        if (voiceBinNonce > 0) {
+            binPlaying = true
+            delay(520)
+            binPlaying = false
+        }
+    }
     Row(
         Modifier
             .fillMaxWidth()
@@ -2912,7 +2977,16 @@ private fun Composer(
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (!recording) {
+        if (binPlaying && !recording) {
+            Row(
+                Modifier
+                    .weight(1f)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                VoiceBinDrop(accent)
+            }
+        } else if (!recording) {
             Column(
                 Modifier
                     .weight(1f)
@@ -3138,6 +3212,66 @@ private fun HoldMicButton(
             tint = if (!enabled) Muted else if (cancelArmed) Red else accent,
             modifier = Modifier.size(20.dp),
         )
+    }
+}
+
+/**
+ * Owner round 33 (item 11b): the voice-cancel dustbin. Sits at the left of
+ * the strip (where the mic slid to); the lid tilts open, a small note pill
+ * drops from the timer's height into the can, the lid snaps shut. 520 ms.
+ */
+@Composable
+internal fun VoiceBinDrop(accent: Color) {
+    val t = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { t.animateTo(1f, tween(520, easing = LinearEasing)) }
+    val v = t.value
+    // lid: open over the first 30 %, closed again over the last 25 %
+    val lid =
+        when {
+            v < 0.3f -> v / 0.3f
+            v > 0.75f -> 1f - (v - 0.75f) / 0.25f
+            else -> 1f
+        }
+    // note: falls between 20 % and 70 %, fades as it passes the rim
+    val drop = ((v - 0.2f) / 0.5f).coerceIn(0f, 1f)
+    Box(Modifier.size(width = 56.dp, height = 40.dp), contentAlignment = Alignment.BottomStart) {
+        Canvas(Modifier.matchParentSize()) {
+            val w = size.width
+            val h = size.height
+            val canW = 22.dp.toPx()
+            val canH = 18.dp.toPx()
+            val left = 6.dp.toPx()
+            val top = h - canH - 2.dp.toPx()
+            // can body
+            drawRoundRect(
+                color = Red,
+                topLeft = Offset(left, top),
+                size = androidx.compose.ui.geometry.Size(canW, canH),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(3.dp.toPx()),
+            )
+            // lid: rotates up around its left hinge
+            val hinge = Offset(left - 1.dp.toPx(), top - 1.dp.toPx())
+            withTransform({ rotate(-55f * lid, hinge) }) {
+                drawRoundRect(
+                    color = Red,
+                    topLeft = Offset(hinge.x, hinge.y - 3.dp.toPx()),
+                    size = androidx.compose.ui.geometry.Size(canW + 2.dp.toPx(), 3.dp.toPx()),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.5.dp.toPx()),
+                )
+            }
+            // the note: a short accent pill falling into the can
+            if (drop > 0f && drop < 1f) {
+                val y = (2.dp.toPx()) + drop * (top - 2.dp.toPx())
+                drawRoundRect(
+                    color = accent.copy(alpha = 1f - drop * drop),
+                    topLeft = Offset(left + canW / 2f - 8.dp.toPx(), y),
+                    size = androidx.compose.ui.geometry.Size(16.dp.toPx(), 5.dp.toPx()),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.5.dp.toPx()),
+                )
+            }
+            // keep the unused width reserved so the row does not jump
+            if (w < 0f) drawCircle(Color.Transparent, 0f)
+        }
     }
 }
 

@@ -13,7 +13,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -194,7 +196,16 @@ fun KpApp() {
                 composable("status") { StatusScreen(nav) }
                 composable("calls") { CallsScreen(nav) }
                 composable("search") { SearchScreen(nav) }
-                composable("statusview/{whose}") { entry ->
+                // Owner round 33 (item 11b): the viewer rises from the bottom
+                // and, on close (last status done / swipe down / X / back),
+                // slides back down instead of fading like an ordinary screen.
+                composable(
+                    "statusview/{whose}",
+                    enterTransition = { slideInVertically(tween(240)) { it } },
+                    popEnterTransition = { fadeIn(tween(220)) },
+                    exitTransition = { fadeOut(tween(180)) },
+                    popExitTransition = { slideOutVertically(tween(240)) { it } },
+                ) { entry ->
                     val whose = entry.arguments?.getString("whose") ?: ""
                     StatusViewerScreen(nav, whose)
                 }

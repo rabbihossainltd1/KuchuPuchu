@@ -3,10 +3,12 @@ package app.kuchupuchu.android
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Base64
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.background
@@ -58,6 +60,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -910,6 +914,66 @@ fun KpConfirmSheet(
             }
             Spacer(Modifier.height(6.dp))
         }
+    }
+}
+
+/**
+ * Owner round 33 (item 11b): the short motion set. Every effect here is
+ * ~200 ms, runs once, and never blocks the action it decorates.
+ *
+ * A row that has just been ADDED rises in: it starts a little lower, a
+ * little smaller and transparent, and settles in 220 ms. `on` = false is a
+ * no-op (rows painted from the store on open stay still).
+ */
+@Composable
+fun Modifier.riseIn(on: Boolean, fromBelow: Boolean = true): Modifier {
+    if (!on) return this
+    val t = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { t.animateTo(1f, tween(220)) }
+    val v = t.value
+    return this.graphicsLayer {
+        alpha = v
+        val s = 0.92f + 0.08f * v
+        scaleX = s
+        scaleY = s
+        translationY = (if (fromBelow) 1f else -1f) * (1f - v) * 28.dp.toPx()
+        transformOrigin = TransformOrigin(0.5f, if (fromBelow) 1f else 0f)
+    }
+}
+
+/**
+ * Item 11b: a row that is about to LEAVE shrinks and fades (180 ms). The
+ * caller flips `gone` first and removes the row when `onDone` fires, so
+ * the list never pops a hole open.
+ */
+@Composable
+fun Modifier.vanishOut(gone: Boolean, onDone: () -> Unit): Modifier {
+    val t = remember { Animatable(1f) }
+    val done = androidx.compose.runtime.rememberUpdatedState(onDone)
+    LaunchedEffect(gone) {
+        if (gone) {
+            t.animateTo(0f, tween(180))
+            done.value()
+        }
+    }
+    val v = t.value
+    return this.graphicsLayer {
+        alpha = v
+        scaleX = 0.7f + 0.3f * v
+        scaleY = 0.7f + 0.3f * v
+        transformOrigin = TransformOrigin(0.5f, 0.5f)
+    }
+}
+
+/** Item 11b: an inline panel / bar that pops open from its bottom edge (180 ms). */
+@Composable
+fun Modifier.popUp(): Modifier {
+    val t = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { t.animateTo(1f, tween(180)) }
+    val v = t.value
+    return this.graphicsLayer {
+        alpha = v
+        translationY = (1f - v) * 24.dp.toPx()
     }
 }
 
