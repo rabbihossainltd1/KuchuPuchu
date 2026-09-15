@@ -4671,7 +4671,9 @@ const convBetween = (db, a, b) =>
     rx.includes("PackageInstaller.STATUS_PENDING_USER_ACTION -> {") &&
       rx.includes("intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)") &&
       rx.includes("ctx.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))") &&
-      rx.includes("PackageInstaller.STATUS_FAILURE_ABORTED -> {}") &&
+      rx.includes("PackageInstaller.STATUS_FAILURE_ABORTED -> {") &&
+      rx.includes("KpUpdate.installing = false") &&
+      rx.includes("KpUpdate.noteStatus(ctx, code, null)") &&
       rx.includes("intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)") &&
       upd.includes("!ctx.packageManager.canRequestPackageInstalls()") &&
       upd.includes("android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES") &&
@@ -4711,7 +4713,8 @@ const convBetween = (db, a, b) =>
       upd.includes("wasn't built for your install") &&
       upd.includes("params.setAppPackageName(ctx.packageName)") &&
       upd.includes("installer.abandonSession(sessionId)") &&
-      rx.includes("runCatching {\n            when (intent.getIntExtra"),
+      rx.includes("runCatching {\n            val code = intent.getIntExtra") &&
+      rx.includes("when (code) {"),
   );
   // Item 27 (owner: Decline ONLY — Approve stays inside the app): the login
   // alert push carries the request id; the card swaps Like for Decline; the
@@ -7614,6 +7617,27 @@ const convBetween = (db, a, b) =>
         ),
     );
   }
+  // r37-4: the installer-confirm failure. A commit whose status lands in
+  // a backgrounded/reclaimed process used to vanish — no toast, no error,
+  // update just never happened. Now the commit + every terminal status
+  // persist to prefs, failures toast LOUDLY, and the next launch explains
+  // itself; Install/Update are single-flight.
+  check(
+    "r37-4: the update commit records an inflight flag, the receiver persists every terminal status + toasts failures, and cold start surfaces an unreported install as downloadError; Install is disabled mid-flight",
+    upd.includes("fun noteCommitted(ctx: Context)") &&
+      upd.includes('putBoolean("inflight", true)') &&
+      upd.includes("fun noteStatus(ctx: Context, code: Int, msg: String?)") &&
+      upd.includes("fun consumeInstallResult(ctx: Context): String?") &&
+      upd.includes("noteCommitted(ctx)") &&
+      rx.includes("update_rx_failed:$code") &&
+      rx.includes("Toast.makeText(ctx, msg, android.widget.Toast.LENGTH_LONG).show()") &&
+      rx.includes('?: "Install failed ($code)"') &&
+      upd.includes("if (installing) return") &&
+      upd.includes("if (downloading) return") &&
+      upd.includes("installing = true") &&
+      kt("KpApp.kt").includes("Confirm the install in the system window.") &&
+      kt("MainActivity.kt").includes("KpUpdate.consumeInstallResult(application)"),
+  );
   // r37-3: reference-style overlay handles — per-overlay rotation,
   // × top-left deletes, top-right drags the turn, bottom-right drags
   // the size; the box + its handles turn with the overlay, taps un-turn

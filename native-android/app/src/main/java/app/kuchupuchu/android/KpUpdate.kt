@@ -29,6 +29,9 @@ object KpUpdate {
     var available by mutableStateOf<Pair<Int, String>?>(null) // versionCode to apk url
     var checking by mutableStateOf(false)
     var downloading by mutableStateOf(false)
+    // Owner round 37 (item 4): a commit is in the system's hands — the
+    // sheet says Installing until the status broadcast lands.
+    var installing by mutableStateOf(false)
     var progress by mutableStateOf(0f) // 0..1
     var downloadError by mutableStateOf("")
 
@@ -119,6 +122,7 @@ object KpUpdate {
      *  Install (owner round 31 — it used to fire the installer and hide). */
     suspend fun downloadAndInstall(ctx: Context) {
         val pair = available ?: return
+        if (downloading) return
         val (_, url) = pair
         downloading = true
         progress = 0f
@@ -261,6 +265,9 @@ object KpUpdate {
     /** The Install tap: hands the downloaded APK to the system installer. */
     suspend fun installReady(ctx: Context) {
         val apk = ready ?: return
+        // A second Install tap mid-commit used to open a second session —
+        // two commits, two confirms, chaos. One flight at a time.
+        if (installing) return
         // Owner round 32 (item 1C): on Android 8+ REQUEST_INSTALL_PACKAGES only
         // lets the app ASK — the user grants "install unknown apps" per source
         // in system settings. Without it PackageInstaller.commit() is refused
@@ -278,12 +285,47 @@ object KpUpdate {
             }.onFailure { downloadError = "Allow installs from KuchuPuchu in Settings" }
             return
         }
+        installing = true
         runCatching { withContext(Dispatchers.IO) { install(ctx, apk) } }
             .onFailure {
+                installing = false
                 KpCrash.mark("update_install_failed:${it.javaClass.simpleName}")
                 downloadError = it.message ?: "Install failed"
             }
     }
+
+    /** Prefs-backed install outcome — survives the process dying mid-install.
+     *  A kill looks like a crash and wipes every in-memory error with it, so
+     *  the commit + every terminal status land in prefs, and the next launch
+     *  explains what happened instead of showing nothing (owner r37 item 4). */
+    fun noteCommitted(ctx: Context) {
+        ctx.getSharedPreferences("kp_update", Context.MODE_PRIVATE).edit()
+            .putBoolean("inflight", true)
+            .putLong("at", System.currentTimeMillis())
+            .remove("lastMsg")
+            .apply()
+    }
+
+    fun noteStatus(ctx: Context, code: Int, msg: String?) {
+        // Only PENDING_USER_ACTION is non-terminal — everything else ends it.
+        ctx.getSharedPreferences("kp_update", Context.MODE_PRIVATE).edit()
+            .putInt("lastCode", code)
+            .putString("lastMsg", msg ?: "")
+            .putBoolean("inflight", code == PackageInstaller.STATUS_PENDING_USER_ACTION)
+            .apply()
+    }
+
+    /** Next launch after a commit: what happened? Null = nothing to say. */
+    fun consumeInstallResult(ctx: Context): String? =
+        runCatching {
+            val prefs = ctx.getSharedPreferences("kp_update", Context.MODE_PRIVATE)
+            if (!prefs.getBoolean("inflight", false)) return@runCatching null
+            prefs.edit().putBoolean("inflight", false).apply()
+            if (prefs.getInt("lastCode", -999) == PackageInstaller.STATUS_SUCCESS) return@runCatching null
+            val msg = prefs.getString("lastMsg", "").orEmpty()
+            if (msg.isNotBlank()) "Update didn't install: $msg"
+            else "The update was interrupted — tap Update to try again."
+        }.getOrNull()
 
     /** PackageInstaller session — Android shows its confirm sheet ON TOP of
      *  the app; confirming installs the update in place. */
@@ -310,6 +352,7 @@ object KpUpdate {
                 android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_MUTABLE,
             )
             session.commit(pending.intentSender)
+            noteCommitted(ctx)
             KpCrash.mark("update_committed")
             session.close()
         } catch (e: Exception) {
@@ -338,7 +381,8 @@ class KpUpdateReceiver : android.content.BroadcastReceiver() {
         // (runCatching is inline, so the early return below still leaves
         // onReceive itself, exactly as before.)
         runCatching {
-            when (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
+            val code = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
+            when (code) {
                 PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                     @Suppress("DEPRECATION")
                     val confirm =
@@ -348,18 +392,45 @@ class KpUpdateReceiver : android.content.BroadcastReceiver() {
                             intent.getParcelableExtra(Intent.EXTRA_INTENT)
                         }
                     if (confirm == null) {
+                        KpUpdate.installing = false
+                        KpUpdate.noteStatus(ctx, PackageInstaller.STATUS_FAILURE, "Install failed")
                         KpUpdate.downloadError = "Install failed"
                         return
                     }
+                    KpCrash.mark("update_confirm_shown")
                     runCatching { ctx.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                        .onFailure { KpUpdate.downloadError = "Install failed" }
+                        .onFailure {
+                            KpUpdate.installing = false
+                            KpUpdate.noteStatus(ctx, PackageInstaller.STATUS_FAILURE, "Install failed")
+                            KpUpdate.downloadError = "Install failed"
+                        }
                 }
-                PackageInstaller.STATUS_SUCCESS -> ctx.filesDir.resolve("kp-update.apk").delete()
+                PackageInstaller.STATUS_SUCCESS -> {
+                    KpUpdate.installing = false
+                    KpUpdate.noteStatus(ctx, code, null)
+                    ctx.filesDir.resolve("kp-update.apk").delete()
+                }
                 // The user dismissed the system sheet: keep the APK, no error text.
-                PackageInstaller.STATUS_FAILURE_ABORTED -> {}
-                else ->
-                    KpUpdate.downloadError =
-                        intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "Install failed"
+                PackageInstaller.STATUS_FAILURE_ABORTED -> {
+                    KpUpdate.installing = false
+                    KpUpdate.noteStatus(ctx, code, null)
+                }
+                else -> {
+                    // Owner round 37 (item 4): a FAILED install used to die
+                    // silently in a backgrounded (often reclaimed) process —
+                    // no toast, no report, update just never happened. Now it
+                    // persists to prefs, toasts LOUDLY, and names itself.
+                    val msg =
+                        intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
+                            ?: "Install failed ($code)"
+                    KpUpdate.installing = false
+                    KpUpdate.noteStatus(ctx, code, msg)
+                    KpCrash.mark("update_rx_failed:$code")
+                    KpUpdate.downloadError = msg
+                    runCatching {
+                        android.widget.Toast.makeText(ctx, msg, android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
             }
         }
     }

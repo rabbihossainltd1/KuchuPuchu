@@ -172,6 +172,10 @@ class MainActivity : ComponentActivity() {
             runCatching { Api.get("/api/calls/history", true) }
             // Owner round 16: in-app update check (GitHub release).
             runCatching { kotlinx.coroutines.runBlocking { KpUpdate.check(application) } }
+            // Owner round 37 (item 4): a commit that never reported back
+            // (killed mid-install) explains itself on the next launch.
+            runCatching { KpUpdate.consumeInstallResult(application) }
+                .getOrNull()?.let { KpUpdate.downloadError = it }
             // Owner round 28: phone-book match, only once the user granted
             // contacts (asked in-context on the contacts screen, never here);
             // keeps search's "in your contacts" rows fresh. 10-min throttle.
