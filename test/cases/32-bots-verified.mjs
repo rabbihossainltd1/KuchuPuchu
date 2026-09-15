@@ -6536,8 +6536,9 @@ const convBetween = (db, a, b) =>
           .includes("Sharing status…"),
     );
     check(
-      "r34-16b: editor flow + captions — a lone grid tap opens the editor, + stages the baked pick first (AddMore) and reopens the panel, the result carries the caption, MediaItem / the send path / forwards keep it, captioned rows render it",
-      attach.includes("} else if (sel.isEmpty()) onEdit(item) else sel.add(item)") &&
+      "r34-16b: editor flow + captions — a grid tap previews (+ checks), the preview pencil opens the editor, the panel caption bar writes the pick, the result carries the caption, MediaItem / the send path / forwards keep it, captioned rows render it",
+      attach.includes("previewUri = item.uri") &&
+        attach.includes("if (pos < 0) sel.add(item)") &&
         attach.includes('val caption: String = "",') &&
         attach.includes("val hd: Boolean = false,") &&
         store.includes(
@@ -7577,16 +7578,16 @@ const convBetween = (db, a, b) =>
     );
   }
   // r36-2: press-hold on an attach-grid photo multi-selects it straight
-  // from an empty tray (the lone-tap editor detour is untouched).
+  // from an empty tray (a lone tap previews instead of the editor detour).
   {
     const attach2 = kt("AttachSheet.kt");
     check(
-      "r36-2: MediaCell takes an optional onLongPress (hold-to-select where offered, plain tap cell otherwise); the attach grid's hold adds the pick without opening the editor",
+      "r36-2: MediaCell takes an optional onLongPress (hold-to-select where offered, plain tap cell otherwise); the attach grid's hold adds the pick without previewing, taps preview",
       attach2.includes("onLongPress: (() -> Unit)? = null,") &&
         attach2.includes(
           "if (onLongPress != null) Modifier.combinedClickable(onLongClick = onLongPress) { onToggle() } else Modifier.clickable(onClick = onToggle)",
         ) &&
-        attach2.includes("} else if (sel.isEmpty()) onEdit(item) else sel.add(item)") &&
+        attach2.includes("previewUri = item.uri") &&
         attach2.includes("onLongPress = {") &&
         attach2.includes("if (pos < 0) {"),
     );
@@ -7706,6 +7707,30 @@ const convBetween = (db, a, b) =>
         !edit38.includes("if (once) ActionBlue else Color(0x66FFFFFF), CircleShape") &&
         !edit38.includes(".border(1.5.dp, Color.White, RoundedCornerShape(7.dp))") &&
         !edit38.includes("Icons.Filled.AddPhotoAlternate"),
+    );
+  }
+  // r38-3: the attach preview stage — a grid tap lands in a walkable
+  // preview, not the editor: left/right swipes turn the photos, the pencil
+  // edits this one, the checkbox right of it multi-picks, caption + send
+  // ride the bottom. Selecting hides the action tiles; a downward swipe
+  // deselects all and returns to the grid.
+  {
+    const attach38 = kt("AttachSheet.kt");
+    check(
+      "r38-3: grid taps open a preview pager (swipe walks photos, pencil edits, checkbox multi-picks, bottom caption + send); selecting auto-hides the tiles, swipe-down deselects all",
+      attach38.includes("private fun PreviewPane(") &&
+        attach38.includes("rememberPagerState(initialPage = startIdx) { shown.size }") &&
+        attach38.includes("HorizontalPager(") &&
+        attach38.includes(
+          "if (checked) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked",
+        ) &&
+        attach38.includes("if (!fullscreen && previewUri == null && sel.isEmpty()) {") &&
+        attach38.includes(
+          "fun decodePreview(uri: Uri, ctx: android.content.Context, isVideo: Boolean)",
+        ) &&
+        attach38.includes("private object PreviewCache") &&
+        attach38.includes("downTotal > 90f") &&
+        attach38.includes("if (sel.isEmpty()) current?.let { sel.add(it) }"),
     );
   }
   // r37-3: reference-style overlay handles — per-overlay rotation,

@@ -43,23 +43,29 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContactPage
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Poll
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -76,6 +82,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -83,6 +90,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -147,6 +155,10 @@ fun AttachPanel(
     var fullscreen by remember { mutableStateOf(false) }
     var foldersOpen by remember { mutableStateOf(false) }
     var folder by remember { mutableStateOf<String?>(null) }
+    // Owner round 38 (item 3): the uri under preview (null = grid). A tap
+    // lands here instead of the editor — swipe walks the photos, the
+    // checkbox multi-picks, the pencil opens the editor for this one.
+    var previewUri by remember { mutableStateOf<Uri?>(null) }
     // Owner round 31 (item 28): swiping up ONLY grows the panel — the folder
     // chips (Camera / Screenshots / Download…) no longer pop open by
     // themselves ("swipe up korle folder/recent auto expand hoy"); the
@@ -422,7 +434,10 @@ fun AttachPanel(
                 AttachAction(Icons.Filled.AutoAwesome, if (KpThemeMode.darkBlue) ActionBlueDeep else Color(0xFF818CF8), "AI images") { comingSoon() },
             ),
         )
-        if (!fullscreen) {
+        // Owner round 38 (item 3): the moment a photo is selected the
+        // action tiles hide themselves; deselect (or swipe the preview
+        // down) and they come back.
+        if (!fullscreen && previewUri == null && sel.isEmpty()) {
             rows.forEach { row ->
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 1.dp),
@@ -444,7 +459,9 @@ fun AttachPanel(
         }
 
         /* header: Recent / folder name — selection count + SEND replaces the
-           chevron while a selection is active (WhatsApp behavior) */
+           chevron while a selection is active (WhatsApp behavior).
+           Hidden under the preview, which carries its own chrome. */
+        if (previewUri == null) {
         Row(
             Modifier
                 .fillMaxWidth()
@@ -544,9 +561,10 @@ fun AttachPanel(
                 )
             }
         }
+        }
 
         /* folder chips (only when the chevron opened them) */
-        if (foldersOpen) {
+        if (foldersOpen && previewUri == null) {
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -580,7 +598,24 @@ fun AttachPanel(
         }
 
 
-        if (shown.isEmpty()) {
+        // Owner round 38 (item 3): the preview stage takes the grid's seat.
+        val previewStart = previewUri
+        if (previewStart != null && shown.isNotEmpty()) {
+            PreviewPane(
+                shown = shown,
+                startUri = previewStart,
+                sel = sel,
+                onEdit = onEdit,
+                onSendBatch = onSendBatch,
+                onScheduleBatch = onScheduleBatch,
+                onClose = { previewUri = null },
+                onClearAll = {
+                    previewUri = null
+                    sel.clear()
+                },
+                modifier = Modifier.fillMaxWidth().weight(1f),
+            )
+        } else if (shown.isEmpty()) {
             Text(
                 if (foldersOpen) "This folder is empty — try another folder" else "No recent media",
                 color = Muted, // Owner round 31: theme token (the fixed ink vanished in dark-blue)
@@ -619,10 +654,12 @@ fun AttachPanel(
                         selectIndex = if (pos >= 0) pos + 1 else 0,
                         onToggle = {
                             haptics.tap()
-                            // Owner round 34 (item 16b): a lone tap opens the
-                            // pick in the editor; taps ADD once the editor's
-                            // + staged a first item (WhatsApp behavior).
-                            if (pos >= 0) sel.removeAll { it.uri == item.uri } else if (sel.isEmpty()) onEdit(item) else sel.add(item)
+                            // Owner round 38 (item 3): every tap previews —
+                            // swipe walks the photos, the checkbox (right of
+                            // the pencil) multi-picks, the pencil opens the
+                            // editor for this one. Tapping checks the item.
+                            previewUri = item.uri
+                            if (pos < 0) sel.add(item)
                         },
                         // Owner round 36 (item 2): press-hold multi-selects
                         // straight from an empty tray — no editor detour.
@@ -710,6 +747,219 @@ internal fun loadMediaPool(ctx: android.content.Context): List<MediaItem> {
  *  Owner round 36 (item 2): press-hold starts multi-select where offered
  *  (null = plain tap cell, the status picker's shape). */
 @OptIn(ExperimentalFoundationApi::class)
+/** Owner round 38 (item 3): the preview stage — a grid tap lands here,
+ *  not the editor. Left/right swipes walk the photos, the pencil opens the
+ *  editor for this one, the checkbox right of it multi-picks (no more
+ *  add-photo), and the caption bar + send ride the bottom. Swipe DOWN
+ *  deselects everything and returns to the grid (tiles come back); × keeps
+ *  the checked set and returns to the grid.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun PreviewPane(
+    shown: List<MediaItem>,
+    startUri: Uri,
+    sel: androidx.compose.runtime.snapshots.SnapshotStateList<MediaItem>,
+    onEdit: (MediaItem) -> Unit,
+    onSendBatch: () -> Unit,
+    onScheduleBatch: () -> Unit,
+    onClose: () -> Unit,
+    onClearAll: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val haptics = rememberHaptics()
+    val startIdx = remember(startUri) { shown.indexOfFirst { it.uri == startUri }.coerceAtLeast(0) }
+    val pagerState = rememberPagerState(initialPage = startIdx) { shown.size }
+    val current = shown.getOrNull(pagerState.currentPage)
+    val checked = current?.let { c -> sel.any { it.uri == c.uri } } == true
+    val cap = current?.let { c -> sel.firstOrNull { it.uri == c.uri }?.caption ?: "" } ?: ""
+    var downTotal by remember { mutableStateOf(0f) }
+    Column(modifier) {
+        // Top chrome: × … pencil, checkbox (right of the pencil).
+        Row(
+            Modifier.fillMaxWidth().padding(start = 6.dp, end = 10.dp, top = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier
+                    .clip(CircleShape)
+                    .clickable {
+                        haptics.tap()
+                        onClose()
+                    }
+                    .padding(8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Close, "Close preview", tint = Muted, modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.weight(1f))
+            Box(
+                Modifier
+                    .clip(CircleShape)
+                    .clickable {
+                        haptics.tap()
+                        current?.let(onEdit)
+                    }
+                    .padding(8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Edit, "Edit", tint = Ink, modifier = Modifier.size(20.dp))
+            }
+            Box(
+                Modifier
+                    .clip(CircleShape)
+                    .clickable {
+                        haptics.tap()
+                        val item = current ?: return@clickable
+                        val i = sel.indexOfFirst { it.uri == item.uri }
+                        if (i >= 0) sel.removeAt(i) else sel.add(item)
+                    }
+                    .padding(8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    if (checked) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+                    if (checked) "Uncheck" else "Check",
+                    tint = if (checked) ActionBlue else Muted,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+        // The walkable photo; a downward swipe clears all and leaves.
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onDragEnd = { downTotal = 0f },
+                        onDragCancel = { downTotal = 0f },
+                    ) { _, drag ->
+                        downTotal += drag
+                        if (downTotal > 90f) {
+                            downTotal = 0f
+                            haptics.tap()
+                            onClearAll()
+                        }
+                    }
+                },
+        ) {
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+                key = { shown[it].uri.toString() },
+            ) { page ->
+                PreviewPage(shown[page])
+            }
+        }
+        // Bottom: caption bar + send (reference placement).
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(ChipIdle)
+                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                BasicTextField(
+                    value = cap,
+                    onValueChange = { t ->
+                        val item = current ?: return@BasicTextField
+                        val v = t.take(1000)
+                        val i = sel.indexOfFirst { it.uri == item.uri }
+                        if (i >= 0) sel[i] = sel[i].copy(caption = v) else sel.add(item.copy(caption = v))
+                    },
+                    singleLine = true,
+                    textStyle = TextStyle(color = Ink, fontSize = 14.sp),
+                    cursorBrush = SolidColor(Ink),
+                    modifier = Modifier.weight(1f),
+                    decorationBox = { inner ->
+                        Box {
+                            if (cap.isEmpty()) Text("Add a caption...", color = Muted, fontSize = 14.sp)
+                            inner()
+                        }
+                    },
+                )
+            }
+            Spacer(Modifier.size(8.dp))
+            Box(
+                Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .background(ActionBlue)
+                    .combinedClickable(
+                        onLongClick = {
+                            haptics.tap()
+                            onScheduleBatch()
+                        },
+                    ) {
+                        haptics.tap()
+                        if (sel.isEmpty()) current?.let { sel.add(it) }
+                        onSendBatch()
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Send,
+                    contentDescription = "Send",
+                    tint = ActionBlueInk,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+    }
+}
+
+/** One preview page: a ~1080px still (Fit on black, media stages are dark
+ *  everywhere), video frames carrying their badges like the grid cell. */
+@Composable
+private fun PreviewPage(item: MediaItem) {
+    val ctx = LocalContext.current
+    val bmp by produceState<ImageBitmap?>(initialValue = PreviewCache.get(item.uri), key1 = item.uri) {
+        if (value == null) {
+            value = withContext(Dispatchers.IO) {
+                PreviewCache.get(item.uri) ?: ThumbDecodeGate.decodePreview(item.uri, ctx, item.isVideo)
+                    ?.also { PreviewCache.put(item.uri, it) }
+            }
+        }
+    }
+    Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+        val b = bmp
+        if (b != null) {
+            Image(b, null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+        }
+        if (item.isVideo) {
+            Icon(
+                Icons.Filled.Videocam,
+                contentDescription = "Video",
+                tint = Color.White,
+                modifier = Modifier.align(Alignment.TopStart).padding(10.dp).size(20.dp),
+            )
+            Text(
+                formatDuration(item.durationMs),
+                color = Color.White,
+                fontSize = 12.sp,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(10.dp),
+            )
+        }
+    }
+}
+
+/** Preview stills LRU: ~1080px bitmaps are ~4 MB — four pages max. */
+private object PreviewCache {
+    private val lru = object : android.util.LruCache<String, ImageBitmap>(16 * 1024) {
+        override fun sizeOf(key: String, value: ImageBitmap): Int = value.asAndroidBitmap().byteCount / 1024
+    }
+
+    fun get(uri: Uri): ImageBitmap? = lru.get(uri.toString())
+
+    fun put(uri: Uri, bmp: ImageBitmap) = lru.put(uri.toString(), bmp)
+}
+
 @Composable
 internal fun MediaCell(
     item: MediaItem,
@@ -809,6 +1059,12 @@ private object ThumbDecodeGate {
             if (isVideo) video.withPermit { decodeThumb(uri, ctx, true) }
             else decodeThumb(uri, ctx, false)
         }
+
+    suspend fun decodePreview(uri: Uri, ctx: android.content.Context, isVideo: Boolean): ImageBitmap? =
+        all.withPermit {
+            if (isVideo) video.withPermit { previewFrame(uri, ctx) }
+            else previewBitmap(uri, ctx)
+        }
 }
 
 /** Grid-cell thumbnail LRU (~24 MB of bitmaps) so grid re-entry doesn't re-decode. */
@@ -860,6 +1116,48 @@ private fun decodeThumb(uri: Uri, ctx: android.content.Context, isVideo: Boolean
             val raw = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
             val opts = BitmapFactory.Options().apply { inSampleSize = 4 }
             BitmapFactory.decodeByteArray(raw, 0, raw.size, opts)?.asImageBitmap()
+        }
+    }.getOrNull()
+
+/** Preview still: the same decode as the thumb, at ~1080px instead of 256. */
+private fun previewBitmap(uri: Uri, ctx: android.content.Context): ImageBitmap? =
+    runCatching {
+        if (Build.VERSION.SDK_INT >= 28) {
+            ImageDecoder.decodeBitmap(ImageDecoder.createSource(ctx.contentResolver, uri)) { d, info, _ ->
+                val srcW = info.size.width.coerceAtLeast(1)
+                val srcH = info.size.height.coerceAtLeast(1)
+                val scale = minOf(1080f / srcW, 1080f / srcH).coerceAtMost(1f)
+                d.setTargetSize(
+                    (srcW * scale).toInt().coerceAtLeast(1),
+                    (srcH * scale).toInt().coerceAtLeast(1),
+                )
+            }.asImageBitmap()
+        } else {
+            val raw = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(raw, 0, raw.size, bounds)
+            var sample = 1
+            while (bounds.outWidth / (sample * 2) >= 1080 || bounds.outHeight / (sample * 2) >= 1080) sample *= 2
+            BitmapFactory.decodeByteArray(raw, 0, raw.size, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
+        }
+    }.getOrNull()
+
+/** Preview video frame at ~512px (a full frame per page is overkill). */
+private fun previewFrame(uri: Uri, ctx: android.content.Context): ImageBitmap? =
+    runCatching {
+        val mmr = MediaMetadataRetriever()
+        try {
+            mmr.setDataSource(ctx, uri)
+            val scaled =
+                if (Build.VERSION.SDK_INT >= 27) {
+                    mmr.getScaledFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 512, 512)
+                        ?: mmr.frameAtTime
+                } else {
+                    mmr.frameAtTime
+                }
+            scaled?.asImageBitmap()
+        } finally {
+            mmr.release()
         }
     }.getOrNull()
 
