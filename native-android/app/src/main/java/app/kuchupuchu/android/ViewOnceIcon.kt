@@ -3,16 +3,11 @@ package app.kuchupuchu.android
 import android.graphics.Bitmap
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -22,54 +17,28 @@ import kotlin.math.roundToInt
 import androidx.compose.material3.Text
 
 /**
- * Owner round 34 (item 16a): the view-once ① mark, drawn from the owner's SVG
- * (a near-full ring with a dotted gap on the right + the digit "1" left of
- * center). Shared: the chat bubble (16a) and the attach editor's caption bar
- * (16b), so the mark is identical in both places.
+ * Owner round 36 (item 4): the view-once ① mark — one clean ring + the
+ * digit "1" dead center. (Round 34 traced the owner's SVG: a 260° arc
+ * clipped past its viewBox + a dotted gap + a 6sp digit — mush at the
+ * 20.dp caption size, the "venge" icon. This reads at every size.)
+ * Shared: the chat bubble (16a) and the editor's caption bar (16b), so
+ * the mark is identical in both places.
  */
 @Composable
 internal fun ViewOnceOneIcon(iconSize: Dp, tint: Color = Color.White) {
     Box(Modifier.size(iconSize), contentAlignment = Alignment.Center) {
         Canvas(Modifier.matchParentSize()) {
-            // px per SVG unit (the source viewBox is 100x100).
-            val u = size.minDimension / 100f
-            if (u <= 0f) return@Canvas
-            // The solid arc: circle center (81.2, 50), r 32, from 130°
-            // sweeping 260° counter-clockwise (the long way around the left).
-            drawArc(
-                color = tint,
-                startAngle = 130f,
-                sweepAngle = -260f,
-                useCenter = false,
-                topLeft = Offset((81.2f - 32f) * u, (50f - 32f) * u),
-                size = Size(64f * u, 64f * u),
-                style = Stroke(width = 5.5f * u, cap = StrokeCap.Round),
-            )
-            // The dotted gap on the right (x, y, r triples from the SVG).
-            val dots =
-                floatArrayOf(
-                    60.6f, 25.5f, 2.5f,
-                    69f, 36.5f, 3.6f,
-                    72f, 50f, 4.2f,
-                    69f, 63.5f, 3.6f,
-                    60.6f, 74.5f, 2.5f,
-                )
-            var i = 0
-            while (i < dots.size) {
-                drawCircle(tint, radius = dots[i + 2] * u, center = Offset(dots[i] * u, dots[i + 1] * u))
-                i += 3
-            }
+            val d = size.minDimension
+            if (d <= 0f) return@Canvas
+            val stroke = (d * 0.09f).coerceAtLeast(2f)
+            drawCircle(tint, radius = d / 2f - stroke / 2f, style = Stroke(width = stroke))
         }
-        // The digit, centered at x = 38 like the SVG's text anchor: the box
-        // keeps the left 76 units, whose center is exactly 38.
-        Box(Modifier.fillMaxSize().padding(end = iconSize * 0.24f), contentAlignment = Alignment.Center) {
-            Text(
-                "1",
-                fontSize = (iconSize.value * 0.32f).sp,
-                fontWeight = FontWeight.Bold,
-                color = tint,
-            )
-        }
+        Text(
+            "1",
+            fontSize = (iconSize.value * 0.52f).sp,
+            fontWeight = FontWeight.Bold,
+            color = tint,
+        )
     }
 }
 

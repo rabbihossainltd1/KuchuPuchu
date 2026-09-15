@@ -6129,10 +6129,12 @@ const convBetween = (db, a, b) =>
     );
     const icon = kt("ViewOnceIcon.kt");
     check(
-      "r34-16a: app — the 1 mark is drawn from the owner's SVG (260° counter-clockwise arc + dotted gap + '1' at x=38) and shared with the editor; the blur is a coil Transformation (48 px + triple box pass, every API level); a VANISHED frame plays the vanish show and drops the row without a tombstone",
+      "r34-16a: app — the 1 mark is one clean ring + a centered '1' (round 36 redrew the mushy SVG trace) and shared with the editor; the blur is a coil Transformation (48 px + triple box pass, every API level); a VANISHED frame plays the vanish show and drops the row without a tombstone",
       icon.includes("internal fun ViewOnceOneIcon(iconSize: Dp, tint: Color = Color.White)") &&
-        icon.includes("sweepAngle = -260f") &&
-        icon.includes('Text(\n                "1",') &&
+        icon.includes(
+          "drawCircle(tint, radius = d / 2f - stroke / 2f, style = Stroke(width = stroke))",
+        ) &&
+        icon.includes('Text(\n            "1",') &&
         icon.includes("internal object ViewOnceBlur : coil.transform.Transformation") &&
         icon.includes('"kp-viewonce-blur-v1"') &&
         icon.includes("repeat(3) { boxBlurPass(pix, sw, sh, 4) }") &&
@@ -7571,6 +7573,20 @@ const convBetween = (db, a, b) =>
         edit3.includes(
           "if (strokes.isNotEmpty()) strokes.removeAt(strokes.size - 1) else undoOverlay()",
         ),
+    );
+  }
+  // r36-4: the ① mark redrawn — one clean ring + a centered "1" that
+  // reads at every size (the clipped SVG arc + dotted gap + 6sp digit
+  // rendered as mush at 20.dp). Shared by the bubble and the editor.
+  {
+    const icon4 = kt("ViewOnceIcon.kt");
+    check(
+      "r36-4: ViewOnceOneIcon is a full ring (9% stroke) + a centered bold 1 at 52% of the size; no arc / dots / off-center digit remain",
+      icon4.includes("val stroke = (d * 0.09f).coerceAtLeast(2f)") &&
+        icon4.includes("(iconSize.value * 0.52f).sp") &&
+        !icon4.includes("drawArc") &&
+        !icon4.includes("sweepAngle") &&
+        !icon4.includes("floatArrayOf"),
     );
   }
   // r35-8: the editor grows up — overlays carry a pinch size (preview AND
