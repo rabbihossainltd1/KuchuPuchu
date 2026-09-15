@@ -8367,6 +8367,20 @@ const convBetween = (db, a, b) =>
       kt("Theme.kt").includes("private object NoTouchIndication : Indication") &&
         kt("Theme.kt").includes("LocalIndication provides NoTouchIndication"),
     );
+    check(
+      "r35-3: voice-isolation strength picks like a privacy level — a SettingRow opening the bottom sheet (KpSheetRow per level, selected checkmark), not an inline segment control",
+      kt("SettingsScreen.kt").includes(
+        'SettingRow(Icons.Filled.NoiseAware, "Voice isolation on calls", ISO_LEVELS[isoLevel])',
+      ) &&
+        kt("SettingsScreen.kt").includes(
+          'private val ISO_LEVELS = listOf("Normal", "Medium", "Aggressive")',
+        ) &&
+        kt("SettingsScreen.kt").includes('picker = "isoLevel"') &&
+        kt("SettingsScreen.kt").includes('title = "Voice Isolation On Calls?"') &&
+        kt("SettingsScreen.kt").includes("VoiceIsolation.setLevel(ctx, i)") &&
+        kt("SettingsScreen.kt").includes("VoiceIsolation.diag()") &&
+        !kt("SettingsScreen.kt").includes('"Normal", "Medium", "Aggressive").forEachIndexed'),
+    );
     {
       const st = kt("StatusScreens.kt");
       const vw = st.slice(

@@ -208,6 +208,7 @@ private fun SubScreenHeader(title: String, onBack: () -> Unit, trailing: @Compos
 }
 
 private val PRIVACY_LEVELS = listOf("nobody" to "No one", "contacts" to "Contacts only", "public" to "Public")
+private val ISO_LEVELS = listOf("Normal", "Medium", "Aggressive")
 
 private fun privacyLabel(level: String): String = PRIVACY_LEVELS.firstOrNull { it.first == level }?.second ?: "Public"
 
@@ -303,6 +304,8 @@ fun PrivacySettingsScreen(nav: NavController) {
     val me = remember { mutableStateOf(Store.me ?: JSONObject()) }
     var picker by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    // Owner round 35 (item 3): hoisted — the row shows it, the sheet picks it.
+    var isoLevel by remember { mutableStateOf(VoiceIsolation.getLevel(ctx)) }
 
     LaunchedEffect(Unit) {
         runCatching {
@@ -380,46 +383,11 @@ fun PrivacySettingsScreen(nav: NavController) {
                     SystemAudioTap.setEnabled(ctx, on)
                 }
             }
-            // Owner round 34 (item 9): isolation strength in three steps, not
-            // a switch — Normal hushes the room, Medium cleans it, Aggressive
-            // gates it. The line below proves the cleaner runs on real calls.
-            var isoLevel by remember { mutableStateOf(VoiceIsolation.getLevel(ctx)) }
-            val isoHaptics = rememberHaptics()
-            Column(Modifier.fillMaxWidth().padding(start = 16.dp, top = 6.dp, bottom = 8.dp, end = 16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.NoiseAware, "Voice isolation on calls", tint = ActionBlueDeep, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Text("Voice isolation on calls", fontSize = 14.5.sp, color = Ink, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.weight(1f))
-                }
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Line.copy(alpha = 0.5f))
-                        .padding(3.dp),
-                ) {
-                    listOf("Normal", "Medium", "Aggressive").forEachIndexed { i, name ->
-                        val sel = isoLevel == i
-                        Box(
-                            Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (sel) ActionBlue else Color.Transparent)
-                                .clickable {
-                                    isoHaptics.tap()
-                                    isoLevel = i
-                                    VoiceIsolation.setLevel(ctx, i)
-                                }
-                                .padding(vertical = 7.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(name, fontSize = 13.sp, color = if (sel) ActionBlueInk else Muted, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Medium)
-                        }
-                    }
-                }
-                Text(VoiceIsolation.diag(), fontSize = 11.5.sp, color = Muted, maxLines = 1, modifier = Modifier.padding(top = 6.dp, start = 32.dp))
-            }
+            // Owner round 35 (item 3): strength picks like a privacy level
+            // above — a row opening the sheet, not an inline segment control.
+            // The line below proves the cleaner runs on real calls.
+            SettingRow(Icons.Filled.NoiseAware, "Voice isolation on calls", ISO_LEVELS[isoLevel]) { picker = "isoLevel" }
+            Text(VoiceIsolation.diag(), fontSize = 11.5.sp, color = Muted, maxLines = 1, modifier = Modifier.padding(start = 48.dp, end = 16.dp, bottom = 10.dp))
         }
         Spacer(Modifier.height(12.dp))
         // Owner round 32 (item 7): the people this account blocked — unblock
@@ -431,6 +399,22 @@ fun PrivacySettingsScreen(nav: NavController) {
     }
 
     picker?.let { field ->
+        // Owner round 35 (item 3): isolation strength picks like a privacy
+        // level — same sheet, same rows; a local pref, no server round-trip.
+        if (field == "isoLevel") {
+            KpSheet(onDismiss = { picker = null }, title = "Voice Isolation On Calls?") {
+                ISO_LEVELS.forEachIndexed { i, name ->
+                    KpSheetRow(icon = null, label = name, selected = i == isoLevel) {
+                        picker = null
+                        if (i != isoLevel) {
+                            isoLevel = i
+                            VoiceIsolation.setLevel(ctx, i)
+                        }
+                    }
+                }
+            }
+            return@let
+        }
         val key = keyOf(field)
         val current = level(key, if (key == "phone") "contacts" else "public")
         // Owner round 31: the picker is a bottom sheet (the status ⋮ pattern),
