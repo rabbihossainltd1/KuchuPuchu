@@ -353,24 +353,24 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
         val id = selectedId ?: return null
         texts.find { it.id == id }?.let { t ->
             val rx = (0.04f + 0.014f * t.text.length.coerceAtMost(16)) * t.scale
-            return EditSel(id, t.center, rx, 0.05f * t.scale)
+            return EditSel(id, t.center, rx, 0.05f * t.scale, t.rotation)
         }
-        stickers.find { it.id == id }?.let { s -> return EditSel(id, s.center, 0.075f * s.scale, 0.075f * s.scale) }
+        stickers.find { it.id == id }?.let { s -> return EditSel(id, s.center, 0.075f * s.scale, 0.075f * s.scale, s.rotation) }
         return null
     }
 
-    /** Topmost overlay under the normalised point (stickers above texts). */
-    fun hitOverlay(x: Float, y: Float): String? {
+    /** Topmost overlay under the point (stickers above texts) — the touch
+     *  is un-turned into each overlay's own frame, so turned overlays tap right. */
+    fun hitOverlay(x: Float, y: Float, w: Float, h: Float): String? {
         for (i in stickers.indices.reversed()) {
             val s = stickers[i]
             val r = 0.075f * s.scale
-            if (kotlin.math.abs(x - s.center.x) <= r && kotlin.math.abs(y - s.center.y) <= r) return s.id
+            if (inOverlay(x, y, s.center, r, r, s.rotation, w, h)) return s.id
         }
         for (i in texts.indices.reversed()) {
             val t = texts[i]
             val rx = (0.04f + 0.014f * t.text.length.coerceAtMost(16)) * t.scale
-            val ry = 0.05f * t.scale
-            if (kotlin.math.abs(x - t.center.x) <= rx && kotlin.math.abs(y - t.center.y) <= ry) return t.id
+            if (inOverlay(x, y, t.center, rx, 0.05f * t.scale, t.rotation, w, h)) return t.id
         }
         return null
     }
@@ -431,6 +431,21 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
         }
     }
 
+    /** Reference-style rotate handle: drag around the centre, live degrees. */
+    fun rotateOverlay(id: String, delta: Float) {
+        val ti = texts.indexOfFirst { it.id == id }
+        if (ti >= 0) {
+            val t = texts[ti]
+            texts[ti] = t.copy(rotation = (t.rotation + delta) % 360f)
+            return
+        }
+        val si = stickers.indexOfFirst { it.id == id }
+        if (si >= 0) {
+            val s = stickers[si]
+            stickers[si] = s.copy(rotation = (s.rotation + delta) % 360f)
+        }
+    }
+
     fun rotateTap() {
         exitCrop()
         haptics.tap()
@@ -444,11 +459,11 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
         }
         for (i in texts.indices) {
             val t = texts[i]
-            texts[i] = t.copy(center = rot90(t.center))
+            texts[i] = t.copy(center = rot90(t.center), rotation = (t.rotation + 90f) % 360f)
         }
         for (i in stickers.indices) {
             val s = stickers[i]
-            stickers[i] = s.copy(center = rot90(s.center))
+            stickers[i] = s.copy(center = rot90(s.center), rotation = (s.rotation + 90f) % 360f)
         }
     }
 
@@ -864,8 +879,10 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                                 val d0 = awaitFirstDown()
                                 val nx0 = d0.position.x / w
                                 val ny0 = d0.position.y / h
+                                // 0 none, 3 rotate handle, 4 resize handle.
+                                var grabHandle = 0
                                 selectedOverlay()?.let { sel ->
-                                    val dp = deletePos(sel)
+                                    val dp = deletePos(sel, w, h)
                                     if (kotlin.math.hypot(nx0 - dp.x, ny0 - dp.y) < DEL_MARK_HIT) {
                                         haptics.tap()
                                         pushOverlayPast()
@@ -873,27 +890,72 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                                         waitForUpOrCancellation()
                                         return@awaitEachGesture
                                     }
+                                    // Reference-style handles: top-right turns,
+                                    // bottom-right resizes — one snapshot each.
+                                    val rp = rotatePos(sel, w, h)
+                                    val zp = resizePos(sel, w, h)
+                                    grabHandle =
+                                        if (kotlin.math.hypot(nx0 - rp.x, ny0 - rp.y) < DEL_MARK_HIT) 3
+                                        else if (kotlin.math.hypot(nx0 - zp.x, ny0 - zp.y) < DEL_MARK_HIT) 4
+                                        else 0
+                                    if (grabHandle != 0) {
+                                        haptics.tap()
+                                        pushOverlayPast()
+                                    }
                                 }
-                                val hit = hitOverlay(nx0, ny0)
+                                val hit = if (grabHandle != 0) selectedId else hitOverlay(nx0, ny0, w, h)
                                 if (hit != null) {
                                     haptics.tap()
                                     selectedId = hit
                                 }
                                 // 0 undecided, 1 move, 2 pinch (pinch wins
                                 // outright — lifting back to one finger
-                                // ends the gesture instead of dragging).
-                                var mode = 0
-                                var moved = false
+                                // ends the gesture instead of dragging),
+                                // 3 rotate handle, 4 resize handle.
+                                var mode = grabHandle
+                                var moved = grabHandle != 0
                                 var prev = d0.position
                                 var prevDist = 0f
                                 var prevCent = Offset.Zero
+                                var grabAngle = 0f
+                                var grabDist = 0f
+                                if (mode == 3 || mode == 4) {
+                                    val sel = selectedOverlay()
+                                    if (sel != null) {
+                                        val ccx = sel.center.x * w
+                                        val ccy = sel.center.y * h
+                                        grabAngle = kotlin.math.atan2(d0.position.y - ccy, d0.position.x - ccx)
+                                        grabDist = kotlin.math.hypot(d0.position.x - ccx, d0.position.y - ccy)
+                                    }
+                                }
                                 val slopPx = viewConfiguration.touchSlop
                                 while (true) {
                                     val ev = awaitPointerEvent()
                                     val pressed = ev.changes.filter { it.pressed }
                                     if (pressed.isEmpty()) break
                                     val target = hit ?: selectedId
-                                    if (pressed.size >= 2 && target != null) {
+                                    if (mode == 3 || mode == 4) {
+                                        val c = pressed[0]
+                                        val sel = selectedOverlay()
+                                        if (sel != null) {
+                                            val ccx = sel.center.x * w
+                                            val ccy = sel.center.y * h
+                                            if (mode == 3) {
+                                                val g = kotlin.math.atan2(c.position.y - ccy, c.position.x - ccx)
+                                                // Around the branch cut without a 360° jump.
+                                                var dd = g - grabAngle
+                                                while (dd > Math.PI) dd -= 2f * Math.PI.toFloat()
+                                                while (dd < -Math.PI) dd += 2f * Math.PI.toFloat()
+                                                rotateOverlay(sel.id, Math.toDegrees(dd.toDouble()).toFloat())
+                                                grabAngle = g
+                                            } else {
+                                                val d = kotlin.math.hypot(c.position.x - ccx, c.position.y - ccy)
+                                                if (grabDist > 1f && d > 1f) scaleOverlay(sel.id, d / grabDist)
+                                                grabDist = d
+                                            }
+                                        }
+                                        pressed.forEach { it.consume() }
+                                    } else if (pressed.size >= 2 && target != null) {
                                         val a = pressed[0].position
                                         val b = pressed[1].position
                                         val dist = kotlin.math.hypot(a.x - b.x, a.y - b.y)
@@ -1529,17 +1591,42 @@ sealed class EditedMedia {
 
 internal class PenStroke(val color: Color, val width: Float, val points: MutableList<Offset>)
 
-/** A placed text overlay: normalised centre, the words, their colour, pinch size. */
-internal data class EditText(val id: String, val center: Offset, val text: String, val color: Color, val scale: Float = 1f)
+/** A placed text overlay: normalised centre, the words, their colour, pinch size, turn. */
+internal data class EditText(val id: String, val center: Offset, val text: String, val color: Color, val scale: Float = 1f, val rotation: Float = 0f)
 
-/** A placed sticker: normalised centre + the pack glyph + pinch size. */
-internal data class EditSticker(val id: String, val center: Offset, val glyph: String, val scale: Float = 1f)
+/** A placed sticker: normalised centre + the pack glyph + pinch size + turn. */
+internal data class EditSticker(val id: String, val center: Offset, val glyph: String, val scale: Float = 1f, val rotation: Float = 0f)
 
-/** The selected overlay's hit geometry (normalised units). */
-private data class EditSel(val id: String, val center: Offset, val rx: Float, val ry: Float)
+/** The selected overlay's hit geometry (normalised units + its turn). */
+private data class EditSel(val id: String, val center: Offset, val rx: Float, val ry: Float, val rot: Float)
 
-/** The delete mark floats just above the selection. */
-private fun deletePos(sel: EditSel): Offset = Offset(sel.center.x, (sel.center.y - sel.ry - 0.045f).coerceAtLeast(0.03f))
+/** Owner round 37 (item 3): a selection-box corner in normalised units —
+ *  the reference puts × top-left, rotate top-right, resize bottom-right.
+ *  The turn is a TRUE pixel-space rotation (normalised space is stretched). */
+private fun handlePos(sel: EditSel, sx: Float, sy: Float, w: Float, h: Float): Offset {
+    val dx = sx * sel.rx * w
+    val dy = sy * sel.ry * h
+    val r = Math.toRadians(sel.rot.toDouble())
+    val cos = kotlin.math.cos(r).toFloat()
+    val sin = kotlin.math.sin(r).toFloat()
+    return Offset(sel.center.x + (dx * cos - dy * sin) / w, sel.center.y + (dx * sin + dy * cos) / h)
+}
+
+private fun deletePos(sel: EditSel, w: Float, h: Float): Offset = handlePos(sel, -1f, -1f, w, h)
+
+private fun rotatePos(sel: EditSel, w: Float, h: Float): Offset = handlePos(sel, 1f, -1f, w, h)
+
+private fun resizePos(sel: EditSel, w: Float, h: Float): Offset = handlePos(sel, 1f, 1f, w, h)
+
+/** The touch un-turned into the overlay's own frame (pixel space, true angle). */
+private fun inOverlay(x: Float, y: Float, c: Offset, rx: Float, ry: Float, rot: Float, w: Float, h: Float): Boolean {
+    val dx = (x - c.x) * w
+    val dy = (y - c.y) * h
+    val r = Math.toRadians(-rot.toDouble())
+    val cos = kotlin.math.cos(r).toFloat()
+    val sin = kotlin.math.sin(r).toFloat()
+    return kotlin.math.abs(dx * cos - dy * sin) <= rx * w && kotlin.math.abs(dx * sin + dy * cos) <= ry * h
+}
 
 /** Owner round 35 (item 8): the delete mark's normalised hit radius. */
 private const val DEL_MARK_HIT = 0.04f
@@ -1626,7 +1713,10 @@ private fun drawEditText(native: android.graphics.Canvas, t: EditText, w: Float,
             textAlign = android.graphics.Paint.Align.CENTER
             setShadowLayer(size * 0.08f, 0f, size * 0.04f, 0xCC000000.toInt())
         }
+    native.save()
+    native.rotate(t.rotation, t.center.x * w, t.center.y * h)
     native.drawText(t.text, t.center.x * w, t.center.y * h + size * 0.35f, paint)
+    native.restore()
 }
 
 /** The sticker glyph, drawn identically in the preview and the bake. */
@@ -1639,10 +1729,15 @@ private fun drawEditSticker(native: android.graphics.Canvas, s: EditSticker, w: 
             textAlign = android.graphics.Paint.Align.CENTER
             setShadowLayer(size * 0.06f, 0f, size * 0.03f, 0x88000000.toInt())
         }
+    native.save()
+    native.rotate(s.rotation, s.center.x * w, s.center.y * h)
     native.drawText(s.glyph, s.center.x * w, s.center.y * h + size * 0.35f, paint)
+    native.restore()
 }
 
-/** Preview-only: the selection ring + the delete mark above it. */
+/** Preview-only: the selection rect turns with the overlay, and the handles
+ *  sit ON its corners like the reference — × top-left, rotate top-right,
+ *  resize bottom-right (white buttons, dark glyphs, same hit feel). */
 private fun drawEditSelection(native: android.graphics.Canvas, sel: EditSel, w: Float, h: Float) {
     val ring =
         android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
@@ -1650,29 +1745,56 @@ private fun drawEditSelection(native: android.graphics.Canvas, sel: EditSel, w: 
             style = android.graphics.Paint.Style.STROKE
             strokeWidth = 3f
         }
-    // Owner round 36 (item 3): the selection is a SHARP rectangle hugging
-    // the overlay — the old circle looked "rounded" and sat loose on text.
-    val cx = sel.center.x * w
-    val cy = sel.center.y * h
-    native.drawRect(cx - sel.rx * w, cy - sel.ry * h, cx + sel.rx * w, cy + sel.ry * h, ring)
-    val dp = deletePos(sel)
-    val dx = dp.x * w
-    val dy = dp.y * h
     val fill =
         android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             color = android.graphics.Color.WHITE
             style = android.graphics.Paint.Style.FILL
         }
-    native.drawCircle(dx, dy, 32f, fill)
-    val cross =
+    val glyph =
         android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             color = android.graphics.Color.BLACK
             style = android.graphics.Paint.Style.STROKE
             strokeWidth = 5f
             strokeCap = android.graphics.Paint.Cap.ROUND
         }
-    native.drawLine(dx - 11f, dy - 11f, dx + 11f, dy + 11f, cross)
-    native.drawLine(dx - 11f, dy + 11f, dx + 11f, dy - 11f, cross)
+    // Owner round 36 (item 3): the selection is a SHARP rectangle hugging
+    // the overlay — the old circle looked "rounded" and sat loose on text.
+    val cx = sel.center.x * w
+    val cy = sel.center.y * h
+    native.save()
+    native.rotate(sel.rot, cx, cy)
+    native.drawRect(cx - sel.rx * w, cy - sel.ry * h, cx + sel.rx * w, cy + sel.ry * h, ring)
+    val lx = cx - sel.rx * w
+    val ty = cy - sel.ry * h
+    val rx = cx + sel.rx * w
+    val by = cy + sel.ry * h
+    // × top-left.
+    native.drawCircle(lx, ty, 32f, fill)
+    native.drawLine(lx - 11f, ty - 11f, lx + 11f, ty + 11f, glyph)
+    native.drawLine(lx - 11f, ty + 11f, lx + 11f, ty - 11f, glyph)
+    // Rotate top-right: a near-full arc (gap at the top) + a filled head
+    // sitting exactly on the arc's start, pointing along the travel.
+    native.drawCircle(rx, ty, 32f, fill)
+    native.drawArc(rx - 13f, ty - 13f, rx + 13f, ty + 13f, 300f, 300f, false, glyph)
+    val head = android.graphics.Path()
+    head.moveTo(rx + 6.5f, ty - 11.3f)
+    head.lineTo(rx - 4.4f, ty - 12.4f)
+    head.lineTo(rx + 0.1f, ty - 20.2f)
+    head.close()
+    val glyphFill =
+        android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.BLACK
+            style = android.graphics.Paint.Style.FILL
+        }
+    native.drawPath(head, glyphFill)
+    // Resize bottom-right: a diagonal double arrow.
+    native.drawCircle(rx, by, 32f, fill)
+    native.drawLine(rx - 10f, by - 10f, rx + 10f, by + 10f, glyph)
+    native.drawLine(rx + 10f, by + 10f, rx + 10f, by + 1f, glyph)
+    native.drawLine(rx + 10f, by + 10f, rx + 1f, by + 10f, glyph)
+    native.drawLine(rx - 10f, by - 10f, rx - 10f, by - 1f, glyph)
+    native.drawLine(rx - 10f, by - 10f, rx - 1f, by - 10f, glyph)
+    native.restore()
 }
 
 /** Runs the working copy through the filter (a no-op for Normal). */

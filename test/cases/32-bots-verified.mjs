@@ -7601,7 +7601,7 @@ const convBetween = (db, a, b) =>
         edit3.includes("fun pushOverlayPast()") &&
         edit3.includes("fun undoOverlay()") &&
         edit3.includes("removeLastOrNull()") &&
-        (edit3.match(/pushOverlayPast\(\)/g) || []).length === 7 &&
+        (edit3.match(/pushOverlayPast\(\)/g) || []).length === 8 &&
         edit3.includes(
           "native.drawRect(cx - sel.rx * w, cy - sel.ry * h, cx + sel.rx * w, cy + sel.ry * h, ring)",
         ) &&
@@ -7612,6 +7612,40 @@ const convBetween = (db, a, b) =>
         edit3.includes(
           "if (strokes.isNotEmpty()) strokes.removeAt(strokes.size - 1) else undoOverlay()",
         ),
+    );
+  }
+  // r37-3: reference-style overlay handles — per-overlay rotation,
+  // × top-left deletes, top-right drags the turn, bottom-right drags
+  // the size; the box + its handles turn with the overlay, taps un-turn
+  // into its frame, the picture turn carries overlay turns too.
+  {
+    const editH = kt("MediaEditScreen.kt");
+    check(
+      "r37-3: overlays turn — rotation on text + sticker, ×/rotate/resize corner handles with true pixel-space maths, handle drags for turn + size, taps un-turn into the overlay frame, rotate carries overlay turns, preview + bake share the turned draws",
+      (editH.match(/val rotation: Float = 0f/g) || []).length === 2 &&
+        editH.includes("fun rotateOverlay(id: String, delta: Float)") &&
+        editH.includes("t.copy(rotation = (t.rotation + delta) % 360f)") &&
+        editH.includes(
+          "private fun handlePos(sel: EditSel, sx: Float, sy: Float, w: Float, h: Float): Offset {",
+        ) &&
+        editH.includes("handlePos(sel, -1f, -1f, w, h)") &&
+        editH.includes("handlePos(sel, 1f, -1f, w, h)") &&
+        editH.includes("handlePos(sel, 1f, 1f, w, h)") &&
+        editH.includes("fun hitOverlay(x: Float, y: Float, w: Float, h: Float): String? {") &&
+        editH.includes("inOverlay(x, y, s.center, r, r, s.rotation, w, h)") &&
+        editH.includes("rotation = (t.rotation + 90f) % 360f") &&
+        editH.includes("rotation = (s.rotation + 90f) % 360f") &&
+        editH.includes("native.rotate(t.rotation, t.center.x * w, t.center.y * h)") &&
+        editH.includes("native.rotate(s.rotation, s.center.x * w, s.center.y * h)") &&
+        editH.includes("native.rotate(sel.rot, cx, cy)") &&
+        editH.includes(
+          "native.drawArc(rx - 13f, ty - 13f, rx + 13f, ty + 13f, 300f, 300f, false, glyph)",
+        ) &&
+        editH.includes("native.drawLine(rx - 10f, by - 10f, rx + 10f, by + 10f, glyph)") &&
+        editH.includes("var grabHandle = 0") &&
+        editH.includes("if (mode == 3 || mode == 4) {") &&
+        editH.includes("rotateOverlay(sel.id, Math.toDegrees(dd.toDouble()).toFloat())") &&
+        editH.includes("if (grabDist > 1f && d > 1f) scaleOverlay(sel.id, d / grabDist)"),
     );
   }
   // r36-4: the ① mark redrawn — one clean ring + a centered "1" that
