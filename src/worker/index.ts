@@ -1043,6 +1043,10 @@ async function cfImage(
   const remaining = () => CF_IMAGE_BUDGET_MS - (Date.now() - started);
   const auth = { Authorization: `Bearer ${env.CF_AI_TOKEN}` };
   if (remaining() >= 5_000) {
+    // Owner round 34 (item 4): a failed draw stays visible in tail — the
+    // status tells quota (429) from outage (5xx) from auth (401/403).
+    // Prompt text and tokens never hit the log, only model + status.
+    let st = "no-response";
     try {
       // klein's contract is a multipart form: prompt + width/height, and
       // `input_image_0` holding the source photo for an edit.
@@ -1060,13 +1064,15 @@ async function cfImage(
         body: form,
         signal: AbortSignal.timeout(Math.min(remaining(), 20_000)),
       });
+      st = String(res.status);
       const img = await cfImageBytes(res);
       if (img) return { image: img, off: false };
-    } catch {
-      /* klein down or rejected: schnell gets its turn below */
+    } catch (e) {
+      console.error("cf-image klein", st, e instanceof Error ? e.message : e);
     }
   }
   if (remaining() >= 5_000) {
+    let st = "no-response";
     try {
       const res = await fetch(cfAiUrl(env, CF_IMAGE_MODEL_FALLBACK), {
         method: "POST",
@@ -1076,10 +1082,11 @@ async function cfImage(
         }),
         signal: AbortSignal.timeout(Math.min(remaining(), 20_000)),
       });
+      st = String(res.status);
       const img = await cfImageBytes(res);
       if (img) return { image: img, off: false };
-    } catch {
-      /* CF fully down: honest failure below */
+    } catch (e) {
+      console.error("cf-image schnell", st, e instanceof Error ? e.message : e);
     }
   }
   return { image: null, off: false };
