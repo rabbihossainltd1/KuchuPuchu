@@ -326,12 +326,28 @@ internal fun DeleteRowShell(
 ) {
     var dead by remember(rowKey, m.optString("kind")) { mutableStateOf(false) }
     if (dead) return
+    // Owner round 36 (item 5): the tombstone's rise — latched when the dust
+    // settles INTO an unsent row instead of leaving a hole.
+    var settled by remember(rowKey, m.optString("kind")) { mutableStateOf(false) }
     var shot by remember(rowKey) { mutableStateOf<DeleteShot?>(null) }
     var capFailed by remember(rowKey) { mutableStateOf(false) }
     // Snapshot at the flip: later layouts (collapse) must not move the show.
     val flip = remember(rowKey, vanishing) { if (vanishing) DeleteGeoms.snapshot(rowKey) else null }
     fun finishDead() {
         if (dead) return
+        // Owner round 36 (item 5): unsend's tombstone (same id — the live
+        // DELETED frame flips the kind mid-show) must STAND after the dust.
+        // Going dead here hid it until a scroll-away: the "my own delete
+        // never finishes" report (peer deletes end with the row gone, so
+        // they always looked right). Settle into it instead — same frame
+        // clears the show AND the vanishing mark, so no replay. It rises once.
+        if (m.optString("kind") == "DELETED") {
+            shot = null
+            capFailed = false
+            settled = true
+            onGone()
+            return
+        }
         dead = true
         onGone()
     }
@@ -339,7 +355,7 @@ internal fun DeleteRowShell(
     Box(
         Modifier
             .fillMaxWidth()
-            .riseIn(born)
+            .riseIn(born || settled)
             .background(if (rowSelected) ActionBlue.copy(alpha = 0.16f) else Color.Transparent)
             .onGloballyPositioned { DeleteGeoms.rows[rowKey] = it.boundsInWindow() },
     ) {

@@ -7589,6 +7589,21 @@ const convBetween = (db, a, b) =>
         !icon4.includes("floatArrayOf"),
     );
   }
+  // r36-5: an unsent row settles INTO its tombstone when the dust ends
+  // (same id, kind flipped mid-show) instead of sticking dead — the
+  // tombstone stands and rises once. Gone-rows still go dead.
+  {
+    const del5 = kt("DeleteAnim.kt");
+    check(
+      "r36-5: DeleteRowShell settles into DELETED tombstones after the show (clears shot, latches a rise, releases the ids) and only goes dead for rows that truly leave",
+      del5.includes('if (m.optString("kind") == "DELETED") {') &&
+        del5.includes("shot = null") &&
+        del5.includes("settled = true") &&
+        del5.includes(".riseIn(born || settled)") &&
+        del5.includes("dead = true") &&
+        del5.includes("onGone()"),
+    );
+  }
   // r35-8: the editor grows up — overlays carry a pinch size (preview AND
   // bake share the scaled draw fns), one gesture loop owns select / move /
   // pinch / ×-delete, the photo owns the whole screen with floating tiny
