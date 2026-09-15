@@ -730,7 +730,9 @@ internal fun MediaCell(
         }
     }
     val press =
-        if (onLongPress != null) Modifier.combinedClickable(onClick = onToggle, onLongClick = onLongPress) else Modifier.clickable(onClick = onToggle)
+        // The trailing-lambda shape is the STABLE overload (the named-
+        // onClick variant is still experimental in this foundation).
+        if (onLongPress != null) Modifier.combinedClickable(onLongClick = onLongPress) { onToggle() } else Modifier.clickable(onClick = onToggle)
     Box(
         Modifier
             .aspectRatio(1f)

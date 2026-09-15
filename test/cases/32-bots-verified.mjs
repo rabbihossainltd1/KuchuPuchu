@@ -7546,7 +7546,7 @@ const convBetween = (db, a, b) =>
       "r36-2: MediaCell takes an optional onLongPress (hold-to-select where offered, plain tap cell otherwise); the attach grid's hold adds the pick without opening the editor",
       attach2.includes("onLongPress: (() -> Unit)? = null,") &&
         attach2.includes(
-          "if (onLongPress != null) Modifier.combinedClickable(onClick = onToggle, onLongClick = onLongPress) else Modifier.clickable(onClick = onToggle)",
+          "if (onLongPress != null) Modifier.combinedClickable(onLongClick = onLongPress) { onToggle() } else Modifier.clickable(onClick = onToggle)",
         ) &&
         attach2.includes("} else if (sel.isEmpty()) onEdit(item) else sel.add(item)") &&
         attach2.includes("onLongPress = {") &&
