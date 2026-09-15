@@ -7541,7 +7541,7 @@ const convBetween = (db, a, b) =>
   {
     const chat15 = kt("ChatScreen.kt");
     check(
-      'r34-15: a block swaps the whole composer for "This User Is Unavailable" + the one Request Unblock (blocked side, unspent only), no call buttons on the wall',
+      "r34-15: a block swaps the whole composer for one thin wall row (blocked side, unspent only: Request Unblock + red Delete side by side; spent: only the unavailable line), no call buttons on the wall",
       chat15.includes("if (blockWall) {") &&
         chat15.includes('"This User Is Unavailable"') &&
         chat15.includes("if (blockedMe && !unblockAsked && !askedSent) {") &&
@@ -7670,6 +7670,29 @@ const convBetween = (db, a, b) =>
         editF.indexOf("fun sendStatus() {") < editF.indexOf("fun send() {") &&
         kitF.includes("import androidx.compose.material.icons.filled.PlayArrow") &&
         !kitF.includes("@Composable\n/** The clip loops"),
+    );
+  }
+  // r38-1: the wall is ONE thin row — the unavailable line and the
+  // buttons never stack. Blocked side (request unspent): Request Unblock
+  // + red Delete chat side by side; blocker: Unblock + red Delete; once
+  // the request is spent only the thin unavailable line remains.
+  {
+    const chatW38 = kt("ChatScreen.kt");
+    const wall38 = chatW38.slice(
+      chatW38.indexOf("if (blockWall) {"),
+      chatW38.indexOf("} else if (requestPending) {"),
+    );
+    check(
+      "r38-1: the block wall is one thin row — way-back + red Delete chat pills side by side (Request Unblock while unspent, Unblock for the blocker), spent walls show only the unavailable line; Delete drops the chat and backs out",
+      wall38.includes("Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)") &&
+        wall38.includes("fun wallPill(") &&
+        wall38.includes("else if (red) Red else ActionBlue") &&
+        wall38.includes('"Delete chat"') &&
+        wall38.includes("fun deleteWallChat()") &&
+        wall38.includes('Api.delete("/api/conversations/$convId")') &&
+        wall38.includes("ScreenStore.dropConv(convId)") &&
+        wall38.includes("nav.popBackStack()") &&
+        wall38.indexOf('"Delete chat"') < wall38.indexOf('"This User Is Unavailable"'),
     );
   }
   // r37-3: reference-style overlay handles — per-overlay rotation,
@@ -7861,12 +7884,12 @@ const convBetween = (db, a, b) =>
   {
     const chat7 = kt("ChatScreen.kt");
     check(
-      "r35-7: block / unblock / request buttons are compact pills — Request Unblock + wall Unblock 13.sp on (14, 6) padding, Accept / Block 13.sp halves on 7.dp vertical, Ignore / card-Unblock 12.5.sp on (14, 6); no fat paddings remain",
+      "r35-7: block / unblock / request buttons are compact pills — one shared wall-pill seat 13.sp on (14, 6) padding, Accept / Block 13.sp halves on 7.dp vertical, Ignore / card-Unblock 12.5.sp on (14, 6); no fat paddings remain",
       chat7.includes('if (asking) "Sending…" else "Request Unblock",') &&
         chat7.includes(
-          "fontSize = 13.sp,\n                            fontWeight = FontWeight.SemiBold,\n                            maxLines = 1,",
+          "fontSize = 13.sp,\n                        fontWeight = FontWeight.SemiBold,\n                        maxLines = 1,",
         ) &&
-        (chat7.match(/\.padding\(horizontal = 14\.dp, vertical = 6\.dp\)/g) || []).length === 7 &&
+        (chat7.match(/\.padding\(horizontal = 14\.dp, vertical = 6\.dp\)/g) || []).length === 6 &&
         (chat7.match(/\.padding\(vertical = 7\.dp\)/g) || []).length === 2 &&
         chat7.includes(
           '{ Text("Ignore", color = Muted, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }',

@@ -2809,28 +2809,72 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
         ReplyQuoteBar(replyTo, chatTheme) { replyTo = null }
         if (blockWall) {
-            // Owner round 37 (item 5): the reference wall. The BLOCKER sees
-            // only a compact Unblock pill; the BLOCKED side sees the
-            // unavailable line + one slim Request pill per block, and once
-            // spent only the line remains. One thin strip, same compact
-            // language as the rest of the app.
+            // Owner round 38 (item 1): the wall is ONE thin row — the
+            // unavailable line and the buttons NEVER stack (that stacking
+            // is what made it fat). Two pills side by side: the way back
+            // (Unblock for the blocker, one Request Unblock for the
+            // blocked side) + Delete chat in red, always. Once the
+            // request is spent, only the thin unavailable line remains.
             var askedSent by remember { mutableStateOf(false) }
             var asking by remember { mutableStateOf(false) }
             var unblocking by remember { mutableStateOf(false) }
+            var deleting by remember { mutableStateOf(false) }
+            // One small pill seat for all three actions — same size as
+            // every other button in the app, never fat (owner rule).
+            @Composable
+            fun wallPill(label: String, busy: Boolean, red: Boolean, onTap: () -> Unit) {
+                val bg = if (busy) Line else if (red) Red else ActionBlue
+                val ink = if (busy) Muted else if (red) Color.White else ActionBlueInk
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(bg)
+                        .clickable(enabled = !busy) { onTap() }
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        label,
+                        color = ink,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                    )
+                }
+            }
+            fun deleteWallChat() {
+                deleting = true
+                scope.launch {
+                    val gone = runCatching {
+                        withContext(Dispatchers.IO) { Api.delete("/api/conversations/$convId") }
+                    }.getOrNull()?.let { !it.has("error") } == true
+                    deleting = false
+                    if (gone) {
+                        haptics.confirm()
+                        ScreenStore.dropConv(convId)
+                        ScreenStore.pokeInbox()
+                        Store.route = ""
+                        nav.popBackStack()
+                    } else {
+                        error = "Could not delete the chat. Try again."
+                    }
+                }
+            }
             Column(
                 Modifier
                     .fillMaxWidth()
                     .background(Card)
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                if (blockedByMe) {
-                    // Same small pill as Request, never a fat button.
-                    Box(
-                        Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(if (unblocking) Line else ActionBlue)
-                            .clickable(enabled = !unblocking) {
+                if (blockedByMe || (blockedMe && !unblockAsked && !askedSent)) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (blockedByMe) {
+                            wallPill(if (unblocking) "Unblocking…" else "Unblock", unblocking, false) {
                                 unblocking = true
                                 scope.launch {
                                     val freed = runCatching {
@@ -2849,35 +2893,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                                     }
                                 }
                             }
-                            .padding(horizontal = 14.dp, vertical = 6.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            if (unblocking) "Unblocking…" else "Unblock",
-                            color = if (unblocking) Muted else ActionBlueInk,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                        )
-                    }
-                } else {
-                    Text(
-                        "This User Is Unavailable",
-                        fontSize = 13.sp,
-                        color = Muted,
-                        textAlign = TextAlign.Center,
-                        maxLines = 2,
-                    )
-                }
-                if (blockedMe && !unblockAsked && !askedSent) {
-                    Spacer(Modifier.height(8.dp))
-                    // Owner round 35 (item 7): compact like the rest of the
-                    // app — a small pill, not a fat button.
-                    Box(
-                        Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(if (asking) Line else ActionBlue)
-                            .clickable(enabled = !asking) {
+                        } else if (blockedMe && !unblockAsked && !askedSent) {
+                            wallPill(if (asking) "Sending…" else "Request Unblock", asking, false) {
                                 asking = true
                                 scope.launch {
                                     val sent = runCatching {
@@ -2895,17 +2912,19 @@ fun ChatScreen(nav: NavController, convId: String) {
                                     }
                                 }
                             }
-                            .padding(horizontal = 14.dp, vertical = 6.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            if (asking) "Sending…" else "Request Unblock",
-                            color = if (asking) Muted else ActionBlueInk,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                        )
+                        }
+                        wallPill(if (deleting) "Deleting…" else "Delete chat", deleting, true) {
+                            deleteWallChat()
+                        }
                     }
+                } else {
+                    Text(
+                        "This User Is Unavailable",
+                        fontSize = 13.sp,
+                        color = Muted,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                    )
                 }
             }
         } else if (requestPending) {
