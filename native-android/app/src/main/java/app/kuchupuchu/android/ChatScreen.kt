@@ -4361,8 +4361,6 @@ private fun ReplyQuoteBar(replyTo: JSONObject?, theme: String, onCancel: () -> U
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
 // Owner round 34 (item 15): the in-chat unblock-request card. The blocker
 // gets Unblock / Ignore; the requester (mine) a muted confirmation line.
 // No busy latch: both answers are idempotent, so a double-tap is harmless.
@@ -4415,6 +4413,8 @@ private fun UnblockAskCard(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
 private fun MessageRow(
     m: JSONObject,
     isGroup: Boolean,
