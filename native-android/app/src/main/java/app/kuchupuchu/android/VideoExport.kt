@@ -18,6 +18,7 @@ import android.opengl.EGLExt
 import android.opengl.EGLSurface
 import android.opengl.GLES11Ext
 import android.opengl.GLES20
+import android.opengl.GLUtils
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
@@ -254,7 +255,21 @@ object VideoExport {
 
     /** Re-encodes [startMs, endMs] (+ optional crop) into an H.264/AAC mp4 at `out`;
      *  `onProgress` gets 0..1 as frames land (called on this thread). */
-    fun export(ctx: Context, uri: Uri, startMs: Long, endMs: Long, crop: CropBox?, out: File, onProgress: (Float) -> Unit = {}) {
+    fun export(
+        ctx: Context,
+        uri: Uri,
+        startMs: Long,
+        endMs: Long,
+        crop: CropBox?,
+        out: File,
+        onProgress: (Float) -> Unit = {},
+        // Owner round 36 (item 6): the chat video editor's layers — a
+        // full-frame overlay (pen + text + sticker, baked at output size),
+        // an android ColorMatrix array (20 floats, row-major), extra 90° turns.
+        overlay: Bitmap? = null,
+        colorMat: FloatArray? = null,
+        userTurns: Int = 0,
+    ) {
         val src = probe(ctx, uri) ?: throw Failed("Could not read that video.")
         val startUs = startMs.coerceAtLeast(0L) * 1000L
         val endUs = endMs.coerceAtMost(src.durationMs) * 1000L
@@ -285,8 +300,11 @@ object VideoExport {
                 }
             }
             val vf = videoFormat ?: throw Failed("No video in that file.")
-            val rotation =
+            val codedRotation =
                 if (vf.containsKey(MediaFormat.KEY_ROTATION)) vf.getInteger(MediaFormat.KEY_ROTATION) else src.rotation
+            // Owner round 36 (item 6): the editor's 90° turns join the coded
+            // rotation — one mapping turns + crops the frame.
+            val rotation = (((codedRotation + (userTurns % 4) * 90) % 360) + 360) % 360
             val codedW = vf.getInteger(MediaFormat.KEY_WIDTH)
             val codedH = vf.getInteger(MediaFormat.KEY_HEIGHT)
             val (outW, outH) = VideoPlan.outputSize(codedW, codedH, rotation, crop)
@@ -312,7 +330,7 @@ object VideoExport {
             val inSurface = enc.createInputSurface()
             inputSurface = inSurface
             enc.start()
-            val gl = GlFrameSink(inSurface, outW, outH, VideoPlan.texCoords(rotation, crop))
+            val gl = GlFrameSink(inSurface, outW, outH, VideoPlan.texCoords(rotation, crop), colorMat, overlay)
             sink = gl
 
             // Rotation is OURS: the decoder hands over the unrotated frame and the
@@ -603,15 +621,39 @@ object VideoExport {
 }
 
 /**
+ * Owner round 36 (item 6): an android ColorMatrix array (row-major 4x5)
+ * becomes the video shader's column-major mat4 + offset vec4. Null (the
+ * Normal filter) is the identity — every export uploads something, so a
+ * missing uniform can never black the frame.
+ */
+private fun colorUniforms(mat: FloatArray?): Pair<FloatArray, FloatArray> {
+    val a =
+        mat?.takeIf { it.size >= 20 } ?: floatArrayOf(
+            1f, 0f, 0f, 0f, 0f,
+            0f, 1f, 0f, 0f, 0f,
+            0f, 0f, 1f, 0f, 0f,
+            0f, 0f, 0f, 1f, 0f,
+        )
+    val m = FloatArray(16)
+    for (row in 0..3) for (col in 0..3) m[col * 4 + row] = a[row * 5 + col]
+    return m to floatArrayOf(a[4], a[9], a[14], a[19])
+}
+
+/**
  * EGL window on the encoder's input surface + an external texture the decoder
  * renders into. One quad per frame; the texture coordinates carry the
  * rotation and the crop, the SurfaceTexture matrix the buffer's own flip.
+ * Owner round 36 (item 6): a color matrix rides the video quad's shader,
+ * and the editor's overlay (pen + text + sticker) draws as a second,
+ * blended quad from a plain 2D texture.
  */
 private class GlFrameSink(
     private val encoderSurface: Surface,
     private val width: Int,
     private val height: Int,
     texCoords: FloatArray,
+    colorMat: FloatArray?,
+    overlay: Bitmap?,
 ) : SurfaceTexture.OnFrameAvailableListener {
     private var eglDisplay: EGLDisplay = EGL14.EGL_NO_DISPLAY
     private var eglContext: EGLContext = EGL14.EGL_NO_CONTEXT
@@ -623,7 +665,16 @@ private class GlFrameSink(
     private var aPosition = 0
     private var aTexCoord = 0
     private var uTexMatrix = 0
+    private var uColorMat = 0
+    private var uColorOff = 0
+    private var overlayProgram = 0
+    private var overlayTex = 0
+    private var ovPosition = 0
+    private var ovTexCoord = 0
     private val stMatrix = FloatArray(16)
+    // texImage2D uploads top-row-first, which GL reads as t = 0 at the
+    // BOTTOM — flipped V keeps the overlay upright.
+    private val overlayTexBuf: FloatBuffer = floats(floatArrayOf(0f, 1f, 1f, 1f, 0f, 0f, 1f, 0f))
     private val vertices: FloatBuffer = floats(floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f))
     private val texBuf: FloatBuffer = floats(texCoords)
     private lateinit var surfaceTexture: SurfaceTexture
@@ -673,10 +724,17 @@ private class GlFrameSink(
         if (eglSurface == EGL14.EGL_NO_SURFACE) throw VideoExport.Failed("EGL surface failed.")
         if (!EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)) throw VideoExport.Failed("EGL makeCurrent failed.")
 
-        program = buildProgram()
+        program = buildProgram(VERTEX_SHADER, FRAGMENT_SHADER)
         aPosition = GLES20.glGetAttribLocation(program, "aPosition")
         aTexCoord = GLES20.glGetAttribLocation(program, "aTextureCoord")
         uTexMatrix = GLES20.glGetUniformLocation(program, "uTexMatrix")
+        // The color matrix is per-export, not per-frame: upload once.
+        GLES20.glUseProgram(program)
+        uColorMat = GLES20.glGetUniformLocation(program, "uColorMat")
+        uColorOff = GLES20.glGetUniformLocation(program, "uColorOff")
+        val (cm, co) = colorUniforms(colorMat)
+        GLES20.glUniformMatrix4fv(uColorMat, 1, false, cm, 0)
+        GLES20.glUniform4fv(uColorOff, 1, co, 0)
         val ids = IntArray(1)
         GLES20.glGenTextures(1, ids, 0)
         texId = ids[0]
@@ -690,6 +748,21 @@ private class GlFrameSink(
         // waits for them (and never on the UI thread).
         surfaceTexture.setOnFrameAvailableListener(this, Handler(thread.looper))
         decoderSurface = Surface(surfaceTexture)
+        if (overlay != null) {
+            overlayProgram = buildProgram(OVERLAY_VERTEX_SHADER, OVERLAY_FRAGMENT_SHADER)
+            ovPosition = GLES20.glGetAttribLocation(overlayProgram, "aPosition")
+            ovTexCoord = GLES20.glGetAttribLocation(overlayProgram, "aTextureCoord")
+            val oids = IntArray(1)
+            GLES20.glGenTextures(1, oids, 0)
+            overlayTex = oids[0]
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, overlayTex)
+            GLES20.glTexParameterf(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR.toFloat())
+            GLES20.glTexParameterf(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR.toFloat())
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, overlay, 0)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
+        }
     }
 
     override fun onFrameAvailable(st: SurfaceTexture) {
@@ -720,6 +793,22 @@ private class GlFrameSink(
         GLES20.glDisableVertexAttribArray(aPosition)
         GLES20.glDisableVertexAttribArray(aTexCoord)
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0)
+        if (overlayProgram != 0) {
+            GLES20.glEnable(GLES20.GL_BLEND)
+            GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+            GLES20.glUseProgram(overlayProgram)
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, overlayTex)
+            GLES20.glEnableVertexAttribArray(ovPosition)
+            GLES20.glVertexAttribPointer(ovPosition, 2, GLES20.GL_FLOAT, false, 8, vertices)
+            GLES20.glEnableVertexAttribArray(ovTexCoord)
+            GLES20.glVertexAttribPointer(ovTexCoord, 2, GLES20.GL_FLOAT, false, 8, overlayTexBuf)
+            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+            GLES20.glDisableVertexAttribArray(ovPosition)
+            GLES20.glDisableVertexAttribArray(ovTexCoord)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
+            GLES20.glDisable(GLES20.GL_BLEND)
+        }
         EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, ptsNs)
         if (!EGL14.eglSwapBuffers(eglDisplay, eglSurface)) throw VideoExport.Failed("Frame hand-off failed.")
     }
@@ -729,6 +818,8 @@ private class GlFrameSink(
         if (this::surfaceTexture.isInitialized) runCatching { surfaceTexture.release() }
         runCatching { GLES20.glDeleteProgram(program) }
         runCatching { GLES20.glDeleteTextures(1, intArrayOf(texId), 0) }
+        if (overlayProgram != 0) runCatching { GLES20.glDeleteProgram(overlayProgram) }
+        if (overlayTex != 0) runCatching { GLES20.glDeleteTextures(1, intArrayOf(overlayTex), 0) }
         teardownEgl()
     }
 
@@ -746,9 +837,9 @@ private class GlFrameSink(
         runCatching { thread.quitSafely() }
     }
 
-    private fun buildProgram(): Int {
-        val vs = compile(GLES20.GL_VERTEX_SHADER, VERTEX_SHADER)
-        val fs = compile(GLES20.GL_FRAGMENT_SHADER, FRAGMENT_SHADER)
+    private fun buildProgram(vsSrc: String, fsSrc: String): Int {
+        val vs = compile(GLES20.GL_VERTEX_SHADER, vsSrc)
+        val fs = compile(GLES20.GL_FRAGMENT_SHADER, fsSrc)
         val p = GLES20.glCreateProgram()
         if (p == 0) throw VideoExport.Failed("GL program failed.")
         GLES20.glAttachShader(p, vs)
@@ -801,6 +892,24 @@ private class GlFrameSink(
                 "precision mediump float;\n" +
                 "varying vec2 vTextureCoord;\n" +
                 "uniform samplerExternalOES sTexture;\n" +
+                "uniform mat4 uColorMat;\n" +
+                "uniform vec4 uColorOff;\n" +
+                "void main() {\n" +
+                "    vec4 c = texture2D(sTexture, vTextureCoord);\n" +
+                "    gl_FragColor = uColorMat * c + uColorOff;\n" +
+                "}\n"
+        private const val OVERLAY_VERTEX_SHADER =
+            "attribute vec4 aPosition;\n" +
+                "attribute vec4 aTextureCoord;\n" +
+                "varying vec2 vTextureCoord;\n" +
+                "void main() {\n" +
+                "    gl_Position = aPosition;\n" +
+                "    vTextureCoord = aTextureCoord.xy;\n" +
+                "}\n"
+        private const val OVERLAY_FRAGMENT_SHADER =
+            "precision mediump float;\n" +
+                "varying vec2 vTextureCoord;\n" +
+                "uniform sampler2D sTexture;\n" +
                 "void main() {\n" +
                 "    gl_FragColor = texture2D(sTexture, vTextureCoord);\n" +
                 "}\n"

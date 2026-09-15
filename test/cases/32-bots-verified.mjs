@@ -6402,7 +6402,7 @@ const convBetween = (db, a, b) =>
         app.includes('viewOnce = entry.arguments?.getString("once") == "1",'),
     );
     check(
-      "r32-19: MediaEditScreen — own screen (black stage, media at its own aspect): a photo gets a pen (6 colours, 3 widths, undo, clear; strokes in normalised picture units, baked at the picture's own resolution into a JPEG data URL (standard ≤380K, HD ≤1.2MB)); a video gets the shared TrimStrip with NO minute cap (maxMs = Long.MAX_VALUE) + the loop preview; Send hands an EditedResult back via ScreenStore.pendingEdited (Photo / Video / Untouched / Failed) and the chat sends it like any pick, view-once kept",
+      "r32-19: MediaEditScreen — own screen (black stage, media at its own aspect): a photo gets a pen (6 colours, 3 widths, undo, clear; strokes in normalised picture units, baked at the picture's own resolution into a JPEG data URL (standard ≤380K, HD ≤1.2MB)); a video gets the shared TrimStrip with NO minute cap (maxMs = Long.MAX_VALUE) + the loop preview + (round 36) the photo toolset — pen / text / sticker / filters / rotate baked through the export; Send hands an EditedResult back via ScreenStore.pendingEdited (Photo / Video / Untouched / Failed) and the chat sends it like any pick, view-once kept",
       edit.includes(
         "fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, convId: String, viewOnce: Boolean) {",
       ) &&
@@ -6421,9 +6421,11 @@ const convBetween = (db, a, b) =>
         edit.includes("Icons.AutoMirrored.Filled.Undo") &&
         edit.includes("maxMs = Long.MAX_VALUE,") &&
         edit.includes(
-          "StatusTrimPreview(pickedUri, start, end, paused = false, scrubAt = scrub, onPosition = { playAt = it })",
+          "StatusTrimPreview(pickedUri, start, end, paused = stillMode, scrubAt = scrub, onPosition = { playAt = it })",
         ) &&
-        edit.includes("VideoExport.export(ctx, pickedUri, s, e, null, out)") &&
+        edit.includes(
+          "VideoExport.export(ctx, pickedUri, s, e, null, out, overlay = overlay, colorMat = filt?.array, userTurns = turn)",
+        ) &&
         edit.includes("VideoExport.passthrough(ctx, pickedUri, s, e, out)") &&
         edit.includes(
           "ScreenStore.pendingEdited.value = EditedResult(convId, once, result, cap)",
@@ -7572,7 +7574,7 @@ const convBetween = (db, a, b) =>
         ) &&
         !edit3.includes("val reach = ") &&
         edit3.includes(
-          "if (shot != null && (strokes.isNotEmpty() || overlayPast.isNotEmpty())) {",
+          "if ((shot != null || clip != null) && (strokes.isNotEmpty() || overlayPast.isNotEmpty())) {",
         ) &&
         edit3.includes(
           "if (strokes.isNotEmpty()) strokes.removeAt(strokes.size - 1) else undoOverlay()",
@@ -7617,6 +7619,41 @@ const convBetween = (db, a, b) =>
         ss8.includes("fontSize = 7.sp,") &&
         ss8.includes(".padding(horizontal = 3.dp),") &&
         !ss8.includes("fontSize = 8.sp,"),
+    );
+  }
+  // r36-6: video gets the photo toolset — pen / text / sticker bake
+  // into one overlay at the export's output size, the filter rides the
+  // video shader, user turns join the rotation mapping; the stage shares
+  // one pen+overlay canvas, and turns / filters freeze the clip into a
+  // WYSIWYG still (a TextureView takes no ColorFilter).
+  {
+    const edit6 = kt("MediaEditScreen.kt");
+    const vx6 = kt("VideoExport.kt");
+    check(
+      "r36-6: chat video edits — export takes overlay + colorMat + userTurns, the shader tints + blends the overlay, the editor shares one StageCanvas, still-mode previews turns/filters, all three video exits carry the layers",
+      vx6.includes("overlay: Bitmap? = null,") &&
+        vx6.includes("colorMat: FloatArray? = null,") &&
+        vx6.includes("userTurns: Int = 0,") &&
+        vx6.includes("uniform mat4 uColorMat;") &&
+        vx6.includes("uniform vec4 uColorOff;") &&
+        vx6.includes("OVERLAY_FRAGMENT_SHADER") &&
+        vx6.includes("GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, overlay, 0)") &&
+        vx6.includes(
+          "private fun colorUniforms(mat: FloatArray?): Pair<FloatArray, FloatArray> {",
+        ) &&
+        edit6.includes("fun StageCanvas() {") &&
+        (edit6.match(/StageCanvas\(\)/g) || []).length === 3 &&
+        edit6.includes("val stillMode = clip != null && (rotation != 0 || filterMatrix != null)") &&
+        edit6.includes("internal fun bakeVideoOverlay(") &&
+        edit6.includes("internal fun grabVideoFrame(") &&
+        edit6.includes("internal fun paintPenStrokes(") &&
+        edit6.includes("paintPenStrokes(canvas, strokes, w, h)") &&
+        (
+          edit6.match(
+            /VideoExport\.export\(ctx, pickedUri, s, e, null, out, overlay = overlay, colorMat = filt\?\.array, userTurns = turn\)/g,
+          ) || []
+        ).length === 3 &&
+        (edit6.match(/if \(hasEdits\) throw e/g) || []).length === 3,
     );
   }
   // r35-8: the editor grows up — overlays carry a pinch size (preview AND

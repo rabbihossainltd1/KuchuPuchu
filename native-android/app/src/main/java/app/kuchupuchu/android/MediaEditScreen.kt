@@ -158,6 +158,9 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
     var showStickerSheet by remember { mutableStateOf(false) }
     var filtersOpen by remember { mutableStateOf(false) }
     var filterThumbs by remember { mutableStateOf<List<ImageBitmap?>>(emptyList()) }
+    // Owner round 36 (item 6): the video still-mode frame (exact export
+    // pixels for the playhead — turns + filter baked in, see below).
+    var videoStill by remember { mutableStateOf<ImageBitmap?>(null) }
 
     LaunchedEffect(pickedUri) {
         if (pickedIsVideo) {
@@ -205,7 +208,13 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
     val mediaAspect =
         when {
             shot != null -> shot.width.toFloat() / shot.height.coerceAtLeast(1)
-            clip != null -> clip.displayW.toFloat() / clip.displayH.coerceAtLeast(1)
+            clip != null ->
+                run {
+                    // Owner round 36 (item 6): user turns swap the frame.
+                    val w = clip.displayW.toFloat()
+                    val h = clip.displayH.toFloat()
+                    if (rotation % 2 == 1) h / w.coerceAtLeast(1f) else w / h.coerceAtLeast(1f)
+                }
             else -> 9f / 16f
         }
     val filterMatrix = EDIT_FILTERS.getOrNull(filterIdx)?.matrix
@@ -213,8 +222,16 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
         if (filterMatrix == null) null else ColorFilter.colorMatrix(ColorMatrix(filterMatrix.array))
     }
     // Filter thumbs follow the rotated copy (a 180° photo's strip matches it).
-    LaunchedEffect(shot) {
-        val bmp = shot?.asAndroidBitmap()
+    // Owner round 36 (item 6): video thumbs come from the mid-frame.
+    LaunchedEffect(shot, clip) {
+        if (shot == null && clip == null) {
+            filterThumbs = emptyList()
+            return@LaunchedEffect
+        }
+        val bmp =
+            shot?.asAndroidBitmap() ?: withContext(Dispatchers.IO) {
+                grabVideoFrame(ctx, pickedUri, (clip?.durationMs ?: 0L) / 2)
+            }
         if (bmp == null) {
             filterThumbs = emptyList()
             return@LaunchedEffect
@@ -233,6 +250,28 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                 }.getOrNull()
             }
         }
+    }
+    // Owner round 36 (item 6): turns / filters freeze the clip into a
+    // WYSIWYG still — the playhead (or scrub target) rotated + filtered
+    // exactly like the export. The player hides underneath, so no
+    // tick-churn: this only re-grabs when the frame, turns or filter change.
+    val stillMode = clip != null && (rotation != 0 || filterMatrix != null)
+    LaunchedEffect(pickedUri, rotation, filterIdx, scrub, stillMode) {
+        if (!stillMode || clip == null) {
+            videoStill = null
+            return@LaunchedEffect
+        }
+        // A scrub lands the playhead first; grab where it settles.
+        if (scrub != null) delay(150)
+        val atMs = (scrub ?: playAt ?: start).coerceAtLeast(0L)
+        val turn = rotation
+        val filt = filterMatrix
+        videoStill =
+            withContext(Dispatchers.IO) {
+                val frame = grabVideoFrame(ctx, pickedUri, atMs) ?: return@withContext null
+                val turned = if (turn != 0) rotateEditBitmap(frame, turn) else frame
+                applyEditFilter(turned, filt).asImageBitmap()
+            }
     }
     // The transient notice ("Saved to gallery") clears itself.
     LaunchedEffect(notice) {
@@ -365,10 +404,20 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                     if (pickedIsVideo && vSource != null) {
                         val out = java.io.File(ctx.cacheDir, "edit_${System.currentTimeMillis()}.mp4")
                         val whole = s <= 0L && e >= vSource.durationMs
-                        if (!whole) {
+                        // Owner round 36 (item 6): the clip carries the
+                        // editor's layers — overlay baked at the export's own
+                        // output size, filter on the shader, turns in the map.
+                        val effRot = (vSource.rotation + (turn % 4) * 90) % 360
+                        val (ovW, ovH) = VideoPlan.outputSize(vSource.codedW, vSource.codedH, effRot, null)
+                        val overlay = bakeVideoOverlay(drawn, wrote, placed, ovW, ovH)
+                        val hasEdits = overlay != null || filt != null || turn != 0
+                        if (!whole || hasEdits) {
                             try {
-                                VideoExport.export(ctx, pickedUri, s, e, null, out)
-                            } catch (_: Exception) {
+                                VideoExport.export(ctx, pickedUri, s, e, null, out, overlay = overlay, colorMat = filt?.array, userTurns = turn)
+                            } catch (e: Exception) {
+                                // Edits must never silently vanish: only a
+                                // bare trim may go through degraded.
+                                if (hasEdits) throw e
                                 out.delete()
                                 VideoExport.passthrough(ctx, pickedUri, s, e, out)
                             }
@@ -414,13 +463,19 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                 runCatching {
                     if (pickedIsVideo && vSource != null) {
                         val whole = s <= 0L && e >= vSource.durationMs
-                        if (whole) {
+                        // Owner round 36 (item 6): staged with the layers.
+                        val effRot = (vSource.rotation + (turn % 4) * 90) % 360
+                        val (ovW, ovH) = VideoPlan.outputSize(vSource.codedW, vSource.codedH, effRot, null)
+                        val overlay = bakeVideoOverlay(drawn, wrote, placed, ovW, ovH)
+                        val hasEdits = overlay != null || filt != null || turn != 0
+                        if (whole && !hasEdits) {
                             MediaItem(pickedUri, true, vSource.durationMs, "", System.currentTimeMillis() / 1000, cap, once = onceShot)
                         } else {
                             val out = java.io.File(ctx.cacheDir, "edit_${System.currentTimeMillis()}.mp4")
                             try {
-                                VideoExport.export(ctx, pickedUri, s, e, null, out)
-                            } catch (_: Exception) {
+                                VideoExport.export(ctx, pickedUri, s, e, null, out, overlay = overlay, colorMat = filt?.array, userTurns = turn)
+                            } catch (e: Exception) {
+                                if (hasEdits) throw e
                                 out.delete()
                                 VideoExport.passthrough(ctx, pickedUri, s, e, out)
                             }
@@ -478,21 +533,28 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
         val wrote = texts.toList()
         val placed = stickers.toList()
         val filt = filterMatrix
+        val turn = rotation
         val hdShot = hd
         ScreenStore.appScope.launch {
             val ok =
                 runCatching {
                     if (pickedIsVideo && vSource != null) {
                         val whole = s <= 0L && e >= vSource.durationMs
+                        // Owner round 36 (item 6): the gallery gets the layers too.
+                        val effRot = (vSource.rotation + (turn % 4) * 90) % 360
+                        val (ovW, ovH) = VideoPlan.outputSize(vSource.codedW, vSource.codedH, effRot, null)
+                        val overlay = bakeVideoOverlay(drawn, wrote, placed, ovW, ovH)
+                        val hasEdits = overlay != null || filt != null || turn != 0
                         val f =
-                            if (whole) {
+                            if (whole && !hasEdits) {
                                 FilesUtil.copyDocument(ctx, pickedUri, "video.mp4")?.second
                                     ?: throw Exception("Could not read that video.")
                             } else {
                                 java.io.File(ctx.cacheDir, "edit_${System.currentTimeMillis()}.mp4").also { out ->
                                     try {
-                                        VideoExport.export(ctx, pickedUri, s, e, null, out)
-                                    } catch (_: Exception) {
+                                        VideoExport.export(ctx, pickedUri, s, e, null, out, overlay = overlay, colorMat = filt?.array, userTurns = turn)
+                                    } catch (e: Exception) {
+                                        if (hasEdits) throw e
                                         out.delete()
                                         VideoExport.passthrough(ctx, pickedUri, s, e, out)
                                     }
@@ -532,6 +594,134 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
         }
     }
 
+    /** Owner round 36 (item 6): the pen + overlay layer — one canvas shared
+     *  by the photo and the video stage (gestures + draw, normalised units). */
+    @Composable
+    fun StageCanvas() {
+        Canvas(
+            Modifier
+                .fillMaxSize()
+                .then(
+                    if (penMode) {
+                        Modifier.pointerInput(penColor, penWidth) {
+                            detectDragGestures(
+                                onDragStart = { pos ->
+                                    val w = size.width.coerceAtLeast(1).toFloat()
+                                    val h = size.height.coerceAtLeast(1).toFloat()
+                                    live = PenStroke(penColor, penWidth, mutableListOf(Offset(pos.x / w, pos.y / h)))
+                                },
+                                onDragEnd = {
+                                    live?.let { if (it.points.size > 1) strokes.add(it) }
+                                    live = null
+                                },
+                                onDragCancel = { live = null },
+                            ) { change, _ ->
+                                change.consume()
+                                val w = size.width.coerceAtLeast(1).toFloat()
+                                val h = size.height.coerceAtLeast(1).toFloat()
+                                val cur = live ?: return@detectDragGestures
+                                cur.points.add(Offset(change.position.x / w, change.position.y / h))
+                                // A fresh object so the canvas repaints the growing line.
+                                live = PenStroke(cur.color, cur.width, cur.points)
+                            }
+                        }
+                    } else {
+                        // Overlay mode, unified (owner round 35, item 8):
+                        // tap selects (the mark deletes), a one-finger
+                        // drag past the slop moves the grabbed overlay,
+                        // a two-finger pinch resizes it. One loop owns
+                        // the whole gesture, so select / move / pinch /
+                        // delete can never strand each other halfway.
+                        Modifier.pointerInput(texts.size, stickers.size) {
+                            awaitEachGesture {
+                                val w = size.width.coerceAtLeast(1).toFloat()
+                                val h = size.height.coerceAtLeast(1).toFloat()
+                                val d0 = awaitFirstDown()
+                                val nx0 = d0.position.x / w
+                                val ny0 = d0.position.y / h
+                                selectedOverlay()?.let { sel ->
+                                    val dp = deletePos(sel)
+                                    if (kotlin.math.hypot(nx0 - dp.x, ny0 - dp.y) < DEL_MARK_HIT) {
+                                        haptics.tap()
+                                        pushOverlayPast()
+                                        removeOverlay(sel.id)
+                                        waitForUpOrCancellation()
+                                        return@awaitEachGesture
+                                    }
+                                }
+                                val hit = hitOverlay(nx0, ny0)
+                                if (hit != null) {
+                                    haptics.tap()
+                                    selectedId = hit
+                                }
+                                // 0 undecided, 1 move, 2 pinch (pinch wins
+                                // outright — lifting back to one finger
+                                // ends the gesture instead of dragging).
+                                var mode = 0
+                                var moved = false
+                                var prev = d0.position
+                                var prevDist = 0f
+                                var prevCent = Offset.Zero
+                                val slopPx = viewConfiguration.touchSlop
+                                while (true) {
+                                    val ev = awaitPointerEvent()
+                                    val pressed = ev.changes.filter { it.pressed }
+                                    if (pressed.isEmpty()) break
+                                    val target = hit ?: selectedId
+                                    if (pressed.size >= 2 && target != null) {
+                                        val a = pressed[0].position
+                                        val b = pressed[1].position
+                                        val dist = kotlin.math.hypot(a.x - b.x, a.y - b.y)
+                                        val cent = Offset((a.x + b.x) / 2f, (a.y + b.y) / 2f)
+                                        if (mode != 2) {
+                                            mode = 2
+                                            pushOverlayPast()
+                                            moved = true
+                                            prevDist = dist
+                                            prevCent = cent
+                                        } else {
+                                            if (prevDist > 1f && dist > 1f) scaleOverlay(target, dist / prevDist)
+                                            moveOverlay(target, (cent.x - prevCent.x) / w, (cent.y - prevCent.y) / h)
+                                            prevDist = dist
+                                            prevCent = cent
+                                        }
+                                        pressed.forEach { it.consume() }
+                                    } else if (pressed.size == 1 && mode != 2) {
+                                        val c = pressed[0]
+                                        if (mode == 0) {
+                                            val ox = c.position.x - d0.position.x
+                                            val oy = c.position.y - d0.position.y
+                                            if (kotlin.math.hypot(ox, oy) > slopPx) {
+                                                if (hit == null) break
+                                                mode = 1
+                                                pushOverlayPast()
+                                                moved = true
+                                                prev = c.position
+                                            }
+                                        }
+                                        if (mode == 1 && hit != null) {
+                                            moveOverlay(hit, (c.position.x - prev.x) / w, (c.position.y - prev.y) / h)
+                                            prev = c.position
+                                        }
+                                        c.consume()
+                                    }
+                                }
+                                if (!moved && hit == null) selectedId = null
+                            }
+                        }
+                    },
+                ),
+        ) {
+            val ww = size.width
+            val hh = size.height
+            val native = drawContext.canvas.nativeCanvas
+            stickers.forEach { st -> drawEditSticker(native, st, ww, hh) }
+            texts.forEach { t -> drawEditText(native, t, ww, hh) }
+            selectedOverlay()?.let { ov -> drawEditSelection(native, ov, ww, hh) }
+            (strokes + listOfNotNull(live)).forEach { st -> drawPen(st, ww, hh) }
+        }
+    }
+
     // Owner round 35 (item 8): soft scrims so the floating chrome reads over any photo.
     val topScrim = Brush.verticalGradient(listOf(Color(0x99000000), Color.Transparent))
     val bottomScrim = Brush.verticalGradient(listOf(Color.Transparent, Color(0x99000000)))
@@ -555,130 +745,18 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                                     contentScale = ContentScale.Fit,
                                     colorFilter = previewFilter,
                                 )
-                                Canvas(
-                                    Modifier
-                                        .fillMaxSize()
-                                        .then(
-                                            if (penMode) {
-                                                Modifier.pointerInput(penColor, penWidth) {
-                                                    detectDragGestures(
-                                                        onDragStart = { pos ->
-                                                            val w = size.width.coerceAtLeast(1).toFloat()
-                                                            val h = size.height.coerceAtLeast(1).toFloat()
-                                                            live = PenStroke(penColor, penWidth, mutableListOf(Offset(pos.x / w, pos.y / h)))
-                                                        },
-                                                        onDragEnd = {
-                                                            live?.let { if (it.points.size > 1) strokes.add(it) }
-                                                            live = null
-                                                        },
-                                                        onDragCancel = { live = null },
-                                                    ) { change, _ ->
-                                                        change.consume()
-                                                        val w = size.width.coerceAtLeast(1).toFloat()
-                                                        val h = size.height.coerceAtLeast(1).toFloat()
-                                                        val cur = live ?: return@detectDragGestures
-                                                        cur.points.add(Offset(change.position.x / w, change.position.y / h))
-                                                        // A fresh object so the canvas repaints the growing line.
-                                                        live = PenStroke(cur.color, cur.width, cur.points)
-                                                    }
-                                                }
-                                            } else {
-                                                // Overlay mode, unified (owner round 35, item 8):
-                                                // tap selects (the mark deletes), a one-finger
-                                                // drag past the slop moves the grabbed overlay,
-                                                // a two-finger pinch resizes it. One loop owns
-                                                // the whole gesture, so select / move / pinch /
-                                                // delete can never strand each other halfway.
-                                                Modifier.pointerInput(texts.size, stickers.size) {
-                                                    awaitEachGesture {
-                                                        val w = size.width.coerceAtLeast(1).toFloat()
-                                                        val h = size.height.coerceAtLeast(1).toFloat()
-                                                        val d0 = awaitFirstDown()
-                                                        val nx0 = d0.position.x / w
-                                                        val ny0 = d0.position.y / h
-                                                        selectedOverlay()?.let { sel ->
-                                                            val dp = deletePos(sel)
-                                                            if (kotlin.math.hypot(nx0 - dp.x, ny0 - dp.y) < DEL_MARK_HIT) {
-                                                                haptics.tap()
-                                                                pushOverlayPast()
-                                                                removeOverlay(sel.id)
-                                                                waitForUpOrCancellation()
-                                                                return@awaitEachGesture
-                                                            }
-                                                        }
-                                                        val hit = hitOverlay(nx0, ny0)
-                                                        if (hit != null) {
-                                                            haptics.tap()
-                                                            selectedId = hit
-                                                        }
-                                                        // 0 undecided, 1 move, 2 pinch (pinch wins
-                                                        // outright — lifting back to one finger
-                                                        // ends the gesture instead of dragging).
-                                                        var mode = 0
-                                                        var moved = false
-                                                        var prev = d0.position
-                                                        var prevDist = 0f
-                                                        var prevCent = Offset.Zero
-                                                        val slopPx = viewConfiguration.touchSlop
-                                                        while (true) {
-                                                            val ev = awaitPointerEvent()
-                                                            val pressed = ev.changes.filter { it.pressed }
-                                                            if (pressed.isEmpty()) break
-                                                            val target = hit ?: selectedId
-                                                            if (pressed.size >= 2 && target != null) {
-                                                                val a = pressed[0].position
-                                                                val b = pressed[1].position
-                                                                val dist = kotlin.math.hypot(a.x - b.x, a.y - b.y)
-                                                                val cent = Offset((a.x + b.x) / 2f, (a.y + b.y) / 2f)
-                                                                if (mode != 2) {
-                                                                    mode = 2
-                                                                    pushOverlayPast()
-                                                                    moved = true
-                                                                    prevDist = dist
-                                                                    prevCent = cent
-                                                                } else {
-                                                                    if (prevDist > 1f && dist > 1f) scaleOverlay(target, dist / prevDist)
-                                                                    moveOverlay(target, (cent.x - prevCent.x) / w, (cent.y - prevCent.y) / h)
-                                                                    prevDist = dist
-                                                                    prevCent = cent
-                                                                }
-                                                                pressed.forEach { it.consume() }
-                                                            } else if (pressed.size == 1 && mode != 2) {
-                                                                val c = pressed[0]
-                                                                if (mode == 0) {
-                                                                    val ox = c.position.x - d0.position.x
-                                                                    val oy = c.position.y - d0.position.y
-                                                                    if (kotlin.math.hypot(ox, oy) > slopPx) {
-                                                                        if (hit == null) break
-                                                                        mode = 1
-                                                                        pushOverlayPast()
-                                                                        moved = true
-                                                                        prev = c.position
-                                                                    }
-                                                                }
-                                                                if (mode == 1 && hit != null) {
-                                                                    moveOverlay(hit, (c.position.x - prev.x) / w, (c.position.y - prev.y) / h)
-                                                                    prev = c.position
-                                                                }
-                                                                c.consume()
-                                                            }
-                                                        }
-                                                        if (!moved && hit == null) selectedId = null
-                                                    }
-                                                }
-                                            },
-                                        ),
-                                ) {
-                                    val ww = size.width
-                                    val hh = size.height
-                                    val native = drawContext.canvas.nativeCanvas
-                                    stickers.forEach { st -> drawEditSticker(native, st, ww, hh) }
-                                    texts.forEach { t -> drawEditText(native, t, ww, hh) }
-                                    selectedOverlay()?.let { ov -> drawEditSelection(native, ov, ww, hh) }
-                                    (strokes + listOfNotNull(live)).forEach { st -> drawPen(st, ww, hh) }
-                                }
+                                StageCanvas()
                             } else {
-                                StatusTrimPreview(pickedUri, start, end, paused = false, scrubAt = scrub, onPosition = { playAt = it })
+                                // Owner round 36 (item 6): turns / filters freeze
+                                // the clip into a WYSIWYG still (the export's
+                                // exact pixels for this frame); the live player
+                                // rests underneath, paused. Ink rides either way.
+                                StatusTrimPreview(pickedUri, start, end, paused = stillMode, scrubAt = scrub, onPosition = { playAt = it })
+                                val still = videoStill
+                                if (stillMode && still != null) {
+                                    Image(still, "Edited frame", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                                }
+                                StageCanvas()
                             }
                         }
                     }
@@ -697,8 +775,8 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                     )
                 }
             }
-            /* top bar: Close · (video) clip length · save / HD / rotate /
-               sticker / text / pen (photo) · undo / clear while inked */
+            /* top bar: Close · (video) clip length · save / HD (photo) /
+               rotate / sticker / text / pen (photo + video) · undo / clear */
             Row(
                 Modifier
                     .align(Alignment.TopCenter)
@@ -736,20 +814,21 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                         Text("HD", color = if (hd) Color.Black else Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                     Spacer(Modifier.width(2.dp))
-                    ToolButton(onClick = { rotateTap() }) {
-                        Icon(Icons.Filled.RotateRight, "Rotate", tint = Color.White, modifier = Modifier.size(18.dp))
-                    }
-                    ToolButton(onClick = { showStickerSheet = true }) {
-                        Icon(Icons.Filled.EmojiEmotions, "Stickers", tint = Color.White, modifier = Modifier.size(18.dp))
-                    }
-                    ToolButton(onClick = { showTextSheet = true }) {
-                        Text("Aa", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    }
-                    ToolButton(active = penMode, onClick = { penMode = !penMode }) {
-                        Icon(Icons.Filled.Edit, "Draw", tint = Color.White, modifier = Modifier.size(18.dp))
-                    }
                 }
-                if (shot != null && (strokes.isNotEmpty() || overlayPast.isNotEmpty())) {
+                // Owner round 36 (item 6): rotate / sticker / text / pen ride video too.
+                ToolButton(onClick = { rotateTap() }) {
+                    Icon(Icons.Filled.RotateRight, "Rotate", tint = Color.White, modifier = Modifier.size(18.dp))
+                }
+                ToolButton(onClick = { showStickerSheet = true }) {
+                    Icon(Icons.Filled.EmojiEmotions, "Stickers", tint = Color.White, modifier = Modifier.size(18.dp))
+                }
+                ToolButton(onClick = { showTextSheet = true }) {
+                    Text("Aa", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                }
+                ToolButton(active = penMode, onClick = { penMode = !penMode }) {
+                    Icon(Icons.Filled.Edit, "Draw", tint = Color.White, modifier = Modifier.size(18.dp))
+                }
+                if ((shot != null || clip != null) && (strokes.isNotEmpty() || overlayPast.isNotEmpty())) {
                     IconButton(
                         onClick = {
                             haptics.tap()
@@ -787,7 +866,9 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                     .fillMaxWidth(),
             ) {
                 /* swipe-up filters (photo only): the hint row + the thumb strip */
-                if (shot != null) {
+                // Owner round 36 (item 6): filters ride video too (the still
+                // below previews them — a TextureView takes no ColorFilter).
+                if (shot != null || clip != null) {
                     var swipeTotal by remember { mutableStateOf(0f) }
                     Row(
                         Modifier
@@ -855,8 +936,8 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                     }
                 }
 
-                /* bottom: the pen's colours + widths (photo, pen mode) or the trim strip (video) */
-                if (shot != null && penMode) {
+                /* bottom: the pen's colours + widths (photo + video, pen mode) and the trim strip (video) */
+                if ((shot != null || clip != null) && penMode) {
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
@@ -894,7 +975,8 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                             }
                         }
                     }
-                } else if (clip != null) {
+                }
+                if (clip != null) {
                     TrimStrip(
                         thumbs = thumbs,
                         durationMs = clip.durationMs,
@@ -1349,22 +1431,7 @@ internal fun bakeFull(
         val h = picture.height.toFloat()
         stickers.forEach { st -> drawEditSticker(canvas, st, w, h) }
         texts.forEach { t -> drawEditText(canvas, t, w, h) }
-        val paint =
-            android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                style = android.graphics.Paint.Style.STROKE
-                strokeCap = android.graphics.Paint.Cap.ROUND
-                strokeJoin = android.graphics.Paint.Join.ROUND
-            }
-        strokes.forEach { st ->
-            if (st.points.size < 2) return@forEach
-            paint.color = st.color.toArgb()
-            paint.strokeWidth = st.width * w
-            val path = android.graphics.Path()
-            st.points.forEachIndexed { i, p ->
-                if (i == 0) path.moveTo(p.x * w, p.y * h) else path.lineTo(p.x * w, p.y * h)
-            }
-            canvas.drawPath(path, paint)
-        }
+        paintPenStrokes(canvas, strokes, w, h)
         var out = picture
         var scale = 1
         val maxSide = if (hd) 2560 else 1440
@@ -1387,3 +1454,51 @@ internal fun bakeFull(
 /** The plain-pen bake (round 32 shape): no filter, no overlays, standard budget. */
 internal fun bakePen(bmp: ImageBitmap, strokes: List<PenStroke>): String? =
     bakeFull(bmp.asAndroidBitmap(), strokes, null, emptyList(), emptyList(), false)
+
+/** Owner round 36 (item 6): pen strokes onto any native canvas — the photo
+ *  bake and the video overlay share it, so ink looks identical in both. */
+internal fun paintPenStrokes(canvas: android.graphics.Canvas, strokes: List<PenStroke>, w: Float, h: Float) {
+    val paint =
+        android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            style = android.graphics.Paint.Style.STROKE
+            strokeCap = android.graphics.Paint.Cap.ROUND
+            strokeJoin = android.graphics.Paint.Join.ROUND
+        }
+    strokes.forEach { st ->
+        if (st.points.size < 2) return@forEach
+        paint.color = st.color.toArgb()
+        paint.strokeWidth = st.width * w
+        val path = android.graphics.Path()
+        st.points.forEachIndexed { i, p ->
+            if (i == 0) path.moveTo(p.x * w, p.y * h) else path.lineTo(p.x * w, p.y * h)
+        }
+        canvas.drawPath(path, paint)
+    }
+}
+
+/** Owner round 36 (item 6): the video export's overlay — pen + text +
+ *  sticker baked transparent at the export's output size (null when empty). */
+internal fun bakeVideoOverlay(strokes: List<PenStroke>, texts: List<EditText>, stickers: List<EditSticker>, w: Int, h: Int): Bitmap? {
+    if (strokes.isEmpty() && texts.isEmpty() && stickers.isEmpty()) return null
+    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bmp)
+    val fw = w.toFloat()
+    val fh = h.toFloat()
+    stickers.forEach { st -> drawEditSticker(canvas, st, fw, fh) }
+    texts.forEach { t -> drawEditText(canvas, t, fw, fh) }
+    paintPenStrokes(canvas, strokes, fw, fh)
+    return bmp
+}
+
+/** Owner round 36 (item 6): one video frame off the IO thread for the still
+ *  preview + filter thumbs (closest sync frame — null on any refusal). */
+internal fun grabVideoFrame(ctx: android.content.Context, uri: Uri, atMs: Long): Bitmap? =
+    runCatching {
+        val r = android.media.MediaMetadataRetriever()
+        try {
+            r.setDataSource(ctx, uri)
+            r.getFrameAtTime(atMs.coerceAtLeast(0L) * 1000L, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+        } finally {
+            runCatching { r.release() }
+        }
+    }.getOrNull()
