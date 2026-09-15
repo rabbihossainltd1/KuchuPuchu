@@ -422,6 +422,118 @@ async function main() {
     );
   }
 
+  // ── 3a. r34-15: the block wall — flags, gated 1:1 shapes, one ask ────────
+  {
+    const h = await mk();
+    const { A, B, cid } = await pair(h, "w15");
+    const C = await h.reg("w15c");
+    const detail = async (who) =>
+      (await h.call("GET", `/api/conversations/${cid}`, undefined, who.token)).json.conversation;
+    const errCode = (r) => r.json.error?.code ?? r.json.code;
+    const open = await detail(A);
+    check(
+      "r34-15: a normal chat carries no wall flags",
+      open.blockedByMe === false && open.blockedMe === false && open.unblockAsked === false,
+      JSON.stringify({ b: open.blockedByMe, m: open.blockedMe, a: open.unblockAsked }),
+    );
+    await h.call("POST", "/api/blocks", { userId: B.user.id }, A.token);
+    const cA = await detail(A);
+    check(
+      "r34-15: the blocker side reads blockedByMe (directional, not a guess)",
+      cA.blockedByMe === true && cA.blockedMe === false,
+      JSON.stringify({ b: cA.blockedByMe, m: cA.blockedMe }),
+    );
+    check(
+      "r34-15: the blocker side's other-shape is walled (no presence / last-seen / avatar / bio)",
+      cA.other.online === false &&
+        cA.other.lastActiveAt == null &&
+        cA.other.avatarUrl == null &&
+        cA.other.avatarRef == null &&
+        cA.other.about == null &&
+        cA.other.blocked === true,
+      JSON.stringify(cA.other).slice(0, 160),
+    );
+    check(
+      "r34-15: …but the identity stays, so Unblock has a name to show",
+      typeof cA.other.displayName === "string" && cA.other.displayName.length > 0,
+      JSON.stringify(cA.other.displayName),
+    );
+    const cB = await detail(B);
+    check(
+      "r34-15: the blocked side reads blockedMe + an unspent ask",
+      cB.blockedMe === true && cB.blockedByMe === false && cB.unblockAsked === false,
+      JSON.stringify({ m: cB.blockedMe, b: cB.blockedByMe, a: cB.unblockAsked }),
+    );
+    check(
+      "r34-15: the blocked side's other-shape is walled too (last-seen leak closed)",
+      cB.other.online === false && cB.other.lastActiveAt == null && cB.other.blocked === true,
+      JSON.stringify(cB.other).slice(0, 140),
+    );
+    const listB = await h.call("GET", "/api/conversations", undefined, B.token);
+    const rowB = (listB.json.items || []).find((c) => c.id === cid) || {};
+    check(
+      "r34-15: the chat LIST walls the other-shape too (row + online dot)",
+      rowB.other?.online === false &&
+        rowB.other?.lastActiveAt == null &&
+        rowB.other?.avatarRef == null,
+      JSON.stringify(rowB.other).slice(0, 140),
+    );
+    const req = await h.call("POST", "/api/blocks/request", { userId: A.user.id }, B.token);
+    check("r34-15: the blocked side can ask once", req.status === 200, String(req.status));
+    const again = await h.call("POST", "/api/blocks/request", { userId: A.user.id }, B.token);
+    check(
+      "r34-15: the second ask for the same block is refused (409 ALREADY_ASKED)",
+      again.status === 409 && errCode(again) === "ALREADY_ASKED",
+      `${again.status} ${errCode(again)}`,
+    );
+    const askedB = await detail(B);
+    check(
+      "r34-15: unblockAsked flips after the ask (the button is spent)",
+      askedB.unblockAsked === true,
+      String(askedB.unblockAsked),
+    );
+    const thread = await h.call("GET", `/api/conversations/${cid}/messages`, undefined, A.token);
+    check(
+      "r34-15: the blocker finds the UNBLOCK_ASK card in the thread",
+      (thread.json.items || []).some((m) => m.kind === "UNBLOCK_ASK" && m.senderId === B.user.id),
+      JSON.stringify((thread.json.items || []).map((m) => m.kind)),
+    );
+    const noWall = await h.call("POST", "/api/blocks/request", { userId: C.user.id }, B.token);
+    check(
+      "r34-15: asking without a block is refused (400)",
+      noWall.status === 400,
+      String(noWall.status),
+    );
+    const ign = await h.call("POST", "/api/blocks/request/ignore", { userId: B.user.id }, A.token);
+    check("r34-15: the blocker can ignore", ign.status === 200, String(ign.status));
+    const thread2 = await h.call("GET", `/api/conversations/${cid}/messages`, undefined, A.token);
+    check(
+      "r34-15: …and the card is gone from the thread (no tombstone)",
+      !(thread2.json.items || []).some((m) => m.kind === "UNBLOCK_ASK"),
+      JSON.stringify((thread2.json.items || []).map((m) => m.kind)),
+    );
+    const third = await h.call("POST", "/api/blocks/request", { userId: A.user.id }, B.token);
+    check(
+      "r34-15: ignored stays spent — still 409, and the flag holds",
+      third.status === 409 && (await detail(B)).unblockAsked === true,
+      String(third.status),
+    );
+    await h.call("DELETE", `/api/blocks/${B.user.id}`, undefined, A.token);
+    const free = await detail(B);
+    check(
+      "r34-15: unblock clears the wall and the spent ask together",
+      free.blockedMe === false && free.unblockAsked === false && free.other?.blocked !== true,
+      JSON.stringify({ m: free.blockedMe, a: free.unblockAsked }),
+    );
+    await h.call("POST", "/api/blocks", { userId: B.user.id }, A.token);
+    const fresh = await h.call("POST", "/api/blocks/request", { userId: A.user.id }, B.token);
+    check(
+      "r34-15: one request PER BLOCK — a later block starts clean (200 again)",
+      fresh.status === 200,
+      String(fresh.status),
+    );
+  }
+
   // ── 3b. the chat-list poll must not touch the messages table at all unless a
   //          conversation actually carries a "delete chat" watermark ──────────
   {

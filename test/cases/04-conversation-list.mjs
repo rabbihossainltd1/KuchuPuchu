@@ -85,7 +85,9 @@ async function mk() {
   check("all six conversations are returned", items.length === 6, String(items.length));
   check(
     "statement count is constant, not per-chat",
-    reads + writes <= 8,
+    // r34-15: +1 for the whole-list blocks lookup that walls the 1:1 shapes —
+    // still constant, never per-chat.
+    reads + writes <= 9,
     `${reads} reads + ${writes} writes`,
   );
 
@@ -179,7 +181,8 @@ async function mk() {
   // 2 of these are the session/user lookup the auth layer always does.
   check(
     "no chats -> the list itself is a single statement",
-    k.db._stats.reads + k.db._stats.writes <= 3,
+    // r34-15: +1 (the whole-list blocks lookup); 2 auth + list + blocks.
+    k.db._stats.reads + k.db._stats.writes <= 4,
     `${k.db._stats.reads} reads total`,
   );
 }

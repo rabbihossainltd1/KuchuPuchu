@@ -2166,6 +2166,11 @@ async function ensureSchema(db: D1Database) {
     )`,
     `CREATE TABLE IF NOT EXISTS devices (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, updated_at TEXT NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS blocks (owner_id TEXT NOT NULL, target_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (owner_id, target_id))`,
+    // Owner round 34 (item 15): the blocked side's one "please unblock me"
+    // per block. The row dies with the block (see the DELETE route), so a
+    // later block starts clean; Ignore only flips the status, so no
+    // second ask for the same block.
+    `CREATE TABLE IF NOT EXISTS unblock_requests (blocker_id TEXT NOT NULL, requester_id TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (blocker_id, requester_id))`,
     `CREATE TABLE IF NOT EXISTS conversations (
       id TEXT PRIMARY KEY, kind TEXT NOT NULL DEFAULT 'SOLO', title TEXT, owner_id TEXT,
       created_at TEXT NOT NULL, last_message_at TEXT, last_message TEXT, hidden_json TEXT NOT NULL DEFAULT '{}'
@@ -5645,13 +5650,173 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       target,
       nowIso(),
     );
+    // Owner round 34 (item 15): the wall lands INSTANTLY on both sides —
+    // the same conv poke the request-accept uses, so open chats re-read
+    // the detail (composer off, header dark) without a reopen. A stale
+    // request card from an earlier block dies with the new one.
+    const wallConv = pairId(uid, target);
+    if (await one(db, "SELECT id FROM conversations WHERE id = ?", wallConv)) {
+      ctx.waitUntil(clearAskCards(env, db, wallConv, target));
+      const at = nowIso();
+      ctx.waitUntil(
+        Promise.all([
+          broadcastRoomEvent(env, `user:${uid}`, { type: "conv", conversationId: wallConv, at }),
+          broadcastRoomEvent(env, `user:${target}`, { type: "conv", conversationId: wallConv, at }),
+        ]),
+      );
+    }
     return json({ ok: true });
   }
   const blockMatch = path.match(/^\/api\/blocks\/([^/]+)$/);
   if (blockMatch && method === "DELETE") {
-    await run(db, "DELETE FROM blocks WHERE owner_id = ? AND target_id = ?", uid, blockMatch[1]!);
+    const freed = blockMatch[1]!;
+    await run(db, "DELETE FROM blocks WHERE owner_id = ? AND target_id = ?", uid, freed);
+    // Owner round 34 (item 15): the spent request dies with the block, so
+    // a LATER block starts clean (one request PER BLOCK, not per pair) —
+    // and both sides repaint instantly, like the block itself.
+    await run(
+      db,
+      "DELETE FROM unblock_requests WHERE blocker_id = ? AND requester_id = ?",
+      uid,
+      freed,
+    );
+    const freedConv = pairId(uid, freed);
+    if (await one(db, "SELECT id FROM conversations WHERE id = ?", freedConv)) {
+      ctx.waitUntil(clearAskCards(env, db, freedConv, freed));
+      const at = nowIso();
+      ctx.waitUntil(
+        Promise.all([
+          broadcastRoomEvent(env, `user:${uid}`, { type: "conv", conversationId: freedConv, at }),
+          broadcastRoomEvent(env, `user:${freed}`, { type: "conv", conversationId: freedConv, at }),
+        ]),
+      );
+    }
     return json({ ok: true });
   }
+  // Owner round 34 (item 15): the blocked side's one "please unblock me"
+  // per block. It lands as an UNBLOCK_ASK card in the pair chat (created
+  // if the two never had one), the blocker's unread ticks up, both sides
+  // repaint. Socket-only delivery, deliberately no push: blocking someone
+  // means their words don't ping you — the card waits in the chat.
+  if (path === "/api/blocks/request" && method === "POST") {
+    rateLimit(`unblockreq:${uid}`, 10, 5);
+    const target = String(body.userId || "");
+    if (!target || target === uid) fail(400, "Bad user.");
+    const wall = await one(
+      db,
+      "SELECT owner_id FROM blocks WHERE owner_id = ? AND target_id = ?",
+      target,
+      uid,
+    );
+    if (!wall) fail(400, "There is no block to lift.");
+    const prior = await one(
+      db,
+      "SELECT blocker_id FROM unblock_requests WHERE blocker_id = ? AND requester_id = ?",
+      target,
+      uid,
+    );
+    if (prior) fail(409, "You already asked for this block.", "ALREADY_ASKED");
+    const askedAt = nowIso();
+    try {
+      await run(
+        db,
+        "INSERT INTO unblock_requests (blocker_id, requester_id, status, created_at) VALUES (?, ?, 'PENDING', ?)",
+        target,
+        uid,
+        askedAt,
+      );
+    } catch {
+      fail(409, "You already asked for this block.", "ALREADY_ASKED");
+    }
+    const convId = pairId(uid, target);
+    if (!(await one(db, "SELECT id FROM conversations WHERE id = ?", convId))) {
+      await run(
+        db,
+        "INSERT INTO conversations (id, kind, created_at, hidden_json) VALUES (?, 'SOLO', ?, '{}')",
+        convId,
+        askedAt,
+      );
+      for (const member of [uid, target])
+        await run(
+          db,
+          "INSERT INTO members (conv_id, user_id, joined_at) VALUES (?, ?, ?)",
+          convId,
+          member,
+          askedAt,
+        );
+    }
+    const mid = id();
+    const askBody = "Unblock request";
+    await run(
+      db,
+      "INSERT INTO messages (id, conv_id, sender_id, kind, body, created_at) VALUES (?, ?, ?, 'UNBLOCK_ASK', ?, ?)",
+      mid,
+      convId,
+      uid,
+      askBody,
+      askedAt,
+    );
+    await run(
+      db,
+      "UPDATE conversations SET last_message_at = ?, last_message = ? WHERE id = ?",
+      askedAt,
+      askBody,
+      convId,
+    );
+    await run(
+      db,
+      "UPDATE members SET unread = unread + 1 WHERE conv_id = ? AND user_id = ?",
+      convId,
+      target,
+    );
+    const askRow = await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", mid);
+    ctx.waitUntil(afterMessageChanged(env, db, convId, askRow ? msgFrom(askRow) : null));
+    // afterMessageChanged skips the sender's own rooms — but the
+    // requester's composer must flip to the spent state too (its Request
+    // button is gone after this one ask).
+    ctx.waitUntil(
+      broadcastRoomEvent(env, `user:${uid}`, { type: "conv", conversationId: convId, at: askedAt }),
+    );
+    return json({ ok: true, asked: true });
+  }
+  // Owner round 34 (item 15): the blocker answers Ignore — the request is
+  // spent (the row STAYS, so no second ask for this block) and the card
+  // vanishes from the thread without a tombstone.
+  if (path === "/api/blocks/request/ignore" && method === "POST") {
+    rateLimit(`unblockignore:${uid}`, 20, 10);
+    const requester = String(body.userId || "");
+    if (!requester || requester === uid) fail(400, "Bad user.");
+    const wall = await one(
+      db,
+      "SELECT owner_id FROM blocks WHERE owner_id = ? AND target_id = ?",
+      uid,
+      requester,
+    );
+    if (!wall) fail(403, "Only the blocker answers this.", "FORBIDDEN");
+    await run(
+      db,
+      "UPDATE unblock_requests SET status = 'IGNORED' WHERE blocker_id = ? AND requester_id = ?",
+      uid,
+      requester,
+    );
+    const ignoreConv = pairId(uid, requester);
+    if (await one(db, "SELECT id FROM conversations WHERE id = ?", ignoreConv)) {
+      ctx.waitUntil(clearAskCards(env, db, ignoreConv, requester));
+      const at = nowIso();
+      ctx.waitUntil(
+        Promise.all([
+          broadcastRoomEvent(env, `user:${uid}`, { type: "conv", conversationId: ignoreConv, at }),
+          broadcastRoomEvent(env, `user:${requester}`, {
+            type: "conv",
+            conversationId: ignoreConv,
+            at,
+          }),
+        ]),
+      );
+    }
+    return json({ ok: true });
+  }
+
   if (path === "/api/blocks" && method === "GET") {
     const rows = await all<{ target_id: string }>(
       db,
@@ -5978,6 +6143,17 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         }
       }
     }
+    // Owner round 34 (item 15): every account on either side of a block
+    // with the caller — one statement for the whole list, so the 1:1 rows
+    // wall their other-user shapes (last seen / online dot / picture / bio).
+    const wallIds = new Set<string>();
+    for (const b of await all<{ owner_id: string; target_id: string }>(
+      db,
+      "SELECT owner_id, target_id FROM blocks WHERE owner_id = ? OR target_id = ?",
+      uid,
+      uid,
+    ))
+      wallIds.add(b.owner_id === uid ? b.target_id : b.owner_id);
     const list = [];
     for (const row of rows) {
       const conv = convs.get(row.id);
@@ -5999,7 +6175,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           if (!lastAt || lastAt < Date.parse(mark.at)) continue;
         }
       }
-      list.push(buildConvDetail(conv, membersByConv.get(conv.id) ?? [], users, uid, true));
+      list.push(
+        buildConvDetail(conv, membersByConv.get(conv.id) ?? [], users, uid, true, { ids: wallIds }),
+      );
     }
     // Freshness marker: everything the client renders (order fields, unread,
     // preview, mute, hidden-state) folded into one hash. Unchanged marker =>
@@ -8845,10 +9023,24 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         userIds.push(m.user_id);
       }
     }
+    // Owner round 34 (item 15): the matched chats wall their other-user
+    // shapes too — history stays searchable, presence does not leak.
+    const wallIds = new Set<string>();
+    for (const b of await all<{ owner_id: string; target_id: string }>(
+      db,
+      "SELECT owner_id, target_id FROM blocks WHERE owner_id = ? OR target_id = ?",
+      uid,
+      uid,
+    ))
+      wallIds.add(b.owner_id === uid ? b.target_id : b.owner_id);
     const chatUsers = await usersById(db, userIds);
     const chats = convIdList
       .filter((id) => convs.has(id))
-      .map((id) => buildConvDetail(convs.get(id)!, membersByConv.get(id) ?? [], chatUsers, uid));
+      .map((id) =>
+        buildConvDetail(convs.get(id)!, membersByConv.get(id) ?? [], chatUsers, uid, false, {
+          ids: wallIds,
+        }),
+      );
     return json({
       users,
       chats,
@@ -9677,6 +9869,36 @@ async function fanOutConversationChange(env: Env, db: D1Database, convId: string
 /** Edit/delete fan-out: the room for the open chat, `user:<id>` for everyone's
  *  chat LIST (a client on the list screen is not joined to any chat room, so a
  *  room broadcast alone leaves the stale preview until the next foreground). */
+/** Owner round 34 (item 15): one requester's UNBLOCK_ASK cards, gone without
+ *  a tombstone. The rows are hard-deleted (the request itself lives in
+ *  unblock_requests, not in the thread) and each id goes out as a DELETED
+ *  frame so open chats drop the card instead of tombstoning it (ChatScreen
+ *  checks the previous kind first). Preview + unread are recomputed the
+ *  same way a delete recomputes them. */
+async function clearAskCards(env: Env, db: D1Database, convId: string, requesterId: string) {
+  const rows = await all<MsgRow>(
+    db,
+    "SELECT * FROM messages WHERE conv_id = ? AND kind = 'UNBLOCK_ASK' AND sender_id = ?",
+    convId,
+    requesterId,
+  );
+  if (!rows.length) return;
+  await run(
+    db,
+    "DELETE FROM messages WHERE conv_id = ? AND kind = 'UNBLOCK_ASK' AND sender_id = ?",
+    convId,
+    requesterId,
+  );
+  for (const row of rows) {
+    await syncPreviewAfterDelete(db, row);
+    await afterMessageChanged(env, db, convId, {
+      id: row.id,
+      senderId: row.sender_id,
+      kind: "DELETED",
+    });
+  }
+}
+
 async function afterMessageChanged(env: Env, db: D1Database, convId: string, message: unknown) {
   await broadcastRoomEvent(env, convId, { type: "message", conversationId: convId, message });
   try {
@@ -9715,6 +9937,11 @@ function buildConvDetail(
   // fetches each data-URI once per version from /api/users/:id/avatar.
   // Opening a conversation is a one-off call, so it keeps the full shape.
   light = false,
+  // Owner round 34 (item 15): the block wall. `ids` walls the 1:1 member
+  // shapes (see below); the directional flags ride the detail so the app
+  // can tell "I blocked them" from "they blocked me" + whether this
+  // side already spent its one Request Unblock for the current block.
+  block: { ids?: Set<string>; byMe?: boolean; me?: boolean; asked?: boolean } = {},
 ) {
   const members = [];
   let other = null;
@@ -9740,13 +9967,32 @@ function buildConvDetail(
       shaped.online = false;
       shaped.lastActiveAt = null;
     }
+    // Owner round 34 (item 15): a block walls the 1:1 shapes the same way
+    // /api/users/:id already walls the profile — identity only, no last
+    // seen / online / bio / picture. The list and the detail both flow
+    // through here, so the header, the list row and its online dot all go
+    // dark together. Groups are untouched: a block is between two people.
+    const walled = solo && row.user_id !== uid && !!block.ids?.has(row.user_id);
+    const memberUser = walled
+      ? {
+          id: user.id,
+          username: user.username,
+          displayName: user.display_name,
+          about: null,
+          online: false,
+          lastActiveAt: null,
+          avatarUrl: null,
+          avatarRef: null,
+          blocked: true,
+        }
+      : shaped;
     members.push({
-      user: shaped,
+      user: memberUser,
       role: row.role,
       lastReadAt:
         solo && row.user_id !== uid && (!meReceipts || !receiptsOn(user)) ? null : row.last_read_at,
     });
-    if (row.user_id !== uid && solo) other = shaped;
+    if (row.user_id !== uid && solo) other = memberUser;
     if (row.user_id === uid) {
       meMuted = row.muted === 1;
       meHidden = Number(row.hidden ?? 0) === 1;
@@ -9768,6 +10014,12 @@ function buildConvDetail(
     // state. Null / false once accepted.
     requestFrom: solo ? (conv.request_from ?? null) : null,
     requestPending: solo && !!conv.request_from && conv.request_from !== uid,
+    // Owner round 34 (item 15): the block wall, directional — the app
+    // kills the composer on either side, and only the blocked side gets
+    // the one Request Unblock button (`unblockAsked` = already spent).
+    blockedByMe: solo && !!block.byMe,
+    blockedMe: solo && !!block.me,
+    unblockAsked: solo && !!block.asked,
     // Owner round 32 (item 28): the newest message's sender + delivery stamp,
     // so a list row can draw sent / delivered / read for the caller's own last
     // message without opening the chat (the list is the screen a sender is
@@ -9824,6 +10076,36 @@ async function conversationDetail(db: D1Database, convId: string, uid: string) {
   );
   conv.last_message_sender_id = newest?.sender_id ?? null;
   conv.last_message_delivered_at = newest?.delivered_at ?? null;
+  // Owner round 34 (item 15): the wall flags for this 1:1 chat — one
+  // blocks lookup, both directions — plus whether this side already
+  // spent its one Request Unblock for the current block.
+  const soloOther =
+    conv.kind === "SOLO" ? (memberRows.find((m) => m.user_id !== uid)?.user_id ?? null) : null;
+  let byMe = false;
+  let me = false;
+  let asked = false;
+  const wallIds = new Set<string>();
+  if (soloOther) {
+    for (const b of await all<{ owner_id: string }>(
+      db,
+      "SELECT owner_id FROM blocks WHERE (owner_id = ? AND target_id = ?) OR (owner_id = ? AND target_id = ?)",
+      uid,
+      soloOther,
+      soloOther,
+      uid,
+    )) {
+      wallIds.add(soloOther);
+      if (b.owner_id === uid) byMe = true;
+      else me = true;
+    }
+    if (me)
+      asked = !!(await one(
+        db,
+        "SELECT blocker_id FROM unblock_requests WHERE blocker_id = ? AND requester_id = ?",
+        soloOther,
+        uid,
+      ));
+  }
   return buildConvDetail(
     conv,
     memberRows,
@@ -9832,6 +10114,8 @@ async function conversationDetail(db: D1Database, convId: string, uid: string) {
       memberRows.map((m) => m.user_id),
     ),
     uid,
+    false,
+    { ids: wallIds, byMe, me, asked },
   );
 }
 

@@ -5619,7 +5619,7 @@ const convBetween = (db, a, b) =>
         ) &&
         chat.includes('val requestPending = !isGroup && c?.optBoolean("requestPending") == true') &&
         chat.includes("val requestOpen = requestPending || requestSent") &&
-        chat.includes("if (!isGroup && c != null && !botChat && !requestOpen) {") &&
+        chat.includes("if (!isGroup && c != null && !botChat && !requestOpen && !blockWall) {") &&
         chat.includes('requestOpen -> " "') &&
         chat.includes(
           'if (!requestOpen) {\n                            KpSheetRow(Icons.Filled.PermMedia, "Media, links, and docs")',
@@ -7371,6 +7371,37 @@ const convBetween = (db, a, b) =>
         chat14.includes(
           "theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty())",
         ),
+    );
+  }
+  {
+    const chat15 = kt("ChatScreen.kt");
+    check(
+      'r34-15: a block swaps the whole composer for "This User Is Unavailable" + the one Request Unblock (blocked side, unspent only), no call buttons on the wall',
+      chat15.includes("if (blockWall) {") &&
+        chat15.includes('"This User Is Unavailable"') &&
+        chat15.includes("if (blockedMe && !unblockAsked && !askedSent) {") &&
+        chat15.includes('Api.post("/api/blocks/request"') &&
+        chat15.includes("!botChat && !requestOpen && !blockWall"),
+    );
+  }
+  {
+    const chat15b = kt("ChatScreen.kt");
+    check(
+      "r34-15: the UNBLOCK_ASK card renders in-thread — blocker gets Unblock / Ignore (DELETE /api/blocks + POST ignore), requester a muted line, answered cards vanish instead of tombstoning",
+      chat15b.includes('if (kind == "UNBLOCK_ASK") {') &&
+        chat15b.includes("UnblockAskCard(m, mine, askName, onUnblockAsk, onIgnoreAsk)") &&
+        chat15b.includes('Api.delete("/api/blocks/${msg.optString("senderId")}")') &&
+        chat15b.includes('Api.post("/api/blocks/request/ignore"') &&
+        chat15b.includes('msgs[idxExisting].optString("kind") == "UNBLOCK_ASK"') &&
+        chat15b.includes('"Unblock requested"'),
+    );
+  }
+  {
+    const chat15c = kt("ChatScreen.kt");
+    check(
+      "r34-15: a send refused by the block wall stays silent (no toast over the unavailable line)",
+      chat15c.includes('val walled = e.message?.contains("can\'t reach") == true') &&
+        chat15c.includes("if (!walled) error = e.message"),
     );
   }
   {

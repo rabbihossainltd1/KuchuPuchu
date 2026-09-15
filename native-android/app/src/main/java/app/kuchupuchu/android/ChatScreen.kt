@@ -771,6 +771,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                             when {
                                 // Same id already present -> replace the row, never
                                 // double it.
+                                // Owner round 34 (item 15): an answered request
+                                // card vanishes instead of tombstoning — the
+                                // server hard-deleted the row and only borrows
+                                // the DELETED frame to reach open chats.
+                                idxExisting >= 0 && liveMsg.optString("kind") == "DELETED" &&
+                                    msgs[idxExisting].optString("kind") == "UNBLOCK_ASK" ->
+                                    msgs.removeAt(idxExisting)
                                 idxExisting >= 0 -> msgs[idxExisting] = liveMsg
                                 liveCid.isNotBlank() && msgs.any { it.optString("clientId") == liveCid } ->
                                     msgs[msgs.indexOfFirst { it.optString("clientId") == liveCid }] = liveMsg
@@ -1055,7 +1062,11 @@ fun ChatScreen(nav: NavController, convId: String) {
             outcome.onFailure { e ->
                 // Refused for good: the bubble turns red now and the text
                 // comes back to the composer (§20) — no page fetch in between.
-                error = e.message?.takeIf { it.isNotBlank() } ?: "Could not send."
+                // Owner round 34 (item 15): a refusal from the BLOCK wall
+                // stays silent — the composer is already gone, so a toast
+                // would be noise over the "unavailable" line.
+                val walled = e.message?.contains("can't reach") == true
+                if (!walled) error = e.message?.takeIf { it.isNotBlank() } ?: "Could not send."
                 markPendingFailed(clientId)
                 reconcileRefused()
             }
@@ -1706,6 +1717,13 @@ fun ChatScreen(nav: NavController, convId: String) {
     val requestPending = !isGroup && c?.optBoolean("requestPending") == true
     val requestSent = !isGroup && c?.optText("requestFrom")?.takeIf { it.isNotBlank() } == Store.myId()
     val requestOpen = requestPending || requestSent
+    // Owner round 34 (item 15): the block wall. Either direction kills the
+    // composer; only the blocked side gets the one Request Unblock button
+    // (unblockAsked = already spent for this block).
+    val blockedMe = !isGroup && c?.optBoolean("blockedMe") == true
+    val blockedByMe = !isGroup && c?.optBoolean("blockedByMe") == true
+    val blockWall = blockedMe || blockedByMe
+    val unblockAsked = c?.optBoolean("unblockAsked") == true
     val rawTitle =
         if (isGroup) c?.optText("title")?.ifBlank { "Group" } ?: "…"
         else c?.optJSONObject("other")?.optText("displayName")?.ifBlank { "…" } ?: "…"
@@ -1964,7 +1982,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     Icon(Icons.Filled.Videocam, "Group video call", tint = chatAccent(chatTheme), modifier = Modifier.size(21.dp))
                 }
             }
-            if (!isGroup && c != null && !botChat && !requestOpen) {
+            if (!isGroup && c != null && !botChat && !requestOpen && !blockWall) {
                 if (otherId.isNotBlank()) {
                     HeaderCallBtn(onClick = {
                         gateMicCamera(video = false) {
@@ -2361,6 +2379,39 @@ fun ChatScreen(nav: NavController, convId: String) {
                             onMessageOwner = { ownerId -> openChatWithUser(ownerId) },
                             theme = chatTheme,
                             onJumpTo = { jumpTo(it) },
+                            askName = rawTitle,
+                            onUnblockAsk = { msg ->
+                                scope.launch {
+                                    val ok = runCatching {
+                                        withContext(Dispatchers.IO) { Api.delete("/api/blocks/${msg.optString("senderId")}") }
+                                    }.getOrNull()?.let { !it.has("error") } == true
+                                    if (ok) {
+                                        haptics.confirm()
+                                        Cache.bust("/api/conversations/$convId")
+                                        refreshMeta()
+                                        refreshMessages(forceNetwork = true)
+                                        ScreenStore.pokeInbox()
+                                    } else {
+                                        error = "Could not unblock. Try again."
+                                    }
+                                }
+                            },
+                            onIgnoreAsk = { msg ->
+                                scope.launch {
+                                    val ok = runCatching {
+                                        withContext(Dispatchers.IO) {
+                                            Api.post("/api/blocks/request/ignore", JSONObject().put("userId", msg.optString("senderId")))
+                                        }
+                                    }.getOrNull()?.let { !it.has("error") } == true
+                                    if (ok) {
+                                        haptics.tap()
+                                        refreshMessages(forceNetwork = true)
+                                        ScreenStore.pokeInbox()
+                                    } else {
+                                        error = "Could not ignore. Try again."
+                                    }
+                                }
+                            },
                         )
                     }
                         if (flashAlpha > 0.004f) Box(Modifier.matchParentSize().background(chatAccent(chatTheme).copy(alpha = flashAlpha)))
@@ -2650,7 +2701,66 @@ fun ChatScreen(nav: NavController, convId: String) {
             )
         }
         ReplyQuoteBar(replyTo, chatTheme) { replyTo = null }
-        if (requestPending) {
+        if (blockWall) {
+            // Owner round 34 (item 15): a block on either side replaces the
+            // whole composer — no send box, no attach, no mic, and no more
+            // red error bubble when a send hits the wall. The blocked side
+            // gets exactly one Request Unblock per block; afterwards (and
+            // for the blocker) only the unavailable line remains.
+            var askedSent by remember { mutableStateOf(false) }
+            var asking by remember { mutableStateOf(false) }
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .background(Card)
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    "This User Is Unavailable",
+                    fontSize = 13.sp,
+                    color = Muted,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                )
+                if (blockedMe && !unblockAsked && !askedSent) {
+                    Spacer(Modifier.height(10.dp))
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(if (asking) Line else ActionBlue)
+                            .clickable(enabled = !asking) {
+                                asking = true
+                                scope.launch {
+                                    val sent = runCatching {
+                                        withContext(Dispatchers.IO) {
+                                            Api.post("/api/blocks/request", JSONObject().put("userId", otherUserId))
+                                        }
+                                    }.getOrNull()?.let { !it.has("error") } == true
+                                    asking = false
+                                    if (sent) {
+                                        haptics.confirm()
+                                        askedSent = true
+                                        ScreenStore.pokeInbox()
+                                    } else {
+                                        error = "Could not send the request. Try again."
+                                    }
+                                }
+                            }
+                            .padding(horizontal = 22.dp, vertical = 11.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            if (asking) "Sending…" else "Request Unblock",
+                            color = if (asking) Muted else ActionBlueInk,
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        } else if (requestPending) {
             // Owner round 32 (item 38): message request — Accept or Block
             // before anything else. Accept = POST /accept (the chat becomes a
             // normal one on both sides); Block = the same block the profile
@@ -4253,6 +4363,57 @@ private fun ReplyQuoteBar(replyTo: JSONObject?, theme: String, onCancel: () -> U
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
+// Owner round 34 (item 15): the in-chat unblock-request card. The blocker
+// gets Unblock / Ignore; the requester (mine) a muted confirmation line.
+// No busy latch: both answers are idempotent, so a double-tap is harmless.
+private fun UnblockAskCard(
+    m: JSONObject,
+    mine: Boolean,
+    askName: String,
+    onUnblock: (JSONObject) -> Unit,
+    onIgnore: (JSONObject) -> Unit,
+) {
+    Box(Modifier.fillMaxWidth().padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
+        Column(
+            Modifier
+                .clip(RoundedCornerShape(14.dp))
+                .background(Card)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            if (mine) {
+                Text("Unblock requested", fontSize = 13.sp, color = Muted)
+            } else {
+                Text(
+                    (if (askName.isNotBlank()) askName else "This user") + " asked you to unblock them",
+                    fontSize = 13.5.sp,
+                    color = Ink,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Line)
+                            .clickable { onIgnore(m) }
+                            .padding(horizontal = 20.dp, vertical = 9.dp),
+                        contentAlignment = Alignment.Center,
+                    ) { Text("Ignore", color = Muted, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(ActionBlue)
+                            .clickable { onUnblock(m) }
+                            .padding(horizontal = 20.dp, vertical = 9.dp),
+                        contentAlignment = Alignment.Center,
+                    ) { Text("Unblock", color = ActionBlueInk, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }
+                }
+            }
+        }
+    }
+}
+
 private fun MessageRow(
     m: JSONObject,
     isGroup: Boolean,
@@ -4273,6 +4434,9 @@ private fun MessageRow(
     onOpenAlbum: (JSONObject) -> Unit = {},
     onOpenDoc: (JSONObject) -> Unit = {},
     onJumpTo: (String) -> Unit = {},
+    onUnblockAsk: (JSONObject) -> Unit = {},
+    onIgnoreAsk: (JSONObject) -> Unit = {},
+    askName: String = "",
 ) {
     val mine = m.optString("senderId") == myId
     val kind = m.optString("kind")
@@ -4297,6 +4461,13 @@ private fun MessageRow(
 
     if (kind == "LOGIN_APPROVAL") {
         LoginApprovalMessage(m)
+        return
+    }
+    // Owner round 34 (item 15): the one-per-block unblock plea. The blocker
+    // answers it right here (Unblock / Ignore); the requester sees a muted
+    // "sent" line instead of buttons.
+    if (kind == "UNBLOCK_ASK") {
+        UnblockAskCard(m, mine, askName, onUnblockAsk, onIgnoreAsk)
         return
     }
     if (kind == "SYSTEM" && !isCallLog(m)) {
