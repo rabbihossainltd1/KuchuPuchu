@@ -709,6 +709,7 @@ internal fun loadMediaPool(ctx: android.content.Context): List<MediaItem> {
  *  Owner round 31 (item 31): also the status picker's cell (selectIndex 0 = plain tick).
  *  Owner round 36 (item 2): press-hold starts multi-select where offered
  *  (null = plain tap cell, the status picker's shape). */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun MediaCell(
     item: MediaItem,
@@ -730,8 +731,8 @@ internal fun MediaCell(
         }
     }
     val press =
-        // The trailing-lambda shape is the STABLE overload (the named-
-        // onClick variant is still experimental in this foundation).
+        // combinedClickable is experimental in this foundation (1.7.5) —
+        // the OptIn above covers the cell (CI's kotlinc enforces it).
         if (onLongPress != null) Modifier.combinedClickable(onLongClick = onLongPress) { onToggle() } else Modifier.clickable(onClick = onToggle)
     Box(
         Modifier
