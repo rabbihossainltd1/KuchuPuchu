@@ -4555,7 +4555,7 @@ private fun MessageRow(
                             if (EmojiRepo.isCustomId(st)) CustomEmojiOrFallback(st)
                             else Text(st, fontSize = 56.sp)
                         }
-                        "FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc)
+                        "FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty())
                         // Owner round 33 (item 5): the stamp is placed by
                         // measurement after the last line (KpStamped) — the
                         // old no-break-space reserve is gone from every text
@@ -6116,6 +6116,11 @@ private fun FileBubble(
     onOpenVideo: (JSONObject) -> Unit = {},
     theme: String = "darkblue",
     onOpenDoc: (JSONObject) -> Unit = {},
+    // Owner round 34 (item 14): press-hold forwards to these (the row's own
+    // tap target used to swallow it, so documents had no long-press at all).
+    onToggleSelect: (JSONObject) -> Unit = {},
+    onLongPress: (JSONObject) -> Unit = {},
+    selecting: Boolean = false,
 ) {
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
@@ -6257,10 +6262,15 @@ private fun FileBubble(
         modifier =
             Modifier
                 .width(200.dp) // fixed width so the bubble never grows/shrinks on tap
-                .clickable {
+                .combinedClickable(
+                    onClick = {
+                        if (selecting && !pendingEcho) {
+                            onToggleSelect(m)
+                            return@combinedClickable
+                        }
                     if (!ready) {
                         android.widget.Toast.makeText(ctx, "This file is no longer available.", android.widget.Toast.LENGTH_SHORT).show()
-                        return@clickable
+                        return@combinedClickable
                     }
                     // Owner round 31: media sent AS a document still opens in
                     // KuchuPuchu's own viewer / player (never a system app);
@@ -6268,15 +6278,15 @@ private fun FileBubble(
                     when {
                         isImage -> {
                             onOpenImage(m)
-                            return@clickable
+                            return@combinedClickable
                         }
                         fileLooksVideo(m) -> {
                             onOpenVideo(m)
-                            return@clickable
+                            return@combinedClickable
                         }
                         fileType.startsWith("audio") -> {
                             if (player.playingId == id) player.stop() else player.toggle(ctx, id, fileKey)
-                            return@clickable
+                            return@combinedClickable
                         }
                     }
                     // Owner round 32 (item 33): every other document opens in
@@ -6285,7 +6295,14 @@ private fun FileBubble(
                     // Forward / Open with) — never straight into a system app,
                     // never a dead tap. The screen downloads and caches it.
                     onOpenDoc(m)
-                },
+                    },
+                    onLongClick = {
+                        if (!pendingEcho) {
+                            haptics.tap()
+                            if (selecting) onToggleSelect(m) else onLongPress(m)
+                        }
+                    },
+                ),
     ) {
         // Owner round 32 (item 34): the upload ring (and the open spinner) wrap
         // the file icon on the LEFT. The old right-hand slot put the ring at

@@ -2710,7 +2710,7 @@ const convBetween = (db, a, b) =>
         chat.includes("if (isImage && !asDocument) {") &&
         // r31-27: the call site now also hands the chat theme down (voice bars).
         chat.includes(
-          '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc)',
+          '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty())',
         ) &&
         readFileSync("src/worker/index.ts", "utf8").includes(
           "...(incomingMeta.document === true ? { document: true } : {}),",
@@ -3803,7 +3803,7 @@ const convBetween = (db, a, b) =>
             '.also { mm -> vm.optJSONArray("waveform")?.let { mm.put("waveform", it) } },',
           ) &&
           chat.includes(
-            '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc)',
+            '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty())',
           ),
       );
     }
@@ -7359,6 +7359,18 @@ const convBetween = (db, a, b) =>
       chat12.indexOf("fun jumpTo(id: String) {") < chat12.indexOf("ChatSearchSheet(") &&
         chat12.includes("showChatSearch = false\n                        jumpTo(id)") &&
         !chat12.includes('val i = msgs.indexOfFirst { it.optString("id") == id }'),
+    );
+  }
+  {
+    const chat14 = kt("ChatScreen.kt");
+    check(
+      "r34-14: press-hold on a document reaches the action sheet — the doc row is a combinedClickable forwarding long-press (sheet / selection), select-mode taps toggle",
+      chat14.includes("if (selecting) onToggleSelect(m) else onLongPress(m)") &&
+        chat14.includes("onClick = {\n                        if (selecting && !pendingEcho) {") &&
+        chat14.includes("selecting: Boolean = false,") &&
+        chat14.includes(
+          "theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty())",
+        ),
     );
   }
   {
