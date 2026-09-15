@@ -6468,7 +6468,7 @@ const convBetween = (db, a, b) =>
   // r34-16b: the attach editor goes full WhatsApp — a lone grid tap opens
   // it; close · save · HD · rotate · sticker · text · pen on top, swipe-up
   // filters, the caption bar (+, caption, the editor-owned ①), the recipient
-  // chip + green send; captions ride the send path and render under bubbles.
+  // chip + blue send; captions ride the send path and render under bubbles.
   {
     const chat = kt("ChatScreen.kt");
     const attach = kt("AttachSheet.kt");
@@ -6476,7 +6476,7 @@ const convBetween = (db, a, b) =>
     const store = kt("ScreenStore.kt");
     const files = kt("Files.kt");
     check(
-      "r34-16b: editor screen — top bar (save, HD pill, rotate, sticker, Aa, pen), swipe-up filter strip (preview + bake share one ColorMatrix), caption bar (add-more, caption field, ViewOnceOneIcon toggle), recipient chip + green send; rotate carries the normalised overlays, HD bakes bigger, no dialogs / toasts",
+      "r34-16b: editor screen — top bar (save, HD pill, rotate, sticker, Aa, pen), swipe-up filter strip (preview + bake share one ColorMatrix), caption bar (add-more, caption field, ViewOnceOneIcon toggle), recipient chip + blue send; rotate carries the normalised overlays, HD bakes bigger, no dialogs / toasts",
       edit.includes("Icons.Filled.Download") &&
         edit.includes('Text("HD", color = if (hd) Color.Black else Color.White') &&
         edit.includes("Icons.Filled.RotateRight") &&
@@ -6488,7 +6488,7 @@ const convBetween = (db, a, b) =>
         edit.includes("ColorMatrix(filterMatrix.array)") &&
         edit.includes("Add a caption...") &&
         edit.includes("ScreenStore.editTitle") &&
-        edit.includes(".background(Green)") &&
+        edit.includes(".background(ActionBlue)") &&
         edit.includes("rotation = (rotation + 1) % 4") &&
         edit.includes("Stickers.packs") &&
         edit.includes("KpSheet(onDismiss = { showTextSheet = false }") &&
@@ -7523,6 +7523,37 @@ const convBetween = (db, a, b) =>
         chat15b.includes('Api.post("/api/blocks/request/ignore"') &&
         chat15b.includes('msgs[idxExisting].optString("kind") == "UNBLOCK_ASK"') &&
         chat15b.includes('"Unblock requested"'),
+    );
+  }
+  // r35-8: the editor grows up — overlays carry a pinch size (preview AND
+  // bake share the scaled draw fns), one gesture loop owns select / move /
+  // pinch / ×-delete, the photo owns the whole screen with floating tiny
+  // chrome on scrims, the send is a small blue dot, the once toggle sits in
+  // a ring seat that fills blue while armed.
+  {
+    const edit = kt("MediaEditScreen.kt");
+    check(
+      "r35-8: overlays carry scale (pinch 0.4–4, geometry + preview + bake all ride it), one select/move/pinch/× loop, full-bleed stage, floating tiny chrome on scrims, small blue send, seated once toggle",
+      (edit.match(/val scale: Float = 1f/g) || []).length === 2 &&
+        edit.includes("fun scaleOverlay(id: String, factor: Float)") &&
+        edit.includes("coerceIn(0.4f, 4f)") &&
+        edit.includes("scaleOverlay(target, dist / prevDist)") &&
+        edit.includes("w * 0.06f * t.scale") &&
+        edit.includes("w * 0.11f * s.scale") &&
+        edit.includes("0.075f * s.scale") &&
+        edit.includes("DEL_MARK_HIT") &&
+        edit.includes("Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center)") &&
+        edit.includes("Brush.verticalGradient") &&
+        edit.includes(".align(Alignment.TopCenter)") &&
+        edit.includes(".align(Alignment.BottomCenter)") &&
+        (edit.match(/\.size\(32\.dp\)/g) || []).length === 3 &&
+        (edit.match(/\.size\(36\.dp\)/g) || []).length === 3 &&
+        (edit.match(/\.size\(40\.dp\)/g) || []).length === 1 &&
+        edit.includes(".background(ActionBlue)") &&
+        edit.includes(".border(1.dp, if (once) ActionBlue else Color(0x66FFFFFF), CircleShape)") &&
+        edit.includes('Text("Aa", color = Color.White, fontSize = 15.sp') &&
+        !edit.includes("size(52.dp)") &&
+        !edit.includes("Box(Modifier.fillMaxWidth().weight(1f)"),
     );
   }
   {

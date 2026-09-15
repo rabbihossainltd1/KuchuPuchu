@@ -9,7 +9,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.awaitTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -63,6 +62,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
@@ -246,10 +246,10 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
     fun selectedOverlay(): EditSel? {
         val id = selectedId ?: return null
         texts.find { it.id == id }?.let { t ->
-            val rx = 0.04f + 0.014f * t.text.length.coerceAtMost(16)
-            return EditSel(id, t.center, rx, 0.05f)
+            val rx = (0.04f + 0.014f * t.text.length.coerceAtMost(16)) * t.scale
+            return EditSel(id, t.center, rx, 0.05f * t.scale)
         }
-        stickers.find { it.id == id }?.let { s -> return EditSel(id, s.center, 0.075f, 0.075f) }
+        stickers.find { it.id == id }?.let { s -> return EditSel(id, s.center, 0.075f * s.scale, 0.075f * s.scale) }
         return null
     }
 
@@ -257,12 +257,14 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
     fun hitOverlay(x: Float, y: Float): String? {
         for (i in stickers.indices.reversed()) {
             val s = stickers[i]
-            if (kotlin.math.abs(x - s.center.x) <= 0.075f && kotlin.math.abs(y - s.center.y) <= 0.075f) return s.id
+            val r = 0.075f * s.scale
+            if (kotlin.math.abs(x - s.center.x) <= r && kotlin.math.abs(y - s.center.y) <= r) return s.id
         }
         for (i in texts.indices.reversed()) {
             val t = texts[i]
-            val rx = 0.04f + 0.014f * t.text.length.coerceAtMost(16)
-            if (kotlin.math.abs(x - t.center.x) <= rx && kotlin.math.abs(y - t.center.y) <= 0.05f) return t.id
+            val rx = (0.04f + 0.014f * t.text.length.coerceAtMost(16)) * t.scale
+            val ry = 0.05f * t.scale
+            if (kotlin.math.abs(x - t.center.x) <= rx && kotlin.math.abs(y - t.center.y) <= ry) return t.id
         }
         return null
     }
@@ -289,6 +291,22 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
         texts.removeAll { it.id == id }
         stickers.removeAll { it.id == id }
         if (selectedId == id) selectedId = null
+    }
+
+    /** Owner round 35 (item 8): pinch zoom — per-event clamped so one jumpy frame never flings the size. */
+    fun scaleOverlay(id: String, factor: Float) {
+        val f = factor.coerceIn(0.5f, 2f)
+        val ti = texts.indexOfFirst { it.id == id }
+        if (ti >= 0) {
+            val t = texts[ti]
+            texts[ti] = t.copy(scale = (t.scale * f).coerceIn(0.4f, 4f))
+            return
+        }
+        val si = stickers.indexOfFirst { it.id == id }
+        if (si >= 0) {
+            val s = stickers[si]
+            stickers[si] = s.copy(scale = (s.scale * f).coerceIn(0.4f, 4f))
+        }
     }
 
     fun rotateTap() {
@@ -485,7 +503,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
     fun ToolButton(active: Boolean = false, onClick: () -> Unit, glyph: @Composable () -> Unit) {
         Box(
             Modifier
-                .size(40.dp)
+                .size(32.dp)
                 .clip(CircleShape)
                 .background(if (active) ActionBlue else Color.Transparent)
                 .clickable {
@@ -498,73 +516,16 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
         }
     }
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
-        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-            /* top bar: Close · (video) clip length · save / HD / rotate /
-               sticker / text / pen (photo) · undo / clear while inked */
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = { nav.popBackStack() }) {
-                    Icon(Icons.Filled.Close, "Close", tint = Color.White)
-                }
-                if (clip != null) {
-                    Text(editClipLabel(start, end), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.width(6.dp))
-                }
-                Spacer(Modifier.weight(1f))
-                ToolButton(onClick = { saveCurrent() }) {
-                    Icon(Icons.Filled.Download, "Save to gallery", tint = Color.White, modifier = Modifier.size(22.dp))
-                }
-                if (clip == null) {
-                    // The HD pill: filled while the bigger send is armed.
-                    Box(
-                        Modifier
-                            .clip(RoundedCornerShape(7.dp))
-                            .background(if (hd) Color.White else Color.Transparent)
-                            .border(1.5.dp, Color.White, RoundedCornerShape(7.dp))
-                            .clickable {
-                                haptics.toggle(!hd)
-                                hd = !hd
-                            }
-                            .padding(horizontal = 7.dp, vertical = 3.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text("HD", color = if (hd) Color.Black else Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(Modifier.width(2.dp))
-                    ToolButton(onClick = { rotateTap() }) {
-                        Icon(Icons.Filled.RotateRight, "Rotate", tint = Color.White, modifier = Modifier.size(22.dp))
-                    }
-                    ToolButton(onClick = { showStickerSheet = true }) {
-                        Icon(Icons.Filled.EmojiEmotions, "Stickers", tint = Color.White, modifier = Modifier.size(22.dp))
-                    }
-                    ToolButton(onClick = { showTextSheet = true }) {
-                        Text("Aa", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
-                    }
-                    ToolButton(active = penMode, onClick = { penMode = !penMode }) {
-                        Icon(Icons.Filled.Edit, "Draw", tint = Color.White, modifier = Modifier.size(21.dp))
-                    }
-                }
-                if (shot != null && strokes.isNotEmpty()) {
-                    IconButton(onClick = {
-                        haptics.tap()
-                        strokes.removeAt(strokes.size - 1)
-                    }) {
-                        Icon(Icons.AutoMirrored.Filled.Undo, "Undo", tint = Color.White)
-                    }
-                    IconButton(onClick = {
-                        haptics.tap()
-                        strokes.clear()
-                    }) {
-                        Icon(Icons.Filled.Delete, "Clear", tint = Color.White)
-                    }
-                }
-            }
+    // Owner round 35 (item 8): soft scrims so the floating chrome reads over any photo.
+    val topScrim = Brush.verticalGradient(listOf(Color(0x99000000), Color.Transparent))
+    val bottomScrim = Brush.verticalGradient(listOf(Color.Transparent, Color(0x99000000)))
 
-            /* the stage: media at its own aspect; overlays + the pen layer over a photo */
-            Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        // Owner round 35 (item 8): the photo owns the whole screen —
+        // chrome floats OVER it on soft black scrims, nothing boxes it in.
+        Box(Modifier.fillMaxSize()) {
+            /* the stage, full-bleed: media max-fit at its own aspect; overlays + the pen layer over a photo */
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 when {
                     loadFailed -> Text("Could not open that file.", color = Color.White, fontSize = 14.sp)
                     !ready -> CircularProgressIndicator(color = ActionBlue)
@@ -606,46 +567,84 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                                                     }
                                                 }
                                             } else {
-                                                // Overlay mode: tap selects (the mark deletes),
-                                                // a drag past the slop moves the grabbed overlay.
+                                                // Overlay mode, unified (owner round 35, item 8):
+                                                // tap selects (the mark deletes), a one-finger
+                                                // drag past the slop moves the grabbed overlay,
+                                                // a two-finger pinch resizes it. One loop owns
+                                                // the whole gesture, so select / move / pinch /
+                                                // delete can never strand each other halfway.
                                                 Modifier.pointerInput(texts.size, stickers.size) {
                                                     awaitEachGesture {
                                                         val w = size.width.coerceAtLeast(1).toFloat()
                                                         val h = size.height.coerceAtLeast(1).toFloat()
-                                                        val down = awaitFirstDown()
-                                                        val nx = down.position.x / w
-                                                        val ny = down.position.y / h
-                                                        val sel = selectedOverlay()
-                                                        if (sel != null) {
+                                                        val d0 = awaitFirstDown()
+                                                        val nx0 = d0.position.x / w
+                                                        val ny0 = d0.position.y / h
+                                                        selectedOverlay()?.let { sel ->
                                                             val dp = deletePos(sel)
-                                                            val dd = kotlin.math.hypot(nx - dp.x, ny - dp.y)
-                                                            if (dd < 0.034f) {
+                                                            if (kotlin.math.hypot(nx0 - dp.x, ny0 - dp.y) < DEL_MARK_HIT) {
                                                                 haptics.tap()
                                                                 removeOverlay(sel.id)
                                                                 waitForUpOrCancellation()
                                                                 return@awaitEachGesture
                                                             }
                                                         }
-                                                        val hit = hitOverlay(nx, ny)
-                                                        if (hit == null) {
-                                                            if (waitForUpOrCancellation() != null) selectedId = null
-                                                            return@awaitEachGesture
+                                                        val hit = hitOverlay(nx0, ny0)
+                                                        if (hit != null) {
+                                                            haptics.tap()
+                                                            selectedId = hit
                                                         }
-                                                        haptics.tap()
-                                                        selectedId = hit
-                                                        val slop = awaitTouchSlopOrCancellation(down.id) { change, _ -> change.consume() }
-                                                        if (slop == null) return@awaitEachGesture
-                                                        var prev = slop.position
+                                                        // 0 undecided, 1 move, 2 pinch (pinch wins
+                                                        // outright — lifting back to one finger
+                                                        // ends the gesture instead of dragging).
+                                                        var mode = 0
+                                                        var moved = false
+                                                        var prev = d0.position
+                                                        var prevDist = 0f
+                                                        var prevCent = Offset.Zero
+                                                        val slopPx = viewConfiguration.touchSlop
                                                         while (true) {
                                                             val ev = awaitPointerEvent()
-                                                            val c = ev.changes.firstOrNull { it.id == down.id } ?: break
-                                                            if (!c.pressed) break
-                                                            val dx = (c.position.x - prev.x) / w
-                                                            val dy = (c.position.y - prev.y) / h
-                                                            prev = c.position
-                                                            c.consume()
-                                                            moveOverlay(hit, dx, dy)
+                                                            val pressed = ev.changes.filter { it.pressed }
+                                                            if (pressed.isEmpty()) break
+                                                            val target = hit ?: selectedId
+                                                            if (pressed.size >= 2 && target != null) {
+                                                                val a = pressed[0].position
+                                                                val b = pressed[1].position
+                                                                val dist = kotlin.math.hypot(a.x - b.x, a.y - b.y)
+                                                                val cent = Offset((a.x + b.x) / 2f, (a.y + b.y) / 2f)
+                                                                if (mode != 2) {
+                                                                    mode = 2
+                                                                    moved = true
+                                                                    prevDist = dist
+                                                                    prevCent = cent
+                                                                } else {
+                                                                    if (prevDist > 1f && dist > 1f) scaleOverlay(target, dist / prevDist)
+                                                                    moveOverlay(target, (cent.x - prevCent.x) / w, (cent.y - prevCent.y) / h)
+                                                                    prevDist = dist
+                                                                    prevCent = cent
+                                                                }
+                                                                pressed.forEach { it.consume() }
+                                                            } else if (pressed.size == 1 && mode != 2) {
+                                                                val c = pressed[0]
+                                                                if (mode == 0) {
+                                                                    val ox = c.position.x - d0.position.x
+                                                                    val oy = c.position.y - d0.position.y
+                                                                    if (kotlin.math.hypot(ox, oy) > slopPx) {
+                                                                        if (hit == null) break
+                                                                        mode = 1
+                                                                        moved = true
+                                                                        prev = c.position
+                                                                    }
+                                                                }
+                                                                if (mode == 1 && hit != null) {
+                                                                    moveOverlay(hit, (c.position.x - prev.x) / w, (c.position.y - prev.y) / h)
+                                                                    prev = c.position
+                                                                }
+                                                                c.consume()
+                                                            }
                                                         }
+                                                        if (!moved && hit == null) selectedId = null
                                                     }
                                                 }
                                             },
@@ -670,225 +669,313 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                     Text(
                         note,
                         color = Color.White,
-                        fontSize = 13.sp,
+                        fontSize = 12.sp,
                         modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(bottom = 10.dp)
+                            .align(Alignment.Center)
                             .clip(RoundedCornerShape(16.dp))
                             .background(Color(0xCC000000))
-                            .padding(horizontal = 14.dp, vertical = 7.dp),
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
                     )
                 }
             }
-
-            /* swipe-up filters (photo only): the hint row + the thumb strip */
-            if (shot != null) {
-                var swipeTotal by remember { mutableStateOf(0f) }
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable { filtersOpen = !filtersOpen }
-                        .pointerInput(Unit) {
-                            detectVerticalDragGestures(
-                                onDragStart = { swipeTotal = 0f },
-                                onVerticalDrag = { _, amount -> swipeTotal += amount },
-                                onDragEnd = {
-                                    if (swipeTotal < -30f) filtersOpen = true
-                                    else if (swipeTotal > 30f) filtersOpen = false
-                                },
-                            )
-                        }
-                        .padding(vertical = 4.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        if (filtersOpen) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                        if (filtersOpen) "Hide filters" else "Show filters",
-                        tint = Color(0xFF9AA4B2),
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text("Swipe up for filters", color = Color(0xFF9AA4B2), fontSize = 13.sp)
+            /* top bar: Close · (video) clip length · save / HD / rotate /
+               sticker / text / pen (photo) · undo / clear while inked */
+            Row(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .background(topScrim)
+                    .statusBarsPadding()
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = { nav.popBackStack() }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Filled.Close, "Close", tint = Color.White, modifier = Modifier.size(20.dp))
                 }
-                if (filtersOpen) {
-                    LazyRow(
-                        Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                if (clip != null) {
+                    Text(editClipLabel(start, end), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.width(6.dp))
+                }
+                Spacer(Modifier.weight(1f))
+                ToolButton(onClick = { saveCurrent() }) {
+                    Icon(Icons.Filled.Download, "Save to gallery", tint = Color.White, modifier = Modifier.size(18.dp))
+                }
+                if (clip == null) {
+                    // The HD pill: filled while the bigger send is armed.
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(if (hd) Color.White else Color.Transparent)
+                            .border(1.5.dp, Color.White, RoundedCornerShape(7.dp))
+                            .clickable {
+                                haptics.toggle(!hd)
+                                hd = !hd
+                            }
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("HD", color = if (hd) Color.Black else Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(Modifier.width(2.dp))
+                    ToolButton(onClick = { rotateTap() }) {
+                        Icon(Icons.Filled.RotateRight, "Rotate", tint = Color.White, modifier = Modifier.size(18.dp))
+                    }
+                    ToolButton(onClick = { showStickerSheet = true }) {
+                        Icon(Icons.Filled.EmojiEmotions, "Stickers", tint = Color.White, modifier = Modifier.size(18.dp))
+                    }
+                    ToolButton(onClick = { showTextSheet = true }) {
+                        Text("Aa", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    }
+                    ToolButton(active = penMode, onClick = { penMode = !penMode }) {
+                        Icon(Icons.Filled.Edit, "Draw", tint = Color.White, modifier = Modifier.size(18.dp))
+                    }
+                }
+                if (shot != null && strokes.isNotEmpty()) {
+                    IconButton(
+                        onClick = {
+                            haptics.tap()
+                            strokes.removeAt(strokes.size - 1)
+                        },
+                        modifier = Modifier.size(36.dp),
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Undo, "Undo", tint = Color.White, modifier = Modifier.size(20.dp))
+                    }
+                    IconButton(
+                        onClick = {
+                            haptics.tap()
+                            strokes.clear()
+                        },
+                        modifier = Modifier.size(36.dp),
+                    ) {
+                        Icon(Icons.Filled.Delete, "Clear", tint = Color.White, modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
+
+            // Owner round 35 (item 8): filters + pen/trim + caption ride one
+            // floating cluster over the photo, on a single soft scrim.
+            Column(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .background(bottomScrim)
+                    .fillMaxWidth(),
+            ) {
+                /* swipe-up filters (photo only): the hint row + the thumb strip */
+                if (shot != null) {
+                    var swipeTotal by remember { mutableStateOf(0f) }
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { filtersOpen = !filtersOpen }
+                            .pointerInput(Unit) {
+                                detectVerticalDragGestures(
+                                    onDragStart = { swipeTotal = 0f },
+                                    onVerticalDrag = { _, amount -> swipeTotal += amount },
+                                    onDragEnd = {
+                                        if (swipeTotal < -30f) filtersOpen = true
+                                        else if (swipeTotal > 30f) filtersOpen = false
+                                    },
+                                )
+                            }
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            if (filtersOpen) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                            if (filtersOpen) "Hide filters" else "Show filters",
+                            tint = Color(0xFF9AA4B2),
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("Swipe up for filters", color = Color(0xFF9AA4B2), fontSize = 12.sp)
+                    }
+                    if (filtersOpen) {
+                        LazyRow(
+                            Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            items(EDIT_FILTERS.size) { i ->
+                                val on = filterIdx == i
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Box(
+                                        Modifier
+                                            .size(48.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(Color(0xFF232A33))
+                                            .border(if (on) 2.5.dp else 0.dp, Color.White, RoundedCornerShape(10.dp))
+                                            .clickable {
+                                                haptics.tap()
+                                                filterIdx = i
+                                            },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        val thumb = filterThumbs.getOrNull(i)
+                                        if (thumb != null) {
+                                            Image(thumb, EDIT_FILTERS[i].name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                        }
+                                    }
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        EDIT_FILTERS[i].name,
+                                        color = if (on) Color.White else Color(0xFF9AA4B2),
+                                        fontSize = 11.sp,
+                                        fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                /* bottom: the pen's colours + widths (photo, pen mode) or the trim strip (video) */
+                if (shot != null && penMode) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        items(EDIT_FILTERS.size) { i ->
-                            val on = filterIdx == i
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Box(
-                                    Modifier
-                                        .size(56.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(Color(0xFF232A33))
-                                        .border(if (on) 2.5.dp else 0.dp, Color.White, RoundedCornerShape(10.dp))
-                                        .clickable {
-                                            haptics.tap()
-                                            filterIdx = i
-                                        },
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    val thumb = filterThumbs.getOrNull(i)
-                                    if (thumb != null) {
-                                        Image(thumb, EDIT_FILTERS[i].name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                                    }
-                                }
-                                Spacer(Modifier.height(2.dp))
-                                Text(
-                                    EDIT_FILTERS[i].name,
-                                    color = if (on) Color.White else Color(0xFF9AA4B2),
-                                    fontSize = 11.sp,
-                                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
-                                )
+                        PEN_COLOURS.forEach { c ->
+                            val on = penColor == c
+                            Box(
+                                Modifier
+                                    .size(if (on) 26.dp else 22.dp)
+                                    .clip(CircleShape)
+                                    .background(c)
+                                    .border(if (on) 2.5.dp else 1.dp, Color.White, CircleShape)
+                                    .clickable {
+                                        haptics.tap()
+                                        penColor = c
+                                    },
+                            )
+                        }
+                        Spacer(Modifier.width(6.dp))
+                        PEN_WIDTHS.forEach { w ->
+                            val on = penWidth == w
+                            Box(
+                                Modifier
+                                    .size(26.dp)
+                                    .clip(CircleShape)
+                                    .background(if (on) Color(0x55FFFFFF) else Color(0x22FFFFFF))
+                                    .clickable {
+                                        haptics.tap()
+                                        penWidth = w
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Box(Modifier.size((6 + w * 160).dp.coerceAtMost(16.dp)).clip(CircleShape).background(Color.White))
                             }
                         }
                     }
-                }
-            }
-
-            /* bottom: the pen's colours + widths (photo, pen mode) or the trim strip (video) */
-            if (shot != null && penMode) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    PEN_COLOURS.forEach { c ->
-                        val on = penColor == c
-                        Box(
-                            Modifier
-                                .size(if (on) 30.dp else 24.dp)
-                                .clip(CircleShape)
-                                .background(c)
-                                .border(if (on) 2.5.dp else 1.dp, Color.White, CircleShape)
-                                .clickable {
-                                    haptics.tap()
-                                    penColor = c
-                                },
-                        )
-                    }
-                    Spacer(Modifier.width(6.dp))
-                    PEN_WIDTHS.forEach { w ->
-                        val on = penWidth == w
-                        Box(
-                            Modifier
-                                .size(30.dp)
-                                .clip(CircleShape)
-                                .background(if (on) Color(0x55FFFFFF) else Color(0x22FFFFFF))
-                                .clickable {
-                                    haptics.tap()
-                                    penWidth = w
-                                },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Box(Modifier.size((6 + w * 160).dp.coerceAtMost(20.dp)).clip(CircleShape).background(Color.White))
-                        }
-                    }
-                }
-            } else if (clip != null) {
-                TrimStrip(
-                    thumbs = thumbs,
-                    durationMs = clip.durationMs,
-                    start = start,
-                    end = end,
-                    maxMs = Long.MAX_VALUE,
-                    onWindow = { s, e ->
-                        start = s
-                        end = e
-                    },
-                    onScrub = { scrub = it },
-                    positionMs = playAt,
-                )
-            }
-            /* the caption bar + recipient chip / send ride above the keyboard */
-            Column(Modifier.imePadding()) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp)
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(Color(0xFF232A33))
-                        .padding(start = 2.dp, end = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    IconButton(onClick = { addMore() }, modifier = Modifier.size(40.dp)) {
-                        Icon(Icons.Filled.AddPhotoAlternate, "Add more", tint = Color.White, modifier = Modifier.size(22.dp))
-                    }
-                    BasicTextField(
-                        value = caption,
-                        onValueChange = { if (it.length <= 1000) caption = it },
-                        singleLine = true,
-                        textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
-                        cursorBrush = SolidColor(Color.White),
-                        modifier = Modifier.weight(1f),
-                        decorationBox = { inner ->
-                            Box {
-                                if (caption.isEmpty()) Text("Add a caption...", color = Color(0xFF9AA4B2), fontSize = 15.sp)
-                                inner()
-                            }
+                } else if (clip != null) {
+                    TrimStrip(
+                        thumbs = thumbs,
+                        durationMs = clip.durationMs,
+                        start = start,
+                        end = end,
+                        maxMs = Long.MAX_VALUE,
+                        onWindow = { s, e ->
+                            start = s
+                            end = e
                         },
+                        onScrub = { scrub = it },
+                        positionMs = playAt,
                     )
-                    Box(
-                        Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .clickable {
-                                haptics.toggle(!once)
-                                once = !once
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        ViewOnceOneIcon(20.dp, tint = if (once) Color.White else Color(0x66FFFFFF))
-                    }
                 }
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+                /* the caption bar + recipient chip / send ride above the keyboard */
+                Column(Modifier.imePadding()) {
                     Row(
                         Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(16.dp))
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp)
+                            .clip(RoundedCornerShape(20.dp))
                             .background(Color(0xFF232A33))
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .padding(start = 2.dp, end = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(Icons.Filled.Person, "To", tint = Color.White, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            ScreenStore.editTitle.ifBlank { "Chat" },
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
+                        IconButton(onClick = { addMore() }, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Filled.AddPhotoAlternate, "Add more", tint = Color.White, modifier = Modifier.size(18.dp))
+                        }
+                        BasicTextField(
+                            value = caption,
+                            onValueChange = { if (it.length <= 1000) caption = it },
+                            singleLine = true,
+                            textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
+                            cursorBrush = SolidColor(Color.White),
+                            modifier = Modifier.weight(1f),
+                            decorationBox = { inner ->
+                                Box {
+                                    if (caption.isEmpty()) Text("Add a caption...", color = Color(0xFF9AA4B2), fontSize = 14.sp)
+                                    inner()
+                                }
+                            },
                         )
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    if (ready) {
+                        // Owner round 35 (item 8): the ① sits in a real seat —
+                        // a ring button that fills blue while once is armed.
+                        // (Placement follows the owner's screenshot when it lands.)
                         Box(
                             Modifier
-                                .size(52.dp)
+                                .size(32.dp)
                                 .clip(CircleShape)
-                                .background(Green)
-                                .clickable(enabled = !busy) {
-                                    haptics.confirm()
-                                    send()
+                                .background(if (once) ActionBlue else Color.Transparent)
+                                .border(1.dp, if (once) ActionBlue else Color(0x66FFFFFF), CircleShape)
+                                .clickable {
+                                    haptics.toggle(!once)
+                                    once = !once
                                 },
                             contentAlignment = Alignment.Center,
                         ) {
-                            if (busy) {
-                                CircularProgressIndicator(color = Color.White, strokeWidth = 3.dp, modifier = Modifier.size(24.dp))
-                            } else {
-                                Icon(
-                                    Icons.AutoMirrored.Filled.Send,
-                                    contentDescription = "Send",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(24.dp),
-                                )
+                            ViewOnceOneIcon(20.dp, tint = if (once) Color.White else Color(0xB3FFFFFF))
+                        }
+                    }
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Row(
+                            Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color(0xFF232A33))
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Filled.Person, "To", tint = Color.White, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                ScreenStore.editTitle.ifBlank { "Chat" },
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        if (ready) {
+                            // Owner round 35 (item 8): the send is a small BLUE dot.
+                            Box(
+                                Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(ActionBlue)
+                                    .clickable(enabled = !busy) {
+                                        haptics.confirm()
+                                        send()
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (busy) {
+                                    CircularProgressIndicator(color = Color.White, strokeWidth = 2.5.dp, modifier = Modifier.size(20.dp))
+                                } else {
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.Send,
+                                        contentDescription = "Send",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                }
                             }
                         }
                     }
@@ -938,7 +1025,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                 Text(
                     "Add",
                     color = ActionBlueDeep,
-                    fontSize = 15.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
                         .clip(RoundedCornerShape(12.dp))
@@ -950,7 +1037,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                             selectedId = t.id
                             showTextSheet = false
                         }
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
                 )
             }
         }
@@ -1014,7 +1101,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                 items(list.size) { i ->
                     Box(
                         Modifier
-                            .size(52.dp)
+                            .size(46.dp)
                             .clip(RoundedCornerShape(12.dp))
                             .clickable {
                                 haptics.confirm()
@@ -1025,7 +1112,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                             },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(list[i], fontSize = 28.sp)
+                        Text(list[i], fontSize = 24.sp)
                     }
                 }
             }
@@ -1052,17 +1139,20 @@ sealed class EditedMedia {
 
 internal class PenStroke(val color: Color, val width: Float, val points: MutableList<Offset>)
 
-/** A placed text overlay: normalised centre, the words, their colour. */
-internal data class EditText(val id: String, val center: Offset, val text: String, val color: Color)
+/** A placed text overlay: normalised centre, the words, their colour, pinch size. */
+internal data class EditText(val id: String, val center: Offset, val text: String, val color: Color, val scale: Float = 1f)
 
-/** A placed sticker: normalised centre + the pack glyph. */
-internal data class EditSticker(val id: String, val center: Offset, val glyph: String)
+/** A placed sticker: normalised centre + the pack glyph + pinch size. */
+internal data class EditSticker(val id: String, val center: Offset, val glyph: String, val scale: Float = 1f)
 
 /** The selected overlay's hit geometry (normalised units). */
 private data class EditSel(val id: String, val center: Offset, val rx: Float, val ry: Float)
 
 /** The delete mark floats just above the selection. */
 private fun deletePos(sel: EditSel): Offset = Offset(sel.center.x, (sel.center.y - sel.ry - 0.045f).coerceAtLeast(0.03f))
+
+/** Owner round 35 (item 8): the delete mark's normalised hit radius. */
+private const val DEL_MARK_HIT = 0.04f
 
 private fun newOverlayId(): String = java.util.UUID.randomUUID().toString().take(8)
 
@@ -1137,7 +1227,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPen(st: PenStro
 
 /** The text overlay, drawn identically in the preview and the bake. */
 private fun drawEditText(native: android.graphics.Canvas, t: EditText, w: Float, h: Float) {
-    val size = w * 0.06f
+    val size = w * 0.06f * t.scale
     val paint =
         android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             color = t.color.toArgb()
@@ -1151,7 +1241,7 @@ private fun drawEditText(native: android.graphics.Canvas, t: EditText, w: Float,
 
 /** The sticker glyph, drawn identically in the preview and the bake. */
 private fun drawEditSticker(native: android.graphics.Canvas, s: EditSticker, w: Float, h: Float) {
-    val size = w * 0.11f
+    val size = w * 0.11f * s.scale
     val paint =
         android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             color = android.graphics.Color.WHITE
@@ -1180,7 +1270,7 @@ private fun drawEditSelection(native: android.graphics.Canvas, sel: EditSel, w: 
             color = android.graphics.Color.WHITE
             style = android.graphics.Paint.Style.FILL
         }
-    native.drawCircle(dx, dy, 30f, fill)
+    native.drawCircle(dx, dy, 32f, fill)
     val cross =
         android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             color = android.graphics.Color.BLACK
@@ -1188,8 +1278,8 @@ private fun drawEditSelection(native: android.graphics.Canvas, sel: EditSel, w: 
             strokeWidth = 5f
             strokeCap = android.graphics.Paint.Cap.ROUND
         }
-    native.drawLine(dx - 10f, dy - 10f, dx + 10f, dy + 10f, cross)
-    native.drawLine(dx - 10f, dy + 10f, dx + 10f, dy - 10f, cross)
+    native.drawLine(dx - 11f, dy - 11f, dx + 11f, dy + 11f, cross)
+    native.drawLine(dx - 11f, dy + 11f, dx + 11f, dy - 11f, cross)
 }
 
 /** Runs the working copy through the filter (a no-op for Normal). */
