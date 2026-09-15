@@ -1037,8 +1037,11 @@ async function cfImageBytes(res: Response): Promise<AiImage | null> {
 async function cfImage(
   env: Env,
   parts: { text: string; raw: string; src: AiPhotoSrc | null },
-): Promise<{ image: AiImage | null; off: boolean }> {
-  if (!env.CF_AI_TOKEN) return { image: null, off: true };
+): Promise<{ image: AiImage | null; off: boolean; err: string }> {
+  if (!env.CF_AI_TOKEN) return { image: null, off: true, err: "no-token" };
+  // Returned to the caller for error_log: model + HTTP status per attempt
+  // (never prompt text or tokens).
+  let err = "";
   const started = Date.now();
   const remaining = () => CF_IMAGE_BUDGET_MS - (Date.now() - started);
   const auth = { Authorization: `Bearer ${env.CF_AI_TOKEN}` };
@@ -1066,9 +1069,10 @@ async function cfImage(
       });
       st = String(res.status);
       const img = await cfImageBytes(res);
-      if (img) return { image: img, off: false };
+      if (img) return { image: img, off: false, err: "" };
     } catch (e) {
-      console.error("cf-image klein", st, e instanceof Error ? e.message : e);
+      err = `klein ${st} ${e instanceof Error ? e.message : e}`;
+      console.error("cf-image", err);
     }
   }
   if (remaining() >= 5_000) {
@@ -1084,12 +1088,14 @@ async function cfImage(
       });
       st = String(res.status);
       const img = await cfImageBytes(res);
-      if (img) return { image: img, off: false };
+      if (img) return { image: img, off: false, err: "" };
     } catch (e) {
-      console.error("cf-image schnell", st, e instanceof Error ? e.message : e);
+      const s = `schnell ${st} ${e instanceof Error ? e.message : e}`;
+      err = err ? `${err}; ${s}` : s;
+      console.error("cf-image", s);
     }
   }
-  return { image: null, off: false };
+  return { image: null, off: false, err };
 }
 
 /** KuchuPuchu AI answers a user message in its chat (owner feature). Runs in
@@ -1423,6 +1429,19 @@ async function sendAiReply(
         if (drawn.image) {
           await sendBotImage(drawn.image);
           return;
+        }
+        // Persist the Cloudflare cause (quota/outage/auth) — tail is too
+        // flaky to be the only witness, and the user must never see it.
+        if (drawn.err) {
+          try {
+            await run(
+              db,
+              "INSERT INTO error_log (id, stack, created_at) VALUES (?, ?, ?)",
+              id(),
+              `cf-image ${drawn.err}`.slice(0, 500),
+              nowIso(),
+            );
+          } catch {}
         }
         photoPrompt = drawn.off
           ? " The user asked you for a picture, but picture creation is switched off on this server " +
