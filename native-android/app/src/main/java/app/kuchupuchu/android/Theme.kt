@@ -1,5 +1,6 @@
 package app.kuchupuchu.android
 
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -107,6 +108,10 @@ fun KpTheme(content: @Composable () -> Unit) {
     val d = LocalDensity.current
     CompositionLocalProvider(
         LocalDensity provides Density(density = d.density * 1.16f, fontScale = d.fontScale * 1.08f),
+        // Owner round 35 (item 2): no touch ripples ANYWHERE — every tap
+        // in the app is silent. (Explicit indication = null sites stay as
+        // they are; the default indication was the only ripple source.)
+        LocalIndication provides null,
     ) {
         MaterialTheme(
             colorScheme = lightColorScheme(

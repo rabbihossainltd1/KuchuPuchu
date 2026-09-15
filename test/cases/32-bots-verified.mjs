@@ -8362,6 +8362,10 @@ const convBetween = (db, a, b) =>
         kt("DeleteAnim.kt").includes("drawToBitmap()") &&
         chat.includes("Box(Modifier.fillMaxWidth().animateItem()) {"),
     );
+    check(
+      "r35-2: no touch ripples anywhere — KpTheme provides LocalIndication null at the root (the default indication was the only ripple source; explicit indication = null sites stay)",
+      kt("Theme.kt").includes("LocalIndication provides null"),
+    );
     {
       const st = kt("StatusScreens.kt");
       const vw = st.slice(
