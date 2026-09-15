@@ -78,13 +78,24 @@ object KpUpdate {
                             val tag = rel.optString("tag_name").trimStart('v', 'V')
                             remoteCode = tag.toIntOrNull() ?: return@runCatching
                             val assets = rel.optJSONArray("assets") ?: return@runCatching
+                            // Owner round 34 (item 2): the release carries both
+                            // apks — fetch the one matching this install, so a
+                            // release build never tries to swallow the debug
+                            // file (or the other way round); either mismatch
+                            // answers INSTALL_FAILED_UPDATE_INCOMPATIBLE.
+                            val wantDebug =
+                                (ctx.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
                             var url: String? = null
+                            var fallback: String? = null
                             for (i in 0 until assets.length()) {
                                 val a = assets.getJSONObject(i)
                                 val name = a.optString("name")
-                                if (name.endsWith(".apk")) url = a.optString("browser_download_url")
+                                if (!name.endsWith(".apk")) continue
+                                val assetUrl = a.optString("browser_download_url")
+                                fallback = assetUrl
+                                if (name.contains("debug", ignoreCase = true) == wantDebug) url = assetUrl
                             }
-                            apkUrl = url ?: return@runCatching
+                            apkUrl = url ?: fallback ?: return@runCatching
                             prefs.edit()
                                 .putString("etag", res.header("ETag"))
                                 .putInt("code", remoteCode)
@@ -133,17 +144,115 @@ object KpUpdate {
                             }
                         }
                     }
+                    // Owner round 34 (item 2): a dropped connection can
+                    // end the stream cleanly — short of the promised bytes.
+                    if (total > 0 && out.length() != total) {
+                        error("Update file was damaged — tap Update to download again")
+                    }
+                    verifyUpdateApk(ctx, out)
                     progress = 1f
                     out
                 }
             }
             ready = apk
         } catch (e: Exception) {
+            // Never leave a partial or rejected file behind for the next run.
+            runCatching { File(ctx.filesDir, "kp-update.apk").delete() }
             downloadError = e.message ?: "Download failed"
         } finally {
             downloading = false
         }
     }
+
+    /**
+     * Owner round 34 (item 2): the downloaded bytes are guilty until proven
+     * innocent. NOTHING unverified may reach the system installer — a
+     * truncated or mis-signed file turns the Update tap into a crash on some
+     * OEM builds instead of an error card. Throws with the exact words the
+     * sheet should show; every throw path deletes the bad file via the
+     * download catch.
+     */
+    private fun verifyUpdateApk(ctx: Context, apk: File) {
+        val damaged = "Update file was damaged — tap Update to download again"
+        if (!apk.exists() || apk.length() <= 0) error(damaged)
+        val pm = ctx.packageManager
+        val archive = parseArchive(pm, apk) ?: error(damaged)
+        if (archive.packageName != ctx.packageName) error(damaged)
+        val archiveCode =
+            if (android.os.Build.VERSION.SDK_INT >= 28) {
+                archive.longVersionCode
+            } else {
+                @Suppress("DEPRECATION") archive.versionCode.toLong()
+            }
+        if (archiveCode <= installedVersionCode(ctx)) {
+            error("holds no newer build — try again later")
+        }
+        // Same package + newer build is not enough: the bytes must carry the
+        // install's own signing key (a CI debug key rotates every build, so a
+        // debug install can never swallow another CI's apk — correctly
+        // refused here with words, not as an installer crash). Keys rotate
+        // nowhere in this project, so a plain set-equality holds; if either
+        // side's certs are unreadable we fail OPEN and let the system's own
+        // check be the judge.
+        val mine = signingSet(pm, ctx.packageName)
+        val theirs = archiveCerts(archive)
+        if (mine != null && theirs != null && mine != theirs) {
+            error("This update wasn't built for your install — grab the full APK from the release page")
+        }
+    }
+
+    private fun parseArchive(
+        pm: android.content.pm.PackageManager,
+        apk: File,
+    ): android.content.pm.PackageInfo? =
+        runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                pm.getPackageArchiveInfo(
+                    apk.absolutePath,
+                    android.content.pm.PackageManager.PackageInfoFlags.of(
+                        android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES.toLong(),
+                    ),
+                )
+            } else if (android.os.Build.VERSION.SDK_INT >= 28) {
+                @Suppress("DEPRECATION")
+                pm.getPackageArchiveInfo(apk.absolutePath, android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES)
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageArchiveInfo(apk.absolutePath, android.content.pm.PackageManager.GET_SIGNATURES)
+            }
+        }.getOrNull()
+
+    private fun signingSet(
+        pm: android.content.pm.PackageManager,
+        packageName: String,
+    ): Set<android.content.pm.Signature>? =
+        runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= 28) {
+                val pi =
+                    if (android.os.Build.VERSION.SDK_INT >= 33) {
+                        pm.getPackageInfo(
+                            packageName,
+                            android.content.pm.PackageManager.PackageInfoFlags.of(
+                                android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES.toLong(),
+                            ),
+                        )
+                    } else {
+                        @Suppress("DEPRECATION")
+                        pm.getPackageInfo(packageName, android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES)
+                    }
+                pi.signingInfo?.apkContentsSigners?.toSet()
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageInfo(packageName, android.content.pm.PackageManager.GET_SIGNATURES)?.signatures?.toSet()
+            }
+        }.getOrNull()
+
+    private fun archiveCerts(archive: android.content.pm.PackageInfo): Set<android.content.pm.Signature>? =
+        if (android.os.Build.VERSION.SDK_INT >= 28) {
+            archive.signingInfo?.apkContentsSigners?.toSet()
+        } else {
+            @Suppress("DEPRECATION") archive.signatures?.toSet()
+        }
 
     /** The Install tap: hands the downloaded APK to the system installer. */
     suspend fun installReady(ctx: Context) {
@@ -174,23 +283,31 @@ object KpUpdate {
     private fun install(ctx: Context, apk: File) {
         val installer = ctx.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+        // Owner round 34 (item 2): attribute the session — some OEM confirm
+        // screens only label (and finish) sessions that name their package.
+        params.setAppPackageName(ctx.packageName)
         val sessionId = installer.createSession(params)
-        val session = installer.openSession(sessionId)
-        session.openWrite("apk", 0, -1).use { out ->
-            apk.inputStream().use { it.copyTo(out) }
-            session.fsync(out)
+        try {
+            val session = installer.openSession(sessionId)
+            session.openWrite("apk", 0, -1).use { out ->
+                apk.inputStream().use { it.copyTo(out) }
+                session.fsync(out)
+            }
+            // Commit with a minimal status receiver: the system's own confirm
+            // dialog is the visible step, we only clean up after it.
+            val receiverIntent = Intent(ctx, KpUpdateReceiver::class.java)
+            val pending = android.app.PendingIntent.getBroadcast(
+                ctx,
+                sessionId,
+                receiverIntent,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_MUTABLE,
+            )
+            session.commit(pending.intentSender)
+            session.close()
+        } catch (e: Exception) {
+            runCatching { installer.abandonSession(sessionId) }
+            throw e
         }
-        // Commit with a minimal status receiver: the system's own confirm
-        // dialog is the visible step, we only clean up after it.
-        val receiverIntent = Intent(ctx, KpUpdateReceiver::class.java)
-        val pending = android.app.PendingIntent.getBroadcast(
-            ctx,
-            sessionId,
-            receiverIntent,
-            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_MUTABLE,
-        )
-        session.commit(pending.intentSender)
-        session.close()
     }
 }
 
@@ -207,28 +324,34 @@ object KpUpdate {
  */
 class KpUpdateReceiver : android.content.BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
-        when (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
-            PackageInstaller.STATUS_PENDING_USER_ACTION -> {
-                @Suppress("DEPRECATION")
-                val confirm =
-                    if (android.os.Build.VERSION.SDK_INT >= 33) {
-                        intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
-                    } else {
-                        intent.getParcelableExtra(Intent.EXTRA_INTENT)
+        // Owner round 34 (item 2): a system status broadcast must never take
+        // the app down with it — last-resort guard; the branches stay exact.
+        // (runCatching is inline, so the early return below still leaves
+        // onReceive itself, exactly as before.)
+        runCatching {
+            when (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
+                PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                    @Suppress("DEPRECATION")
+                    val confirm =
+                        if (android.os.Build.VERSION.SDK_INT >= 33) {
+                            intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
+                        } else {
+                            intent.getParcelableExtra(Intent.EXTRA_INTENT)
+                        }
+                    if (confirm == null) {
+                        KpUpdate.downloadError = "Install failed"
+                        return
                     }
-                if (confirm == null) {
-                    KpUpdate.downloadError = "Install failed"
-                    return
+                    runCatching { ctx.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                        .onFailure { KpUpdate.downloadError = "Install failed" }
                 }
-                runCatching { ctx.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                    .onFailure { KpUpdate.downloadError = "Install failed" }
+                PackageInstaller.STATUS_SUCCESS -> ctx.filesDir.resolve("kp-update.apk").delete()
+                // The user dismissed the system sheet: keep the APK, no error text.
+                PackageInstaller.STATUS_FAILURE_ABORTED -> {}
+                else ->
+                    KpUpdate.downloadError =
+                        intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "Install failed"
             }
-            PackageInstaller.STATUS_SUCCESS -> ctx.filesDir.resolve("kp-update.apk").delete()
-            // The user dismissed the system sheet: keep the APK, no error text.
-            PackageInstaller.STATUS_FAILURE_ABORTED -> {}
-            else ->
-                KpUpdate.downloadError =
-                    intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "Install failed"
         }
     }
 }

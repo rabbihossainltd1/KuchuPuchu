@@ -4675,6 +4675,24 @@ const convBetween = (db, a, b) =>
       upd.indexOf("canRequestPackageInstalls()") <
         upd.indexOf("withContext(Dispatchers.IO) { install(ctx, apk) }"),
   );
+  check(
+    "r34-2: the updater verifies the APK before any session (bytes vs Content-Length, getPackageArchiveInfo parse, same package, strictly newer build, signing-cert match with the install — fail open when certs are unreadable) and fetches the flavor-matching asset, so a damaged or mis-signed file never reaches the system installer; sessions are attributed and abandoned on failure, and the status receiver can never crash the app",
+    upd.includes("FLAG_DEBUGGABLE") &&
+      upd.includes('name.contains("debug", ignoreCase = true) == wantDebug') &&
+      upd.includes("apkUrl = url ?: fallback ?: return@runCatching") &&
+      upd.includes("out.length() != total") &&
+      upd.includes("verifyUpdateApk(ctx, out)") &&
+      upd.includes("private fun verifyUpdateApk(ctx: Context, apk: File)") &&
+      upd.includes("getPackageArchiveInfo") &&
+      upd.includes("GET_SIGNING_CERTIFICATES") &&
+      upd.includes("apkContentsSigners") &&
+      upd.includes("archiveCode <= installedVersionCode(ctx)") &&
+      upd.includes("mine != null && theirs != null && mine != theirs") &&
+      upd.includes("wasn't built for your install") &&
+      upd.includes("params.setAppPackageName(ctx.packageName)") &&
+      upd.includes("installer.abandonSession(sessionId)") &&
+      rx.includes("runCatching {\n            when (intent.getIntExtra"),
+  );
   // Item 27 (owner: Decline ONLY — Approve stays inside the app): the login
   // alert push carries the request id; the card swaps Like for Decline; the
   // receiver posts /api/auth/login/decline and marks the chat read.
