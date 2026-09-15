@@ -2274,7 +2274,14 @@ fun ChatScreen(nav: NavController, convId: String) {
                     msgs.filter { m ->
                         // Owner round 25: unsent messages VANISH — no
                         // "This message was deleted" tombstone any more.
-                        m.optString("kind") != "DELETED" && run {
+                        // Owner round 38 (item 4): …except MID-SHOW. The live
+                        // DELETED frame lands ~200ms into the dust and used
+                        // to filter the row straight out — disposing the
+                        // shell, aborting the canvas, reading as "removed
+                        // before the animation completes". A vanishing row
+                        // stays rendered until its own onGone lands, then
+                        // vanishes like any other tombstone.
+                        (m.optString("kind") != "DELETED" || albumPhotos(m).any { it.optString("id") in vanishingIds }) && run {
                             val k = m.optString("clientId").ifBlank { m.optString("id") }
                             k.isNotBlank() && seenKeys.add(k)
                         }

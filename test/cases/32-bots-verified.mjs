@@ -1150,8 +1150,10 @@ const convBetween = (db, a, b) =>
       chat.split("MessageReactions(m)").length - 1 === 5,
   );
   check(
-    "r18-3/r25: unsent messages VANISH (no tombstone) — filtered before render",
-    chat.includes('m.optString("kind") != "DELETED" && run {'),
+    "r18-3/r25: unsent messages VANISH (no tombstone) — filtered before render (r38-4: except mid-vanish, so the dust plays out)",
+    chat.includes(
+      '(m.optString("kind") != "DELETED" || albumPhotos(m).any { it.optString("id") in vanishingIds }) && run {',
+    ),
   );
   check(
     "r18-7: system back steps one level — chat search closes, settings pickers/editors close first",
@@ -7733,6 +7735,15 @@ const convBetween = (db, a, b) =>
         attach38.includes("if (sel.isEmpty()) current?.let { sel.add(it) }"),
     );
   }
+  // r38-4: own unsends aborted the dust ~200ms in — the live DELETED
+  // frame filtered the row out of visibleMsgs, disposing the shell mid-show.
+  // A vanishing row now stays rendered until its own onGone lands.
+  check(
+    "r38-4: the tombstone filter keeps rows mid-vanish — a DELETED row whose id is in vanishingIds stays in visibleMsgs until onGone drops the mark",
+    kt("ChatScreen.kt").includes(
+      '(m.optString("kind") != "DELETED" || albumPhotos(m).any { it.optString("id") in vanishingIds }) && run {',
+    ),
+  );
   // r37-3: reference-style overlay handles — per-overlay rotation,
   // × top-left deletes, top-right drags the turn, bottom-right drags
   // the size; the box + its handles turn with the overlay, taps un-turn
