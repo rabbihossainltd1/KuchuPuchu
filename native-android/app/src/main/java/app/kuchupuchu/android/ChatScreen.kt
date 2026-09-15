@@ -2824,7 +2824,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 Modifier
                     .fillMaxWidth()
                     .background(Card)
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
@@ -2835,10 +2835,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                     maxLines = 2,
                 )
                 if (blockedMe && !unblockAsked && !askedSent) {
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(8.dp))
+                    // Owner round 35 (item 7): compact like the rest of the
+                    // app — a small pill, not a fat button.
                     Box(
                         Modifier
-                            .clip(RoundedCornerShape(14.dp))
+                            .clip(RoundedCornerShape(10.dp))
                             .background(if (asking) Line else ActionBlue)
                             .clickable(enabled = !asking) {
                                 asking = true
@@ -2858,13 +2860,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                                     }
                                 }
                             }
-                            .padding(horizontal = 22.dp, vertical = 11.dp),
+                            .padding(horizontal = 14.dp, vertical = 6.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
                             if (asking) "Sending…" else "Request Unblock",
                             color = if (asking) Muted else ActionBlueInk,
-                            fontSize = 14.5.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                         )
@@ -2877,17 +2879,19 @@ fun ChatScreen(nav: NavController, convId: String) {
             // normal one on both sides); Block = the same block the profile
             // sheet writes, then back to the list.
             var deciding by remember { mutableStateOf(false) }
+            // Owner round 35 (item 7): compact decision halves, same as
+            // every other button in the app.
             Row(
                 Modifier
                     .fillMaxWidth()
                     .background(Card)
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Box(
                     Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(14.dp))
+                        .clip(RoundedCornerShape(10.dp))
                         .background(Line)
                         .clickable(enabled = !deciding) {
                             deciding = true
@@ -2906,13 +2910,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 }
                             }
                         }
-                        .padding(vertical = 12.dp),
+                        .padding(vertical = 7.dp),
                     contentAlignment = Alignment.Center,
-                ) { Text("Block", color = Red, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }
+                ) { Text("Block", color = Red, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }
                 Box(
                     Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(14.dp))
+                        .clip(RoundedCornerShape(10.dp))
                         .background(ActionBlue)
                         .clickable(enabled = !deciding) {
                             deciding = true
@@ -2931,9 +2935,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 }
                             }
                         }
-                        .padding(vertical = 12.dp),
+                        .padding(vertical = 7.dp),
                     contentAlignment = Alignment.Center,
-                ) { Text("Accept", color = ActionBlueInk, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }
+                ) { Text("Accept", color = ActionBlueInk, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }
             }
         } else if (noReply) {
             // Official security account: replies are off (owner rule).
@@ -4484,12 +4488,14 @@ private fun UnblockAskCard(
     onUnblock: (JSONObject) -> Unit,
     onIgnore: (JSONObject) -> Unit,
 ) {
+    // Owner round 35 (item 7): compact card, small buttons — like every
+    // other pill in the app.
     Box(Modifier.fillMaxWidth().padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
         Column(
             Modifier
-                .clip(RoundedCornerShape(14.dp))
+                .clip(RoundedCornerShape(12.dp))
                 .background(Card)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 14.dp, vertical = 9.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             if (mine) {
@@ -4497,28 +4503,28 @@ private fun UnblockAskCard(
             } else {
                 Text(
                     (if (askName.isNotBlank()) askName else "This user") + " asked you to unblock them",
-                    fontSize = 13.5.sp,
+                    fontSize = 13.sp,
                     color = Ink,
                     textAlign = TextAlign.Center,
                 )
-                Spacer(Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(
                         Modifier
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(10.dp))
                             .background(Line)
                             .clickable { onIgnore(m) }
-                            .padding(horizontal = 20.dp, vertical = 9.dp),
+                            .padding(horizontal = 14.dp, vertical = 6.dp),
                         contentAlignment = Alignment.Center,
-                    ) { Text("Ignore", color = Muted, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }
+                    ) { Text("Ignore", color = Muted, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }
                     Box(
                         Modifier
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(10.dp))
                             .background(ActionBlue)
                             .clickable { onUnblock(m) }
-                            .padding(horizontal = 20.dp, vertical = 9.dp),
+                            .padding(horizontal = 14.dp, vertical = 6.dp),
                         contentAlignment = Alignment.Center,
-                    ) { Text("Unblock", color = ActionBlueInk, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }
+                    ) { Text("Unblock", color = ActionBlueInk, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }
                 }
             }
         }

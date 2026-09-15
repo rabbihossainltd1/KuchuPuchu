@@ -5646,10 +5646,10 @@ const convBetween = (db, a, b) =>
         chat.includes('Api.post("/api/conversations/$convId/accept")') &&
         chat.includes('Api.post("/api/blocks", JSONObject().put("userId", otherUserId))') &&
         chat.includes(
-          '{ Text("Accept", color = ActionBlueInk, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }',
+          '{ Text("Accept", color = ActionBlueInk, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }',
         ) &&
         chat.includes(
-          '{ Text("Block", color = Red, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }',
+          '{ Text("Block", color = Red, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }',
         ) &&
         profile.includes(
           'val requestOpen = peerConv?.optText("requestFrom")?.isNotBlank() == true',
@@ -7523,6 +7523,27 @@ const convBetween = (db, a, b) =>
         chat15b.includes('Api.post("/api/blocks/request/ignore"') &&
         chat15b.includes('msgs[idxExisting].optString("kind") == "UNBLOCK_ASK"') &&
         chat15b.includes('"Unblock requested"'),
+    );
+  }
+  {
+    const chat7 = kt("ChatScreen.kt");
+    check(
+      "r35-7: block / unblock / request buttons are compact pills — Request Unblock 13.sp on (14, 6) padding, Accept / Block 13.sp halves on 7.dp vertical, Ignore / Unblock 12.5.sp on (14, 6); no fat paddings remain",
+      chat7.includes('if (asking) "Sending…" else "Request Unblock",') &&
+        chat7.includes(
+          "fontSize = 13.sp,\n                            fontWeight = FontWeight.SemiBold,\n                            maxLines = 1,",
+        ) &&
+        (chat7.match(/\.padding\(horizontal = 14\.dp, vertical = 6\.dp\)/g) || []).length === 6 &&
+        (chat7.match(/\.padding\(vertical = 7\.dp\)/g) || []).length === 2 &&
+        chat7.includes(
+          '{ Text("Ignore", color = Muted, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }',
+        ) &&
+        chat7.includes(
+          '{ Text("Unblock", color = ActionBlueInk, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }',
+        ) &&
+        !chat7.includes(".padding(horizontal = 22.dp, vertical = 11.dp)") &&
+        !chat7.includes(".padding(horizontal = 20.dp, vertical = 9.dp)") &&
+        !chat7.includes(".padding(vertical = 12.dp)"),
     );
   }
   {
