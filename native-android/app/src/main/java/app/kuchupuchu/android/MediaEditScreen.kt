@@ -1287,8 +1287,11 @@ private fun drawEditSelection(native: android.graphics.Canvas, sel: EditSel, w: 
             style = android.graphics.Paint.Style.STROKE
             strokeWidth = 3f
         }
-    val reach = (sel.rx * w).coerceAtLeast(sel.ry * h) * 0.62f + 10f
-    native.drawCircle(sel.center.x * w, sel.center.y * h, reach, ring)
+    // Owner round 36 (item 3): the selection is a SHARP rectangle hugging
+    // the overlay — the old circle looked "rounded" and sat loose on text.
+    val cx = sel.center.x * w
+    val cy = sel.center.y * h
+    native.drawRect(cx - sel.rx * w, cy - sel.ry * h, cx + sel.rx * w, cy + sel.ry * h, ring)
     val dp = deletePos(sel)
     val dx = dp.x * w
     val dy = dp.y * h

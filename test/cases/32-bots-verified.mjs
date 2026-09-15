@@ -7559,7 +7559,7 @@ const convBetween = (db, a, b) =>
   {
     const edit3 = kt("MediaEditScreen.kt");
     check(
-      "r36-3: overlay undo — snapshot history (push on add / gesture-start / delete / clear, cap 50), undo pops strokes first then overlays, clear wipes strokes + overlays together",
+      "r36-3: overlay undo — snapshot history (push on add / gesture-start / delete / clear, cap 50), undo pops strokes first then overlays, clear wipes strokes + overlays together; the selection is a sharp rectangle, not a ring",
       edit3.includes(
         "val overlayPast = remember { mutableStateListOf<Pair<List<EditText>, List<EditSticker>>>() }",
       ) &&
@@ -7567,6 +7567,10 @@ const convBetween = (db, a, b) =>
         edit3.includes("fun undoOverlay()") &&
         edit3.includes("removeLastOrNull()") &&
         (edit3.match(/pushOverlayPast\(\)/g) || []).length === 7 &&
+        edit3.includes(
+          "native.drawRect(cx - sel.rx * w, cy - sel.ry * h, cx + sel.rx * w, cy + sel.ry * h, ring)",
+        ) &&
+        !edit3.includes("val reach = ") &&
         edit3.includes(
           "if (shot != null && (strokes.isNotEmpty() || overlayPast.isNotEmpty())) {",
         ) &&
