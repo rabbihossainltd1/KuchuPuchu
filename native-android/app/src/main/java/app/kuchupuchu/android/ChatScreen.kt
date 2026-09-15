@@ -2115,7 +2115,11 @@ fun ChatScreen(nav: NavController, convId: String) {
                 when {
                     otherUserId == "kp_ai_bot" -> {
                         // Owner round 7: the AI chat's own menu, exactly six
-                        // options — nothing else.
+                        // options — nothing else (r34-17: plus "Scheduled
+                        // messages", only while this chat has parked rows).
+                        if (scheduledRows.isNotEmpty()) {
+                            KpSheetRow(Icons.Filled.Schedule, "Scheduled messages") { menuOpen = false; showScheduled = true }
+                        }
                         KpSheetRow(Icons.Filled.Schedule, "History") { menuOpen = false; nav.navigate("aihistory") }
                         KpSheetRow(Icons.AutoMirrored.Filled.Chat, "New chat") { menuOpen = false; resetAiSession() }
                         KpSheetRow(Icons.Filled.NotificationsOff, if (muted) "Unmute notifications" else "Mute notifications", onClick = toggleMute)
@@ -2157,6 +2161,11 @@ fun ChatScreen(nav: NavController, convId: String) {
                         // owner's order. Add Members is the admin's (the
                         // server refuses everyone else) and a PRIVATE group
                         // takes no new members and has no media gallery.
+                        // Owner round 34 (item 17): parked rows are managed
+                        // from the ⋮ menu — this row shows only while any exist.
+                        if (scheduledRows.isNotEmpty()) {
+                            KpSheetRow(Icons.Filled.Schedule, "Scheduled messages") { menuOpen = false; showScheduled = true }
+                        }
                         if (groupAdmin && !privateGroup) {
                             KpSheetRow(Icons.Filled.PersonAdd, "Add Members") { menuOpen = false; showAddMembers = true }
                         }
@@ -2169,6 +2178,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                         KpSheetRow(Icons.AutoMirrored.Filled.Logout, "Leave Group", tint = Red) { menuOpen = false; confirmLeave = true }
                     }
                     else -> {
+                        if (scheduledRows.isNotEmpty()) {
+                            KpSheetRow(Icons.Filled.Schedule, "Scheduled messages") { menuOpen = false; showScheduled = true }
+                        }
                         KpSheetRow(Icons.Filled.GroupAdd, "New group") { menuOpen = false; nav.navigate("newgroup") }
                         if (otherUserId.isNotBlank()) {
                             // Owner round 30: "View contact" only when this person is
@@ -2744,7 +2756,20 @@ fun ChatScreen(nav: NavController, convId: String) {
 
         /* ---------------- composer (doubles as the recording bar) ---------------- */
         // Owner round 32 (item 18): the chat's parked "send later" rows.
-        ScheduledChip(scheduledRows, chatTheme) { showScheduled = true }
+        // Owner round 34 (item 17): the chip is TRANSIENT — it flashes for a
+        // few seconds whenever the parked set (re)loads, then hides itself
+        // (the ⋮ menu carries "Scheduled messages" from then on).
+        var schedFlashUntil by remember { mutableStateOf(0L) }
+        LaunchedEffect(scheduledRows.size) {
+            if (scheduledRows.isNotEmpty()) {
+                schedFlashUntil = System.currentTimeMillis() + 4000L
+                delay(4000L)
+                schedFlashUntil = 0L
+            }
+        }
+        if (scheduledRows.isNotEmpty() && System.currentTimeMillis() < schedFlashUntil) {
+            ScheduledChip(scheduledRows, chatTheme) { showScheduled = true }
+        }
         if (showSchedule) {
             ScheduleSheet(
                 onClose = { showSchedule = false },

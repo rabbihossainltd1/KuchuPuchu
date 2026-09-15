@@ -6301,6 +6301,25 @@ const convBetween = (db, a, b) =>
         ) &&
         chat.includes("LaunchedEffect(rows.size) { if (rows.isEmpty()) onClose() }"),
     );
+    check(
+      "r34-17: the parked chip is transient (flashes 4s whenever the parked set reloads, then hides) and the ⋮ menu carries 'Scheduled messages' in all three menus (AI / group / chat) only while parked rows exist — opening the same Scheduled sheet (worker-computed preview per row, so text + photo + video all cancel from there)",
+      chat.includes("var schedFlashUntil by remember { mutableStateOf(0L) }") &&
+        chat.includes("LaunchedEffect(scheduledRows.size) {") &&
+        chat.includes("schedFlashUntil = System.currentTimeMillis() + 4000L") &&
+        chat.includes("delay(4000L)") &&
+        chat.includes(
+          "if (scheduledRows.isNotEmpty() && System.currentTimeMillis() < schedFlashUntil) {",
+        ) &&
+        chat.includes("ScheduledChip(scheduledRows, chatTheme) { showScheduled = true }") &&
+        (chat.match(/KpSheetRow\(Icons\.Filled\.Schedule, "Scheduled messages"\)/g) || []).length === 3 &&
+        chat.includes(
+          'KpSheetRow(Icons.Filled.Schedule, "Scheduled messages") { menuOpen = false; showScheduled = true }',
+        ) &&
+        chat.includes(
+          'r.optString("preview").ifBlank { r.optString("body") }.ifBlank { "Message" }',
+        ) &&
+        src.includes("preview: preview.slice(0, 120)"),
+    );
   }
   // r32-19: attach flow — the mic stays the mic; the panel owns the media Send
   // (tap = now, hold = later); one picked photo / video gets Edit → the light
