@@ -323,7 +323,6 @@ fun ChatScreen(nav: NavController, convId: String) {
     val attachSel = remember { mutableStateListOf<MediaItem>() }
     // Owner round 32 (item 17): the attach panel's "view once" switch — armed
     // for one batch, reset once it goes out.
-    var attachOnce by remember { mutableStateOf(false) }
     // System back during selection CLEARS the selection (WhatsApp) — it must
     // not fling the user out of the chat with bubbles still highlighted.
     androidx.activity.compose.BackHandler(enabled = selected.isNotEmpty()) {
@@ -1555,7 +1554,6 @@ fun ChatScreen(nav: NavController, convId: String) {
             if (more == null || more.convId != convId) return@collect
             ScreenStore.pendingAddMore.value = null
             attachSel.add(0, more.item)
-            attachOnce = more.once
             showAttach = true
         }
     }
@@ -1564,15 +1562,13 @@ fun ChatScreen(nav: NavController, convId: String) {
         val batch = attachSel.toList()
         attachSel.clear()
         showAttach = false
-        // Owner round 32 (item 17): the panel's ① switch — this batch goes out
-        // view-once (no album: each photo is its own single opening), and the
-        // switch disarms itself for the next pick.
-        val once = attachOnce
-        attachOnce = false
+        // Owner round 36 (item 1): the panel's ① switch is gone — once
+        // rides PER ITEM now (armed in the editor before staging), so a
+        // mixed batch just works: once photos go out single, the rest
+        // share the album.
         // Owner round 31 (item 29): two or more photos picked together go out
         // as ONE album — each still its own message row, sharing meta.album.
-        val photos = batch.count { !it.isVideo }
-        val album = if (photos >= 2 && !once) newAlbumId() else null
+        val album = if (batch.count { !it.isVideo && !it.once } >= 2) newAlbumId() else null
         scope.launch {
             // Owner round 32 (item 48): photos are read one after another, in
             // the order they were ticked, so the pending rows (and the album's
@@ -1580,7 +1576,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             // decode happened to finish first. Each upload still runs on its
             // own coroutine inside sendImage, so they overlap on the wire.
             batch.forEach { item ->
-                if (once) {
+                if (item.once) {
                     if (item.isVideo) handleDocumentPicked(item.uri, viewOnce = true, sendAt = sendAt, caption = item.caption) else readAndSendImage(item.uri, null, viewOnce = true, sendAt = sendAt, caption = item.caption, hd = item.hd)
                 } else {
                     if (item.isVideo) handleDocumentPicked(item.uri, sendAt = sendAt, caption = item.caption) else readAndSendImage(item.uri, album, sendAt = sendAt, caption = item.caption, hd = item.hd)
@@ -3025,16 +3021,14 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // Owner round 32 (item 19): hold the panel's Send → a time
                 // (item 18's sheet); Edit on a single pick → the light editor.
                 onScheduleBatch = { showScheduleMedia = true },
+                // Owner round 36 (item 1): the editor always opens
+                // unarmed — once is the editor's own toggle now.
                 onEdit = { item ->
-                    val once = attachOnce
                     ScreenStore.editTitle = title
                     attachSel.clear()
-                    attachOnce = false
                     showAttach = false
-                    nav.navigate("mediaedit/$convId/${if (once) 1 else 0}/${statusPickArg(item)}")
+                    nav.navigate("mediaedit/$convId/0/${statusPickArg(item)}")
                 },
-                viewOnce = attachOnce,
-                onViewOnce = { attachOnce = it },
                 onImagePicked = { uri -> handleImagePicked(uri) },
                 onDocumentPicked = { uri -> handleDocumentPicked(uri, asDocument = true) },
                 onContactPicked = ::handleContactPicked,

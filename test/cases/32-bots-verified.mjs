@@ -4041,8 +4041,10 @@ const convBetween = (db, a, b) =>
     check(
       "r31-29: app — the grid send stamps ONE album id on 2+ photos (single photo: none), the pending row + both payloads carry it, a retry keeps it, forwarding 2+ photos re-groups them",
       chat.includes("internal fun newAlbumId(): String =") &&
-        // r32-17: a view-once batch is never an album.
-        chat.includes("val album = if (photos >= 2 && !once) newAlbumId() else null") &&
+        // r36-1: once ITEMS join no album (the batch switch is gone).
+        chat.includes(
+          "val album = if (batch.count { !it.isVideo && !it.once } >= 2) newAlbumId() else null",
+        ) &&
         chat.includes(
           'fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "") {',
         ) &&
@@ -6067,16 +6069,12 @@ const convBetween = (db, a, b) =>
         src.includes('"SELECT sender_id, meta_json FROM messages WHERE media = ? LIMIT 8",'),
     );
     check(
-      "r32-17: app — the attach panel's ① toggle (viewOnce / onViewOnce next to 'N selected'); a view-once batch sends each photo / video with meta.viewOnce and no album, then disarms; sendImage / sendFile / readAndSendImage / handleDocumentPicked carry the flag; the pending echo is marked viewOnce so it draws as the card",
-      attach.includes("viewOnce: Boolean = false,") &&
-        attach.includes("onViewOnce: (Boolean) -> Unit = {},") &&
-        attach.includes("onViewOnce(!viewOnce)") &&
-        attach.includes(".background(if (viewOnce) ActionBlueDeep else Color.Transparent)") &&
-        chat.includes("var attachOnce by remember { mutableStateOf(false) }") &&
-        chat.includes("viewOnce = attachOnce,") &&
-        chat.includes("onViewOnce = { attachOnce = it },") &&
-        chat.includes("val once = attachOnce\n        attachOnce = false") &&
-        chat.includes("val album = if (photos >= 2 && !once) newAlbumId() else null") &&
+      "r32-17: app — once rides PER ITEM (round 36 killed the panel ① toggle): a once item sends with meta.viewOnce and no album, the rest share the album; sendImage / sendFile / readAndSendImage / handleDocumentPicked carry the flag; the pending echo is marked viewOnce so it draws as the card",
+      attach.includes("val once: Boolean = false,") &&
+        chat.includes("if (item.once) {") &&
+        chat.includes(
+          "val album = if (batch.count { !it.isVideo && !it.once } >= 2) newAlbumId() else null",
+        ) &&
         chat.includes(
           "if (item.isVideo) handleDocumentPicked(item.uri, viewOnce = true, sendAt = sendAt, caption = item.caption) else readAndSendImage(item.uri, null, viewOnce = true, sendAt = sendAt, caption = item.caption, hd = item.hd)",
         ) &&
@@ -6378,7 +6376,7 @@ const convBetween = (db, a, b) =>
         chat.includes("if (input.isNotBlank()) onSend() else onSendSelection()"),
     );
     check(
-      "r32-19: chat — the panel's hold opens item 18's ScheduleSheet for the batch (sendAttachSelection(sendAt)); a scheduled photo / video / document uploads now and parks on the server with sendAt (no bubble, the clock chip lists it); Edit clears the pick and opens mediaedit/{conv}/{once}/{arg}",
+      "r32-19: chat — the panel's hold opens item 18's ScheduleSheet for the batch (sendAttachSelection(sendAt)); a scheduled photo / video / document uploads now and parks on the server with sendAt (no bubble, the clock chip lists it); Edit clears the pick and opens mediaedit/{conv}/0/{arg} (unarmed; once is the editor\u2019s own toggle)",
       chat.includes("var showScheduleMedia by remember { mutableStateOf(false) }") &&
         chat.includes("onScheduleBatch = { showScheduleMedia = true },") &&
         chat.includes("                    sendAttachSelection(sendAt = at)") &&
@@ -6397,9 +6395,7 @@ const convBetween = (db, a, b) =>
           "val up = withContext(Dispatchers.IO) { Api.uploadFile(name, mime, file) }",
         ) &&
         (chat.match(/res\.optJSONObject\("scheduled"\)\?\.let \{ row ->/g) || []).length === 3 &&
-        chat.includes(
-          'nav.navigate("mediaedit/$convId/${if (once) 1 else 0}/${statusPickArg(item)}")',
-        ) &&
+        chat.includes('nav.navigate("mediaedit/$convId/0/${statusPickArg(item)}")') &&
         app.includes('composable("mediaedit/{conv}/{once}/{arg}") { entry ->') &&
         app.includes('viewOnce = entry.arguments?.getString("once") == "1",'),
     );
@@ -7523,6 +7519,21 @@ const convBetween = (db, a, b) =>
         chat15b.includes('Api.post("/api/blocks/request/ignore"') &&
         chat15b.includes('msgs[idxExisting].optString("kind") == "UNBLOCK_ASK"') &&
         chat15b.includes('"Unblock requested"'),
+    );
+  }
+  // r36-1: the attach panel's ① toggle is gone (it sat next to Edit) —
+  // once rides per item, armed in the editor; the editor opens unarmed.
+  {
+    const attach1 = kt("AttachSheet.kt");
+    const chat1 = kt("ChatScreen.kt");
+    const edit1 = kt("MediaEditScreen.kt");
+    check(
+      "r36-1: no ① toggle in the attach panel (no viewOnce params, no attachOnce state); staged items carry once from the editor; lone edits open unarmed",
+      !attach1.includes("onViewOnce") &&
+        !attach1.includes("viewOnce: Boolean") &&
+        !chat1.includes("attachOnce") &&
+        (edit1.match(/, once = onceShot\)/g) || []).length === 4 &&
+        chat1.includes('nav.navigate("mediaedit/$convId/0/${statusPickArg(item)}")'),
     );
   }
   // r35-8: the editor grows up — overlays carry a pinch size (preview AND

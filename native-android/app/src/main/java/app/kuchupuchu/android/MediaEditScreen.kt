@@ -399,7 +399,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                     if (pickedIsVideo && vSource != null) {
                         val whole = s <= 0L && e >= vSource.durationMs
                         if (whole) {
-                            MediaItem(pickedUri, true, vSource.durationMs, "", System.currentTimeMillis() / 1000, cap)
+                            MediaItem(pickedUri, true, vSource.durationMs, "", System.currentTimeMillis() / 1000, cap, once = onceShot)
                         } else {
                             val out = java.io.File(ctx.cacheDir, "edit_${System.currentTimeMillis()}.mp4")
                             try {
@@ -414,13 +414,13 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                                     "${ctx.packageName}.fileprovider",
                                     out,
                                 )
-                            MediaItem(uri, true, e - s, "Edits", System.currentTimeMillis() / 1000, cap)
+                            MediaItem(uri, true, e - s, "Edits", System.currentTimeMillis() / 1000, cap, once = onceShot)
                         }
                     } else {
                         val bmp = img ?: throw Exception("Could not read that photo.")
                         val edited = drawn.isNotEmpty() || wrote.isNotEmpty() || placed.isNotEmpty() || filt != null || turn != 0 || hdShot
                         if (!edited) {
-                            MediaItem(pickedUri, false, 0, "", System.currentTimeMillis() / 1000, cap)
+                            MediaItem(pickedUri, false, 0, "", System.currentTimeMillis() / 1000, cap, once = onceShot)
                         } else {
                             val url = bakeFull(bmp, drawn, filt, wrote, placed, hdShot) ?: throw Exception("Could not save the drawing.")
                             val bytes = android.util.Base64.decode(url.substringAfter(","), android.util.Base64.DEFAULT)
@@ -432,7 +432,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                                     "${ctx.packageName}.fileprovider",
                                     f,
                                 )
-                            MediaItem(uri, false, 0, "Edits", System.currentTimeMillis() / 1000, cap, hdShot)
+                            MediaItem(uri, false, 0, "Edits", System.currentTimeMillis() / 1000, cap, hdShot, once = onceShot)
                         }
                     }
                 }.getOrNull()

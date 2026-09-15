@@ -102,8 +102,10 @@ data class MediaItem(
     val added: Long,
     // Owner round 34 (item 16b): the caption typed in the editor + whether
     // the pick goes out HD — set when the editor's + stages the item.
+    // Owner round 36 (item 1): + whether it goes out view-once (same trip).
     val caption: String = "",
     val hd: Boolean = false,
+    val once: Boolean = false,
 )
 
 private data class AttachAction(
@@ -132,10 +134,6 @@ fun AttachPanel(
     // photo / video also gets Edit (the light editor).
     onScheduleBatch: () -> Unit = {},
     onEdit: (MediaItem) -> Unit = {},
-    // Owner round 32 (item 17): "View once" for the picked photos / videos —
-    // a ① toggle next to "N selected"; on = the batch goes out view-once.
-    viewOnce: Boolean = false,
-    onViewOnce: (Boolean) -> Unit = {},
     onImagePicked: (Uri) -> Unit,
     onDocumentPicked: (Uri) -> Unit,
     onContactPicked: (Uri) -> Unit,
@@ -465,29 +463,9 @@ fun AttachPanel(
                 modifier = Modifier.weight(1f),
             )
             if (sel.isNotEmpty()) {
-                // Owner round 32 (item 17): view once — filled accent circle
-                // when armed, plain outline otherwise. No label (the ① glyph
-                // is the WhatsApp-known mark for it).
-                Box(
-                    Modifier
-                        .clip(CircleShape)
-                        .background(if (viewOnce) ActionBlueDeep else Color.Transparent)
-                        .border(1.5.dp, if (viewOnce) ActionBlueDeep else Muted, CircleShape)
-                        .clickable {
-                            haptics.tap()
-                            onViewOnce(!viewOnce)
-                        }
-                        .size(24.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        "1",
-                        color = if (viewOnce) Color.White else Muted,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-                Spacer(Modifier.size(4.dp))
+                // Owner round 36 (item 1): the ① toggle lived here, next to
+                // the Edit chip — removed. Once is per item now, armed in
+                // the editor; the batch just carries it.
                 // This tiny x just clears the selection.
                 Icon(
                     Icons.Filled.Close,
