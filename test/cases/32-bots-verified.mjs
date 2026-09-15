@@ -7638,6 +7638,25 @@ const convBetween = (db, a, b) =>
       kt("KpApp.kt").includes("Confirm the install in the system window.") &&
       kt("MainActivity.kt").includes("KpUpdate.consumeInstallResult(application)"),
   );
+  // r37-5: the reference block wall — the blocker sees ONLY a compact
+  // Unblock pill (thin strip, no unavailable line); the blocked side keeps
+  // the unavailable line + the one slim Request pill, spent once per block.
+  {
+    const chatW = kt("ChatScreen.kt");
+    const wall = chatW.slice(
+      chatW.indexOf("if (blockWall) {"),
+      chatW.indexOf("} else if (requestPending) {"),
+    );
+    check(
+      "r37-5: the block wall shows the blocker only a compact Unblock pill (DELETE /api/blocks + meta refresh lifts the wall) and the blocked side the unavailable line + the one slim Request pill",
+      wall.includes("if (blockedByMe) {") &&
+        wall.includes('else "Unblock"') &&
+        wall.includes('Api.delete("/api/blocks/$otherUserId")') &&
+        wall.includes("refreshMeta()") &&
+        wall.includes("if (blockedMe && !unblockAsked && !askedSent) {") &&
+        wall.indexOf('"Unblock"') < wall.indexOf('"This User Is Unavailable"'),
+    );
+  }
   // r37-3: reference-style overlay handles — per-overlay rotation,
   // × top-left deletes, top-right drags the turn, bottom-right drags
   // the size; the box + its handles turn with the overlay, taps un-turn
@@ -7827,12 +7846,12 @@ const convBetween = (db, a, b) =>
   {
     const chat7 = kt("ChatScreen.kt");
     check(
-      "r35-7: block / unblock / request buttons are compact pills — Request Unblock 13.sp on (14, 6) padding, Accept / Block 13.sp halves on 7.dp vertical, Ignore / Unblock 12.5.sp on (14, 6); no fat paddings remain",
+      "r35-7: block / unblock / request buttons are compact pills — Request Unblock + wall Unblock 13.sp on (14, 6) padding, Accept / Block 13.sp halves on 7.dp vertical, Ignore / card-Unblock 12.5.sp on (14, 6); no fat paddings remain",
       chat7.includes('if (asking) "Sending…" else "Request Unblock",') &&
         chat7.includes(
           "fontSize = 13.sp,\n                            fontWeight = FontWeight.SemiBold,\n                            maxLines = 1,",
         ) &&
-        (chat7.match(/\.padding\(horizontal = 14\.dp, vertical = 6\.dp\)/g) || []).length === 6 &&
+        (chat7.match(/\.padding\(horizontal = 14\.dp, vertical = 6\.dp\)/g) || []).length === 7 &&
         (chat7.match(/\.padding\(vertical = 7\.dp\)/g) || []).length === 2 &&
         chat7.includes(
           '{ Text("Ignore", color = Muted, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }',

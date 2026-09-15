@@ -2809,27 +2809,66 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
         ReplyQuoteBar(replyTo, chatTheme) { replyTo = null }
         if (blockWall) {
-            // Owner round 34 (item 15): a block on either side replaces the
-            // whole composer — no send box, no attach, no mic, and no more
-            // red error bubble when a send hits the wall. The blocked side
-            // gets exactly one Request Unblock per block; afterwards (and
-            // for the blocker) only the unavailable line remains.
+            // Owner round 37 (item 5): the reference wall. The BLOCKER sees
+            // only a compact Unblock pill; the BLOCKED side sees the
+            // unavailable line + one slim Request pill per block, and once
+            // spent only the line remains. One thin strip, same compact
+            // language as the rest of the app.
             var askedSent by remember { mutableStateOf(false) }
             var asking by remember { mutableStateOf(false) }
+            var unblocking by remember { mutableStateOf(false) }
             Column(
                 Modifier
                     .fillMaxWidth()
                     .background(Card)
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(
-                    "This User Is Unavailable",
-                    fontSize = 13.sp,
-                    color = Muted,
-                    textAlign = TextAlign.Center,
-                    maxLines = 2,
-                )
+                if (blockedByMe) {
+                    // Same small pill as Request, never a fat button.
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (unblocking) Line else ActionBlue)
+                            .clickable(enabled = !unblocking) {
+                                unblocking = true
+                                scope.launch {
+                                    val freed = runCatching {
+                                        withContext(Dispatchers.IO) {
+                                            Api.delete("/api/blocks/$otherUserId")
+                                        }
+                                    }.getOrNull()?.let { !it.has("error") } == true
+                                    unblocking = false
+                                    if (freed) {
+                                        haptics.confirm()
+                                        Cache.bust("/api/conversations/$convId")
+                                        refreshMeta()
+                                        ScreenStore.pokeInbox()
+                                    } else {
+                                        error = "Could not unblock. Try again."
+                                    }
+                                }
+                            }
+                            .padding(horizontal = 14.dp, vertical = 6.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            if (unblocking) "Unblocking…" else "Unblock",
+                            color = if (unblocking) Muted else ActionBlueInk,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                        )
+                    }
+                } else {
+                    Text(
+                        "This User Is Unavailable",
+                        fontSize = 13.sp,
+                        color = Muted,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                    )
+                }
                 if (blockedMe && !unblockAsked && !askedSent) {
                     Spacer(Modifier.height(8.dp))
                     // Owner round 35 (item 7): compact like the rest of the
