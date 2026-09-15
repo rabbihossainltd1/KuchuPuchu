@@ -6148,12 +6148,16 @@ const convBetween = (db, a, b) =>
     );
     const icon = kt("ViewOnceIcon.kt");
     check(
-      "r34-16a: app — the 1 mark is one clean ring + a centered '1' (round 36 redrew the mushy SVG trace) and shared with the editor; the blur is a coil Transformation (48 px + triple box pass, every API level); a VANISHED frame plays the vanish show and drops the row without a tombstone",
+      "r34-16a: app — the 1 mark is the owner's SVG traced exactly (260.2° arc on center 40/50, the 5 gap dots, the bold 1 at x 38 / baseline 62) and shared with the editor; the blur is a coil Transformation (48 px + triple box pass, every API level); a VANISHED frame plays the vanish show and drops the row without a tombstone",
       icon.includes("internal fun ViewOnceOneIcon(iconSize: Dp, tint: Color = Color.White)") &&
-        icon.includes(
-          "drawCircle(tint, radius = d / 2f - stroke / 2f, style = Stroke(width = stroke))",
-        ) &&
-        icon.includes('Text(\n            "1",') &&
+        icon.includes("startAngle = 49.9f,") &&
+        icon.includes("sweepAngle = 260.2f,") &&
+        icon.includes("60.6f, 25.5f, 2.5f,") &&
+        icon.includes("72f, 50f, 4.2f,") &&
+        icon.includes('"1",') &&
+        icon.includes("38f * u,") &&
+        icon.includes("62f * u,") &&
+        icon.includes("android.graphics.Typeface.DEFAULT_BOLD") &&
         icon.includes("internal object ViewOnceBlur : coil.transform.Transformation") &&
         icon.includes('"kp-viewonce-blur-v1"') &&
         icon.includes("repeat(3) { boxBlurPass(pix, sw, sh, 4) }") &&
@@ -7606,12 +7610,15 @@ const convBetween = (db, a, b) =>
   {
     const icon4 = kt("ViewOnceIcon.kt");
     check(
-      "r36-4: ViewOnceOneIcon is a full ring (9% stroke) + a centered bold 1 at 52% of the size; no arc / dots / off-center digit remain",
-      icon4.includes("val stroke = (d * 0.09f).coerceAtLeast(2f)") &&
-        icon4.includes("(iconSize.value * 0.52f).sp") &&
-        !icon4.includes("drawArc") &&
-        !icon4.includes("sweepAngle") &&
-        !icon4.includes("floatArrayOf"),
+      "r37-1: ViewOnceOneIcon is the owner's SVG exactly — 260.2° arc centered (40, 50), the 5 dotted-gap triples, the bold 1 drawn at x 38 / baseline 62; the round-36 plain ring is gone",
+      icon4.includes("startAngle = 49.9f,") &&
+        icon4.includes("sweepAngle = 260.2f,") &&
+        icon4.includes("topLeft = Offset(8f * u, 18f * u),") &&
+        icon4.includes("69f, 36.5f, 3.6f,") &&
+        icon4.includes("69f, 63.5f, 3.6f,") &&
+        icon4.includes("textSize = 32f * u") &&
+        !icon4.includes("d * 0.09f") &&
+        !icon4.includes("0.52f).sp"),
     );
   }
   // r36-5: an unsent row settles INTO its tombstone when the dust ends
