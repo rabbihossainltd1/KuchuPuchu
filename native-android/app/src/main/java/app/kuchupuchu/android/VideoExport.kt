@@ -652,8 +652,8 @@ private class GlFrameSink(
     private val width: Int,
     private val height: Int,
     texCoords: FloatArray,
-    colorMat: FloatArray?,
-    overlay: Bitmap?,
+    private val colorMat: FloatArray?,
+    private val overlay: Bitmap?,
 ) : SurfaceTexture.OnFrameAvailableListener {
     private var eglDisplay: EGLDisplay = EGL14.EGL_NO_DISPLAY
     private var eglContext: EGLContext = EGL14.EGL_NO_CONTEXT

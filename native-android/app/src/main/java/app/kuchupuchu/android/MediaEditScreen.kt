@@ -418,10 +418,10 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                         if (!whole || hasEdits) {
                             try {
                                 VideoExport.export(ctx, pickedUri, s, e, null, out, overlay = overlay, colorMat = filt?.array, userTurns = turn)
-                            } catch (e: Exception) {
+                            } catch (err: Exception) {
                                 // Edits must never silently vanish: only a
                                 // bare trim may go through degraded.
-                                if (hasEdits) throw e
+                                if (hasEdits) throw err
                                 out.delete()
                                 VideoExport.passthrough(ctx, pickedUri, s, e, out)
                             }
@@ -481,8 +481,8 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                             val out = java.io.File(ctx.cacheDir, "edit_${System.currentTimeMillis()}.mp4")
                             try {
                                 VideoExport.export(ctx, pickedUri, s, e, null, out, overlay = overlay, colorMat = filt?.array, userTurns = turn)
-                            } catch (e: Exception) {
-                                if (hasEdits) throw e
+                            } catch (err: Exception) {
+                                if (hasEdits) throw err
                                 out.delete()
                                 VideoExport.passthrough(ctx, pickedUri, s, e, out)
                             }
@@ -560,8 +560,8 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                                 java.io.File(ctx.cacheDir, "edit_${System.currentTimeMillis()}.mp4").also { out ->
                                     try {
                                         VideoExport.export(ctx, pickedUri, s, e, null, out, overlay = overlay, colorMat = filt?.array, userTurns = turn)
-                                    } catch (e: Exception) {
-                                        if (hasEdits) throw e
+                                    } catch (err: Exception) {
+                                        if (hasEdits) throw err
                                         out.delete()
                                         VideoExport.passthrough(ctx, pickedUri, s, e, out)
                                     }

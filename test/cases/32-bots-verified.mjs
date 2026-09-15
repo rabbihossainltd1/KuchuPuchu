@@ -7655,7 +7655,7 @@ const convBetween = (db, a, b) =>
             /VideoExport\.export\(ctx, pickedUri, s, e, null, out, overlay = overlay, colorMat = filt\?\.array, userTurns = turn\)/g,
           ) || []
         ).length === 3 &&
-        (edit6.match(/if \(hasEdits\) throw e/g) || []).length === 3,
+        (edit6.match(/if \(hasEdits\) throw err/g) || []).length === 3,
     );
   }
   // r36-7: the status share screen gets the full editor — an Edit
