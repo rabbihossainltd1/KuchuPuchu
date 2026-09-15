@@ -8445,12 +8445,20 @@ const convBetween = (db, a, b) =>
     {
       const ss = kt("SettingsScreen.kt");
       check(
-        "r34-8: device list separates rows (divider), the phone icon sits in a tint disc, the This-device badge is tiny",
+        "r34-8: device list separates rows, the phone icon sits in a tint disc, the This-device badge is tiny",
         ss.includes("list.forEachIndexed { i, d ->") &&
-          ss.includes("if (i > 0) HorizontalDivider(color = Line") &&
           ss.includes(".size(38.dp)") &&
-          ss.includes('"This device",') &&
-          ss.includes("fontSize = 9.sp,"),
+          ss.includes('"This device",'),
+      );
+      check(
+        "r35-6: one card per device with breathing room (no shared wrapper, no hairlines), the badge shrinks to 8.sp, and both detail lines wrap so nothing truncates",
+        !ss.includes("SectionCard { DevicesSection() }") &&
+          ss.includes(".padding(top = if (i == 0) 2.dp else 8.dp)") &&
+          ss.includes("fontSize = 8.sp,") &&
+          (ss.match(/maxLines = 2,/g) || []).length >= 2 &&
+          !ss
+            .slice(ss.indexOf("private fun DevicesSection()"), ss.indexOf("private fun deviceSeen"))
+            .includes("HorizontalDivider"),
       );
     }
     check(

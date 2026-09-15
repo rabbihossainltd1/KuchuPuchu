@@ -64,7 +64,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -584,7 +583,9 @@ fun DevicesSettingsScreen(nav: NavController) {
             .verticalScroll(rememberScrollState()),
     ) {
         SubScreenHeader("Devices", onBack = { nav.popBackStack() })
-        SectionCard { DevicesSection() }
+        // Owner round 35 (item 6): one card PER device — the section draws
+        // its own cards now, no shared wrapper.
+        DevicesSection()
         Spacer(Modifier.height(32.dp))
     }
 }
@@ -691,19 +692,44 @@ private fun DevicesSection() {
     val myDevice = remember { KpPush.deviceId(ctx) }
     val list = items ?: emptyList()
     if (items == null && !failed) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Card)
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             CircularProgressIndicator(color = ActionBlueDeep, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
         }
     } else if (list.isEmpty()) {
-        Text(if (failed) "Offline" else "No devices", color = Muted, fontSize = 13.5.sp, modifier = Modifier.padding(16.dp))
+        Text(
+            if (failed) "Offline" else "No devices",
+            color = Muted,
+            fontSize = 13.5.sp,
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Card)
+                    .padding(16.dp),
+        )
     } else {
-        // Owner round 34 (item 8): one device per separated row.
+        // Owner round 35 (item 6): one card per device, breathing room
+        // between them — separation you can see, not a hairline.
         list.forEachIndexed { i, d ->
             val current = d.optBoolean("current") || d.optString("deviceId") == myDevice
             val active = d.optBoolean("active")
-            if (i > 0) HorizontalDivider(color = Line, thickness = 0.75.dp, modifier = Modifier.padding(horizontal = 16.dp))
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 11.dp),
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp)
+                    .padding(top = if (i == 0) 2.dp else 8.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Card)
+                    .padding(horizontal = 16.dp, vertical = 11.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(
@@ -729,19 +755,20 @@ private fun DevicesSection() {
                             color = Ink,
                             fontWeight = FontWeight.Medium,
                             maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         if (current) {
                             Spacer(Modifier.width(8.dp))
-                            // Owner round 34 (item 8): the badge shrinks to a whisper.
+                            // Owner round 35 (item 6): the badge is a whisper.
                             Text(
                                 "This device",
-                                fontSize = 9.sp,
+                                fontSize = 8.sp,
                                 color = ActionBlueInk,
                                 modifier =
                                     Modifier
-                                        .clip(RoundedCornerShape(6.dp))
+                                        .clip(RoundedCornerShape(5.dp))
                                         .background(ActionBlue)
-                                        .padding(horizontal = 5.dp, vertical = 1.dp),
+                                        .padding(horizontal = 4.dp),
                             )
                         }
                     }
@@ -755,7 +782,8 @@ private fun DevicesSection() {
                         },
                         fontSize = 12.5.sp,
                         color = Muted,
-                        maxLines = 1,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     // Owner round 32 item 4: where the device came from + when it
                     // signed in. Rows that predate the columns show only the time.
@@ -776,7 +804,7 @@ private fun DevicesSection() {
                         },
                         fontSize = 12.sp,
                         color = Muted,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
