@@ -287,6 +287,22 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
         }
     }
 
+    // Owner round 36 (item 3): overlay undo — one snapshot per finished
+    // gesture / add / remove, never per move event (a drag would flood it).
+    val overlayPast = remember { mutableStateListOf<Pair<List<EditText>, List<EditSticker>>>() }
+    fun pushOverlayPast() {
+        overlayPast.add(texts.toList() to stickers.toList())
+        if (overlayPast.size > 50) overlayPast.removeAt(0)
+    }
+    fun undoOverlay() {
+        val last = overlayPast.removeLastOrNull() ?: return
+        texts.clear()
+        texts.addAll(last.first)
+        stickers.clear()
+        stickers.addAll(last.second)
+        if (selectedId != null && texts.none { it.id == selectedId } && stickers.none { it.id == selectedId }) selectedId = null
+    }
+
     fun removeOverlay(id: String) {
         texts.removeAll { it.id == id }
         stickers.removeAll { it.id == id }
@@ -584,6 +600,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                                                             val dp = deletePos(sel)
                                                             if (kotlin.math.hypot(nx0 - dp.x, ny0 - dp.y) < DEL_MARK_HIT) {
                                                                 haptics.tap()
+                                                                pushOverlayPast()
                                                                 removeOverlay(sel.id)
                                                                 waitForUpOrCancellation()
                                                                 return@awaitEachGesture
@@ -615,6 +632,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                                                                 val cent = Offset((a.x + b.x) / 2f, (a.y + b.y) / 2f)
                                                                 if (mode != 2) {
                                                                     mode = 2
+                                                                    pushOverlayPast()
                                                                     moved = true
                                                                     prevDist = dist
                                                                     prevCent = cent
@@ -633,6 +651,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                                                                     if (kotlin.math.hypot(ox, oy) > slopPx) {
                                                                         if (hit == null) break
                                                                         mode = 1
+                                                                        pushOverlayPast()
                                                                         moved = true
                                                                         prev = c.position
                                                                     }
@@ -730,11 +749,11 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                         Icon(Icons.Filled.Edit, "Draw", tint = Color.White, modifier = Modifier.size(18.dp))
                     }
                 }
-                if (shot != null && strokes.isNotEmpty()) {
+                if (shot != null && (strokes.isNotEmpty() || overlayPast.isNotEmpty())) {
                     IconButton(
                         onClick = {
                             haptics.tap()
-                            strokes.removeAt(strokes.size - 1)
+                            if (strokes.isNotEmpty()) strokes.removeAt(strokes.size - 1) else undoOverlay()
                         },
                         modifier = Modifier.size(36.dp),
                     ) {
@@ -743,7 +762,13 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                     IconButton(
                         onClick = {
                             haptics.tap()
-                            strokes.clear()
+                            if (strokes.isNotEmpty()) strokes.clear()
+                            if (texts.isNotEmpty() || stickers.isNotEmpty()) {
+                                pushOverlayPast()
+                                texts.clear()
+                                stickers.clear()
+                                selectedId = null
+                            }
                         },
                         modifier = Modifier.size(36.dp),
                     ) {
@@ -1033,6 +1058,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                             if (draft.isBlank()) return@clickable
                             haptics.confirm()
                             val t = EditText(newOverlayId(), Offset(0.5f, 0.38f), draft.trim(), ink)
+                            pushOverlayPast()
                             texts.add(t)
                             selectedId = t.id
                             showTextSheet = false
@@ -1106,6 +1132,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                             .clickable {
                                 haptics.confirm()
                                 val s = EditSticker(newOverlayId(), Offset(0.5f, 0.5f), list[i])
+                                pushOverlayPast()
                                 stickers.add(s)
                                 selectedId = s.id
                                 showStickerSheet = false

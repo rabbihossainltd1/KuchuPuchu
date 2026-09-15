@@ -7551,6 +7551,28 @@ const convBetween = (db, a, b) =>
         attach2.includes("if (pos < 0) {"),
     );
   }
+  // r36-3: emoji / text overlays get an undo of their own — one snapshot
+  // per gesture / add / remove; the pen's stroke-undo keeps priority and its
+  // verbatim shape. (Resize + drag already ride the round-35 gesture loop.)
+  {
+    const edit3 = kt("MediaEditScreen.kt");
+    check(
+      "r36-3: overlay undo — snapshot history (push on add / gesture-start / delete / clear, cap 50), undo pops strokes first then overlays, clear wipes strokes + overlays together",
+      edit3.includes(
+        "val overlayPast = remember { mutableStateListOf<Pair<List<EditText>, List<EditSticker>>>() }",
+      ) &&
+        edit3.includes("fun pushOverlayPast()") &&
+        edit3.includes("fun undoOverlay()") &&
+        edit3.includes("removeLastOrNull()") &&
+        (edit3.match(/pushOverlayPast\(\)/g) || []).length === 7 &&
+        edit3.includes(
+          "if (shot != null && (strokes.isNotEmpty() || overlayPast.isNotEmpty())) {",
+        ) &&
+        edit3.includes(
+          "if (strokes.isNotEmpty()) strokes.removeAt(strokes.size - 1) else undoOverlay()",
+        ),
+    );
+  }
   // r35-8: the editor grows up — overlays carry a pinch size (preview AND
   // bake share the scaled draw fns), one gesture loop owns select / move /
   // pinch / ×-delete, the photo owns the whole screen with floating tiny
