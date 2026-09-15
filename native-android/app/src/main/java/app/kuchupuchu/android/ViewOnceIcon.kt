@@ -80,7 +80,7 @@ internal fun ViewOnceOneIcon(iconSize: Dp, tint: Color = Color.White) {
  * which would leak the pixels on older devices.)
  */
 internal object ViewOnceBlur : coil.transform.Transformation {
-    override val key: String = "kp-viewonce-blur-v1"
+    override val cacheKey: String = "kp-viewonce-blur-v1"
 
     override suspend fun transform(input: Bitmap, size: coil.size.Size): Bitmap {
         val w = input.width
