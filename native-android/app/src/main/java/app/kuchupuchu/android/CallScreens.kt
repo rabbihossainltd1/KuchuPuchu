@@ -767,10 +767,9 @@ fun OutgoingVideoScreen(call: CallUi) {
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val routeAction = rememberRouteAction(engine)
-            StripAction(routeAction.icon, routeAction.label, active = engine.audioRoute != AudioRoute.EARPIECE) {
-                routeAction.onClick()
-            }
+            // Owner round 34 (item 13): no speaker button on video — the
+            // call opens on the speaker (a headset / Bluetooth wins when
+            // connected, hot-plug included) and nothing here can lie.
             StripAction(
                 if (engine.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
                 if (engine.muted) "Unmute" else "Mute",
@@ -987,10 +986,9 @@ fun InCallVideoScreen(call: CallUi) {
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val routeAction = rememberRouteAction(engine)
-            StripAction(routeAction.icon, routeAction.label, active = engine.audioRoute != AudioRoute.EARPIECE) {
-                routeAction.onClick()
-            }
+            // Owner round 34 (item 13): no speaker button on video — the
+            // call opens on the speaker (a headset / Bluetooth wins when
+            // connected, hot-plug included) and nothing here can lie.
             StripAction(
                 if (engine.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
                 if (engine.muted) "Unmute" else "Mute",
@@ -1148,10 +1146,9 @@ fun GroupVideoScreen(call: CallUi) {
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val routeAction = rememberRouteAction(engine)
-            StripAction(routeAction.icon, routeAction.label, active = engine.audioRoute != AudioRoute.EARPIECE) {
-                routeAction.onClick()
-            }
+            // Owner round 34 (item 13): no speaker button on video — the
+            // call opens on the speaker (a headset / Bluetooth wins when
+            // connected, hot-plug included) and nothing here can lie.
             StripAction(
                 if (engine.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
                 if (engine.muted) "Unmute" else "Mute",

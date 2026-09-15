@@ -7361,6 +7361,19 @@ const convBetween = (db, a, b) =>
         !chat12.includes('val i = msgs.indexOfFirst { it.optString("id") == id }'),
     );
   }
+  {
+    const cs13 = kt("CallScreens.kt");
+    check(
+      "r34-13: video calls have no speaker button (voice keeps its route step) — video opens on the speaker, personal outputs win, upgrades flip off the earpiece",
+      (cs13.match(/val routeAction = rememberRouteAction\(engine\)/g) || []).length === 1 &&
+        !cs13.includes("StripAction(routeAction.icon") &&
+        cs13.includes("CallAction(\n                    routeAction.icon,") &&
+        kt("AudioRouter.kt").includes(
+          'return if (kind == "VIDEO") AudioRoute.SPEAKER else AudioRoute.EARPIECE',
+        ) &&
+        kt("CallEngine.kt").includes("private fun markVideoRoute() {"),
+    );
+  }
   // Item 25: status viewers always showed 0 and the viewed-by sheet reloaded on
   // every open. Root causes: ScreenStore.setStatuses keyed its change signature
   // on ids + lengths only (a poll carrying the real counts was discarded, and

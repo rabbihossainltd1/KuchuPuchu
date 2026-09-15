@@ -157,11 +157,12 @@ function main() {
   has(router, "fun toneFollowsCallRoute", "the router decides, the notifier obeys");
   lacks(router, "tonePlaybackDevice", "no unused device helper left behind");
 
-  // Contract 6: the button exists everywhere, cycles, and its icon tells the truth.
+  // Contract 6 (r34-13): the button lives ONLY on the voice grid — video
+  // opens on the speaker and routes itself (headset/BT win, hot-plug).
   const buttons = (screens.match(/rememberRouteAction\(engine\)/g) || []).length;
   check(
-    "audio button present on voice grid, connecting screen and video strip",
-    buttons >= 3,
+    "audio button only on the voice grid (video strips dropped it)",
+    buttons === 1 && !screens.includes("StripAction(routeAction.icon"),
     `found ${buttons}`,
   );
   for (const [route, icon] of [
