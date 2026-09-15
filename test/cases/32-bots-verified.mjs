@@ -6311,7 +6311,8 @@ const convBetween = (db, a, b) =>
           "if (scheduledRows.isNotEmpty() && System.currentTimeMillis() < schedFlashUntil) {",
         ) &&
         chat.includes("ScheduledChip(scheduledRows, chatTheme) { showScheduled = true }") &&
-        (chat.match(/KpSheetRow\(Icons\.Filled\.Schedule, "Scheduled messages"\)/g) || []).length === 3 &&
+        (chat.match(/KpSheetRow\(Icons\.Filled\.Schedule, "Scheduled messages"\)/g) || [])
+          .length === 3 &&
         chat.includes(
           'KpSheetRow(Icons.Filled.Schedule, "Scheduled messages") { menuOpen = false; showScheduled = true }',
         ) &&
