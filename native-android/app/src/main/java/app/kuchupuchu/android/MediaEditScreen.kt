@@ -1111,7 +1111,6 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                         Modifier
                             .clip(RoundedCornerShape(7.dp))
                             .background(if (hd) Color.White else Color.Transparent)
-                            .border(1.5.dp, Color.White, RoundedCornerShape(7.dp))
                             .clickable {
                                 haptics.toggle(!hd)
                                 hd = !hd
@@ -1342,12 +1341,9 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                                 .padding(horizontal = 10.dp)
                                 .clip(RoundedCornerShape(20.dp))
                                 .background(Color(0xFF232A33))
-                                .padding(start = 2.dp, end = 2.dp),
+                                .padding(start = 12.dp, end = 2.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            IconButton(onClick = { addMore() }, modifier = Modifier.size(32.dp)) {
-                                Icon(Icons.Filled.AddPhotoAlternate, "Add more", tint = Color.White, modifier = Modifier.size(18.dp))
-                            }
                             BasicTextField(
                                 value = caption,
                                 onValueChange = { if (it.length <= 1000) caption = it },
@@ -1362,22 +1358,22 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                                     }
                                 },
                             )
-                            // Owner round 35 (item 8): the ① sits in a real seat —
-                            // a ring button that fills blue while once is armed.
-                            // (Placement follows the owner's screenshot when it lands.)
+                            // Owner round 38 (item 2): the ① sits borderless in
+                            // its seat — no ring — and fills it (28.dp), the
+                            // size the ringed button used to read. Still fills
+                            // blue while once is armed.
                             Box(
                                 Modifier
                                     .size(32.dp)
                                     .clip(CircleShape)
                                     .background(if (once) ActionBlue else Color.Transparent)
-                                    .border(1.dp, if (once) ActionBlue else Color(0x66FFFFFF), CircleShape)
                                     .clickable {
                                         haptics.toggle(!once)
                                         once = !once
                                     },
                                 contentAlignment = Alignment.Center,
                             ) {
-                                ViewOnceOneIcon(20.dp, tint = if (once) Color.White else Color(0xB3FFFFFF))
+                                ViewOnceOneIcon(28.dp, tint = if (once) Color.White else Color(0xB3FFFFFF))
                             }
                         }
                     }

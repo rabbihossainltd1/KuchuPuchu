@@ -6507,14 +6507,14 @@ const convBetween = (db, a, b) =>
     const store = kt("ScreenStore.kt");
     const files = kt("Files.kt");
     check(
-      "r34-16b: editor screen — top bar (save, HD pill, rotate, sticker, Aa, pen), swipe-up filter strip (preview + bake share one ColorMatrix), caption bar (add-more, caption field, ViewOnceOneIcon toggle), recipient chip + blue send; rotate carries the normalised overlays, HD bakes bigger, no dialogs; toasts only for the status post",
+      "r34-16b: editor screen — top bar (save, HD pill, rotate, sticker, Aa, pen), swipe-up filter strip (preview + bake share one ColorMatrix), caption bar (caption field, borderless ViewOnceOneIcon toggle — no add-more button), recipient chip + blue send; rotate carries the normalised overlays, HD bakes bigger, no dialogs; toasts only for the status post",
       edit.includes("Icons.Filled.Download") &&
         edit.includes('Text("HD", color = if (hd) Color.Black else Color.White') &&
         edit.includes("Icons.Filled.RotateRight") &&
         edit.includes("Icons.Filled.EmojiEmotions") &&
         edit.includes('Text("Aa", color = Color.White') &&
         edit.includes("Icons.Filled.Edit") &&
-        edit.includes("ViewOnceOneIcon(20.dp") &&
+        edit.includes("ViewOnceOneIcon(28.dp") &&
         edit.includes("Swipe up for filters") &&
         edit.includes("ColorMatrix(filterMatrix.array)") &&
         edit.includes("Add a caption...") &&
@@ -7695,6 +7695,19 @@ const convBetween = (db, a, b) =>
         wall38.indexOf('"Delete chat"') < wall38.indexOf('"This User Is Unavailable"'),
     );
   }
+  // r38-2: editor chrome trims — the ① toggle loses its ring and grows
+  // to fill the seat, the HD pill loses its border, the caption bar loses
+  // its add-photo button (multi-select moved to the panel checkbox).
+  {
+    const edit38 = kt("MediaEditScreen.kt");
+    check(
+      "r38-2: the editor ① is borderless at 28.dp, the HD pill has no border, and the caption bar carries no add-photo button",
+      edit38.includes("ViewOnceOneIcon(28.dp") &&
+        !edit38.includes("if (once) ActionBlue else Color(0x66FFFFFF), CircleShape") &&
+        !edit38.includes(".border(1.5.dp, Color.White, RoundedCornerShape(7.dp))") &&
+        !edit38.includes("Icons.Filled.AddPhotoAlternate"),
+    );
+  }
   // r37-3: reference-style overlay handles — per-overlay rotation,
   // × top-left deletes, top-right drags the turn, bottom-right drags
   // the size; the box + its handles turn with the overlay, taps un-turn
@@ -7854,11 +7867,11 @@ const convBetween = (db, a, b) =>
   // bake share the scaled draw fns), one gesture loop owns select / move /
   // pinch / ×-delete, the photo owns the whole screen with floating tiny
   // chrome on scrims, the send is a small blue dot, the once toggle sits in
-  // a ring seat that fills blue while armed.
+  // a borderless seat that fills blue while armed.
   {
     const edit = kt("MediaEditScreen.kt");
     check(
-      "r35-8: overlays carry scale (pinch 0.4–4, geometry + preview + bake all ride it), one select/move/pinch/× loop, full-bleed stage, floating tiny chrome on scrims, small blue send, seated once toggle",
+      "r35-8: overlays carry scale (pinch 0.4–4, geometry + preview + bake all ride it), one select/move/pinch/× loop, full-bleed stage, floating tiny chrome on scrims, small blue send, borderless once toggle",
       (edit.match(/val scale: Float = 1f/g) || []).length === 2 &&
         edit.includes("fun scaleOverlay(id: String, factor: Float)") &&
         edit.includes("coerceIn(0.4f, 4f)") &&
@@ -7871,11 +7884,11 @@ const convBetween = (db, a, b) =>
         edit.includes("Brush.verticalGradient") &&
         edit.includes(".align(Alignment.TopCenter)") &&
         edit.includes(".align(Alignment.BottomCenter)") &&
-        (edit.match(/\.size\(32\.dp\)/g) || []).length === 3 &&
+        (edit.match(/\.size\(32\.dp\)/g) || []).length === 2 &&
         (edit.match(/\.size\(36\.dp\)/g) || []).length === 3 &&
         (edit.match(/\.size\(40\.dp\)/g) || []).length === 1 &&
         edit.includes(".background(ActionBlue)") &&
-        edit.includes(".border(1.dp, if (once) ActionBlue else Color(0x66FFFFFF), CircleShape)") &&
+        !edit.includes(".border(1.dp, if (once) ActionBlue") &&
         edit.includes('Text("Aa", color = Color.White, fontSize = 15.sp') &&
         !edit.includes("size(52.dp)") &&
         !edit.includes("Box(Modifier.fillMaxWidth().weight(1f)"),
