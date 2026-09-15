@@ -7536,6 +7536,21 @@ const convBetween = (db, a, b) =>
         chat1.includes('nav.navigate("mediaedit/$convId/0/${statusPickArg(item)}")'),
     );
   }
+  // r36-2: press-hold on an attach-grid photo multi-selects it straight
+  // from an empty tray (the lone-tap editor detour is untouched).
+  {
+    const attach2 = kt("AttachSheet.kt");
+    check(
+      "r36-2: MediaCell takes an optional onLongPress (hold-to-select where offered, plain tap cell otherwise); the attach grid's hold adds the pick without opening the editor",
+      attach2.includes("onLongPress: (() -> Unit)? = null,") &&
+        attach2.includes(
+          "if (onLongPress != null) Modifier.combinedClickable(onClick = onToggle, onLongClick = onLongPress) else Modifier.clickable(onClick = onToggle)",
+        ) &&
+        attach2.includes("} else if (sel.isEmpty()) onEdit(item) else sel.add(item)") &&
+        attach2.includes("onLongPress = {") &&
+        attach2.includes("if (pos < 0) {"),
+    );
+  }
   // r35-8: the editor grows up — overlays carry a pinch size (preview AND
   // bake share the scaled draw fns), one gesture loop owns select / move /
   // pinch / ×-delete, the photo owns the whole screen with floating tiny

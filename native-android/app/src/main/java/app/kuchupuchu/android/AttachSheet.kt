@@ -624,6 +624,14 @@ fun AttachPanel(
                             // + staged a first item (WhatsApp behavior).
                             if (pos >= 0) sel.removeAll { it.uri == item.uri } else if (sel.isEmpty()) onEdit(item) else sel.add(item)
                         },
+                        // Owner round 36 (item 2): press-hold multi-selects
+                        // straight from an empty tray — no editor detour.
+                        onLongPress = {
+                            if (pos < 0) {
+                                haptics.tap()
+                                sel.add(item)
+                            }
+                        },
                     )
                 }
             }
@@ -698,7 +706,9 @@ internal fun loadMediaPool(ctx: android.content.Context): List<MediaItem> {
 }
 
 /** Grid cell: taps report through onToggle (never sends), thumbnail decodes off-thread.
- *  Owner round 31 (item 31): also the status picker's cell (selectIndex 0 = plain tick). */
+ *  Owner round 31 (item 31): also the status picker's cell (selectIndex 0 = plain tick).
+ *  Owner round 36 (item 2): press-hold starts multi-select where offered
+ *  (null = plain tap cell, the status picker's shape). */
 @Composable
 internal fun MediaCell(
     item: MediaItem,
@@ -706,6 +716,7 @@ internal fun MediaCell(
     selected: Boolean,
     selectIndex: Int,
     onToggle: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
 ) {
     // Seed synchronously from the process LRU. LazyGrid disposes off-screen
     // cells; starting every re-entry at null showed a placeholder frame even
@@ -718,11 +729,13 @@ internal fun MediaCell(
             }
         }
     }
+    val press =
+        if (onLongPress != null) Modifier.combinedClickable(onClick = onToggle, onLongClick = onLongPress) else Modifier.clickable(onClick = onToggle)
     Box(
         Modifier
             .aspectRatio(1f)
             .background(Line)
-            .clickable { onToggle() },
+            .then(press),
     ) {
         val bmp = thumb
         if (bmp != null) {
