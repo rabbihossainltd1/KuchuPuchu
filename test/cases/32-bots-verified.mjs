@@ -8363,8 +8363,9 @@ const convBetween = (db, a, b) =>
         chat.includes("Box(Modifier.fillMaxWidth().animateItem()) {"),
     );
     check(
-      "r35-2: no touch ripples anywhere — KpTheme provides LocalIndication null at the root (the default indication was the only ripple source; explicit indication = null sites stay)",
-      kt("Theme.kt").includes("LocalIndication provides null"),
+      "r35-2: no touch ripples anywhere — KpTheme provides a no-op NoTouchIndication at the root (LocalIndication is non-null here, so silence is an instance; the default indication was the only ripple source; explicit indication = null sites stay)",
+      kt("Theme.kt").includes("private object NoTouchIndication : Indication") &&
+        kt("Theme.kt").includes("LocalIndication provides NoTouchIndication"),
     );
     {
       const st = kt("StatusScreens.kt");

@@ -1,6 +1,9 @@
 package app.kuchupuchu.android
 
+import androidx.compose.foundation.Indication
+import androidx.compose.foundation.IndicationInstance
 import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -103,6 +106,21 @@ val SwipeArchiveBg: Color
 val SwipeArchiveInk: Color
     get() = if (KpThemeMode.darkBlue) Color(0xFF4ADE80) else Color(0xFF2E7D32)
 
+/**
+ * Owner round 35 (item 2): the app-wide no-touch-effect indication —
+ * LocalIndication is non-null here, so silence is an instance, not null.
+ */
+private object NoTouchIndication : Indication {
+    @Composable
+    override fun rememberUpdatedInstance(interactionSource: InteractionSource): IndicationInstance = NoTouchInstance
+}
+
+private object NoTouchInstance : IndicationInstance {
+    @Composable
+    override fun Content() {
+    }
+}
+
 @Composable
 fun KpTheme(content: @Composable () -> Unit) {
     val d = LocalDensity.current
@@ -111,7 +129,7 @@ fun KpTheme(content: @Composable () -> Unit) {
         // Owner round 35 (item 2): no touch ripples ANYWHERE — every tap
         // in the app is silent. (Explicit indication = null sites stay as
         // they are; the default indication was the only ripple source.)
-        LocalIndication provides null,
+        LocalIndication provides NoTouchIndication,
     ) {
         MaterialTheme(
             colorScheme = lightColorScheme(
