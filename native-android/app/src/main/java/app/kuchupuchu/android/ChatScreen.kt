@@ -2431,9 +2431,15 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 }
                             },
                             onOpenImage = { msg ->
-                                viewerPhotos = listOf(msg)
-                                viewerStart = 0
-                                viewerAt = 0
+                                // Owner round 35 (item 5): a tapped photo
+                                // opens WITH its send-mates — swiping walks
+                                // the whole group from the tapped one. (A lone
+                                // photo's group is itself: same as before.)
+                                val all = albumPhotos(m)
+                                viewerPhotos = all
+                                viewerStart =
+                                    all.indexOfFirst { it.optString("id") == msg.optString("id") }.coerceAtLeast(0)
+                                viewerAt = viewerStart
                             },
                             onOpenAlbum = { msg -> albumMsg = msg },
                             onOpenVideo = { msg ->

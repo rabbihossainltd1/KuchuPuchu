@@ -8429,6 +8429,14 @@ const convBetween = (db, a, b) =>
       );
     }
     check(
+      "r35-5: a tapped photo opens with its send-mates — onOpenImage feeds the row's albumPhotos (not a one-item list) and starts the pager on the tapped tile, so swiping walks the whole group",
+      chat.includes("val all = albumPhotos(m)") &&
+        chat.includes(
+          'all.indexOfFirst { it.optString("id") == msg.optString("id") }.coerceAtLeast(0)',
+        ) &&
+        !chat.includes("viewerPhotos = listOf(msg)"),
+    );
+    check(
       "r34-7: typing dots follow the chat theme — TypingBubble takes the dot color, the row passes chatAccent(chatTheme), no fixed amber in the indicator",
       chat.includes("private fun TypingBubble(dot: Color) {") &&
         chat.includes(".background(dot.copy(alpha = 0.35f + 0.65f * lift))") &&
