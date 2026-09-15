@@ -5725,10 +5725,9 @@ const convBetween = (db, a, b) =>
       chat.includes("else Links.annotate(full, bodyInk) { u -> Links.open(ctx, u) }") &&
         chat.includes("val firstLink = remember(full) { Links.first(full) }") &&
         chat.includes("onOpen = if (selecting) null else ({ Links.open(ctx, firstLink) }),") &&
-        chat.includes(
-          "Text(linked, fontSize = 14.5.sp, lineHeight = 19.sp, color = bodyInk, onTextLayout = onLayout)",
-        ) &&
-        chat.indexOf("LinkPreviewCard(") < chat.indexOf("Text(linked, fontSize = 14.5.sp"),
+        chat.includes("linked,\n                                        fontSize = 14.5.sp,") &&
+        chat.includes("maxLines = if (capped) BODY_COLLAPSE_LINES else Int.MAX_VALUE,") &&
+        chat.indexOf("LinkPreviewCard(") < chat.indexOf("linked,"),
     );
   }
   // Item 33: documents open inside the app.
@@ -7080,10 +7079,29 @@ const convBetween = (db, a, b) =>
       chat.indexOf("// Owner round 12: one pinned stamp row for every bubble,"),
     );
     check(
+      "r34-19: bodies longer than ten lines fold behind a See more / See less toggle (unbounded measure first so the count is real, monotonic high-water count, typing replies exempt)",
+      chat.includes("private const val BODY_COLLAPSE_LINES = 10") &&
+        chat.includes("var bodyLines by remember(mid) { mutableStateOf(0) }") &&
+        chat.includes("var msgExpanded by remember(mid) { mutableStateOf(false) }") &&
+        chat.includes("val capped = !msgExpanded && !typing && bodyLines > BODY_COLLAPSE_LINES") &&
+        chat.includes(
+          "val countLines = { r: TextLayoutResult, report: (TextLayoutResult) -> Unit ->",
+        ) &&
+        (chat.match(/maxLines = if \(capped\) BODY_COLLAPSE_LINES else Int\.MAX_VALUE,/g) || [])
+          .length === 4 &&
+        chat.includes(
+          "if (bodyLines > BODY_COLLAPSE_LINES && !typing && selectedIds.isEmpty()) {",
+        ) &&
+        chat.includes('"See less"') &&
+        chat.includes('"See more"') &&
+        chat.includes("msgExpanded = !msgExpanded"),
+    );
+    check(
       "r33-5: chat — TEXT / DELETED / emoji-only / STICKER bodies render inside KpStamped (emoji + sticker with below = true), every body Text hands onTextLayout to the holder; the reveal, linked and plain texts all do; one BubbleStamp composable serves the in-column stamp and the media overlay",
       (textBranch.match(/KpStamped\(/g) || []).length === 4 &&
         (textBranch.match(/below = true,/g) || []).length === 2 &&
-        (textBranch.match(/onTextLayout = onLayout/g) || []).length === 5 &&
+        (textBranch.match(/onTextLayout = onLayout,/g) || []).length === 1 &&
+        (textBranch.match(/countLines\(it, onLayout\)/g) || []).length === 4 &&
         (
           textBranch.match(
             /BubbleStamp\(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk\)/g,

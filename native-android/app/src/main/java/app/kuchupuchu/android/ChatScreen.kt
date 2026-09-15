@@ -136,6 +136,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -4514,6 +4515,9 @@ private fun UnblockAskCard(
     }
 }
 
+/** Owner round 34 (item 19): bodies longer than this fold with See more. */
+private const val BODY_COLLAPSE_LINES = 10
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MessageRow(
@@ -4820,6 +4824,24 @@ private fun MessageRow(
                     if (!mine && isGroup && senderName.isNotBlank()) {
                         Text(senderName, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = GoldDeep)
                     }
+                    // Owner round 34 (item 19): long bodies collapse to ten
+                    // lines with a See more / See less toggle under the
+                    // bubble. The count is measured unbounded first (a capped
+                    // measure could only ever report ten), so a long message
+                    // shows full for a frame, then folds. Typing AI replies
+                    // stay unbounded until the reveal finishes.
+                    val mid = m.optString("id")
+                    var bodyLines by remember(mid) { mutableStateOf(0) }
+                    var msgExpanded by remember(mid) { mutableStateOf(false) }
+                    val typing = revealChars != null && revealChars < m.optText("body").length
+                    val capped = !msgExpanded && !typing && bodyLines > BODY_COLLAPSE_LINES
+                    // Reports to the stamp holder AND keeps the high-water
+                    // line count (monotonic — a capped re-measure must not
+                    // shrink it back to ten and strand the toggle).
+                    val countLines = { r: TextLayoutResult, report: (TextLayoutResult) -> Unit ->
+                        report(r)
+                        if (r.lineCount > bodyLines) bodyLines = r.lineCount
+                    }
                     when (kind) {
                         "STICKER" -> KpStamped(
                             below = true,
@@ -4858,7 +4880,9 @@ private fun MessageRow(
                                     fontSize = if (emojiOnly == 1) 44.sp else 34.sp,
                                     lineHeight = if (emojiOnly == 1) 52.sp else 40.sp,
                                     modifier = Modifier.padding(start = 2.dp, end = 2.dp),
-                                    onTextLayout = onLayout,
+                                    maxLines = if (capped) BODY_COLLAPSE_LINES else Int.MAX_VALUE,
+                                    overflow = if (capped) TextOverflow.Ellipsis else TextOverflow.Clip,
+                                    onTextLayout = { countLines(it, onLayout) },
                                 )
                             }
                         } else {
@@ -4893,15 +4917,46 @@ private fun MessageRow(
                                         fontSize = 14.5.sp,
                                         lineHeight = 19.sp,
                                         color = bodyInk,
-                                        onTextLayout = onLayout,
+                                        maxLines = if (capped) BODY_COLLAPSE_LINES else Int.MAX_VALUE,
+                                        overflow = if (capped) TextOverflow.Ellipsis else TextOverflow.Clip,
+                                        onTextLayout = { countLines(it, onLayout) },
                                     )
                                 } else if (linked != null) {
-                                    Text(linked, fontSize = 14.5.sp, lineHeight = 19.sp, color = bodyInk, onTextLayout = onLayout)
+                                    Text(
+                                        linked,
+                                        fontSize = 14.5.sp,
+                                        lineHeight = 19.sp,
+                                        color = bodyInk,
+                                        maxLines = if (capped) BODY_COLLAPSE_LINES else Int.MAX_VALUE,
+                                        overflow = if (capped) TextOverflow.Ellipsis else TextOverflow.Clip,
+                                        onTextLayout = { countLines(it, onLayout) },
+                                    )
                                 } else {
-                                    Text(full, fontSize = 14.5.sp, lineHeight = 19.sp, color = bodyInk, onTextLayout = onLayout)
+                                    Text(
+                                        full,
+                                        fontSize = 14.5.sp,
+                                        lineHeight = 19.sp,
+                                        color = bodyInk,
+                                        maxLines = if (capped) BODY_COLLAPSE_LINES else Int.MAX_VALUE,
+                                        overflow = if (capped) TextOverflow.Ellipsis else TextOverflow.Clip,
+                                        onTextLayout = { countLines(it, onLayout) },
+                                    )
                                 }
                             }
                         }
+                    }
+                    if (bodyLines > BODY_COLLAPSE_LINES && !typing && selectedIds.isEmpty()) {
+                        Text(
+                            if (msgExpanded) "See less" else "See more",
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = chatAccent(theme),
+                            modifier =
+                                Modifier.padding(top = 2.dp).clickable {
+                                    haptics.tap()
+                                    msgExpanded = !msgExpanded
+                                },
+                        )
                     }
                 }
                 // Owner round 12: one pinned stamp row for every bubble,
