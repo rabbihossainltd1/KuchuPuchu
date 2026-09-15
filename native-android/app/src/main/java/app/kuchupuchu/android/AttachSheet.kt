@@ -742,11 +742,6 @@ internal fun loadMediaPool(ctx: android.content.Context): List<MediaItem> {
     return out.sortedByDescending { it.added }
 }
 
-/** Grid cell: taps report through onToggle (never sends), thumbnail decodes off-thread.
- *  Owner round 31 (item 31): also the status picker's cell (selectIndex 0 = plain tick).
- *  Owner round 36 (item 2): press-hold starts multi-select where offered
- *  (null = plain tap cell, the status picker's shape). */
-@OptIn(ExperimentalFoundationApi::class)
 /** Owner round 38 (item 3): the preview stage — a grid tap lands here,
  *  not the editor. Left/right swipes walk the photos, the pencil opens the
  *  editor for this one, the checkbox right of it multi-picks (no more
@@ -960,6 +955,11 @@ private object PreviewCache {
     fun put(uri: Uri, bmp: ImageBitmap) = lru.put(uri.toString(), bmp)
 }
 
+/** Grid cell: taps report through onToggle (never sends), thumbnail decodes off-thread.
+ *  Owner round 31 (item 31): also the status picker's cell (selectIndex 0 = plain tick).
+ *  Owner round 36 (item 2): press-hold starts multi-select where offered
+ *  (null = plain tap cell, the status picker's shape). */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun MediaCell(
     item: MediaItem,
