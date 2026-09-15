@@ -6278,6 +6278,7 @@ private fun ImageBubble(m: JSONObject, mine: Boolean) {
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun FileBubble(
     m: JSONObject,
     mine: Boolean,
