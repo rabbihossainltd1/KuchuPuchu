@@ -2987,7 +2987,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 onScheduleBatch = { showScheduleMedia = true },
                 onEdit = { item ->
                     val once = attachOnce
-                    ScreenStore.editTitle.value = title
+                    ScreenStore.editTitle = title
                     attachSel.clear()
                     attachOnce = false
                     showAttach = false

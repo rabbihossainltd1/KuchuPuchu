@@ -6474,7 +6474,7 @@ const convBetween = (db, a, b) =>
           "data class AddMore(val convId: String, val item: MediaItem, val once: Boolean)",
         ) &&
         chat.includes("ScreenStore.pendingAddMore.collect { more ->") &&
-        chat.includes("ScreenStore.editTitle.value = title") &&
+        chat.includes("ScreenStore.editTitle = title") &&
         (chat.match(/\.put\("body", caption\)/g) || []).length === 6 &&
         chat.includes('MediaCaption(m.optText("body"), mine)') &&
         chat.includes("MediaCaption(albumCaption, mine)") &&
