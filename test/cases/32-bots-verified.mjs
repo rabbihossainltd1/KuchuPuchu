@@ -7605,7 +7605,7 @@ const convBetween = (db, a, b) =>
       share.indexOf("private fun CropOverlay("),
     );
     check(
-      "r33-8: trim playhead — TrimClipPlayer.positionMs() (seek target while in flight, start handle before ready), StatusTrimPreview reports it through onPosition every tick, TrimStrip draws a white outlined playhead inside the window (hidden while a handle is held), and both the status share screen and MediaEditScreen wire playAt through",
+      "r33-8: trim playhead — TrimClipPlayer.positionMs() (seek target while in flight, start handle before ready), StatusTrimPreview reports it through onPosition every tick, TrimStrip draws a white outlined playhead inside the window (hidden while a handle is held), and both the status share screen and MediaEditScreen wire playAt through (r34-18: the playhead glides between the 120 ms ticks instead of jumping)",
       playerCls.includes("fun positionMs(): Long {") &&
         playerCls.includes("if (pendingSeek >= 0L) return pendingSeek") &&
         share.includes("    onPosition: (Long) -> Unit = {},\n) {") &&
@@ -7613,7 +7613,12 @@ const convBetween = (db, a, b) =>
         stripFn.includes("positionMs: Long? = null,") &&
         stripFn.includes("if (head != null && mode == 0) {") &&
         stripFn.includes(
-          "val px = (head.coerceIn(s, e) / total * size.width).coerceIn(sx + hw / 2f, ex - hw / 2f)",
+          "val px = (headSmooth.toLong().coerceIn(s, e) / total * size.width).coerceIn(sx + hw / 2f, ex - hw / 2f)",
+        ) &&
+        stripFn.includes("val headSmooth by animateFloatAsState(") &&
+        stripFn.includes("targetValue = (positionMs ?: s).toFloat(),") &&
+        stripFn.includes(
+          "animationSpec = tween(durationMillis = 130, easing = LinearEasing),",
         ) &&
         stripFn.includes(
           "drawLine(Color.White, Offset(px, 0f), Offset(px, size.height), strokeWidth = edge)",

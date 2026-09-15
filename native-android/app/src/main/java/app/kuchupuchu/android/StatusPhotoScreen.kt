@@ -3,6 +3,9 @@ package app.kuchupuchu.android
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -685,6 +688,15 @@ internal fun TrimStrip(
     val grabPx = with(LocalDensity.current) { 24.dp.toPx() }
     val scrubCb = rememberUpdatedState(onScrub)
     val windowCb = rememberUpdatedState(onWindow)
+    // Owner round 34 (item 18): the position ticks land every 120 ms — glide
+    // the playhead between them (linear, about one tick) instead of jumping
+    // tick to tick. Hoisted into composition: the value is drawn by the
+    // strip's Canvas, and composables cannot run inside a draw scope.
+    val headSmooth by animateFloatAsState(
+        targetValue = (positionMs ?: s).toFloat(),
+        animationSpec = tween(durationMillis = 130, easing = LinearEasing),
+        label = "trimhead",
+    )
     Box(
         Modifier
             .fillMaxWidth()
@@ -774,7 +786,7 @@ internal fun TrimStrip(
             // hidden while a handle is held (the handle IS the position then).
             val head = positionMs
             if (head != null && mode == 0) {
-                val px = (head.coerceIn(s, e) / total * size.width).coerceIn(sx + hw / 2f, ex - hw / 2f)
+                val px = (headSmooth.toLong().coerceIn(s, e) / total * size.width).coerceIn(sx + hw / 2f, ex - hw / 2f)
                 drawLine(Color(0x99000000), Offset(px, 0f), Offset(px, size.height), strokeWidth = edge * 2f)
                 drawLine(Color.White, Offset(px, 0f), Offset(px, size.height), strokeWidth = edge)
                 drawCircle(Color.White, radius = 3.dp.toPx(), center = Offset(px, 3.dp.toPx()))
