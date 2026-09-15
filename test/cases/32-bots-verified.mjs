@@ -4679,6 +4679,23 @@ const convBetween = (db, a, b) =>
       upd.indexOf("canRequestPackageInstalls()") <
         upd.indexOf("withContext(Dispatchers.IO) { install(ctx, apk) }"),
   );
+  // Release solidity: the update flow leaves breadcrumbs, so a crash
+  // anywhere past the Update tap names its phase in the report — and
+  // the report keeps the whole stack (the sheet scrolls).
+  check(
+    "release: crash-report solidity — update_ready / update_committed success marks, update_dl/install/session _failed marks with the exception name, the saved report keeps 4000 chars",
+    (() => {
+      const crash = kt("KpCrash.kt");
+      return (
+        upd.includes('KpCrash.mark("update_ready")') &&
+        upd.includes('KpCrash.mark("update_committed")') &&
+        upd.includes('KpCrash.mark("update_dl_failed:${e.javaClass.simpleName}")') &&
+        upd.includes('KpCrash.mark("update_install_failed:${it.javaClass.simpleName}")') &&
+        upd.includes('KpCrash.mark("update_session_failed:${e.javaClass.simpleName}")') &&
+        crash.includes("?.readText()?.take(4000)")
+      );
+    })(),
+  );
   check(
     "r34-2: the updater verifies the APK before any session (bytes vs Content-Length, getPackageArchiveInfo parse, same package, strictly newer build, signing-cert match with the install — fail open when certs are unreadable) and fetches the flavor-matching asset, so a damaged or mis-signed file never reaches the system installer; sessions are attributed and abandoned on failure, and the status receiver can never crash the app",
     upd.includes("FLAG_DEBUGGABLE") &&

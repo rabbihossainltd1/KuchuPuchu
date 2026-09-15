@@ -93,7 +93,7 @@ object KpCrash {
         }
 
     fun lastReport(ctx: Context): String? =
-        runCatching { ctx.filesDir.resolve(FILE).takeIf { it.exists() }?.readText()?.take(1600) }.getOrNull()
+        runCatching { ctx.filesDir.resolve(FILE).takeIf { it.exists() }?.readText()?.take(4000) }.getOrNull()
 
     fun clear(ctx: Context) {
         runCatching { ctx.filesDir.resolve(FILE).delete() }

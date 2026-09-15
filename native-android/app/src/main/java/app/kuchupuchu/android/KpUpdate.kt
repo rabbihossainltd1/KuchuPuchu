@@ -155,9 +155,13 @@ object KpUpdate {
                 }
             }
             ready = apk
+            // Release solidity: the crash report's crumbs must say which
+            // update phase was last — a blind installer crash is undebuggable.
+            KpCrash.mark("update_ready")
         } catch (e: Exception) {
             // Never leave a partial or rejected file behind for the next run.
             runCatching { File(ctx.filesDir, "kp-update.apk").delete() }
+            KpCrash.mark("update_dl_failed:${e.javaClass.simpleName}")
             downloadError = e.message ?: "Download failed"
         } finally {
             downloading = false
@@ -275,7 +279,10 @@ object KpUpdate {
             return
         }
         runCatching { withContext(Dispatchers.IO) { install(ctx, apk) } }
-            .onFailure { downloadError = it.message ?: "Install failed" }
+            .onFailure {
+                KpCrash.mark("update_install_failed:${it.javaClass.simpleName}")
+                downloadError = it.message ?: "Install failed"
+            }
     }
 
     /** PackageInstaller session — Android shows its confirm sheet ON TOP of
@@ -303,8 +310,10 @@ object KpUpdate {
                 android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_MUTABLE,
             )
             session.commit(pending.intentSender)
+            KpCrash.mark("update_committed")
             session.close()
         } catch (e: Exception) {
+            KpCrash.mark("update_session_failed:${e.javaClass.simpleName}")
             runCatching { installer.abandonSession(sessionId) }
             throw e
         }
