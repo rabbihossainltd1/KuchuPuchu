@@ -8381,6 +8381,16 @@ const convBetween = (db, a, b) =>
         kt("SettingsScreen.kt").includes("VoiceIsolation.diag()") &&
         !kt("SettingsScreen.kt").includes('"Normal", "Medium", "Aggressive").forEachIndexed'),
     );
+    check(
+      "r35-4: compact status-viewer header — the name shrinks to 13.sp and the stamp tucks right under it (11.sp, tight line heights)",
+      kt("StatusScreens.kt").includes(
+        "fontSize = 13.sp,\n                                lineHeight = 15.sp,",
+      ) &&
+        kt("StatusScreens.kt").includes(
+          "fontSize = 11.sp,\n                            lineHeight = 12.sp,",
+        ) &&
+        kt("StatusScreens.kt").includes("UserBadges(user ?: Store.me, 14.dp)"),
+    );
     {
       const st = kt("StatusScreens.kt");
       const vw = st.slice(

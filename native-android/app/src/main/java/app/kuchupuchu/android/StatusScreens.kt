@@ -984,13 +984,16 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                         avatarRef = user?.optIso("avatarRef") ?: Store.me?.optIso("avatarRef"),
                     )
                     Spacer(Modifier.width(10.dp))
+                    // Owner round 35 (item 4): compact viewer header — a
+                    // smaller name with the stamp tucked right under it.
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 user?.optText("displayName") ?: "My status",
                                 color = Color.White,
                                 fontWeight = FontWeight.SemiBold,
-                                fontSize = 15.sp,
+                                fontSize = 13.sp,
+                                lineHeight = 15.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f, fill = false),
@@ -1000,7 +1003,8 @@ fun StatusViewerScreen(nav: NavController, whose: String) {
                         Text(
                             statusStamp(s.optString("createdAt")),
                             color = Color.White.copy(alpha = 0.75f),
-                            fontSize = 12.sp,
+                            fontSize = 11.sp,
+                            lineHeight = 12.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
