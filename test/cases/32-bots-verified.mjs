@@ -7604,6 +7604,17 @@ const convBetween = (db, a, b) =>
         del5.includes("onGone()"),
     );
   }
+  // r36-8: the "This device" badge shrinks again (7.sp whisper).
+  {
+    const ss8 = kt("SettingsScreen.kt");
+    check(
+      "r36-8: This-device badge at 7.sp with a tighter seat; no 8.sp badge remains",
+      ss8.includes('"This device",') &&
+        ss8.includes("fontSize = 7.sp,") &&
+        ss8.includes(".padding(horizontal = 3.dp),") &&
+        !ss8.includes("fontSize = 8.sp,"),
+    );
+  }
   // r35-8: the editor grows up — overlays carry a pinch size (preview AND
   // bake share the scaled draw fns), one gesture loop owns select / move /
   // pinch / ×-delete, the photo owns the whole screen with floating tiny
@@ -8582,10 +8593,10 @@ const convBetween = (db, a, b) =>
           ss.includes('"This device",'),
       );
       check(
-        "r35-6: one card per device with breathing room (no shared wrapper, no hairlines), the badge shrinks to 8.sp, and both detail lines wrap so nothing truncates",
+        "r35-6: one card per device with breathing room (no shared wrapper, no hairlines), the badge shrinks to 7.sp (round 36 went smaller still), and both detail lines wrap so nothing truncates",
         !ss.includes("SectionCard { DevicesSection() }") &&
           ss.includes(".padding(top = if (i == 0) 2.dp else 8.dp)") &&
-          ss.includes("fontSize = 8.sp,") &&
+          ss.includes("fontSize = 7.sp,") &&
           (ss.match(/maxLines = 2,/g) || []).length >= 2 &&
           !ss
             .slice(ss.indexOf("private fun DevicesSection()"), ss.indexOf("private fun deviceSeen"))

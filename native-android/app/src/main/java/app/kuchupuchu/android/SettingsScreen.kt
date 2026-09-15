@@ -759,16 +759,16 @@ private fun DevicesSection() {
                         )
                         if (current) {
                             Spacer(Modifier.width(8.dp))
-                            // Owner round 35 (item 6): the badge is a whisper.
+                            // Owner round 36 (item 8): the badge is a whisper of a whisper.
                             Text(
                                 "This device",
-                                fontSize = 8.sp,
+                                fontSize = 7.sp,
                                 color = ActionBlueInk,
                                 modifier =
                                     Modifier
-                                        .clip(RoundedCornerShape(5.dp))
+                                        .clip(RoundedCornerShape(4.dp))
                                         .background(ActionBlue)
-                                        .padding(horizontal = 4.dp),
+                                        .padding(horizontal = 3.dp),
                             )
                         }
                     }
