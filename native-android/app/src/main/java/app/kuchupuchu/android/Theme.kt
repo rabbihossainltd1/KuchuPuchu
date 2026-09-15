@@ -1,9 +1,10 @@
 package app.kuchupuchu.android
 
-import androidx.compose.foundation.Indication
+import androidx.compose.foundation.IndicationNodeFactory
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.node.DelegatableNode
 import androidx.compose.ui.node.DrawModifierNode
@@ -114,13 +115,17 @@ val SwipeArchiveInk: Color
  * node, not null. (The old rememberUpdatedInstance API is a hard error
  * on this Compose — hence the IndicationNodeFactory shape.)
  */
-private object NoTouchIndication : Indication {
+private object NoTouchIndication : IndicationNodeFactory {
     override fun create(interactionSource: InteractionSource): DelegatableNode = NoTouchNode()
+
+    override fun hashCode(): Int = -1
+
+    override fun equals(other: Any?): Boolean = other === this
 }
 
 private class NoTouchNode :
-    DrawModifierNode,
-    androidx.compose.ui.Modifier.Node {
+    Modifier.Node(),
+    DrawModifierNode {
     override fun ContentDrawScope.draw() {
         drawContent()
     }
