@@ -30,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.PlayArrow
@@ -100,8 +101,13 @@ fun StatusPhotoScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean
         onDispose { controller?.isAppearanceLightStatusBars = prev ?: true }
     }
 
-    val picked: Uri = pickedUri
-    val isVideo = pickedIsVideo
+    // Owner round 36 (item 7): the working media — the editor swaps these
+    // when its result lands (below), and the loader re-runs for the new pick.
+    var picked by remember(pickedUri) { mutableStateOf(pickedUri) }
+    var isVideo by remember(pickedIsVideo) { mutableStateOf(pickedIsVideo) }
+    // An edited clip arrives pre-trimmed — keep its whole length instead of
+    // re-selecting the first minute.
+    var fullWindow by remember { mutableStateOf(false) }
     var photo by remember { mutableStateOf<ImageBitmap?>(null) }
     var source by remember { mutableStateOf<VideoExport.Source?>(null) }
     var loadFailed by remember { mutableStateOf(false) }
@@ -117,7 +123,7 @@ fun StatusPhotoScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean
     var playAt by remember { mutableStateOf<Long?>(null) }
     val thumbs = remember { mutableStateListOf<ImageBitmap?>() }
 
-    LaunchedEffect(picked) {
+    LaunchedEffect(picked, isVideo) {
         val uri = picked
         if (isVideo) {
             val src = withContext(Dispatchers.IO) { VideoExport.probe(ctx, uri) }
@@ -125,8 +131,10 @@ fun StatusPhotoScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean
                 loadFailed = true
                 return@LaunchedEffect
             }
-            // Over a minute: the first minute is selected up front.
-            val (s, e) = VideoPlan.defaultWindow(src.durationMs)
+            // Over a minute: the first minute is selected up front — unless
+            // the clip just came back from the editor, pre-trimmed.
+            val (s, e) = if (fullWindow) 0L to src.durationMs else VideoPlan.defaultWindow(src.durationMs)
+            fullWindow = false
             start = s
             end = e
             source = src
@@ -144,6 +152,50 @@ fun StatusPhotoScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean
                 }
             }
             if (bmp == null) loadFailed = true else photo = bmp.asImageBitmap()
+        }
+    }
+
+    // Owner round 36 (item 7): the editor hands back through its own flow —
+    // swap the working media, reset the crop box (it belonged to the old
+    // pixels), keep sharing from here.
+    LaunchedEffect(Unit) {
+        ScreenStore.pendingStatusEdited.collect { res ->
+            if (res == null) return@collect
+            ScreenStore.pendingStatusEdited.value = null
+            val m = res.media
+            if (m is EditedMedia.Untouched) return@collect
+            if (m is EditedMedia.Failed) {
+                android.widget.Toast.makeText(ctx, m.message, android.widget.Toast.LENGTH_LONG).show()
+                return@collect
+            }
+            ScreenStore.appScope.launch {
+                val swapped =
+                    runCatching {
+                        when (m) {
+                            is EditedMedia.Photo -> {
+                                val bytes = android.util.Base64.decode(m.dataUrl.substringAfter(","), android.util.Base64.DEFAULT)
+                                val f = java.io.File(ctx.cacheDir, "status_edit_${System.currentTimeMillis()}.jpg")
+                                f.writeBytes(bytes)
+                                androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f) to false
+                            }
+                            is EditedMedia.Video ->
+                                androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", m.file) to true
+                            else -> null
+                        }
+                    }.getOrNull()
+                withContext(Dispatchers.Main) {
+                    if (swapped == null) {
+                        android.widget.Toast.makeText(ctx, "Could not use that edit.", android.widget.Toast.LENGTH_LONG).show()
+                    } else {
+                        picked = swapped.first
+                        isVideo = swapped.second
+                        if (swapped.second) fullWindow = true
+                        cropping = false
+                        crop = null
+                        loadFailed = false
+                    }
+                }
+            }
         }
     }
 
@@ -237,6 +289,16 @@ fun StatusPhotoScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean
                     Spacer(Modifier.width(6.dp))
                 }
                 if (ready) {
+                    // Owner round 36 (item 7): the full editor (pen / text /
+                    // sticker / filters / rotate / trim) before sharing.
+                    IconButton(onClick = {
+                        haptics.tap()
+                        ScreenStore.editTitle = "Status"
+                        val item = MediaItem(picked, isVideo, 0L, "", 0L)
+                        nav.navigate("mediaedit/status/0/" + statusPickArg(item))
+                    }) {
+                        Icon(Icons.Filled.Brush, "Edit", tint = Color.White)
+                    }
                     IconButton(onClick = {
                         haptics.tap()
                         cropping = !cropping
@@ -257,7 +319,7 @@ fun StatusPhotoScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean
                             if (shot != null) {
                                 Image(shot, contentDescription = "Status photo", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
                             } else {
-                                StatusTrimPreview(pickedUri, start, end, paused = cropping, scrubAt = scrub, onPosition = { playAt = it })
+                                StatusTrimPreview(picked, start, end, paused = cropping, scrubAt = scrub, onPosition = { playAt = it })
                             }
                             if (cropping) {
                                 CropOverlay(

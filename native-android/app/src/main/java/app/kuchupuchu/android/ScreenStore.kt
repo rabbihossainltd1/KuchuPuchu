@@ -238,6 +238,10 @@ object ScreenStore {
      *  it to its attach selection and reopens the panel. */
     val pendingAddMore = kotlinx.coroutines.flow.MutableStateFlow<AddMore?>(null)
 
+    /** Owner round 36 (item 7): what the media editor hands back to the
+     *  STATUS share screen — its own flow, so no chat ever trips on it. */
+    val pendingStatusEdited = kotlinx.coroutines.flow.MutableStateFlow<EditedResult?>(null)
+
     /** Bumped on FCM so an open chat refreshes immediately. */
     var poke by mutableStateOf(0)
     fun pokeInbox() {

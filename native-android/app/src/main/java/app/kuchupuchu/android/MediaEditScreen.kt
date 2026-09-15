@@ -37,6 +37,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
@@ -101,7 +102,7 @@ import kotlinx.coroutines.withContext
  * strip carries the filters; the caption bar carries the + (stage this one
  * and pick more), the caption field and the view-once ① (the editor OWNS the
  * toggle now — the panel's switch only sets its starting side); the bottom
- * row is the recipient chip + the green send. A video keeps the trim strip +
+ * row is the recipient chip + the blue send. A video keeps the trim strip +
  * clip download and shares the caption / view-once / chip / send half — pen,
  * text, stickers, filters and rotation are photo-only (they bake into the
  * JPEG; baking them into a clip needs a re-encode overlay pass).
@@ -161,6 +162,9 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
     // Owner round 36 (item 6): the video still-mode frame (exact export
     // pixels for the playhead — turns + filter baked in, see below).
     var videoStill by remember { mutableStateOf<ImageBitmap?>(null) }
+    // Owner round 36 (item 7): opened from the status share screen — no
+    // caption (status posts carry none), no once, no add-more, no HD.
+    val statusMode = convId == "status"
 
     LaunchedEffect(pickedUri) {
         if (pickedIsVideo) {
@@ -436,7 +440,10 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                         }
                     }
                 }.getOrElse { EditedMedia.Failed(it.message ?: "Could not edit that file.") }
-            ScreenStore.pendingEdited.value = EditedResult(convId, once, result, cap)
+            // Owner round 36 (item 7): status edits hand back through
+            // their own flow — the share screen consumes them, not a chat.
+            if (statusMode) ScreenStore.pendingStatusEdited.value = EditedResult(convId, once, result, cap)
+            else ScreenStore.pendingEdited.value = EditedResult(convId, once, result, cap)
         }
         nav.popBackStack()
     }
@@ -797,7 +804,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                 ToolButton(onClick = { saveCurrent() }) {
                     Icon(Icons.Filled.Download, "Save to gallery", tint = Color.White, modifier = Modifier.size(18.dp))
                 }
-                if (clip == null) {
+                if (clip == null && !statusMode) {
                     // The HD pill: filled while the bigger send is armed.
                     Box(
                         Modifier
@@ -993,48 +1000,50 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                 }
                 /* the caption bar + recipient chip / send ride above the keyboard */
                 Column(Modifier.imePadding()) {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 10.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(Color(0xFF232A33))
-                            .padding(start = 2.dp, end = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        IconButton(onClick = { addMore() }, modifier = Modifier.size(32.dp)) {
-                            Icon(Icons.Filled.AddPhotoAlternate, "Add more", tint = Color.White, modifier = Modifier.size(18.dp))
-                        }
-                        BasicTextField(
-                            value = caption,
-                            onValueChange = { if (it.length <= 1000) caption = it },
-                            singleLine = true,
-                            textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
-                            cursorBrush = SolidColor(Color.White),
-                            modifier = Modifier.weight(1f),
-                            decorationBox = { inner ->
-                                Box {
-                                    if (caption.isEmpty()) Text("Add a caption...", color = Color(0xFF9AA4B2), fontSize = 14.sp)
-                                    inner()
-                                }
-                            },
-                        )
-                        // Owner round 35 (item 8): the ① sits in a real seat —
-                        // a ring button that fills blue while once is armed.
-                        // (Placement follows the owner's screenshot when it lands.)
-                        Box(
+                    if (!statusMode) {
+                        Row(
                             Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(if (once) ActionBlue else Color.Transparent)
-                                .border(1.dp, if (once) ActionBlue else Color(0x66FFFFFF), CircleShape)
-                                .clickable {
-                                    haptics.toggle(!once)
-                                    once = !once
-                                },
-                            contentAlignment = Alignment.Center,
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(Color(0xFF232A33))
+                                .padding(start = 2.dp, end = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            ViewOnceOneIcon(20.dp, tint = if (once) Color.White else Color(0xB3FFFFFF))
+                            IconButton(onClick = { addMore() }, modifier = Modifier.size(32.dp)) {
+                                Icon(Icons.Filled.AddPhotoAlternate, "Add more", tint = Color.White, modifier = Modifier.size(18.dp))
+                            }
+                            BasicTextField(
+                                value = caption,
+                                onValueChange = { if (it.length <= 1000) caption = it },
+                                singleLine = true,
+                                textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
+                                cursorBrush = SolidColor(Color.White),
+                                modifier = Modifier.weight(1f),
+                                decorationBox = { inner ->
+                                    Box {
+                                        if (caption.isEmpty()) Text("Add a caption...", color = Color(0xFF9AA4B2), fontSize = 14.sp)
+                                        inner()
+                                    }
+                                },
+                            )
+                            // Owner round 35 (item 8): the ① sits in a real seat —
+                            // a ring button that fills blue while once is armed.
+                            // (Placement follows the owner's screenshot when it lands.)
+                            Box(
+                                Modifier
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(if (once) ActionBlue else Color.Transparent)
+                                    .border(1.dp, if (once) ActionBlue else Color(0x66FFFFFF), CircleShape)
+                                    .clickable {
+                                        haptics.toggle(!once)
+                                        once = !once
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                ViewOnceOneIcon(20.dp, tint = if (once) Color.White else Color(0xB3FFFFFF))
+                            }
                         }
                     }
                     Row(
@@ -1077,8 +1086,8 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                                     CircularProgressIndicator(color = Color.White, strokeWidth = 2.5.dp, modifier = Modifier.size(20.dp))
                                 } else {
                                     Icon(
-                                        Icons.AutoMirrored.Filled.Send,
-                                        contentDescription = "Send",
+                                        if (statusMode) Icons.Filled.Check else Icons.AutoMirrored.Filled.Send,
+                                        contentDescription = if (statusMode) "Done" else "Send",
                                         tint = Color.White,
                                         modifier = Modifier.size(20.dp),
                                     )

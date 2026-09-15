@@ -4113,7 +4113,9 @@ const convBetween = (db, a, b) =>
       );
       check(
         "r31-30: video — first minute preselected (VideoPlan.defaultWindow), a trim strip with slide/start/end handles, a crop overlay with Original/9:16/1:1/Free, the cut clip's real length goes up as `seconds`",
-        share.includes("val (s, e) = VideoPlan.defaultWindow(src.durationMs)") &&
+        share.includes(
+          "val (s, e) = if (fullWindow) 0L to src.durationMs else VideoPlan.defaultWindow(src.durationMs)",
+        ) &&
           share.includes("internal fun TrimStrip(") &&
           // r32-43: the drag is absolute (window at touch-down + total travel)
           share.includes(
@@ -4821,7 +4823,7 @@ const convBetween = (db, a, b) =>
       ) &&
       share32.includes("player?.setPaused(paused || userPaused || scrubAt != null)") &&
       share32.includes(
-        "StatusTrimPreview(pickedUri, start, end, paused = cropping, scrubAt = scrub, onPosition = { playAt = it })",
+        "StatusTrimPreview(picked, start, end, paused = cropping, scrubAt = scrub, onPosition = { playAt = it })",
       ),
   );
   check(
@@ -7654,6 +7656,34 @@ const convBetween = (db, a, b) =>
           ) || []
         ).length === 3 &&
         (edit6.match(/if \(hasEdits\) throw e/g) || []).length === 3,
+    );
+  }
+  // r36-7: the status share screen gets the full editor — an Edit
+  // button opens it in status mode (no caption / once / add-more / HD,
+  // Done check instead of Send); results return through their own flow
+  // and swap the working media, crop reset, edited clips kept whole.
+  {
+    const edit7 = kt("MediaEditScreen.kt");
+    const store7 = kt("ScreenStore.kt");
+    const share7 = kt("StatusPhotoScreen.kt");
+    check(
+      "r36-7: status edits — status mode hides caption/once/HD and checks Done, results return via pendingStatusEdited, the share screen swaps its media and resets crop, edited clips keep their full window",
+      store7.includes(
+        "val pendingStatusEdited = kotlinx.coroutines.flow.MutableStateFlow<EditedResult?>(null)",
+      ) &&
+        edit7.includes('val statusMode = convId == "status"') &&
+        edit7.includes("if (clip == null && !statusMode) {") &&
+        edit7.includes("if (!statusMode) {") &&
+        edit7.includes("if (statusMode) Icons.Filled.Check else Icons.AutoMirrored.Filled.Send,") &&
+        edit7.includes(
+          "if (statusMode) ScreenStore.pendingStatusEdited.value = EditedResult(convId, once, result, cap)",
+        ) &&
+        share7.includes('ScreenStore.editTitle = "Status"') &&
+        share7.includes('nav.navigate("mediaedit/status/0/" + statusPickArg(item))') &&
+        share7.includes("ScreenStore.pendingStatusEdited.collect { res ->") &&
+        share7.includes("var picked by remember(pickedUri) { mutableStateOf(pickedUri) }") &&
+        share7.includes("if (swapped.second) fullWindow = true") &&
+        share7.includes("StatusTrimPreview(picked, start, end, paused = cropping"),
     );
   }
   // r35-8: the editor grows up — overlays carry a pinch size (preview AND
