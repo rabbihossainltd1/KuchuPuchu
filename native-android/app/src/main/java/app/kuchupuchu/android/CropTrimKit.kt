@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -58,7 +59,6 @@ import kotlinx.coroutines.delay
  * the route argument — the system picker and the old "Choose photo or video"
  * / "Post" buttons are gone.
  */
-@Composable
 /** The clip loops inside the selected window; tap pauses/resumes. While a
  *  trim handle is being dragged ([scrubAt]) the picture holds the frame under
  *  that handle — the release restarts playback from the start handle. */

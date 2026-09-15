@@ -7657,6 +7657,21 @@ const convBetween = (db, a, b) =>
         wall.indexOf('"Unblock"') < wall.indexOf('"This User Is Unavailable"'),
     );
   }
+  // r37-fix (CI compile): local gates cannot compile Kotlin, so the
+  // declaration order the compiler demands is pinned — exitCrop before its
+  // callers, sendStatus before send(), no stray annotations in the kit.
+  {
+    const editF = kt("MediaEditScreen.kt");
+    const kitF = kt("CropTrimKit.kt");
+    check(
+      "r37-fix: exitCrop is declared before rotateTap + the crop BackHandler, sendStatus before send(), and the trim kit keeps its PlayArrow import with no doubled @Composable",
+      editF.indexOf("fun exitCrop() {") < editF.indexOf("fun rotateTap() {") &&
+        editF.indexOf("fun exitCrop() {") < editF.indexOf("BackHandler(enabled = cropping)") &&
+        editF.indexOf("fun sendStatus() {") < editF.indexOf("fun send() {") &&
+        kitF.includes("import androidx.compose.material.icons.filled.PlayArrow") &&
+        !kitF.includes("@Composable\n/** The clip loops"),
+    );
+  }
   // r37-3: reference-style overlay handles — per-overlay rotation,
   // × top-left deletes, top-right drags the turn, bottom-right drags
   // the size; the box + its handles turn with the overlay, taps un-turn
