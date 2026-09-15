@@ -1,10 +1,12 @@
 package app.kuchupuchu.android
 
 import androidx.compose.foundation.Indication
-import androidx.compose.foundation.IndicationInstance
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.node.DelegatableNode
+import androidx.compose.ui.node.DrawModifierNode
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -108,16 +110,19 @@ val SwipeArchiveInk: Color
 
 /**
  * Owner round 35 (item 2): the app-wide no-touch-effect indication —
- * LocalIndication is non-null here, so silence is an instance, not null.
+ * LocalIndication is non-null here, so silence is a pass-through draw
+ * node, not null. (The old rememberUpdatedInstance API is a hard error
+ * on this Compose — hence the IndicationNodeFactory shape.)
  */
 private object NoTouchIndication : Indication {
-    @Composable
-    override fun rememberUpdatedInstance(interactionSource: InteractionSource): IndicationInstance = NoTouchInstance
+    override fun create(interactionSource: InteractionSource): DelegatableNode = NoTouchNode()
 }
 
-private object NoTouchInstance : IndicationInstance {
-    @Composable
-    override fun Content() {
+private class NoTouchNode :
+    DrawModifierNode,
+    androidx.compose.ui.Modifier.Node {
+    override fun ContentDrawScope.draw() {
+        drawContent()
     }
 }
 
