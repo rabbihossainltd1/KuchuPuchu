@@ -1675,7 +1675,8 @@ async function main() {
     );
   }
 
-  // ── r32-17. view once: one opening, then the object is gone ──────────────
+  // ── r32-17. view once: one opening, then the row is gone (r34-16a: the ──
+  //          opening deletes the row for everyone — no 'Opened' shell) ─────────
   {
     const h = await mk();
     const frames = [];
@@ -1829,40 +1830,71 @@ async function main() {
     const frame = frames.find(
       (f) => f.room === conv.id && f.body.type === "message" && f.body.message?.id === m.id,
     );
+    const senderPoke = frames.find(
+      (f) =>
+        f.room === `user:${A.user.id}` &&
+        f.body.type === "conv" &&
+        f.body.conversationId === conv.id,
+    );
+    const gallery2 = await h.call("GET", `/api/conversations/${conv.id}/media`, undefined, B.token);
     check(
-      "r32-17: POST /api/messages/:id/view — the sender (403 OWN_MESSAGE) and a non-member (403) cannot spend it; the recipient's first call stamps viewedAt/viewedBy and clears the media, the second is 410 VIEWED; afterwards the bytes are gone for everyone (the key answers 403/404 to sender and recipient alike), the row exposes no fileKey / mediaUrl / hasImage, and the chat room got the 'message' frame that repaints the sender's bubble as opened",
+      "r34-16a: POST /api/messages/:id/view — the sender (403 OWN_MESSAGE) and a non-member (403) cannot spend it; the recipient's first call DELETES the row for everyone (no viewedAt shell left), a tap after the vanish is 404; the bytes are gone for everyone (the key answers 403/404 to sender and recipient alike), the thread omits the id, the gallery omits it, and the chat room got the VANISHED 'message' frame plus a list poke for the sender",
       ownTap.status === 403 &&
         ownTap.json.error?.code === "OWN_MESSAGE" &&
         strangerTap.status === 403 &&
         before.status === 200 &&
         opened.status === 200 &&
-        opened.json.message?.viewOnce === true &&
-        typeof opened.json.message?.viewedAt === "string" &&
-        opened.json.message?.viewedBy === B.user.id &&
-        opened.json.message?.fileKey === undefined &&
-        opened.json.message?.hasImage === false &&
-        again.status === 410 &&
-        again.json.error?.code === "VIEWED" &&
+        opened.json.ok === true &&
+        opened.json.vanished === true &&
+        again.status === 404 &&
         [403, 404].includes(after.status) &&
         [403, 404].includes(senderAfter.status) &&
-        row?.media === null &&
-        JSON.parse(row?.meta_json ?? "{}").viewedBy === B.user.id &&
-        page?.viewedAt === opened.json.message.viewedAt &&
-        page?.fileKey === undefined &&
-        frame?.body.message?.viewedAt === opened.json.message.viewedAt,
+        row == null &&
+        page === undefined &&
+        frame?.body.message?.kind === "VANISHED" &&
+        frame?.body.message?.id === m.id &&
+        senderPoke !== undefined &&
+        !(gallery2.json.images ?? []).some((x) => x.id === m.id) &&
+        !(gallery2.json.videos ?? []).some((x) => x.id === m.id),
       JSON.stringify({
         own: ownTap.status,
         stranger: strangerTap.status,
         before: before.status,
         opened: opened.status,
-        msg: opened.json.message,
+        msg: opened.json,
         again: again.status,
         after: after.status,
         senderAfter: senderAfter.status,
         row,
         page,
-        frame: frame?.body.message?.viewedAt,
+        frame: frame?.body.message,
+        senderPoke,
       }),
+    );
+
+    // ----- the newest view-once: preview + unread recompute on the vanish -----
+    const freshKey = await upload("fresh.jpg", "image/jpeg", "fresh-bytes");
+    const listBefore = (
+      await h.call("GET", "/api/conversations", undefined, B.token)
+    ).json.items?.find((x) => x.id === conv.id);
+    const fresh = await sendOnce(freshKey);
+    const freshId = fresh.json.message.id;
+    const listDuring = (
+      await h.call("GET", "/api/conversations", undefined, B.token)
+    ).json.items?.find((x) => x.id === conv.id);
+    const viewedFresh = await h.call("POST", `/api/messages/${freshId}/view`, {}, B.token);
+    const listAfter = (
+      await h.call("GET", "/api/conversations", undefined, B.token)
+    ).json.items?.find((x) => x.id === conv.id);
+    check(
+      "r34-16a: …the vanish recomputes the chat-list preview (back to the previous message) and drops the recipient's unread bump for the gone row",
+      fresh.status === 201 &&
+        listDuring?.lastMessage === "Photo · View once" &&
+        listDuring?.unread === (listBefore?.unread ?? 0) + 1 &&
+        viewedFresh.status === 200 &&
+        listAfter?.lastMessage === listBefore?.lastMessage &&
+        listAfter?.unread === listBefore?.unread,
+      JSON.stringify({ before: listBefore, during: listDuring, after: listAfter }),
     );
 
     // ----- not forwardable by the recipient; a plain photo still is -----
@@ -1959,17 +1991,20 @@ async function main() {
     const inlineBefore = await h.call("GET", `/api/messages/${im?.id}/media`, undefined, B.token);
     const inlineOpen = await h.call("POST", `/api/messages/${im?.id}/view`, {}, B.token);
     const inlineAfter = await h.call("GET", `/api/messages/${im?.id}/media`, undefined, B.token);
+    const inlinePage = (
+      await h.call("GET", `/api/conversations/${conv.id}/messages`, undefined, A.token)
+    ).json.items;
     check(
-      "r32-17: an inline IMAGE sent view-once behaves the same — mediaUrl until the opening, then the media route is 404 and the row carries no mediaUrl / hasImage",
+      "r34-16a: an inline IMAGE sent view-once behaves the same — mediaUrl until the opening, then the media route is 404 and the row is gone from the thread",
       inline.status === 201 &&
         im?.viewOnce === true &&
         typeof im?.mediaUrl === "string" &&
         im?.mediaW === undefined &&
         inlineBefore.status === 200 &&
         inlineOpen.status === 200 &&
-        inlineOpen.json.message?.mediaUrl === undefined &&
-        inlineOpen.json.message?.hasImage === false &&
-        inlineAfter.status === 404,
+        inlineOpen.json.vanished === true &&
+        inlineAfter.status === 404 &&
+        !(inlinePage ?? []).some((x) => x.id === im?.id),
       JSON.stringify({
         inline: inline.status,
         im,
@@ -1979,8 +2014,15 @@ async function main() {
       }),
     );
 
-    // ----- the delete path still works on a spent row -----
+    // ----- the delete path: nothing left after a vanish; unsend still works unopened -----
     const del = await h.call("DELETE", `/api/messages/${m.id}`, undefined, A.token);
+    const once3 = await sendOnce(await upload("once3.jpg", "image/jpeg", "once3-bytes"));
+    const delUnopened = await h.call(
+      "DELETE",
+      `/api/messages/${once3.json.message.id}`,
+      undefined,
+      A.token,
+    );
     const notOnce = await h.call(
       "POST",
       `/api/messages/${asText.json.message.id}/view`,
@@ -1988,9 +2030,17 @@ async function main() {
       B.token,
     );
     check(
-      "r32-17: 'Delete for everyone' still works on an opened view-once row, and /view on an ordinary message is 400 NOT_VIEW_ONCE",
-      del.status === 200 && notOnce.status === 400 && notOnce.json.error?.code === "NOT_VIEW_ONCE",
-      JSON.stringify({ del: del.status, notOnce: notOnce.status, code: notOnce.json.error?.code }),
+      "r34-16a: deleting a vanished view-once row is 404 (nothing left to delete), unsend on an UNOPENED view-once still tombstones (200), and /view on an ordinary message is 400 NOT_VIEW_ONCE",
+      del.status === 404 &&
+        delUnopened.status === 200 &&
+        notOnce.status === 400 &&
+        notOnce.json.error?.code === "NOT_VIEW_ONCE",
+      JSON.stringify({
+        del: del.status,
+        delUnopened: delUnopened.status,
+        notOnce: notOnce.status,
+        code: notOnce.json.error?.code,
+      }),
     );
   }
 

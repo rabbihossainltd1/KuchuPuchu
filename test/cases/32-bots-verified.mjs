@@ -6030,7 +6030,7 @@ const convBetween = (db, a, b) =>
         src.includes("items.map((m) => [m.id, m.body, m.edited, m.deliveredAt, m.viewedAt]),"),
     );
     check(
-      "r32-17: worker — POST /api/messages/:id/view: member only, 400 NOT_VIEW_ONCE on an ordinary message, 403 OWN_MESSAGE for the sender, 410 VIEWED on a repeat; the UPDATE is conditional on media still being set (race-safe), the object is collected before the answer, and afterMessageChanged repaints every device; a recipient re-posting someone else's view-once key is 403 VIEW_ONCE",
+      "r34-16a: worker — POST /api/messages/:id/view: member only, 400 NOT_VIEW_ONCE on an ordinary message, 403 OWN_MESSAGE for the sender; the opening DELETES the row (conditional — a race loser is 410 VIEWED, later taps 404), the object is collected before the answer, syncPreviewAfterDelete recomputes preview + unread, the room gets the VANISHED frame and the sender's list a conv poke; a recipient re-posting someone else's view-once key is 403 VIEW_ONCE",
       viewRoute.includes("await requireMember(db, row.conv_id, uid);") &&
         viewRoute.includes(
           'if (meta.viewOnce !== true) fail(400, "Not a view-once message.", "NOT_VIEW_ONCE");',
@@ -6038,15 +6038,14 @@ const convBetween = (db, a, b) =>
         viewRoute.includes(
           'if (row.sender_id === uid) fail(403, "You sent this.", "OWN_MESSAGE");',
         ) &&
-        viewRoute.includes(
-          'if (viewOnceSpent(meta)) fail(410, "This was already opened.", "VIEWED");',
-        ) &&
-        viewRoute.includes(
-          '"UPDATE messages SET media = NULL, meta_json = ? WHERE id = ? AND media IS NOT NULL",',
-        ) &&
-        viewRoute.includes('if (!changed) fail(410, "This was already opened.", "VIEWED");') &&
+        viewRoute.includes("\"DELETE FROM messages WHERE id = ? AND kind != 'DELETED'\",") &&
+        viewRoute.includes('if (!cleared) fail(410, "This was already opened.", "VIEWED");') &&
         viewRoute.includes("if (row.media) await collectOrphanedMedia(env, db, [row.media]);") &&
-        viewRoute.includes("ctx.waitUntil(afterMessageChanged(env, db, row.conv_id, message));") &&
+        viewRoute.includes("await syncPreviewAfterDelete(db, row);") &&
+        viewRoute.includes('kind: "VANISHED",') &&
+        viewRoute.includes("return json({ ok: true, vanished: true });") &&
+        viewRoute.includes("broadcastRoomEvent(env, `user:${row.sender_id}`") &&
+        !viewRoute.includes("viewedAt") &&
         src.includes('if (foreignOnce) fail(403, "This was sent as view once.", "VIEW_ONCE");') &&
         src.includes('"SELECT sender_id, meta_json FROM messages WHERE media = ? LIMIT 8",'),
     );
@@ -6087,7 +6086,7 @@ const convBetween = (db, a, b) =>
       chat.indexOf("internal fun sentAsDocument(m: JSONObject): Boolean ="),
     );
     check(
-      "r32-17: app — a view-once message renders ViewOnceRow (no thumbnail: a ① card reading 'Photo · View once' / 'Video · View once', 'Opened' once spent); only the recipient can open it and only while unspent; the sender's tap does nothing; reply-drag + long-press intact; the album fold, resend and the media grid never take it",
+      "r34-16a: app — a view-once message renders ViewOnceRow: the photo at its original ratio (ImageRatios-cached) blurred past recognition via ViewOnceBlur, the ViewOnceOneIcon mark in the middle, a dark tile for video / uploads; the recipient opens it (sender's tap does nothing), reply-drag + long-press intact, no 'Opened' state anywhere; the album fold, resend and the media grid never take it",
       chat.includes(
         "if (isViewOnce(m)) {\n        ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)",
       ) &&
@@ -6095,21 +6094,37 @@ const convBetween = (db, a, b) =>
           chat.indexOf(
             'if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {',
           ) &&
-        onceRow.includes("val openable = !mine && !spent && !pendingEcho") &&
-        onceRow.includes('spent -> "Opened"') &&
-        onceRow.includes('video -> "Video · View once"') &&
-        onceRow.includes('else -> "Photo · View once"') &&
+        onceRow.includes("val openable = !mine && !pendingEcho") &&
         onceRow.includes("openable -> if (video) onOpenVideo(m) else onOpenImage(m)") &&
         onceRow.includes("detectHorizontalDragGestures(") &&
         onceRow.includes("if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)") &&
-        !onceRow.includes("ImageBubble(") &&
-        !onceRow.includes("AsyncImage(") &&
+        onceRow.includes(".transformations(ViewOnceBlur)") &&
+        onceRow.includes("coil.compose.AsyncImage(") &&
+        onceRow.includes("ViewOnceOneIcon(56.dp)") &&
+        onceRow.includes("ImageRatios.put(photoUrl,") &&
+        onceRow.includes("DeleteGeoms.put(m, it.boundsInWindow())") &&
+        !onceRow.includes("viewOnceSpent") &&
+        !chat.includes('"Opened"') &&
         chat.includes("internal fun isViewOnce(m: JSONObject): Boolean =") &&
-        chat.includes("internal fun viewOnceSpent(m: JSONObject): Boolean =") &&
+        !chat.includes("internal fun viewOnceSpent(m: JSONObject): Boolean =") &&
         chat.includes('return if (a.isNotBlank() && isPhotoMsg(m) && !isViewOnce(m)) a else ""') &&
         chat.includes(
           '(it.optString("kind") == "IMAGE" || it.optString("kind") == "FILE") && !isViewOnce(it)',
         ),
+    );
+    const icon = kt("ViewOnceIcon.kt");
+    check(
+      "r34-16a: app — the 1 mark is drawn from the owner's SVG (260° counter-clockwise arc + dotted gap + '1' at x=38) and shared with the editor; the blur is a coil Transformation (48 px + triple box pass, every API level); a VANISHED frame plays the vanish show and drops the row without a tombstone",
+      icon.includes("internal fun ViewOnceOneIcon(iconSize: Dp, tint: Color = Color.White)") &&
+        icon.includes("sweepAngle = -260f") &&
+        icon.includes('Text(\n                "1",') &&
+        icon.includes("internal object ViewOnceBlur : coil.transform.Transformation") &&
+        icon.includes('"kp-viewonce-blur-v1"') &&
+        icon.includes("repeat(3) { boxBlurPass(pix, sw, sh, 4) }") &&
+        chat.includes('if (liveMsg.optString("kind") == "VANISHED" && liveId.isNotBlank()) {') &&
+        chat.includes("vanishingIds.add(liveId)") &&
+        chat.includes('msgs.removeAll { it.optString("id") == liveId }') &&
+        chat.includes("ScreenStore.pokeInbox()"),
     );
     check(
       "r32-17: app — the opening: the photo viewer gets onShown (fired by KpNetImage.onLoaded once the picture is really on screen, never on a failed load) → ViewOnce.spend(id) (process-level, de-duplicated, POST /api/messages/:id/view, retried on a network miss); the player spends a kpOnce clip once it is ready; both run under capture guard with Save / Forward withheld; Forward is absent from the long-press sheet and the selection bar for view-once rows; the quotes and the chat list read 'Photo · View once'",
@@ -8194,7 +8209,10 @@ const convBetween = (db, a, b) =>
     );
     check(
       "r34-3: every delete plays the pixel-destroy — sweep + dust + collapse under one grace window, paintFromStore holds mid-destroy + peer-deleted rows (vanishedOnce, no ghosts), rows without a capture fall back to vanishOut",
-      (chat.match(/delay\(DeleteAnim\.GRACE_MS\)/g) || []).length === 3 &&
+      // r34-16a: the 4th grace window is the VANISHED frame (a spent view-once
+      // plays the same show, then leaves without a tombstone).
+      (chat.match(/delay\(DeleteAnim\.GRACE_MS\)/g) || []).length === 4 &&
+        chat.includes('if (liveMsg.optString("kind") == "VANISHED" && liveId.isNotBlank()) {') &&
         chat.includes("val vanishedOnce = remember { HashSet<String>() }") &&
         chat.includes('vanishedOnce.removeAll(next.map { it.optString("id") }.toSet())') &&
         chat.includes(

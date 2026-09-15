@@ -7414,9 +7414,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // is opaque client text, pinned to the `alb_` shape and a short length.
     const album = albumId(kind, imageData ?? fileKey, String(body.fileType || ""), incomingMeta);
     // Owner round 32 (item 17): a view-once photo / video. It never joins an
-    // album (one tap = one opening) and publishes no dimensions — the bubble
-    // is a placeholder card, not a preview, so nothing about the picture
-    // leaks before the single opening.
+    // album (one tap = one opening) and publishes no dimensions (the client
+    // measures the ratio at runtime) — the bubble blurs the pixels past
+    // recognition, so nothing about the picture leaks before the opening.
     const viewOnce = viewOnceFlag(
       kind,
       imageData ?? fileKey,
@@ -8122,13 +8122,15 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     return storedMediaResponse(env, row.media, row.kind === "VIDEO" ? "video/mp4" : "image/jpeg");
   }
 
-  // Owner round 32 (item 17): the single opening of a view-once message. The
+  // Owner round 34 (item 16a): the single opening of a view-once message. The
   // recipient's viewer calls this the moment it has the bytes on screen: the
-  // row is stamped viewedAt/viewedBy, the object is deleted from the bucket
-  // (unless another row still references the key), and everyone in the chat
-  // — the sender included — gets the "message" frame that turns the bubble
-  // into "Opened". Only a member other than the sender can spend it; the
-  // sender's own tap and a second opening are refused, never counted twice.
+  // row is DELETED for everyone (sender included) — no "Opened" shell is left
+  // behind — the object is collected from the bucket, the preview + unread
+  // recompute, and every open chat gets the VANISHED frame that plays the
+  // vanish show and drops the row. Only a member other than the sender can
+  // spend it; the delete is conditional, so two devices racing the same
+  // opening cannot both win (the loser sees 410; taps after the vanish see
+  // 404 — the row is gone).
   const msgViewMatch = path.match(/^\/api\/messages\/([^/]+)\/view$/);
   if (msgViewMatch && method === "POST") {
     const row = await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", msgViewMatch[1]!);
@@ -8137,25 +8139,33 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const meta = parseJson<Record<string, unknown>>(row.meta_json, {});
     if (meta.viewOnce !== true) fail(400, "Not a view-once message.", "NOT_VIEW_ONCE");
     if (row.sender_id === uid) fail(403, "You sent this.", "OWN_MESSAGE");
-    if (viewOnceSpent(meta)) fail(410, "This was already opened.", "VIEWED");
-    const viewedAt = nowIso();
-    const next = { ...meta, viewedAt, viewedBy: uid };
-    // Conditional on the row still being unspent: two devices racing the same
-    // opening cannot both win (the loser sees 410 like any later tap).
-    const changed = await run(
+    const cleared = await run(
       db,
-      "UPDATE messages SET media = NULL, meta_json = ? WHERE id = ? AND media IS NOT NULL",
-      JSON.stringify(next),
+      "DELETE FROM messages WHERE id = ? AND kind != 'DELETED'",
       row.id,
     );
-    if (!changed) fail(410, "This was already opened.", "VIEWED");
+    if (!cleared) fail(410, "This was already opened.", "VIEWED");
     // Awaited, not waitUntil: "gone" must be true by the time this answers —
     // no window in which a second device could still fetch the key.
     if (row.media) await collectOrphanedMedia(env, db, [row.media]);
-    const fresh = (await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", row.id))!;
-    const message = msgFrom(fresh);
-    ctx.waitUntil(afterMessageChanged(env, db, row.conv_id, message));
-    return json({ message });
+    await syncPreviewAfterDelete(db, row);
+    ctx.waitUntil(
+      afterMessageChanged(env, db, row.conv_id, {
+        id: row.id,
+        senderId: row.sender_id,
+        kind: "VANISHED",
+      }),
+    );
+    // afterMessageChanged skips the sender's own rooms — but the sender's
+    // LIST must drop the stale preview too, not just their open chat (which
+    // the room frame above already covers).
+    ctx.waitUntil(
+      broadcastRoomEvent(env, `user:${row.sender_id}`, {
+        type: "conv",
+        conversationId: row.conv_id,
+      }),
+    );
+    return json({ ok: true, vanished: true });
   }
 
   const statusMatch = path.match(/^\/api\/statuses\/([^/]+)$/);

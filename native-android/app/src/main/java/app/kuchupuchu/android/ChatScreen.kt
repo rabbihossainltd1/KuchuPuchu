@@ -759,6 +759,22 @@ fun ChatScreen(nav: NavController, convId: String) {
                             // sound"); the send/sent tones already cover ours.
                             val fromOther = liveMsg.optString("senderId").let { it.isNotBlank() && it != Store.myId() }
                             val liveId = liveMsg.optString("id")
+                            // Owner round 34 (item 16a): a spent view-once is
+                            // GONE server-side — the row plays the vanish show
+                            // and leaves, no tombstone, on both sides.
+                            if (liveMsg.optString("kind") == "VANISHED" && liveId.isNotBlank()) {
+                                if (msgs.any { it.optString("id") == liveId } && liveId !in vanishingIds) {
+                                    vanishingIds.add(liveId)
+                                    vanishedOnce.add(liveId)
+                                    scope.launch {
+                                        delay(DeleteAnim.GRACE_MS)
+                                        msgs.removeAll { it.optString("id") == liveId }
+                                        vanishingIds.remove(liveId)
+                                        ScreenStore.pokeInbox()
+                                    }
+                                }
+                                return@let
+                            }
                             val fresh = msgs.none { it.optString("id") == liveId }
                             if (fromOther && fresh) runCatching { KpSounds.receive(ctx) }
                             val liveCid = liveMsg.optString("clientId")
@@ -2995,7 +3011,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 else m.optText("senderName").ifBlank { rawTitle }
             // Owner round 32 (item 17): a view-once photo — capture guard on,
             // no Save / Forward, and the single opening is spent the moment the
-            // picture is on screen (the row flips to "Opened" everywhere).
+            // picture is on screen (the row vanishes everywhere).
             val once = isViewOnce(m)
             KpPhotoViewer(
                 url = messageMediaUrl(m),
@@ -4503,9 +4519,10 @@ private fun MessageRow(
         AlbumMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenAlbum, onReply, onLongPress)
         return
     }
-    // Owner round 32 (item 17): a view-once photo / video never shows a
-    // preview — a card ("Photo · View once" / "Opened") that opens the media
-    // ONCE for the recipient; the sender only ever sees the card.
+    // Owner round 34 (item 16a): a view-once photo / video shows the pixels
+    // blurred past recognition (original ratio, 1 mark in the middle) and
+    // opens the media ONCE for the recipient; the opening deletes the row
+    // for everyone, so there is no opened state left to render.
     if (isViewOnce(m)) {
         ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)
         return
@@ -5214,12 +5231,13 @@ private fun VideoMessageRow(
 }
 
 /**
- * Owner round 32 (item 17): the view-once bubble — a compact card in the chat
- * accent with a ① mark and "Photo · View once" / "Video · View once"; after the
- * opening it reads "Opened" (dimmed, no tap). The recipient's tap opens the
- * app's own viewer / player under capture guard; the sender's tap does
- * nothing (they cannot re-see it either). Reply-drag and long-press behave
- * like every other bubble.
+ * Owner round 34 (item 16a): the view-once bubble — the photo at its original
+ * ratio, fully blurred, with the 1 mark in the middle (tap opens the single
+ * viewing); a video gets the same mark on a dark tile. The opening deletes
+ * the row for everyone, so there is no "opened" state anymore — the bubble
+ * plays the vanish show and leaves. The sender's tap does nothing (they
+ * cannot re-see it either). Reply-drag and long-press behave like every
+ * other bubble.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -5239,40 +5257,57 @@ private fun ViewOnceRow(
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
     val video = fileLooksVideo(m)
-    val spent = viewOnceSpent(m)
-    // The recipient can open it while it is unspent; the sender never can.
-    val openable = !mine && !spent && !pendingEcho
-    val label =
-        when {
-            spent -> "Opened"
-            video -> "Video · View once"
-            else -> "Photo · View once"
-        }
+    // The recipient can open it; the sender never can.
+    val openable = !mine && !pendingEcho
     var replyDrag by remember { mutableStateOf(0f) }
     val replyOffset by animateFloatAsState(replyDrag, spring(stiffness = 1400f), label = "oncereplydrag")
     val replyThreshold = with(LocalDensity.current) { 36.dp.toPx() }
     val rowSelected = m.optString("id") in selectedIds
-    val bubbleShape =
-        RoundedCornerShape(
-            topStart = 16.dp,
-            topEnd = 16.dp,
-            bottomStart = if (mine) 16.dp else 5.dp,
-            bottomEnd = if (mine) 5.dp else 16.dp,
-        )
-    val ink = if (mine) Color.White else if (theme == "darkblue" || (theme == "night")) Color(0xFFE6EAF2) else Ink
-    val stampInk = if (mine) Color(0xD9FFFFFF) else if (theme == "darkblue" || theme == "night") Color(0xFFA9B4CC) else Muted
+    val bubbleShape = RoundedCornerShape(12.dp)
+    // A photo bubble shows the actual pixels (blurred past recognition); a
+    // video or an upload in flight gets the dark tile instead. Data-URI /
+    // file-URI echoes never carry remote pixels — tile, not photo.
+    val url = photoUrlOf(m)
+    val photoUrl =
+        if (!video && !pendingEcho && url != null && !url.startsWith("data:") && !url.startsWith("file://")) url
+        else null
+    var ratio by remember(photoUrl) {
+        mutableStateOf(ImageRatios.get(photoUrl).takeIf { it > 0f } ?: 0f)
+    }
     val upFrac = UploadProgress.fracs[m.optString("clientId")]
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 2.dp),
+            .padding(vertical = 3.dp),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
         Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
             Box(
                 Modifier
-                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
+                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
+                    .widthIn(max = 240.dp)
+                    .then(
+                        if (video) {
+                            Modifier.aspectRatio(16f / 9f)
+                        } else if (photoUrl != null && ratio > 0f) {
+                            Modifier
+                                .heightIn(max = 320.dp)
+                                .aspectRatio(ratio)
+                        } else {
+                            Modifier
+                                .widthIn(min = 180.dp)
+                                .height(220.dp)
+                        },
+                    )
+                    .shadow(2.dp, bubbleShape)
+                    .clip(bubbleShape)
+                    .background(Color(0xFF1B1E26))
+                    .border(
+                        1.dp,
+                        if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444),
+                        bubbleShape,
+                    )
                     .pointerInput(m.optString("id")) {
                         detectHorizontalDragGestures(
                             onHorizontalDrag = { change, dragAmount ->
@@ -5297,10 +5332,6 @@ private fun ViewOnceRow(
                             onDragCancel = { replyDrag = 0f },
                         )
                     }
-                    .shadow(2.dp, bubbleShape)
-                    .clip(bubbleShape)
-                    .background(if (mine) chatMineFill(theme) else chatOtherFill(theme))
-                    .then(if (rowSelected) Modifier.background(ActionBlue.copy(alpha = 0.35f)) else Modifier)
                     .combinedClickable(
                         onClick = {
                             when {
@@ -5316,60 +5347,77 @@ private fun ViewOnceRow(
                                 if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)
                             }
                         },
-                    )
-                    .padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 6.dp),
+                    ),
+                contentAlignment = Alignment.Center,
             ) {
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        // ① mark — a ring with the digit; struck through once spent.
-                        Box(
-                            Modifier
-                                .size(30.dp)
-                                .clip(CircleShape)
-                                .border(1.5.dp, ink.copy(alpha = if (spent) 0.45f else 0.9f), CircleShape),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (upFrac != null) {
-                                CircularProgressIndicator(
-                                    progress = { upFrac },
-                                    color = ink,
-                                    strokeWidth = 2.dp,
-                                    trackColor = ink.copy(alpha = 0.22f),
-                                    modifier = Modifier.size(26.dp),
-                                )
-                            } else {
-                                Text(
-                                    "1",
-                                    color = ink.copy(alpha = if (spent) 0.45f else 1f),
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    textDecoration = if (spent) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
-                                )
-                            }
-                        }
-                        Spacer(Modifier.width(9.dp))
-                        Text(
-                            label,
-                            color = ink.copy(alpha = if (spent) 0.6f else 1f),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                            fontStyle = if (spent) FontStyle.Italic else FontStyle.Normal,
-                            maxLines = 1,
-                            // the stamp row sits under the text's end
-                            modifier = Modifier.padding(end = 6.dp),
-                        )
+                if (photoUrl != null) {
+                    val imageRequest = remember(photoUrl) {
+                        coil.request.ImageRequest.Builder(ctx)
+                            .data(if (photoUrl.startsWith("http")) photoUrl else Api.BASE + photoUrl)
+                            .transformations(ViewOnceBlur)
+                            .crossfade(false)
+                            .size(720)
+                            .build()
                     }
-                    Row(
-                        Modifier.align(Alignment.End).padding(top = 3.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(msgStamp(m.optString("createdAt")), fontSize = 10.sp, color = stampInk)
-                        if (mine) {
-                            Spacer(Modifier.width(3.dp))
-                            TickIcon(m, pendingEcho, otherReadAt, onWallpaper = false, ink = stampInk)
+                    coil.compose.AsyncImage(
+                        model = imageRequest,
+                        contentDescription = "Photo",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                        onSuccess = { state ->
+                            val d = state.result.drawable
+                            if (d.intrinsicWidth > 0 && d.intrinsicHeight > 0 && ratio <= 0f) {
+                                ratio = ImageRatios.put(photoUrl, d.intrinsicWidth.toFloat() / d.intrinsicHeight.toFloat())
+                            }
+                        },
+                    )
+                    // Dimmer so the white mark never drowns in a bright photo.
+                    Box(Modifier.matchParentSize().background(Color(0x40000000)))
+                }
+                ViewOnceOneIcon(56.dp)
+                if (pendingEcho) {
+                    // An upload in flight: the determinate ring under the mark.
+                    Box(Modifier.matchParentSize().padding(bottom = 14.dp), contentAlignment = Alignment.BottomCenter) {
+                        if (upFrac != null) {
+                            CircularProgressIndicator(
+                                progress = { upFrac },
+                                color = Color.White,
+                                strokeWidth = 3.dp,
+                                trackColor = Color.White.copy(alpha = 0.22f),
+                                modifier = Modifier.size(30.dp),
+                            )
+                        } else {
+                            CircularProgressIndicator(color = Color.White, strokeWidth = 3.dp, modifier = Modifier.size(30.dp))
                         }
                     }
                 }
+                // scrim so the stamp never drowns in a bright photo
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.Transparent, Color.Transparent, Color(0x66000000)),
+                            ),
+                        ),
+                )
+                Row(
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        msgStamp(m.optString("createdAt")),
+                        fontSize = 10.sp,
+                        color = Color.White,
+                    )
+                    if (mine) {
+                        Spacer(Modifier.width(3.dp))
+                        TickIcon(m, pendingEcho, otherReadAt)
+                    }
+                }
+                if (rowSelected) Box(Modifier.matchParentSize().background(ActionBlue.copy(alpha = 0.35f)))
             }
             MessageReactions(m)
         }
@@ -5641,16 +5689,13 @@ internal fun albumIdOf(m: JSONObject): String {
 internal fun isViewOnce(m: JSONObject): Boolean =
     m.optBoolean("viewOnce") || m.optJSONObject("meta")?.optBoolean("viewOnce") == true
 
-/** Already opened by the recipient (the object is gone). */
-internal fun viewOnceSpent(m: JSONObject): Boolean =
-    isViewOnce(m) && (m.optText("viewedAt").isNotBlank() || (m.optJSONObject("meta")?.optString("viewedAt").orEmpty().isNotBlank()))
-
 /**
  * Owner round 32 (item 17): reports the single opening to the server (POST
  * /api/messages/:id/view). Process-level and de-duplicated per id: the viewer
  * calls it when the picture / clip is on screen, and a recomposition or a
- * second tap in the same second must not fire twice. The room broadcast that
- * follows repaints the bubble as "Opened" on every device (sender included).
+ * second tap in the same second must not fire twice. The VANISHED broadcast
+ * that follows plays the vanish show and drops the row on every device
+ * (sender included).
  */
 object ViewOnce {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
