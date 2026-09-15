@@ -179,8 +179,10 @@ fun StatusPickScreen(nav: NavController) {
                         selectIndex = 0,
                         onToggle = {
                             haptics.tap()
-                            // One tap = straight to the share screen with this item.
-                            nav.navigate("statusphoto/" + statusPickArg(item)) {
+                            // Owner round 37 (item 2): one tap = straight into
+                            // the editor in status mode (no share screen).
+                            ScreenStore.editTitle = "Status"
+                            nav.navigate("mediaedit/status/0/" + statusPickArg(item)) {
                                 popUpTo("statuspick") { inclusive = true }
                             }
                         },
@@ -191,7 +193,7 @@ fun StatusPickScreen(nav: NavController) {
     }
 }
 
-/** Uri + kind → one URL-safe route argument for `statusphoto/{arg}`. */
+/** Uri + kind → one URL-safe route argument (the editor route shares the codec). */
 internal fun statusPickArg(item: MediaItem): String =
     android.util.Base64.encodeToString(
         ((if (item.isVideo) "v:" else "i:") + item.uri.toString()).toByteArray(),

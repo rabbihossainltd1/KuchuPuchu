@@ -1905,7 +1905,7 @@ const convBetween = (db, a, b) =>
   check(
     "r27/r31-30: status composer uploads the cut clip as video/mp4 under a proper name (the export always writes mp4)",
     readFileSync(
-      "native-android/app/src/main/java/app/kuchupuchu/android/StatusPhotoScreen.kt",
+      "native-android/app/src/main/java/app/kuchupuchu/android/MediaEditScreen.kt",
       "utf8",
     ).includes('Api.upload("status.mp4", "video/mp4", bytes)'),
   );
@@ -2543,7 +2543,7 @@ const convBetween = (db, a, b) =>
       !kt("SearchScreen.kt").includes("Search people, chats, messages") &&
       !kt("NewChatScreen.kt").includes('"Name or username"') &&
       // r31-30: the status share screen has NO caption bar any more.
-      !kt("StatusPhotoScreen.kt").includes('Text("Caption")'),
+      !kt("CropTrimKit.kt").includes('Text("Caption")'),
   );
   // r31-5: real groups — group profile screen, admin = creator, add/kick/rename/picture,
   // the create screen lists chat-list peers immediately, group avatar cache token "g:".
@@ -4087,51 +4087,50 @@ const convBetween = (db, a, b) =>
         chat.includes("if (ids.first() in selected) selected.removeAll(ids.toSet())"),
     );
 
-    // r31-30: the status share screen — full-bleed dark stage, Close on top, ONE
-    // Send button, no caption bar; video trim (first minute preselected, window
-    // slides anywhere, never over a minute) + crop for photo AND video; the
-    // clip is cut on the phone (GPU re-encode, sample-copy fallback) and only
-    // the result is uploaded.
+    // r31-30: status lands straight in the editor (round 37 retired the
+    // share screen) — full-bleed dark stage, Close on top, ONE Done check, no
+    // caption bar; video trim (first minute preselected, window slides
+    // anywhere, never over a minute) + crop for photo AND video; the clip is
+    // cut on the phone (GPU re-encode, sample-copy fallback) and only the
+    // result is uploaded.
     {
-      const share = kt("StatusPhotoScreen.kt");
+      const kit = kt("CropTrimKit.kt");
+      const edit30 = kt("MediaEditScreen.kt");
       const exp = kt("VideoExport.kt");
       const plan = readFileSync(
         "native-android/app/src/test/java/app/kuchupuchu/android/VideoPlanTest.kt",
         "utf8",
       );
       check(
-        "r31-30: share screen — no caption field / Post / 'Choose photo or video' buttons; dark stage + Close + one Send; the >60s rejection is gone",
-        !share.includes("OutlinedTextField(") &&
-          !share.includes('Text("Caption")') &&
-          !share.includes('GoldBtn("Post")') &&
-          !share.includes('GoldBtn("Choose photo or video")') &&
-          !share.includes("Video status can be at most 1 minute.") &&
-          share.includes("Box(Modifier.fillMaxSize().background(Color.Black)) {") &&
-          share.includes('Icon(Icons.Filled.Close, "Close", tint = Color.White)') &&
-          share.includes('contentDescription = if (cropping) "Done" else "Send",') &&
-          share.includes('.put("text", ""),'),
+        "r31-30: status mode — no caption bar (posts carry no text), no Post / 'Choose photo or video' buttons; dark stage + Close + one Done check; the >60s rejection is gone",
+        edit30.includes("if (!statusMode) {") &&
+          !edit30.includes('GoldBtn("Post")') &&
+          !edit30.includes('GoldBtn("Choose photo or video")') &&
+          !edit30.includes("Video status can be at most 1 minute.") &&
+          edit30.includes("Box(Modifier.fillMaxSize().background(Color.Black)) {") &&
+          edit30.includes('Icon(Icons.Filled.Close, "Close", tint = Color.White') &&
+          edit30.includes('contentDescription = if (statusMode) "Done" else "Send",') &&
+          edit30.includes('.put("text", ""),'),
       );
       check(
-        "r31-30: video — first minute preselected (VideoPlan.defaultWindow), a trim strip with slide/start/end handles, a crop overlay with Original/9:16/1:1/Free, the cut clip's real length goes up as `seconds`",
-        share.includes(
-          "val (s, e) = if (fullWindow) 0L to src.durationMs else VideoPlan.defaultWindow(src.durationMs)",
-        ) &&
-          share.includes("internal fun TrimStrip(") &&
+        "r31-30: video — status preselects the first minute (VideoPlan.defaultWindow), a trim strip with slide/start/end handles, a crop overlay with Original/9:16/1:1/Free, the cut clip's real length goes up as `seconds`",
+        edit30.includes("val (s, e) = VideoPlan.defaultWindow(src.durationMs)") &&
+          kit.includes("internal fun TrimStrip(") &&
           // r32-43: the drag is absolute (window at touch-down + total travel)
-          share.includes(
+          kit.includes(
             "1 -> VideoPlan.moveStart(grabS, grabE, durationMs, grabS + deltaMs, maxMs)",
           ) &&
-          share.includes(
+          kit.includes(
             "2 -> VideoPlan.moveEnd(grabS, grabE, durationMs, grabE + deltaMs, maxMs)",
           ) &&
-          share.includes("3 -> VideoPlan.slide(grabS, grabE, durationMs, deltaMs)") &&
-          share.includes("private fun CropOverlay(") &&
-          share.includes('listOf("Original", "9:16", "1:1", "Free").forEach { name ->') &&
-          share.includes('.put("seconds", ((e - s + 500L) / 1000L).toInt().coerceAtLeast(1))') &&
-          share.includes("VideoExport.export(ctx, uri, start, end, crop, out)") &&
-          share.includes("VideoExport.passthrough(ctx, uri, start, end, out)") &&
-          share.includes(
-            "if (!VideoPlan.needsTranscode(crop, start, end, src.durationMs, size, mime)) {",
+          kit.includes("3 -> VideoPlan.slide(grabS, grabE, durationMs, deltaMs)") &&
+          kit.includes("internal fun CropOverlay(") &&
+          edit30.includes('listOf("Original", "9:16", "1:1", "Free").forEach { name ->') &&
+          edit30.includes('.put("seconds", ((e - s + 500L) / 1000L).toInt().coerceAtLeast(1))') &&
+          edit30.includes("VideoExport.export(ctx, pickedUri, s, e, box, cut,") &&
+          edit30.includes("VideoExport.passthrough(ctx, pickedUri, s, e, cut)") &&
+          edit30.includes(
+            "if (!VideoPlan.needsTranscode(box, s, e, vSource.durationMs, size, mime) && !hasEdits) {",
           ),
       );
       check(
@@ -4165,7 +4164,7 @@ const convBetween = (db, a, b) =>
     {
       const pick = kt("StatusPickScreen.kt");
       const statusScreens = kt("StatusScreens.kt");
-      const share = kt("StatusPhotoScreen.kt");
+      const kit31 = kt("CropTrimKit.kt");
       const app = kt("KpApp.kt");
       const at = kt("AttachSheet.kt");
       check(
@@ -4179,7 +4178,7 @@ const convBetween = (db, a, b) =>
           !statusScreens.includes('nav.navigate("statusphoto")'),
       );
       check(
-        "r31-31: the picker IS the app gallery — loadMediaPool + MediaCell from the attach panel, folder chips, 4 columns, one tap → statusphoto/{arg} replacing the picker; no system picker in the picker or the share screen",
+        "r31-31: the picker IS the app gallery — loadMediaPool + MediaCell from the attach panel, folder chips, 4 columns, one tap → the editor in status mode replacing the picker; no system picker anywhere in the flow",
         at.includes(
           "internal fun loadMediaPool(ctx: android.content.Context): List<MediaItem> {",
         ) &&
@@ -4188,20 +4187,20 @@ const convBetween = (db, a, b) =>
             "pool = withContext(Dispatchers.IO) { runCatching { loadMediaPool(ctx) }.getOrDefault(emptyList()) }",
           ) &&
           pick.includes("columns = GridCells.Fixed(4),") &&
-          pick.includes('nav.navigate("statusphoto/" + statusPickArg(item)) {') &&
+          pick.includes('ScreenStore.editTitle = "Status"') &&
+          pick.includes('nav.navigate("mediaedit/status/0/" + statusPickArg(item)) {') &&
           pick.includes('popUpTo("statuspick") { inclusive = true }') &&
           pick.includes("internal fun statusPickArg(item: MediaItem): String =") &&
           pick.includes(
             "internal fun statusPickDecode(arg: String): Pair<android.net.Uri, Boolean>? =",
           ) &&
           !pick.includes("PickVisualMedia") &&
-          !share.includes("PickVisualMedia") &&
-          !share.includes("rememberLauncherForActivityResult") &&
-          share.includes(
-            "fun StatusPhotoScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean) {",
-          ) &&
+          !kit31.includes("PickVisualMedia") &&
+          !kit31.includes("rememberLauncherForActivityResult") &&
           app.includes('composable("statuspick") { StatusPickScreen(nav) }') &&
-          app.includes('composable("statusphoto/{arg}") { entry ->'),
+          app.includes('composable("mediaedit/{conv}/{once}/{arg}") { entry ->') &&
+          !app.includes("statusphoto/") &&
+          !app.includes("StatusPhotoScreen("),
       );
     }
 
@@ -4814,16 +4813,17 @@ const convBetween = (db, a, b) =>
   //      `box` it was created with (keyed only on lock/aspect), so each drag
   //      moved that stale copy — the block now reads the box through
   //      rememberUpdatedState.
-  const share32 = kt("StatusPhotoScreen.kt");
+  const share32 = kt("CropTrimKit.kt");
+  const edit43 = kt("MediaEditScreen.kt");
   const playerCls = share32.slice(
     share32.indexOf("private class TrimClipPlayer("),
     share32.indexOf("internal fun TrimStrip("),
   );
   const stripFn = share32.slice(
     share32.indexOf("internal fun TrimStrip("),
-    share32.indexOf("private fun CropOverlay("),
+    share32.indexOf("internal fun CropOverlay("),
   );
-  const cropFn = share32.slice(share32.indexOf("private fun CropOverlay("));
+  const cropFn = share32.slice(share32.indexOf("internal fun CropOverlay("));
   check(
     "r32-43: trim preview — frame-exact seeks (SEEK_CLOSEST on 26+), a seek in flight is never re-issued, the loop floor is where the last seek landed, a paused/scrubbed picture never loops, and the scrubbed handle's frame is shown while the finger is down",
     playerCls.includes("p.seekTo(ms, android.media.MediaPlayer.SEEK_CLOSEST)") &&
@@ -4839,8 +4839,8 @@ const convBetween = (db, a, b) =>
         "LaunchedEffect(player, start, end, scrubAt) { player?.setWindow(start, end, scrubAt ?: -1L) }",
       ) &&
       share32.includes("player?.setPaused(paused || userPaused || scrubAt != null)") &&
-      share32.includes(
-        "StatusTrimPreview(picked, start, end, paused = cropping, scrubAt = scrub, onPosition = { playAt = it })",
+      edit43.includes(
+        "StatusTrimPreview(pickedUri, start, end, paused = stillMode, scrubAt = scrub, onPosition = { playAt = it })",
       ),
   );
   check(
@@ -4854,7 +4854,7 @@ const convBetween = (db, a, b) =>
       stripFn.includes("scrubCb.value(null)") &&
       stripFn.includes("val hw = 10.dp.toPx()") &&
       !stripFn.includes("val grab = 40f") &&
-      share32.includes("onScrub = { scrub = it },"),
+      edit43.includes("onScrub = { scrub = it },"),
   );
   check(
     "r32-43: Free crop box moves — CropOverlay reads the CURRENT box / callback through rememberUpdatedState inside its pointerInput (no stale capture), 28 dp corner grab",
@@ -6369,7 +6369,7 @@ const convBetween = (db, a, b) =>
     const chat = kt("ChatScreen.kt");
     const attach = kt("AttachSheet.kt");
     const edit = kt("MediaEditScreen.kt");
-    const share = kt("StatusPhotoScreen.kt");
+    const share = kt("CropTrimKit.kt");
     const plan = kt("VideoExport.kt");
     const store = kt("ScreenStore.kt");
     const app = kt("KpApp.kt");
@@ -6447,7 +6447,7 @@ const convBetween = (db, a, b) =>
           "StatusTrimPreview(pickedUri, start, end, paused = stillMode, scrubAt = scrub, onPosition = { playAt = it })",
         ) &&
         edit.includes(
-          "VideoExport.export(ctx, pickedUri, s, e, null, out, overlay = overlay, colorMat = filt?.array, userTurns = turn)",
+          "VideoExport.export(ctx, pickedUri, s, e, box, out, overlay = overlay, colorMat = filt?.array, userTurns = turn)",
         ) &&
         edit.includes("VideoExport.passthrough(ctx, pickedUri, s, e, out)") &&
         edit.includes(
@@ -6463,7 +6463,12 @@ const convBetween = (db, a, b) =>
           "Failed(val message: String)",
         ].every((l) => edit.includes(l)) &&
         !edit.includes("AlertDialog") &&
-        !edit.includes("Toast") &&
+        // round 37: the fire-and-forget status post toasts (it pops
+        // first) — every Toast lives in sendStatus, nowhere else.
+        (edit.match(/Toast/g) || []).length === 4 &&
+        edit
+          .slice(edit.indexOf("fun sendStatus() {"), edit.indexOf("/** The caption bar's +"))
+          .includes("Sharing status…") &&
         store.includes(
           "val pendingEdited = kotlinx.coroutines.flow.MutableStateFlow<EditedResult?>(null)",
         ) &&
@@ -6499,7 +6504,7 @@ const convBetween = (db, a, b) =>
     const store = kt("ScreenStore.kt");
     const files = kt("Files.kt");
     check(
-      "r34-16b: editor screen — top bar (save, HD pill, rotate, sticker, Aa, pen), swipe-up filter strip (preview + bake share one ColorMatrix), caption bar (add-more, caption field, ViewOnceOneIcon toggle), recipient chip + blue send; rotate carries the normalised overlays, HD bakes bigger, no dialogs / toasts",
+      "r34-16b: editor screen — top bar (save, HD pill, rotate, sticker, Aa, pen), swipe-up filter strip (preview + bake share one ColorMatrix), caption bar (add-more, caption field, ViewOnceOneIcon toggle), recipient chip + blue send; rotate carries the normalised overlays, HD bakes bigger, no dialogs; toasts only for the status post",
       edit.includes("Icons.Filled.Download") &&
         edit.includes('Text("HD", color = if (hd) Color.Black else Color.White') &&
         edit.includes("Icons.Filled.RotateRight") &&
@@ -6520,7 +6525,12 @@ const convBetween = (db, a, b) =>
         edit.includes("FilesUtil.saveVideo(ctx, f") &&
         files.includes("fun saveVideo(ctx: Context, file: File, displayName: String): Uri?") &&
         !edit.includes("AlertDialog") &&
-        !edit.includes("Toast"),
+        // the fire-and-forget status post toasts (it pops first); the chat
+        // editor itself stays silent — every Toast lives in sendStatus.
+        (edit.match(/Toast/g) || []).length === 4 &&
+        edit
+          .slice(edit.indexOf("fun sendStatus() {"), edit.indexOf("/** The caption bar's +"))
+          .includes("Sharing status…"),
     );
     check(
       "r34-16b: editor flow + captions — a lone grid tap opens the editor, + stages the baked pick first (AddMore) and reopens the panel, the result carries the caption, MediaItem / the send path / forwards keep it, captioned rows render it",
@@ -7656,7 +7666,7 @@ const convBetween = (db, a, b) =>
     const edit6 = kt("MediaEditScreen.kt");
     const vx6 = kt("VideoExport.kt");
     check(
-      "r36-6: chat video edits — export takes overlay + colorMat + userTurns, the shader tints + blends the overlay, the editor shares one StageCanvas, still-mode previews turns/filters, all three video exits carry the layers",
+      "r36-6: video edits — export takes overlay + colorMat + userTurns, the shader tints + blends the overlay, the editor shares one StageCanvas, still-mode previews turns/filters, all four video exits (chat send / add-more / save + status post) carry the layers",
       vx6.includes("overlay: Bitmap? = null,") &&
         vx6.includes("colorMat: FloatArray? = null,") &&
         vx6.includes("userTurns: Int = 0,") &&
@@ -7676,38 +7686,53 @@ const convBetween = (db, a, b) =>
         edit6.includes("paintPenStrokes(canvas, strokes, w, h)") &&
         (
           edit6.match(
-            /VideoExport\.export\(ctx, pickedUri, s, e, null, out, overlay = overlay, colorMat = filt\?\.array, userTurns = turn\)/g,
+            /VideoExport\.export\(ctx, pickedUri, s, e, box, out, overlay = overlay, colorMat = filt\?\.array, userTurns = turn\)/g,
           ) || []
         ).length === 3 &&
-        (edit6.match(/if \(hasEdits\) throw err/g) || []).length === 3,
+        (edit6.match(/if \(hasEdits\) throw err/g) || []).length === 4,
     );
   }
   // r36-7: the status share screen gets the full editor — an Edit
   // button opens it in status mode (no caption / once / add-more / HD,
   // Done check instead of Send); results return through their own flow
   // and swap the working media, crop reset, edited clips kept whole.
+  // r37-2: one screen for status — the picker lands straight in the editor
+  // (no share screen, no Edit tap, no round-trip flow); Done posts from here
+  // (bake + upload + refresh); the crop tool (photo + video) opens the box
+  // over the full frame and commits on exit — photo overlays hop boxes,
+  // video overlays remap at bake time; every send path carries the box.
   {
     const edit7 = kt("MediaEditScreen.kt");
     const store7 = kt("ScreenStore.kt");
-    const share7 = kt("StatusPhotoScreen.kt");
+    const app7 = kt("KpApp.kt");
+    const pick7 = kt("StatusPickScreen.kt");
+    const kit7 = kt("CropTrimKit.kt");
     check(
-      "r36-7: status edits — status mode hides caption/once/HD and checks Done, results return via pendingStatusEdited, the share screen swaps its media and resets crop, edited clips keep their full window",
-      store7.includes(
-        "val pendingStatusEdited = kotlinx.coroutines.flow.MutableStateFlow<EditedResult?>(null)",
-      ) &&
-        edit7.includes('val statusMode = convId == "status"') &&
-        edit7.includes("if (clip == null && !statusMode) {") &&
-        edit7.includes("if (!statusMode) {") &&
-        edit7.includes("if (statusMode) Icons.Filled.Check else Icons.AutoMirrored.Filled.Send,") &&
-        edit7.includes(
-          "if (statusMode) ScreenStore.pendingStatusEdited.value = EditedResult(convId, once, result, cap)",
-        ) &&
-        share7.includes('ScreenStore.editTitle = "Status"') &&
-        share7.includes('nav.navigate("mediaedit/status/0/" + statusPickArg(item))') &&
-        share7.includes("ScreenStore.pendingStatusEdited.collect { res ->") &&
-        share7.includes("var picked by remember(pickedUri) { mutableStateOf(pickedUri) }") &&
-        share7.includes("if (swapped.second) fullWindow = true") &&
-        share7.includes("StatusTrimPreview(picked, start, end, paused = cropping"),
+      "r37-2: status is one screen — the picker opens the editor in status mode, Done posts (bake + upload + refresh), the crop tool commits the box on exit with photo overlays hopping boxes and video overlays remapping at bake, every send path carries the box, the share screen + round-trip are gone",
+      pick7.includes('ScreenStore.editTitle = "Status"') &&
+        pick7.includes('nav.navigate("mediaedit/status/0/" + statusPickArg(item)) {') &&
+        edit7.includes("if (statusMode) {") &&
+        edit7.includes("sendStatus()") &&
+        edit7.includes("fun sendStatus() {") &&
+        edit7.includes('"Sharing status…"') &&
+        edit7.includes('.put("kind", "VIDEO")') &&
+        edit7.includes('.put("kind", "IMAGE").put("imageData", data)') &&
+        edit7.includes('ScreenStore.setStatuses(data.arr("items").objects())') &&
+        edit7.includes("val (s, e) = VideoPlan.defaultWindow(src.durationMs)") &&
+        edit7.includes("if (cropping) exitCrop() else enterCrop()") &&
+        edit7.includes("fun remapOverlaysForCrop(from: CropBox?, to: CropBox?)") &&
+        edit7.includes("if (shotFull != null) remapOverlaysForCrop(cropBox, null)") &&
+        edit7.includes("if (shotFull != null) remapOverlaysForCrop(null, draft)") &&
+        edit7.includes("box = cropDraft,") &&
+        edit7.includes("val stageShot = if (cropping) shotFull else shot") &&
+        edit7.includes("h: Int, box: CropBox? = null") &&
+        edit7.includes("canvas.scale(1f / b.w, 1f / b.h)") &&
+        (edit7.match(/\|\| box != null/g) || []).length === 6 &&
+        (edit7.match(/, box, (out|cut),/g) || []).length === 4 &&
+        !store7.includes("pendingStatusEdited") &&
+        !edit7.includes("pendingStatusEdited") &&
+        !app7.includes("statusphoto/") &&
+        !kit7.includes("fun StatusPhotoScreen("),
     );
   }
   // r35-8: the editor grows up — overlays carry a pinch size (preview AND
@@ -7867,22 +7892,22 @@ const convBetween = (db, a, b) =>
   // Item 8: the status / chat-video trim strip shows a playhead — the
   // preview reports its position every tick and the strip draws it.
   {
-    const share = kt("StatusPhotoScreen.kt");
     const edit = kt("MediaEditScreen.kt");
-    const playerCls = share.slice(
-      share.indexOf("private class TrimClipPlayer("),
-      share.indexOf("internal fun TrimStrip("),
+    const kit33 = kt("CropTrimKit.kt");
+    const playerCls = kit33.slice(
+      kit33.indexOf("private class TrimClipPlayer("),
+      kit33.indexOf("internal fun TrimStrip("),
     );
-    const stripFn = share.slice(
-      share.indexOf("internal fun TrimStrip("),
-      share.indexOf("private fun CropOverlay("),
+    const stripFn = kit33.slice(
+      kit33.indexOf("internal fun TrimStrip("),
+      kit33.indexOf("internal fun CropOverlay("),
     );
     check(
-      "r33-8: trim playhead — TrimClipPlayer.positionMs() (seek target while in flight, start handle before ready), StatusTrimPreview reports it through onPosition every tick, TrimStrip draws a white outlined playhead inside the window (hidden while a handle is held), and both the status share screen and MediaEditScreen wire playAt through (r34-18: the playhead glides between the 120 ms ticks instead of jumping)",
+      "r33-8: trim playhead — TrimClipPlayer.positionMs() (seek target while in flight, start handle before ready), StatusTrimPreview reports it through onPosition every tick, TrimStrip draws a white outlined playhead inside the window (hidden while a handle is held), and the editor wires playAt through (r34-18: the playhead glides between the 120 ms ticks instead of jumping)",
       playerCls.includes("fun positionMs(): Long {") &&
         playerCls.includes("if (pendingSeek >= 0L) return pendingSeek") &&
-        share.includes("    onPosition: (Long) -> Unit = {},\n) {") &&
-        share.includes("positionCb.value(p.positionMs())") &&
+        kit33.includes("    onPosition: (Long) -> Unit = {},\n) {") &&
+        kit33.includes("positionCb.value(p.positionMs())") &&
         stripFn.includes("positionMs: Long? = null,") &&
         stripFn.includes("if (head != null && mode == 0) {") &&
         stripFn.includes(
@@ -7894,9 +7919,7 @@ const convBetween = (db, a, b) =>
         stripFn.includes(
           "drawLine(Color.White, Offset(px, 0f), Offset(px, size.height), strokeWidth = edge)",
         ) &&
-        (share.match(/positionMs = playAt,/g) || []).length === 1 &&
         (edit.match(/positionMs = playAt,/g) || []).length === 1 &&
-        share.includes("onPosition = { playAt = it })") &&
         edit.includes("onPosition = { playAt = it })"),
     );
   }

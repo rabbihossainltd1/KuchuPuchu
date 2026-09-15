@@ -2,6 +2,7 @@ package app.kuchupuchu.android
 
 import android.graphics.Bitmap
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -39,6 +40,7 @@ import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
@@ -89,6 +91,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 /**
  * Owner round 32 (item 19): the light editor behind the attach panel's Edit
@@ -103,9 +106,16 @@ import kotlinx.coroutines.withContext
  * and pick more), the caption field and the view-once ① (the editor OWNS the
  * toggle now — the panel's switch only sets its starting side); the bottom
  * row is the recipient chip + the blue send. A video keeps the trim strip +
- * clip download and shares the caption / view-once / chip / send half — pen,
- * text, stickers, filters and rotation are photo-only (they bake into the
- * JPEG; baking them into a clip needs a re-encode overlay pass).
+ * clip download and shares the caption / view-once / chip / send half; pen,
+ * text, stickers, filters, rotation AND crop ride video too (the overlay
+ * bakes at the export's own output size, the filter rides the GL shader,
+ * turns + crop ride the frame map).
+ *
+ * Owner round 37 (item 2): status lands straight here (convId "status") —
+ * no caption / once / add-more / HD, Done posts the status from this one
+ * screen. The crop tool (photo + video) opens the box over the FULL frame;
+ * photo overlays commit into cropped coords on exit, video overlays remap
+ * at bake time — the stage always shows what the bake keeps.
  *
  * The photo path draws in the picture's own pixel space (strokes AND text /
  * sticker overlays are stored in normalised 0..1 units and rotate with the
@@ -126,6 +136,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
         controller?.isAppearanceLightStatusBars = false
         onDispose { controller?.isAppearanceLightStatusBars = prev ?: true }
     }
+    BackHandler(enabled = cropping) { exitCrop() }
 
     var photo by remember { mutableStateOf<ImageBitmap?>(null) }
     var source by remember { mutableStateOf<VideoExport.Source?>(null) }
@@ -162,9 +173,18 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
     // Owner round 36 (item 6): the video still-mode frame (exact export
     // pixels for the playhead — turns + filter baked in, see below).
     var videoStill by remember { mutableStateOf<ImageBitmap?>(null) }
-    // Owner round 36 (item 7): opened from the status share screen — no
-    // caption (status posts carry none), no once, no add-more, no HD.
+    // Owner round 37 (item 2): the status share screen is GONE — the
+    // picker lands straight here, and Done posts the status. No caption
+    // (status posts carry none), no once, no add-more, no HD.
     val statusMode = convId == "status"
+    // Owner round 37 (item 2): the crop tool (photo + video, chat + status).
+    // cropBox commits into normalised full-frame coords; while the box is
+    // open the stage shows the FULL frame and the draft rides above it.
+    var cropping by remember { mutableStateOf(false) }
+    var cropBox by remember { mutableStateOf<CropBox?>(null) }
+    var cropDraft by remember { mutableStateOf(CropBox.FULL) }
+    var cropTouched by remember { mutableStateOf(false) }
+    var cropPreset by remember { mutableStateOf("Original") }
 
     LaunchedEffect(pickedUri) {
         if (pickedIsVideo) {
@@ -173,10 +193,16 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                 loadFailed = true
                 return@LaunchedEffect
             }
-            // A chat video keeps its whole length by default (the status
-            // share's first-minute rule is a status rule); trim from any point.
-            start = 0L
-            end = src.durationMs
+            // A chat video keeps its whole length; a status clip preselects
+            // the first minute (the status rule, inherited from the share screen).
+            if (statusMode) {
+                val (s, e) = VideoPlan.defaultWindow(src.durationMs)
+                start = s
+                end = e
+            } else {
+                start = 0L
+                end = src.durationMs
+            }
             source = src
             thumbs.clear()
             repeat(EDIT_STRIP_FRAMES) { thumbs.add(null) }
@@ -198,20 +224,47 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
     }
 
     val base = photo
-    // The rotated working copy — overlays are stored against THIS orientation
-    // (rotateTap transforms them), so the bake reads straight off it.
-    val shot = remember(base, rotation) {
+    // The full rotated working copy — the crop box is drawn over THIS, and
+    // photo overlays hop back into these coords while the box is open.
+    val shotFull = remember(base, rotation) {
         if (base == null || rotation == 0) {
             base
         } else {
             runCatching { rotateEditBitmap(base.asAndroidBitmap(), rotation).asImageBitmap() }.getOrNull() ?: base
         }
     }
+    // The cropped working copy — photo overlays commit into these coords
+    // when the box closes, so the stage + the bake read straight off it.
+    val shot = remember(shotFull, cropBox) {
+        val full = shotFull
+        val box = cropBox?.takeIf { !it.isFull() }
+        if (full == null || box == null) {
+            full
+        } else {
+            runCatching {
+                val src = full.asAndroidBitmap()
+                val x = (box.x * src.width).toInt().coerceIn(0, src.width - 1)
+                val y = (box.y * src.height).toInt().coerceIn(0, src.height - 1)
+                val w = (box.w * src.width).toInt().coerceIn(1, src.width - x)
+                val h = (box.h * src.height).toInt().coerceIn(1, src.height - y)
+                Bitmap.createBitmap(src, x, y, w, h).asImageBitmap()
+            }.getOrNull() ?: full
+        }
+    }
     val clip = source
     val ready = shot != null || clip != null
+    val aspectShot = if (cropping) shotFull else shot
+    // Full-frame aspect while the box is open, so the box maths (normalised
+    // units) and the on-screen pixels agree without any extra measuring.
+    val cropFullAspect =
+        when {
+            shotFull != null -> shotFull.width.toFloat() / shotFull.height.coerceAtLeast(1)
+            clip != null -> clip.displayW.toFloat() / clip.displayH.coerceAtLeast(1)
+            else -> 9f / 16f
+        }
     val mediaAspect =
         when {
-            shot != null -> shot.width.toFloat() / shot.height.coerceAtLeast(1)
+            aspectShot != null -> aspectShot.width.toFloat() / aspectShot.height.coerceAtLeast(1)
             clip != null ->
                 run {
                     // Owner round 36 (item 6): user turns swap the frame.
@@ -260,7 +313,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
     // exactly like the export. The player hides underneath, so no
     // tick-churn: this only re-grabs when the frame, turns or filter change.
     val stillMode = clip != null && (rotation != 0 || filterMatrix != null)
-    LaunchedEffect(pickedUri, rotation, filterIdx, scrub, stillMode) {
+    LaunchedEffect(pickedUri, rotation, filterIdx, scrub, stillMode, cropBox) {
         if (!stillMode || clip == null) {
             videoStill = null
             return@LaunchedEffect
@@ -274,7 +327,17 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
             withContext(Dispatchers.IO) {
                 val frame = grabVideoFrame(ctx, pickedUri, atMs) ?: return@withContext null
                 val turned = if (turn != 0) rotateEditBitmap(frame, turn) else frame
-                applyEditFilter(turned, filt).asImageBitmap()
+                val box = cropBox?.takeIf { !it.isFull() }
+                val cropped =
+                    if (box == null) turned
+                    else {
+                        val x = (box.x * turned.width).toInt().coerceIn(0, turned.width - 1)
+                        val y = (box.y * turned.height).toInt().coerceIn(0, turned.height - 1)
+                        val w = (box.w * turned.width).toInt().coerceIn(1, turned.width - x)
+                        val h = (box.h * turned.height).toInt().coerceIn(1, turned.height - y)
+                        Bitmap.createBitmap(turned, x, y, w, h)
+                    }
+                applyEditFilter(cropped, filt).asImageBitmap()
             }
     }
     // The transient notice ("Saved to gallery") clears itself.
@@ -369,6 +432,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
     }
 
     fun rotateTap() {
+        exitCrop()
         haptics.tap()
         live = null
         rotation = (rotation + 1) % 4
@@ -388,7 +452,85 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
         }
     }
 
+    /** One normalised point between box coords and full-frame coords. */
+    fun cropMap(p: Offset, from: CropBox?, to: CropBox?): Offset {
+        val f = from?.takeIf { !it.isFull() }
+        val t = to?.takeIf { !it.isFull() }
+        val fx = if (f == null) p.x else f.x + p.x * f.w
+        val fy = if (f == null) p.y else f.y + p.y * f.h
+        if (t == null) return Offset(fx, fy)
+        return Offset((fx - t.x) / t.w.coerceAtLeast(1e-6f), (fy - t.y) / t.h.coerceAtLeast(1e-6f))
+    }
+
+    /** Photo overlays hop boxes (strokes + texts + stickers, same carry as rotate). */
+    fun remapOverlaysForCrop(from: CropBox?, to: CropBox?) {
+        for (i in strokes.indices) {
+            val st = strokes[i]
+            strokes[i] = PenStroke(st.color, st.width, st.points.map { cropMap(it, from, to) }.toMutableList())
+        }
+        for (i in texts.indices) {
+            val t = texts[i]
+            texts[i] = t.copy(center = cropMap(t.center, from, to))
+        }
+        for (i in stickers.indices) {
+            val s = stickers[i]
+            stickers[i] = s.copy(center = cropMap(s.center, from, to))
+        }
+    }
+
+    fun applyCropPreset(name: String) {
+        haptics.tap()
+        cropPreset = name
+        cropDraft =
+            when (name) {
+                "9:16" -> CropBox.centered(9f / 16f, cropFullAspect)
+                "1:1" -> CropBox.centered(1f, cropFullAspect)
+                "Free" -> cropDraft
+                else -> CropBox.FULL
+            }
+        cropTouched = true
+    }
+
+    fun enterCrop() {
+        if (cropping || !ready) return
+        penMode = false
+        live = null
+        selectedId = null
+        filtersOpen = false
+        val box = cropBox?.takeIf { !it.isFull() }
+        if (box == null) {
+            cropPreset = "Free"
+            cropDraft = CropBox(0.08f, 0.08f, 0.84f, 0.84f)
+        } else {
+            cropDraft = box
+        }
+        cropTouched = false
+        // Photo overlays commit into cropped coords — hop them back to full
+        // so they sit right on the full frame while the box is open. (Video
+        // overlays always live full-frame; the bake remaps them instead.)
+        if (shotFull != null) remapOverlaysForCrop(cropBox, null)
+        cropping = true
+    }
+
+    fun exitCrop() {
+        if (!cropping) return
+        if (cropTouched) {
+            val draft = cropDraft.takeIf { !it.isFull() }
+            if (shotFull != null) remapOverlaysForCrop(null, draft)
+            cropBox = draft
+            if (draft == null) cropPreset = "Original"
+        } else {
+            if (shotFull != null) remapOverlaysForCrop(null, cropBox)
+        }
+        cropping = false
+    }
+
     fun send() {
+        // Owner round 37 (item 2): status posts straight from here.
+        if (statusMode) {
+            sendStatus()
+            return
+        }
         if (busy) return
         busy = true
         val cap = caption.trim()
@@ -401,23 +543,24 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
         val placed = stickers.toList()
         val filt = filterMatrix
         val turn = rotation
+        val box = cropBox?.takeIf { !it.isFull() }
         val hdShot = hd
         ScreenStore.appScope.launch {
             val result =
                 runCatching {
                     if (pickedIsVideo && vSource != null) {
                         val out = java.io.File(ctx.cacheDir, "edit_${System.currentTimeMillis()}.mp4")
-                        val whole = s <= 0L && e >= vSource.durationMs
+                        val whole = s <= 0L && e >= vSource.durationMs && box == null
                         // Owner round 36 (item 6): the clip carries the
                         // editor's layers — overlay baked at the export's own
                         // output size, filter on the shader, turns in the map.
                         val effRot = (vSource.rotation + (turn % 4) * 90) % 360
-                        val (ovW, ovH) = VideoPlan.outputSize(vSource.codedW, vSource.codedH, effRot, null)
-                        val overlay = bakeVideoOverlay(drawn, wrote, placed, ovW, ovH)
-                        val hasEdits = overlay != null || filt != null || turn != 0
+                        val (ovW, ovH) = VideoPlan.outputSize(vSource.codedW, vSource.codedH, effRot, box)
+                        val overlay = bakeVideoOverlay(drawn, wrote, placed, ovW, ovH, box)
+                        val hasEdits = overlay != null || filt != null || turn != 0 || box != null
                         if (!whole || hasEdits) {
                             try {
-                                VideoExport.export(ctx, pickedUri, s, e, null, out, overlay = overlay, colorMat = filt?.array, userTurns = turn)
+                                VideoExport.export(ctx, pickedUri, s, e, box, out, overlay = overlay, colorMat = filt?.array, userTurns = turn)
                             } catch (err: Exception) {
                                 // Edits must never silently vanish: only a
                                 // bare trim may go through degraded.
@@ -432,7 +575,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                     } else {
                         val bmp = img ?: throw Exception("Could not read that photo.")
                         // HD with no edits still bakes — the bigger file IS the edit.
-                        val edited = drawn.isNotEmpty() || wrote.isNotEmpty() || placed.isNotEmpty() || filt != null || turn != 0 || hdShot
+                        val edited = drawn.isNotEmpty() || wrote.isNotEmpty() || placed.isNotEmpty() || filt != null || turn != 0 || hdShot || box != null
                         if (!edited) {
                             EditedMedia.Untouched(pickedUri, false)
                         } else {
@@ -440,12 +583,84 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                         }
                     }
                 }.getOrElse { EditedMedia.Failed(it.message ?: "Could not edit that file.") }
-            // Owner round 36 (item 7): status edits hand back through
-            // their own flow — the share screen consumes them, not a chat.
-            if (statusMode) ScreenStore.pendingStatusEdited.value = EditedResult(convId, once, result, cap)
-            else ScreenStore.pendingEdited.value = EditedResult(convId, once, result, cap)
+            ScreenStore.pendingEdited.value = EditedResult(convId, once, result, cap)
         }
         nav.popBackStack()
+    }
+
+    /** Status mode's Done: the bake + the upload happen here — no second screen. */
+    fun sendStatus() {
+        if (busy) return
+        busy = true
+        val img = runCatching { shot?.asAndroidBitmap() }.getOrNull()
+        val vSource = source
+        val s = start
+        val e = end
+        val drawn = strokes.toList()
+        val wrote = texts.toList()
+        val placed = stickers.toList()
+        val filt = filterMatrix
+        val turn = rotation
+        val box = cropBox?.takeIf { !it.isFull() }
+        android.widget.Toast.makeText(ctx, "Sharing status…", android.widget.Toast.LENGTH_SHORT).show()
+        nav.popBackStack()
+        ScreenStore.appScope.launch {
+            try {
+                if (pickedIsVideo && vSource != null) {
+                    val effRot = (vSource.rotation + (turn % 4) * 90) % 360
+                    val (ovW, ovH) = VideoPlan.outputSize(vSource.codedW, vSource.codedH, effRot, box)
+                    val overlay = bakeVideoOverlay(drawn, wrote, placed, ovW, ovH, box)
+                    val hasEdits = overlay != null || filt != null || turn != 0 || box != null
+                    val mime = (ctx.contentResolver.getType(pickedUri) ?: "").ifBlank { "video/mp4" }
+                    val size = runCatching { ctx.contentResolver.openAssetFileDescriptor(pickedUri, "r")?.use { it.length } ?: -1L }.getOrDefault(-1L)
+                    val cut = java.io.File(ctx.cacheDir, "status_out_${System.currentTimeMillis()}.mp4")
+                    val bytes =
+                        if (!VideoPlan.needsTranscode(box, s, e, vSource.durationMs, size, mime) && !hasEdits) {
+                            ctx.contentResolver.openInputStream(pickedUri)?.use { it.readBytes() }
+                                ?: throw Exception("Could not read that video.")
+                        } else {
+                            try {
+                                VideoExport.export(ctx, pickedUri, s, e, box, cut, overlay = overlay, colorMat = filt?.array, userTurns = turn)
+                            } catch (err: Exception) {
+                                // Edits must never silently vanish: only a
+                                // bare trim may go through degraded.
+                                if (hasEdits) throw err
+                                cut.delete()
+                                VideoExport.passthrough(ctx, pickedUri, s, e, cut)
+                            }
+                            val b = cut.readBytes()
+                            cut.delete()
+                            b
+                        }
+                    if (bytes.size > VideoPlan.UPLOAD_LIMIT) throw Exception("That video is over 25 MB.")
+                    val up = Api.upload("status.mp4", "video/mp4", bytes)
+                    Api.post(
+                        "/api/statuses",
+                        JSONObject()
+                            .put("kind", "VIDEO")
+                            .put("fileKey", up.optString("fileKey"))
+                            .put("seconds", ((e - s + 500L) / 1000L).toInt().coerceAtLeast(1))
+                            .put("text", ""),
+                    )
+                } else {
+                    val bmp = img ?: throw Exception("Could not read that photo.")
+                    val data = bakeFull(bmp, drawn, filt, wrote, placed, false)
+                        ?: throw Exception("Could not read that photo.")
+                    Api.post(
+                        "/api/statuses",
+                        JSONObject().put("kind", "IMAGE").put("imageData", data).put("text", ""),
+                    )
+                }
+                runCatching {
+                    val data = Api.get("/api/statuses", true)
+                    ScreenStore.setStatuses(data.arr("items").objects())
+                }
+            } catch (err: Exception) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    android.widget.Toast.makeText(ctx, err.message ?: "Status didn't post. Try again.", android.widget.Toast.LENGTH_LONG).show()
+                }
+            }
+        }
     }
 
     /** The caption bar's + : stage this one (edits baked in) and pick more. */
@@ -463,24 +678,25 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
         val placed = stickers.toList()
         val filt = filterMatrix
         val turn = rotation
+        val box = cropBox?.takeIf { !it.isFull() }
         val hdShot = hd
         val onceShot = once
         ScreenStore.appScope.launch {
             val item =
                 runCatching {
                     if (pickedIsVideo && vSource != null) {
-                        val whole = s <= 0L && e >= vSource.durationMs
+                        val whole = s <= 0L && e >= vSource.durationMs && box == null
                         // Owner round 36 (item 6): staged with the layers.
                         val effRot = (vSource.rotation + (turn % 4) * 90) % 360
-                        val (ovW, ovH) = VideoPlan.outputSize(vSource.codedW, vSource.codedH, effRot, null)
-                        val overlay = bakeVideoOverlay(drawn, wrote, placed, ovW, ovH)
-                        val hasEdits = overlay != null || filt != null || turn != 0
+                        val (ovW, ovH) = VideoPlan.outputSize(vSource.codedW, vSource.codedH, effRot, box)
+                        val overlay = bakeVideoOverlay(drawn, wrote, placed, ovW, ovH, box)
+                        val hasEdits = overlay != null || filt != null || turn != 0 || box != null
                         if (whole && !hasEdits) {
                             MediaItem(pickedUri, true, vSource.durationMs, "", System.currentTimeMillis() / 1000, cap, once = onceShot)
                         } else {
                             val out = java.io.File(ctx.cacheDir, "edit_${System.currentTimeMillis()}.mp4")
                             try {
-                                VideoExport.export(ctx, pickedUri, s, e, null, out, overlay = overlay, colorMat = filt?.array, userTurns = turn)
+                                VideoExport.export(ctx, pickedUri, s, e, box, out, overlay = overlay, colorMat = filt?.array, userTurns = turn)
                             } catch (err: Exception) {
                                 if (hasEdits) throw err
                                 out.delete()
@@ -496,7 +712,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                         }
                     } else {
                         val bmp = img ?: throw Exception("Could not read that photo.")
-                        val edited = drawn.isNotEmpty() || wrote.isNotEmpty() || placed.isNotEmpty() || filt != null || turn != 0 || hdShot
+                        val edited = drawn.isNotEmpty() || wrote.isNotEmpty() || placed.isNotEmpty() || filt != null || turn != 0 || hdShot || box != null
                         if (!edited) {
                             MediaItem(pickedUri, false, 0, "", System.currentTimeMillis() / 1000, cap, once = onceShot)
                         } else {
@@ -541,17 +757,18 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
         val placed = stickers.toList()
         val filt = filterMatrix
         val turn = rotation
+        val box = cropBox?.takeIf { !it.isFull() }
         val hdShot = hd
         ScreenStore.appScope.launch {
             val ok =
                 runCatching {
                     if (pickedIsVideo && vSource != null) {
-                        val whole = s <= 0L && e >= vSource.durationMs
+                        val whole = s <= 0L && e >= vSource.durationMs && box == null
                         // Owner round 36 (item 6): the gallery gets the layers too.
                         val effRot = (vSource.rotation + (turn % 4) * 90) % 360
-                        val (ovW, ovH) = VideoPlan.outputSize(vSource.codedW, vSource.codedH, effRot, null)
-                        val overlay = bakeVideoOverlay(drawn, wrote, placed, ovW, ovH)
-                        val hasEdits = overlay != null || filt != null || turn != 0
+                        val (ovW, ovH) = VideoPlan.outputSize(vSource.codedW, vSource.codedH, effRot, box)
+                        val overlay = bakeVideoOverlay(drawn, wrote, placed, ovW, ovH, box)
+                        val hasEdits = overlay != null || filt != null || turn != 0 || box != null
                         val f =
                             if (whole && !hasEdits) {
                                 FilesUtil.copyDocument(ctx, pickedUri, "video.mp4")?.second
@@ -559,7 +776,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                             } else {
                                 java.io.File(ctx.cacheDir, "edit_${System.currentTimeMillis()}.mp4").also { out ->
                                     try {
-                                        VideoExport.export(ctx, pickedUri, s, e, null, out, overlay = overlay, colorMat = filt?.array, userTurns = turn)
+                                        VideoExport.export(ctx, pickedUri, s, e, box, out, overlay = overlay, colorMat = filt?.array, userTurns = turn)
                                     } catch (err: Exception) {
                                         if (hasEdits) throw err
                                         out.delete()
@@ -609,7 +826,8 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
             Modifier
                 .fillMaxSize()
                 .then(
-                    if (penMode) {
+                    if (cropping) Modifier
+                    else if (penMode) {
                         Modifier.pointerInput(penColor, penWidth) {
                             detectDragGestures(
                                 onDragStart = { pos ->
@@ -744,9 +962,12 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                     !ready -> CircularProgressIndicator(color = ActionBlue)
                     else -> {
                         Box(Modifier.aspectRatio(mediaAspect.coerceIn(0.3f, 3.5f))) {
-                            if (shot != null) {
+                            // While the box is open the stage shows the FULL
+                            // frame (photo) — the crop commits on exit.
+                            val stageShot = if (cropping) shotFull else shot
+                            if (stageShot != null) {
                                 Image(
-                                    shot,
+                                    stageShot,
                                     contentDescription = "Photo",
                                     modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Fit,
@@ -764,6 +985,23 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                                     Image(still, "Edited frame", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
                                 }
                                 StageCanvas()
+                            }
+                            if (cropping) {
+                                CropOverlay(
+                                    box = cropDraft,
+                                    lock =
+                                        when (cropPreset) {
+                                            "9:16" -> 9f / 16f
+                                            "1:1" -> 1f
+                                            else -> null
+                                        },
+                                    boxAspect = cropFullAspect,
+                                    onChange = {
+                                        cropDraft = it
+                                        cropTouched = true
+                                        if (cropPreset == "Original") cropPreset = "Free"
+                                    },
+                                )
                             }
                         }
                     }
@@ -793,7 +1031,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                     .padding(horizontal = 4.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = { nav.popBackStack() }, modifier = Modifier.size(36.dp)) {
+                IconButton(onClick = { if (cropping) exitCrop() else nav.popBackStack() }, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.Filled.Close, "Close", tint = Color.White, modifier = Modifier.size(20.dp))
                 }
                 if (clip != null) {
@@ -826,13 +1064,27 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                 ToolButton(onClick = { rotateTap() }) {
                     Icon(Icons.Filled.RotateRight, "Rotate", tint = Color.White, modifier = Modifier.size(18.dp))
                 }
-                ToolButton(onClick = { showStickerSheet = true }) {
+                // Owner round 37 (item 2): the crop tool (photo + video) —
+                // the share screen's box + presets, on this one screen.
+                ToolButton(active = cropping, onClick = { if (cropping) exitCrop() else enterCrop() }) {
+                    Icon(Icons.Filled.Crop, "Crop", tint = Color.White, modifier = Modifier.size(18.dp))
+                }
+                ToolButton(onClick = {
+                    exitCrop()
+                    showStickerSheet = true
+                }) {
                     Icon(Icons.Filled.EmojiEmotions, "Stickers", tint = Color.White, modifier = Modifier.size(18.dp))
                 }
-                ToolButton(onClick = { showTextSheet = true }) {
+                ToolButton(onClick = {
+                    exitCrop()
+                    showTextSheet = true
+                }) {
                     Text("Aa", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 }
-                ToolButton(active = penMode, onClick = { penMode = !penMode }) {
+                ToolButton(active = penMode, onClick = {
+                    exitCrop()
+                    penMode = !penMode
+                }) {
                     Icon(Icons.Filled.Edit, "Draw", tint = Color.White, modifier = Modifier.size(18.dp))
                 }
                 if ((shot != null || clip != null) && (strokes.isNotEmpty() || overlayPast.isNotEmpty())) {
@@ -875,7 +1127,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                 /* swipe-up filters (photo only): the hint row + the thumb strip */
                 // Owner round 36 (item 6): filters ride video too (the still
                 // below previews them — a TextureView takes no ColorFilter).
-                if (shot != null || clip != null) {
+                if ((shot != null || clip != null) && !cropping) {
                     var swipeTotal by remember { mutableStateOf(0f) }
                     Row(
                         Modifier
@@ -983,7 +1235,27 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                         }
                     }
                 }
-                if (clip != null) {
+                if (cropping) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                    ) {
+                        listOf("Original", "9:16", "1:1", "Free").forEach { name ->
+                            val on = cropPreset == name
+                            Text(
+                                name,
+                                color = if (on) ActionBlueInk else Color.White,
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(if (on) ActionBlue else Color(0x33FFFFFF))
+                                    .clickable { applyCropPreset(name) }
+                                    .padding(horizontal = 14.dp, vertical = 7.dp),
+                            )
+                        }
+                    }
+                } else if (clip != null) {
                     TrimStrip(
                         thumbs = thumbs,
                         durationMs = clip.durationMs,
@@ -1078,7 +1350,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                                     .background(ActionBlue)
                                     .clickable(enabled = !busy) {
                                         haptics.confirm()
-                                        send()
+                                        if (cropping) exitCrop() else send()
                                     },
                                 contentAlignment = Alignment.Center,
                             ) {
@@ -1487,12 +1759,19 @@ internal fun paintPenStrokes(canvas: android.graphics.Canvas, strokes: List<PenS
 
 /** Owner round 36 (item 6): the video export's overlay — pen + text +
  *  sticker baked transparent at the export's output size (null when empty). */
-internal fun bakeVideoOverlay(strokes: List<PenStroke>, texts: List<EditText>, stickers: List<EditSticker>, w: Int, h: Int): Bitmap? {
+internal fun bakeVideoOverlay(strokes: List<PenStroke>, texts: List<EditText>, stickers: List<EditSticker>, w: Int, h: Int, box: CropBox? = null): Bitmap? {
     if (strokes.isEmpty() && texts.isEmpty() && stickers.isEmpty()) return null
     val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
     val canvas = android.graphics.Canvas(bmp)
     val fw = w.toFloat()
     val fh = h.toFloat()
+    // Owner round 37 (item 2): the export frame IS the cropped region —
+    // remap the full-frame overlay coords into it (scale, then shift). The
+    // canvas clips the rest, exactly like the stage does.
+    box?.takeIf { !it.isFull() }?.let { b ->
+        canvas.scale(1f / b.w, 1f / b.h)
+        canvas.translate(-b.x * fw, -b.y * fh)
+    }
     stickers.forEach { st -> drawEditSticker(canvas, st, fw, fh) }
     texts.forEach { t -> drawEditText(canvas, t, fw, fh) }
     paintPenStrokes(canvas, strokes, fw, fh)

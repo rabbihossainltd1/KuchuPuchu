@@ -212,14 +212,6 @@ fun KpApp() {
                 // Owner round 31 (items 30/31): the app's own gallery picks the
                 // item, the share screen receives it as a route argument.
                 composable("statuspick") { StatusPickScreen(nav) }
-                composable("statusphoto/{arg}") { entry ->
-                    val picked = statusPickDecode(entry.arguments?.getString("arg") ?: "")
-                    if (picked == null) {
-                        LaunchedEffect(Unit) { nav.popBackStack() }
-                    } else {
-                        StatusPhotoScreen(nav, picked.first, picked.second)
-                    }
-                }
                 // Owner round 32 (item 19): the light media editor behind the
                 // attach panel's Edit (pen for a photo, trim for a video).
                 composable("mediaedit/{conv}/{once}/{arg}") { entry ->
