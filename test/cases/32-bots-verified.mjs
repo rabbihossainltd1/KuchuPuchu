@@ -7617,9 +7617,7 @@ const convBetween = (db, a, b) =>
         ) &&
         stripFn.includes("val headSmooth by animateFloatAsState(") &&
         stripFn.includes("targetValue = (positionMs ?: s).toFloat(),") &&
-        stripFn.includes(
-          "animationSpec = tween(durationMillis = 130, easing = LinearEasing),",
-        ) &&
+        stripFn.includes("animationSpec = tween(durationMillis = 130, easing = LinearEasing),") &&
         stripFn.includes(
           "drawLine(Color.White, Offset(px, 0f), Offset(px, size.height), strokeWidth = edge)",
         ) &&
