@@ -298,6 +298,33 @@ object FilesUtil {
         uri
     }.getOrNull()
 
+    /**
+     * Owner round 34 (item 16b): the edited clip into the gallery
+     * (Movies/KuchuPuchu) — the video half of [saveImage], streaming from
+     * the file so a long trim never sits whole in memory.
+     */
+    fun saveVideo(ctx: Context, file: File, displayName: String): Uri? = runCatching {
+        val safe = displayName.ifBlank { "kuchupuchu_${System.currentTimeMillis()}.mp4" }
+        val values =
+            ContentValues().apply {
+                put(MediaStore.Video.Media.DISPLAY_NAME, safe)
+                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                if (Build.VERSION.SDK_INT >= 29) {
+                    put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/KuchuPuchu")
+                    put(MediaStore.Video.Media.IS_PENDING, 1)
+                }
+            }
+        val uri =
+            ctx.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: return null
+        ctx.contentResolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out) } } ?: return null
+        if (Build.VERSION.SDK_INT >= 29) {
+            values.clear()
+            values.put(MediaStore.Video.Media.IS_PENDING, 0)
+            ctx.contentResolver.update(uri, values, null, null)
+        }
+        uri
+    }.getOrNull()
+
     /** Reads any picked document's bytes + guessed mime. */
     /**
      * Owner round 32 (item 34): a picked document is STREAMED into the app's

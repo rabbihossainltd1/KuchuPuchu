@@ -229,6 +229,15 @@ object ScreenStore {
      *  chat it was opened from — consumed (nulled) by that chat on arrival. */
     val pendingEdited = kotlinx.coroutines.flow.MutableStateFlow<EditedResult?>(null)
 
+    /** Owner round 34 (item 16b): the name on the editor's recipient chip —
+     *  set by the chat that opens the editor. */
+    var editTitle: String = ""
+
+    /** Owner round 34 (item 16b): the editor's + stages the current photo /
+     *  clip (edits baked in) as the batch's first item — the chat prepends
+     *  it to its attach selection and reopens the panel. */
+    val pendingAddMore = kotlinx.coroutines.flow.MutableStateFlow<AddMore?>(null)
+
     /** Bumped on FCM so an open chat refreshes immediately. */
     var poke by mutableStateOf(0)
     fun pokeInbox() {
@@ -731,3 +740,6 @@ fun callPeerId(call: JSONObject): String =
         call.optBoolean("incoming") -> call.optString("callerId")
         else -> call.optString("calleeId")
     }
+
+/** Owner round 34 (item 16b): one staged batch item from the editor's +. */
+data class AddMore(val convId: String, val item: MediaItem, val once: Boolean)

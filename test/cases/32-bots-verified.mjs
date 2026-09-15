@@ -2693,10 +2693,10 @@ const convBetween = (db, a, b) =>
       "r31-16: a photo/video/audio picked through Document is SENT and SHOWN as a document (meta.document), opening in the app's own viewer/player or playing inline",
       // r32-17: both signatures grew a trailing viewOnce flag.
       chat.includes(
-        "fun handleDocumentPicked(uri: Uri, asDocument: Boolean = false, viewOnce: Boolean = false, sendAt: java.time.Instant? = null)",
+        'fun handleDocumentPicked(uri: Uri, asDocument: Boolean = false, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "")',
       ) &&
         chat.includes(
-          "fun sendFile(name: String, mime: String, file: File, asDocument: Boolean = false, viewOnce: Boolean = false, sendAt: java.time.Instant? = null)",
+          'fun sendFile(name: String, mime: String, file: File, asDocument: Boolean = false, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "")',
         ) &&
         chat.includes('asDocument -> JSONObject().put("document", true)') &&
         chat.includes(
@@ -4044,7 +4044,7 @@ const convBetween = (db, a, b) =>
         // r32-17: a view-once batch is never an album.
         chat.includes("val album = if (photos >= 2 && !once) newAlbumId() else null") &&
         chat.includes(
-          "fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {",
+          'fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "") {',
         ) &&
         chat.includes('if (album != null) o.put("album", album)') &&
         chat.includes('.also { row -> metaWith(0, 0)?.let { row.put("meta", it) } }') &&
@@ -4711,7 +4711,7 @@ const convBetween = (db, a, b) =>
   const chat32 = kt("ChatScreen.kt");
   const sendImageBody = chat32.slice(
     chat32.indexOf(
-      "fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {",
+      'fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "") {',
     ),
     chat32.indexOf("fun sendFile(name: String, mime: String, file: File"),
   );
@@ -4722,7 +4722,7 @@ const convBetween = (db, a, b) =>
   const sendTextBody = chat32.slice(
     chat32.indexOf('fun sendText(body: String, kind: String = "TEXT") {'),
     chat32.indexOf(
-      "fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {",
+      'fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "") {',
     ),
   );
   check(
@@ -4748,11 +4748,11 @@ const convBetween = (db, a, b) =>
         chat32,
       ) &&
       chat32.includes(
-        "suspend fun readAndSendImage(uri: Uri, album: String?, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {",
+        'suspend fun readAndSendImage(uri: Uri, album: String?, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "", hd: Boolean = false) {',
       ) &&
       chat32.includes("scope.launch { readAndSendImage(uri, album) }") &&
       chat32.includes(
-        "if (item.isVideo) handleDocumentPicked(item.uri, sendAt = sendAt) else readAndSendImage(item.uri, album, sendAt = sendAt)",
+        "if (item.isVideo) handleDocumentPicked(item.uri, sendAt = sendAt, caption = item.caption) else readAndSendImage(item.uri, album, sendAt = sendAt, caption = item.caption, hd = item.hd)",
       ) &&
       // refresh's forced scroll + the AI reveal loop survive an interrupted scroll too
       chat32.includes(
@@ -6061,24 +6061,24 @@ const convBetween = (db, a, b) =>
         chat.includes("val once = attachOnce\n        attachOnce = false") &&
         chat.includes("val album = if (photos >= 2 && !once) newAlbumId() else null") &&
         chat.includes(
-          "if (item.isVideo) handleDocumentPicked(item.uri, viewOnce = true, sendAt = sendAt) else readAndSendImage(item.uri, null, viewOnce = true, sendAt = sendAt)",
+          "if (item.isVideo) handleDocumentPicked(item.uri, viewOnce = true, sendAt = sendAt, caption = item.caption) else readAndSendImage(item.uri, null, viewOnce = true, sendAt = sendAt, caption = item.caption, hd = item.hd)",
         ) &&
         chat.includes(
-          "fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {",
+          'fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "") {',
         ) &&
         chat.includes(
           'if (viewOnce) {\n                o.put("viewOnce", true)\n                return o\n            }',
         ) &&
         chat.includes('.also { row -> if (viewOnce) row.put("viewOnce", true) }') &&
         chat.includes(
-          "fun sendFile(name: String, mime: String, file: File, asDocument: Boolean = false, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {",
+          'fun sendFile(name: String, mime: String, file: File, asDocument: Boolean = false, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "") {',
         ) &&
         chat.includes('viewOnce -> JSONObject().put("viewOnce", true)') &&
         chat.includes(
-          "suspend fun readAndSendImage(uri: Uri, album: String?, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {",
+          'suspend fun readAndSendImage(uri: Uri, album: String?, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "", hd: Boolean = false) {',
         ) &&
         chat.includes(
-          "fun handleDocumentPicked(uri: Uri, asDocument: Boolean = false, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {",
+          'fun handleDocumentPicked(uri: Uri, asDocument: Boolean = false, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "") {',
         ),
     );
     const onceRow = chat.slice(
@@ -6347,10 +6347,10 @@ const convBetween = (db, a, b) =>
         chat.includes("                    sendAttachSelection(sendAt = at)") &&
         chat.includes("fun sendAttachSelection(sendAt: java.time.Instant? = null) {") &&
         chat.includes(
-          "if (item.isVideo) handleDocumentPicked(item.uri, viewOnce = true, sendAt = sendAt) else readAndSendImage(item.uri, null, viewOnce = true, sendAt = sendAt)",
+          "if (item.isVideo) handleDocumentPicked(item.uri, viewOnce = true, sendAt = sendAt, caption = item.caption) else readAndSendImage(item.uri, null, viewOnce = true, sendAt = sendAt, caption = item.caption, hd = item.hd)",
         ) &&
         chat.includes(
-          "if (item.isVideo) handleDocumentPicked(item.uri, sendAt = sendAt) else readAndSendImage(item.uri, album, sendAt = sendAt)",
+          "if (item.isVideo) handleDocumentPicked(item.uri, sendAt = sendAt, caption = item.caption) else readAndSendImage(item.uri, album, sendAt = sendAt, caption = item.caption, hd = item.hd)",
         ) &&
         (chat.match(/\.put\("sendAt", sendAt\.toString\(\)\)/g) || []).length === 2 &&
         chat.includes(
@@ -6367,7 +6367,7 @@ const convBetween = (db, a, b) =>
         app.includes('viewOnce = entry.arguments?.getString("once") == "1",'),
     );
     check(
-      "r32-19: MediaEditScreen — own screen (black stage, media at its own aspect): a photo gets a pen (6 colours, 3 widths, undo, clear; strokes in normalised picture units, baked by bakePen at the picture's own resolution into a ≤380K JPEG data URL); a video gets the shared TrimStrip with NO minute cap (maxMs = Long.MAX_VALUE) + the loop preview; Send hands an EditedResult back via ScreenStore.pendingEdited (Photo / Video / Untouched / Failed) and the chat sends it like any pick, view-once kept",
+      "r32-19: MediaEditScreen — own screen (black stage, media at its own aspect): a photo gets a pen (6 colours, 3 widths, undo, clear; strokes in normalised picture units, baked at the picture's own resolution into a JPEG data URL (standard ≤380K, HD ≤1.2MB)); a video gets the shared TrimStrip with NO minute cap (maxMs = Long.MAX_VALUE) + the loop preview; Send hands an EditedResult back via ScreenStore.pendingEdited (Photo / Video / Untouched / Failed) and the chat sends it like any pick, view-once kept",
       edit.includes(
         "fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, convId: String, viewOnce: Boolean) {",
       ) &&
@@ -6381,7 +6381,7 @@ const convBetween = (db, a, b) =>
           "internal fun bakePen(bmp: ImageBitmap, strokes: List<PenStroke>): String? =",
         ) &&
         edit.includes("paint.strokeWidth = st.width * w") &&
-        edit.includes("if (bytes.size <= 380_000 * 3 / 4 || quality <= 45) break") &&
+        edit.includes("if (bytes.size <= budget || quality <= minQuality) break") &&
         edit.includes("strokes.removeAt(strokes.size - 1)") &&
         edit.includes("Icons.AutoMirrored.Filled.Undo") &&
         edit.includes("maxMs = Long.MAX_VALUE,") &&
@@ -6390,9 +6390,11 @@ const convBetween = (db, a, b) =>
         ) &&
         edit.includes("VideoExport.export(ctx, pickedUri, s, e, null, out)") &&
         edit.includes("VideoExport.passthrough(ctx, pickedUri, s, e, out)") &&
-        edit.includes("ScreenStore.pendingEdited.value = EditedResult(convId, viewOnce, result)") &&
         edit.includes(
-          "data class EditedResult(val convId: String, val viewOnce: Boolean, val media: EditedMedia)",
+          "ScreenStore.pendingEdited.value = EditedResult(convId, once, result, cap)",
+        ) &&
+        edit.includes(
+          'data class EditedResult(val convId: String, val viewOnce: Boolean, val media: EditedMedia, val caption: String = "")',
         ) &&
         [
           "Photo(val dataUrl: String)",
@@ -6407,9 +6409,11 @@ const convBetween = (db, a, b) =>
         ) &&
         chat.includes("ScreenStore.pendingEdited.collect { edited ->") &&
         chat.includes("if (edited == null || edited.convId != convId) return@collect") &&
-        chat.includes("is EditedMedia.Photo -> sendImage(m.dataUrl, null, edited.viewOnce)") &&
         chat.includes(
-          'is EditedMedia.Video -> sendFile("video.mp4", m.mime, m.file, viewOnce = edited.viewOnce)',
+          "is EditedMedia.Photo -> sendImage(m.dataUrl, null, edited.viewOnce, caption = edited.caption)",
+        ) &&
+        chat.includes(
+          'is EditedMedia.Video -> sendFile("video.mp4", m.mime, m.file, viewOnce = edited.viewOnce, caption = edited.caption)',
         ) &&
         chat.includes("is EditedMedia.Failed -> error = m.message") &&
         // the shared pieces: TrimStrip / StatusTrimPreview are internal, the cap is a parameter
@@ -6422,6 +6426,59 @@ const convBetween = (db, a, b) =>
         plan.includes(
           "fun moveEnd(start: Long, end: Long, durationMs: Long, newEnd: Long, maxMs: Long = MAX_STATUS_MS): Pair<Long, Long> {",
         ),
+    );
+  }
+  // r34-16b: the attach editor goes full WhatsApp — a lone grid tap opens
+  // it; close · save · HD · rotate · sticker · text · pen on top, swipe-up
+  // filters, the caption bar (+, caption, the editor-owned ①), the recipient
+  // chip + green send; captions ride the send path and render under bubbles.
+  {
+    const chat = kt("ChatScreen.kt");
+    const attach = kt("AttachSheet.kt");
+    const edit = kt("MediaEditScreen.kt");
+    const store = kt("ScreenStore.kt");
+    const files = kt("Files.kt");
+    check(
+      "r34-16b: editor screen — top bar (save, HD pill, rotate, sticker, Aa, pen), swipe-up filter strip (preview + bake share one ColorMatrix), caption bar (add-more, caption field, ViewOnceOneIcon toggle), recipient chip + green send; rotate carries the normalised overlays, HD bakes bigger, no dialogs / toasts",
+      edit.includes("Icons.Filled.Download") &&
+        edit.includes('Text("HD", color = if (hd) Color.Black else Color.White') &&
+        edit.includes("Icons.Filled.RotateRight") &&
+        edit.includes("Icons.Filled.EmojiEmotions") &&
+        edit.includes('Text("Aa", color = Color.White') &&
+        edit.includes("Icons.Filled.Edit") &&
+        edit.includes("ViewOnceOneIcon(20.dp") &&
+        edit.includes("Swipe up for filters") &&
+        edit.includes("ColorMatrix(filterMatrix.array)") &&
+        edit.includes("Add a caption...") &&
+        edit.includes("ScreenStore.editTitle") &&
+        edit.includes(".background(Green)") &&
+        edit.includes("rotation = (rotation + 1) % 4") &&
+        edit.includes("Stickers.packs") &&
+        edit.includes("KpSheet(onDismiss = { showTextSheet = false }") &&
+        edit.includes("KpSheet(onDismiss = { showStickerSheet = false }") &&
+        edit.includes("FilesUtil.saveImage(ctx, bytes") &&
+        edit.includes("FilesUtil.saveVideo(ctx, f") &&
+        files.includes("fun saveVideo(ctx: Context, file: File, displayName: String): Uri?") &&
+        !edit.includes("AlertDialog") &&
+        !edit.includes("Toast"),
+    );
+    check(
+      "r34-16b: editor flow + captions — a lone grid tap opens the editor, + stages the baked pick first (AddMore) and reopens the panel, the result carries the caption, MediaItem / the send path / forwards keep it, captioned rows render it",
+      attach.includes("} else if (sel.isEmpty()) onEdit(item) else sel.add(item)") &&
+        attach.includes('val caption: String = "",') &&
+        attach.includes("val hd: Boolean = false,") &&
+        store.includes(
+          "val pendingAddMore = kotlinx.coroutines.flow.MutableStateFlow<AddMore?>(null)",
+        ) &&
+        store.includes(
+          "data class AddMore(val convId: String, val item: MediaItem, val once: Boolean)",
+        ) &&
+        chat.includes("ScreenStore.pendingAddMore.collect { more ->") &&
+        chat.includes("ScreenStore.editTitle.value = title") &&
+        (chat.match(/\.put\("body", caption\)/g) || []).length === 6 &&
+        chat.includes('MediaCaption(m.optText("body"), mine)') &&
+        chat.includes("MediaCaption(albumCaption, mine)") &&
+        (chat.match(/\.put\("body", m\.optText\("body"\)\)/g) || []).length >= 3,
     );
   }
   // r32-40: haptics polish — a five-verb vocabulary (tap / confirm / heavy /
@@ -6780,7 +6837,7 @@ const convBetween = (db, a, b) =>
     );
     const sendImage33 = chat33.slice(
       chat33.indexOf(
-        "fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {",
+        'fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "") {',
       ),
       chat33.indexOf("fun sendFile(name: String, mime: String, file: File"),
     );
@@ -6860,7 +6917,8 @@ const convBetween = (db, a, b) =>
         !sendVoice33.includes("Api.post(") &&
         // sendAt (scheduled) paths still post directly — they are not optimistic bubbles
         (sendImage33.match(/Api\.post\(/g) || []).length === 1 &&
-        (chat33.match(/outcome\.onSuccess \{ row -> paintSent\(row\) \}/g) || []).length === 4,
+        // r34-16b: sendFile grew a captioned arm (the same callback on both arms).
+        (chat33.match(/outcome\.onSuccess \{ row -> paintSent\(row\) \}/g) || []).length === 5,
     );
   }
   // r33 item 2: auto-scroll to the new thing everywhere. Keyed LazyColumns

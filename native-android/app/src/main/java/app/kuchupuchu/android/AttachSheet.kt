@@ -100,6 +100,10 @@ data class MediaItem(
     val durationMs: Long,
     val bucket: String,
     val added: Long,
+    // Owner round 34 (item 16b): the caption typed in the editor + whether
+    // the pick goes out HD — set when the editor's + stages the item.
+    val caption: String = "",
+    val hd: Boolean = false,
 )
 
 private data class AttachAction(
@@ -112,7 +116,8 @@ private data class AttachAction(
 /**
  * Attach panel — WhatsApp-exact: sits UNDER the message bar (the bar stays
  * on top of it), normally NOT fullscreen; tapping the handle or swiping it
- * up is the ONLY way it goes fullscreen. Grid taps SELECT (multi-select
+ * up is the ONLY way it goes fullscreen. A lone grid tap opens the pick in
+ * the editor; taps ADD once the editor's + staged a first item (multi-select
  * with numbered badges); a send button appears once something is picked.
  * The chevron next to "Recent" opens device FOLDERS (Camera, Screenshots…).
  */
@@ -636,7 +641,10 @@ fun AttachPanel(
                         selectIndex = if (pos >= 0) pos + 1 else 0,
                         onToggle = {
                             haptics.tap()
-                            if (pos >= 0) sel.removeAll { it.uri == item.uri } else sel.add(item)
+                            // Owner round 34 (item 16b): a lone tap opens the
+                            // pick in the editor; taps ADD once the editor's
+                            // + staged a first item (WhatsApp behavior).
+                            if (pos >= 0) sel.removeAll { it.uri == item.uri } else if (sel.isEmpty()) onEdit(item) else sel.add(item)
                         },
                     )
                 }
@@ -711,7 +719,7 @@ internal fun loadMediaPool(ctx: android.content.Context): List<MediaItem> {
     return out.sortedByDescending { it.added }
 }
 
-/** Grid cell: SELECT toggles (never sends), thumbnail decodes off-thread.
+/** Grid cell: taps report through onToggle (never sends), thumbnail decodes off-thread.
  *  Owner round 31 (item 31): also the status picker's cell (selectIndex 0 = plain tick). */
 @Composable
 internal fun MediaCell(

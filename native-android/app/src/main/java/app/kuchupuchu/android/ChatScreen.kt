@@ -1142,7 +1142,7 @@ fun ChatScreen(nav: NavController, convId: String) {
     // Owner round 32 (item 18): this chat's parked "send later" rows.
     LaunchedEffect(convId) { loadScheduled() }
 
-    fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {
+    fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "") {
         // Owner round 32 (item 19): a photo picked for LATER uploads now and
         // parks on the server (item 18) — no bubble, the clock chip shows it.
         if (sendAt != null) {
@@ -1165,6 +1165,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             .put("fileName", "photo.jpg")
                             .put("fileType", "image/jpeg")
                             .put("fileSize", jpeg.size)
+                            .put("body", caption)
                             .put("clientId", "c_${java.util.UUID.randomUUID()}")
                             .put("sendAt", sendAt.toString())
                     val meta = JSONObject()
@@ -1205,7 +1206,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .put("clientId", clientId)
                 .put("senderId", Store.myId())
                 .put("kind", "IMAGE")
-                .put("body", "")
+                .put("body", caption)
                 .put("hasImage", true)
                 .put("fileName", "photo.jpg")
                 .put("fileType", "image/jpeg")
@@ -1267,6 +1268,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     .put("fileName", "photo.jpg")
                     .put("fileType", "image/jpeg")
                     .put("fileSize", jpeg.size)
+                    .put("body", caption)
                     .put("clientId", clientId)
             metaWith(shotW, shotH)?.let { payload.put("meta", it) }
             Uploads.sendPhoto(ctx, convId, clientId, jpeg, payload) { outcome ->
@@ -1284,7 +1286,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
-    fun sendFile(name: String, mime: String, file: File, asDocument: Boolean = false, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {
+    fun sendFile(name: String, mime: String, file: File, asDocument: Boolean = false, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "") {
         // Owner round 32 (item 34): the server's 25 MB cap is checked HERE — a
         // bigger file used to upload for minutes and then fail on that check.
         if (file.length() > VideoPlan.UPLOAD_LIMIT) {
@@ -1306,6 +1308,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             .put("fileName", name)
                             .put("fileType", mime)
                             .put("fileSize", file.length())
+                            .put("body", caption)
                             .put("clientId", "c_${java.util.UUID.randomUUID()}")
                             .put("sendAt", sendAt.toString())
                     when {
@@ -1347,6 +1350,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .put("fileName", name)
                 .put("fileType", mime)
                 .put("fileSize", file.length().toInt())
+                .put("body", caption)
                 // Kept for tap-to-retry after a failed send (the cached copy is
                 // only deleted once the send succeeds) — like voicePath.
                 .put("docPath", file.absolutePath)
@@ -1363,19 +1367,53 @@ fun ChatScreen(nav: NavController, convId: String) {
         // Owner round 33 (item 3): queue-first — the copy is already on disk
         // (docPath), so the queue itself can upload it later when the send
         // was started offline; the outcome is painted here while alive.
-        Uploads.sendFile(convId, clientId, name, mime, file, docMeta) { outcome ->
-            outcome.onSuccess { runCatching { KpSounds.sent(ctx) } }
-            if (!alive.get()) return@sendFile false
-            outcome.onSuccess { row -> paintSent(row) }
-            outcome.onFailure { failure ->
-                // Before this the optimistic bubble stayed on screen forever
-                // looking like it was still uploading: the POST never happened,
-                // so no message with this clientId ever came back to match it.
-                markPendingFailed(clientId)
-                error = (failure.message ?: "Could not send file.") + "  Tap the banner to retry."
-                reconcileRefused()
+        // Owner round 34 (item 16b): a captioned clip carries its caption in
+        // the payload (the queue posts it as-is); anything else keeps the
+        // default body.
+        val captionPayload =
+            if (caption.isBlank()) {
+                null
+            } else {
+                JSONObject()
+                    .put("kind", "FILE")
+                    .put("fileName", name)
+                    .put("fileType", mime)
+                    .put("fileSize", file.length())
+                    .put("body", caption)
+                    .put("clientId", clientId)
+                    .also { if (docMeta != null) it.put("meta", docMeta) }
             }
-            true
+        // The outcome callback is the same on both arms — only the body differs.
+        if (captionPayload == null) {
+            Uploads.sendFile(convId, clientId, name, mime, file, docMeta) { outcome ->
+                outcome.onSuccess { runCatching { KpSounds.sent(ctx) } }
+                if (!alive.get()) return@sendFile false
+                outcome.onSuccess { row -> paintSent(row) }
+                outcome.onFailure { failure ->
+                    // Before this the optimistic bubble stayed on screen forever
+                    // looking like it was still uploading: the POST never happened,
+                    // so no message with this clientId ever came back to match it.
+                    markPendingFailed(clientId)
+                    error = (failure.message ?: "Could not send file.") + "  Tap the banner to retry."
+                    reconcileRefused()
+                }
+                true
+            }
+        } else {
+            Uploads.sendFile(convId, clientId, name, mime, file, docMeta, captionPayload) { outcome ->
+                outcome.onSuccess { runCatching { KpSounds.sent(ctx) } }
+                if (!alive.get()) return@sendFile false
+                outcome.onSuccess { row -> paintSent(row) }
+                outcome.onFailure { failure ->
+                    // Before this the optimistic bubble stayed on screen forever
+                    // looking like it was still uploading: the POST never happened,
+                    // so no message with this clientId ever came back to match it.
+                    markPendingFailed(clientId)
+                    error = (failure.message ?: "Could not send file.") + "  Tap the banner to retry."
+                    reconcileRefused()
+                }
+                true
+            }
         }
     }
 
@@ -1444,16 +1482,26 @@ fun ChatScreen(nav: NavController, convId: String) {
        run on the *chat* screen's scope instead, which lives as long as the
        chat is open, so gallery / camera / document / audio / contact /
        location all survive the sheet closing. */
-    suspend fun readAndSendImage(uri: Uri, album: String?, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {
+    suspend fun readAndSendImage(uri: Uri, album: String?, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "", hd: Boolean = false) {
         // 720px / ~100KB: the old 960px/220KB photos took minutes to send AND load
         // on slow mobile data (the "image loads forever" report).
         // High-quality photos: 1440px, ~380KB inline budget (server caps at 450K).
-        val dataUrl = withContext(Dispatchers.IO) { FilesUtil.imageToDataUrl(uri, ctx, maxSide = 1440, maxChars = 380_000) }
+        // Owner round 34 (item 16b): HD caps for an HD pick (the editor's
+        // switch); the standard caps stay the fast default.
+        val dataUrl =
+            withContext(Dispatchers.IO) {
+                FilesUtil.imageToDataUrl(
+                    uri,
+                    ctx,
+                    maxSide = if (hd) 2560 else 1440,
+                    maxChars = if (hd) 1_600_000 else 380_000,
+                )
+            }
         if (dataUrl == null) {
             error = "Could not read that photo — try another one."
         } else {
             error = ""
-            sendImage(dataUrl, album, viewOnce, sendAt)
+            sendImage(dataUrl, album, viewOnce, sendAt, caption)
         }
     }
 
@@ -1461,7 +1509,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         scope.launch { readAndSendImage(uri, album) }
     }
 
-    fun handleDocumentPicked(uri: Uri, asDocument: Boolean = false, viewOnce: Boolean = false, sendAt: java.time.Instant? = null) {
+    fun handleDocumentPicked(uri: Uri, asDocument: Boolean = false, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "") {
         scope.launch {
             val name = withContext(Dispatchers.IO) { queryName(ctx, uri) }
             // Owner round 32 (item 34): streamed into the cache, never read
@@ -1478,7 +1526,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 return@launch
             }
             error = ""
-            sendFile(name, mime, file, asDocument, viewOnce, sendAt)
+            sendFile(name, mime, file, asDocument, viewOnce, sendAt, caption)
         }
     }
     // Owner round 32 (item 19): the media editor hands its result back here —
@@ -1488,13 +1536,24 @@ fun ChatScreen(nav: NavController, convId: String) {
             if (edited == null || edited.convId != convId) return@collect
             ScreenStore.pendingEdited.value = null
             when (val m = edited.media) {
-                is EditedMedia.Photo -> sendImage(m.dataUrl, null, edited.viewOnce)
-                is EditedMedia.Video -> sendFile("video.mp4", m.mime, m.file, viewOnce = edited.viewOnce)
+                is EditedMedia.Photo -> sendImage(m.dataUrl, null, edited.viewOnce, caption = edited.caption)
+                is EditedMedia.Video -> sendFile("video.mp4", m.mime, m.file, viewOnce = edited.viewOnce, caption = edited.caption)
                 is EditedMedia.Untouched ->
-                    if (m.isVideo) handleDocumentPicked(m.uri, viewOnce = edited.viewOnce)
-                    else readAndSendImage(m.uri, null, viewOnce = edited.viewOnce)
+                    if (m.isVideo) handleDocumentPicked(m.uri, viewOnce = edited.viewOnce, caption = edited.caption)
+                    else readAndSendImage(m.uri, null, viewOnce = edited.viewOnce, caption = edited.caption)
                 is EditedMedia.Failed -> error = m.message
             }
+        }
+    }
+    // Owner round 34 (item 16b): the editor's + staged the current pick as
+    // the batch's first item — prepend it and reopen the panel for more.
+    LaunchedEffect(convId) {
+        ScreenStore.pendingAddMore.collect { more ->
+            if (more == null || more.convId != convId) return@collect
+            ScreenStore.pendingAddMore.value = null
+            attachSel.add(0, more.item)
+            attachOnce = more.once
+            showAttach = true
         }
     }
 
@@ -1519,9 +1578,9 @@ fun ChatScreen(nav: NavController, convId: String) {
             // own coroutine inside sendImage, so they overlap on the wire.
             batch.forEach { item ->
                 if (once) {
-                    if (item.isVideo) handleDocumentPicked(item.uri, viewOnce = true, sendAt = sendAt) else readAndSendImage(item.uri, null, viewOnce = true, sendAt = sendAt)
+                    if (item.isVideo) handleDocumentPicked(item.uri, viewOnce = true, sendAt = sendAt, caption = item.caption) else readAndSendImage(item.uri, null, viewOnce = true, sendAt = sendAt, caption = item.caption, hd = item.hd)
                 } else {
-                    if (item.isVideo) handleDocumentPicked(item.uri, sendAt = sendAt) else readAndSendImage(item.uri, album, sendAt = sendAt)
+                    if (item.isVideo) handleDocumentPicked(item.uri, sendAt = sendAt, caption = item.caption) else readAndSendImage(item.uri, album, sendAt = sendAt, caption = item.caption, hd = item.hd)
                 }
             }
         }
@@ -2928,6 +2987,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 onScheduleBatch = { showScheduleMedia = true },
                 onEdit = { item ->
                     val once = attachOnce
+                    ScreenStore.editTitle.value = title
                     attachSel.clear()
                     attachOnce = false
                     showAttach = false
@@ -5225,6 +5285,7 @@ private fun VideoMessageRow(
                 }
             }
         }
+        MediaCaption(m.optText("body"), mine)
         MessageReactions(m)
         }
     }
@@ -5594,6 +5655,7 @@ private fun ImageMessageRow(
                 }
             }
         }
+        MediaCaption(m.optText("body"), mine)
         MessageReactions(m)
         }
     }
@@ -5620,6 +5682,7 @@ internal suspend fun forwardMessageTo(targetConvId: String, m: JSONObject, album
                         .put("fileName", m.optText("fileName").ifBlank { "File" })
                         .put("fileType", m.optText("fileType").ifBlank { "application/octet-stream" })
                         .put("fileSize", m.optInt("fileSize"))
+                        .put("body", m.optText("body"))
                         // Owner round 31 (item 27): a forwarded voice note
                         // stays a voice note — duration + bars come along.
                         .also { body ->
@@ -5643,6 +5706,7 @@ internal suspend fun forwardMessageTo(targetConvId: String, m: JSONObject, album
                     JSONObject()
                         .put("kind", "IMAGE")
                         .put("imageData", m.optText("mediaUrl"))
+                        .put("body", m.optText("body"))
                         .also { body -> albumMeta?.let { body.put("meta", it) } },
                 )
             m.optText("mediaUrl").isNotBlank() -> {
@@ -5658,6 +5722,7 @@ internal suspend fun forwardMessageTo(targetConvId: String, m: JSONObject, album
                         .put("fileName", m.optText("fileName").ifBlank { "photo.jpg" })
                         .put("fileType", "image/jpeg")
                         .put("fileSize", bytes.size)
+                        .put("body", m.optText("body"))
                         .also { body -> albumMeta?.let { body.put("meta", it) } },
                 )
             }
@@ -5917,6 +5982,8 @@ private fun AlbumMessageRow(
                     }
                 }
             }
+            val albumCaption = photos.map { it.optText("body") }.firstOrNull { it.isNotBlank() }.orEmpty()
+            MediaCaption(albumCaption, mine)
             MessageReactions(m)
         }
     }
@@ -6207,6 +6274,21 @@ object Uploads {
     }
 }
 
+/**
+ * Owner round 34 (item 16b): the words under a captioned photo / video /
+ * album — the body the editor's caption bar stored.
+ */
+@Composable
+private fun MediaCaption(body: String, mine: Boolean) {
+    if (body.isBlank()) return
+    Text(
+        body,
+        color = Ink,
+        fontSize = 13.5.sp,
+        modifier = Modifier.padding(top = 5.dp, start = 2.dp, end = 2.dp).widthIn(max = 240.dp),
+    )
+}
+
 @Composable
 private fun ImageBubble(m: JSONObject, mine: Boolean) {
     // Photos arrive two ways: kind=IMAGE carries mediaUrl (/api/messages/:id/media
@@ -6354,7 +6436,7 @@ private fun FileBubble(
     val isImage = fileType.startsWith("image") || fileName.endsWith(".jpg") || fileName.endsWith(".jpeg") || fileName.endsWith(".png")
     if (isImage && !asDocument) {
         val url = if (fileKey.isNotBlank()) "/api/files/$fileKey" else m.optString("mediaUrl")
-        ImageBubble(JSONObject().put("mediaUrl", url), mine)
+        ImageBubble(JSONObject().put("mediaUrl", url).put("body", m.optText("body")), mine)
         return
     }
     val isVoice = !asDocument && fileLooksVoice(m)
