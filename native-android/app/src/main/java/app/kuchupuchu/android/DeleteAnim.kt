@@ -2,6 +2,7 @@ package app.kuchupuchu.android
 
 import android.graphics.Bitmap
 import android.view.PixelCopy
+import androidx.annotation.RequiresApi
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -132,6 +133,7 @@ internal object DeleteAnim {
     }
 
     /** GPU-side window shot: hardware bitmaps included, null on any refusal. */
+    @RequiresApi(android.os.Build.VERSION_CODES.O)
     private suspend fun pixelCopy(): Bitmap? {
         val win = MainActivity.current?.window ?: return null
         val w = win.decorView.width
