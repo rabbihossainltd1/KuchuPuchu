@@ -1,6 +1,7 @@
 package app.kuchupuchu.android
 
 import android.graphics.Bitmap
+import android.view.PixelCopy
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -33,9 +34,11 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.core.view.drawToBitmap
+import kotlin.coroutines.resume
 import kotlin.math.exp
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.suspendCancellableCoroutine
 import org.json.JSONObject
 
 /* Owner round 34 (delete animation): a deleted message explodes into dust.
@@ -69,7 +72,13 @@ internal object DeleteAnim {
     const val SAFETY_MS = 2100L
     const val COLLAPSE_MS = 220
     const val PRE_MS = 120L
-    const val GRACE_MS = 2600L
+    // Owner round 35 (item 1): the hold past which NO delete path may drop
+    // a vanishing row. Budget: PRE 120 + capture <= 500 (full-window shot
+    // on a slow phone) + SAFETY 2100 (the sim's wall-clock cap) + COLLAPSE
+    // 220 = 2940 worst case, +260 margin. The old 2600 sat INSIDE the worst
+    // case, so heavy rows (photos: full particle field, slowest draw) were
+    // yanked mid-dust on ordinary phones.
+    const val GRACE_MS = 3200L
     const val MAX_W = 360
     const val BLOCK = 2
     const val EXTRA = 14f
@@ -83,15 +92,26 @@ internal object DeleteAnim {
 
     /** Screen capture cropped to the bubble, downscaled to the sim budget.
      *  The full-screen shot is shared across rows deleted in one burst;
-     *  every crop is an independent copy (subset bitmaps share pixels). */
-    fun capture(bubble: Rect): Bitmap? {
+     *  every crop is an independent copy (subset bitmaps share pixels).
+     *
+     *  Owner round 35 (item 1): API 26+ goes through PixelCopy, NOT
+     *  drawToBitmap — chat photos are coil HARDWARE bitmaps, and drawing
+     *  one into drawToBitmap's software canvas throws, so every solo photo
+     *  delete silently fell back to the shrink. Below 26 hardware bitmaps
+     *  do not exist, so the old path stays. */
+    suspend fun capture(bubble: Rect): Bitmap? {
         return try {
             if (bubble.width < 4f || bubble.height < 4f) return null
             val decor = MainActivity.current?.window?.decorView ?: return null
             val now = android.os.SystemClock.uptimeMillis()
             var full = sharedFull
             if (full == null || full.isRecycled || now - sharedAt > 300) {
-                full = decor.drawToBitmap()
+                full =
+                    if (android.os.Build.VERSION.SDK_INT >= 26) {
+                        pixelCopy() ?: return null
+                    } else {
+                        decor.drawToBitmap()
+                    }
                 sharedFull = full
                 sharedAt = now
             }
@@ -109,6 +129,33 @@ internal object DeleteAnim {
         } catch (e: Exception) {
             null
         }
+    }
+
+    /** GPU-side window shot: hardware bitmaps included, null on any refusal. */
+    private suspend fun pixelCopy(): Bitmap? {
+        val win = MainActivity.current?.window ?: return null
+        val w = win.decorView.width
+        val h = win.decorView.height
+        if (w <= 0 || h <= 0) return null
+        val dest = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val ok =
+            try {
+                suspendCancellableCoroutine { cont ->
+                    PixelCopy.request(
+                        win,
+                        dest,
+                        { res -> cont.resume(res == PixelCopy.SUCCESS) },
+                        android.os.Handler(android.os.Looper.getMainLooper()),
+                    )
+                }
+            } catch (e: Exception) {
+                false
+            }
+        if (!ok) {
+            runCatching { dest.recycle() }
+            return null
+        }
+        return dest
     }
 }
 

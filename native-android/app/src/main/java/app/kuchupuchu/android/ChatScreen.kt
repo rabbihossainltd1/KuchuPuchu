@@ -440,9 +440,11 @@ fun ChatScreen(nav: NavController, convId: String) {
             return
         }
         // Owner round 34 (item 3): rows mid-vanish (my delete) and rows the
-        // PEER just deleted hold their place for the 180 ms shrink instead
+        // PEER just deleted hold their place for the whole dust show instead
         // of popping instantly — a poll tick landing mid-animation used to
         // drop them early, and peer-deletes never animated at all.
+        // Owner round 35 (item 1): the hold IS the GRACE_MS window — sized
+        // past the worst-case show (see DeleteAnim), never under it.
         val hold = oldIds.filter { it.isNotBlank() && it !in newIds && it !in ScreenStore.hiddenMsgIds && (it in vanishingIds || it !in vanishedOnce) }
         if (hold.isNotEmpty()) {
             val fresh = hold.filter { it !in vanishingIds }
@@ -2395,7 +2397,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                         tween(if (flashing) 180 else 700),
                         label = "quoteflash",
                     )
-                    Box(Modifier.fillMaxWidth()) {
+                    // Owner round 35 (item 1): when a row leaves, the
+                    // survivors glide into its place instead of jumping.
+                    Box(Modifier.fillMaxWidth().animateItem()) {
                         DeleteRowShell(
                             m = m,
                             rowKey = rowKey,

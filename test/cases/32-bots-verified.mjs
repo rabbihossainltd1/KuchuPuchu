@@ -8345,7 +8345,7 @@ const convBetween = (db, a, b) =>
         ui.includes("t.snapTo(1f)") &&
         (chat.match(/DeleteGeoms\.put\(m, it\.boundsInWindow\(\)\)/g) || []).length === 5 &&
         kt("DeleteAnim.kt").includes("const val SWEEP_MS = 1200") &&
-        kt("DeleteAnim.kt").includes("const val GRACE_MS = 2600L") &&
+        kt("DeleteAnim.kt").includes("const val GRACE_MS = 3200L") &&
         kt("DeleteAnim.kt").includes("const val COLLAPSE_MS = 220") &&
         kt("DeleteAnim.kt").includes("fun DeleteRowShell(") &&
         kt("DeleteAnim.kt").includes("fun DestroyCanvas(shot: DeleteShot, onDone: () -> Unit)") &&
@@ -8353,6 +8353,14 @@ const convBetween = (db, a, b) =>
         kt("DeleteAnim.kt").includes("DeleteParticle(") &&
         kt("DeleteAnim.kt").includes("exp(-dist / DeleteAnim.CURVE_W)") &&
         kt("DeleteAnim.kt").includes("if (tick == -1) return@Canvas"),
+    );
+    check(
+      "r35-1: deletes play to the end on every content — PixelCopy capture on API 26+ (drawToBitmap throws on coil hardware photos, which silently shrank every solo photo delete), grace sized past the worst-case show (PRE + capture + SAFETY + COLLAPSE) — and surviving rows glide into the gap (animateItem on thread rows)",
+      kt("DeleteAnim.kt").includes("const val GRACE_MS = 3200L") &&
+        kt("DeleteAnim.kt").includes("suspend fun capture(bubble: Rect)") &&
+        kt("DeleteAnim.kt").includes("PixelCopy.request(") &&
+        kt("DeleteAnim.kt").includes("drawToBitmap()") &&
+        chat.includes("Box(Modifier.fillMaxWidth().animateItem()) {"),
     );
     {
       const st = kt("StatusScreens.kt");
