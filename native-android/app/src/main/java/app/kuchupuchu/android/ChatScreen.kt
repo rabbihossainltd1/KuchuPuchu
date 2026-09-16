@@ -2,6 +2,7 @@ package app.kuchupuchu.android
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -4329,7 +4330,18 @@ private fun Modifier.animatedImePadding(): Modifier {
             }
         }
     }
-    val glided by animateIntAsState(targetPx, tween(280), label = "imeglide")
+    // Owner round 45 (item 3): tween(280) restarts on every frame the
+    // system streams insets (the close), leaving a jelly tail behind the
+    // keyboard — while an open lands as ONE silent jump that needed a
+    // glide. A critical spring does both jobs: it tracks a live frame
+    // stream in lock-step (close stays exactly as smooth as the system)
+    // and glides a single jump out over ~150 ms (the open).
+    val glided by
+        animateIntAsState(
+            targetPx,
+            spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessHigh),
+            label = "imeglide",
+        )
     return this.padding(bottom = with(density) { glided.toDp() })
 }
 
