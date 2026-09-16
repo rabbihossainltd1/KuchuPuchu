@@ -3081,7 +3081,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                 maxLines = 1,
                 modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
             )
-        } else {
+        // Owner round 40 (item 2): the attach panel open = the composer
+        // (pill + voice) hides — the panel owns the bottom of the screen.
+        } else if (!showAttach) {
         Composer(
             input = input,
             replyFocusNonce = replyFocusNonce,
@@ -3144,9 +3146,9 @@ fun ChatScreen(nav: NavController, convId: String) {
         )
         }
 
-        /* ---------------- inline panels — BELOW the message bar, WhatsApp
-           style: the bar rides on top of the panel; the panel is NOT
-           fullscreen until the user taps/swipes the handle up ---------------- */
+        /* ---------------- inline panels — the attach panel owns the bottom
+           (the composer hides while it is open); NOT fullscreen until the
+           user taps/swipes the handle up ---------------- */
         if (showAttach) {
             // Owner round 33 (item 11b): the panel pops up from the bar.
             Box(Modifier.popUp()) {

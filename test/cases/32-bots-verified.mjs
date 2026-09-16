@@ -6418,6 +6418,8 @@ const convBetween = (db, a, b) =>
         !attach.includes("previewUri") &&
         !attach.includes('"${sel.size} selected"') &&
         !attach.includes("the composer's mic IS the\n                // send button") &&
+        // Owner round 40 (item 2): the composer hides while attach is open.
+        chat.includes("} else if (!showAttach) {") &&
         // the composer's circle is the MIC while a gallery pick is active
         !chat.includes("gridSelCount") &&
         !chat.includes("onSendGrid") &&
