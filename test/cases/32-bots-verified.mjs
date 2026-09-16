@@ -6417,8 +6417,12 @@ const convBetween = (db, a, b) =>
         attach.includes("onScheduleBatch()") &&
         attach.includes("onSendBatch()") &&
         attach.includes('"${sel.size}", color = Ink') &&
-        // Owner round 40 (item 5): the badge rides the unclipped rim.
-        attach.includes(".offset(x = 3.dp, y = (-3).dp)") &&
+        // Owner round 41 (item 3): the whole bar is 28.dp (badge 15).
+        attach.includes(".offset(x = 2.dp, y = (-2).dp)") &&
+        attach.includes(
+          "if (allOnce) Box(Modifier.size(30.dp).clip(CircleShape).background(ActionBlue))",
+        ) &&
+        attach.includes(".height(28.dp)") &&
         // Owner round 40 (item 3): the keyboard pushes the bar up.
         attach.includes(".imePadding(),") &&
         !attach.includes("PreviewPane") &&

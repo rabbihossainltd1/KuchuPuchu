@@ -684,9 +684,11 @@ fun AttachPanel(
                 Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // Owner round 41 (item 3): every bar control is 28.dp, the
+                // ①'s own seat — glyphs shrink along (14.dp).
                 Box(
                     Modifier
-                        .size(38.dp)
+                        .size(28.dp)
                         .clip(CircleShape)
                         .background(ChipIdle)
                         .clickable {
@@ -695,15 +697,16 @@ fun AttachPanel(
                         },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Filled.Edit, "Edit", tint = Ink, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Filled.Edit, "Edit", tint = Ink, modifier = Modifier.size(14.dp))
                 }
                 Spacer(Modifier.size(8.dp))
                 Row(
                     Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(20.dp))
+                        .height(28.dp)
+                        .clip(RoundedCornerShape(14.dp))
                         .background(ChipIdle)
-                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                        .padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     val cap = sel[0].caption
@@ -724,11 +727,11 @@ fun AttachPanel(
                 }
                 Spacer(Modifier.size(8.dp))
                 val allOnce = sel.all { it.once }
+                // Owner round 41 (item 3): the ① seat is 28.dp; armed it
+                // sits on a filled 30.dp blue disc (a 1.dp halo all round).
                 Box(
                     Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(if (allOnce) ActionBlue else Color.Transparent)
+                        .size(28.dp)
                         .clickable {
                             haptics.toggle(!allOnce)
                             val v = !allOnce
@@ -736,20 +739,22 @@ fun AttachPanel(
                         },
                     contentAlignment = Alignment.Center,
                 ) {
+                    if (allOnce) Box(Modifier.size(30.dp).clip(CircleShape).background(ActionBlue))
                     CenteredOnceIcon(28.dp, tint = if (allOnce) Color.White else Muted)
                 }
                 Spacer(Modifier.size(8.dp))
                 // Owner round 40 (item 5): the badge used to live INSIDE the
-                // clipped 44.dp circle, so the clip ate its top-right half.
+                // clipped send circle, so the clip ate its top-right half.
                 // The circle keeps its own clip; the badge is a sibling on
-                // the unclipped rim.
+                // the unclipped rim. Round 41 (item 3): the circle is 28.dp
+                // now, the badge 15.dp along with it.
                 Box(
-                    Modifier.size(44.dp),
+                    Modifier.size(28.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Box(
                         Modifier
-                            .size(44.dp)
+                            .size(28.dp)
                             .clip(CircleShape)
                             .background(ActionBlue)
                             .combinedClickable(
@@ -767,20 +772,20 @@ fun AttachPanel(
                             Icons.AutoMirrored.Filled.Send,
                             contentDescription = "Send",
                             tint = ActionBlueInk,
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(14.dp),
                         )
                     }
                     Box(
                         Modifier
                             .align(Alignment.TopEnd)
-                            .offset(x = 3.dp, y = (-3).dp)
-                            .size(18.dp)
+                            .offset(x = 2.dp, y = (-2).dp)
+                            .size(15.dp)
                             .clip(CircleShape)
                             .background(Color.White)
                             .border(1.dp, ActionBlue, CircleShape),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text("${sel.size}", color = Ink, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("${sel.size}", color = Ink, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
