@@ -415,7 +415,7 @@ fun ChatScreen(nav: NavController, convId: String) {
     }
 
     fun paintFromStore() {
-        val next = ScreenStore.msgsOf(convId).filter { it.optString("id") !in ScreenStore.hiddenMsgIds }
+        var next = ScreenStore.msgsOf(convId).filter { it.optString("id") !in ScreenStore.hiddenMsgIds }
         // Owner round 34 (item 3): a row that came back may vanish again if
         // it departs again — only the currently missing stay remembered.
         vanishedOnce.removeAll(next.map { it.optString("id") }.toSet())
@@ -423,6 +423,27 @@ fun ChatScreen(nav: NavController, convId: String) {
             msgs.addAll(next)
             return
         }
+        // Owner round 39 (item 3): the server soft-deletes (kind='DELETED'
+        // rows stay in the GET), but a tombstone object must never replace
+        // a live row — same contentType-flip disposal as the socket frame.
+        // A tombstone for a vanishing row is dropped from this paint (the
+        // missing-id hold below keeps the original); a tombstone for a
+        // fresh LIVE row starts its vanish on the original. After onGone
+        // removes the original the next paint takes the tombstone itself
+        // (filtered from view, like any tombstone) instead of re-vanishing.
+        val liveIds = msgs.filter { it.optString("kind") != "DELETED" }.map { it.optString("id") }.toSet()
+        val freshTombs =
+            next.filter {
+                it.optString("kind") == "DELETED" &&
+                    it.optString("id") in liveIds &&
+                    it.optString("id") !in vanishingIds
+            }
+        if (freshTombs.isNotEmpty()) {
+            val tombIds = freshTombs.map { it.optString("id") }
+            vanishingIds.addAll(tombIds)
+            vanishedOnce.addAll(tombIds)
+        }
+        next = next.filter { it.optString("kind") != "DELETED" || it.optString("id") !in vanishingIds }
         val oldIds = msgs.map { it.optString("id") }
         val newIds = next.map { it.optString("id") }
         if (oldIds == newIds) {
@@ -796,6 +817,22 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 idxExisting >= 0 && liveMsg.optString("kind") == "DELETED" &&
                                     msgs[idxExisting].optString("kind") == "UNBLOCK_ASK" ->
                                     msgs.removeAt(idxExisting)
+                                // Owner round 39 (item 3): a DELETED frame never
+                                // swaps the row's object — the swap flips
+                                // contentType (TEXT→DELETED), LazyColumn
+                                // disposes the shell, and the dust canvas dies
+                                // ~200ms in (own unsends aborted; peer deletes
+                                // popped with no show at all). Own unsends are
+                                // already in vanishingIds (the frame is
+                                // ACK-only); a peer's delete starts the vanish
+                                // on the ORIGINAL so it dusts out like ours.
+                                // Removal stays at onGone + the next paint.
+                                idxExisting >= 0 && liveMsg.optString("kind") == "DELETED" -> {
+                                    if (liveId.isNotBlank() && liveId !in vanishingIds) {
+                                        vanishingIds.add(liveId)
+                                        vanishedOnce.add(liveId)
+                                    }
+                                }
                                 idxExisting >= 0 -> msgs[idxExisting] = liveMsg
                                 liveCid.isNotBlank() && msgs.any { it.optString("clientId") == liveCid } ->
                                     msgs[msgs.indexOfFirst { it.optString("clientId") == liveCid }] = liveMsg
@@ -2412,6 +2449,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                             onGone = {
                                 val gone = albumPhotos(m).map { it.optString("id") }
                                 vanishingIds.removeAll(gone.toSet())
+                                // Owner round 39 (item 3): the dusted originals
+                                // leave exactly at dust end (the next paint
+                                // takes the server's tombstone, filtered from
+                                // view) — and without live originals left, a
+                                // later paint can never re-vanish the id.
+                                msgs.removeAll { it.optString("id") in gone }
                                 if (gone.any { it in ScreenStore.hiddenMsgIds }) paintFromStore()
                             },
                         ) {

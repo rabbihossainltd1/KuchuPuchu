@@ -7755,6 +7755,22 @@ const convBetween = (db, a, b) =>
       '(m.optString("kind") != "DELETED" || albumPhotos(m).any { it.optString("id") in vanishingIds }) && run {',
     ),
   );
+  // Owner round 39 (item 3): r38-4 kept the row rendered, but the socket /
+  // poll tombstone swap still flipped contentType (TEXT→DELETED), so
+  // LazyColumn disposed the shell and the dust aborted ~200ms in. A
+  // tombstone never replaces a live row now — the original dusts out.
+  {
+    const chat39 = kt("ChatScreen.kt");
+    check(
+      "r39-3: DELETED frames never swap a live row — the socket branch starts peer vanish on the original, paintFromStore drops vanishing tombstones + starts fresh ones, onGone removes the dusted originals",
+      chat39.includes('idxExisting >= 0 && liveMsg.optString("kind") == "DELETED" -> {') &&
+        chat39.includes("val freshTombs =") &&
+        chat39.includes(
+          'next = next.filter { it.optString("kind") != "DELETED" || it.optString("id") !in vanishingIds }',
+        ) &&
+        chat39.includes('msgs.removeAll { it.optString("id") in gone }'),
+    );
+  }
   // r37-3: reference-style overlay handles — per-overlay rotation,
   // × top-left deletes, top-right drags the turn, bottom-right drags
   // the size; the box + its handles turn with the overlay, taps un-turn
