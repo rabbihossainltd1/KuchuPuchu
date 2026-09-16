@@ -6624,15 +6624,16 @@ const convBetween = (db, a, b) =>
         chat.includes("ScreenStore.pendingAddMore.collect { more ->") &&
         chat.includes("ScreenStore.editTitle = title") &&
         (chat.match(/\.put\("body", caption\)/g) || []).length === 6 &&
-        chat.includes('MediaCaption(m.optText("body"), mine)') &&
-        chat.includes("MediaCaption(albumCaption, mine)") &&
+        chat.includes('MediaCaption(m.optText("body"), mine, theme)') &&
+        chat.includes("MediaCaption(albumCaption, mine, theme)") &&
         // Owner round 44: X with a selection asks first (Yes/No).
         chat.includes('title = "Deselect media?"') &&
         chat.includes('cancelLabel = "No"') &&
         chat.includes("if (attachSel.isNotEmpty()) showDeselect = true") &&
-        // Owner round 43 (item 4): frame + caption in one bubble.
-        (chat.match(/MediaBubbleFrame\(mine, theme, m, replyOffset\) \{/g) || []).length === 3 &&
-        chat.includes(".padding(horizontal = 8.dp, vertical = 3.dp)") &&
+        // Owner round 44 (item 6): the caption is its own bubble now.
+        chat.includes("private fun MediaCaption(body: String, mine: Boolean, theme: String)") &&
+        chat.includes("val captionShape =") &&
+        chat.includes(".padding(horizontal = 8.dp, vertical = 4.dp)") &&
         // Owner round 42 (item 3): every media column hugs MY side.
         (
           chat.match(
@@ -8980,9 +8981,9 @@ const convBetween = (db, a, b) =>
         chat.includes("vanishingIds.removeAll(hold.toSet())") &&
         ui.includes("} else {\n            // Owner round 34 (item 3)") &&
         ui.includes("t.snapTo(1f)") &&
-        // Owner round 43 (item 4): video/photo/album capture through the one
-        // shared media frame now (5: text + view-once + frame).
-        (chat.match(/DeleteGeoms\.put\(m, it\.boundsInWindow\(\)\)/g) || []).length === 3 &&
+        // Owner round 44 (item 6): frames carry their own capture again
+        // (5: text + video + photo + album + view-once).
+        (chat.match(/DeleteGeoms\.put\(m, it\.boundsInWindow\(\)\)/g) || []).length === 5 &&
         kt("DeleteAnim.kt").includes("const val SWEEP_MS = 1200") &&
         kt("DeleteAnim.kt").includes("const val GRACE_MS = 3200L") &&
         kt("DeleteAnim.kt").includes("const val COLLAPSE_MS = 220") &&
