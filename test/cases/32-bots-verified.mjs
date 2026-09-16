@@ -6637,10 +6637,12 @@ const convBetween = (db, a, b) =>
         (chat.match(/\.put\("body", caption\)/g) || []).length === 6 &&
         chat.includes('MediaCaption(m.optText("body"), mine, theme)') &&
         chat.includes("MediaCaption(albumCaption, mine, theme)") &&
-        // Owner round 44: X with a selection asks first (Yes/No).
-        chat.includes('title = "Deselect media?"') &&
-        chat.includes('cancelLabel = "No"') &&
-        chat.includes("if (attachSel.isNotEmpty()) showDeselect = true") &&
+        // Owner round 45 (item 5): every close forgets the ticks — the
+        // r44-3 confirm sheet is retired, back swipes the selection too.
+        !chat.includes("showDeselect") &&
+        !chat.includes('title = "Deselect media?"') &&
+        chat.includes("onDismiss = {\n                    attachSel.clear()") &&
+        chat.includes("if (showAttach) attachSel.clear()") &&
         // Owner round 44 (item 6): the caption is its own bubble now.
         chat.includes("private fun MediaCaption(body: String, mine: Boolean, theme: String)") &&
         chat.includes("val captionShape =") &&
