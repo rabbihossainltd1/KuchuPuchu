@@ -6393,7 +6393,7 @@ const convBetween = (db, a, b) =>
     // gone — the picker is × · Recents ▾ · HD over the grid, with the
     // selection bar (pencil, caption, ①, send-with-count) under it.
     check(
-      "r39-6: attach picker — fullscreen header (× closes, 'Recents'/folder + chevron, HD pill); collapsed tiles + recents strip (a strip tap ticks + opens fullscreen); selection bar (pencil edits the last tick, caption rides sel[0], ① batch toggle, ActionBlue send with count badge, hold = later); no preview anywhere",
+      "r39-6: attach picker — fullscreen header (× closes, 'Recents'/folder + chevron, HD pill); collapsed tiles + vertical recents grid (r40-1: the strip is gone, a grid tap ticks + opens fullscreen); selection bar (pencil edits the last tick, caption rides sel[0], ① batch toggle, ActionBlue send with count badge, hold = later); no preview anywhere",
       attach.includes("onScheduleBatch: () -> Unit = {},") &&
         attach.includes("onEdit: (MediaItem) -> Unit = {},") &&
         attach.includes(
@@ -6403,7 +6403,8 @@ const convBetween = (db, a, b) =>
         attach.includes('"HD",') &&
         attach.includes("val hdOn = if (sel.isEmpty()) hdArm else sel.all { it.hd }") &&
         attach.includes("if (!fullscreen) {") &&
-        attach.includes("LazyRow(") &&
+        (attach.match(/LazyVerticalGrid\(/g) || []).length === 2 &&
+        !attach.includes("LazyRow") &&
         attach.includes("setFullscreen(true)") &&
         attach.includes("if (fullscreen && sel.isNotEmpty()) {") &&
         attach.includes("sel.lastOrNull()?.let(onEdit)") &&

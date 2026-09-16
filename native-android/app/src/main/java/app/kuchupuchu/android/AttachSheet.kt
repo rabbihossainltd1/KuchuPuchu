@@ -42,10 +42,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -123,7 +120,7 @@ private data class AttachAction(
 
 /**
  * Attach panel — WhatsApp-exact: collapsed it shows the action tiles over a
- * recents strip (a strip tap ticks the photo and opens the fullscreen
+ * recents grid (a grid tap ticks the photo and opens the fullscreen
  * picker); fullscreen it is × · Recents ▾ · HD over the 4-column grid, with
  * the selection bar under it (pencil → editor, caption, ①, send-with-count).
  * Grid taps tick/untick with numbered badges — never a preview, never an
@@ -295,6 +292,16 @@ fun AttachPanel(
     // Owner round 39 (item 6): the batch's HD state (or the armed default
     // for the next taps) — the pill and every tick read the same value.
     val hdOn = if (sel.isEmpty()) hdArm else sel.all { it.hd }
+    // O(1) lookup per cell instead of an O(n) `indexOfFirst` scan on
+    // every recomposition of every visible cell — with a big selection
+    // that scan-per-cell was a real source of the "laggy swipe" feel (the
+    // grid recomposes every drag frame while the panel height is
+    // animating). Hoisted: the collapsed + fullscreen grids share it.
+    val selIndex = remember(sel.size) {
+        val map = HashMap<Uri, Int>()
+        sel.forEachIndexed { i, it -> map[it.uri] = i }
+        map
+    }
 
     /* Swipe the GRID itself, WhatsApp-style: up = fullscreen (actions
        hidden), down at the top = back to the compact panel.
@@ -580,44 +587,35 @@ fun AttachPanel(
                     .align(Alignment.CenterHorizontally),
             )
         } else if (!fullscreen) {
-            // Owner round 39 (item 6): the collapsed recents strip under
-            // the tiles (reference shot 1). A tap ticks the photo AND
-            // opens the fullscreen picker on it.
-            LazyRow(
-                modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
-                state = rememberLazyListState(),
-                contentPadding = PaddingValues(horizontal = 4.dp),
+            // Owner round 40 (item 1): the collapsed recents GRID under the
+            // tiles (owner verdict on the round-39 strip: only a few photos
+            // + a sideways swipe). Tiles + a vertical grid, scrolled down —
+            // a tap ticks the photo AND opens the fullscreen picker on it.
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(4),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentPadding = PaddingValues(horizontal = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 items(shown, key = { it.uri.toString() }) { item ->
-                    val pos = sel.indexOfFirst { it.uri == item.uri }
-                    Box(Modifier.size(76.dp)) {
-                        MediaCell(
-                            item,
-                            ctx,
-                            selected = pos >= 0,
-                            selectIndex = if (pos >= 0) pos + 1 else 0,
-                            onToggle = {
-                                haptics.tap()
-                                if (pos >= 0) sel.removeAll { it.uri == item.uri } else sel.add(item.copy(hd = hdOn))
-                                setFullscreen(true)
-                            },
-                        )
-                    }
+                    val pos = selIndex[item.uri] ?: -1
+                    MediaCell(
+                        item,
+                        ctx,
+                        selected = pos >= 0,
+                        selectIndex = if (pos >= 0) pos + 1 else 0,
+                        onToggle = {
+                            haptics.tap()
+                            if (pos >= 0) sel.removeAll { it.uri == item.uri } else sel.add(item.copy(hd = hdOn))
+                            setFullscreen(true)
+                        },
+                    )
                 }
             }
         } else {
-            // O(1) lookup per cell        } else {
-            // O(1) lookup per cell instead of an O(n) `indexOfFirst` scan on
-            // every recomposition of every visible cell — with a big
-            // selection that scan-per-cell was a real source of the "laggy
-            // swipe" feel (the grid recomposes every drag frame while the
-            // panel height is animating).
-            val selIndex = remember(sel.size) {
-                val map = HashMap<Uri, Int>()
-                sel.forEachIndexed { i, it -> map[it.uri] = i }
-                map
-            }
             LazyVerticalGrid(
                 columns = GridCells.Fixed(4),
                 state = gridState,
@@ -646,7 +644,7 @@ fun AttachPanel(
                 }
             }
         }
-        // Owner round 39 (item 6): the selection bar — pencil (the last
+        // Owner round 39 (item 6): the selection bar — pencil (the last        // Owner round 39 (item 6): the selection bar — pencil (the last
         // ticked photo opens in the editor), one caption for the batch (it
         // rides the first photo, WhatsApp-exact), the ① batch toggle and
         // Send with its count badge (hold = send later, as before).
