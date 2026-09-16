@@ -325,16 +325,50 @@ fun AttachPanel(
        0 by coincidence). A parent-level connection always sees pre-scroll
        before the grid touches it and post-scroll after — the standard,
        reliable Compose nested-scroll pattern. */
+    // Owner round 43 (item 3): the bar's fold/expand drag — one detector
+    // shared by the bar row and the caption pill (the text field eats drags
+    // that start on it, and it is most of the bar; chained OUTERMOST there
+    // it sees the vertical move before the field's own cursor drag, while
+    // taps and horizontal moves pass through untouched).
+    fun Modifier.barDragDetect() =
+        pointerInput("barDrag") {
+            detectVerticalDragGestures(
+                onDragStart = { isDragging = true },
+                onDragEnd = {
+                    if (dragTotal.value < -70f) setFullscreen(true)
+                    else if (dragTotal.value > 70f) setFullscreen(false)
+                    dragTotal.value = 0f
+                    isDragging = false
+                },
+                onDragCancel = {
+                    dragTotal.value = 0f
+                    isDragging = false
+                },
+            ) { _, amount ->
+                dragTotal.value += amount
+            }
+        }
     val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
     var gridDragTotal by remember { mutableStateOf(0f) }
+    var gridPreTotal by remember { mutableStateOf(0f) }
     val gridScroll = remember {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                // Owner round 42 (item 2): a fast swipe arrives as Fling, not
-                // Drag — ignoring it is why "swipe down doesn't shrink".
-                if ((source == NestedScrollSource.Drag || source == NestedScrollSource.Fling) && available.y < -30f && !fullscreen) {
-                    haptics.tap()
-                    setFullscreen(true)
+                // Owner round 43 (item 3): Compose 1.7 dispatches UserInput /
+                // SideEffect (Drag / Fling are dead names — nothing matches
+                // them); and a normal swipe delivers ~10px frames, so the old
+                // per-event -30px gate never fired. Accumulate like below.
+                if ((source == NestedScrollSource.UserInput || source == NestedScrollSource.SideEffect) && !fullscreen) {
+                    if (available.y < 0f) {
+                        gridPreTotal += available.y
+                        if (gridPreTotal < -60f) {
+                            haptics.tap()
+                            setFullscreen(true)
+                            gridPreTotal = 0f
+                        }
+                    } else {
+                        gridPreTotal = 0f
+                    }
                 }
                 return Offset.Zero
             }
@@ -349,7 +383,7 @@ fun AttachPanel(
                 // start (can't scroll back further) and the user is still
                 // dragging down. That is the correct, reliable "at the top
                 // and pulling down" signal.
-                if ((source == NestedScrollSource.Drag || source == NestedScrollSource.Fling) && fullscreen) {
+                if ((source == NestedScrollSource.UserInput || source == NestedScrollSource.SideEffect) && fullscreen) {
                     if (available.y > 0f) {
                         gridDragTotal += available.y
                         if (gridDragTotal > 60f) {
@@ -689,25 +723,9 @@ fun AttachPanel(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    // Owner round 42 (item 2): the bar drags like the header
+                    // Owner round 43 (item 3): the bar drags like the header
                     // — down past 70 folds to the collapsed half panel.
-                    .pointerInput("barDrag") {
-                        detectVerticalDragGestures(
-                            onDragStart = { isDragging = true },
-                            onDragEnd = {
-                                if (dragTotal.value < -70f) setFullscreen(true)
-                                else if (dragTotal.value > 70f) setFullscreen(false)
-                                dragTotal.value = 0f
-                                isDragging = false
-                            },
-                            onDragCancel = {
-                                dragTotal.value = 0f
-                                isDragging = false
-                            },
-                        ) { _, amount ->
-                            dragTotal.value += amount
-                        }
-                    }
+                    .barDragDetect()
                     .padding(horizontal = 10.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -729,6 +747,7 @@ fun AttachPanel(
                 Spacer(Modifier.size(8.dp))
                 Row(
                     Modifier
+                        .barDragDetect()
                         .weight(1f)
                         .height(28.dp)
                         .clip(RoundedCornerShape(14.dp))
