@@ -782,11 +782,14 @@ fun AttachPanel(
                             .offset(x = 2.dp, y = (-2).dp)
                             .size(15.dp)
                             .clip(CircleShape)
-                            .background(Color.White)
-                            .border(1.dp, ActionBlue, CircleShape),
+                            // Owner round 41 (item 5): blue badge, white
+                            // number (WhatsApp) — Ink follows the theme, so
+                            // the old white badge went unreadable in dark.
+                            .background(ActionBlue)
+                            .border(1.dp, Color.White, CircleShape),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text("${sel.size}", color = Ink, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        Text("${sel.size}", color = ActionBlueInk, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
