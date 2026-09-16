@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -360,7 +361,11 @@ fun AttachPanel(
             .fillMaxWidth()
             .height(panelH)
             .nestedScroll(gridScroll)
-            .background(Cream),
+            .background(Cream)
+            // Owner round 40 (item 3): the caption field's keyboard must
+            // push the selection bar up instead of burying it — the grid
+            // (weight) yields the space.
+            .imePadding(),
     ) {
         /* drag handle — tap OR swipe up = fullscreen; swipe down = back.
            (The grid's own swipe-up does the same; see gridScroll.) */

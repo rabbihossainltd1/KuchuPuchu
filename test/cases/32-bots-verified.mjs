@@ -6414,6 +6414,8 @@ const convBetween = (db, a, b) =>
         attach.includes("onScheduleBatch()") &&
         attach.includes("onSendBatch()") &&
         attach.includes('"${sel.size}", color = Ink') &&
+        // Owner round 40 (item 3): the keyboard pushes the bar up.
+        attach.includes(".imePadding(),") &&
         !attach.includes("PreviewPane") &&
         !attach.includes("previewUri") &&
         !attach.includes('"${sel.size} selected"') &&
