@@ -4277,7 +4277,6 @@ private fun LoginApprovalMessage(m: JSONObject) {
  * device's ART verifier reject the whole class (VerifyError: copy-cat) — the
  * chat screen died on open. Small function, annotation at function level.
  */
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 /**
  * Owner round 44: the keyboard CLOSE glides (system-animated insets) but
@@ -4285,7 +4284,6 @@ private fun LoginApprovalMessage(m: JSONObject) {
  * both directions glide the same way (read in composition — the round-13
  * crash was the coroutine/snapshotFlow form, never this).
  */
-@Composable
 private fun Modifier.animatedImePadding(): Modifier {
     val density = LocalDensity.current
     val target = WindowInsets.ime.getBottom(density)
@@ -4293,6 +4291,8 @@ private fun Modifier.animatedImePadding(): Modifier {
     return this.padding(bottom = with(density) { glided.toDp() })
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
 private fun KpImeAutoScroll(listState: androidx.compose.foundation.lazy.LazyListState) {
     val imeVisible = WindowInsets.isImeVisible
     LaunchedEffect(imeVisible) {
