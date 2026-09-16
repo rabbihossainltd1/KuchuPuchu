@@ -862,14 +862,14 @@ const OWNER_INTENT =
 // old list needed an English-style "make", so nearly every Banglish request
 // fell through to a text answer ("ami chobi banate pari na").
 const IMAGE_MAKE_VERB =
-  /(make|create|draw|generate|paint|design|render|produce|sketch|imagine|banao|banai|banan|banabe|banaiya|baniye|baniya|banate|banano|banabo|anko|ako|akte|eke|kore\s*dao|kore\s*den|koro|korun|toiri|tairi|ready|dao\b|den\b|dekhao|chai\b|lagbe|আঁকো|আঁকুন|আঁকা|এঁকে|বানাও|বানান|বানাবে|বানিয়ে|বানাতে|তৈরি|করে\s*দাও|করে\s*দিন|করো|করুন|দাও|দিন|দেখাও|চাই|লাগবে)/i;
+  /(make|create|draw|generate|paint|design|render|produce|sketch|imagine|banao|banai|banan|banabe|banaiya|baniye|baniya|banate|banano|banabo|anko|ako|akte|eke|kore\s*dao|kore\s*den|kore\s*daw|kore\s*de\b|koro|korun|toiri|tairi|ready|dao\b|den\b|daw\b|de\b|give\b|pathao|pathiye|pathan|dekhao|chai\b|lagbe|আঁকো|আঁকুন|আঁকা|এঁকে|বানাও|বানান|বানাবে|বানিয়ে|বানাতে|তৈরি|করে\s*দাও|করে\s*দিন|করো|করুন|দাও|দিন|দেখাও|চাই|লাগবে)/i;
 const IMAGE_NOUN =
   /(photo|picture|pic\b|pics\b|image|img\b|drawing|painting|illustration|logo|avatar|poster|banner|wallpaper|thumbnail|sticker|cartoon|anime|portrait|sketch|art\b|artwork|design|chobi|chhobi|sobi|ছবি|ফটো|পিকচার|ড্রয়িং|পোস্টার|লোগো|ব্যানার|ওয়ালপেপার|স্টিকার|কার্টুন|ডিজাইন)/i;
 // A message that is only about a picture ALREADY in the thread ("edit", "make
 // it brighter", "remove the background") never counts as a creation request —
 // it is routed to the edit flow when a photo is close by.
 const IMAGE_EDIT_HINT =
-  /(edit|change|remove|replace|add\b|fix|improve|enhance|brighten|darken|blur|crop|resize|background|colou?r|style|cartoon|anime|filter|retouch|restore|upscale|sharpen|makeover|paint|convert|turn|transform|swap|erase|clean|make|create|draw|generate|kore\s*dao|kore\s*den|banao|banai|koro|korun|bodl|bodla|kato|muche|muchhe|felo|shundor|sundor|bhalo|উন্নত|বদল|বদলাও|মুছে|সরাও|যোগ|ঠিক|সুন্দর|ভালো|রং|রঙ|ব্যাকগ্রাউন্ড|স্টাইল|কার্টুন|এডিট|ফিল্টার|বানাও|বানিয়ে|করো|করুন|করে\s*দাও)/i;
+  /(edit|change|remove|replace|add\b|fix|improve|enhance|brighten|darken|blur|crop|resize|background|colou?r|style|cartoon|anime|filter|retouch|restore|upscale|sharpen|makeover|paint|convert|turn|transform|swap|erase|clean|make|create|draw|generate|kore\s*dao|kore\s*den|kore\s*daw|kore\s*de\b|banao|banai|koro|korun|thik\b|bodl|bodla|kato|muche|muchhe|felo|shundor|sundor|bhalo|উন্নত|বদল|বদলাও|মুছে|সরাও|যোগ|ঠিক|সুন্দর|ভালো|রং|রঙ|ব্যাকগ্রাউন্ড|স্টাইল|কার্টুন|এডিট|ফিল্টার|বানাও|বানিয়ে|করো|করুন|করে\s*দাও)/i;
 // "this one / the photo / amar chobi ta" — the words that point at a picture
 // already in the thread.
 const IMAGE_REF =
@@ -1236,7 +1236,10 @@ async function sendAiReply(
       // Owner round 33 (item 11a): the bot used to deny having eyes or a
       // brush. It can do both now, so it must never claim otherwise.
       "Abilities: you CAN see photos the user sends and you CAN create or edit pictures on request " +
-      "(the picture arrives as a separate message). Never say you cannot see images or cannot make images.";
+      "(the picture arrives as a separate message). Never say you cannot see images or cannot make images. " +
+      "Never PROMISE a picture in chat text (no 'dicchi / sending / baniye dicchi'): the picture " +
+      "arrives as its own message or not at all — if one was asked for and none is coming, say the " +
+      "creation failed instead of promising.";
     // Owner round 2026-09-04: photo creation + editing. The NEWEST message is
     // the user's: an IMAGE with a caption = edit request; a TEXT with a
     // creation verb + a picture noun = generation request. The result is

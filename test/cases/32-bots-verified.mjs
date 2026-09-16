@@ -8451,6 +8451,11 @@ const convBetween = (db, a, b) =>
         ) &&
         src.includes("const wantsEdit = (t: string) =>") &&
         src.includes("IMAGE_EDIT_HINT.test(t) && (IMAGE_REF.test(t) || !FRESH_NOUN.test(t));") &&
+        // Owner round 43 (item 6): his spellings route to the brush too,
+        // and the model never promises a picture in chat text.
+        src.includes("kore\\s*daw|kore\\s*de\\b") &&
+        src.includes("daw\\b|de\\b|give\\b|pathao|pathiye|pathan") &&
+        src.includes("Never PROMISE a picture in chat text") &&
         src.includes("async function classifyAiKind(") &&
         src.includes(
           "ON CONFLICT (conv_id, user_id) DO UPDATE SET at = excluded.at, kind = excluded.kind",
