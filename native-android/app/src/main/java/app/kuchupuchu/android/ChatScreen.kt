@@ -97,6 +97,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -161,6 +162,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.net.Uri
+import android.view.WindowManager
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -1928,6 +1930,18 @@ fun ChatScreen(nav: NavController, convId: String) {
             lastInThread != null &&
             !lastInThread.optBoolean("failed", false) &&
             lastInThread.optString("senderId") == Store.myId()
+
+    // Owner round 43 (item 7): a reply can take 25s+ (image gen) — longer
+    // than the screen timeout, so the phone slept mid-reply (fade to black).
+    // The chat holds the screen while the AI composes, like a call does;
+    // the flag clears when the reply lands or the chat is left. (Edge: an AI
+    // reply landing mid-call clears the call's flag too — the window flag is
+    // shared; the call screen re-adds it on its next status change.)
+    DisposableEffect(aiTyping) {
+        val win = MainActivity.current?.window
+        if (aiTyping) win?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        onDispose { win?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+    }
 
     // Owner round 16: starting a reply grows the quote bar + keyboard over
     // the newest rows — jump the thread up so nothing hides under them.

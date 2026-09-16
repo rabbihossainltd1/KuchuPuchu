@@ -530,6 +530,9 @@ const convBetween = (db, a, b) =>
   check(
     "typing bubble: one shared bouncing-dots indicator, header typing text removed",
     chat.includes("aiTyping || typingLeaseActive") &&
+      // Owner round 43 (item 7): the screen stays on while the AI composes.
+      chat.includes("DisposableEffect(aiTyping)") &&
+      chat.includes("FLAG_KEEP_SCREEN_ON") &&
       chat.includes("TypingBubble(chatAccent(chatTheme))") &&
       !chat.includes('typingNow -> "typing..."') &&
       // Owner round 42 (item 3): an image coming gets the shimmer card.
