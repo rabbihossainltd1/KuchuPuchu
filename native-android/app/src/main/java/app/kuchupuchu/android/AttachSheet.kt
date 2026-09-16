@@ -328,7 +328,9 @@ fun AttachPanel(
     val gridScroll = remember {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (source == NestedScrollSource.Drag && available.y < -30f && !fullscreen) {
+                // Owner round 42 (item 2): a fast swipe arrives as Fling, not
+                // Drag — ignoring it is why "swipe down doesn't shrink".
+                if ((source == NestedScrollSource.Drag || source == NestedScrollSource.Fling) && available.y < -30f && !fullscreen) {
                     haptics.tap()
                     setFullscreen(true)
                 }
@@ -345,7 +347,7 @@ fun AttachPanel(
                 // start (can't scroll back further) and the user is still
                 // dragging down. That is the correct, reliable "at the top
                 // and pulling down" signal.
-                if (source == NestedScrollSource.Drag && fullscreen) {
+                if ((source == NestedScrollSource.Drag || source == NestedScrollSource.Fling) && fullscreen) {
                     if (available.y > 0f) {
                         gridDragTotal += available.y
                         if (gridDragTotal > 60f) {
@@ -683,7 +685,28 @@ fun AttachPanel(
         // Send with its count badge (hold = send later, as before).
         if (fullscreen && sel.isNotEmpty()) {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+                Modifier
+                    .fillMaxWidth()
+                    // Owner round 42 (item 2): the bar drags like the header
+                    // — down past 70 folds to the collapsed half panel.
+                    .pointerInput("barDrag") {
+                        detectVerticalDragGestures(
+                            onDragStart = { isDragging = true },
+                            onDragEnd = {
+                                if (dragTotal.value < -70f) setFullscreen(true)
+                                else if (dragTotal.value > 70f) setFullscreen(false)
+                                dragTotal.value = 0f
+                                isDragging = false
+                            },
+                            onDragCancel = {
+                                dragTotal.value = 0f
+                                isDragging = false
+                            },
+                        ) { _, amount ->
+                            dragTotal.value += amount
+                        }
+                    }
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Owner round 41 (item 3): every bar control is 28.dp, the

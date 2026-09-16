@@ -6408,6 +6408,9 @@ const convBetween = (db, a, b) =>
         attach.includes("setFullscreen(true)") &&
         // Owner round 41 (item 1): the fullscreen header drags down.
         attach.includes('"headerDrag"') &&
+        // Owner round 42 (item 2): flings count, and the bar drags too.
+        attach.includes("NestedScrollSource.Fling") &&
+        attach.includes('"barDrag"') &&
         attach.includes("if (fullscreen && sel.isNotEmpty()) {") &&
         attach.includes("sel.lastOrNull()?.let(onEdit)") &&
         attach.includes("sel[0] = sel[0].copy(caption = t.take(1000))") &&
