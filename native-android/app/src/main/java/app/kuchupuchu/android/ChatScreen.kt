@@ -6,6 +6,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -3482,7 +3483,7 @@ private fun Composer(
             // Owner round 15: the bar itself is TRANSPARENT — the themed
             // wallpaper (which spans the whole screen) shows through; only
             // the input pill and the send button keep their own surfaces.
-            .then(if (padForIme) Modifier.imePadding() else Modifier)
+            .then(if (padForIme) Modifier.animatedImePadding() else Modifier)
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -4272,6 +4273,20 @@ private fun LoginApprovalMessage(m: JSONObject) {
  */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
+/**
+ * Owner round 44: the keyboard CLOSE glides (system-animated insets) but
+ * OPEN snapped 0→full in one frame. Chase the inset height ourselves so
+ * both directions glide the same way (read in composition — the round-13
+ * crash was the coroutine/snapshotFlow form, never this).
+ */
+@Composable
+private fun Modifier.animatedImePadding(): Modifier {
+    val density = LocalDensity.current
+    val target = WindowInsets.ime.getBottom(density)
+    val glided by animateIntAsState(target, tween(280), label = "imeglide")
+    return this.padding(bottom = with(density) { glided.toDp() })
+}
+
 private fun KpImeAutoScroll(listState: androidx.compose.foundation.lazy.LazyListState) {
     val imeVisible = WindowInsets.isImeVisible
     LaunchedEffect(imeVisible) {

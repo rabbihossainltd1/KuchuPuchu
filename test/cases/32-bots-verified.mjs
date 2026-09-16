@@ -974,7 +974,11 @@ const convBetween = (db, a, b) =>
     "keyboard jump uses the safe isImeVisible flag (no ViewTreeObserver crash)",
     chat.includes("WindowInsets.isImeVisible") &&
       chat.includes("private fun KpImeAutoScroll") &&
-      !chat.includes("snapshotFlow { kpIme"),
+      !chat.includes("snapshotFlow { kpIme") &&
+      // Owner round 44: open glides like close.
+      chat.includes("private fun Modifier.animatedImePadding()") &&
+      chat.includes("animateIntAsState(target, tween(280)") &&
+      chat.includes("Modifier.animatedImePadding() else Modifier"),
   );
   check(
     "swipe a bubble right to quote-reply",
@@ -8341,7 +8345,8 @@ const convBetween = (db, a, b) =>
           "Stickers.packs.filter { it.first.contains(q, ignoreCase = true) }.flatMap { it.second }",
         ) &&
         chat.includes("padForIme: Boolean = true,") &&
-        chat.includes(".then(if (padForIme) Modifier.imePadding() else Modifier)") &&
+        // Owner round 44: the composer glides on the animated inset now.
+        chat.includes(".then(if (padForIme) Modifier.animatedImePadding() else Modifier)") &&
         chat.includes("padForIme = !showAttach && !showStickers,"),
     );
   }
