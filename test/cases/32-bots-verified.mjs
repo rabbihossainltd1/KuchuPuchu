@@ -6423,6 +6423,8 @@ const convBetween = (db, a, b) =>
           "if (allOnce) Box(Modifier.size(30.dp).clip(CircleShape).background(ActionBlue))",
         ) &&
         attach.includes(".height(28.dp)") &&
+        // Owner round 41 (item 4): the HD pill carries no border.
+        !attach.includes(".border(1.dp, if (hdOn)") &&
         // Owner round 40 (item 3): the keyboard pushes the bar up.
         attach.includes(".imePadding(),") &&
         !attach.includes("PreviewPane") &&

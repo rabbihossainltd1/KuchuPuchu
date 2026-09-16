@@ -547,11 +547,12 @@ fun AttachPanel(
             Spacer(Modifier.weight(1f))
             // The HD pill: quality for the ticked set — or the armed
             // default (hdArm) for the next taps while nothing is ticked.
+            // Owner round 41 (item 4): no border — armed it is a filled
+            // blue pill, unarmed plain Muted text.
             Row(
                 Modifier
                     .clip(RoundedCornerShape(8.dp))
                     .background(if (hdOn) ActionBlue else Color.Transparent)
-                    .border(1.dp, if (hdOn) ActionBlue else Muted, RoundedCornerShape(8.dp))
                     .clickable {
                         haptics.tap()
                         if (sel.isEmpty()) hdArm = !hdArm
