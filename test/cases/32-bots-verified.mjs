@@ -8424,8 +8424,20 @@ const convBetween = (db, a, b) =>
         ai.includes("if (!parts) readSource = newestPhoto;") &&
         ai.includes("readSource = recentPhoto; // a follow-up question about the photo") &&
         ai.includes("if (recentPhoto && wantsEdit(newestText)) {") &&
-        ai.includes("IMAGE_MAKE_VERB.test(t) && IMAGE_NOUN.test(t) && !OWNER_PHOTO_ASK.test(t);") &&
-        ai.includes("IMAGE_EDIT_HINT.test(t) && (IMAGE_REF.test(t) || !FRESH_NOUN.test(t));") &&
+        // Owner round 42 (item 3): the predicates live at module level now
+        // (the send path classifies with the same definitions).
+        src.includes("const wantsPicture = (t: string) =>") &&
+        src.includes(
+          "IMAGE_MAKE_VERB.test(t) && IMAGE_NOUN.test(t) && !OWNER_PHOTO_ASK.test(t);",
+        ) &&
+        src.includes("const wantsEdit = (t: string) =>") &&
+        src.includes("IMAGE_EDIT_HINT.test(t) && (IMAGE_REF.test(t) || !FRESH_NOUN.test(t));") &&
+        src.includes("async function classifyAiKind(") &&
+        src.includes(
+          "ON CONFLICT (conv_id, user_id) DO UPDATE SET at = excluded.at, kind = excluded.kind",
+        ) &&
+        src.includes("ALTER TABLE typing ADD COLUMN kind TEXT") &&
+        src.includes("typingKind,") &&
         ai.includes("but the image tool failed this time") &&
         ai.includes("but picture creation is switched off on this server") &&
         src.includes("let pictureTurn = false;") &&
@@ -9202,7 +9214,8 @@ const convBetween = (db, a, b) =>
         post.includes("return json({ message: msgFrom(winner), duplicate: true }, 200);") &&
         !post.includes("for (const group of chunked(others)) {") &&
         !post.includes('await run(\n        db,\n        "INSERT INTO messages') &&
-        (post.match(/await run\(/g) || []).length === 3,
+        // Owner round 42 (item 3): the fourth run stamps the AI typing kind.
+        (post.match(/await run\(/g) || []).length === 4,
       `awaited runs=${(post.match(/await run\(/g) || []).length}`,
     );
     const k = await mk();

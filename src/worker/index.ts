@@ -884,6 +884,59 @@ const OWNER_PHOTO_ASK =
 // photo nearby and no reference to it, such a request creates instead of edits.
 const FRESH_NOUN =
   /(photo|picture|pic\b|pics\b|image|img\b|chobi|chhobi|sobi|logo|poster|banner|wallpaper|thumbnail|ছবি|ফটো|পিকচার|লোগো|পোস্টার|ব্যানার|ওয়ালপেপার|থাম্বনেইল)/i;
+// Owner round 42 (item 3): module-level so the send path classifies with
+// the SAME predicates the reply uses (one definition, no drift).
+const wantsPicture = (t: string) =>
+  IMAGE_MAKE_VERB.test(t) && IMAGE_NOUN.test(t) && !OWNER_PHOTO_ASK.test(t);
+const wantsEdit = (t: string) =>
+  IMAGE_EDIT_HINT.test(t) && (IMAGE_REF.test(t) || !FRESH_NOUN.test(t));
+const isPhotoRowOf = (r: { kind: string; media: string | null; meta_json: string | null }) => {
+  if (!r.media) return false;
+  if (r.kind === "IMAGE") return true;
+  if (r.kind !== "FILE") return false;
+  const fm = parseJson<{ type?: string; document?: boolean; voice?: boolean }>(r.meta_json, {});
+  return String(fm.type || "").startsWith("image/") && fm.document !== true;
+};
+/** Owner round 42 (item 3): image-vs-text for the JUST-SENT AI message —
+ *  the reply's own decision (CREATE = make-verb + picture noun; EDIT =
+ *  a captioned photo now, or an edit-hint with a photo right above),
+ *  mirrored so the app animates correctly. The photo look-back runs only
+ *  when the text smells visual, so plain chat costs no extra SELECT. */
+async function classifyAiKind(
+  db: D1Database,
+  convId: string,
+  uid: string,
+  mid: string,
+  kind: string,
+  body: string,
+  media: string | null,
+  metaJson: string | null,
+): Promise<"image" | "text"> {
+  const photoNow = isPhotoRowOf({ kind, media, meta_json: metaJson });
+  const caption = photoNow ? (body ?? "").trim() : "";
+  if (photoNow && caption && (IMAGE_EDIT_HINT.test(caption) || wantsPicture(caption)))
+    return "image";
+  const newestText = kind === "TEXT" ? (body ?? "").trim() : "";
+  if (
+    !photoNow &&
+    newestText &&
+    (IMAGE_EDIT_HINT.test(newestText) ||
+      IMAGE_MAKE_VERB.test(newestText) ||
+      IMAGE_NOUN.test(newestText) ||
+      IMAGE_REF.test(newestText))
+  ) {
+    const back = await all<{ kind: string; media: string | null; meta_json: string | null }>(
+      db,
+      "SELECT kind, media, meta_json FROM messages WHERE conv_id = ? AND sender_id = ? AND id != ? ORDER BY rowid DESC LIMIT 8",
+      convId,
+      uid,
+      mid,
+    );
+    const recentPhoto = back.find((r) => isPhotoRowOf(r)) ?? null;
+    if ((recentPhoto && wantsEdit(newestText)) || wantsPicture(newestText)) return "image";
+  }
+  return "text";
+}
 
 /** The mime a stored photo row advertises (uploads carry meta.type; inline
  *  IMAGE rows carry nothing — the bucket's own type decides then). */
@@ -1128,13 +1181,7 @@ async function sendAiReply(
         WHERE conv_id = ? AND kind IN ('TEXT', 'IMAGE', 'FILE') ORDER BY rowid DESC LIMIT 12`,
       convId,
     );
-    const isPhotoRow = (r: { kind: string; media: string | null; meta_json: string | null }) => {
-      if (!r.media) return false;
-      if (r.kind === "IMAGE") return true;
-      if (r.kind !== "FILE") return false;
-      const fm = parseJson<{ type?: string; document?: boolean; voice?: boolean }>(r.meta_json, {});
-      return String(fm.type || "").startsWith("image/") && fm.document !== true;
-    };
+    const isPhotoRow = isPhotoRowOf;
     const rowText = (r: (typeof rows)[number]) => {
       if (r.kind === "TEXT") return r.body ?? "";
       if (isPhotoRow(r)) return `[sent a photo]${r.body ? ` ${r.body}` : ""}`;
@@ -1300,11 +1347,6 @@ async function sendAiReply(
       }
     }
     const newestText = newest && newest.kind === "TEXT" ? (newest.body ?? "").trim() : "";
-    // asking for the OWNER's / the bot's own photo is the profile card's job
-    const wantsPicture = (t: string) =>
-      IMAGE_MAKE_VERB.test(t) && IMAGE_NOUN.test(t) && !OWNER_PHOTO_ASK.test(t);
-    const wantsEdit = (t: string) =>
-      IMAGE_EDIT_HINT.test(t) && (IMAGE_REF.test(t) || !FRESH_NOUN.test(t));
     const photoParts: unknown[] = [];
     let photoPrompt = "";
     // Owner round 33 (item 11a): "ekta chobi banao" also matches the owner
@@ -2322,7 +2364,7 @@ async function ensureSchema(db: D1Database) {
     `CREATE INDEX IF NOT EXISTS idx_call_members_user ON call_members(user_id, created_at)`,
     // "X is typing" pings: one row per (conversation, user), overwritten on
     // every keystroke batch and expired by age on read (no cleanup job).
-    `CREATE TABLE IF NOT EXISTS typing (conv_id TEXT NOT NULL, user_id TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (conv_id, user_id))`,
+    `CREATE TABLE IF NOT EXISTS typing (conv_id TEXT NOT NULL, user_id TEXT NOT NULL, at TEXT NOT NULL, kind TEXT, PRIMARY KEY (conv_id, user_id))`,
     // §52 observability. ONE row per (day, metric) — never one row per event, and
     // one row per source table remembering where the rollup stopped. See
     // rollupMetrics() for why this shape is the only one D1's free tier survives.
@@ -2374,6 +2416,8 @@ async function ensureSchema(db: D1Database) {
     // deliberately outside the batch — a duplicate-column error must not roll the
     // whole batch back — and each one is individually tolerant.
     `ALTER TABLE messages ADD COLUMN delivered_at TEXT`,
+    // Owner round 42 (item 3): what the AI is making (image|text).
+    `ALTER TABLE typing ADD COLUMN kind TEXT`,
     // Owner round 32 item 4: where each signed-in device last came from.
     `ALTER TABLE auth_devices ADD COLUMN ip TEXT`,
     `ALTER TABLE auth_devices ADD COLUMN city TEXT`,
@@ -7325,14 +7369,18 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       readRow && !receiptsHidden && Number(readRow.unreadMembers || 0) === 0 ? readRow.r : null;
     // Typing indicator: the OTHER members' freshest ping, if any. The client
     // treats it as typing while it is younger than ~6s.
-    const typingRow = await one<{ at: string }>(
+    const typingRow = await one<{ at: string; kind: string | null }>(
       db,
-      "SELECT at FROM typing WHERE conv_id = ? AND user_id != ? ORDER BY at DESC LIMIT 1",
+      "SELECT at, kind FROM typing WHERE conv_id = ? AND user_id != ? ORDER BY at DESC LIMIT 1",
       convId,
       uid,
     );
     const typingAt =
       typingRow && Date.now() - Date.parse(typingRow.at) < 6_000 ? typingRow.at : null;
+    // Owner round 42 (item 3): what the AI is making. Ungated by design — a
+    // 25 s image gen outlives the 6 s typing lease, and the app binds the
+    // kind to its own generating state, not the clock.
+    const typingKind = typingRow?.kind ?? null;
     // Freshness marker: page contents (id/text/edited/delivery per row) +
     // read + typing, so every field the client consumes participates in the
     // check - including repeat edits of the same row.
@@ -7341,6 +7389,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         items.map((m) => [m.id, m.body, m.edited, m.deliveredAt, m.viewedAt]),
         readAt,
         typingAt,
+        typingKind,
       ]),
     );
     const clientMarker = url.searchParams.get("marker");
@@ -7349,6 +7398,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       items,
       readAt: readAt ?? null,
       typingAt,
+      typingKind,
       marker,
       // The next cursor back. `kp_rowid` stays here, deliberately NOT inside the
       // items: an internal rowid has no business in a message payload (the client
@@ -7782,9 +7832,34 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     }
     // KuchuPuchu AI answers in its chat (owner feature): the reply generates
     // in the background so the send itself stays instant.
-    if (conv.kind === "SOLO" && members.some((m) => m.user_id === AI_BOT_ID))
+    // Owner round 42 (item 3): the send also classifies image-vs-text with
+    // the reply's own predicates, so the app shows the image-creating
+    // animation instead of typing dots. The kind rides the response (no
+    // flip) and the typing row (polls + reopen healing).
+    let aiKind: string | undefined;
+    if (conv.kind === "SOLO" && members.some((m) => m.user_id === AI_BOT_ID)) {
+      aiKind = await classifyAiKind(
+        db,
+        convId,
+        uid,
+        mid,
+        storedKind,
+        text,
+        imageData ?? fileKey ?? null,
+        meta,
+      );
+      await run(
+        db,
+        `INSERT INTO typing (conv_id, user_id, at, kind) VALUES (?, ?, ?, ?)
+         ON CONFLICT (conv_id, user_id) DO UPDATE SET at = excluded.at, kind = excluded.kind`,
+        convId,
+        AI_BOT_ID,
+        nowIso(),
+        aiKind,
+      );
       ctx.waitUntil(sendAiReply(env, db, ctx, convId, uid));
-    return json({ message }, 201);
+    }
+    return json({ message, ...(aiKind ? { aiKind } : {}) }, 201);
   }
 
   // Owner round 32 (item 18): the caller's own pending "send later" rows of
