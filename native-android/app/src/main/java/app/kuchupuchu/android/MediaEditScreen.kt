@@ -47,8 +47,6 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material3.CircularProgressIndicator
@@ -82,6 +80,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -148,62 +147,17 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
     val works = remember { HashMap<String, EditBits>() }
     val item = pool[idx]
     val uriKey = item.uri.toString()
-    // Owner round 45 (item 7, second pass): the drag-swipe alone wasn't
-    // reachable on every device (the stage's own capture gestures can
-    // starve it), so the browse also gets REAL chevrons plus a "you are
-    // here" label — deterministic, no gesture gamble.
-    val haptics = rememberHaptics()
     key(uriKey) {
-        Box(Modifier.fillMaxSize()) {
-            MediaEditItemScreen(
-                nav,
-                item.uri,
-                item.isVideo,
-                convId,
-                viewOnce,
-                works[uriKey],
-                { bits -> works[uriKey] = bits },
-                { d -> idx = (idx + d).coerceIn(0, pool.lastIndex) },
-            )
-            Text(
-                "${idx + 1}/${pool.size}",
-                modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 62.dp),
-                color = Color.White,
-                fontSize = 14.sp,
-            )
-            if (idx > 0) {
-                Box(
-                    Modifier
-                        .align(Alignment.CenterStart)
-                        .padding(start = 10.dp)
-                        .size(44.dp)
-                        .background(Color.Black.copy(alpha = 0.45f), CircleShape)
-                        .clickable {
-                            haptics.tap()
-                            idx = (idx - 1).coerceIn(0, pool.lastIndex)
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Filled.KeyboardArrowLeft, "Previous photo", tint = Color.White)
-                }
-            }
-            if (idx < pool.lastIndex) {
-                Box(
-                    Modifier
-                        .align(Alignment.CenterEnd)
-                        .padding(end = 10.dp)
-                        .size(44.dp)
-                        .background(Color.Black.copy(alpha = 0.45f), CircleShape)
-                        .clickable {
-                            haptics.tap()
-                            idx = (idx + 1).coerceIn(0, pool.lastIndex)
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Filled.KeyboardArrowRight, "Next photo", tint = Color.White)
-                }
-            }
-        }
+        MediaEditItemScreen(
+            nav,
+            item.uri,
+            item.isVideo,
+            convId,
+            viewOnce,
+            works[uriKey],
+            { bits -> works[uriKey] = bits },
+            { d -> idx = (idx + d).coerceIn(0, pool.lastIndex) },
+        )
     }
 }
 
@@ -1178,14 +1132,50 @@ private fun MediaEditItemScreen(
                     Modifier
                 } else {
                     Modifier.pointerInput("editbrowse") {
-                        var travel = 0f
-                        detectHorizontalDragGestures(
-                            onDragEnd = {
-                                if (travel < -140f) onBrowse?.invoke(1) else if (travel > 140f) onBrowse?.invoke(-1)
-                                travel = 0f
-                            },
-                            onDragCancel = { travel = 0f },
-                        ) { _, amount -> travel += amount }
+                        // Owner round 47 (item 5): the Main-pass detector
+                        // lost the touch-slop race to the stage whenever
+                        // the swipe started ON the photo — only the empty
+                        // border margins browsed. Claim in the INITIAL pass
+                        // (the parent sees events BEFORE the stage); only a
+                        // firmly-horizontal drag is taken, so taps and
+                        // vertical drags still belong to the stage, and
+                        // browseTick keeps pen/crop/overlay drags winning.
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            var travel = 0f
+                            var vert = 0f
+                            var mode = 0
+                            while (true) {
+                                val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!ch.pressed) break
+                                val dx = ch.position.x - ch.previousPosition.x
+                                val dy = ch.position.y - ch.previousPosition.y
+                                if (mode == 0) {
+                                    travel += dx
+                                    vert += dy
+                                    if (kotlin.math.abs(travel) > 24f && kotlin.math.abs(travel) > kotlin.math.abs(vert) * 1.5f) {
+                                        mode = 1
+                                        ch.consume()
+                                    } else if (kotlin.math.abs(vert) > 24f) {
+                                        mode = -1
+                                    }
+                                } else if (mode == 1) {
+                                    travel += dx
+                                    ch.consume()
+                                    if (travel < -140f) {
+                                        onBrowse?.invoke(1)
+                                        break
+                                    }
+                                    if (travel > 140f) {
+                                        onBrowse?.invoke(-1)
+                                        break
+                                    }
+                                } else {
+                                    break
+                                }
+                            }
+                        }
                     }
                 },
             ),

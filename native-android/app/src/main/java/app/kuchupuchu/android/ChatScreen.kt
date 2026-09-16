@@ -361,6 +361,10 @@ fun ChatScreen(nav: NavController, convId: String) {
     var flyTarget by remember { mutableStateOf<Rect?>(null) }
     var flyLanded by remember { mutableStateOf<String?>(null) }
     var flyFlash by remember { mutableStateOf<Rect?>(null) }
+    // Owner round 47: the overlay lives inside the messages Box now — its
+    // own origin converts the rows' root-space rects to local ones.
+    var flyOx by remember { mutableStateOf(0f) }
+    var flyOy by remember { mutableStateOf(0f) }
     // Owner round 45 (item 5): r44-3's deselect confirm is retired — every
     // close clears the ticks (back/swipe both mean "get me out").
     // Owner round 32 (item 17): the attach panel's "view once" switch — armed
@@ -2008,10 +2012,30 @@ fun ChatScreen(nav: NavController, convId: String) {
     // animations read as a screen-wide twitch/dim on the owner's device
     // (and the reveal was exactly the "animation/effect" he asked about).
     val other = c?.optJSONObject("other")
-    // Owner round 45 (item 3): ONE glide value — the thread's bottom padding
-    // AND the composer's bottom pad ride the SAME spring, so an opening
-    // keyboard lifts the rows WITH the bar (no bar-snap + list-teleport).
-    val imeGlideDp = with(LocalDensity.current) { rememberImeGlidePx().toDp() }
+    // Owner round 47 (item 3+4): the r45b "pad the list bottom with the
+    // glide" idea failed on his device — growing contentPadding never
+    // moves already-laid rows (the latest message stayed buried under the
+    // bar) AND it opened a scrollable void past the list end (swiping
+    // flung the rows off the top). The padding is constant again; the
+    // glide's own per-frame DELTA scrolls the list itself by the same
+    // amount, so the rows physically ride the bar up on open and settle
+    // back down on close — but only while the thread is parked at the
+    // bottom. This also restores a VISIBLE glide on open (his #4: "on
+    // open nothing happens, close feels like it glides").
+    val glidePx = rememberImeGlidePx()
+    val imeGlideDp = with(LocalDensity.current) { glidePx.toDp() }
+    var glideApplied by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) {
+        snapshotFlow { glidePx }.collect { cur ->
+            val delta = cur - glideApplied
+            glideApplied = cur
+            val info = listState.layoutInfo
+            if (delta != 0 && info.totalItemsCount > 0 &&
+                (info.visibleItemsInfo.lastOrNull()?.index ?: 0) >= info.totalItemsCount - 2) {
+                runCatching { listState.scrollBy(delta.toFloat()) }
+            }
+        }
+    }
     Column(
         Modifier
             .fillMaxSize()
@@ -2489,7 +2513,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 6.dp + imeGlideDp),
+                contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
             ) {
                 items(
                     groupedMsgs,
@@ -2762,6 +2786,58 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 Text("Sending…", fontSize = 12.5.sp, color = Muted)
                             }
                         }
+                    }
+                }
+            }
+
+            // Owner round 47 (fly-send placement fix): the overlay lives
+            // INSIDE the messages Box. As a root-Column sibling after the
+            // composer it was a REAL layout child — its clone/glow boxes
+            // consumed Column height, squashed the weighted list to zero
+            // and shot the composer pill to the top on every send
+            // ("message bar ta top a uthe jai" — the owner was right, the
+            // position was a shortcut, not the animation itself). Box
+            // children wrap, so this draws without touching any layout;
+            // Compose doesn't clip, so the clone still flies from the
+            // composer below up into the list.
+            if (flyQueue.isNotEmpty() || flyFlash != null) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .onGloballyPositioned {
+                            flyOx = it.boundsInRoot().left
+                            flyOy = it.boundsInRoot().top
+                        },
+                ) {
+                    val ox = flyOx
+                    val oy = flyOy
+                    val flyNow = flyQueue.firstOrNull()
+                    if (flyNow != null) {
+                        // Watchdog — an echo that never reports a rect (odd
+                        // race at the end of a long list) lands at once.
+                        LaunchedEffect(flyNow.key) {
+                            delay(400)
+                            if (flyTarget == null && flyQueue.firstOrNull()?.key == flyNow.key) {
+                                flyHidden.remove(flyNow.key)
+                                flyQueue.removeAll { it.key == flyNow.key }
+                            }
+                        }
+                        flyTarget?.let { tgt ->
+                            KpFlySend(
+                                spec = FlySpec(flyNow.key, flyNow.cloneType, flyNow.body, flyNow.from.translate(Offset(-ox, -oy))),
+                                target = { (flyTarget ?: tgt).translate(Offset(-ox, -oy)) },
+                                accent = chatAccent(chatTheme),
+                            ) {
+                                flyHidden.remove(flyNow.key)
+                                flyLanded = flyNow.key
+                                flyFlash = tgt
+                                flyQueue.removeAll { it.key == flyNow.key }
+                                flyTarget = null
+                            }
+                        }
+                    }
+                    flyFlash?.let { r ->
+                        KpFlyLandFlash(r.translate(Offset(-ox, -oy)), chatAccent(chatTheme)) { flyFlash = null }
                     }
                 }
             }
@@ -3339,39 +3415,6 @@ fun ChatScreen(nav: NavController, convId: String) {
             )
             }
         }
-        // Owner round 46: the fly-send overlay — sits last so the clone
-        // (and its glow/trail) paint over the list AND the composer it
-        // launches from. Touch-transparent: a plain Box, no clickables.
-        val flyNow = flyQueue.firstOrNull()
-        if (flyNow != null) {
-            // Watchdog — if the echo row never reports a rect (odd race at
-            // the very end of a long list), land immediately instead of
-            // leaving the row hidden.
-            LaunchedEffect(flyNow.key) {
-                delay(400)
-                if (flyTarget == null && flyQueue.firstOrNull()?.key == flyNow.key) {
-                    flyHidden.remove(flyNow.key)
-                    flyQueue.removeAll { it.key == flyNow.key }
-                }
-            }
-            flyTarget?.let { tgt ->
-                KpFlySend(
-                    spec = flyNow,
-                    target = { flyTarget ?: tgt },
-                    accent = chatAccent(chatTheme),
-                ) {
-                    flyHidden.remove(flyNow.key)
-                    flyLanded = flyNow.key
-                    flyFlash = tgt
-                    flyQueue.removeAll { it.key == flyNow.key }
-                    flyTarget = null
-                }
-            }
-        }
-        flyFlash?.let { r ->
-            KpFlyLandFlash(r, chatAccent(chatTheme)) { flyFlash = null }
-        }
-
         androidx.activity.compose.BackHandler(enabled = showAttach || showStickers) {
             // Owner round 45 (item 5): back is a real leave — the ticks die
             // with the panel, so a reopen starts clean.

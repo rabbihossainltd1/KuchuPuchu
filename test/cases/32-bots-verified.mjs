@@ -972,11 +972,15 @@ const convBetween = (db, a, b) =>
       !chat.includes(".background(if (cancelArmed) Color.White else Gold)"),
   );
   check(
-    "keyboard glide: ONE shared spring rides BOTH the composer pad and the thread's bottom padding — the rows rise with the bar (the 250 ms teleport auto-scroll is gone)",
+    "keyboard glide: ONE shared spring on the composer pad AND the thread RIDES it — a per-frame delta scroll at bottom (r45b's padding version buried the latest row and opened a scrollable void past the end; padding is constant again) — open glides like close, no 250 ms teleport",
     chat.includes("private fun rememberImeGlidePx(): Int") &&
       !chat.includes("snapshotFlow { kpIme") &&
       !chat.includes("KpImeAutoScroll") &&
-      chat.includes("bottom = 6.dp + imeGlideDp") &&
+      chat.includes("snapshotFlow { glidePx }") &&
+      chat.includes("listState.scrollBy(delta.toFloat())") &&
+      chat.includes(">= info.totalItemsCount - 2") &&
+      chat.includes("top = 6.dp, bottom = 6.dp),") &&
+      !chat.includes("bottom = 6.dp + imeGlideDp") &&
       chat.includes("padForIme = if (!showAttach && !showStickers) imeGlideDp else 0.dp,") &&
       // Owner round 44: open glides like close. Owner round 45 (item 3):
       // a critical spring — frame streams are tracked live, single jumps
@@ -6428,12 +6432,17 @@ const convBetween = (db, a, b) =>
         edit.includes("private class EditBits") &&
         edit.includes("@Composable\nprivate fun MediaEditItemScreen(") &&
         edit.includes('pointerInput("editbrowse")') &&
-        // Owner round 45 (item 7, second pass): the swipe alone wasn't
-        // reachable on every device — real chevrons + a position label
-        // guarantee the browse.
-        edit.includes("KeyboardArrowLeft") &&
-        edit.includes("KeyboardArrowRight") &&
-        edit.includes('"${idx + 1}/${pool.size}"') &&
+        // Owner round 47 (item 5): the chevrons were his removal order —
+        // the swipe itself is fixed ON the photo: an Initial-pass claim
+        // ahead of the stage's own gestures (the Main-pass detector only
+        // fired in the border margins before).
+        edit.includes(
+          "awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)",
+        ) &&
+        edit.includes("ch.consume()") &&
+        !edit.includes("KeyboardArrowLeft") &&
+        !edit.includes("KeyboardArrowRight") &&
+        edit.includes("travel < -140f") &&
         edit.includes("works[uriKey] = bits") &&
         edit.includes(
           "DisposableEffect(Unit) { onDispose { ScreenStore.editPool = emptyList() } }",
@@ -6464,7 +6473,13 @@ const convBetween = (db, a, b) =>
         chat.includes("delay(400)") &&
         attach.includes("onSendRect: (androidx.compose.ui.geometry.Rect) -> Unit = {},") &&
         attach.includes("onGloballyPositioned { onSendRect(it.boundsInRoot()) }") &&
-        chat.includes("onSendRect = { attachSendRect = it },"),
+        chat.includes("onSendRect = { attachSendRect = it },") &&
+        // Owner round 47 (fix): the overlay draws inside the messages Box
+        // (a root-Column child consumed layout height and shoved the
+        // composer to the top on every send).
+        chat.includes("flyOx = it.boundsInRoot().left") &&
+        chat.includes("flyNow.from.translate(Offset(-ox, -oy))") &&
+        !chat.includes("// Owner round 46: the fly-send overlay"),
     );
     // Owner round 39 (item 6): the 'N selected' header + Edit chip are
     // gone — the picker is Recents ▾ · HD over the grid, with the
