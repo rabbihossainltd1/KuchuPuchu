@@ -8945,14 +8945,16 @@ const convBetween = (db, a, b) =>
         chat.includes(
           'bornKeys.add(liveMsg.optString("clientId").ifBlank { liveMsg.optString("id") })',
         ) &&
-        (chat.match(/val born = remember\(rowKey\) \{ bornKeys\.remove\(rowKey\) \}/g) || [])
-          .length === 2 &&
+        // Owner round 44: sends don't rise (only the other side's rows
+        // do); the keys are still consumed once (thread + pending).
+        (chat.match(/remember\(rowKey\) \{ bornKeys\.remove\(rowKey\) \}/g) || []).length === 2 &&
+        chat.includes("val born = bornKey && ") &&
+        !chat.includes("Box(Modifier.fillMaxWidth().riseIn(born)) {") &&
         chat.includes("DeleteRowShell(") &&
         chat.includes(
           "                            m = m,\n                            rowKey = rowKey,",
         ) &&
         chat.includes("vanishingIds.removeAll(gone.toSet())") &&
-        chat.includes("Box(Modifier.fillMaxWidth().riseIn(born)) {") &&
         (chat.match(/vanishingIds\.addAll\(ids\)/g) || []).length === 2 &&
         chat.includes(
           "        vanishingIds.addAll(ids)\n        scope.launch {\n            delay(DeleteAnim.GRACE_MS)\n            ids.forEach { ScreenStore.hideMessage(it) }\n            paintFromStore()\n        }",

@@ -2483,8 +2483,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // Owner round 33 (item 11b): a row born after open rises in
                     // once (the key leaves the set so a recomposition never
                     // replays it); a row being deleted explodes first.
+                    // Owner round 44: the SEND rise is gone (the owner's own
+                    // animation lands later) — only the other side's rows
+                    // rise now. The key still leaves the set either way.
                     val rowKey = m.optString("clientId").ifBlank { m.optString("id") }
-                    val born = remember(rowKey) { bornKeys.remove(rowKey) }
+                    val bornKey = remember(rowKey) { bornKeys.remove(rowKey) }
+                    val born = bornKey && m.optString("senderId") != Store.myId()
                     val vanishing = albumPhotos(m).any { it.optString("id") in vanishingIds }
                     // Owner round 33 (item 17): the jumped-to row flashes once.
                     val flashing = flashId.isNotBlank() && albumPhotos(m).any { it.optString("id") == flashId }
@@ -2626,11 +2630,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                     ),
                     key = { it.optString("clientId").ifBlank { it.optString("id") } },
                 ) { m ->
-                    // Owner round 33 (item 11b): my fresh send rises from the
-                    // composer's side into the list.
+                    // Owner round 44: no rise on my sends any more (the
+                    // owner's own animation lands later) — but the key is
+                    // still consumed here, or the send would rise on its
+                    // server ack instead.
                     val rowKey = m.optString("clientId").ifBlank { m.optString("id") }
-                    val born = remember(rowKey) { bornKeys.remove(rowKey) }
-                    Box(Modifier.fillMaxWidth().riseIn(born)) {
+                    remember(rowKey) { bornKeys.remove(rowKey) }
+                    Box(Modifier.fillMaxWidth()) {
                         MessageRow(
                             m,
                             isGroup,
