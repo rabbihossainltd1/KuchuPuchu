@@ -6416,8 +6416,9 @@ const convBetween = (db, a, b) =>
         attach.includes("sel.replaceAll { it.copy(once = v) }") &&
         attach.includes("onScheduleBatch()") &&
         attach.includes("onSendBatch()") &&
-        // Owner round 41 (item 5): blue badge, white number.
-        attach.includes('"${sel.size}", color = ActionBlueInk') &&
+        // Owner round 42 (item 2): blue badge, white number, pinned center.
+        attach.includes('"${sel.size}"') &&
+        attach.includes("textAlign = TextAlign.Center") &&
         attach.includes(".border(1.dp, Color.White, CircleShape)") &&
         // Owner round 41 (item 3): the whole bar is 28.dp (badge 15).
         attach.includes(".offset(x = 2.dp, y = (-2).dp)") &&

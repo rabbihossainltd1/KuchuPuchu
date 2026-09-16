@@ -89,6 +89,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -789,7 +790,16 @@ fun AttachPanel(
                             .border(1.dp, Color.White, CircleShape),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text("${sel.size}", color = ActionBlueInk, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        // Owner round 42 (item 2): the digit hugged the badge's
+                        // left edge on device — pin it: full width + centered.
+                        Text(
+                            "${sel.size}",
+                            color = ActionBlueInk,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     }
                 }
             }
