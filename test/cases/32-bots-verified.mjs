@@ -6415,6 +6415,8 @@ const convBetween = (db, a, b) =>
         attach.includes("onScheduleBatch()") &&
         attach.includes("onSendBatch()") &&
         attach.includes('"${sel.size}", color = Ink') &&
+        // Owner round 40 (item 5): the badge rides the unclipped rim.
+        attach.includes(".offset(x = 3.dp, y = (-3).dp)") &&
         // Owner round 40 (item 3): the keyboard pushes the bar up.
         attach.includes(".imePadding(),") &&
         !attach.includes("PreviewPane") &&

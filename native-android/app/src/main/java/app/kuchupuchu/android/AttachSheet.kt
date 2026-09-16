@@ -39,6 +39,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -649,7 +650,7 @@ fun AttachPanel(
                 }
             }
         }
-        // Owner round 39 (item 6): the selection bar — pencil (the last        // Owner round 39 (item 6): the selection bar — pencil (the last
+        // Owner round 39 (item 6): the selection bar — pencil (the last
         // ticked photo opens in the editor), one caption for the batch (it
         // rides the first photo, WhatsApp-exact), the ① batch toggle and
         // Send with its count badge (hold = send later, as before).
@@ -713,31 +714,41 @@ fun AttachPanel(
                     CenteredOnceIcon(28.dp, tint = if (allOnce) Color.White else Muted)
                 }
                 Spacer(Modifier.size(8.dp))
+                // Owner round 40 (item 5): the badge used to live INSIDE the
+                // clipped 44.dp circle, so the clip ate its top-right half.
+                // The circle keeps its own clip; the badge is a sibling on
+                // the unclipped rim.
                 Box(
-                    Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(ActionBlue)
-                        .combinedClickable(
-                            onLongClick = {
-                                haptics.tap()
-                                onScheduleBatch()
-                            },
-                        ) {
-                            haptics.tap()
-                            onSendBatch()
-                        },
+                    Modifier.size(44.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "Send",
-                        tint = ActionBlueInk,
-                        modifier = Modifier.size(20.dp),
-                    )
+                    Box(
+                        Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(ActionBlue)
+                            .combinedClickable(
+                                onLongClick = {
+                                    haptics.tap()
+                                    onScheduleBatch()
+                                },
+                            ) {
+                                haptics.tap()
+                                onSendBatch()
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Send,
+                            contentDescription = "Send",
+                            tint = ActionBlueInk,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
                     Box(
                         Modifier
                             .align(Alignment.TopEnd)
+                            .offset(x = 3.dp, y = (-3).dp)
                             .size(18.dp)
                             .clip(CircleShape)
                             .background(Color.White)
