@@ -238,6 +238,13 @@ object ScreenStore {
      *  it to its attach selection and reopens the panel. */
     val pendingAddMore = kotlinx.coroutines.flow.MutableStateFlow<AddMore?>(null)
 
+    /** Owner round 39 (item 6): the attach picker's pencil on a MULTI batch
+     *  sets this to the edited item's uri — the editor's Done then stages
+     *  the edited photo back (replacing the original) instead of sending.
+     *  Null = send mode (single picks, viewer edits). Cleared on consume
+     *  and on editor dispose (backing out must not poison the next edit). */
+    var editStageUri: String? = null
+
 
     /** Bumped on FCM so an open chat refreshes immediately. */
     var poke by mutableStateOf(0)
@@ -743,4 +750,7 @@ fun callPeerId(call: JSONObject): String =
     }
 
 /** Owner round 34 (item 16b): one staged batch item from the editor's +. */
-data class AddMore(val convId: String, val item: MediaItem, val once: Boolean)
+/** Owner round 39 (item 6): + replaceUri — the staged item replaces this
+ *  uri in the batch instead of prepending (the panel pencil's trip back).
+ *  Blank = prepend, the editor + button's shape. */
+data class AddMore(val convId: String, val item: MediaItem, val once: Boolean, val replaceUri: String = "")

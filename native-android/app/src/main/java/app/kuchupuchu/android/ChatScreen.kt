@@ -1595,11 +1595,18 @@ fun ChatScreen(nav: NavController, convId: String) {
     }
     // Owner round 34 (item 16b): the editor's + staged the current pick as
     // the batch's first item — prepend it and reopen the panel for more.
+    // Owner round 39 (item 6): the panel pencil's trip carries replaceUri —
+    // the staged photo swaps into the original's seat instead.
     LaunchedEffect(convId) {
         ScreenStore.pendingAddMore.collect { more ->
             if (more == null || more.convId != convId) return@collect
             ScreenStore.pendingAddMore.value = null
-            attachSel.add(0, more.item)
+            if (more.replaceUri.isNotBlank()) {
+                val at = attachSel.indexOfFirst { it.uri.toString() == more.replaceUri }
+                if (at >= 0) attachSel[at] = more.item else attachSel.add(0, more.item)
+            } else {
+                attachSel.add(0, more.item)
+            }
             showAttach = true
         }
     }
@@ -3142,7 +3149,14 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // unarmed — once is the editor's own toggle now.
                 onEdit = { item ->
                     ScreenStore.editTitle = title
-                    attachSel.clear()
+                    // Owner round 39 (item 6): the pencil on a MULTI batch
+                    // keeps the batch — Done stages the edited photo back
+                    // (replacing this uri). A lone pick sends as before.
+                    if (attachSel.size > 1) ScreenStore.editStageUri = item.uri.toString()
+                    else {
+                        ScreenStore.editStageUri = null
+                        attachSel.clear()
+                    }
                     showAttach = false
                     nav.navigate("mediaedit/$convId/0/${statusPickArg(item)}")
                 },

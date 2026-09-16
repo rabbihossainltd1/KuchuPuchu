@@ -133,7 +133,12 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
         val controller = window?.let { androidx.core.view.WindowCompat.getInsetsController(it, it.decorView) }
         val prev = controller?.isAppearanceLightStatusBars
         controller?.isAppearanceLightStatusBars = false
-        onDispose { controller?.isAppearanceLightStatusBars = prev ?: true }
+        // Owner round 39 (item 6): backing out of a pencil trip must not
+        // poison the next edit — the stage flag dies with the screen.
+        onDispose {
+            controller?.isAppearanceLightStatusBars = prev ?: true
+            ScreenStore.editStageUri = null
+        }
     }
 
     var photo by remember { mutableStateOf<ImageBitmap?>(null) }
@@ -621,6 +626,14 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
             sendStatus()
             return
         }
+        // Owner round 39 (item 6): the panel pencil's trip — Done stages
+        // the edited photo back into the batch (replacing the original)
+        // instead of sending it. Same bake as the + button.
+        ScreenStore.editStageUri?.let { stageUri ->
+            ScreenStore.editStageUri = null
+            addMore(stageUri)
+            return
+        }
         if (busy) return
         busy = true
         val cap = caption.trim()
@@ -678,8 +691,10 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
         nav.popBackStack()
     }
 
-    /** The caption bar's + : stage this one (edits baked in) and pick more. */
-    fun addMore() {
+    /** The caption bar's + : stage this one (edits baked in) and pick more.
+     *  Owner round 39 (item 6): replaceUri carries the panel pencil's trip —
+     *  the staged item replaces that uri in the batch instead of prepending. */
+    fun addMore(replaceUri: String = "") {
         if (busy) return
         busy = true
         haptics.tap()
@@ -751,7 +766,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                     haptics.reject()
                     notice = "Could not add that one."
                 } else {
-                    ScreenStore.pendingAddMore.value = AddMore(convId, item, onceShot)
+                    ScreenStore.pendingAddMore.value = AddMore(convId, item, onceShot, replaceUri)
                     nav.popBackStack()
                 }
             }

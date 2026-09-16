@@ -6389,26 +6389,33 @@ const convBetween = (db, a, b) =>
     const plan = kt("VideoExport.kt");
     const store = kt("ScreenStore.kt");
     const app = kt("KpApp.kt");
-    const header = attach.slice(
-      attach.indexOf('sel.isNotEmpty() -> "${sel.size} selected"'),
-      attach.indexOf("if (foldersOpen) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore"),
-    );
+    // Owner round 39 (item 6): the 'N selected' header + Edit chip are
+    // gone — the picker is × · Recents ▾ · HD over the grid, with the
+    // selection bar (pencil, caption, ①, send-with-count) under it.
     check(
-      "r32-19: attach panel — the header reads 'N selected' with ①, x, Edit (ONLY for a single pick) and a real Send circle (ActionBlue, combinedClickable: tap = onSendBatch, hold = onScheduleBatch); the panel no longer relies on the composer's mic slot",
+      "r39-6: attach picker — fullscreen header (× closes, 'Recents'/folder + chevron, HD pill); collapsed tiles + recents strip (a strip tap ticks + opens fullscreen); selection bar (pencil edits the last tick, caption rides sel[0], ① batch toggle, ActionBlue send with count badge, hold = later); no preview anywhere",
       attach.includes("onScheduleBatch: () -> Unit = {},") &&
         attach.includes("onEdit: (MediaItem) -> Unit = {},") &&
         attach.includes(
           "@OptIn(ExperimentalFoundationApi::class)\n@Composable\nfun AttachPanel(",
         ) &&
-        header.includes("if (sel.size == 1) {") &&
-        header.includes("onEdit(sel[0])") &&
-        header.includes(
-          'Text("Edit", color = Ink, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)',
-        ) &&
-        header.includes(
-          ".size(38.dp)\n                        .clip(CircleShape)\n                        .background(ActionBlue)\n                        .combinedClickable(\n                            onLongClick = {\n                                haptics.tap()\n                                onScheduleBatch()\n                            },\n                        ) {\n                            haptics.tap()\n                            onSendBatch()\n                        },",
-        ) &&
-        header.includes('contentDescription = "Send",') &&
+        attach.includes('folder ?: "Recents",') &&
+        attach.includes('"HD",') &&
+        attach.includes("val hdOn = if (sel.isEmpty()) hdArm else sel.all { it.hd }") &&
+        attach.includes("if (!fullscreen) {") &&
+        attach.includes("LazyRow(") &&
+        attach.includes("setFullscreen(true)") &&
+        attach.includes("if (fullscreen && sel.isNotEmpty()) {") &&
+        attach.includes("sel.lastOrNull()?.let(onEdit)") &&
+        attach.includes("sel[0] = sel[0].copy(caption = t.take(1000))") &&
+        attach.includes("ViewOnceOneIcon(28.dp, tint = if (allOnce) Color.White else Muted)") &&
+        attach.includes("sel.replaceAll { it.copy(once = v) }") &&
+        attach.includes("onScheduleBatch()") &&
+        attach.includes("onSendBatch()") &&
+        attach.includes('"${sel.size}", color = Ink') &&
+        !attach.includes("PreviewPane") &&
+        !attach.includes("previewUri") &&
+        !attach.includes('"${sel.size} selected"') &&
         !attach.includes("the composer's mic IS the\n                // send button") &&
         // the composer's circle is the MIC while a gallery pick is active
         !chat.includes("gridSelCount") &&
@@ -6549,16 +6556,16 @@ const convBetween = (db, a, b) =>
           .includes("Sharing status…"),
     );
     check(
-      "r34-16b: editor flow + captions — a grid tap previews (+ checks), the preview pencil opens the editor, the panel caption bar writes the pick, the result carries the caption, MediaItem / the send path / forwards keep it, captioned rows render it",
-      attach.includes("previewUri = item.uri") &&
-        attach.includes("if (pos < 0) sel.add(item)") &&
+      "r34-16b: editor flow + captions — a grid tap ticks in place (strip + grid share the hd-aware toggle), the bar pencil opens the editor, the panel caption bar writes sel[0], the result carries the caption, MediaItem / the send path / forwards keep it, captioned rows render it",
+      (attach.match(/sel\.add\(item\.copy\(hd = hdOn\)\)/g) || []).length === 2 &&
+        attach.includes("if (pos >= 0) sel.removeAll { it.uri == item.uri }") &&
         attach.includes('val caption: String = "",') &&
         attach.includes("val hd: Boolean = false,") &&
         store.includes(
           "val pendingAddMore = kotlinx.coroutines.flow.MutableStateFlow<AddMore?>(null)",
         ) &&
         store.includes(
-          "data class AddMore(val convId: String, val item: MediaItem, val once: Boolean)",
+          'data class AddMore(val convId: String, val item: MediaItem, val once: Boolean, val replaceUri: String = "")',
         ) &&
         chat.includes("ScreenStore.pendingAddMore.collect { more ->") &&
         chat.includes("ScreenStore.editTitle = title") &&
@@ -7590,19 +7597,15 @@ const convBetween = (db, a, b) =>
         chat1.includes('nav.navigate("mediaedit/$convId/0/${statusPickArg(item)}")'),
     );
   }
-  // r36-2: press-hold on an attach-grid photo multi-selects it straight
-  // from an empty tray (a lone tap previews instead of the editor detour).
+  // r36-2 (retired by r39-6): press-hold multi-select left with the
+  // preview stage — MediaCell is a plain tap cell again, every tap ticks.
   {
     const attach2 = kt("AttachSheet.kt");
     check(
-      "r36-2: MediaCell takes an optional onLongPress (hold-to-select where offered, plain tap cell otherwise); the attach grid's hold adds the pick without previewing, taps preview",
-      attach2.includes("onLongPress: (() -> Unit)? = null,") &&
-        attach2.includes(
-          "if (onLongPress != null) Modifier.combinedClickable(onLongClick = onLongPress) { onToggle() } else Modifier.clickable(onClick = onToggle)",
-        ) &&
-        attach2.includes("previewUri = item.uri") &&
-        attach2.includes("onLongPress = {") &&
-        attach2.includes("if (pos < 0) {"),
+      "r36-2 (retired): no onLongPress anywhere in the attach sheet — MediaCell is a plain clickable tap cell, taps tick/untick in place",
+      !attach2.includes("onLongPress") &&
+        attach2.includes("val press = Modifier.clickable(onClick = onToggle)") &&
+        attach2.includes("if (pos >= 0) sel.removeAll { it.uri == item.uri }"),
     );
   }
   // r36-3: emoji / text overlays get an undo of their own — one snapshot
@@ -7722,28 +7725,40 @@ const convBetween = (db, a, b) =>
         !edit38.includes("Icons.Filled.AddPhotoAlternate"),
     );
   }
-  // r38-3: the attach preview stage — a grid tap lands in a walkable
-  // preview, not the editor: left/right swipes turn the photos, the pencil
-  // edits this one, the checkbox right of it multi-picks, caption + send
-  // ride the bottom. Selecting hides the action tiles; a downward swipe
-  // deselects all and returns to the grid.
+  // Owner round 39 (item 6): the r38-3 preview stage is deleted — no
+  // pager, no preview cache/decodes, no checkbox. The pencil on a MULTI
+  // batch keeps the batch: Done stages the edited photo back into the
+  // original's seat (replaceUri rides the AddMore); a lone pick sends.
   {
     const attach38 = kt("AttachSheet.kt");
+    const edit39 = kt("MediaEditScreen.kt");
+    const chat39b = kt("ChatScreen.kt");
+    const store39 = kt("ScreenStore.kt");
     check(
-      "r38-3: grid taps open a preview pager (swipe walks photos, pencil edits, checkbox multi-picks, bottom caption + send); selecting auto-hides the tiles, swipe-down deselects all",
-      attach38.includes("private fun PreviewPane(") &&
-        attach38.includes("rememberPagerState(initialPage = startIdx) { shown.size }") &&
-        attach38.includes("HorizontalPager(") &&
-        attach38.includes(
-          "if (checked) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked",
+      "r39-6: preview stage fully deleted (no PreviewPane/Page/Cache, no pager imports, no preview decodes, no checkbox icons); the pencil stages back into multi batches via replaceUri",
+      !attach38.includes("PreviewPane") &&
+        !attach38.includes("PreviewPage") &&
+        !attach38.includes("PreviewCache") &&
+        !attach38.includes("HorizontalPager") &&
+        !attach38.includes("rememberPagerState") &&
+        !attach38.includes("decodePreview") &&
+        !attach38.includes("previewBitmap") &&
+        !attach38.includes("previewFrame") &&
+        !attach38.includes("CheckCircle") &&
+        !attach38.includes("RadioButtonUnchecked") &&
+        store39.includes("var editStageUri: String? = null") &&
+        edit39.includes('fun addMore(replaceUri: String = "") {') &&
+        edit39.includes(
+          "ScreenStore.pendingAddMore.value = AddMore(convId, item, onceShot, replaceUri)",
         ) &&
-        attach38.includes("if (!fullscreen && previewUri == null && sel.isEmpty()) {") &&
-        attach38.includes(
-          "fun decodePreview(uri: Uri, ctx: android.content.Context, isVideo: Boolean)",
+        edit39.includes("addMore(stageUri)") &&
+        chat39b.includes(
+          "if (attachSel.size > 1) ScreenStore.editStageUri = item.uri.toString()",
         ) &&
-        attach38.includes("private object PreviewCache") &&
-        attach38.includes("downTotal > 90f") &&
-        attach38.includes("if (sel.isEmpty()) current?.let { sel.add(it) }"),
+        chat39b.includes(
+          "val at = attachSel.indexOfFirst { it.uri.toString() == more.replaceUri }",
+        ) &&
+        chat39b.includes("if (at >= 0) attachSel[at] = more.item else attachSel.add(0, more.item)"),
     );
   }
   // r38-4: own unsends aborted the dust ~200ms in — the live DELETED

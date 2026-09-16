@@ -42,9 +42,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -54,7 +55,6 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContactPage
 import androidx.compose.material.icons.filled.Description
@@ -65,7 +65,6 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Poll
-import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -124,12 +123,13 @@ private data class AttachAction(
 )
 
 /**
- * Attach panel — WhatsApp-exact: sits UNDER the message bar (the bar stays
- * on top of it), normally NOT fullscreen; tapping the handle or swiping it
- * up is the ONLY way it goes fullscreen. A lone grid tap opens the pick in
- * the editor; taps ADD once the editor's + staged a first item (multi-select
- * with numbered badges); a send button appears once something is picked.
- * The chevron next to "Recent" opens device FOLDERS (Camera, Screenshots…).
+ * Attach panel — WhatsApp-exact: collapsed it shows the action tiles over a
+ * recents strip (a strip tap ticks the photo and opens the fullscreen
+ * picker); fullscreen it is × · Recents ▾ · HD over the 4-column grid, with
+ * the selection bar under it (pencil → editor, caption, ①, send-with-count).
+ * Grid taps tick/untick with numbered badges — never a preview, never an
+ * editor detour. Sits UNDER the message bar; the handle or a grid swipe-up
+ * goes fullscreen. The chevron next to "Recents" opens device FOLDERS.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -155,10 +155,9 @@ fun AttachPanel(
     var fullscreen by remember { mutableStateOf(false) }
     var foldersOpen by remember { mutableStateOf(false) }
     var folder by remember { mutableStateOf<String?>(null) }
-    // Owner round 38 (item 3): the uri under preview (null = grid). A tap
-    // lands here instead of the editor — swipe walks the photos, the
-    // checkbox multi-picks, the pencil opens the editor for this one.
-    var previewUri by remember { mutableStateOf<Uri?>(null) }
+    // Owner round 39 (item 6): the HD default for the next taps while
+    // nothing is ticked yet (WhatsApp: the pill arms before the pick).
+    var hdArm by remember { mutableStateOf(false) }
     // Owner round 31 (item 28): swiping up ONLY grows the panel — the folder
     // chips (Camera / Screenshots / Download…) no longer pop open by
     // themselves ("swipe up korle folder/recent auto expand hoy"); the
@@ -294,6 +293,9 @@ fun AttachPanel(
             folder == null -> pool.take(80)
             else -> pool.filter { it.bucket == folder }.take(80)
         }
+    // Owner round 39 (item 6): the batch's HD state (or the armed default
+    // for the next taps) — the pill and every tick read the same value.
+    val hdOn = if (sel.isEmpty()) hdArm else sel.all { it.hd }
 
     /* Swipe the GRID itself, WhatsApp-style: up = fullscreen (actions
        hidden), down at the top = back to the compact panel.
@@ -434,10 +436,9 @@ fun AttachPanel(
                 AttachAction(Icons.Filled.AutoAwesome, if (KpThemeMode.darkBlue) ActionBlueDeep else Color(0xFF818CF8), "AI images") { comingSoon() },
             ),
         )
-        // Owner round 38 (item 3): the moment a photo is selected the
-        // action tiles hide themselves; deselect (or swipe the preview
-        // down) and they come back.
-        if (!fullscreen && previewUri == null && sel.isEmpty()) {
+        // Owner round 39 (item 6): tiles + recents live together while
+        // collapsed (reference shot 1) — only fullscreen hides the tiles.
+        if (!fullscreen) {
             rows.forEach { row ->
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 1.dp),
@@ -458,113 +459,85 @@ fun AttachPanel(
             return@Column
         }
 
-        /* header: Recent / folder name — selection count + SEND replaces the
-           chevron while a selection is active (WhatsApp behavior).
-           Hidden under the preview, which carries its own chrome. */
-        if (previewUri == null) {
+        /* Owner round 39 (item 6): the fullscreen picker header — × closes
+           the sheet, the title (folder when filtered) + its chevron opens
+           the folder chips, the HD pill arms batch quality. The collapsed
+           panel shows tiles + strip, no header (reference shots 1 vs 2/4). */
+        if (fullscreen) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(start = 14.dp, end = 10.dp, top = 2.dp),
+                .padding(start = 6.dp, end = 10.dp, top = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                when {
-                    sel.isNotEmpty() -> "${sel.size} selected"
-                    foldersOpen && folder != null -> folder!!
-                    else -> "Recent"
-                },
-                color = Ink,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f),
-            )
-            if (sel.isNotEmpty()) {
-                // Owner round 36 (item 1): the ① toggle lived here, next to
-                // the Edit chip — removed. Once is per item now, armed in
-                // the editor; the batch just carries it.
-                // This tiny x just clears the selection.
-                Icon(
-                    Icons.Filled.Close,
-                    contentDescription = "Clear selection",
-                    tint = Muted, // Owner round 25: theme token
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .clickable {
-                            haptics.tap()
-                            sel.clear()
-                        }
-                        .padding(6.dp)
-                        .size(18.dp),
-                )
-                // Owner round 32 (item 19): ONE picked photo / video → Edit
-                // (draw / trim) before it goes.
-                if (sel.size == 1) {
-                    Spacer(Modifier.size(4.dp))
-                    Row(
-                        Modifier
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(ChipIdle)
-                            .clickable {
-                                haptics.tap()
-                                onEdit(sel[0])
-                            }
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(Icons.Filled.Brush, null, tint = Ink, modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.size(4.dp))
-                        Text("Edit", color = Ink, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            Box(
+                Modifier
+                    .clip(CircleShape)
+                    .clickable {
+                        haptics.tap()
+                        onDismiss()
                     }
-                }
-                Spacer(Modifier.size(6.dp))
-                // Owner round 32 (item 19): the media Send lives HERE, right
-                // under the composer's mic (which stays a mic). Tap = send
-                // now, hold = "send later" (item 18's sheet).
-                Box(
-                    Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(ActionBlue)
-                        .combinedClickable(
-                            onLongClick = {
-                                haptics.tap()
-                                onScheduleBatch()
-                            },
-                        ) {
-                            haptics.tap()
-                            onSendBatch()
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "Send",
-                        tint = ActionBlueInk,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-            } else {
+                    .padding(8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Close, "Close", tint = Muted, modifier = Modifier.size(20.dp))
+            }
+            Text(
+                folder ?: "Recents",
+                color = Ink,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 2.dp),
+            )
+            Box(
+                Modifier
+                    .clip(CircleShape)
+                    .clickable {
+                        haptics.tap()
+                        foldersOpen = !foldersOpen
+                        if (!foldersOpen) folder = null
+                    }
+                    .padding(6.dp),
+                contentAlignment = Alignment.Center,
+            ) {
                 Icon(
                     if (foldersOpen) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
                     contentDescription = "Folders",
                     tint = Ink,
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .clickable {
-                            haptics.tap()
-                            foldersOpen = !foldersOpen
-                            if (!foldersOpen) folder = null
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            // The HD pill: quality for the ticked set — or the armed
+            // default (hdArm) for the next taps while nothing is ticked.
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (hdOn) ActionBlue else Color.Transparent)
+                    .border(1.dp, if (hdOn) ActionBlue else Muted, RoundedCornerShape(8.dp))
+                    .clickable {
+                        haptics.tap()
+                        if (sel.isEmpty()) hdArm = !hdArm
+                        else {
+                            val v = !sel.all { it.hd }
+                            sel.replaceAll { it.copy(hd = v) }
                         }
-                        .padding(6.dp)
-                        .size(20.dp),
+                    }
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "HD",
+                    color = if (hdOn) ActionBlueInk else Muted,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Bold,
                 )
             }
         }
         }
 
         /* folder chips (only when the chevron opened them) */
-        if (foldersOpen && previewUri == null) {
+        if (foldersOpen) {
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -598,24 +571,7 @@ fun AttachPanel(
         }
 
 
-        // Owner round 38 (item 3): the preview stage takes the grid's seat.
-        val previewStart = previewUri
-        if (previewStart != null && shown.isNotEmpty()) {
-            PreviewPane(
-                shown = shown,
-                startUri = previewStart,
-                sel = sel,
-                onEdit = onEdit,
-                onSendBatch = onSendBatch,
-                onScheduleBatch = onScheduleBatch,
-                onClose = { previewUri = null },
-                onClearAll = {
-                    previewUri = null
-                    sel.clear()
-                },
-                modifier = Modifier.fillMaxWidth().weight(1f),
-            )
-        } else if (shown.isEmpty()) {
+        if (shown.isEmpty()) {
             Text(
                 if (foldersOpen) "This folder is empty — try another folder" else "No recent media",
                 color = Muted, // Owner round 31: theme token (the fixed ink vanished in dark-blue)
@@ -624,7 +580,35 @@ fun AttachPanel(
                     .padding(vertical = 14.dp)
                     .align(Alignment.CenterHorizontally),
             )
+        } else if (!fullscreen) {
+            // Owner round 39 (item 6): the collapsed recents strip under
+            // the tiles (reference shot 1). A tap ticks the photo AND
+            // opens the fullscreen picker on it.
+            LazyRow(
+                modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                state = rememberLazyListState(),
+                contentPadding = PaddingValues(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                items(shown, key = { it.uri.toString() }) { item ->
+                    val pos = sel.indexOfFirst { it.uri == item.uri }
+                    Box(Modifier.size(76.dp)) {
+                        MediaCell(
+                            item,
+                            ctx,
+                            selected = pos >= 0,
+                            selectIndex = if (pos >= 0) pos + 1 else 0,
+                            onToggle = {
+                                haptics.tap()
+                                if (pos >= 0) sel.removeAll { it.uri == item.uri } else sel.add(item.copy(hd = hdOn))
+                                setFullscreen(true)
+                            },
+                        )
+                    }
+                }
+            }
         } else {
+            // O(1) lookup per cell        } else {
             // O(1) lookup per cell instead of an O(n) `indexOfFirst` scan on
             // every recomposition of every visible cell — with a big
             // selection that scan-per-cell was a real source of the "laggy
@@ -654,22 +638,112 @@ fun AttachPanel(
                         selectIndex = if (pos >= 0) pos + 1 else 0,
                         onToggle = {
                             haptics.tap()
-                            // Owner round 38 (item 3): every tap previews —
-                            // swipe walks the photos, the checkbox (right of
-                            // the pencil) multi-picks, the pencil opens the
-                            // editor for this one. Tapping checks the item.
-                            previewUri = item.uri
-                            if (pos < 0) sel.add(item)
+                            // Owner round 39 (item 6): every tap ticks in
+                            // the grid — numbered badge, no preview, no
+                            // editor detour. The pencil below edits.
+                            if (pos >= 0) sel.removeAll { it.uri == item.uri } else sel.add(item.copy(hd = hdOn))
                         },
-                        // Owner round 36 (item 2): press-hold multi-selects
-                        // straight from an empty tray — no editor detour.
-                        onLongPress = {
-                            if (pos < 0) {
-                                haptics.tap()
-                                sel.add(item)
+                    )
+                }
+            }
+        }
+        // Owner round 39 (item 6): the selection bar — pencil (the last
+        // ticked photo opens in the editor), one caption for the batch (it
+        // rides the first photo, WhatsApp-exact), the ① batch toggle and
+        // Send with its count badge (hold = send later, as before).
+        if (fullscreen && sel.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(ChipIdle)
+                        .clickable {
+                            haptics.tap()
+                            sel.lastOrNull()?.let(onEdit)
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.Edit, "Edit", tint = Ink, modifier = Modifier.size(18.dp))
+                }
+                Spacer(Modifier.size(8.dp))
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(ChipIdle)
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val cap = sel[0].caption
+                    BasicTextField(
+                        value = cap,
+                        onValueChange = { t -> sel[0] = sel[0].copy(caption = t.take(1000)) },
+                        singleLine = true,
+                        textStyle = TextStyle(color = Ink, fontSize = 14.sp),
+                        cursorBrush = SolidColor(Ink),
+                        modifier = Modifier.weight(1f),
+                        decorationBox = { inner ->
+                            Box {
+                                if (cap.isEmpty()) Text("Add a caption...", color = Muted, fontSize = 14.sp)
+                                inner()
                             }
                         },
                     )
+                }
+                Spacer(Modifier.size(8.dp))
+                val allOnce = sel.all { it.once }
+                Box(
+                    Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(if (allOnce) ActionBlue else Color.Transparent)
+                        .clickable {
+                            haptics.toggle(!allOnce)
+                            val v = !allOnce
+                            sel.replaceAll { it.copy(once = v) }
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    ViewOnceOneIcon(28.dp, tint = if (allOnce) Color.White else Muted)
+                }
+                Spacer(Modifier.size(8.dp))
+                Box(
+                    Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(ActionBlue)
+                        .combinedClickable(
+                            onLongClick = {
+                                haptics.tap()
+                                onScheduleBatch()
+                            },
+                        ) {
+                            haptics.tap()
+                            onSendBatch()
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "Send",
+                        tint = ActionBlueInk,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Box(
+                        Modifier
+                            .align(Alignment.TopEnd)
+                            .size(18.dp)
+                            .clip(CircleShape)
+                            .background(Color.White)
+                            .border(1.dp, ActionBlue, CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("${sel.size}", color = Ink, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
@@ -742,224 +816,10 @@ internal fun loadMediaPool(ctx: android.content.Context): List<MediaItem> {
     return out.sortedByDescending { it.added }
 }
 
-/** Owner round 38 (item 3): the preview stage — a grid tap lands here,
- *  not the editor. Left/right swipes walk the photos, the pencil opens the
- *  editor for this one, the checkbox right of it multi-picks (no more
- *  add-photo), and the caption bar + send ride the bottom. Swipe DOWN
- *  deselects everything and returns to the grid (tiles come back); × keeps
- *  the checked set and returns to the grid.
- */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun PreviewPane(
-    shown: List<MediaItem>,
-    startUri: Uri,
-    sel: androidx.compose.runtime.snapshots.SnapshotStateList<MediaItem>,
-    onEdit: (MediaItem) -> Unit,
-    onSendBatch: () -> Unit,
-    onScheduleBatch: () -> Unit,
-    onClose: () -> Unit,
-    onClearAll: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val haptics = rememberHaptics()
-    val startIdx = remember(startUri) { shown.indexOfFirst { it.uri == startUri }.coerceAtLeast(0) }
-    val pagerState = rememberPagerState(initialPage = startIdx) { shown.size }
-    val current = shown.getOrNull(pagerState.currentPage)
-    val checked = current?.let { c -> sel.any { it.uri == c.uri } } == true
-    val cap = current?.let { c -> sel.firstOrNull { it.uri == c.uri }?.caption ?: "" } ?: ""
-    var downTotal by remember { mutableStateOf(0f) }
-    Column(modifier) {
-        // Top chrome: × … pencil, checkbox (right of the pencil).
-        Row(
-            Modifier.fillMaxWidth().padding(start = 6.dp, end = 10.dp, top = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                Modifier
-                    .clip(CircleShape)
-                    .clickable {
-                        haptics.tap()
-                        onClose()
-                    }
-                    .padding(8.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Filled.Close, "Close preview", tint = Muted, modifier = Modifier.size(20.dp))
-            }
-            Spacer(Modifier.weight(1f))
-            Box(
-                Modifier
-                    .clip(CircleShape)
-                    .clickable {
-                        haptics.tap()
-                        current?.let(onEdit)
-                    }
-                    .padding(8.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Filled.Edit, "Edit", tint = Ink, modifier = Modifier.size(20.dp))
-            }
-            Box(
-                Modifier
-                    .clip(CircleShape)
-                    .clickable {
-                        haptics.tap()
-                        val item = current ?: return@clickable
-                        val i = sel.indexOfFirst { it.uri == item.uri }
-                        if (i >= 0) sel.removeAt(i) else sel.add(item)
-                    }
-                    .padding(8.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    if (checked) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
-                    if (checked) "Uncheck" else "Check",
-                    tint = if (checked) ActionBlue else Muted,
-                    modifier = Modifier.size(22.dp),
-                )
-            }
-        }
-        // The walkable photo; a downward swipe clears all and leaves.
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .pointerInput(Unit) {
-                    detectVerticalDragGestures(
-                        onDragEnd = { downTotal = 0f },
-                        onDragCancel = { downTotal = 0f },
-                    ) { _, drag ->
-                        downTotal += drag
-                        if (downTotal > 90f) {
-                            downTotal = 0f
-                            haptics.tap()
-                            onClearAll()
-                        }
-                    }
-                },
-        ) {
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxSize(),
-                key = { shown[it].uri.toString() },
-            ) { page ->
-                PreviewPage(shown[page])
-            }
-        }
-        // Bottom: caption bar + send (reference placement).
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Row(
-                Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(ChipIdle)
-                    .padding(horizontal = 12.dp, vertical = 9.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                BasicTextField(
-                    value = cap,
-                    onValueChange = { t ->
-                        val item = current ?: return@BasicTextField
-                        val v = t.take(1000)
-                        val i = sel.indexOfFirst { it.uri == item.uri }
-                        if (i >= 0) sel[i] = sel[i].copy(caption = v) else sel.add(item.copy(caption = v))
-                    },
-                    singleLine = true,
-                    textStyle = TextStyle(color = Ink, fontSize = 14.sp),
-                    cursorBrush = SolidColor(Ink),
-                    modifier = Modifier.weight(1f),
-                    decorationBox = { inner ->
-                        Box {
-                            if (cap.isEmpty()) Text("Add a caption...", color = Muted, fontSize = 14.sp)
-                            inner()
-                        }
-                    },
-                )
-            }
-            Spacer(Modifier.size(8.dp))
-            Box(
-                Modifier
-                    .size(38.dp)
-                    .clip(CircleShape)
-                    .background(ActionBlue)
-                    .combinedClickable(
-                        onLongClick = {
-                            haptics.tap()
-                            onScheduleBatch()
-                        },
-                    ) {
-                        haptics.tap()
-                        if (sel.isEmpty()) current?.let { sel.add(it) }
-                        onSendBatch()
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "Send",
-                    tint = ActionBlueInk,
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-        }
-    }
-}
-
-/** One preview page: a ~1080px still (Fit on black, media stages are dark
- *  everywhere), video frames carrying their badges like the grid cell. */
-@Composable
-private fun PreviewPage(item: MediaItem) {
-    val ctx = LocalContext.current
-    val bmp by produceState<ImageBitmap?>(initialValue = PreviewCache.get(item.uri), key1 = item.uri) {
-        if (value == null) {
-            value = withContext(Dispatchers.IO) {
-                PreviewCache.get(item.uri) ?: ThumbDecodeGate.decodePreview(item.uri, ctx, item.isVideo)
-                    ?.also { PreviewCache.put(item.uri, it) }
-            }
-        }
-    }
-    Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-        val b = bmp
-        if (b != null) {
-            Image(b, null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
-        }
-        if (item.isVideo) {
-            Icon(
-                Icons.Filled.Videocam,
-                contentDescription = "Video",
-                tint = Color.White,
-                modifier = Modifier.align(Alignment.TopStart).padding(10.dp).size(20.dp),
-            )
-            Text(
-                formatDuration(item.durationMs),
-                color = Color.White,
-                fontSize = 12.sp,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(10.dp),
-            )
-        }
-    }
-}
-
-/** Preview stills LRU: ~1080px bitmaps are ~4 MB — four pages max. */
-private object PreviewCache {
-    private val lru = object : android.util.LruCache<String, ImageBitmap>(16 * 1024) {
-        override fun sizeOf(key: String, value: ImageBitmap): Int = value.asAndroidBitmap().byteCount / 1024
-    }
-
-    fun get(uri: Uri): ImageBitmap? = lru.get(uri.toString())
-
-    fun put(uri: Uri, bmp: ImageBitmap) = lru.put(uri.toString(), bmp)
-}
-
 /** Grid cell: taps report through onToggle (never sends), thumbnail decodes off-thread.
  *  Owner round 31 (item 31): also the status picker's cell (selectIndex 0 = plain tick).
- *  Owner round 36 (item 2): press-hold starts multi-select where offered
- *  (null = plain tap cell, the status picker's shape). */
-@OptIn(ExperimentalFoundationApi::class)
+ *  Owner round 39 (item 6): plain tap cell everywhere again (the round-36
+ *  press-hold multi-select left with the preview stage — taps tick). */
 @Composable
 internal fun MediaCell(
     item: MediaItem,
@@ -967,7 +827,6 @@ internal fun MediaCell(
     selected: Boolean,
     selectIndex: Int,
     onToggle: () -> Unit,
-    onLongPress: (() -> Unit)? = null,
 ) {
     // Seed synchronously from the process LRU. LazyGrid disposes off-screen
     // cells; starting every re-entry at null showed a placeholder frame even
@@ -980,10 +839,7 @@ internal fun MediaCell(
             }
         }
     }
-    val press =
-        // combinedClickable is experimental in this foundation (1.7.5) —
-        // the OptIn above covers the cell (CI's kotlinc enforces it).
-        if (onLongPress != null) Modifier.combinedClickable(onLongClick = onLongPress) { onToggle() } else Modifier.clickable(onClick = onToggle)
+    val press = Modifier.clickable(onClick = onToggle)
     Box(
         Modifier
             .aspectRatio(1f)
@@ -1060,11 +916,6 @@ private object ThumbDecodeGate {
             else decodeThumb(uri, ctx, false)
         }
 
-    suspend fun decodePreview(uri: Uri, ctx: android.content.Context, isVideo: Boolean): ImageBitmap? =
-        all.withPermit {
-            if (isVideo) video.withPermit { previewFrame(uri, ctx) }
-            else previewBitmap(uri, ctx)
-        }
 }
 
 /** Grid-cell thumbnail LRU (~24 MB of bitmaps) so grid re-entry doesn't re-decode. */
@@ -1116,48 +967,6 @@ private fun decodeThumb(uri: Uri, ctx: android.content.Context, isVideo: Boolean
             val raw = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
             val opts = BitmapFactory.Options().apply { inSampleSize = 4 }
             BitmapFactory.decodeByteArray(raw, 0, raw.size, opts)?.asImageBitmap()
-        }
-    }.getOrNull()
-
-/** Preview still: the same decode as the thumb, at ~1080px instead of 256. */
-private fun previewBitmap(uri: Uri, ctx: android.content.Context): ImageBitmap? =
-    runCatching {
-        if (Build.VERSION.SDK_INT >= 28) {
-            ImageDecoder.decodeBitmap(ImageDecoder.createSource(ctx.contentResolver, uri)) { d, info, _ ->
-                val srcW = info.size.width.coerceAtLeast(1)
-                val srcH = info.size.height.coerceAtLeast(1)
-                val scale = minOf(1080f / srcW, 1080f / srcH).coerceAtMost(1f)
-                d.setTargetSize(
-                    (srcW * scale).toInt().coerceAtLeast(1),
-                    (srcH * scale).toInt().coerceAtLeast(1),
-                )
-            }.asImageBitmap()
-        } else {
-            val raw = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeByteArray(raw, 0, raw.size, bounds)
-            var sample = 1
-            while (bounds.outWidth / (sample * 2) >= 1080 || bounds.outHeight / (sample * 2) >= 1080) sample *= 2
-            BitmapFactory.decodeByteArray(raw, 0, raw.size, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
-        }
-    }.getOrNull()
-
-/** Preview video frame at ~512px (a full frame per page is overkill). */
-private fun previewFrame(uri: Uri, ctx: android.content.Context): ImageBitmap? =
-    runCatching {
-        val mmr = MediaMetadataRetriever()
-        try {
-            mmr.setDataSource(ctx, uri)
-            val scaled =
-                if (Build.VERSION.SDK_INT >= 27) {
-                    mmr.getScaledFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 512, 512)
-                        ?: mmr.frameAtTime
-                } else {
-                    mmr.frameAtTime
-                }
-            scaled?.asImageBitmap()
-        } finally {
-            mmr.release()
         }
     }.getOrNull()
 
