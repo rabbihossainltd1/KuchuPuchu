@@ -956,24 +956,53 @@ const AI_VOICE_MAX_BYTES = 6_000_000;
 
 /** Owner round 31 (item 17) + the 2026-09-16 HF migration: a voice note is
  *  transcribed by Whisper on HF (raw audio bytes in, `{ text }` out) and
- *  the transcript is answered as chat text. Any failure ⇒ null (the caller
- *  says the clip couldn't be heard). Never throws. */
-async function hfTranscribe(env: Env, bytes: ArrayBuffer, mime: string): Promise<string | null> {
-  if (!env.HF_TOKEN) return null;
-  try {
-    const res = await fetch(`${HF_ROUTER}/hf-inference/models/${HF_STT_MODEL}`, {
-      method: "POST",
-      headers: { "content-type": mime || "audio/m4a", Authorization: `Bearer ${env.HF_TOKEN}` },
-      body: bytes,
-      signal: AbortSignal.timeout(20_000),
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as { text?: string };
-    const text = (data.text ?? "").trim().slice(0, 800);
-    return text || null;
-  } catch {
-    return null;
+ *  the transcript is answered as chat text. Owner round 42 (item 3): two
+ *  attempts like the image path — a loading model (503 + estimated_time)
+ *  usually answers seconds later, and every failure persists to error_log
+ *  (model + status, never audio) so a deaf spell is debuggable. The caller
+ *  says the clip couldn't be heard only when both tries fail. Never throws. */
+async function hfTranscribe(
+  env: Env,
+  bytes: ArrayBuffer,
+  mime: string,
+): Promise<{ text: string | null; err: string }> {
+  if (!env.HF_TOKEN) return { text: null, err: "" };
+  let err = "";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let st = "no-response";
+    try {
+      const res = await fetch(`${HF_ROUTER}/hf-inference/models/${HF_STT_MODEL}`, {
+        method: "POST",
+        headers: { "content-type": mime || "audio/m4a", Authorization: `Bearer ${env.HF_TOKEN}` },
+        body: bytes,
+        signal: AbortSignal.timeout(20_000),
+      });
+      st = String(res.status);
+      if (res.status === 503) {
+        const over = (await res.json().catch(() => ({}))) as { estimated_time?: number };
+        const loading = new Error("hf-stt-loading");
+        (loading as { estimatedTime?: number }).estimatedTime =
+          typeof over.estimated_time === "number" ? over.estimated_time : undefined;
+        throw loading;
+      }
+      if (!res.ok) throw new Error(`hf-stt-http-${res.status}`);
+      const data = (await res.json()) as { text?: string };
+      const text = (data.text ?? "").trim().slice(0, 800);
+      if (text) return { text, err: "" };
+      throw new Error("hf-stt-empty");
+    } catch (e) {
+      const wait = (e as { estimatedTime?: number }).estimatedTime;
+      const s = `whisper ${st} ${e instanceof Error ? e.message : e}`;
+      err = err ? `${err}; ${s}` : s;
+      console.error("hf-stt", s);
+      // A loading model usually answers seconds later — sleep its estimate
+      // (capped) so the retry lands instead of failing the same way.
+      if (wait && wait > 0 && attempt === 0) {
+        await new Promise((r) => setTimeout(r, Math.min(wait * 1000, 8_000)));
+      }
+    }
   }
+  return { text: null, err };
 }
 
 /** HF picture call (owner round 2026-09-16: the HF migration) — SD3-medium
@@ -1203,11 +1232,25 @@ async function sendAiReply(
           if (obj) {
             const buf = await new Response(obj.body).arrayBuffer();
             if (buf.byteLength > 0 && buf.byteLength <= AI_VOICE_MAX_BYTES) {
-              const said = await hfTranscribe(
+              const heard = await hfTranscribe(
                 env,
                 buf,
                 type || obj.httpMetadata?.contentType || "",
               );
+              const said = heard.text;
+              // Persist the HF cause (quota/outage/auth) — tail is too flaky
+              // to be the only witness, and the user must never see it.
+              if (heard.err) {
+                try {
+                  await run(
+                    db,
+                    "INSERT INTO error_log (id, stack, created_at) VALUES (?, ?, ?)",
+                    id(),
+                    `hf-stt ${heard.err}`.slice(0, 500),
+                    nowIso(),
+                  );
+                } catch {}
+              }
               voicePrompt = said
                 ? ` The user's newest message is a VOICE NOTE and this is what they said: "${said}" ` +
                   "Reply to what they said, in the language they spoke."

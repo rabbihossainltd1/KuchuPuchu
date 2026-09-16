@@ -2731,9 +2731,13 @@ const convBetween = (db, a, b) =>
         "val down = awaitFirstDown(requireUnconsumed = false)\n                    if (!enabled) {\n                        down.consume()\n                        return@awaitEachGesture\n                    }",
       ) &&
         !chat.includes("if (!enabled) return@awaitEachGesture") &&
+        // Owner round 42 (item 3): two attempts, 503-sleep, error_log.
+        readFileSync("src/worker/index.ts", "utf8").includes("async function hfTranscribe(") &&
         readFileSync("src/worker/index.ts", "utf8").includes(
-          "async function hfTranscribe(env: Env, bytes: ArrayBuffer, mime: string)",
+          "Promise<{ text: string | null; err: string }>",
         ) &&
+        readFileSync("src/worker/index.ts", "utf8").includes("hf-stt-loading") &&
+        readFileSync("src/worker/index.ts", "utf8").includes("`hf-stt ${heard.err}`") &&
         readFileSync("src/worker/index.ts", "utf8").includes("openai/whisper-large-v3-turbo") &&
         readFileSync("src/worker/index.ts", "utf8").includes("this is what they said:") &&
         readFileSync("src/worker/index.ts", "utf8").includes("the clip could not be heard: say so"),
