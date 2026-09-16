@@ -6644,9 +6644,12 @@ const convBetween = (db, a, b) =>
         chat.includes("onDismiss = {\n                    attachSel.clear()") &&
         chat.includes("if (showAttach) attachSel.clear()") &&
         // Owner round 44 (item 6): the caption is its own bubble now.
+        // Owner round 45 (item 6): compact — 7x3 padding, 12.sp, no shadow.
         chat.includes("private fun MediaCaption(body: String, mine: Boolean, theme: String)") &&
         chat.includes("val captionShape =") &&
-        chat.includes(".padding(horizontal = 8.dp, vertical = 4.dp)") &&
+        chat.includes(".padding(horizontal = 7.dp, vertical = 3.dp)") &&
+        chat.includes("platformStyle = PlatformTextStyle(includeFontPadding = false)") &&
+        !chat.includes(".shadow(2.dp, captionShape)") &&
         // Owner round 42 (item 3): every media column hugs MY side.
         (
           chat.match(

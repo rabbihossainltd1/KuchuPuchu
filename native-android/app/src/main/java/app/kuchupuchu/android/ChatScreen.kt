@@ -139,6 +139,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
@@ -6681,26 +6682,31 @@ object Uploads {
 @Composable
 private fun MediaCaption(body: String, mine: Boolean, theme: String) {
     if (body.isBlank()) return
+    // Owner round 45 (item 6): compact — tighter corners, 7x3 padding, no
+    // shadow (the media frame above already carries the card), 12.sp on
+    // trimmed line height so the caption reads as a tight strip, not a
+    // second message.
     val captionShape =
         RoundedCornerShape(
-            topStart = 16.dp,
-            topEnd = 16.dp,
-            bottomStart = if (mine) 16.dp else 5.dp,
-            bottomEnd = if (mine) 5.dp else 16.dp,
+            topStart = 14.dp,
+            topEnd = 14.dp,
+            bottomStart = if (mine) 14.dp else 5.dp,
+            bottomEnd = if (mine) 5.dp else 14.dp,
         )
     Box(
         Modifier
-            .padding(top = 3.dp)
-            .shadow(2.dp, captionShape)
+            .padding(top = 2.dp)
             .clip(captionShape)
             .background(if (mine) chatMineFill(theme) else chatOtherFill(theme))
-            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .padding(horizontal = 7.dp, vertical = 3.dp)
             .widthIn(max = 240.dp),
     ) {
         Text(
             body,
             color = if (mine) Color(0xE6FFFFFF) else Ink,
-            fontSize = 13.sp,
+            fontSize = 12.sp,
+            lineHeight = 14.sp,
+            style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)),
         )
     }
 }
