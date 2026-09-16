@@ -531,7 +531,13 @@ const convBetween = (db, a, b) =>
     "typing bubble: one shared bouncing-dots indicator, header typing text removed",
     chat.includes("aiTyping || typingLeaseActive") &&
       chat.includes("TypingBubble(chatAccent(chatTheme))") &&
-      !chat.includes('typingNow -> "typing..."'),
+      !chat.includes('typingNow -> "typing..."') &&
+      // Owner round 42 (item 3): an image coming gets the shimmer card.
+      chat.includes('if (aiTyping && otherTypingKind == "image") ImageCreatingBubble()') &&
+      chat.includes("private fun ImageCreatingBubble() {") &&
+      chat.includes("val shimmer = rememberShimmerAlpha()") &&
+      chat.includes('typingKind = data.optString("typingKind")') &&
+      chat.includes("otherTypingKind = parsed.typingKind"),
   );
   check(
     "owner photo viewer is truly fullscreen (no platform dialog width cap)",

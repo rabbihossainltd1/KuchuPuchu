@@ -177,6 +177,8 @@ private class MsgPage(
     val topId: String,
     val readAt: String?,
     val typingAt: Long,
+    /** Owner round 42 (item 3): what the AI is making (image|text). */
+    val typingKind: String?,
     /** §39: the cursor for one page back, and whether anything older exists. */
     val oldest: JSONObject?,
     val hasMore: Boolean,
@@ -287,6 +289,10 @@ fun ChatScreen(nav: NavController, convId: String) {
     var otherReadAt by remember { mutableStateOf<String?>(null) }
     // "typing…" lives 6s per ping, refreshed on the messages poll.
     var otherTypingAt by remember { mutableStateOf(0L) }
+    // Owner round 42 (item 3): the AI's current make (image|text), refreshed
+    // on the same poll — assigned raw (never guarded) so a text prompt after
+    // an image one clears the shimmer card on the next tick.
+    var otherTypingKind by remember { mutableStateOf<String?>(null) }
     // Word-by-word reveal for a freshly-arrived KuchuPuchu AI reply (owner
     // round 2026-09-04). Only messages CREATED after this screen opened are
     // animated, so conversation history never re-types itself on open.
@@ -591,6 +597,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                                         }
                                         .getOrNull()
                                         ?: 0L),
+                                typingKind = data.optString("typingKind").takeIf { it.isNotBlank() },
                                 oldest = data.optJSONObject("oldest"),
                                 hasMore = data.optBoolean("hasMore"),
                             )
@@ -603,6 +610,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // reopening the chat.
                 parsed.readAt?.let { otherReadAt = it }
                 if (parsed.typingAt > 0) otherTypingAt = parsed.typingAt
+                otherTypingKind = parsed.typingKind
                 val newTop = parsed.topId
                 // §39: rows the user paged back to are not in the newest window, so
                 // a plain rebuild would drop them on the next tick — scroll back two
@@ -2624,7 +2632,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // EITHER side is typing — the AI composing, or the other
                 // person's typing lease (the header used to carry this).
                 if (aiTyping || typingLeaseActive) {
-                    item(key = "typing-bubble") { TypingBubble(chatAccent(chatTheme)) }
+                    // Owner round 42 (item 3): an image coming gets the
+                    // shimmer photo-card, not the typing dots.
+                    item(key = "typing-bubble") {
+                        if (aiTyping && otherTypingKind == "image") ImageCreatingBubble()
+                        else TypingBubble(chatAccent(chatTheme))
+                    }
                 }
                 if (uploading > 0) {
                     item {
@@ -7390,6 +7403,39 @@ private fun TypingBubble(dot: Color) {
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * Owner round 42 (item 3): the "image is being created" card — a small
+ * photo-shaped shimmer (the shared shimmer pulse + an image glyph), shown
+ * while the AI draws instead of the typing dots. No text: the card itself
+ * is the status.
+ */
+@Composable
+private fun ImageCreatingBubble() {
+    val shimmer = rememberShimmerAlpha()
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp),
+        horizontalArrangement = Arrangement.Start,
+    ) {
+        Box(
+            Modifier
+                .width(132.dp)
+                .height(88.dp)
+                .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 5.dp, bottomEnd = 16.dp))
+                .background(Line.copy(alpha = shimmer)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Filled.Image,
+                contentDescription = "Creating image",
+                tint = Muted.copy(alpha = shimmer),
+                modifier = Modifier.size(30.dp),
+            )
         }
     }
 }

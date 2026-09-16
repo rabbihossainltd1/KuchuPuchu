@@ -7834,8 +7834,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // in the background so the send itself stays instant.
     // Owner round 42 (item 3): the send also classifies image-vs-text with
     // the reply's own predicates, so the app shows the image-creating
-    // animation instead of typing dots. The kind rides the response (no
-    // flip) and the typing row (polls + reopen healing).
+    // animation instead of typing dots. The kind rides the typing row
+    // (polls + reopen healing) and the response, for whoever reads it.
     let aiKind: string | undefined;
     if (conv.kind === "SOLO" && members.some((m) => m.user_id === AI_BOT_ID)) {
       aiKind = await classifyAiKind(
