@@ -2488,7 +2488,16 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // rise now. The key still leaves the set either way.
                     val rowKey = m.optString("clientId").ifBlank { m.optString("id") }
                     val bornKey = remember(rowKey) { bornKeys.remove(rowKey) }
-                    val born = bornKey && m.optString("senderId") != Store.myId()
+                    // Owner round 44 (item 7): an AI text reply types itself
+                    // out word by word — the reveal IS its entrance. Letting
+                    // it ALSO rise (fade 0→1) under the reveal strobed the
+                    // thread black→light on every arrival. Same rule as the
+                    // round-39 scroll exclusion: the reveal owns it all.
+                    val aiRevealRow =
+                        isAiChat &&
+                            m.optString("kind") == "TEXT" &&
+                            m.optString("senderId") == "kp_ai_bot"
+                    val born = bornKey && m.optString("senderId") != Store.myId() && !aiRevealRow
                     val vanishing = albumPhotos(m).any { it.optString("id") in vanishingIds }
                     // Owner round 33 (item 17): the jumped-to row flashes once.
                     val flashing = flashId.isNotBlank() && albumPhotos(m).any { it.optString("id") == flashId }

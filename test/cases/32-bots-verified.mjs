@@ -8950,6 +8950,9 @@ const convBetween = (db, a, b) =>
         // do); the keys are still consumed once (thread + pending).
         (chat.match(/remember\(rowKey\) \{ bornKeys\.remove\(rowKey\) \}/g) || []).length === 2 &&
         chat.includes("val born = bornKey && ") &&
+        // Owner round 44 (item 7): AI text replies skip the rise.
+        chat.includes("&& !aiRevealRow") &&
+        chat.includes('m.optString("kind") == "TEXT"') &&
         !chat.includes("Box(Modifier.fillMaxWidth().riseIn(born)) {") &&
         chat.includes("DeleteRowShell(") &&
         chat.includes(
