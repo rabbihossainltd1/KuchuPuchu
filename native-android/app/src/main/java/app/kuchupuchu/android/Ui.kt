@@ -865,6 +865,7 @@ fun KpConfirmSheet(
     title: String,
     text: String? = null,
     confirmLabel: String,
+    cancelLabel: String = "Cancel",
     danger: Boolean = false,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
@@ -890,7 +891,7 @@ fun KpConfirmSheet(
                         .clickable { haptics.tap(); onDismiss() }
                         .padding(vertical = 12.dp),
                     contentAlignment = Alignment.Center,
-                ) { Text("Cancel", color = Ink, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }
+                ) { Text(cancelLabel, color = Ink, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }
                 Box(
                     Modifier
                         .weight(1f)

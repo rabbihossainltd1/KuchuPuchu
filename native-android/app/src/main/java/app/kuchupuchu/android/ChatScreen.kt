@@ -332,6 +332,8 @@ fun ChatScreen(nav: NavController, convId: String) {
     // mic turns into SEND while the panel has picks (WhatsApp behaviour) —
     // the panel itself no longer carries its own send button.
     val attachSel = remember { mutableStateListOf<MediaItem>() }
+    // Owner round 44: X with ticked photos asks before dropping them.
+    var showDeselect by remember { mutableStateOf(false) }
     // Owner round 32 (item 17): the attach panel's "view once" switch — armed
     // for one batch, reset once it goes out.
     // System back during selection CLEARS the selection (WhatsApp) — it must
@@ -3181,12 +3183,29 @@ fun ChatScreen(nav: NavController, convId: String) {
            (the composer hides while it is open); NOT fullscreen until the
            user taps/swipes the handle up ---------------- */
         if (showAttach) {
+            if (showDeselect) {
+                KpConfirmSheet(
+                    title = "Deselect media?",
+                    confirmLabel = "Yes",
+                    cancelLabel = "No",
+                    onDismiss = { showDeselect = false },
+                    onConfirm = {
+                        showDeselect = false
+                        attachSel.clear()
+                        showAttach = false
+                        attachFs = false
+                    },
+                )
+            }
             // Owner round 33 (item 11b): the panel pops up from the bar.
             Box(Modifier.popUp()) {
             AttachPanel(
                 sel = attachSel,
                 onSendBatch = { sendAttachSelection() },
-                onDismiss = { showAttach = false; attachFs = false },
+                // Owner round 44: X with a selection asks first (the ticks
+                // used to linger silently into the next open — with no caption
+                // bar, since collapsed panels hide it).
+                onDismiss = { if (attachSel.isNotEmpty()) showDeselect = true else { showAttach = false; attachFs = false } },
                 onFullscreenChange = { attachFs = it },
                 // Owner round 32 (item 19): hold the panel's Send → a time
                 // (item 18's sheet); Edit on a single pick → the light editor.

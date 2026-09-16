@@ -6622,6 +6622,10 @@ const convBetween = (db, a, b) =>
         (chat.match(/\.put\("body", caption\)/g) || []).length === 6 &&
         chat.includes('MediaCaption(m.optText("body"), mine)') &&
         chat.includes("MediaCaption(albumCaption, mine)") &&
+        // Owner round 44: X with a selection asks first (Yes/No).
+        chat.includes('title = "Deselect media?"') &&
+        chat.includes('cancelLabel = "No"') &&
+        chat.includes("if (attachSel.isNotEmpty()) showDeselect = true") &&
         // Owner round 43 (item 4): frame + caption in one bubble.
         (chat.match(/MediaBubbleFrame\(mine, theme, m, replyOffset\) \{/g) || []).length === 3 &&
         chat.includes(".padding(horizontal = 8.dp, vertical = 3.dp)") &&
