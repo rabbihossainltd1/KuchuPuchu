@@ -348,7 +348,9 @@ fun KpUpdateGate() {
     val ready = KpUpdate.ready
     val downloading = KpUpdate.downloading
     val installing = KpUpdate.installing
-    if (upd == null && ready == null && !downloading && !installing) return
+    // Owner round 42 (item 1): the new build waits for a restart.
+    val justUpdated = KpUpdate.justUpdated
+    if (upd == null && ready == null && !downloading && !installing && !justUpdated) return
     // Owner round 31: ONE bottom sheet for the whole flow — offer → progress →
     // Install. The accent is the theme's action blue (no cream/gold bar), and
     // the sheet never hides itself after the download: the user taps Install.
@@ -357,10 +359,12 @@ fun KpUpdateGate() {
             if (!downloading && !installing) {
                 KpUpdate.available = null
                 KpUpdate.ready = null
+                KpUpdate.justUpdated = false
             }
         },
         title =
             when {
+                justUpdated -> "Update installed"
                 installing -> "Installing update"
                 ready != null -> "Update ready"
                 downloading -> "Downloading update"
@@ -369,6 +373,9 @@ fun KpUpdateGate() {
     ) {
         Column(Modifier.padding(horizontal = 14.dp)) {
             when {
+                justUpdated -> {
+                    GoldBtn("Restart", Modifier.fillMaxWidth()) { KpUpdate.restart(ctx) }
+                }
                 installing -> {
                     LinearProgressIndicator(
                         color = ActionBlue,

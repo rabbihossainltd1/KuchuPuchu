@@ -7676,7 +7676,13 @@ const convBetween = (db, a, b) =>
       upd.includes("if (downloading) return") &&
       upd.includes("installing = true") &&
       kt("KpApp.kt").includes("Confirm the install in the system window.") &&
-      kt("MainActivity.kt").includes("KpUpdate.consumeInstallResult(application)"),
+      kt("MainActivity.kt").includes("KpUpdate.consumeInstallResult(application)") &&
+      // Owner round 42 (item 1): the install no longer kills the app; the
+      // sheet offers a restart into the new build instead.
+      upd.includes("params.setDontKillApp(true)") &&
+      upd.includes("var justUpdated by mutableStateOf(false)") &&
+      upd.includes("fun restart(ctx: Context)") &&
+      kt("KpApp.kt").includes('GoldBtn("Restart", Modifier.fillMaxWidth())'),
   );
   // r37-5: the reference block wall — the blocker sees ONLY a compact
   // Unblock pill (thin strip, no unavailable line); the blocked side keeps

@@ -38,6 +38,9 @@ object KpUpdate {
     // Owner round 31: the downloaded APK waits here until the user taps
     // Install — the sheet never vanishes on its own after the download.
     var ready by mutableStateOf<File?>(null)
+    // Owner round 42 (item 1): set while the new build waits for a restart
+    // (the app now survives the install — see setDontKillApp below).
+    var justUpdated by mutableStateOf(false)
 
     fun installedVersionCode(ctx: Context): Int =
         runCatching {
@@ -262,6 +265,17 @@ object KpUpdate {
             @Suppress("DEPRECATION") archive.signatures?.toSet()
         }
 
+    /** Owner round 42 (item 1): relaunch into the newly installed build. */
+    fun restart(ctx: Context) {
+        justUpdated = false
+        runCatching {
+            ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
+                ?.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
+                ?.let { ctx.startActivity(it) }
+        }
+        android.os.Process.killProcess(android.os.Process.myPid())
+    }
+
     /** The Install tap: hands the downloaded APK to the system installer. */
     suspend fun installReady(ctx: Context) {
         val apk = ready ?: return
@@ -332,6 +346,10 @@ object KpUpdate {
     private fun install(ctx: Context, apk: File) {
         val installer = ctx.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+        // Owner round 42 (item 1): a full install KILLS the app by default —
+        // that sudden death is the "install dile app crash kore". The app
+        // stays alive now; the new build takes over at the next launch.
+        params.setDontKillApp(true)
         // Owner round 34 (item 2): attribute the session — some OEM confirm
         // screens only label (and finish) sessions that name their package.
         params.setAppPackageName(ctx.packageName)
@@ -409,6 +427,10 @@ class KpUpdateReceiver : android.content.BroadcastReceiver() {
                     KpUpdate.installing = false
                     KpUpdate.noteStatus(ctx, code, null)
                     ctx.filesDir.resolve("kp-update.apk").delete()
+                    // Owner round 42 (item 1): the app survived (dontKill) —
+                    // drop the stale file ref and offer the restart.
+                    KpUpdate.ready = null
+                    KpUpdate.justUpdated = true
                 }
                 // The user dismissed the system sheet: keep the APK, no error text.
                 PackageInstaller.STATUS_FAILURE_ABORTED -> {
