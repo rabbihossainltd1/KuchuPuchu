@@ -3190,6 +3190,41 @@ fun ChatScreen(nav: NavController, convId: String) {
                     },
                 canSave = !privateChat && !once,
                 secure = privateChat || once,
+                // Owner round 39 (item 1): Edit — same gate as Forward
+                // (private chats + view-once never expose it). The current
+                // page downloads into cache and opens in the existing
+                // media editor; Done hands back pendingEdited, which this
+                // chat already sends like any picked media. Applies to
+                // every chat photo alike — AI-made pictures included.
+                onEdit =
+                    if (privateChat || once) {
+                        null
+                    } else {
+                        {
+                            val editMsg = viewerPhotos[viewerAt.coerceIn(viewerPhotos.indices)]
+                            viewerPhotos = emptyList()
+                            scope.launch {
+                                val bytes =
+                                    withContext(Dispatchers.IO) {
+                                        runCatching {
+                                            val u = messageMediaUrl(editMsg)
+                                            if (u.startsWith("data:")) {
+                                                android.util.Base64.decode(u.substringAfter(","), android.util.Base64.DEFAULT)
+                                            } else {
+                                                Api.download(u)
+                                            }
+                                        }.getOrNull()
+                                    }
+                                if (bytes == null) {
+                                    error = "Could not download the photo."
+                                } else {
+                                    val uri = FilesUtil.cacheFile(ctx, "viewer-edit.jpg", bytes, "image/jpeg")
+                                    ScreenStore.editTitle = title
+                                    nav.navigate("mediaedit/$convId/0/${statusPickArg(MediaItem(uri, false, 0, "", System.currentTimeMillis()))}")
+                                }
+                            }
+                        }
+                    },
                 onShown = if (once) ({ ViewOnce.spend(m.optString("id")) }) else null,
                 urls = viewerPhotos.map { messageMediaUrl(it) },
                 subtitles = viewerPhotos.map { if (isViewOnce(it)) "View once" else viewerStamp(it.optText("createdAt")) },

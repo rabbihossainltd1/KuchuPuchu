@@ -37,6 +37,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.MoreVert
@@ -415,16 +416,20 @@ fun KpPhotoViewer(
     }
 }
 
-/** Owner round 32 (item 46): the viewer / player ⋮ sheet — Save, Forward. */
+/** Owner round 32 (item 46): the viewer / player ⋮ sheet — Save, Forward.
+ *  Owner round 39 (item 1): + Edit (owner order Save / Forward / Edit) —
+ *  the photo viewer wires it, the video player leaves it null. */
 @Composable
 internal fun MediaMenuSheet(
     onDismiss: () -> Unit,
     onSave: (() -> Unit)?,
     onForward: (() -> Unit)?,
+    onEdit: (() -> Unit)? = null,
 ) {
     KpSheet(onDismiss = onDismiss) {
         if (onSave != null) KpSheetRow(Icons.Filled.Download, "Save", onClick = onSave)
         if (onForward != null) KpSheetRow(Icons.AutoMirrored.Filled.Send, "Forward", onClick = onForward)
+        if (onEdit != null) KpSheetRow(Icons.Filled.Brush, "Edit", onClick = onEdit)
     }
 }
 
