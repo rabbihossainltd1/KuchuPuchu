@@ -135,6 +135,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
@@ -163,6 +166,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.net.Uri
+import android.view.ViewTreeObserver
 import android.view.WindowManager
 import org.json.JSONArray
 import org.json.JSONObject
@@ -4290,13 +4294,38 @@ private fun LoginApprovalMessage(m: JSONObject) {
 /**
  * Owner round 44: the keyboard CLOSE glides (system-animated insets) but
  * OPEN snapped 0→full in one frame. Chase the inset height ourselves so
- * both directions glide the same way (read in composition — the round-13
- * crash was the coroutine/snapshotFlow form, never this).
+ * both directions glide the same way. The height comes from the view
+ * tree's root insets (IME type) — WindowInsets.ime does not resolve
+ * against this BOM (its expect/actual WindowInsets lack it), while
+ * isImeVisible does. A guarded global-layout listener (the round-13
+ * crash was the coroutine/snapshotFlow form, never a listener), kept a
+ * small top-level fun (the round-13e VerifyError was the inline form in
+ * this huge class).
  */
 private fun Modifier.animatedImePadding(): Modifier {
+    val view = LocalView.current
     val density = LocalDensity.current
-    val target = WindowInsets.ime.getBottom(density)
-    val glided by animateIntAsState(target, tween(280), label = "imeglide")
+    var targetPx by remember { mutableStateOf(0) }
+    DisposableEffect(view) {
+        val tree = view.viewTreeObserver
+        val listener =
+            ViewTreeObserver.OnGlobalLayoutListener {
+                targetPx =
+                    runCatching {
+                        ViewCompat.getRootWindowInsets(view)
+                            ?.getInsets(WindowInsetsCompat.Type.ime())
+                            ?.bottom ?: 0
+                    }.getOrDefault(0)
+            }
+        runCatching { if (tree.isAlive) tree.addOnGlobalLayoutListener(listener) }
+        runCatching { listener.onGlobalLayout() }
+        onDispose {
+            runCatching {
+                if (tree.isAlive) tree.removeOnGlobalLayoutListener(listener)
+            }
+        }
+    }
+    val glided by animateIntAsState(targetPx, tween(280), label = "imeglide")
     return this.padding(bottom = with(density) { glided.toDp() })
 }
 

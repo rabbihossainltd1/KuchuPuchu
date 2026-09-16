@@ -977,7 +977,10 @@ const convBetween = (db, a, b) =>
       !chat.includes("snapshotFlow { kpIme") &&
       // Owner round 44: open glides like close.
       chat.includes("private fun Modifier.animatedImePadding()") &&
-      chat.includes("animateIntAsState(target, tween(280)") &&
+      chat.includes("animateIntAsState(targetPx, tween(280)") &&
+      // Owner round 44: the glide reads the view tree (ime is unresolvable
+      // on this BOM) — always behind an isAlive guard (round 13).
+      chat.includes("if (tree.isAlive)") &&
       chat.includes("Modifier.animatedImePadding() else Modifier"),
   );
   check(
