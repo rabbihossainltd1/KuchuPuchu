@@ -6439,6 +6439,33 @@ const convBetween = (db, a, b) =>
           "DisposableEffect(Unit) { onDispose { ScreenStore.editPool = emptyList() } }",
         ),
     );
+    check(
+      "r46-1: morph-&-fly send (owner's savedly demo port) — the send echoes hide, a clone launches from whatever fired the send (input pill / mic-send slot / panel send circle) and flies 620 ms on an arced, wobbling, 45%-morphing path onto the hidden row, with glow + particle trail, then a 280 ms landing bounce + accent flash; EVERY type (text/photo/video/doc/voice) rides the same engine, batch flies once, stray rects can never fly a later send (one-shot baton + watchdog)",
+      chat.includes("private class FlySpec(") &&
+        chat.includes("private fun KpFlySend(") &&
+        chat.includes("private fun KpFlyLandFlash(") &&
+        chat.includes("val flyQueue = remember { mutableStateListOf<FlySpec>() }") &&
+        chat.includes("fun launchFly(clientId: String, cloneType: String") &&
+        (chat.match(/launchFly\(clientId, /g) || []).length >= 4 &&
+        chat.includes('launchFly(clientId, "TEXT", body)') &&
+        chat.includes('launchFly(clientId, "PHOTO")') &&
+        chat.includes('launchFly(clientId, "VOICE")') &&
+        chat.includes("sendFromRect = Rect.Zero") &&
+        chat.includes("tween(620, easing = LinearEasing)") &&
+        chat.includes("(-56).dp.toPx()") &&
+        chat.includes("e > 0.45f") &&
+        (chat.match(/\.alpha\(if \(rowKey in flyHidden\) 0f else 1f\)/g) || []).length === 2 &&
+        chat.includes("flyQueue.firstOrNull()?.key == rowKey) flyTarget = it.boundsInRoot()") &&
+        chat.includes("onGloballyPositioned { onFieldRect(it.boundsInRoot()) }") &&
+        chat.includes("onGloballyPositioned { onActionRect(it.boundsInRoot()) }") &&
+        chat.includes("flyLanded == rowKey") &&
+        chat.includes("transformOrigin = TransformOrigin.Center") &&
+        // the watchdog: an echo that never reports a rect lands at 400 ms
+        chat.includes("delay(400)") &&
+        attach.includes("onSendRect: (androidx.compose.ui.geometry.Rect) -> Unit = {},") &&
+        attach.includes("onGloballyPositioned { onSendRect(it.boundsInRoot()) }") &&
+        chat.includes("onSendRect = { attachSendRect = it },"),
+    );
     // Owner round 39 (item 6): the 'N selected' header + Edit chip are
     // gone — the picker is Recents ▾ · HD over the grid, with the
     // selection bar (pencil, caption, ①, send-with-count) under it.
@@ -9050,9 +9077,7 @@ const convBetween = (db, a, b) =>
         kt("DeleteAnim.kt").includes("suspend fun capture(bubble: Rect)") &&
         kt("DeleteAnim.kt").includes("PixelCopy.request(") &&
         kt("DeleteAnim.kt").includes("drawToBitmap()") &&
-        chat.includes(
-          "Box(Modifier.fillMaxWidth().animateItem(fadeInSpec = null, fadeOutSpec = null)) {",
-        ),
+        chat.includes(".animateItem(fadeInSpec = null, fadeOutSpec = null)"),
     );
     check(
       "r35-2: no touch ripples anywhere — KpTheme provides a no-op NoTouchIndication at the root (LocalIndication is non-null here, so silence is an instance; the default indication was the only ripple source; explicit indication = null sites stay)",
