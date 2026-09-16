@@ -5212,12 +5212,15 @@ const convBetween = (db, a, b) =>
   // Item 46: the full-screen photo viewer and the video player carry a ⋮ whose
   // sheet is exactly Save / Forward (the old bottom action strip is gone);
   // forwarding runs through ONE off-main helper shared with multi-select.
+  // Owner round 39 (item 1): the photo viewer wires a third row, Edit
+  // (Save / Forward / Edit order); the player leaves it null (Save /
+  // Forward as before).
   {
     const mv = kt("MediaViewer.kt");
     const chat = kt("ChatScreen.kt");
     const tab = kt("ChatMediaScreen.kt");
     check(
-      "r32-46: viewer/player ⋮ → sheet = Save / Forward only; one IO forward helper (forwardMessageTo) used by chat select, photo viewer, video player and the media tab",
+      "r32-46: viewer ⋮ → sheet = Save / Forward / Edit (player: Save / Forward); one IO forward helper (forwardMessageTo) used by chat select, photo viewer, video player and the media tab",
       mv.includes("internal fun MediaMenuSheet(") &&
         mv.includes(
           'if (onSave != null) KpSheetRow(Icons.Filled.Download, "Save", onClick = onSave)',
@@ -5225,7 +5228,16 @@ const convBetween = (db, a, b) =>
         mv.includes(
           'if (onForward != null) KpSheetRow(Icons.AutoMirrored.Filled.Send, "Forward", onClick = onForward)',
         ) &&
-        (mv.match(/KpSheetRow\(/g) || []).length === 2 &&
+        mv.includes(
+          'if (onEdit != null) KpSheetRow(Icons.Filled.Brush, "Edit", onClick = onEdit)',
+        ) &&
+        (mv.match(/KpSheetRow\(/g) || []).length === 3 &&
+        // Only the photo viewer passes onEdit (the player relies on the null default).
+        (mv.match(/onEdit = /g) || []).length === 1 &&
+        mv.includes("onEdit = onEdit?.let { e -> { menuOpen = false; e() } },") &&
+        // The chat's Edit downloads the current page into cache and opens
+        // the existing media editor (Done → pendingEdited → sent).
+        chat.includes('FilesUtil.cacheFile(ctx, "viewer-edit.jpg", bytes, "image/jpeg")') &&
         (mv.match(/Icons\.Filled\.MoreVert, "More"/g) || []).length === 2 &&
         !mv.includes("private fun ViewerAction(") &&
         // r34-6: the album position pill joins the player's seek bar at the bottom.

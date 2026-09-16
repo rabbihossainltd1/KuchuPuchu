@@ -38,6 +38,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Brush
+import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.MoreVert
@@ -168,6 +169,10 @@ fun KpPhotoViewer(
     onForward: (() -> Unit)? = null,
     canSave: Boolean = true,
     secure: Boolean = false,
+    // Owner round 39 (item 1): the host wires this to open the current page
+    // in the media editor (download → mediaedit route → Done sends it back
+    // to the chat like any picked media). Null = no Edit row, as before.
+    onEdit: (() -> Unit)? = null,
     // Owner round 32 (item 17): fired once the picture is on screen (a failed
     // load never fires it) — the chat uses it to spend a view-once opening.
     onShown: (() -> Unit)? = null,
@@ -379,7 +384,7 @@ fun KpPhotoViewer(
                     Spacer(Modifier.width(8.dp))
                     if (saving) {
                         CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.padding(end = 14.dp).size(18.dp))
-                    } else if (canSave || onForward != null) {
+                    } else if (canSave || onForward != null || onEdit != null) {
                         IconButton(onClick = { menuOpen = true }) {
                             Icon(Icons.Filled.MoreVert, "More", tint = Color.White, modifier = Modifier.size(24.dp))
                         }
@@ -412,6 +417,7 @@ fun KpPhotoViewer(
             onDismiss = { menuOpen = false },
             onSave = if (canSave) ({ menuOpen = false; savePhoto() }) else null,
             onForward = onForward?.let { f -> { menuOpen = false; f() } },
+            onEdit = onEdit?.let { e -> { menuOpen = false; e() } },
         )
     }
 }
