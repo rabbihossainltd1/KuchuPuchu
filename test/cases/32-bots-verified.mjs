@@ -6624,7 +6624,7 @@ const convBetween = (db, a, b) =>
         chat.includes("MediaCaption(albumCaption, mine)") &&
         // Owner round 43 (item 4): frame + caption in one bubble.
         (chat.match(/MediaBubbleFrame\(mine, theme, m, replyOffset\) \{/g) || []).length === 3 &&
-        chat.includes(".padding(horizontal = 10.dp, vertical = 7.dp)") &&
+        chat.includes(".padding(horizontal = 8.dp, vertical = 3.dp)") &&
         // Owner round 42 (item 3): every media column hugs MY side.
         (
           chat.match(

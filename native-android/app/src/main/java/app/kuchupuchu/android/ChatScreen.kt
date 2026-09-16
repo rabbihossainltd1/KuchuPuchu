@@ -6603,6 +6603,8 @@ private fun MediaBubbleFrame(
  * Owner round 34 (item 16b): the words under a captioned photo / video /
  * album — the body the editor's caption bar stored. Round 43 (item 4): on
  * the bubble fill now, in text-bubble ink — frame + strip read as one.
+ * Round 44 (item 4): slim — the strip was fat (7.dp); the app's compact
+ * UI keeps 3.dp + 13.sp here.
  */
 @Composable
 private fun MediaCaption(body: String, mine: Boolean) {
@@ -6610,8 +6612,8 @@ private fun MediaCaption(body: String, mine: Boolean) {
     Text(
         body,
         color = if (mine) Color(0xE6FFFFFF) else Ink,
-        fontSize = 13.5.sp,
-        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp).widthIn(max = 240.dp),
+        fontSize = 13.sp,
+        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp).widthIn(max = 240.dp),
     )
 }
 
