@@ -849,7 +849,16 @@ fun ChatScreen(nav: NavController, convId: String) {
                                     val info = listState.layoutInfo
                                     val follow =
                                         !listState.isScrollInProgress &&
-                                            info.visibleItemsInfo.lastOrNull()?.index?.let { it >= info.totalItemsCount - 2 } == true
+                                            info.visibleItemsInfo.lastOrNull()?.index?.let { it >= info.totalItemsCount - 2 } == true &&
+                                            // Owner round 39 (item 4): an AI text
+                                            // reply reveals itself word by word and
+                                            // pins the viewport on every tick — a
+                                            // second animated scroll here fights it
+                                            // and the thread flickers/jumps on
+                                            // arrival. The reveal owns the pinning.
+                                            !(convId.endsWith("_kp_ai_bot") &&
+                                                liveMsg.optString("senderId") == "kp_ai_bot" &&
+                                                liveMsg.optString("kind") == "TEXT")
                                     // Owner round 33 (item 11b): a live arrival rises in.
                                     bornKeys.add(liveMsg.optString("clientId").ifBlank { liveMsg.optString("id") })
                                     msgs.add(liveMsg)

@@ -7770,6 +7770,15 @@ const convBetween = (db, a, b) =>
         ) &&
         chat39.includes('msgs.removeAll { it.optString("id") in gone }'),
     );
+    // Owner round 39 (item 4): the live-append follow-scroll used to fight
+    // the AI typewriter's per-tick pinning — the thread flickered on every
+    // AI reply. Bot TEXT arrivals in the AI chat skip it now.
+    check(
+      "r39-4: AI text replies skip the live-append follow-scroll (the word-by-word reveal owns the viewport pinning)",
+      chat39.includes('!(convId.endsWith("_kp_ai_bot") &&') &&
+        chat39.includes('liveMsg.optString("senderId") == "kp_ai_bot" &&') &&
+        chat39.includes('liveMsg.optString("kind") == "TEXT")'),
+    );
   }
   // r37-3: reference-style overlay handles — per-overlay rotation,
   // × top-left deletes, top-right drags the turn, bottom-right drags
