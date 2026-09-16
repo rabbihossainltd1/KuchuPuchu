@@ -1614,7 +1614,7 @@ const convBetween = (db, a, b) =>
       chat.includes("(replyDrag + dragAmount).coerceIn(-replyThreshold * 1.5f, 0f)") &&
       chat.includes("if (mine) replyThreshold * 1.5f else replyThreshold") &&
       chat.includes(
-        "ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress)",
+        "ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme)",
       ),
   );
   check(
@@ -6613,6 +6613,9 @@ const convBetween = (db, a, b) =>
         (chat.match(/\.put\("body", caption\)/g) || []).length === 6 &&
         chat.includes('MediaCaption(m.optText("body"), mine)') &&
         chat.includes("MediaCaption(albumCaption, mine)") &&
+        // Owner round 43 (item 4): frame + caption in one bubble.
+        (chat.match(/MediaBubbleFrame\(mine, theme, m, replyOffset\) \{/g) || []).length === 3 &&
+        chat.includes(".padding(horizontal = 10.dp, vertical = 7.dp)") &&
         // Owner round 42 (item 3): every media column hugs MY side.
         (
           chat.match(
@@ -7500,7 +7503,7 @@ const convBetween = (db, a, b) =>
     check(
       "r33-19: video bubble — VideoMessageRow takes pendingEcho + otherReadAt, reads UploadProgress for its clientId, decodes the pending frame from the local copy (docPath), swaps the play circle for a determinate ring + percentage while sending (indeterminate during the POST), ignores taps on the echo, and draws a scrim with the time and TickIcon (sending / sent / delivered / seen) like a photo; the duration moves to the top-start corner",
       chat.includes(
-        "VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo)",
+        "VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme)",
       ) &&
         vid.includes(
           "    pendingEcho: Boolean,\n    otherReadAt: String?,\n    selectedIds: List<String>,",
@@ -8952,7 +8955,9 @@ const convBetween = (db, a, b) =>
         chat.includes("vanishingIds.removeAll(hold.toSet())") &&
         ui.includes("} else {\n            // Owner round 34 (item 3)") &&
         ui.includes("t.snapTo(1f)") &&
-        (chat.match(/DeleteGeoms\.put\(m, it\.boundsInWindow\(\)\)/g) || []).length === 5 &&
+        // Owner round 43 (item 4): video/photo/album capture through the one
+        // shared media frame now (5: text + view-once + frame).
+        (chat.match(/DeleteGeoms\.put\(m, it\.boundsInWindow\(\)\)/g) || []).length === 3 &&
         kt("DeleteAnim.kt").includes("const val SWEEP_MS = 1200") &&
         kt("DeleteAnim.kt").includes("const val GRACE_MS = 3200L") &&
         kt("DeleteAnim.kt").includes("const val COLLAPSE_MS = 220") &&

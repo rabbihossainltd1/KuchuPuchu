@@ -4813,7 +4813,7 @@ private fun MessageRow(
     // image uploads (picked as documents) get the same treatment.
     // Owner round 31 (item 29): photos sent together = one grouped bubble.
     if (m.has("kpAlbum")) {
-        AlbumMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenAlbum, onReply, onLongPress)
+        AlbumMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenAlbum, onReply, onLongPress, theme)
         return
     }
     // Owner round 34 (item 16a): a view-once photo / video shows the pixels
@@ -4825,13 +4825,13 @@ private fun MessageRow(
         return
     }
     if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {
-        ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress)
+        ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme)
         return
     }
     // Owner round 20: videos render as a tappable video bubble and play
     // IN-APP (the system player could never stream these auth-only files).
     if (kind == "FILE" && fileLooksVideo(m) && !sentAsDocument(m)) {
-        VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo)
+        VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme)
         return
     }
 
@@ -5344,6 +5344,7 @@ private fun VideoMessageRow(
     onReply: (JSONObject) -> Unit,
     onLongPress: (JSONObject) -> Unit,
     onOpen: (JSONObject) -> Unit,
+    theme: String,
 ) {
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
@@ -5414,12 +5415,11 @@ private fun VideoMessageRow(
         // than the frame — without the alignment the frame hugs the wrong
         // side for my own messages.
         Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
+        // Owner round 43 (item 4): frame + caption in one bubble — the chrome
+        // (shadow/clip/border, reply offset, delete box) lives on the frame.
+        MediaBubbleFrame(mine, theme, m, replyOffset) {
         Box(
             Modifier
-                .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                .shadow(2.dp, RoundedCornerShape(12.dp))
-                .clip(RoundedCornerShape(12.dp))
-                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
                 .background(Color(0xFF0B1220))
                 .border(1.dp, if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444), RoundedCornerShape(12.dp))
                 .pointerInput(m.optString("id")) {
@@ -5577,6 +5577,7 @@ private fun VideoMessageRow(
             }
         }
         MediaCaption(m.optText("body"), mine)
+        }
         MessageReactions(m)
         }
     }
@@ -5842,6 +5843,7 @@ private fun ImageMessageRow(
     onOpenImage: (JSONObject) -> Unit,
     onReply: (JSONObject) -> Unit = {},
     onLongPress: (JSONObject) -> Unit = {},
+    theme: String,
 ) {
     val haptics = rememberHaptics()
     // Owner round 21: the photo reply-swipe sound plays from the row.
@@ -5864,22 +5866,12 @@ private fun ImageMessageRow(
         // Owner round 42 (item 3): a captioned photo's column is caption-wide
         // — the photo must hug MY side, not the column's start.
         Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
+        // Owner round 43 (item 4): frame + caption in one bubble (the round-8
+        // border + round-10 lift live on the frame now).
+        MediaBubbleFrame(mine, theme, m, replyOffset) {
         Box(
             Modifier
-                .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
                 .widthIn(max = 120.dp) // Owner round 25 / 32 item 29 / 33 item 18: smaller inline preview
-                // Owner round 10: photos float too — 3D lift + the round-8
-                // thin border.
-                .shadow(2.dp, RoundedCornerShape(12.dp))
-                .clip(RoundedCornerShape(12.dp))
-                // Owner round 8/16: thin photo border — gray-BLUE on dark-blue,
-                // gray-BLACK on cream, so the frame matches the app theme.
-                .border(
-                    1.dp,
-                    if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444),
-                    RoundedCornerShape(12.dp),
-                )
                 .pointerInput(m.optString("id")) {
                     detectHorizontalDragGestures(
                         onHorizontalDrag = { change, dragAmount ->
@@ -5949,6 +5941,7 @@ private fun ImageMessageRow(
             }
         }
         MediaCaption(m.optText("body"), mine)
+        }
         MessageReactions(m)
         }
     }
@@ -6143,6 +6136,7 @@ private fun AlbumMessageRow(
     onOpenAlbum: (JSONObject) -> Unit,
     onReply: (JSONObject) -> Unit = {},
     onLongPress: (JSONObject) -> Unit = {},
+    theme: String,
 ) {
     val photos = albumPhotos(m)
     val haptics = rememberHaptics()
@@ -6150,7 +6144,6 @@ private fun AlbumMessageRow(
     var replyDrag by remember { mutableStateOf(0f) }
     val replyOffset by animateFloatAsState(replyDrag, spring(stiffness = 1400f), label = "albumreplydrag")
     val replyThreshold = with(LocalDensity.current) { 36.dp.toPx() }
-    val shape = RoundedCornerShape(12.dp)
     val gap = 2.dp
     val albumWidth = 208.dp // Owner round 33 (item 18): narrower, like the single photo
     fun longPress() {
@@ -6174,18 +6167,11 @@ private fun AlbumMessageRow(
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
         Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
+            // Owner round 43 (item 4): frame + caption in one bubble.
+            MediaBubbleFrame(mine, theme, m, replyOffset) {
             Box(
                 Modifier
-                    .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
                     .width(albumWidth)
-                    .shadow(2.dp, shape)
-                    .clip(shape)
-                    .border(
-                        1.dp,
-                        if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444),
-                        shape,
-                    )
                     .pointerInput(m.optString("id")) {
                         detectHorizontalDragGestures(
                             onHorizontalDrag = { change, dragAmount ->
@@ -6277,6 +6263,7 @@ private fun AlbumMessageRow(
             }
             val albumCaption = photos.map { it.optText("body") }.firstOrNull { it.isNotBlank() }.orEmpty()
             MediaCaption(albumCaption, mine)
+            }
             MessageReactions(m)
         }
     }
@@ -6568,17 +6555,49 @@ object Uploads {
 }
 
 /**
+ * Owner round 43 (item 4): photo / video / album + caption in ONE bubble —
+ * the frame's own shadow/clip/border moved up here, the caption strip sits
+ * on the bubble fill below the pixels. No caption = the frame alone, the
+ * same look as before.
+ */
+@Composable
+private fun MediaBubbleFrame(
+    mine: Boolean,
+    theme: String,
+    m: JSONObject,
+    replyOffset: Float,
+    content: @Composable () -> Unit,
+) {
+    Column(
+        Modifier
+            .offset { IntOffset(replyOffset.roundToInt(), 0) }
+            .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
+            .shadow(2.dp, RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (mine) chatMineFill(theme) else chatOtherFill(theme))
+            .border(
+                1.dp,
+                if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444),
+                RoundedCornerShape(12.dp),
+            ),
+    ) {
+        content()
+    }
+}
+
+/**
  * Owner round 34 (item 16b): the words under a captioned photo / video /
- * album — the body the editor's caption bar stored.
+ * album — the body the editor's caption bar stored. Round 43 (item 4): on
+ * the bubble fill now, in text-bubble ink — frame + strip read as one.
  */
 @Composable
 private fun MediaCaption(body: String, mine: Boolean) {
     if (body.isBlank()) return
     Text(
         body,
-        color = Ink,
+        color = if (mine) Color(0xE6FFFFFF) else Ink,
         fontSize = 13.5.sp,
-        modifier = Modifier.padding(top = 5.dp, start = 2.dp, end = 2.dp).widthIn(max = 240.dp),
+        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp).widthIn(max = 240.dp),
     )
 }
 
