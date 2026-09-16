@@ -4136,7 +4136,7 @@ const convBetween = (db, a, b) =>
           !edit30.includes('GoldBtn("Post")') &&
           !edit30.includes('GoldBtn("Choose photo or video")') &&
           !edit30.includes("Video status can be at most 1 minute.") &&
-          edit30.includes("Box(Modifier.fillMaxSize().background(Color.Black)) {") &&
+          edit30.includes(".fillMaxSize()\n            .background(Color.Black)") &&
           edit30.includes('Icon(Icons.Filled.Close, "Close", tint = Color.White') &&
           edit30.includes('contentDescription = if (statusMode) "Done" else "Send",') &&
           edit30.includes('.put("text", ""),'),
@@ -6417,6 +6417,21 @@ const convBetween = (db, a, b) =>
     const plan = kt("VideoExport.kt");
     const store = kt("ScreenStore.kt");
     const app = kt("KpApp.kt");
+    // Owner round 45 (item 7): swipe-browse the pool inside the editor.
+    check(
+      "r45-7: attach editor browses the pool — lone pencil stages ScreenStore.editPool, the editor sessions item screens with per-photo EditBits snapshots + a horizontal swipe, the stage dies with the screen",
+      store.includes("var editPool: List<MediaItem> = emptyList()") &&
+        attach.includes("onPool: (List<MediaItem>) -> Unit = {},") &&
+        attach.includes("LaunchedEffect(pool) { if (pool.isNotEmpty()) onPool(pool) }") &&
+        chat.includes("ScreenStore.editPool = attachPool") &&
+        edit.includes("private class EditBits") &&
+        edit.includes("private fun MediaEditItemScreen(") &&
+        edit.includes('pointerInput("editbrowse")') &&
+        edit.includes("works[uriKey] = bits") &&
+        edit.includes(
+          "DisposableEffect(Unit) { onDispose { ScreenStore.editPool = emptyList() } }",
+        ),
+    );
     // Owner round 39 (item 6): the 'N selected' header + Edit chip are
     // gone — the picker is Recents ▾ · HD over the grid, with the
     // selection bar (pencil, caption, ①, send-with-count) under it.
@@ -6517,7 +6532,7 @@ const convBetween = (db, a, b) =>
       edit.includes(
         "fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, convId: String, viewOnce: Boolean) {",
       ) &&
-        edit.includes("Box(Modifier.fillMaxSize().background(Color.Black)) {") &&
+        edit.includes(".fillMaxSize()\n            .background(Color.Black)") &&
         edit.includes(
           "internal class PenStroke(val color: Color, val width: Float, val points: MutableList<Offset>)",
         ) &&

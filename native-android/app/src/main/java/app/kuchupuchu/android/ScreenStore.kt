@@ -244,6 +244,10 @@ object ScreenStore {
      *  Null = send mode (single picks, viewer edits). Cleared on consume
      *  and on editor dispose (backing out must not poison the next edit). */
     var editStageUri: String? = null
+    // Owner round 45 (item 7): the attach panel's loaded pool, staged by
+    // the chat's lone-pick pencil so the editor can browse it; the editor
+    // clears it on dispose.
+    var editPool: List<MediaItem> = emptyList()
 
 
     /** Bumped on FCM so an open chat refreshes immediately. */

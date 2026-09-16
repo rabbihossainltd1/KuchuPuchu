@@ -339,6 +339,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     // mic turns into SEND while the panel has picks (WhatsApp behaviour) —
     // the panel itself no longer carries its own send button.
     val attachSel = remember { mutableStateListOf<MediaItem>() }
+    // Owner round 45 (item 7): the panel reports its loaded recents; the
+    // lone-pick pencil stages them for the editor's browse mode.
+    var attachPool by remember { mutableStateOf(listOf<MediaItem>()) }
     // Owner round 45 (item 5): r44-3's deselect confirm is retired — every
     // close clears the ticks (back/swipe both mean "get me out").
     // Owner round 32 (item 17): the attach panel's "view once" switch — armed
@@ -3224,6 +3227,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     attachFs = false
                 },
                 onFullscreenChange = { attachFs = it },
+                onPool = { attachPool = it },
                 // Owner round 32 (item 19): hold the panel's Send → a time
                 // (item 18's sheet); Edit on a single pick → the light editor.
                 onScheduleBatch = { showScheduleMedia = true },
@@ -3238,6 +3242,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                     else {
                         ScreenStore.editStageUri = null
                         attachSel.clear()
+                        // Owner round 45 (item 7): the lone-pick pencil
+                        // browses the whole pool (a batch pencil must
+                        // return to its staged uri — no browsing there).
+                        ScreenStore.editPool = attachPool
                     }
                     showAttach = false
                     nav.navigate("mediaedit/$convId/0/${statusPickArg(item)}")

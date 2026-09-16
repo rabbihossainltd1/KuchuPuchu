@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
@@ -60,6 +61,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -125,6 +127,67 @@ import org.json.JSONObject
  */
 @Composable
 fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, convId: String, viewOnce: Boolean) {
+    // Owner round 45 (item 7): an attach pencil trip stages the panel's
+    // pool (ScreenStore.editPool) — swiping left/right browses the other
+    // photos right here instead of backing out. Single opens (viewer,
+    // status, camera) skip the pool untouched. The stage dies with the
+    // screen, so a stale pool can never leak into a later open.
+    val pool = ScreenStore.editPool
+    DisposableEffect(Unit) { onDispose { ScreenStore.editPool = emptyList() } }
+    if (pool.size < 2) {
+        MediaEditItemScreen(nav, pickedUri, pickedIsVideo, convId, viewOnce, null, null, null)
+        return
+    }
+    var idx by remember {
+        mutableStateOf(pool.indexOfFirst { it.uri == pickedUri }.takeIf { it >= 0 } ?: 0)
+    }
+    // Every photo visited keeps its edits — the item screen snapshots its
+    // EditBits on leave (kilobytes; bitmaps are re-decoded on return).
+    val works = remember { HashMap<String, EditBits>() }
+    val item = pool[idx]
+    val uriKey = item.uri.toString()
+    key(uriKey) {
+        MediaEditItemScreen(
+            nav,
+            item.uri,
+            item.isVideo,
+            convId,
+            viewOnce,
+            works[uriKey],
+            { bits -> works[uriKey] = bits },
+            { d -> idx = (idx + d).coerceIn(0, pool.lastIndex) },
+        )
+    }
+}
+
+/** Snapshotted per-photo edit state while browsing (owner round 45, item 7). */
+private class EditBits(
+    val rotation: Int,
+    val filterIdx: Int,
+    val cropBox: CropBox?,
+    val cropDraft: CropBox,
+    val cropTouched: Boolean,
+    val cropPreset: String,
+    val caption: String,
+    val once: Boolean,
+    val hd: Boolean,
+    val startMs: Long,
+    val endMs: Long,
+    val strokes: List<PenStroke>,
+    val texts: List<EditText>,
+    val stickers: List<EditSticker>,
+)
+
+private fun MediaEditItemScreen(
+    nav: NavController,
+    pickedUri: Uri,
+    pickedIsVideo: Boolean,
+    convId: String,
+    viewOnce: Boolean,
+    bits: EditBits?,
+    onBits: ((EditBits) -> Unit)?,
+    onBrowse: ((Int) -> Unit)?,
+) {
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
 
@@ -152,7 +215,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
     var busy by remember { mutableStateOf(false) }
     val thumbs = remember { mutableStateListOf<ImageBitmap?>() }
     // Pen: strokes in normalised picture units; the live one is drawn as it grows.
-    val strokes = remember { mutableStateListOf<PenStroke>() }
+    val strokes = remember { mutableStateListOf<PenStroke>().also { l -> bits?.let { l.addAll(it.strokes) } } }
     var live by remember { mutableStateOf<PenStroke?>(null) }
     var penColor by remember { mutableStateOf(PEN_COLOURS[0]) }
     var penWidth by remember { mutableStateOf(PEN_WIDTHS[1]) }
@@ -160,14 +223,14 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
     // (the stage is drag-to-move for overlays while it is off), the ① toggle
     // and the HD switch live here, overlays sit in normalised units.
     var penMode by remember { mutableStateOf(false) }
-    var rotation by remember { mutableStateOf(0) }
-    var filterIdx by remember { mutableStateOf(0) }
-    val texts = remember { mutableStateListOf<EditText>() }
-    val stickers = remember { mutableStateListOf<EditSticker>() }
+    var rotation by remember { mutableStateOf(bits?.rotation ?: 0) }
+    var filterIdx by remember { mutableStateOf(bits?.filterIdx ?: 0) }
+    val texts = remember { mutableStateListOf<EditText>().also { l -> bits?.let { l.addAll(it.texts) } } }
+    val stickers = remember { mutableStateListOf<EditSticker>().also { l -> bits?.let { l.addAll(it.stickers) } } }
     var selectedId by remember { mutableStateOf<String?>(null) }
-    var once by remember { mutableStateOf(viewOnce) }
-    var hd by remember { mutableStateOf(false) }
-    var caption by remember { mutableStateOf("") }
+    var once by remember { mutableStateOf(bits?.once ?: viewOnce) }
+    var hd by remember { mutableStateOf(bits?.hd ?: false) }
+    var caption by remember { mutableStateOf(bits?.caption ?: "") }
     var notice by remember { mutableStateOf<String?>(null) }
     var showTextSheet by remember { mutableStateOf(false) }
     var showStickerSheet by remember { mutableStateOf(false) }
@@ -184,10 +247,33 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
     // cropBox commits into normalised full-frame coords; while the box is
     // open the stage shows the FULL frame and the draft rides above it.
     var cropping by remember { mutableStateOf(false) }
-    var cropBox by remember { mutableStateOf<CropBox?>(null) }
-    var cropDraft by remember { mutableStateOf(CropBox.FULL) }
-    var cropTouched by remember { mutableStateOf(false) }
-    var cropPreset by remember { mutableStateOf("Original") }
+    var cropBox by remember { mutableStateOf<CropBox?>(bits?.cropBox) }
+    var cropDraft by remember { mutableStateOf(bits?.cropDraft ?: CropBox.FULL) }
+    var cropTouched by remember { mutableStateOf(bits?.cropTouched ?: false) }
+    var cropPreset by remember { mutableStateOf(bits?.cropPreset ?: "Original") }
+    // Owner round 45 (item 7): snapshot this photo's work for the browse back.
+    DisposableEffect(Unit) {
+        onDispose {
+            onBits?.invoke(
+                EditBits(
+                    rotation = rotation,
+                    filterIdx = filterIdx,
+                    cropBox = cropBox,
+                    cropDraft = cropDraft,
+                    cropTouched = cropTouched,
+                    cropPreset = cropPreset,
+                    caption = caption,
+                    once = once,
+                    hd = hd,
+                    startMs = start,
+                    endMs = end,
+                    strokes = strokes.toList(),
+                    texts = texts.toList(),
+                    stickers = stickers.toList(),
+                ),
+            )
+        }
+    }
 
     LaunchedEffect(pickedUri) {
         if (pickedIsVideo) {
@@ -196,9 +282,13 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                 loadFailed = true
                 return@LaunchedEffect
             }
+            // Owner round 45 (item 7): a browsed-back clip keeps its trim.
+            if (bits != null) {
+                start = bits.startMs
+                end = bits.endMs
+            } else if (statusMode) {
             // A chat video keeps its whole length; a status clip preselects
             // the first minute (the status rule, inherited from the share screen).
-            if (statusMode) {
                 val (s, e) = VideoPlan.defaultWindow(src.durationMs)
                 start = s
                 end = e
@@ -1027,7 +1117,31 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
     val topScrim = Brush.verticalGradient(listOf(Color(0x99000000), Color.Transparent))
     val bottomScrim = Brush.verticalGradient(listOf(Color.Transparent, Color(0x99000000)))
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    // Owner round 45 (item 7): a horizontal swipe browses the pool — gated
+    // off while drawing, cropping or nudging an overlay, so those drags
+    // always win. Left = next photo, right = previous.
+    val browseTick = onBrowse != null && !penMode && !cropping && selectedId == null && !busy
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .then(
+                if (!browseTick) {
+                    Modifier
+                } else {
+                    Modifier.pointerInput("editbrowse") {
+                        var travel = 0f
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                if (travel < -140f) onBrowse?.invoke(1) else if (travel > 140f) onBrowse?.invoke(-1)
+                                travel = 0f
+                            },
+                            onDragCancel = { travel = 0f },
+                        ) { _, amount -> travel += amount }
+                    }
+                },
+            ),
+    ) {
         // Owner round 35 (item 8): the photo owns the whole screen —
         // chrome floats OVER it on soft black scrims, nothing boxes it in.
         Box(Modifier.fillMaxSize()) {

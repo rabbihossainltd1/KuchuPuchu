@@ -145,6 +145,9 @@ fun AttachPanel(
     // Owner round 41 (item 2): the chat hides its composer only once the
     // user ticked something or swiped up — this reports the swipe.
     onFullscreenChange: (Boolean) -> Unit = {},
+    // Owner round 45 (item 7): the loaded recents, so the chat can stage
+    // them for the editor's browse mode.
+    onPool: (List<MediaItem>) -> Unit = {},
     onImagePicked: (Uri) -> Unit,
     onDocumentPicked: (Uri) -> Unit,
     onContactPicked: (Uri) -> Unit,
@@ -155,6 +158,7 @@ fun AttachPanel(
     val scope = rememberCoroutineScope()
     var canRead by remember { mutableStateOf(false) }
     var pool by remember { mutableStateOf(listOf<MediaItem>()) }
+    LaunchedEffect(pool) { if (pool.isNotEmpty()) onPool(pool) }
     var fullscreen by remember { mutableStateOf(false) }
     var foldersOpen by remember { mutableStateOf(false) }
     var folder by remember { mutableStateOf<String?>(null) }
