@@ -686,8 +686,9 @@ const HF_STT_MODEL = "openai/whisper-large-v3-turbo";
 
 /** One bounded HF chat completion: models tried in order under a shared
  *  wall-clock budget, any failure ⇒ null. Never throws — callers own the
- *  fallback text. Each model gets at most 12s (a cold provider can sit on
- *  a load before answering) and the loop keeps going while ≥4s remain. */
+ *  fallback text. Each model gets at most 12s by default (a cold provider
+ *  can sit on a load before answering; callers on a longer chain pass a
+ *  tighter per-call cap) and the loop keeps going while ≥4s remain. */
 const HF_CALL_BUDGET_MS = 25_000;
 
 type HfChatMessage = { role: string; content: unknown };
@@ -697,6 +698,7 @@ async function hfChat(
   messages: HfChatMessage[],
   maxTokens = 120,
   models: readonly string[] = HF_CHAT_MODELS,
+  perCallMs = 12_000,
 ): Promise<string | null> {
   if (!env.HF_TOKEN) return null;
   const started = Date.now();
@@ -708,7 +710,7 @@ async function hfChat(
         method: "POST",
         headers: { "content-type": "application/json", Authorization: `Bearer ${env.HF_TOKEN}` },
         body: JSON.stringify({ model, messages, max_tokens: maxTokens }),
-        signal: AbortSignal.timeout(Math.min(remaining, 12_000)),
+        signal: AbortSignal.timeout(Math.min(remaining, perCallMs)),
       });
       if (!res.ok) continue;
       const data = (await res.json()) as {
@@ -973,9 +975,12 @@ async function hfTranscribe(env: Env, bytes: ArrayBuffer, mime: string): Promise
  *  source photo already folded into the prompt (no img2img model is served
  *  on this account's enabled providers, so a true pixel edit is impossible
  *  and the draw is a variation). Up to two attempts under a shared budget;
- *  a loading-503 sleeps its estimated_time so the retry lands. Text and
+ *  a loading-503 sleeps its estimated_time so the retry lands. The whole
+ *  picture path MUST fit inside ~25s: the reply runs in ctx.waitUntil and
+ *  the runtime reaps it ~30s after the response — the first live cold draw
+ *  died exactly that way (no IMAGE, no fallback, no error_log). Text and
  *  photo READING run on the HF chat/vision models. Never throws. */
-const HF_IMAGE_BUDGET_MS = 40_000;
+const HF_IMAGE_BUDGET_MS = 25_000;
 type AiImage = { bytes: Uint8Array; mime: string; text: string };
 type AiPhotoSrc = { bytes: Uint8Array<ArrayBuffer>; mime: string };
 /** SD3-medium answers raw image bytes. A failure is JSON `{ error }` (a
@@ -1022,7 +1027,7 @@ async function hfImage(
   let err = "";
   const started = Date.now();
   const remaining = () => HF_IMAGE_BUDGET_MS - (Date.now() - started);
-  for (let attempt = 0; attempt < 2 && remaining() >= 8_000; attempt++) {
+  for (let attempt = 0; attempt < 2 && remaining() >= 6_000; attempt++) {
     // A failed draw stays visible in tail — the status tells quota (429)
     // from outage (5xx) from auth (401/403). Prompt text and tokens never
     // hit the log, only model + status.
@@ -1032,7 +1037,7 @@ async function hfImage(
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.HF_TOKEN}` },
         body: JSON.stringify({ inputs: prompt, parameters: { width: 1024, height: 1024 } }),
-        signal: AbortSignal.timeout(Math.min(remaining(), 30_000)),
+        signal: AbortSignal.timeout(Math.min(remaining(), 20_000)),
       });
       st = String(res.status);
       const img = await hfImageBytes(res);
@@ -1044,7 +1049,7 @@ async function hfImage(
       console.error("hf-image", s);
       // A loading model usually answers seconds later — sleep its estimate
       // (capped) so the retry lands instead of failing the same way.
-      if (wait && wait > 0 && attempt === 0 && remaining() > 12_000) {
+      if (wait && wait > 0 && attempt === 0 && remaining() > 14_000) {
         await new Promise((r) => setTimeout(r, Math.min(wait * 1000, 8_000)));
       }
     }
@@ -1403,6 +1408,9 @@ async function sendAiReply(
             ],
             300,
             [HF_VISION_MODEL],
+            // An edit chains vision + draw inside one 30s waitUntil — the
+            // scene read gets 8s so the draw keeps its full budget.
+            8_000,
           );
         }
         const drawn = await hfImage(env, parts, scene);

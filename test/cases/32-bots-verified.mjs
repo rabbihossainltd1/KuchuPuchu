@@ -733,7 +733,7 @@ const convBetween = (db, a, b) =>
   // ---- Owner round 11 (2026-09-05) ----
   check(
     "AI: each HF model capped (12s) so one 503 can't starve the rest",
-    src.includes("Math.min(remaining, 12_000)") && src.includes("HF_CALL_BUDGET_MS"),
+    src.includes("perCallMs = 12_000") && src.includes("HF_CALL_BUDGET_MS"),
   );
   check("user-channel conv pokes carry msg:1 for the in-app sound", src.includes("msg: 1 }"));
   const kpapp = readFileSync(
@@ -1634,7 +1634,7 @@ const convBetween = (db, a, b) =>
   );
   check(
     "15: AI replies fail over per-model (12s HF cap) + both APKs per CI run (r22)",
-    src.includes("Math.min(remaining, 12_000)") &&
+    src.includes("perCallMs = 12_000") &&
       readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8").includes(
         "assembleDebug",
       ) &&
