@@ -8364,7 +8364,13 @@ const convBetween = (db, a, b) =>
         ai.includes("VALUES (?, ?, ?, 'IMAGE', NULL, ?, ?)`") &&
         ai.includes("kp_media: `/api/messages/${imgMid}/media`,") &&
         ai.includes("answer = await hfChat(") &&
-        ai.includes("const body = answer ?? AI_REPLY_FALLBACK;") &&
+        ai.includes(
+          "const body = answer ?? (!env.HF_TOKEN ? AI_REPLY_FALLBACK : AI_REPLY_DOWN);",
+        ) &&
+        // Owner round 39 (item 5): an HF-side failure says so honestly
+        // (module-level const, outside the sendAiReply slice).
+        src.includes("const AI_REPLY_DOWN =") &&
+        src.includes("can't reach its brain right now") &&
         ai.includes("it cannot be seen right now: say so briefly") &&
         src.includes(
           "Abilities: you CAN see photos the user sends and you CAN create or edit pictures on request",

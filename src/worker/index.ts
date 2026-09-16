@@ -835,6 +835,12 @@ async function sendAiWelcome(
 /** The AI's line when HF is unreachable: it still answers, never silence. */
 const AI_REPLY_FALLBACK =
   "I'm KuchuPuchu AI — I'm right here with you! Ask me anything about the app — or just say hi.";
+// Owner round 39 (item 5): the reply fallback used to be one line for every
+// failure, so an HF outage looked like a dumb bot ("shob somoy fallback
+// message dey"). No token = the setup line above; a token whose call erred
+// (outage/quota/cold) = this honest line instead.
+const AI_REPLY_DOWN =
+  "KuchuPuchu AI can't reach its brain right now — the AI service is having trouble. Please try again in a bit.";
 
 // Owner-identity questions in the AI chat: after the text answer, the app
 // also renders a tappable profile card (kind "OWNER_CARD") with the owner's
@@ -1521,7 +1527,7 @@ async function sendAiReply(
         900,
       );
     }
-    const body = answer ?? AI_REPLY_FALLBACK;
+    const body = answer ?? (!env.HF_TOKEN ? AI_REPLY_FALLBACK : AI_REPLY_DOWN);
     const botId = await ensureAiBot(db);
     const mid = id();
     const created = nowIso();
