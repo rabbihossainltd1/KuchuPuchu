@@ -1007,6 +1007,32 @@ function arrayBufferToBase64(buf: ArrayBuffer): string {
 /** Voice-note bytes ≤ this go to Whisper (a 60s note is ~0.5 MB). */
 const AI_VOICE_MAX_BYTES = 6_000_000;
 
+/** Owner round 43 (item 5): 0.1s of 8kHz silence as a valid WAV — the cron's
+ *  Whisper warmup (a model that only ever hears real voices is always cold
+ *  for the first one). */
+function wavSilence(): Uint8Array<ArrayBuffer> {
+  const n = 800;
+  const out = new Uint8Array(new ArrayBuffer(44 + n * 2));
+  const v = new DataView(out.buffer);
+  const ascii = (o: number, s: string) => {
+    for (let i = 0; i < s.length; i++) out[o + i] = s.charCodeAt(i);
+  };
+  ascii(0, "RIFF");
+  v.setUint32(4, 36 + n * 2, true);
+  ascii(8, "WAVE");
+  ascii(12, "fmt ");
+  v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true);
+  v.setUint16(22, 1, true);
+  v.setUint32(24, 8000, true);
+  v.setUint32(28, 16000, true);
+  v.setUint16(32, 2, true);
+  v.setUint16(34, 16, true);
+  ascii(36, "data");
+  v.setUint32(40, n * 2, true);
+  return out;
+}
+
 /** Owner round 31 (item 17) + the 2026-09-16 HF migration: a voice note is
  *  transcribed by Whisper on HF (raw audio bytes in, `{ text }` out) and
  *  the transcript is answered as chat text. Owner round 42 (item 3): two
@@ -4510,6 +4536,22 @@ export default {
             try {
               await hfChat(env, [{ role: "user", content: "ping" }], 5, [HF_CHAT_MODELS[0]], 8_000);
               await hfChat(env, [{ role: "user", content: "ping" }], 5, [HF_VISION_MODEL], 8_000);
+              // Owner round 43 (item 5): Whisper scales to zero too — a cold
+              // first voice paid 20s+ of model load against an 8s retry cap
+              // ("could not be heard" every quiet stretch). A 0.1s silence
+              // keeps it warm; the result is ignored (even a 503 triggers
+              // the load it needs).
+              if (env.HF_TOKEN) {
+                await fetch(`${HF_ROUTER}/hf-inference/models/${HF_STT_MODEL}`, {
+                  method: "POST",
+                  headers: {
+                    "content-type": "audio/wav",
+                    Authorization: `Bearer ${env.HF_TOKEN}`,
+                  },
+                  body: wavSilence(),
+                  signal: AbortSignal.timeout(8_000),
+                }).catch(() => null);
+              }
             } catch (wErr) {
               console.error(
                 "cron_hf_warmup_error",

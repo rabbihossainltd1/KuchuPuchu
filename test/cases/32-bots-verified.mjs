@@ -2748,6 +2748,9 @@ const convBetween = (db, a, b) =>
         readFileSync("src/worker/index.ts", "utf8").includes("hf-stt-loading") &&
         readFileSync("src/worker/index.ts", "utf8").includes("`hf-stt ${heard.err}`") &&
         readFileSync("src/worker/index.ts", "utf8").includes("openai/whisper-large-v3-turbo") &&
+        // Owner round 43 (item 5): the cron keeps Whisper warm.
+        readFileSync("src/worker/index.ts", "utf8").includes("function wavSilence()") &&
+        readFileSync("src/worker/index.ts", "utf8").includes('"content-type": "audio/wav"') &&
         readFileSync("src/worker/index.ts", "utf8").includes("this is what they said:") &&
         readFileSync("src/worker/index.ts", "utf8").includes("the clip could not be heard: say so"),
     );
