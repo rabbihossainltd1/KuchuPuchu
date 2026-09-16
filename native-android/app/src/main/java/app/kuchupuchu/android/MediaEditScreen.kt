@@ -620,77 +620,6 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
         }
     }
 
-    fun send() {
-        // Owner round 37 (item 2): status posts straight from here.
-        if (statusMode) {
-            sendStatus()
-            return
-        }
-        // Owner round 39 (item 6): the panel pencil's trip — Done stages
-        // the edited photo back into the batch (replacing the original)
-        // instead of sending it. Same bake as the + button.
-        ScreenStore.editStageUri?.let { stageUri ->
-            ScreenStore.editStageUri = null
-            addMore(stageUri)
-            return
-        }
-        if (busy) return
-        busy = true
-        val cap = caption.trim()
-        val img = runCatching { shot?.asAndroidBitmap() }.getOrNull()
-        val vSource = source
-        val s = start
-        val e = end
-        val drawn = strokes.toList()
-        val wrote = texts.toList()
-        val placed = stickers.toList()
-        val filt = filterMatrix
-        val turn = rotation
-        val box = cropBox?.takeIf { !it.isFull() }
-        val hdShot = hd
-        ScreenStore.appScope.launch {
-            val result =
-                runCatching {
-                    if (pickedIsVideo && vSource != null) {
-                        val out = java.io.File(ctx.cacheDir, "edit_${System.currentTimeMillis()}.mp4")
-                        val whole = s <= 0L && e >= vSource.durationMs && box == null
-                        // Owner round 36 (item 6): the clip carries the
-                        // editor's layers — overlay baked at the export's own
-                        // output size, filter on the shader, turns in the map.
-                        val effRot = (vSource.rotation + (turn % 4) * 90) % 360
-                        val (ovW, ovH) = VideoPlan.outputSize(vSource.codedW, vSource.codedH, effRot, box)
-                        val overlay = bakeVideoOverlay(drawn, wrote, placed, ovW, ovH, box)
-                        val hasEdits = overlay != null || filt != null || turn != 0 || box != null
-                        if (!whole || hasEdits) {
-                            try {
-                                VideoExport.export(ctx, pickedUri, s, e, box, out, overlay = overlay, colorMat = filt?.array, userTurns = turn)
-                            } catch (err: Exception) {
-                                // Edits must never silently vanish: only a
-                                // bare trim may go through degraded.
-                                if (hasEdits) throw err
-                                out.delete()
-                                VideoExport.passthrough(ctx, pickedUri, s, e, out)
-                            }
-                            EditedMedia.Video(out, "video/mp4")
-                        } else {
-                            EditedMedia.Untouched(pickedUri, true)
-                        }
-                    } else {
-                        val bmp = img ?: throw Exception("Could not read that photo.")
-                        // HD with no edits still bakes — the bigger file IS the edit.
-                        val edited = drawn.isNotEmpty() || wrote.isNotEmpty() || placed.isNotEmpty() || filt != null || turn != 0 || hdShot || box != null
-                        if (!edited) {
-                            EditedMedia.Untouched(pickedUri, false)
-                        } else {
-                            EditedMedia.Photo(bakeFull(bmp, drawn, filt, wrote, placed, hdShot) ?: throw Exception("Could not save the drawing."))
-                        }
-                    }
-                }.getOrElse { EditedMedia.Failed(it.message ?: "Could not edit that file.") }
-            ScreenStore.pendingEdited.value = EditedResult(convId, once, result, cap)
-        }
-        nav.popBackStack()
-    }
-
     /** The caption bar's + : stage this one (edits baked in) and pick more.
      *  Owner round 39 (item 6): replaceUri carries the panel pencil's trip —
      *  the staged item replaces that uri in the batch instead of prepending. */
@@ -773,6 +702,76 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
         }
     }
 
+    fun send() {
+        // Owner round 37 (item 2): status posts straight from here.
+        if (statusMode) {
+            sendStatus()
+            return
+        }
+        // Owner round 39 (item 6): the panel pencil's trip — Done stages
+        // the edited photo back into the batch (replacing the original)
+        // instead of sending it. Same bake as the + button.
+        ScreenStore.editStageUri?.let { stageUri ->
+            ScreenStore.editStageUri = null
+            addMore(stageUri)
+            return
+        }
+        if (busy) return
+        busy = true
+        val cap = caption.trim()
+        val img = runCatching { shot?.asAndroidBitmap() }.getOrNull()
+        val vSource = source
+        val s = start
+        val e = end
+        val drawn = strokes.toList()
+        val wrote = texts.toList()
+        val placed = stickers.toList()
+        val filt = filterMatrix
+        val turn = rotation
+        val box = cropBox?.takeIf { !it.isFull() }
+        val hdShot = hd
+        ScreenStore.appScope.launch {
+            val result =
+                runCatching {
+                    if (pickedIsVideo && vSource != null) {
+                        val out = java.io.File(ctx.cacheDir, "edit_${System.currentTimeMillis()}.mp4")
+                        val whole = s <= 0L && e >= vSource.durationMs && box == null
+                        // Owner round 36 (item 6): the clip carries the
+                        // editor's layers — overlay baked at the export's own
+                        // output size, filter on the shader, turns in the map.
+                        val effRot = (vSource.rotation + (turn % 4) * 90) % 360
+                        val (ovW, ovH) = VideoPlan.outputSize(vSource.codedW, vSource.codedH, effRot, box)
+                        val overlay = bakeVideoOverlay(drawn, wrote, placed, ovW, ovH, box)
+                        val hasEdits = overlay != null || filt != null || turn != 0 || box != null
+                        if (!whole || hasEdits) {
+                            try {
+                                VideoExport.export(ctx, pickedUri, s, e, box, out, overlay = overlay, colorMat = filt?.array, userTurns = turn)
+                            } catch (err: Exception) {
+                                // Edits must never silently vanish: only a
+                                // bare trim may go through degraded.
+                                if (hasEdits) throw err
+                                out.delete()
+                                VideoExport.passthrough(ctx, pickedUri, s, e, out)
+                            }
+                            EditedMedia.Video(out, "video/mp4")
+                        } else {
+                            EditedMedia.Untouched(pickedUri, true)
+                        }
+                    } else {
+                        val bmp = img ?: throw Exception("Could not read that photo.")
+                        // HD with no edits still bakes — the bigger file IS the edit.
+                        val edited = drawn.isNotEmpty() || wrote.isNotEmpty() || placed.isNotEmpty() || filt != null || turn != 0 || hdShot || box != null
+                        if (!edited) {
+                            EditedMedia.Untouched(pickedUri, false)
+                        } else {
+                            EditedMedia.Photo(bakeFull(bmp, drawn, filt, wrote, placed, hdShot) ?: throw Exception("Could not save the drawing."))
+                        }
+                    }
+                }.getOrElse { EditedMedia.Failed(it.message ?: "Could not edit that file.") }
+            ScreenStore.pendingEdited.value = EditedResult(convId, once, result, cap)
+        }
+        nav.popBackStack()
+    }
     /** The top bar's download: the current state into the gallery. */
     fun saveCurrent() {
         if (busy) return
