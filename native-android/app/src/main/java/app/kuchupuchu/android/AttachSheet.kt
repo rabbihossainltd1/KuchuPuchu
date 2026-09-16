@@ -349,7 +349,7 @@ fun AttachPanel(
             }
         }
     val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
-    var gridDragTotal by remember { mutableStateOf(0f) }
+    var gridPreDownTotal by remember { mutableStateOf(0f) }
     var gridPreTotal by remember { mutableStateOf(0f) }
     val gridScroll = remember {
         object : NestedScrollConnection {
@@ -370,6 +370,23 @@ fun AttachPanel(
                         gridPreTotal = 0f
                     }
                 }
+                // Owner round 44 (item 3): DOWN lives here too — post-scroll
+                // never sees it (the grid's edge effect eats the leftover at
+                // the top). Gated on the grid's first position so a mid-list
+                // scroll never folds the panel.
+                if ((source == NestedScrollSource.UserInput || source == NestedScrollSource.SideEffect) && fullscreen &&
+                    gridState.firstVisibleItemIndex == 0 && gridState.firstVisibleItemScrollOffset == 0) {
+                    if (available.y > 0f) {
+                        gridPreDownTotal += available.y
+                        if (gridPreDownTotal > 60f) {
+                            haptics.tap()
+                            setFullscreen(false)
+                            gridPreDownTotal = 0f
+                        }
+                    } else {
+                        gridPreDownTotal = 0f
+                    }
+                }
                 return Offset.Zero
             }
 
@@ -378,23 +395,9 @@ fun AttachPanel(
                 available: Offset,
                 source: NestedScrollSource,
             ): Offset {
-                // `available.y` here is what the grid did NOT consume —
-                // non-zero exactly when the grid is already pinned at its
-                // start (can't scroll back further) and the user is still
-                // dragging down. That is the correct, reliable "at the top
-                // and pulling down" signal.
-                if ((source == NestedScrollSource.UserInput || source == NestedScrollSource.SideEffect) && fullscreen) {
-                    if (available.y > 0f) {
-                        gridDragTotal += available.y
-                        if (gridDragTotal > 60f) {
-                            haptics.tap()
-                            setFullscreen(false)
-                            gridDragTotal = 0f
-                        }
-                    } else {
-                        gridDragTotal = 0f
-                    }
-                }
+                // Owner round 44 (item 3): intentionally empty — the edge
+                // effect eats the leftover, so down-folds are detected
+                // pre-scroll (above), gated on the grid's top position.
                 return Offset.Zero
             }
         }

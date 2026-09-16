@@ -6429,6 +6429,9 @@ const convBetween = (db, a, b) =>
         attach.includes("NestedScrollSource.SideEffect") &&
         attach.includes("NestedScrollSource.UserInput") &&
         attach.includes("gridPreTotal") &&
+        // Owner round 44 (item 3): down-folds are pre-scroll, top-gated.
+        attach.includes("gridPreDownTotal") &&
+        attach.includes("firstVisibleItemIndex == 0") &&
         attach.includes('"barDrag"') &&
         attach.includes("barDragDetect") &&
         attach.includes("if (fullscreen && sel.isNotEmpty()) {") &&
