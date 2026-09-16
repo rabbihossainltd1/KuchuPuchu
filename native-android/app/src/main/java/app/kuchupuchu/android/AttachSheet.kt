@@ -87,8 +87,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -813,14 +815,26 @@ fun AttachPanel(
                             .border(1.dp, Color.White, CircleShape),
                         contentAlignment = Alignment.Center,
                     ) {
-                        // Owner round 42 (item 2): the digit hugged the badge's
-                        // left edge on device — pin it: full width + centered.
+                        // Owner round 43 (item 2): the digit sank to the badge's
+                        // bottom rim on device (r42 centered the width — wrong
+                        // axis). Android's font padding lives INSIDE the centered
+                        // line box and shoves the glyph down; strip it and trim
+                        // the line height so the digit itself centers.
                         Text(
                             "${sel.size}",
                             color = ActionBlueInk,
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
                             textAlign = TextAlign.Center,
+                            style =
+                                TextStyle(
+                                    platformStyle = PlatformTextStyle(includeFontPadding = false),
+                                    lineHeightStyle =
+                                        LineHeightStyle(
+                                            LineHeightStyle.Alignment.Center,
+                                            LineHeightStyle.Trim.Both,
+                                        ),
+                                ),
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
