@@ -349,7 +349,8 @@ object KpUpdate {
         // Owner round 42 (item 1): a full install KILLS the app by default —
         // that sudden death is the "install dile app crash kore". The app
         // stays alive now; the new build takes over at the next launch.
-        params.setDontKillApp(true)
+        // (API-34 call — older phones keep the pre-round-42 behaviour.)
+        if (android.os.Build.VERSION.SDK_INT >= 34) params.setDontKillApp(true)
         // Owner round 34 (item 2): attribute the session — some OEM confirm
         // screens only label (and finish) sessions that name their package.
         params.setAppPackageName(ctx.packageName)

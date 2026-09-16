@@ -7699,7 +7699,7 @@ const convBetween = (db, a, b) =>
       kt("MainActivity.kt").includes("KpUpdate.consumeInstallResult(application)") &&
       // Owner round 42 (item 1): the install no longer kills the app; the
       // sheet offers a restart into the new build instead.
-      upd.includes("params.setDontKillApp(true)") &&
+      upd.includes("if (android.os.Build.VERSION.SDK_INT >= 34) params.setDontKillApp(true)") &&
       upd.includes("var justUpdated by mutableStateOf(false)") &&
       upd.includes("fun restart(ctx: Context)") &&
       kt("KpApp.kt").includes('GoldBtn("Restart", Modifier.fillMaxWidth())'),
