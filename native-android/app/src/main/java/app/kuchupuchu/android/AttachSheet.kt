@@ -140,6 +140,9 @@ fun AttachPanel(
     // photo / video also gets Edit (the light editor).
     onScheduleBatch: () -> Unit = {},
     onEdit: (MediaItem) -> Unit = {},
+    // Owner round 41 (item 2): the chat hides its composer only once the
+    // user ticked something or swiped up — this reports the swipe.
+    onFullscreenChange: (Boolean) -> Unit = {},
     onImagePicked: (Uri) -> Unit,
     onDocumentPicked: (Uri) -> Unit,
     onContactPicked: (Uri) -> Unit,
@@ -167,6 +170,7 @@ fun AttachPanel(
     // first" bug.
     fun setFullscreen(value: Boolean) {
         fullscreen = value
+        onFullscreenChange(value)
         if (!value) {
             foldersOpen = false
             folder = null

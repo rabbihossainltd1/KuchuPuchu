@@ -207,6 +207,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     val loadingOlder = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
     var lastTypingPing by remember { mutableStateOf(0L) }
     var showAttach by remember { mutableStateOf(false) }
+    // Owner round 41 (item 2): the panel reports its fullscreen
+    // flips here so the composer below can stay until they happen.
+    var attachFs by remember { mutableStateOf(false) }
     var showStickers by remember { mutableStateOf(false) }
     // Owner round 32 (item 18): hold Send → "send later". The sheet, and the
     // chat's own parked rows (server truth: GET …/scheduled), shown as a
@@ -3081,9 +3084,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                 maxLines = 1,
                 modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
             )
-        // Owner round 40 (item 2): the attach panel open = the composer
-        // (pill + voice) hides — the panel owns the bottom of the screen.
-        } else if (!showAttach) {
+        // Owner round 41 (item 2): the composer stays while the attach
+        // panel is freshly open — it hides only once the user ticked a
+        // photo or swiped the panel up (r40 hid it from the first tap).
+        } else if (!showAttach || (attachSel.isEmpty() && !attachFs)) {
         Composer(
             input = input,
             replyFocusNonce = replyFocusNonce,
@@ -3155,7 +3159,8 @@ fun ChatScreen(nav: NavController, convId: String) {
             AttachPanel(
                 sel = attachSel,
                 onSendBatch = { sendAttachSelection() },
-                onDismiss = { showAttach = false },
+                onDismiss = { showAttach = false; attachFs = false },
+                onFullscreenChange = { attachFs = it },
                 // Owner round 32 (item 19): hold the panel's Send → a time
                 // (item 18's sheet); Edit on a single pick → the light editor.
                 onScheduleBatch = { showScheduleMedia = true },
