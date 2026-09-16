@@ -6746,7 +6746,10 @@ const convBetween = (db, a, b) =>
         ) &&
         !iso.includes("Log.") &&
         iso.includes("chunksOk.incrementAndGet()") &&
-        iso.includes("fun diag(): String {") &&
+        iso.includes("fun diag(): String? {") &&
+        // Owner round 39 (item 7): no not-run-yet instruction text anywhere.
+        !iso.includes("Not run yet") &&
+        !kt("SettingsScreen.kt").includes("Not run yet") &&
         iso.includes("private external fun nativeSetLevel(handle: Long, level: Int)") &&
         voice.includes("void kp_voice_set_level(KpVoice *v, int level) {") &&
         voice.includes("static const float wet[3] = { 0.55f, 0.8f, 1.f };") &&

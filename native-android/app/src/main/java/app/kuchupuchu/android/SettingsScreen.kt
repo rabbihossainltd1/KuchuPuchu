@@ -386,7 +386,11 @@ fun PrivacySettingsScreen(nav: NavController) {
             // above — a row opening the sheet, not an inline segment control.
             // The line below proves the cleaner runs on real calls.
             SettingRow(Icons.Filled.NoiseAware, "Voice isolation on calls", ISO_LEVELS[isoLevel]) { picker = "isoLevel" }
-            Text(VoiceIsolation.diag(), fontSize = 11.5.sp, color = Muted, maxLines = 1, modifier = Modifier.padding(start = 48.dp, end = 16.dp, bottom = 10.dp))
+            // Owner round 39 (item 7): the proof line only exists once a
+            // call ran — never an instruction sentence in its place.
+            VoiceIsolation.diag()?.let { line ->
+                Text(line, fontSize = 11.5.sp, color = Muted, maxLines = 1, modifier = Modifier.padding(start = 48.dp, end = 16.dp, bottom = 10.dp))
+            }
         }
         Spacer(Modifier.height(12.dp))
         // Owner round 32 (item 7): the people this account blocked — unblock

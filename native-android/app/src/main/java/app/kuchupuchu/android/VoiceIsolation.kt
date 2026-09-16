@@ -89,11 +89,13 @@ object VoiceIsolation {
         dropRequested = true
     }
 
-    /** One line for Settings: what the cleaner did on this call, and why not. */
-    fun diag(): String {
+    /** One line for Settings: what the cleaner did on this call, and why not.
+     *  Owner round 39 (item 7): null until the first call — Settings shows
+     *  no line at all instead of a pointless "not run yet" instruction. */
+    fun diag(): String? {
         val ok = chunksOk.get()
         val skip = chunksSkipped.get()
-        if (!ranOnce && ok == 0L && skip == 0L) return "Not run yet — start a call"
+        if (!ranOnce && ok == 0L && skip == 0L) return null
         return "This call: $ok cleaned · $skip skipped (${lastSkip.ifBlank { "none" }})"
     }
 
