@@ -1010,18 +1010,22 @@ async function hfImage(
   env: Env,
   parts: { text: string; raw: string; src: AiPhotoSrc | null },
   scene: string | null = null,
+  clean: string | null = null,
 ): Promise<{ image: AiImage | null; off: boolean; err: string }> {
   if (!env.HF_TOKEN) return { image: null, off: true, err: "no-token" };
   // An EDIT has no img2img model on this account's enabled providers, so it
-  // runs as describe-then-vary: the vision read of the source photo joins
-  // the instruction. When even the vision read failed, the draw degrades to
-  // a plain text variation (the old schnell safety net did the same).
+  // runs as describe-then-vary: the vision model rewrites photo + change
+  // into a ready-made image prompt. When even that failed, the draw degrades
+  // to a plain text variation (the old schnell safety net did the same).
+  // `scene` (edit) and `clean` (create) arrive as ready-made English image
+  // prompts from the chat/vision models; only the last-resort degrade sends
+  // the raw user words to SD3 (which would paint Banglish as gibberish text).
   const prompt =
     parts.src && scene
-      ? `${parts.text}. The source photo shows: ${scene}`
+      ? scene
       : parts.src
         ? `Create one image: ${parts.raw}`
-        : parts.text;
+        : (clean ?? parts.text);
   // Returned to the caller for error_log: model + HTTP status per attempt
   // (never prompt text or tokens).
   let err = "";
@@ -1383,9 +1387,15 @@ async function sendAiReply(
       }
       if (parts) {
         pictureTurn = true;
-        // An edit carries the source photo: the HF vision model reads it
-        // first so the draw keeps the scene the user asked to change.
+        // SD3-medium is a pure text-to-image model: raw Banglish/Bengali
+        // words in its prompt get PAINTED as gibberish text (live-verified —
+        // "ekta bagher chobi banao" drew a notebook of fake script). So the
+        // user words are rewritten into a clean English image prompt first —
+        // an edit folds the source photo into that rewrite via the vision
+        // model. A null falls back to the raw request. Both rewrites are
+        // tightly capped: the picture path shares one 30s waitUntil.
         let scene: string | null = null;
+        let clean: string | null = null;
         if (parts.src) {
           scene = await hfChat(
             env,
@@ -1395,7 +1405,12 @@ async function sendAiReply(
                 content: [
                   {
                     type: "text",
-                    text: "Describe this photo precisely in one paragraph: the subject, setting, colours, style, and any text visible.",
+                    text:
+                      `The user sent this photo and wants this change: "${parts.raw}". Write ONE ` +
+                      "text-to-image prompt in plain English that recreates this exact photo WITH that " +
+                      "change applied, max 80 words. Describe only the final picture (subject, setting, " +
+                      'colours, style). End with "no text, no letters, no words in the image". Reply ' +
+                      "with the prompt only, no quotes, no preamble, no Bengali or Banglish words.",
                   },
                   {
                     type: "image_url",
@@ -1409,11 +1424,28 @@ async function sendAiReply(
             300,
             [HF_VISION_MODEL],
             // An edit chains vision + draw inside one 30s waitUntil — the
-            // scene read gets 8s so the draw keeps its full budget.
+            // scene rewrite gets 8s so the draw keeps its full budget.
             8_000,
           );
+        } else {
+          clean = await hfChat(
+            env,
+            [
+              {
+                role: "user",
+                content:
+                  "Rewrite this picture request as ONE text-to-image prompt in plain English, max " +
+                  "60 words. Describe ONLY the final picture (subject, setting, colours, style, mood). " +
+                  'End with "no text, no letters, no words in the image". Reply with the prompt only, ' +
+                  `no quotes, no preamble.\nRequest: "${parts.raw}"`,
+              },
+            ],
+            150,
+            HF_CHAT_MODELS,
+            6_000,
+          );
         }
-        const drawn = await hfImage(env, parts, scene);
+        const drawn = await hfImage(env, parts, scene, clean);
         if (drawn.image) {
           await sendBotImage(drawn.image);
           return;

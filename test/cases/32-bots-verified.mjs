@@ -8340,13 +8340,15 @@ const convBetween = (db, a, b) =>
         src.includes("async function hfTranscribe(") &&
         src.includes("async function aiPhotoBytes(") &&
         src.includes("type AiPhotoSrc = { bytes: Uint8Array<ArrayBuffer>; mime: string };") &&
-        src.includes("The source photo shows: ${scene}") &&
+        src.includes("Rewrite this picture request as ONE text-to-image prompt") &&
+        src.includes("recreates this exact photo WITH that ") &&
+        src.includes("no text, no letters, no words in the image") &&
         src.includes("AbortSignal.timeout(") &&
         src.includes("router.huggingface.co") &&
         src.includes("v1/chat/completions") &&
         src.includes("hf-inference/models") &&
         src.includes('type: "image_url"') &&
-        src.includes("const drawn = await hfImage(env, parts, scene);") &&
+        src.includes("const drawn = await hfImage(env, parts, scene, clean);") &&
         !src.includes("geminiComplete(") &&
         !src.includes("cfImage(") &&
         !src.includes("generativelanguage") &&
@@ -8570,11 +8572,17 @@ const convBetween = (db, a, b) =>
         .prepare("SELECT last_message FROM conversations WHERE id = ?")
         .get(conv.id);
       check(
-        "r33-11a: 'ekta chobi banao' (a photo 4 rows up) → the image model draws from a text-only prompt, the bot's IMAGE lands, the chat list reads Photo — and no OWNER_CARD rides along ('banao' also matches the owner intent)",
-        afterCreate.length >= 1 &&
-          afterCreate[0].image &&
-          !afterCreate[0].hasInline &&
-          afterCreate[0].text.includes("ekta chobi banao") &&
+        "r33-11a: 'ekta chobi banao' (a photo 4 rows up) → the request is rewritten to a clean image prompt, the image model draws it, the bot's IMAGE lands, the chat list reads Photo — and no OWNER_CARD rides along ('banao' also matches the owner intent)",
+        afterCreate.length >= 2 &&
+          afterCreate.some(
+            (c) =>
+              !c.image &&
+              c.text.includes("Rewrite this picture request") &&
+              c.text.includes("ekta chobi banao"),
+          ) &&
+          afterCreate.some(
+            (c) => c.image && !c.hasInline && c.text === "Ami ekta lal phool dekhte pacchi.",
+          ) &&
           rowsNow.length === before + 1 &&
           created.kind === "IMAGE" &&
           created.body === null &&
@@ -8596,17 +8604,16 @@ const convBetween = (db, a, b) =>
       const afterEdit = seen.splice(0);
       const edited = botRows().filter((r) => r.kind === "IMAGE");
       check(
-        "r33-11a: 'background remove kore dao' after a photo → the vision model reads the photo, the image model draws the variation, the bot answers with a new IMAGE",
+        "r33-11a: 'background remove kore dao' after a photo → the vision model rewrites photo + change into a clean image prompt, the image model draws it verbatim, the bot answers with a new IMAGE",
         afterEdit.length >= 2 &&
           afterEdit.some(
-            (c) => !c.image && c.hasInline && c.text.includes("Describe this photo precisely"),
+            (c) =>
+              !c.image &&
+              c.hasInline &&
+              c.text.includes("recreates this exact photo WITH that change applied"),
           ) &&
           afterEdit.some(
-            (c) =>
-              c.image &&
-              !c.hasInline &&
-              c.text.startsWith("Edit this photo as requested: background remove kore dao") &&
-              c.text.includes("The source photo shows:"),
+            (c) => c.image && !c.hasInline && c.text === "Ami ekta lal phool dekhte pacchi.",
           ) &&
           edited.length === 2 &&
           !!edited[1].media &&
