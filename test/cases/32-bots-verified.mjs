@@ -6406,6 +6406,8 @@ const convBetween = (db, a, b) =>
         (attach.match(/LazyVerticalGrid\(/g) || []).length === 2 &&
         !attach.includes("LazyRow") &&
         attach.includes("setFullscreen(true)") &&
+        // Owner round 41 (item 1): the fullscreen header drags down.
+        attach.includes('"headerDrag"') &&
         attach.includes("if (fullscreen && sel.isNotEmpty()) {") &&
         attach.includes("sel.lastOrNull()?.let(onEdit)") &&
         attach.includes("sel[0] = sel[0].copy(caption = t.take(1000))") &&

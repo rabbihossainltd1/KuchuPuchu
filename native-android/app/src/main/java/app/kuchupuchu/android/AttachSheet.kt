@@ -479,6 +479,27 @@ fun AttachPanel(
         Row(
             Modifier
                 .fillMaxWidth()
+                // Owner round 41 (item 1): the header drags like the handle
+                // (the 7.dp handle strip alone is too thin to grab) — down
+                // past 70 folds back to the collapsed half panel; the grid's
+                // own top-pull does the same (see gridScroll).
+                .pointerInput("headerDrag") {
+                    detectVerticalDragGestures(
+                        onDragStart = { isDragging = true },
+                        onDragEnd = {
+                            if (dragTotal.value < -70f) setFullscreen(true)
+                            else if (dragTotal.value > 70f) setFullscreen(false)
+                            dragTotal.value = 0f
+                            isDragging = false
+                        },
+                        onDragCancel = {
+                            dragTotal.value = 0f
+                            isDragging = false
+                        },
+                    ) { _, amount ->
+                        dragTotal.value += amount
+                    }
+                }
                 .padding(start = 6.dp, end = 10.dp, top = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
