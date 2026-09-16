@@ -1940,14 +1940,18 @@ fun ChatScreen(nav: NavController, convId: String) {
 
     // Owner round 43 (item 7): a reply can take 25s+ (image gen) — longer
     // than the screen timeout, so the phone slept mid-reply (fade to black).
-    // The chat holds the screen while the AI composes, like a call does;
-    // the flag clears when the reply lands or the chat is left. (Edge: an AI
-    // reply landing mid-call clears the call's flag too — the window flag is
-    // shared; the call screen re-adds it on its next status change.)
-    DisposableEffect(aiTyping) {
+    // Owner round 45 (item 1): keying the hold on aiTyping flipped the
+    // window flag on every send and off on every arrival — a window-flag
+    // change re-runs the panel's dim/restore pass, which read as the
+    // screen dimming (and the thread flickering) on each AI reply. Hold
+    // it for the whole open AI chat instead: nothing toggles mid-thread,
+    // and the screen still stays awake through a 25 s generation. (Same
+    // shared-window edge as before: a call screen up at dispose time
+    // re-adds its own hold on the next status change.)
+    DisposableEffect(isAiChat) {
         val win = MainActivity.current?.window
-        if (aiTyping) win?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        onDispose { win?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+        if (isAiChat) win?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        onDispose { if (isAiChat) win?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
     }
 
     // Owner round 16: starting a reply grows the quote bar + keyboard over
