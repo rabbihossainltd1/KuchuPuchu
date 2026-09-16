@@ -7797,6 +7797,14 @@ const convBetween = (db, a, b) =>
         chat39.includes('liveMsg.optString("senderId") == "kp_ai_bot" &&') &&
         chat39.includes('liveMsg.optString("kind") == "TEXT")'),
     );
+    // Owner round 39 (item 8): opening the AI chat re-fires the welcome
+    // (idempotent server-side) so old/reset accounts greet instead of an
+    // empty thread.
+    check(
+      "r39-8: the AI chat re-fires /api/ai/welcome on open (server-guarded once-per-account)",
+      chat39.includes('if (convId.endsWith("_kp_ai_bot")) {') &&
+        chat39.includes('Api.post("/api/ai/welcome", JSONObject())'),
+    );
   }
   // r37-3: reference-style overlay handles — per-overlay rotation,
   // × top-left deletes, top-right drags the turn, bottom-right drags

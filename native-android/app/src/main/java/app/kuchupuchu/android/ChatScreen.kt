@@ -1593,6 +1593,18 @@ fun ChatScreen(nav: NavController, convId: String) {
             }
         }
     }
+    // Owner round 39 (item 8): the welcome used to fire only at login —
+    // old accounts (and threads emptied by a session reset) opened an
+    // empty AI chat with no greeting. The server guards once-per-account,
+    // so re-firing on every AI-chat open is safe; the socket paints the
+    // greeting live in the open thread.
+    LaunchedEffect(convId) {
+        if (convId.endsWith("_kp_ai_bot")) {
+            scope.launch(Dispatchers.IO) {
+                runCatching { Api.post("/api/ai/welcome", JSONObject()) }
+            }
+        }
+    }
     // Owner round 34 (item 16b): the editor's + staged the current pick as
     // the batch's first item — prepend it and reopen the panel for more.
     // Owner round 39 (item 6): the panel pencil's trip carries replaceUri —
