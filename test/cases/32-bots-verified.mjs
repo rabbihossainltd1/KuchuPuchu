@@ -1,5 +1,5 @@
-// Bots & badges (owner round): the KuchuPuchu AI welcome message (Gemini
-// fallback when no key), both bot accounts verified with the bundled logo
+// Bots & badges (owner round): the KuchuPuchu AI welcome message (fixed
+// fallback when no HF key), both bot accounts verified with the bundled logo
 // avatar, the login-approval card carrying the attempt's origin (IP, place,
 // time), and the official notification account being strictly one-way.
 
@@ -66,7 +66,7 @@ const convBetween = (db, a, b) =>
     .prepare("SELECT * FROM messages WHERE conv_id = ? AND sender_id = 'kp_ai_bot'")
     .get(conv?.id);
   check(
-    "welcome message from KuchuPuchu AI (fallback text without GEMINI_API_KEY)",
+    "welcome message from KuchuPuchu AI (fallback text without HF_TOKEN)",
     !!msg && msg.kind === "TEXT" && msg.body.includes("Welcome to KuchuPuchu"),
     msg ? msg.body.slice(0, 50) : "none",
   );
@@ -449,7 +449,7 @@ const convBetween = (db, a, b) =>
     .get(convB.id).n;
   check("a normal question drops no card", cardsB === 0, String(cardsB));
 
-  // Photo-create intent without GEMINI_API_KEY: no IMAGE message, the text
+  // Photo-create intent without HF_TOKEN: no IMAGE message, the text
   // fallback still answers — the user is never left silent.
   await send("amar ekta photo banao — a cat in space");
   const botImages = k.db._db
@@ -586,8 +586,10 @@ const convBetween = (db, a, b) =>
 
   // ---- Owner round 7 (2026-09-04) ----
   check(
-    "AI replies: gemini-3.5-flash first + thinking disabled (empty-reply bug)",
-    src.includes("gemini-3.5-flash") && src.includes("thinkingBudget"),
+    "AI replies: Kimi-K2-Instruct first + DeepSeek-V3 failover (HF migration)",
+    src.includes('"moonshotai/Kimi-K2-Instruct"') &&
+      src.includes('"deepseek-ai/DeepSeek-V3-0324"') &&
+      src.includes("const HF_CHAT_MODELS"),
   );
   check(
     "bot-conversation reset endpoint exists (bot chats only)",
@@ -730,8 +732,8 @@ const convBetween = (db, a, b) =>
 
   // ---- Owner round 11 (2026-09-05) ----
   check(
-    "AI: each Gemini model capped (round 15: 6s) so one 503 can't starve the rest",
-    src.includes("Math.min(remaining, 6_000)") && src.includes("gemini-3.8-flash"),
+    "AI: each HF model capped (12s) so one 503 can't starve the rest",
+    src.includes("Math.min(remaining, 12_000)") && src.includes("HF_CALL_BUDGET_MS"),
   );
   check("user-channel conv pokes carry msg:1 for the in-app sound", src.includes("msg: 1 }"));
   const kpapp = readFileSync(
@@ -787,7 +789,8 @@ const convBetween = (db, a, b) =>
   // ---- Owner round 12 (2026-09-05): 5 device reports ----
   check(
     "AI budget 900 tokens: Bengali script no longer dies mid-message",
-    src.includes("geminiComplete(env, prompt + voicePrompt + photoPrompt, 900, ["),
+    src.includes('[{ role: "user", content: prompt + voicePrompt + photoPrompt }],') &&
+      src.includes("answer = await hfChat("),
   );
   check(
     "callee in a call → 486 LINE_BUSY (pair-redial never blocked)",
@@ -1630,8 +1633,8 @@ const convBetween = (db, a, b) =>
       settings.includes("fun EditFieldScaffold("),
   );
   check(
-    "15: AI replies fail over faster (per-model 10s -> 6s) + both APKs per CI run (r22)",
-    src.includes("Math.min(remaining, 6_000)") &&
+    "15: AI replies fail over per-model (12s HF cap) + both APKs per CI run (r22)",
+    src.includes("Math.min(remaining, 12_000)") &&
       readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8").includes(
         "assembleDebug",
       ) &&
@@ -2723,21 +2726,17 @@ const convBetween = (db, a, b) =>
     );
 
     check(
-      "r31-17: the hold-mic gesture always awaits the pointer down first (a disabled mic no longer spins the main thread), and the AI answers voice notes via inline audio",
+      "r31-17: the hold-mic gesture always awaits the pointer down first (a disabled mic no longer spins the main thread), and the AI answers voice notes via Whisper transcription",
       chat.includes(
         "val down = awaitFirstDown(requireUnconsumed = false)\n                    if (!enabled) {\n                        down.consume()\n                        return@awaitEachGesture\n                    }",
       ) &&
         !chat.includes("if (!enabled) return@awaitEachGesture") &&
         readFileSync("src/worker/index.ts", "utf8").includes(
-          "function geminiAudioMime(type: string): string",
+          "async function hfTranscribe(env: Env, bytes: ArrayBuffer, mime: string)",
         ) &&
-        readFileSync("src/worker/index.ts", "utf8").includes("extraParts: unknown[] = [],") &&
-        readFileSync("src/worker/index.ts", "utf8").includes(
-          "contents: [{ parts: [{ text: prompt }, ...extraParts] }],",
-        ) &&
-        readFileSync("src/worker/index.ts", "utf8").includes(
-          "(await geminiComplete(env, prompt + voicePrompt + photoPrompt, 900, [\n        ...voiceParts,\n        ...photoParts,\n      ])) ?? AI_REPLY_FALLBACK",
-        ),
+        readFileSync("src/worker/index.ts", "utf8").includes("openai/whisper-large-v3-turbo") &&
+        readFileSync("src/worker/index.ts", "utf8").includes("this is what they said:") &&
+        readFileSync("src/worker/index.ts", "utf8").includes("the clip could not be heard: say so"),
     );
 
     check(
@@ -8292,11 +8291,12 @@ const convBetween = (db, a, b) =>
   }
 
   // Item 11a: the AI reads photos and creates / edits pictures. Behavioural
-  // probe with a fake Gemini: a photo + "ki dekhte paccho" must reach the text
-  // model as an inline image part; "ekta chobi banao" must reach the image
+  // probe with a fake HF router: a photo + "ki dekhte paccho" must reach the
+  // vision model as an image_url part; "ekta chobi banao" must reach the image
   // model and come back as an IMAGE from the bot (with the model's caption);
-  // a photo followed by "background remove koro" must go to the image model
-  // WITH the photo bytes. Static locks on the intent regexes and the persona.
+  // a photo followed by "background remove koro" must be read by the vision
+  // model first, then drawn as a variation. Static locks on the intent
+  // regexes and the persona.
   {
     const src = readFileSync("src/worker/index.ts", "utf8");
     const ai = src.slice(
@@ -8304,7 +8304,7 @@ const convBetween = (db, a, b) =>
       src.indexOf("async function all<T>("),
     );
     check(
-      "r33-11a: sendAiReply — the transcript names photos / voice notes, a bare photo or a question about one rides along as an inline part (READ), a change request edits the nearby photo (a NEW-picture request still creates), a Banglish creation request draws, an owner-photo request never draws; a failed image tool makes the text reply apologise; the bot's picture goes out with a kp_media push",
+      "r33-11a: sendAiReply — the transcript names photos / voice notes, a bare photo or a question about one goes to the vision model (READ), a change request reads the nearby photo then draws the variation (a NEW-picture request still creates), a Banglish creation request draws, an owner-photo request never draws; a failed image tool makes the text reply apologise; the bot's picture goes out with a kp_media push",
       ai.includes(
         "WHERE conv_id = ? AND kind IN ('TEXT', 'IMAGE', 'FILE') ORDER BY rowid DESC LIMIT 12",
       ) &&
@@ -8326,24 +8326,33 @@ const convBetween = (db, a, b) =>
         ai.includes("if (caption && (IMAGE_EDIT_HINT.test(caption) || wantsPicture(caption))) {") &&
         ai.includes("VALUES (?, ?, ?, 'IMAGE', NULL, ?, ?)`") &&
         ai.includes("kp_media: `/api/messages/${imgMid}/media`,") &&
-        ai.includes(
-          "(await geminiComplete(env, prompt + voicePrompt + photoPrompt, 900, [\n        ...voiceParts,\n        ...photoParts,\n      ])) ?? AI_REPLY_FALLBACK",
-        ) &&
+        ai.includes("answer = await hfChat(") &&
+        ai.includes("const body = answer ?? AI_REPLY_FALLBACK;") &&
+        ai.includes("it cannot be seen right now: say so briefly") &&
         src.includes(
           "Abilities: you CAN see photos the user sends and you CAN create or edit pictures on request",
         ) &&
-        src.includes('const CF_IMAGE_MODEL = "@cf/black-forest-labs/flux-2-klein-9b";') &&
-        src.includes('const CF_IMAGE_MODEL_FALLBACK = "@cf/black-forest-labs/flux-1-schnell";') &&
-        src.includes("async function cfImage(") &&
+        src.includes('const HF_VISION_MODEL = "Qwen/Qwen3.8-27B";') &&
+        src.includes('const HF_IMAGE_MODEL = "stabilityai/stable-diffusion-3-medium-diffusers";') &&
+        src.includes('const HF_STT_MODEL = "openai/whisper-large-v3-turbo";') &&
+        src.includes("async function hfChat(") &&
+        src.includes("async function hfImage(") &&
+        src.includes("async function hfTranscribe(") &&
         src.includes("async function aiPhotoBytes(") &&
         src.includes("type AiPhotoSrc = { bytes: Uint8Array<ArrayBuffer>; mime: string };") &&
-        src.includes('form.append("input_image_0"') &&
+        src.includes("The source photo shows: ${scene}") &&
         src.includes("AbortSignal.timeout(") &&
-        src.includes("/ai/run/") &&
-        src.includes("CF_AI_TOKEN") &&
-        src.includes("const drawn = await cfImage(env, parts);") &&
-        !src.includes("geminiImage(") &&
-        src.includes("async function aiPhotoPart(") &&
+        src.includes("router.huggingface.co") &&
+        src.includes("v1/chat/completions") &&
+        src.includes("hf-inference/models") &&
+        src.includes('type: "image_url"') &&
+        src.includes("const drawn = await hfImage(env, parts, scene);") &&
+        !src.includes("geminiComplete(") &&
+        !src.includes("cfImage(") &&
+        !src.includes("generativelanguage") &&
+        !src.includes("GEMINI_API_KEY") &&
+        !src.includes("CF_AI_TOKEN") &&
+        src.includes("async function aiPhotoVisionPart(") &&
         src.includes("const AI_PHOTO_MAX_BYTES = 7_000_000;"),
     );
     // the intent regexes, evaluated the way the worker does
@@ -8392,60 +8401,61 @@ const convBetween = (db, a, b) =>
     );
   }
   {
-    // behavioural probe: a fake generativelanguage endpoint answers the TEXT
-    // model; the Workers AI REST endpoint (/ai/run/) is faked below and
-    // records what each image model was asked
+    // behavioural probe: a fake HF router answers the TEXT + VISION chat
+    // models and the image / STT task routes, and records what each model
+    // was asked
     const seen = [];
     const realFetch = globalThis.fetch;
     const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
-    // r34-4: flipped by the failure checks — cfImagesDown = every image model
-    // throws; kleinDown = only klein throws (schnell fallback must still draw)
-    let cfImagesDown = false;
-    let kleinDown = false;
+    // r34-4: flipped by the failure checks — hfImagesDown = every image
+    // attempt throws; loadingOnce = the first image call answers a
+    // loading-503 (the retry must still draw)
+    let hfImagesDown = false;
+    let loadingOnce = false;
     globalThis.fetch = async (input, init) => {
       const url = typeof input === "string" ? input : input.url;
-      if (url.includes("/ai/run/")) {
-        const model = url.split("/ai/run/")[1];
-        let prompt = "";
-        let hasInline = false;
-        if (typeof init.body === "string") {
-          prompt = String(JSON.parse(init.body).prompt ?? "");
-        } else if (init.body && typeof init.body.get === "function") {
-          prompt = String(init.body.get("prompt") ?? "");
-          hasInline = init.body.has("input_image_0");
-        }
-        seen.push({ model, image: true, hasInline, text: prompt });
-        if (cfImagesDown) throw new Error("Workers AI is down");
-        if (kleinDown && model.includes("klein")) throw new Error("klein is down");
-        if (model.includes("schnell"))
-          return new Response(pngBytes, {
-            status: 200,
-            headers: { "content-type": "image/png" },
-          });
-        return new Response(
-          JSON.stringify({ success: true, result: { image: pngBytes.toString("base64") } }),
-          {
+      if (url.startsWith("https://router.huggingface.co/hf-inference/models/")) {
+        const model = url.split("/models/")[1];
+        if (model.includes("whisper")) {
+          seen.push({ model, image: false, audio: true, text: "" });
+          return new Response(JSON.stringify({ text: "kemon acho" }), {
             status: 200,
             headers: { "content-type": "application/json" },
-          },
-        );
-      }
-      if (url.startsWith("https://generativelanguage.googleapis.com/")) {
-        const model = url.split("/models/")[1].split(":")[0];
+          });
+        }
         const req = JSON.parse(init.body);
-        const parts = req.contents?.[0]?.parts ?? [];
+        seen.push({ model, image: true, hasInline: false, text: String(req.inputs ?? "") });
+        if (hfImagesDown) throw new Error("HF images are down");
+        if (loadingOnce) {
+          loadingOnce = false;
+          return new Response(JSON.stringify({ error: "Model loading", estimated_time: 0.01 }), {
+            status: 503,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response(pngBytes, {
+          status: 200,
+          headers: { "content-type": "image/png" },
+        });
+      }
+      if (url.startsWith("https://router.huggingface.co/v1/chat/completions")) {
+        const req = JSON.parse(init.body);
+        const content = req.messages?.[0]?.content;
+        const parts = Array.isArray(content)
+          ? content
+          : [{ type: "text", text: String(content ?? "") }];
         seen.push({
-          model,
+          model: req.model,
           image: false,
-          hasInline: parts.some((p) => p.inlineData?.mimeType?.startsWith("image/")),
+          hasInline: parts.some((p) => p.type === "image_url"),
           text: parts
-            .filter((p) => typeof p.text === "string")
+            .filter((p) => p.type === "text" || typeof p.text === "string")
             .map((p) => p.text)
             .join("\n"),
         });
         return new Response(
           JSON.stringify({
-            candidates: [{ content: { parts: [{ text: "Ami ekta lal phool dekhte pacchi." }] } }],
+            choices: [{ message: { content: "Ami ekta lal phool dekhte pacchi." } }],
           }),
           { status: 200, headers: { "content-type": "application/json" } },
         );
@@ -8460,9 +8470,7 @@ const convBetween = (db, a, b) =>
         DB: db,
         MEDIA: r2,
         GOOGLE_WEB_CLIENT_ID: "kp-test-web-client",
-        GEMINI_API_KEY: "test-key",
-        CF_AI_TOKEN: "test-ai-token",
-        CF_ACCOUNT_ID: "test-acct",
+        HF_TOKEN: "test-hf-token",
       };
       const ctx = makeCtx();
       let ipSeq = 0;
@@ -8532,7 +8540,7 @@ const convBetween = (db, a, b) =>
       );
       const afterAsk = seen.splice(0);
       check(
-        "r33-11a: a bare photo goes to the TEXT model with the picture attached (the bot describes it), and the follow-up question still carries that photo",
+        "r33-11a: a bare photo goes to the VISION model with the picture attached (the bot describes it), and the follow-up question still carries that photo",
         afterPhoto.length >= 1 &&
           afterPhoto.every((c) => !c.image) &&
           afterPhoto[0].hasInline &&
@@ -8588,12 +8596,17 @@ const convBetween = (db, a, b) =>
       const afterEdit = seen.splice(0);
       const edited = botRows().filter((r) => r.kind === "IMAGE");
       check(
-        "r33-11a: 'background remove kore dao' after a photo → the image model gets the photo + the instruction and the bot answers with a new IMAGE",
-        afterEdit.length >= 1 &&
-          afterEdit[0].image &&
-          afterEdit[0].hasInline &&
-          afterEdit[0].text.startsWith(
-            "Edit this photo as requested: background remove kore dao",
+        "r33-11a: 'background remove kore dao' after a photo → the vision model reads the photo, the image model draws the variation, the bot answers with a new IMAGE",
+        afterEdit.length >= 2 &&
+          afterEdit.some(
+            (c) => !c.image && c.hasInline && c.text.includes("Describe this photo precisely"),
+          ) &&
+          afterEdit.some(
+            (c) =>
+              c.image &&
+              !c.hasInline &&
+              c.text.startsWith("Edit this photo as requested: background remove kore dao") &&
+              c.text.includes("The source photo shows:"),
           ) &&
           edited.length === 2 &&
           !!edited[1].media &&
@@ -8611,7 +8624,7 @@ const convBetween = (db, a, b) =>
       );
       const afterOwner = seen.splice(0);
       check(
-        "r33-11a: 'tomar owner er photo dao' → text model only (no image generation)",
+        "r33-11a: 'tomar owner er photo dao' → chat/vision only (no image generation)",
         afterOwner.length >= 1 && afterOwner.every((c) => !c.image),
         JSON.stringify(afterOwner).slice(0, 300),
       );
@@ -8640,10 +8653,10 @@ const convBetween = (db, a, b) =>
         JSON.stringify({ botImg, status: media?.status }).slice(0, 300),
       );
 
-      // 5. r34-4: Workers AI down (both models throw) → the text model is
+      // 5. r34-4: HF images down (both attempts throw) → the text model is
       // told the image tool failed (honest line); nothing is blocked — the
       // retry right after draws fine.
-      cfImagesDown = true;
+      hfImagesDown = true;
       const botCountBefore = botRows().length;
       await call(
         "POST",
@@ -8652,7 +8665,7 @@ const convBetween = (db, a, b) =>
         a.token,
       );
       const afterDown = seen.splice(0);
-      cfImagesDown = false;
+      hfImagesDown = false;
       await call(
         "POST",
         `/api/conversations/${conv.id}/messages`,
@@ -8662,7 +8675,7 @@ const convBetween = (db, a, b) =>
       const afterRetry = seen.splice(0);
       const downRows = botRows().slice(botCountBefore);
       check(
-        "r34-4: Workers AI down → both models tried, the text reply says the image tool failed (TEXT row, no IMAGE); the retry draws (no block window)",
+        "r34-4: HF images down → both attempts tried, the text reply says the image tool failed (TEXT row, no IMAGE); the retry draws (no block window)",
         afterDown.filter((c) => c.image).length === 2 &&
           afterDown.some(
             (c) => !c.image && c.text.includes("but the image tool failed this time"),
@@ -8675,9 +8688,9 @@ const convBetween = (db, a, b) =>
         JSON.stringify({ afterDown, afterRetry, downRows }).slice(0, 600),
       );
 
-      // 5b. r34-4: klein down but schnell alive → the fallback draws (the
-      // IMAGE lands, served from the schnell bytes).
-      kleinDown = true;
+      // 5b. r34-4: the first draw answers a loading-503 → the retry lands
+      // (the IMAGE is served from the second attempt's bytes).
+      loadingOnce = true;
       const botCountBeforeFb = botRows().length;
       await call(
         "POST",
@@ -8686,17 +8699,43 @@ const convBetween = (db, a, b) =>
         a.token,
       );
       const afterFb = seen.splice(0);
-      kleinDown = false;
       const fbRows = botRows().slice(botCountBeforeFb);
       check(
-        "r34-4: klein down → schnell fallback draws (klein attempted, schnell answered, IMAGE lands)",
+        "r34-4: loading-503 → the retry draws (two image attempts, IMAGE lands)",
         afterFb.filter((c) => c.image).length === 2 &&
-          afterFb.some((c) => c.image && c.model.includes("klein")) &&
-          afterFb.some((c) => c.image && c.model.includes("schnell")) &&
           fbRows.length === 1 &&
           fbRows[0].kind === "IMAGE" &&
           !!(await r2.get(fbRows[0].media)),
         JSON.stringify({ afterFb, fbRows }).slice(0, 500),
+      );
+
+      // 6. VOICE: an audio note is transcribed by Whisper and the transcript
+      // is answered as chat text.
+      const kv = await upload("note.m4a", "audio/mp4");
+      await call(
+        "POST",
+        `/api/conversations/${conv.id}/messages`,
+        {
+          kind: "FILE",
+          fileKey: kv,
+          fileName: "note.m4a",
+          fileType: "audio/mp4",
+          clientId: "ai-v1",
+        },
+        a.token,
+      );
+      const afterVoice = seen.splice(0);
+      check(
+        "HF migration: a voice note goes to Whisper, the transcript is answered as chat text",
+        afterVoice.some((c) => c.audio === true) &&
+          afterVoice.some(
+            (c) =>
+              !c.image &&
+              !c.audio &&
+              c.text.includes("[sent a voice note]") &&
+              c.text.includes("kemon acho"),
+          ),
+        JSON.stringify(afterVoice).slice(0, 400),
       );
     } finally {
       globalThis.fetch = realFetch;
