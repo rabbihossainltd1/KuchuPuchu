@@ -4398,6 +4398,31 @@ export default {
           dispatched,
         }),
       );
+      // Owner round 39 (item 2): HF warmup — the chat + vision providers
+      // scale to zero when idle, so the first user turn of a quiet stretch
+      // pays cold-start seconds ("reply aste onek somoy ney"). Every 10th
+      // minute tick fires one tiny ping per model (5 tokens ≈ 288 calls a
+      // day, negligible) in waitUntil so the tick itself stays fast; its
+      // own try, and hfChat already no-ops without a token. The SD3 draw
+      // is NOT warmed — a warm draw would be a full image generation.
+      // Placed AFTER the reap log on purpose: test 27 reads scheduled()
+      // through a fixed 4000-char window, and this block must not push the
+      // prune/log shape out of it.
+      if (new Date().getMinutes() % 10 === 0) {
+        ctx.waitUntil(
+          (async () => {
+            try {
+              await hfChat(env, [{ role: "user", content: "ping" }], 5, [HF_CHAT_MODELS[0]], 8_000);
+              await hfChat(env, [{ role: "user", content: "ping" }], 5, [HF_VISION_MODEL], 8_000);
+            } catch (wErr) {
+              console.error(
+                "cron_hf_warmup_error",
+                JSON.stringify({ err: wErr instanceof Error ? wErr.message : String(wErr) }),
+              );
+            }
+          })(),
+        );
+      }
     } catch (err) {
       console.error(
         "cron_reap_error",
