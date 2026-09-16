@@ -6596,6 +6596,12 @@ const convBetween = (db, a, b) =>
         (chat.match(/\.put\("body", caption\)/g) || []).length === 6 &&
         chat.includes('MediaCaption(m.optText("body"), mine)') &&
         chat.includes("MediaCaption(albumCaption, mine)") &&
+        // Owner round 42 (item 3): every media column hugs MY side.
+        (
+          chat.match(
+            /Column\(horizontalAlignment = if \(mine\) Alignment\.End else Alignment\.Start\) \{/g,
+          ) || []
+        ).length === 5 &&
         (chat.match(/\.put\("body", m\.optText\("body"\)\)/g) || []).length >= 3,
     );
   }

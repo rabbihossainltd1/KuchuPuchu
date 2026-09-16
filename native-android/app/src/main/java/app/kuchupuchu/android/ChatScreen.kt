@@ -5397,7 +5397,10 @@ private fun VideoMessageRow(
             .padding(vertical = 3.dp),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
-        Column {
+        // Owner round 42 (item 3): the caption stretches this column wider
+        // than the frame — without the alignment the frame hugs the wrong
+        // side for my own messages.
+        Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
         Box(
             Modifier
                 .offset { IntOffset(replyOffset.roundToInt(), 0) }
@@ -5845,7 +5848,9 @@ private fun ImageMessageRow(
         // column, so a reaction on a PHOTO actually renders (the chips were
         // only wired into the text path — reacting to a photo did nothing
         // visible).
-        Column {
+        // Owner round 42 (item 3): a captioned photo's column is caption-wide
+        // — the photo must hug MY side, not the column's start.
+        Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
         Box(
             Modifier
                 .offset { IntOffset(replyOffset.roundToInt(), 0) }
@@ -6155,7 +6160,7 @@ private fun AlbumMessageRow(
             .padding(vertical = 3.dp),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
-        Column {
+        Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
             Box(
                 Modifier
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
