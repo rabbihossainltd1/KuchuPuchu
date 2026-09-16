@@ -28,8 +28,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -150,6 +148,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -305,9 +304,6 @@ fun ChatScreen(nav: NavController, convId: String) {
     // Word-by-word reveal for a freshly-arrived KuchuPuchu AI reply (owner
     // round 2026-09-04). Only messages CREATED after this screen opened are
     // animated, so conversation history never re-types itself on open.
-    val chatOpenedAtMs = remember { System.currentTimeMillis() }
-    var aiRevealId by remember { mutableStateOf<String?>(null) }
-    var aiRevealChars by remember { mutableStateOf(0) }
     // Owner round 25: the Saver keeps the exact scroll position across
     // navigation (video player and back) — with the no-yank rules this makes
     // "back from a video returns where I was" guaranteed.
@@ -1078,11 +1074,10 @@ fun ChatScreen(nav: NavController, convId: String) {
     // the latest messages. The first cut read WindowInsets.ime.getBottom()
     // inside a coroutine snapshotFlow — the exact pattern behind the known
     // "ViewTreeObserver is not alive" crash on navigation (chat open crash).
-    // The official isImeVisible flag read IN composition + a keyed effect is
     // the safe form.
-    // Owner round 13e: extracted to KpImeAutoScroll below — a local @OptIn
-    // val inside this (huge) function produced a VerifyError on device ART.
-    KpImeAutoScroll(listState)
+    // Owner round 45 (item 3): the 250 ms teleport scroll is gone — the
+    // thread's bottom padding rides the bar's own glide (rememberImeGlidePx),
+    // so the opening keyboard lifts the rows WITH the bar (no double motion).
 
     // Owner round 33 (item 4): the POST's own response row is painted straight
     // away — the same merge the socket's "message" frame does — instead of a
@@ -1969,43 +1964,15 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
-    // A brand-new AI reply (created after open) types itself out word by word.
-    LaunchedEffect(msgs.size) {
-        val last = msgs.lastOrNull() ?: return@LaunchedEffect
-        if (!convId.endsWith("_kp_ai_bot")) return@LaunchedEffect
-        if (last.optString("senderId") != "kp_ai_bot" || last.optString("kind") != "TEXT") return@LaunchedEffect
-        val mid = last.optString("id")
-        if (mid == aiRevealId) return@LaunchedEffect
-        val created =
-            runCatching { java.time.Instant.parse(last.optString("createdAt")).toEpochMilli() }.getOrDefault(0L)
-        if (created < chatOpenedAtMs) return@LaunchedEffect
-        aiRevealChars = 0
-        aiRevealId = mid
-    }
-
-    LaunchedEffect(aiRevealId) {
-        val revealMid = aiRevealId ?: return@LaunchedEffect
-        val body = msgs.lastOrNull { it.optString("id") == revealMid }?.optText("body").orEmpty()
-        var pos = 0
-        while (pos < body.length) {
-            delay(if (body.length > 240) 30L else 45L)
-            pos = body.indexOf(' ', pos + 1).takeIf { it >= 0 } ?: body.length
-            aiRevealChars = pos
-            // Stay pinned to the newest line while the reply types itself —
-            // unless the user scrolled up to read (their scroll wins).
-            val info = listState.layoutInfo
-            val nearBottom =
-                info.visibleItemsInfo.lastOrNull()?.index?.let { it >= info.totalItemsCount - 2 } == true
-            // Owner round 32 (item 48 family): a user drag owns the scroll
-            // mutex, so this programmatic scroll throws — the reveal must keep
-            // typing (and reset aiRevealId at the end) instead of dying here
-            // and leaving the reply cut off at that word.
-            if (nearBottom) runCatching { listState.scrollToItem(info.totalItemsCount - 1) }
-        }
-        delay(250)
-        aiRevealId = null
-    }
+    // Owner round 45 (item 1): every ENTRANCE effect is gone — the per-word
+    // AI reply reveal AND the born pop-in. A new row simply appears; both
+    // animations read as a screen-wide twitch/dim on the owner's device
+    // (and the reveal was exactly the "animation/effect" he asked about).
     val other = c?.optJSONObject("other")
+    // Owner round 45 (item 3): ONE glide value — the thread's bottom padding
+    // AND the composer's bottom pad ride the SAME spring, so an opening
+    // keyboard lifts the rows WITH the bar (no bar-snap + list-teleport).
+    val imeGlideDp = with(LocalDensity.current) { rememberImeGlidePx().toDp() }
     Column(
         Modifier
             .fillMaxSize()
@@ -2483,7 +2450,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
+                contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 6.dp + imeGlideDp),
             ) {
                 items(
                     groupedMsgs,
@@ -2493,24 +2460,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // WhatsApp-style selection: the whole ROW gets a translucent
                     // highlight strip, edge to edge — not just the bubble.
                     val rowSelected = m.optString("id") in selected
-                    // Owner round 33 (item 11b): a row born after open rises in
-                    // once (the key leaves the set so a recomposition never
-                    // replays it); a row being deleted explodes first.
-                    // Owner round 44: the SEND rise is gone (the owner's own
-                    // animation lands later) — only the other side's rows
-                    // rise now. The key still leaves the set either way.
+                    // Owner round 45 (item 1): NO pop-in, no reveal, no
+                    // entrance of any kind — the row renders as-is (every
+                    // animated birth read as a screen-wide flicker on the
+                    // owner's device). The key is still consumed so a later
+                    // pass never reads it as new.
                     val rowKey = m.optString("clientId").ifBlank { m.optString("id") }
-                    val bornKey = remember(rowKey) { bornKeys.remove(rowKey) }
-                    // Owner round 44 (item 7): an AI text reply types itself
-                    // out word by word — the reveal IS its entrance. Letting
-                    // it ALSO rise (fade 0→1) under the reveal strobed the
-                    // thread black→light on every arrival. Same rule as the
-                    // round-39 scroll exclusion: the reveal owns it all.
-                    val aiRevealRow =
-                        isAiChat &&
-                            m.optString("kind") == "TEXT" &&
-                            m.optString("senderId") == "kp_ai_bot"
-                    val born = bornKey && m.optString("senderId") != Store.myId() && !aiRevealRow
+                    bornKeys.remove(rowKey)
                     val vanishing = albumPhotos(m).any { it.optString("id") in vanishingIds }
                     // Owner round 33 (item 17): the jumped-to row flashes once.
                     val flashing = flashId.isNotBlank() && albumPhotos(m).any { it.optString("id") == flashId }
@@ -2521,11 +2477,15 @@ fun ChatScreen(nav: NavController, convId: String) {
                     )
                     // Owner round 35 (item 1): when a row leaves, the
                     // survivors glide into its place instead of jumping.
-                    Box(Modifier.fillMaxWidth().animateItem()) {
+                    // Owner round 45 (item 1): keep the delete glide but
+                    // switch the default fade off — that fade flashed over
+                    // the dark wallpaper on every new row (the "the whole
+                    // screen dims for a second" ghost).
+                    Box(Modifier.fillMaxWidth().animateItem(fadeInSpec = null, fadeOutSpec = null)) {
                         DeleteRowShell(
                             m = m,
                             rowKey = rowKey,
-                            born = born,
+                            born = false, // Owner round 45: never pops in — the row is simply here
                             rowSelected = rowSelected,
                             vanishing = vanishing,
                             onGone = {
@@ -2590,7 +2550,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 val arg = JSONObject(msg.toString()).put("kpPrivate", privateChat)
                                 nav.navigate("docviewer/${mediaArg(arg)}")
                             },
-                            revealChars = if (m.optString("id") == aiRevealId) aiRevealChars else null,
                             onReply = { haptics.tap(); replyTo = it; replyFocusNonce++ },
                             onLongPress = { msg ->
                                 // Owner round 31: the action sheet (reactions on
@@ -2652,12 +2611,11 @@ fun ChatScreen(nav: NavController, convId: String) {
                     ),
                     key = { it.optString("clientId").ifBlank { it.optString("id") } },
                 ) { m ->
-                    // Owner round 44: no rise on my sends any more (the
-                    // owner's own animation lands later) — but the key is
-                    // still consumed here, or the send would rise on its
-                    // server ack instead.
+                    // Owner round 45: no pop-in anywhere — but the key is
+                    // still consumed here so it can never linger for a
+                    // later pass.
                     val rowKey = m.optString("clientId").ifBlank { m.optString("id") }
-                    remember(rowKey) { bornKeys.remove(rowKey) }
+                    bornKeys.remove(rowKey)
                     Box(Modifier.fillMaxWidth()) {
                         MessageRow(
                             m,
@@ -3200,7 +3158,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             // worker feeds the clip to Gemini), so the mic works here too.
             micEnabled = true,
             theme = chatTheme,
-            padForIme = !showAttach && !showStickers,
+            padForIme = if (!showAttach && !showStickers) imeGlideDp else 0.dp,
             onFinishRecord = { cancelled -> finishRecording(cancelled) },
             voiceBinNonce = voiceBinNonce,
             selectCount = selected.size,
@@ -3472,7 +3430,9 @@ private fun Composer(
     theme: String = "",
     // Owner round 33 (item 11c): false while an inline panel is open — the
     // panel carries the keyboard padding then (its search box opens the IME).
-    padForIme: Boolean = true,
+    // Owner round 45 (item 3): a Dp now — the shared glide value (0 while
+    // a panel is open keeps the bar down over it).
+    padForIme: Dp = 0.dp,
 ) {
     val accent = chatAccent(theme)
     // Attach/sticker MUST close the keyboard first — otherwise both the IME
@@ -3510,7 +3470,7 @@ private fun Composer(
             // Owner round 15: the bar itself is TRANSPARENT — the themed
             // wallpaper (which spans the whole screen) shows through; only
             // the input pill and the send button keep their own surfaces.
-            .then(if (padForIme) Modifier.animatedImePadding() else Modifier)
+            .padding(bottom = padForIme)
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -4300,19 +4260,18 @@ private fun LoginApprovalMessage(m: JSONObject) {
  */
 @Composable
 /**
- * Owner round 44: the keyboard CLOSE glides (system-animated insets) but
- * OPEN snapped 0→full in one frame. Chase the inset height ourselves so
- * both directions glide the same way. The height comes from the view
- * tree's root insets (IME type) — WindowInsets.ime does not resolve
- * against this BOM (its expect/actual WindowInsets lack it), while
- * isImeVisible does. A guarded global-layout listener (the round-13
- * crash was the coroutine/snapshotFlow form, never a listener), kept a
- * small top-level fun (the round-13e VerifyError was the inline form in
- * this huge class).
+ * Owner round 45 (item 3): ONE shared keyboard glide. The r44 form was a
+ * Modifier on the composer only — the keyboard's open snapped the BAR up
+ * while the teleported list followed 250 ms late, which read as a
+ * flicker on his device. Now the same spring value feeds the bar's
+ * bottom pad AND the thread's bottom contentPadding: both rise together,
+ * the teleport scroll is gone. The height still comes from the root
+ * insets (r44: WindowInsets.ime does not resolve on this BOM), the
+ * listener stays behind the round-13 isAlive guard, and the critical
+ * spring tracks the close's frame stream while gliding the open's jump.
  */
-private fun Modifier.animatedImePadding(): Modifier {
+private fun rememberImeGlidePx(): Int {
     val view = LocalView.current
-    val density = LocalDensity.current
     var targetPx by remember { mutableStateOf(0) }
     DisposableEffect(view) {
         val tree = view.viewTreeObserver
@@ -4333,32 +4292,13 @@ private fun Modifier.animatedImePadding(): Modifier {
             }
         }
     }
-    // Owner round 45 (item 3): tween(280) restarts on every frame the
-    // system streams insets (the close), leaving a jelly tail behind the
-    // keyboard — while an open lands as ONE silent jump that needed a
-    // glide. A critical spring does both jobs: it tracks a live frame
-    // stream in lock-step (close stays exactly as smooth as the system)
-    // and glides a single jump out over ~150 ms (the open).
     val glided by
         animateIntAsState(
             targetPx,
             spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessHigh),
             label = "imeglide",
         )
-    return this.padding(bottom = with(density) { glided.toDp() })
-}
-
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-@Composable
-private fun KpImeAutoScroll(listState: androidx.compose.foundation.lazy.LazyListState) {
-    val imeVisible = WindowInsets.isImeVisible
-    LaunchedEffect(imeVisible) {
-        if (imeVisible) {
-            delay(250)
-            val total = listState.layoutInfo.totalItemsCount
-            if (total > 0) listState.animateScrollToItem(total - 1)
-        }
-    }
+    return glided
 }
 
 /** Owner round 32 (item 21): the quoted status inside a status-reply bubble. */

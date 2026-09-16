@@ -972,21 +972,23 @@ const convBetween = (db, a, b) =>
       !chat.includes(".background(if (cancelArmed) Color.White else Gold)"),
   );
   check(
-    "keyboard jump uses the safe isImeVisible flag (no ViewTreeObserver crash)",
-    chat.includes("WindowInsets.isImeVisible") &&
-      chat.includes("private fun KpImeAutoScroll") &&
+    "keyboard glide: ONE shared spring rides BOTH the composer pad and the thread's bottom padding — the rows rise with the bar (the 250 ms teleport auto-scroll is gone)",
+    chat.includes("private fun rememberImeGlidePx(): Int") &&
       !chat.includes("snapshotFlow { kpIme") &&
+      !chat.includes("KpImeAutoScroll") &&
+      chat.includes("bottom = 6.dp + imeGlideDp") &&
+      chat.includes("padForIme = if (!showAttach && !showStickers) imeGlideDp else 0.dp,") &&
       // Owner round 44: open glides like close. Owner round 45 (item 3):
       // a critical spring — frame streams are tracked live, single jumps
       // glide (a tween restart left a jelly tail on the close).
-      chat.includes("private fun Modifier.animatedImePadding()") &&
+      chat.includes("ViewTreeObserver.OnGlobalLayoutListener") &&
       chat.includes(
         "spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessHigh)",
       ) &&
       // Owner round 44: the glide reads the view tree (ime is unresolvable
       // on this BOM) — always behind an isAlive guard (round 13).
       chat.includes("if (tree.isAlive)") &&
-      chat.includes("Modifier.animatedImePadding() else Modifier"),
+      chat.includes(".padding(bottom = padForIme)"),
   );
   check(
     "swipe a bubble right to quote-reply",
@@ -4824,12 +4826,11 @@ const convBetween = (db, a, b) =>
       chat32.includes(
         "if (item.isVideo) handleDocumentPicked(item.uri, sendAt = sendAt, caption = item.caption) else readAndSendImage(item.uri, album, sendAt = sendAt, caption = item.caption, hd = item.hd)",
       ) &&
-      // refresh's forced scroll + the AI reveal loop survive an interrupted scroll too
+      // refresh's forced scroll survives an interrupted scroll too (r45
+      // item 1: the AI reveal loop this used to name is gone — no
+      // entrance effects of any kind)
       chat32.includes(
         "runCatching { listState.animateScrollToItem(total - 1) }\n                }\n                lastTopId = newTop",
-      ) &&
-      chat32.includes(
-        "if (nearBottom) runCatching { listState.scrollToItem(info.totalItemsCount - 1) }",
       ),
   );
   // Item 43 / 1D (status share screen) — three real defects, all fixed in place:
@@ -6427,6 +6428,12 @@ const convBetween = (db, a, b) =>
         edit.includes("private class EditBits") &&
         edit.includes("@Composable\nprivate fun MediaEditItemScreen(") &&
         edit.includes('pointerInput("editbrowse")') &&
+        // Owner round 45 (item 7, second pass): the swipe alone wasn't
+        // reachable on every device — real chevrons + a position label
+        // guarantee the browse.
+        edit.includes("KeyboardArrowLeft") &&
+        edit.includes("KeyboardArrowRight") &&
+        edit.includes('"${idx + 1}/${pool.size}"') &&
         edit.includes("works[uriKey] = bits") &&
         edit.includes(
           "DisposableEffect(Unit) { onDispose { ScreenStore.editPool = emptyList() } }",
@@ -6459,9 +6466,15 @@ const convBetween = (db, a, b) =>
         attach.includes("NestedScrollSource.SideEffect") &&
         attach.includes("NestedScrollSource.UserInput") &&
         attach.includes("gridPreTotal") &&
-        // Owner round 44 (item 3): down-folds are pre-scroll, top-gated.
+        // Owner round 45 (item 2, second pass): the top-gate is
+        // canScrollBackward (a phantom pixel used to read "not at top"
+        // forever) and the fold is claimed from the touch stream itself —
+        // Initial pass, ahead of the grid's scrollable.
         attach.includes("gridPreDownTotal") &&
-        attach.includes("firstVisibleItemIndex == 0") &&
+        attach.includes("!gridState.canScrollBackward") &&
+        attach.includes("awaitEachGesture") &&
+        attach.includes("PointerEventPass.Initial") &&
+        attach.includes('.pointerInput("foldcheck")') &&
         attach.includes('"barDrag"') &&
         attach.includes("barDragDetect") &&
         attach.includes("if (fullscreen && sel.isNotEmpty()) {") &&
@@ -8376,10 +8389,10 @@ const convBetween = (db, a, b) =>
         sticker.includes(
           "Stickers.packs.filter { it.first.contains(q, ignoreCase = true) }.flatMap { it.second }",
         ) &&
-        chat.includes("padForIme: Boolean = true,") &&
-        // Owner round 44: the composer glides on the animated inset now.
-        chat.includes(".then(if (padForIme) Modifier.animatedImePadding() else Modifier)") &&
-        chat.includes("padForIme = !showAttach && !showStickers,"),
+        chat.includes("padForIme: Dp = 0.dp,") &&
+        // Owner round 45 (item 3): the pad is the shared glide value.
+        chat.includes(".padding(bottom = padForIme)") &&
+        chat.includes("padForIme = if (!showAttach && !showStickers) imeGlideDp else 0.dp,"),
     );
   }
   // Item 14: a person in the phone book must never show "Add contact".
@@ -8979,10 +8992,13 @@ const convBetween = (db, a, b) =>
         ) &&
         // Owner round 44: sends don't rise (only the other side's rows
         // do); the keys are still consumed once (thread + pending).
-        (chat.match(/remember\(rowKey\) \{ bornKeys\.remove\(rowKey\) \}/g) || []).length === 2 &&
-        chat.includes("val born = bornKey && ") &&
-        // Owner round 44 (item 7): AI text replies skip the rise.
-        chat.includes("&& !aiRevealRow") &&
+        (chat.match(/bornKeys\.remove\(rowKey\)/g) || []).length === 2 &&
+        // Owner round 45 (item 1): NO pop-in at all — born is a constant
+        // false now, and the per-word reveal is gone entirely.
+        !chat.includes("val born = bornKey && ") &&
+        chat.includes("born = false, // Owner round 45") &&
+        !chat.includes("aiRevealRow") &&
+        !chat.includes("aiRevealId") &&
         chat.includes('m.optString("kind") == "TEXT"') &&
         !chat.includes("Box(Modifier.fillMaxWidth().riseIn(born)) {") &&
         chat.includes("DeleteRowShell(") &&
@@ -9034,7 +9050,9 @@ const convBetween = (db, a, b) =>
         kt("DeleteAnim.kt").includes("suspend fun capture(bubble: Rect)") &&
         kt("DeleteAnim.kt").includes("PixelCopy.request(") &&
         kt("DeleteAnim.kt").includes("drawToBitmap()") &&
-        chat.includes("Box(Modifier.fillMaxWidth().animateItem()) {"),
+        chat.includes(
+          "Box(Modifier.fillMaxWidth().animateItem(fadeInSpec = null, fadeOutSpec = null)) {",
+        ),
     );
     check(
       "r35-2: no touch ripples anywhere — KpTheme provides a no-op NoTouchIndication at the root (LocalIndication is non-null here, so silence is an instance; the default indication was the only ripple source; explicit indication = null sites stay)",

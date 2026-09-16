@@ -47,6 +47,8 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material3.CircularProgressIndicator
@@ -146,17 +148,62 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
     val works = remember { HashMap<String, EditBits>() }
     val item = pool[idx]
     val uriKey = item.uri.toString()
+    // Owner round 45 (item 7, second pass): the drag-swipe alone wasn't
+    // reachable on every device (the stage's own capture gestures can
+    // starve it), so the browse also gets REAL chevrons plus a "you are
+    // here" label — deterministic, no gesture gamble.
+    val haptics = rememberHaptics()
     key(uriKey) {
-        MediaEditItemScreen(
-            nav,
-            item.uri,
-            item.isVideo,
-            convId,
-            viewOnce,
-            works[uriKey],
-            { bits -> works[uriKey] = bits },
-            { d -> idx = (idx + d).coerceIn(0, pool.lastIndex) },
-        )
+        Box(Modifier.fillMaxSize()) {
+            MediaEditItemScreen(
+                nav,
+                item.uri,
+                item.isVideo,
+                convId,
+                viewOnce,
+                works[uriKey],
+                { bits -> works[uriKey] = bits },
+                { d -> idx = (idx + d).coerceIn(0, pool.lastIndex) },
+            )
+            Text(
+                "${idx + 1}/${pool.size}",
+                modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 62.dp),
+                color = Color.White,
+                fontSize = 14.sp,
+            )
+            if (idx > 0) {
+                Box(
+                    Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(start = 10.dp)
+                        .size(44.dp)
+                        .background(Color.Black.copy(alpha = 0.45f), CircleShape)
+                        .clickable {
+                            haptics.tap()
+                            idx = (idx - 1).coerceIn(0, pool.lastIndex)
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.KeyboardArrowLeft, "Previous photo", tint = Color.White)
+                }
+            }
+            if (idx < pool.lastIndex) {
+                Box(
+                    Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(end = 10.dp)
+                        .size(44.dp)
+                        .background(Color.Black.copy(alpha = 0.45f), CircleShape)
+                        .clickable {
+                            haptics.tap()
+                            idx = (idx + 1).coerceIn(0, pool.lastIndex)
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.KeyboardArrowRight, "Next photo", tint = Color.White)
+                }
+            }
+        }
     }
 }
 

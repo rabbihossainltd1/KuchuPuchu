@@ -22,6 +22,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.ui.geometry.Offset
@@ -82,6 +84,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
@@ -373,20 +376,22 @@ fun AttachPanel(
                         gridPreTotal = 0f
                     }
                 }
-                // Owner round 44 (item 3): DOWN lives here too — post-scroll
-                // never sees it (the grid's edge effect eats the leftover at
-                // the top). Gated on the grid's first position so a mid-list
-                // scroll never folds the panel.
+                // Owner round 45 (item 2, second pass): the r44 gate asked
+                // firstVisibleItemIndex == 0 && offset == 0 — one phantom
+                // pixel of rest-offset reads "not at top" forever on some
+                // ROMs, so the fold never fired. canScrollBackward is the
+                // real "am I at the top?" answer. Finger jitter no longer
+                // zeroes the run either — only genuine upward travel does.
                 if ((source == NestedScrollSource.UserInput || source == NestedScrollSource.SideEffect) && fullscreen &&
-                    gridState.firstVisibleItemIndex == 0 && gridState.firstVisibleItemScrollOffset == 0) {
+                    !gridState.canScrollBackward) {
                     if (available.y > 0f) {
                         gridPreDownTotal += available.y
-                        if (gridPreDownTotal > 60f) {
+                        if (gridPreDownTotal > 56f) {
                             haptics.tap()
                             setFullscreen(false)
                             gridPreDownTotal = 0f
                         }
-                    } else {
+                    } else if (available.y < -4f) {
                         gridPreDownTotal = 0f
                     }
                 }
@@ -398,9 +403,19 @@ fun AttachPanel(
                 available: Offset,
                 source: NestedScrollSource,
             ): Offset {
-                // Owner round 44 (item 3): intentionally empty — the edge
-                // effect eats the leftover, so down-folds are detected
-                // pre-scroll (above), gated on the grid's top position.
+                // Owner round 45 (item 2): the leftover down-drag at the
+                // top edge backs the pre-scroll path up — whichever fires
+                // first folds the panel (some ROMs deliver the drag only
+                // here).
+                if ((source == NestedScrollSource.UserInput || source == NestedScrollSource.SideEffect) && fullscreen &&
+                    !gridState.canScrollBackward && available.y > 0f) {
+                    gridPreDownTotal += available.y
+                    if (gridPreDownTotal > 56f) {
+                        haptics.tap()
+                        setFullscreen(false)
+                        gridPreDownTotal = 0f
+                    }
+                }
                 return Offset.Zero
             }
         }
@@ -688,7 +703,43 @@ fun AttachPanel(
                 state = gridState,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f),
+                    .weight(1f)
+                    // Owner round 45 (item 2): device-proof fold — watch the
+                    // touch stream in the INITIAL pass, BEFORE the grid's
+                    // scrollable claims it. A downward pull at the top edge
+                    // folds the panel even on a ROM whose nested-scroll pipe
+                    // sleeps through this overscroll entirely.
+                    .pointerInput("foldcheck") {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            var total = 0f
+                            var mode = 0 // 0 watching, 1 folding, -1 grid's own drag
+                            while (true) {
+                                val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!ch.pressed) break
+                                val dy = ch.position.y - ch.previousPosition.y
+                                if (mode == 0) {
+                                    total += dy
+                                    if (total > 12f) {
+                                        mode = if (gridState.canScrollBackward) -1 else 1
+                                    } else if (total < -12f) {
+                                        mode = -1
+                                    }
+                                } else if (mode == 1) {
+                                    total += dy
+                                    if (total > 56f) {
+                                        haptics.tap()
+                                        setFullscreen(false)
+                                        break
+                                    }
+                                    ch.consume()
+                                } else {
+                                    break
+                                }
+                            }
+                        }
+                    },
                 contentPadding = PaddingValues(horizontal = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
