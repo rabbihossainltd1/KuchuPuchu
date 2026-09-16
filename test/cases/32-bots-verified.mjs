@@ -6425,7 +6425,7 @@ const convBetween = (db, a, b) =>
         attach.includes("LaunchedEffect(pool) { if (pool.isNotEmpty()) onPool(pool) }") &&
         chat.includes("ScreenStore.editPool = attachPool") &&
         edit.includes("private class EditBits") &&
-        edit.includes("private fun MediaEditItemScreen(") &&
+        edit.includes("@Composable\nprivate fun MediaEditItemScreen(") &&
         edit.includes('pointerInput("editbrowse")') &&
         edit.includes("works[uriKey] = bits") &&
         edit.includes(

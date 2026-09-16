@@ -178,6 +178,7 @@ private class EditBits(
     val stickers: List<EditSticker>,
 )
 
+@Composable
 private fun MediaEditItemScreen(
     nav: NavController,
     pickedUri: Uri,
