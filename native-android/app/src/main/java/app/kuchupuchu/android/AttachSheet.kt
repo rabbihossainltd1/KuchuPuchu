@@ -710,7 +710,7 @@ fun AttachPanel(
                         },
                     contentAlignment = Alignment.Center,
                 ) {
-                    ViewOnceOneIcon(28.dp, tint = if (allOnce) Color.White else Muted)
+                    CenteredOnceIcon(28.dp, tint = if (allOnce) Color.White else Muted)
                 }
                 Spacer(Modifier.size(8.dp))
                 Box(

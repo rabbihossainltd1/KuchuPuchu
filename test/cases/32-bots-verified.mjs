@@ -6409,7 +6409,8 @@ const convBetween = (db, a, b) =>
         attach.includes("if (fullscreen && sel.isNotEmpty()) {") &&
         attach.includes("sel.lastOrNull()?.let(onEdit)") &&
         attach.includes("sel[0] = sel[0].copy(caption = t.take(1000))") &&
-        attach.includes("ViewOnceOneIcon(28.dp, tint = if (allOnce) Color.White else Muted)") &&
+        // Owner round 40 (item 4): the ring is centered + shrunk (layout-only).
+        attach.includes("CenteredOnceIcon(28.dp, tint = if (allOnce) Color.White else Muted)") &&
         attach.includes("sel.replaceAll { it.copy(once = v) }") &&
         attach.includes("onScheduleBatch()") &&
         attach.includes("onSendBatch()") &&
@@ -6532,14 +6533,14 @@ const convBetween = (db, a, b) =>
     const store = kt("ScreenStore.kt");
     const files = kt("Files.kt");
     check(
-      "r34-16b: editor screen — top bar (save, HD pill, rotate, sticker, Aa, pen), swipe-up filter strip (preview + bake share one ColorMatrix), caption bar (caption field, borderless ViewOnceOneIcon toggle — no add-more button), recipient chip + blue send; rotate carries the normalised overlays, HD bakes bigger, no dialogs; toasts only for the status post",
+      "r34-16b: editor screen — top bar (save, HD pill, rotate, sticker, Aa, pen), swipe-up filter strip (preview + bake share one ColorMatrix), caption bar (caption field, borderless centered-once toggle — no add-more button), recipient chip + blue send; rotate carries the normalised overlays, HD bakes bigger, no dialogs; toasts only for the status post",
       edit.includes("Icons.Filled.Download") &&
         edit.includes('Text("HD", color = if (hd) Color.Black else Color.White') &&
         edit.includes("Icons.Filled.RotateRight") &&
         edit.includes("Icons.Filled.EmojiEmotions") &&
         edit.includes('Text("Aa", color = Color.White') &&
         edit.includes("Icons.Filled.Edit") &&
-        edit.includes("ViewOnceOneIcon(28.dp") &&
+        edit.includes("CenteredOnceIcon(28.dp") &&
         edit.includes("Swipe up for filters") &&
         edit.includes("ColorMatrix(filterMatrix.array)") &&
         edit.includes("Add a caption...") &&
@@ -7726,8 +7727,13 @@ const convBetween = (db, a, b) =>
   {
     const edit38 = kt("MediaEditScreen.kt");
     check(
-      "r38-2: the editor ① is borderless at 28.dp, the HD pill has no border, and the caption bar carries no add-photo button",
-      edit38.includes("ViewOnceOneIcon(28.dp") &&
+      "r38-2: the editor ① is borderless at 28.dp (r40-4: centered + 0.85 layout scale, geometry verbatim), the HD pill has no border, and the caption bar carries no add-photo button",
+      edit38.includes("CenteredOnceIcon(28.dp") &&
+        kt("ViewOnceIcon.kt").includes(
+          "internal fun CenteredOnceIcon(iconSize: Dp, tint: Color = Color.White) {",
+        ) &&
+        kt("ViewOnceIcon.kt").includes("scaleX = 0.85f") &&
+        kt("ViewOnceIcon.kt").includes("translationX = px * 0.0799f") &&
         !edit38.includes("if (once) ActionBlue else Color(0x66FFFFFF), CircleShape") &&
         !edit38.includes(".border(1.5.dp, Color.White, RoundedCornerShape(7.dp))") &&
         !edit38.includes("Icons.Filled.AddPhotoAlternate"),

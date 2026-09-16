@@ -2,10 +2,14 @@ package app.kuchupuchu.android
 
 import android.graphics.Bitmap
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -70,6 +74,30 @@ internal fun ViewOnceOneIcon(iconSize: Dp, tint: Color = Color.White) {
                 isAntiAlias = true
             },
         )
+    }
+}
+
+/**
+ * Owner round 40 (item 4): the ① glyph's ink sits LEFT of its 100-unit box
+ * (x 5→76, ink center 40.6 vs box 50), so the select ring reads off-center
+ * and oversized in the small buttons. Layout-only fix — the traced geometry
+ * stays verbatim: draw at 0.85 scale about the box center, then nudge right
+ * by the exact remainder (7.99 units) so the ink centers. Same seat size.
+ */
+@Composable
+internal fun CenteredOnceIcon(iconSize: Dp, tint: Color = Color.White) {
+    val px = with(LocalDensity.current) { iconSize.toPx() }
+    Box(
+        Modifier
+            .size(iconSize)
+            .graphicsLayer {
+                scaleX = 0.85f
+                scaleY = 0.85f
+                translationX = px * 0.0799f
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        ViewOnceOneIcon(iconSize, tint)
     }
 }
 

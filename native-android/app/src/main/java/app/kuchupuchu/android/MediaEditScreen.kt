@@ -1386,7 +1386,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
                                     },
                                 contentAlignment = Alignment.Center,
                             ) {
-                                ViewOnceOneIcon(28.dp, tint = if (once) Color.White else Color(0xB3FFFFFF))
+                                CenteredOnceIcon(28.dp, tint = if (once) Color.White else Color(0xB3FFFFFF))
                             }
                         }
                     }
