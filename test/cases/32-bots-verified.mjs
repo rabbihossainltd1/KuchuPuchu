@@ -980,7 +980,9 @@ const convBetween = (db, a, b) =>
       // a critical spring — frame streams are tracked live, single jumps
       // glide (a tween restart left a jelly tail on the close).
       chat.includes("private fun Modifier.animatedImePadding()") &&
-      chat.includes("spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessHigh)") &&
+      chat.includes(
+        "spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessHigh)",
+      ) &&
       // Owner round 44: the glide reads the view tree (ime is unresolvable
       // on this BOM) — always behind an isAlive guard (round 13).
       chat.includes("if (tree.isAlive)") &&
@@ -6416,11 +6418,14 @@ const convBetween = (db, a, b) =>
     const store = kt("ScreenStore.kt");
     const app = kt("KpApp.kt");
     // Owner round 39 (item 6): the 'N selected' header + Edit chip are
-    // gone — the picker is × · Recents ▾ · HD over the grid, with the
+    // gone — the picker is Recents ▾ · HD over the grid, with the
     // selection bar (pencil, caption, ①, send-with-count) under it.
+    // Owner round 45 (item 4): the header's close button is retired —
+    // swipe-down folds, system back closes (see r45-5's dismiss lock).
     check(
-      "r39-6: attach picker — fullscreen header (× closes, 'Recents'/folder + chevron, HD pill); collapsed tiles + vertical recents grid (r40-1: the strip is gone, a grid tap ticks + opens fullscreen); selection bar (pencil edits the last tick, caption rides sel[0], ① batch toggle, ActionBlue send with count badge, hold = later); no preview anywhere",
-      attach.includes("onScheduleBatch: () -> Unit = {},") &&
+      "r39-6: attach picker — fullscreen header (no close button since r45-4; 'Recents'/folder + chevron, HD pill); collapsed tiles + vertical recents grid (r40-1: the strip is gone, a grid tap ticks + opens fullscreen); selection bar (pencil edits the last tick, caption rides sel[0], ① batch toggle, ActionBlue send with count badge, hold = later); no preview anywhere",
+      !attach.includes('Icons.Filled.Close, "Close"') &&
+        attach.includes("onScheduleBatch: () -> Unit = {},") &&
         attach.includes("onEdit: (MediaItem) -> Unit = {},") &&
         attach.includes(
           "@OptIn(ExperimentalFoundationApi::class)\n@Composable\nfun AttachPanel(",

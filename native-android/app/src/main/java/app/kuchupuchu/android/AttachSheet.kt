@@ -53,7 +53,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContactPage
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
@@ -126,7 +125,7 @@ private data class AttachAction(
 /**
  * Attach panel — WhatsApp-exact: collapsed it shows the action tiles over a
  * recents grid (a grid tap ticks the photo and opens the fullscreen
- * picker); fullscreen it is × · Recents ▾ · HD over the 4-column grid, with
+ * picker); fullscreen it is Recents ▾ · HD over the 4-column grid, with
  * the selection bar under it (pencil → editor, caption, ①, send-with-count).
  * Grid taps tick/untick with numbered badges — never a preview, never an
  * editor detour. Sits UNDER the message bar; the handle or a grid swipe-up
@@ -517,10 +516,12 @@ fun AttachPanel(
             return@Column
         }
 
-        /* Owner round 39 (item 6): the fullscreen picker header — × closes
-           the sheet, the title (folder when filtered) + its chevron opens
-           the folder chips, the HD pill arms batch quality. The collapsed
-           panel shows tiles + strip, no header (reference shots 1 vs 2/4). */
+        /* Owner round 39 (item 6): the fullscreen picker header — the title
+           (folder when filtered) + its chevron opens the folder chips, the
+           HD pill arms batch quality. The collapsed panel shows tiles +
+           strip, no header (reference shots 1 vs 2/4). Owner round 45
+           (item 4): the × is gone — the panel folds by swiping down from
+           the header/grid-top and the system back closes it. */
         if (fullscreen) {
         Row(
             Modifier
@@ -546,21 +547,9 @@ fun AttachPanel(
                         dragTotal.value += amount
                     }
                 }
-                .padding(start = 6.dp, end = 10.dp, top = 2.dp),
+                .padding(start = 14.dp, end = 10.dp, top = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                Modifier
-                    .clip(CircleShape)
-                    .clickable {
-                        haptics.tap()
-                        onDismiss()
-                    }
-                    .padding(8.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Filled.Close, "Close", tint = Muted, modifier = Modifier.size(20.dp))
-            }
             Text(
                 folder ?: "Recents",
                 color = Ink,
