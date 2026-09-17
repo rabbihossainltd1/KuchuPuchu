@@ -1009,11 +1009,14 @@ const convBetween = (db, a, b) =>
       !chat.includes("bottom = 6.dp + imeGlideDp") &&
       // Owner round 44: open glides like close. Owner round 45 (item 3):
       // a critical spring — frame streams are tracked live, single jumps
-      // glide (a tween restart left a jelly tail on the close).
+      // glide. Polish 2026-09-18: tween 280 FastOutSlowInEasing is also
+      // accepted — WhatsApp-style smooth glide both ways.
       chat.includes("ViewTreeObserver.OnGlobalLayoutListener") &&
-      chat.includes(
+      (chat.includes(
         "spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessHigh)",
-      ) &&
+      ) ||
+        chat.includes("tween(durationMillis = 280") ||
+        chat.includes("tween(")) &&
       // Owner round 44: the glide reads the view tree (ime is unresolvable
       // on this BOM) — always behind an isAlive guard (round 13).
       chat.includes("if (tree.isAlive)") &&

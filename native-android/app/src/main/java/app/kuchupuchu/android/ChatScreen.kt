@@ -376,7 +376,7 @@ fun ChatScreen(nav: NavController, convId: String) {
     // flew huge and off-ratio). Only the queue head's rect counts.
     LaunchedEffect(Unit) {
         KpFlyTarget.report = { k, r ->
-            if (k == flyQueue.firstOrNull()?.key && k in flyHidden) flyTarget = r
+            if (k == flyQueue.firstOrNull()?.key) flyTarget = r
         }
     }
     // Owner round 45 (item 5): r44-3's deselect confirm is retired — every
@@ -1149,14 +1149,14 @@ fun ChatScreen(nav: NavController, convId: String) {
     // Owner round 46: hide the just-painted echo row and queue its clone.
     // cloneType drives only the clone's FACE (TEXT pill / PHOTO / VIDEO /
     // DOC / VOICE) — the flight engine is the same for everyone.
-    // Owner fix 4/5: video no longer hides the echo row — the 0.5s hide→show fade is removed; no clone flight for video so the pending bubble is present immediately. Photo keeps flight but now mirrors video's processing ring.
+    // Polish 2026-09-18: all media fly without the 0.5s hide gap — the echo
+    // stays visible (no flyHidden) so the clone lands and the bubble stays
+    // in place at once; view-once also flies (VIDEO no longer early-return).
     fun launchFly(clientId: String, cloneType: String, body: String = "", media: String = "") {
         val from = sendFromRect
         sendFromRect = Rect.Zero
         if (from.width <= 0f || from.isEmpty) return
-        if (cloneType == "VIDEO") return
         flyTarget = null
-        flyHidden.add(clientId)
         flyQueue.add(FlySpec(clientId, cloneType, body, from, media))
     }
 
@@ -2933,7 +2933,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                         LaunchedEffect(flyNow.key) {
                             delay(400)
                             if (flyTarget == null && flyQueue.firstOrNull()?.key == flyNow.key) {
-                                flyHidden.remove(flyNow.key)
                                 flyQueue.removeAll { it.key == flyNow.key }
                             }
                         }
@@ -2943,7 +2942,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 target = { (flyTarget ?: tgt).translate(Offset(-ox, -oy)) },
                                 accent = chatAccent(chatTheme),
                             ) {
-                                flyHidden.remove(flyNow.key)
                                 flyLanded = flyNow.key
                                 flyFlash = tgt
                                 flyQueue.removeAll { it.key == flyNow.key }
@@ -4871,7 +4869,7 @@ private fun rememberImeGlidePx(): Int {
     val glided by
         animateIntAsState(
             targetPx,
-            spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessHigh),
+            tween(durationMillis = 280, easing = androidx.compose.animation.core.FastOutSlowInEasing),
             label = "imeglide",
         )
     return glided
