@@ -1,5 +1,6 @@
 package app.kuchupuchu.android
 
+import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.compose.BackHandler
@@ -199,6 +200,7 @@ private class EditBits(
 )
 
 @Composable
+@SuppressLint("UnusedContentLambdaTargetStateParameter")
 private fun MediaEditItemScreen(
     nav: NavController,
     pickedUri: Uri,
@@ -1231,6 +1233,8 @@ private fun MediaEditItemScreen(
                     },
                     label = "mediaOnly",
                 ) { animUri ->
+                // Keep lint happy — animUri is the AnimatedContent target (pickedUri); the stage content is already keyed to it
+                @Suppress("UNUSED_VARIABLE") val _lintKeep = animUri
                 when {
                     loadFailed -> Text("Could not open that file.", color = Color.White, fontSize = 14.sp)
                     !ready -> CircularProgressIndicator(color = ActionBlue)
