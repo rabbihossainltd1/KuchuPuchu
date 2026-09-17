@@ -123,6 +123,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -2058,29 +2059,19 @@ fun ChatScreen(nav: NavController, convId: String) {
         aiRevealId = null
     }
     val other = c?.optJSONObject("other")
-    // Owner round 49 (item 1 — proven dead on his device): snapshotFlow
-    // { glidePx } captured a LOCAL Int once — animateIntAsState hands back
-    // a fresh value each recomposition, so the lambda kept reading the
-    // FIRST one (0) and the flow emitted exactly once. The follower
-    // literally never ran. The per-value relaunch below cannot freeze:
-    // LaunchedEffect(glidePx) restarts on every spring frame with the
-    // fresh value in hand. r48's consume-accounting stands (clamped open
-    // pixels retry next frame; close scrolls never clamp; a reader up in
-    // history keeps their place).
+    // Owner round 50 (item 1, third take — "not fixed" twice): every
+    // INSET-driven follower died silently on his device (r47's clamped
+    // deltas, the r48 consumption fix, r49's frozen-capture fix — each a
+    // real bug, yet the feed returned a constant there anyway, and the
+    // insets listener clearly never delivered a value). The bar pads
+    // with the same glide (which he approves), but the THREAD now rides
+    // what cannot lie: the messages Box's own height (below) — it loses
+    // exactly the keyboard's height, in every window mode.
     val glidePx = rememberImeGlidePx()
     val imeGlideDp = with(LocalDensity.current) { glidePx.toDp() }
-    var glideApplied by remember { mutableStateOf(0f) }
-    LaunchedEffect(glidePx) {
-        val delta = glidePx - glideApplied
-        if (delta == 0f) return@LaunchedEffect
-        val info = listState.layoutInfo
-        if (info.totalItemsCount > 0 &&
-            (info.visibleItemsInfo.lastOrNull()?.index ?: 0) >= info.totalItemsCount - 2) {
-            glideApplied += runCatching { listState.scrollBy(delta) }.getOrDefault(0f)
-        } else {
-            glideApplied = glidePx.toFloat()
-        }
-    }
+    // Last laid-out height of the messages Box; the onSizeChanged below
+    // turns each frame's shrink into an equal thread scroll.
+    var threadTrackH by remember { mutableStateOf(0) }
     Column(
         Modifier
             .fillMaxSize()
@@ -2438,7 +2429,25 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
 
         /* ---------------- message list on coin wallpaper ---------------- */
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .onSizeChanged { sz ->
+                    // The thread rides the thing the keyboard actually
+                    // shrinks. A shrink of H px is exactly a H px reason
+                    // to scroll — only while parked at the bottom, and a
+                    // user's own scroll area is never touched otherwise.
+                    val old = threadTrackH
+                    threadTrackH = sz.height
+                    if (old == 0 || sz.height == old) return@onSizeChanged
+                    val info = listState.layoutInfo
+                    if (info.totalItemsCount > 0 &&
+                        (info.visibleItemsInfo.lastOrNull()?.index ?: 0) >= info.totalItemsCount - 2) {
+                        scope.launch { runCatching { listState.scrollBy((old - sz.height).toFloat()) } }
+                    }
+                },
+        ) {
             CoinWallpaper()
             // A retried send used to leave TWO server rows with the same
             // clientId; keys collide and the chat crashed on open ("Key ...

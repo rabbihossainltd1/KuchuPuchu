@@ -982,9 +982,9 @@ const convBetween = (db, a, b) =>
     chat.includes("private fun rememberImeGlidePx(): Int") &&
       !chat.includes("snapshotFlow { kpIme") &&
       !chat.includes("KpImeAutoScroll") &&
-      chat.includes("LaunchedEffect(glidePx) {") &&
-      chat.includes("listState.scrollBy(delta)") &&
-      chat.includes("glideApplied +=") &&
+      chat.includes(".onSizeChanged { sz ->") &&
+      chat.includes("threadTrackH") &&
+      chat.includes("listState.scrollBy((old - sz.height).toFloat())") &&
       chat.includes(">= info.totalItemsCount - 2") &&
       chat.includes("top = 6.dp, bottom = 6.dp),") &&
       !chat.includes("bottom = 6.dp + imeGlideDp") &&
