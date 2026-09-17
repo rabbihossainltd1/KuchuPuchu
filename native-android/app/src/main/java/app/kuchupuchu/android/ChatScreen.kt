@@ -2073,27 +2073,60 @@ fun ChatScreen(nav: NavController, convId: String) {
     // floor) — index counts lie when trailing zero-size items exist.
     val glidePx = rememberImeGlidePx()
     val imeGlideDp = with(LocalDensity.current) { glidePx.toDp() }
-    // Pixels the thread has consumed of the glide so far (clamped opens
-    // retry next frame; closes never clamp — r48 accounting stands).
+    // Pixels the thread has consumed of the glide so far. Clamped opens
+    // retry next frame; closes never clamp — r48 accounting stands. The
+    // latch below cures the two remaining bugs: open-miss (viewport shrank
+    // before the first scroll frame so geometric atBottom briefly false)
+    // and close 1-line drop (per-frame float vs dp rounding + clamped residue).
     var glideApplied by remember { mutableStateOf(0f) }
-    // Owner fix 2/5: latch the at-bottom decision at the start of the gesture
-    // so a stale viewport mid-animation cannot drop the remaining delta and
-    // leave the last bubble one line off on close, and the open's first frames
-    // cannot miss because the tail briefly leaves the 24px slack.
     var glideFollow by remember { mutableStateOf(false) }
+    var latchedAtBottom by remember { mutableStateOf(false) }
     LaunchedEffect(glidePx) {
         val delta = glidePx - glideApplied
         if (delta == 0f) return@LaunchedEffect
         val info = listState.layoutInfo
+        val total = info.totalItemsCount
         val tail = info.visibleItemsInfo.lastOrNull()
-        val atBottom = tail != null && tail.index == info.totalItemsCount - 1 && tail.offset + tail.size <= info.viewportEndOffset + 24
-        if (glideApplied == 0f && glidePx != 0 && atBottom) glideFollow = true
-        if (listState.isScrollInProgress) glideFollow = false
+        // Geometric atBottom for test (index counts lie with zero-size items)
+        // plus index latch for device fix: viewport shrinks before first scroll
+        // frame so geometric briefly false and open was missed.
+        val atBottomGeometric = tail != null && tail.index == info.totalItemsCount - 1 && tail.offset + tail.size <= info.viewportEndOffset + 24
+        val atBottomIdx = tail != null && tail.index >= total - 1
+        val atBottom = atBottomIdx || atBottomGeometric
+        val nearBottom = tail != null && tail.index >= total - 2
+        if (glideApplied == 0f && glidePx != 0 && nearBottom) {
+            glideFollow = true
+            latchedAtBottom = atBottomIdx || atBottomGeometric
+        }
+        if (listState.isScrollInProgress) {
+            glideFollow = false
+            latchedAtBottom = false
+        }
         if (glideFollow) {
             glideApplied += runCatching { listState.scrollBy(delta) }.getOrDefault(0f)
-            if (glidePx == 0) glideFollow = false
+            if (glidePx == 0) {
+                // Keyboard fully closed — force sync and correct the 1-line drift
+                // that comes from per-frame float→dp rounding and any clamped residue.
+                glideApplied = 0f
+                if (latchedAtBottom && total > 0) {
+                    // Pin exactly to the last bubble — no line left behind.
+                    runCatching { listState.scrollToItem(total - 1) }
+                }
+                glideFollow = false
+                latchedAtBottom = false
+            } else if (kotlin.math.abs(glidePx - glideApplied) < 0.5f) {
+                glideApplied = glidePx.toFloat()
+                // Open settled: ensure the latched bubble is fully above the bar.
+                // Per-frame scroll can leave a pixel due to dp rounding; the final
+                // pin guarantees it without needing manual scroll.
+                if (latchedAtBottom && total > 0) {
+                    runCatching { listState.scrollToItem(total - 1) }
+                }
+            }
         } else if (atBottom) {
             glideApplied += runCatching { listState.scrollBy(delta) }.getOrDefault(0f)
+            if (kotlin.math.abs(glidePx - glideApplied) < 0.5f) glideApplied = glidePx.toFloat()
+            if (glidePx == 0) glideApplied = 0f
         } else {
             glideApplied = glidePx.toFloat()
         }
