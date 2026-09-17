@@ -2415,7 +2415,7 @@ const convBetween = (db, a, b) =>
     "utf8",
   );
   check(
-    "r28-5/r31/r32-3: the settings cog is gone; the home ⋮ menu is exactly My Profile, New contact, All contacts, New group, Settings — in that order, each a real route (r32-3: About Us removed; it stays under Settings › App)",
+    "r28-5/r31/r32-3: the settings cog is gone; the home ⋮ menu is exactly My Profile, New contact, All contacts, New group, Settings — in that order, each a real route (r32-3: About Us removed; it stays under Settings › App) — bottom sheet (no DropdownMenu)",
     !list.includes('Icon(Icons.Filled.Settings, "Settings"') &&
       (() => {
         const order = ["My Profile", "New contact", "All contacts", "New group", "Settings"];
@@ -2432,9 +2432,11 @@ const convBetween = (db, a, b) =>
       ["about", "contacts", "settings"].every((r) => kpapp.includes(`composable("${r}")`)) &&
       // r30-1: the new-contact route takes optional prefill args (name, phone).
       kpapp.includes('"newcontact?name={name}&phone={phone}"') &&
-      list.includes(
-        "containerColor = Card,\n                        shape = RoundedCornerShape(16.dp)",
-      ),
+      !list.includes("DropdownMenu") &&
+      list.includes("fun HomeMenuSheet(") &&
+      list.includes("KpSheet(onDismiss = onDismiss) {") &&
+      list.includes("if (homeMenu) {") &&
+      list.includes("HomeMenuSheet(onDismiss = { homeMenu = false }, nav = nav)"),
   );
   const profile = readFileSync(
     "native-android/app/src/main/java/app/kuchupuchu/android/ProfileScreen.kt",

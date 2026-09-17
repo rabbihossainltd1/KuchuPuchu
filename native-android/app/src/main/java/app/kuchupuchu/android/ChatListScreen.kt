@@ -368,29 +368,11 @@ fun ChatListScreen(nav: NavController) {
                 // Owner round 28: the settings cog is gone — a ⋮ menu carries
                 // Settings, Profile, About Us, New group, New contact, All
                 // contacts. Every entry is a real screen, nothing is a demo.
-                Box {
-                    IconButton(onClick = { haptics.tap(); homeMenu = true }) {
-                        Icon(Icons.Filled.MoreVert, "Menu", tint = Ink, modifier = Modifier.size(26.dp))
-                    }
-                    androidx.compose.material3.DropdownMenu(
-                        expanded = homeMenu,
-                        onDismissRequest = { homeMenu = false },
-                        // Theme surface, not the M3 default tint (the mismatch
-                        // the owner flagged on the status menu).
-                        containerColor = Card,
-                        shape = RoundedCornerShape(16.dp),
-                        tonalElevation = 0.dp,
-                        shadowElevation = 6.dp,
-                    ) {
-                        // Owner round 31: this exact order.
-                        HomeMenuItem(Icons.Filled.Person, "My Profile") { homeMenu = false; nav.navigate("profile/${Store.myId()}") }
-                        HomeMenuItem(Icons.Filled.PersonAdd, "New contact") { homeMenu = false; nav.navigate("newcontact") }
-                        HomeMenuItem(Icons.Filled.Contacts, "All contacts") { homeMenu = false; nav.navigate("contacts") }
-                        HomeMenuItem(Icons.Filled.GroupAdd, "New group") { homeMenu = false; nav.navigate("newgroup") }
-                        HomeMenuItem(Icons.Filled.Settings, "Settings") { homeMenu = false; nav.navigate("settings") }
-                        // Owner round 32 (item 3): no About Us here — it lives
-                        // under Settings › App.
-                    }
+                IconButton(onClick = { haptics.tap(); homeMenu = true }) {
+                    Icon(Icons.Filled.MoreVert, "Menu", tint = Ink, modifier = Modifier.size(26.dp))
+                }
+                if (homeMenu) {
+                    HomeMenuSheet(onDismiss = { homeMenu = false }, nav = nav)
                 }
             }
             }
@@ -1605,11 +1587,18 @@ private fun ChatRowSheet(
 /** Owner round 28: one row of the home ⋮ menu — theme ink + blue icon. */
 @Composable
 private fun HomeMenuItem(icon: ImageVector, label: String, onClick: () -> Unit) {
-    androidx.compose.material3.DropdownMenuItem(
-        text = { Text(label, color = Ink, fontSize = 15.sp) },
-        leadingIcon = { Icon(icon, null, tint = ActionBlueDeep, modifier = Modifier.size(22.dp)) },
-        onClick = onClick,
-    )
+    KpSheetRow(icon, label, onClick = onClick)
+}
+
+@Composable
+private fun HomeMenuSheet(onDismiss: () -> Unit, nav: NavController) {
+    KpSheet(onDismiss = onDismiss) {
+        HomeMenuItem(Icons.Filled.Person, "My Profile") { onDismiss(); nav.navigate("profile/${Store.myId()}") }
+        HomeMenuItem(Icons.Filled.PersonAdd, "New contact") { onDismiss(); nav.navigate("newcontact") }
+        HomeMenuItem(Icons.Filled.Contacts, "All contacts") { onDismiss(); nav.navigate("contacts") }
+        HomeMenuItem(Icons.Filled.GroupAdd, "New group") { onDismiss(); nav.navigate("newgroup") }
+        HomeMenuItem(Icons.Filled.Settings, "Settings") { onDismiss(); nav.navigate("settings") }
+    }
 }
 
 /**
