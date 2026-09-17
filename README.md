@@ -15,7 +15,7 @@ Android id: `app.kuchupuchu.android` (do not change).
 native Android app (Kotlin + Jetpack Compose)  native-android/
         │
         └── HTTPS JSON  →  Cloudflare Worker   src/worker/index.ts
-                                ├── D1 database  kuchupuchu-v3
+                                ├── D1 database  kuchupuchu-v3-apac (primary Singapore, read replication)
                                 └── R2 bucket    kp-media   (photos, voice notes, documents, videos)
 ```
 
