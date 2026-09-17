@@ -299,6 +299,15 @@ object KpUpdate {
             }.onFailure { downloadError = "Allow installs from KuchuPuchu in Settings" }
             return
         }
+        // Owner fix 5/5: on API <34 PackageInstaller kills the host app the instant commit() runs — before the system's confirm sheet even appears — so tapping Install read as "exits app without update". Below 34 we install via the platform ACTION_VIEW intent (FileProvider) which keeps the app alive until the user confirms in the system installer; on 34+ the PackageInstaller path stays (dontKillApp).
+        if (android.os.Build.VERSION.SDK_INT < 34) {
+            installing = true
+            val ok = runCatching { withContext(Dispatchers.IO) { installViaIntent(ctx, apk) } }.isSuccess
+            // The system installer activity is now on top — keep the popup alive; if the user cancels they return to the same ready state.
+            installing = false
+            if (!ok) downloadError = "Install failed"
+            return
+        }
         installing = true
         runCatching { withContext(Dispatchers.IO) { install(ctx, apk) } }
             .onFailure {
@@ -306,6 +315,18 @@ object KpUpdate {
                 KpCrash.mark("update_install_failed:${it.javaClass.simpleName}")
                 downloadError = it.message ?: "Install failed"
             }
+    }
+
+    /** Owner fix 5/5: Intent install path for <34 — no premature kill, system handles the confirm sheet. FileProvider path covers filesDir (see file_paths.xml). */
+    private fun installViaIntent(ctx: Context, apk: File) {
+        val uri = androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", apk)
+        val intent = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(uri, "application/vnd.android.package-archive")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        // Note the commit so the next launch can explain a failure; success is the package-replaced relaunch.
+        noteCommitted(ctx)
+        KpCrash.mark("update_intent_committed")
+        ctx.startActivity(intent)
     }
 
     /** Prefs-backed install outcome — survives the process dying mid-install.

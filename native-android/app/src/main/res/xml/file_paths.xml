@@ -6,4 +6,6 @@
          through this provider, which only knew cacheDir and threw
          "Failed to find configured root". -->
     <files-path name="docs" path="kp-doc-cache/" />
+    <!-- Owner fix 5/5: the update APK lives in filesDir/kp-update.apk — it must be shareable via FileProvider for the Intent install path (the old xml only exposed kp-doc-cache). -->
+    <files-path name="update" path="." />
 </paths>

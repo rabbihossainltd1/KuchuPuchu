@@ -2671,19 +2671,21 @@ const convBetween = (db, a, b) =>
     );
     const update = kt("KpUpdate.kt");
     check(
-      "r31-10: update = KpSheet with ActionBlue progress (no Gold bar) and an explicit Install step (ready APK kept, installReady on tap)",
+      "r31-10: update = popup Dialog (not bottom sheet) with ActionBlue progress (no Gold bar) and explicit Install step (ready APK kept, installReady on tap) — non-skippable, appears on any screen",
       kpapp.includes("fun KpUpdateGate()") &&
-        kpapp.includes("KpSheet(") &&
-        kpapp.includes(
-          "color = ActionBlue,\n                        trackColor = ActionBlue.copy(alpha = 0.18f)",
-        ) &&
+        kpapp.includes("Dialog(") &&
+        kpapp.includes("dismissOnBackPress = false") &&
+        kpapp.includes("dismissOnClickOutside = false") &&
+        !kpapp.includes("KpSheet(") &&
+        kpapp.includes("color = ActionBlue,") &&
+        kpapp.includes("trackColor = ActionBlue.copy(alpha = 0.18f)") &&
         !kpapp.includes("color = Gold,") &&
-        kpapp.includes(
-          'GoldBtn("Install", Modifier.fillMaxWidth()) { scope.launch { KpUpdate.installReady(ctx) } }',
-        ) &&
+        kpapp.includes('GoldBtn("Install", Modifier.fillMaxWidth())') &&
+        kpapp.includes("KpUpdate.installReady(ctx)") &&
         update.includes("var ready by mutableStateOf<File?>(null)") &&
         update.includes("ready = apk") &&
         update.includes("suspend fun installReady(ctx: Context)") &&
+        update.includes("installViaIntent") &&
         !update.includes(
           "withContext(Dispatchers.IO) { install(ctx, apk) }\n            available = null",
         ),

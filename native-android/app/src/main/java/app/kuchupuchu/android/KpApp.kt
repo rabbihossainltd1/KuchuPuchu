@@ -362,6 +362,7 @@ private fun askBatteryExemption(ctx: android.content.Context) {
  * Owner round 16: the in-app update flow. Popup first; tapping Update stays
  * INSIDE the app — progress bar + percentage — and hands the finished APK to
  * the system installer when the bytes land.
+ * Owner fix 5/5: replaced the dismissible bottom sheet (KpSheet) with a centered, non-cancelable popup Dialog that appears on ANY screen (it lives at the root of KpApp), cannot be swiped away, and drives download→install without the app exiting. Installing uses Intent path on <34 so the app is not killed before the system confirm sheet.
  */
 @Composable
 fun KpUpdateGate() {
@@ -371,78 +372,93 @@ fun KpUpdateGate() {
     val ready = KpUpdate.ready
     val downloading = KpUpdate.downloading
     val installing = KpUpdate.installing
-    // Owner round 42 (item 1): the new build waits for a restart.
     val justUpdated = KpUpdate.justUpdated
     if (upd == null && ready == null && !downloading && !installing && !justUpdated) return
-    // Owner round 31: ONE bottom sheet for the whole flow — offer → progress →
-    // Install. The accent is the theme's action blue (no cream/gold bar), and
-    // the sheet never hides itself after the download: the user taps Install.
-    KpSheet(
-        onDismiss = {
-            if (!downloading && !installing) {
-                KpUpdate.available = null
-                KpUpdate.ready = null
-                KpUpdate.justUpdated = false
-            }
-        },
-        title =
-            when {
-                justUpdated -> "Update installed"
-                installing -> "Installing update"
-                ready != null -> "Update ready"
-                downloading -> "Downloading update"
-                else -> "Update available"
-            },
+    // Non-skippable popup — Dialog with no outside/back dismiss so an update cannot be swiped away. The old KpSheet was dismissible and a bottom sheet.
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = {},
+        properties = androidx.compose.ui.window.DialogProperties(
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false,
+            usePlatformDefaultWidth = false,
+        ),
     ) {
-        Column(Modifier.padding(horizontal = 14.dp)) {
-            when {
-                justUpdated -> {
-                    GoldBtn("Restart", Modifier.fillMaxWidth()) { KpUpdate.restart(ctx) }
-                }
-                installing -> {
-                    LinearProgressIndicator(
-                        color = ActionBlue,
-                        trackColor = ActionBlue.copy(alpha = 0.18f),
-                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                    )
-                    Spacer(Modifier.height(8.dp))
+        // Centered card — theme-aware, works on any route because this gate is at the root of KpApp.
+        androidx.compose.foundation.layout.Box(
+            Modifier.fillMaxWidth().padding(horizontal = 22.dp),
+            contentAlignment = androidx.compose.ui.Alignment.Center,
+        ) {
+            androidx.compose.material3.Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Card),
+                elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
                     Text(
-                        "Confirm the install in the system window.",
-                        color = Muted,
-                        fontSize = 13.sp,
+                        when {
+                            justUpdated -> "Update installed"
+                            installing -> "Installing update"
+                            ready != null -> "Update ready"
+                            downloading -> "Downloading update"
+                            else -> "Update available"
+                        },
+                        fontSize = 18.sp,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                        color = Ink,
                     )
-                }
-                ready != null -> {
-                    Text("v${upd?.first ?: ""} downloaded.", color = Muted, fontSize = 13.5.sp)
-                    Spacer(Modifier.height(14.dp))
-                    GoldBtn("Install", Modifier.fillMaxWidth()) { scope.launch { KpUpdate.installReady(ctx) } }
-                }
-                downloading -> {
-                    LinearProgressIndicator(
-                        progress = { KpUpdate.progress },
-                        color = ActionBlue,
-                        trackColor = ActionBlue.copy(alpha = 0.18f),
-                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "${(KpUpdate.progress * 100).toInt()}%",
-                        color = ActionBlueDeep,
-                        fontSize = 14.sp,
-                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
-                    )
-                }
-                else -> {
-                    Text("v${upd?.first} is ready to download.", color = Muted, fontSize = 13.5.sp)
-                    Spacer(Modifier.height(14.dp))
-                    GoldBtn("Update", Modifier.fillMaxWidth()) { scope.launch { KpUpdate.downloadAndInstall(ctx) } }
+                    Spacer(Modifier.height(10.dp))
+                    when {
+                        justUpdated -> {
+                            Text("Restart to run the new build.", color = Muted, fontSize = 13.5.sp)
+                            Spacer(Modifier.height(14.dp))
+                            GoldBtn("Restart", Modifier.fillMaxWidth()) { KpUpdate.restart(ctx) }
+                        }
+                        installing -> {
+                            LinearProgressIndicator(
+                                color = ActionBlue,
+                                trackColor = ActionBlue.copy(alpha = 0.18f),
+                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            Text(
+                                "Confirm the install in the system window.",
+                                color = Muted,
+                                fontSize = 13.sp,
+                            )
+                        }
+                        ready != null -> {
+                            Text("v${upd?.first ?: ""} downloaded and ready to install.", color = Muted, fontSize = 13.5.sp)
+                            Spacer(Modifier.height(14.dp))
+                            GoldBtn("Install", Modifier.fillMaxWidth()) { scope.launch { KpUpdate.installReady(ctx) } }
+                        }
+                        downloading -> {
+                            LinearProgressIndicator(
+                                progress = { KpUpdate.progress },
+                                color = ActionBlue,
+                                trackColor = ActionBlue.copy(alpha = 0.18f),
+                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            Text(
+                                "${(KpUpdate.progress * 100).toInt()}%",
+                                color = ActionBlueDeep,
+                                fontSize = 14.sp,
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                            )
+                        }
+                        else -> {
+                            Text("A new version v${upd?.first} is available. Update to continue.", color = Muted, fontSize = 13.5.sp)
+                            Spacer(Modifier.height(14.dp))
+                            GoldBtn("Update", Modifier.fillMaxWidth()) { scope.launch { KpUpdate.downloadAndInstall(ctx) } }
+                        }
+                    }
+                    if (KpUpdate.downloadError.isNotBlank()) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(KpUpdate.downloadError, color = Red, fontSize = 12.sp)
+                    }
                 }
             }
-            if (KpUpdate.downloadError.isNotBlank()) {
-                Spacer(Modifier.height(8.dp))
-                Text(KpUpdate.downloadError, color = Red, fontSize = 12.sp)
-            }
-            Spacer(Modifier.height(6.dp))
         }
     }
 }
