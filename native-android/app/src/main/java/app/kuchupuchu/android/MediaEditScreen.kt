@@ -246,6 +246,7 @@ private fun MediaEditItemScreen(
     var scrub by remember { mutableStateOf<Long?>(null) }
     // Owner round 33 (item 8): the preview's play position for the strip's playhead.
     var playAt by remember { mutableStateOf<Long?>(null) }
+    var seekTo by remember { mutableStateOf<Long?>(null) }
     var busy by remember { mutableStateOf(false) }
     val thumbs = remember { mutableStateListOf<ImageBitmap?>() }
     // Pen: strokes in normalised picture units; the live one is drawn as it grows.
@@ -1251,7 +1252,7 @@ private fun MediaEditItemScreen(
                                 // the clip into a WYSIWYG still (the export's
                                 // exact pixels for this frame); the live player
                                 // rests underneath, paused. Ink rides either way.
-                                StatusTrimPreview(pickedUri, start, end, paused = stillMode, scrubAt = scrub, onPosition = { playAt = it })
+                                StatusTrimPreview(pickedUri, start, end, paused = stillMode, scrubAt = scrub, seekTo = seekTo, onSeekDone = { seekTo = null; scrub = null }, onPosition = { playAt = it })
                                 val still = videoStill
                                 if (stillMode && still != null) {
                                     Image(still, "Edited frame", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
@@ -1365,9 +1366,9 @@ private fun MediaEditItemScreen(
                     Box(
                         Modifier
                             .size(26.dp)
-                            .clip(RoundedCornerShape(6.dp))
+                            .clip(CircleShape)
                             .background(if (isSelected == true) Color.White else Color(0x33FFFFFF))
-                            .border(1.5.dp, Color.White, RoundedCornerShape(6.dp))
+                            .border(1.5.dp, Color.White, CircleShape)
                             .clickable { onToggleSelect.invoke() },
                         contentAlignment = Alignment.Center,
                     ) {
@@ -1557,6 +1558,11 @@ private fun MediaEditItemScreen(
                         },
                         onScrub = { scrub = it },
                         positionMs = playAt,
+                        onSeek = {
+                            seekTo = it
+                            scrub = it
+                            playAt = it
+                        },
                     )
                 }
                 /* the caption bar + recipient chip / send ride above the keyboard */
@@ -1665,7 +1671,14 @@ private fun MediaEditItemScreen(
                                             .border(1.dp, Color.White, CircleShape),
                                         contentAlignment = Alignment.Center,
                                     ) {
-                                        Text("$selectedCount", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            "$selectedCount",
+                                            color = Color.White,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                            modifier = Modifier.align(Alignment.Center),
+                                        )
                                     }
                                 }
                             }

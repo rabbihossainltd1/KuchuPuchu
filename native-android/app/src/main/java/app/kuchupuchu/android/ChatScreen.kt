@@ -376,7 +376,7 @@ fun ChatScreen(nav: NavController, convId: String) {
     // flew huge and off-ratio). Only the queue head's rect counts.
     LaunchedEffect(Unit) {
         KpFlyTarget.report = { k, r ->
-            if (k == flyQueue.firstOrNull()?.key) flyTarget = r
+            if (k == flyQueue.firstOrNull()?.key && k in flyHidden) flyTarget = r
         }
     }
     // Owner round 45 (item 5): r44-3's deselect confirm is retired — every
@@ -1152,11 +1152,14 @@ fun ChatScreen(nav: NavController, convId: String) {
     // Polish 2026-09-18: all media fly without the 0.5s hide gap — the echo
     // stays visible (no flyHidden) so the clone lands and the bubble stays
     // in place at once; view-once also flies (VIDEO no longer early-return).
+    // Fix 2026-09-18b: re-add hide to avoid duplicate overlap — pending is
+    // hidden while the clone flies, then appears at landing with bounce.
     fun launchFly(clientId: String, cloneType: String, body: String = "", media: String = "") {
         val from = sendFromRect
         sendFromRect = Rect.Zero
         if (from.width <= 0f || from.isEmpty) return
         flyTarget = null
+        flyHidden.add(clientId)
         flyQueue.add(FlySpec(clientId, cloneType, body, from, media))
     }
 
@@ -2933,6 +2936,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         LaunchedEffect(flyNow.key) {
                             delay(400)
                             if (flyTarget == null && flyQueue.firstOrNull()?.key == flyNow.key) {
+                                flyHidden.remove(flyNow.key)
                                 flyQueue.removeAll { it.key == flyNow.key }
                             }
                         }
@@ -2942,6 +2946,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 target = { (flyTarget ?: tgt).translate(Offset(-ox, -oy)) },
                                 accent = chatAccent(chatTheme),
                             ) {
+                                flyHidden.remove(flyNow.key)
                                 flyLanded = flyNow.key
                                 flyFlash = tgt
                                 flyQueue.removeAll { it.key == flyNow.key }
@@ -3781,6 +3786,7 @@ private fun Composer(
             // wallpaper (which spans the whole screen) shows through; only
             // the input pill and the send button keep their own surfaces.
             .padding(bottom = padForIme)
+            .then(if (showAttach) Modifier.padding(bottom = 340.dp) else Modifier)
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -4869,7 +4875,7 @@ private fun rememberImeGlidePx(): Int {
     val glided by
         animateIntAsState(
             targetPx,
-            tween(durationMillis = 280, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            tween(durationMillis = 300, easing = androidx.compose.animation.core.FastOutSlowInEasing),
             label = "imeglide",
         )
     return glided

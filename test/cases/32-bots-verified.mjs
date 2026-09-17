@@ -4908,9 +4908,8 @@ const convBetween = (db, a, b) =>
         "LaunchedEffect(player, start, end, scrubAt) { player?.setWindow(start, end, scrubAt ?: -1L) }",
       ) &&
       share32.includes("player?.setPaused(paused || userPaused || scrubAt != null)") &&
-      edit43.includes(
-        "StatusTrimPreview(pickedUri, start, end, paused = stillMode, scrubAt = scrub, onPosition = { playAt = it })",
-      ),
+      edit43.includes("StatusTrimPreview(pickedUri, start, end, paused = stillMode, scrubAt = scrub") &&
+        edit43.includes("onPosition = { playAt = it }"),
   );
   check(
     "r32-43: trim handles — 24 dp grab zone, the nearer handle wins, absolute drag maths (grabS/grabE + travel), the held handle reports its clip position via onScrub (null on release), 10 dp handle pills",
@@ -6637,9 +6636,8 @@ const convBetween = (db, a, b) =>
         edit.includes("strokes.removeAt(strokes.size - 1)") &&
         edit.includes("Icons.AutoMirrored.Filled.Undo") &&
         edit.includes("maxMs = Long.MAX_VALUE,") &&
-        edit.includes(
-          "StatusTrimPreview(pickedUri, start, end, paused = stillMode, scrubAt = scrub, onPosition = { playAt = it })",
-        ) &&
+        edit.includes("StatusTrimPreview(pickedUri, start, end, paused = stillMode, scrubAt = scrub") &&
+        edit.includes("onPosition = { playAt = it }") &&
         edit.includes(
           "VideoExport.export(ctx, pickedUri, s, e, box, out, overlay = overlay, colorMat = filt?.array, userTurns = turn)",
         ) &&

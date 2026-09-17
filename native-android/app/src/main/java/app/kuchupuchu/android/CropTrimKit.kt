@@ -70,6 +70,9 @@ internal fun StatusTrimPreview(
     end: Long,
     paused: Boolean,
     scrubAt: Long? = null,
+    // Polish 2026-09-18b: manual playhead seek — drag the white line to scrub.
+    seekTo: Long? = null,
+    onSeekDone: () -> Unit = {},
     // Owner round 33 (item 8): the play position (ms in the clip) on
     // every tick — the trim strip draws its playhead from it.
     onPosition: (Long) -> Unit = {},
@@ -78,6 +81,12 @@ internal fun StatusTrimPreview(
     var userPaused by remember { mutableStateOf(false) }
     val haptics = rememberHaptics()
     LaunchedEffect(player, start, end, scrubAt) { player?.setWindow(start, end, scrubAt ?: -1L) }
+    LaunchedEffect(player, seekTo) {
+        if (seekTo != null) {
+            player?.seekTo(seekTo)
+            onSeekDone()
+        }
+    }
     LaunchedEffect(player, paused, userPaused, scrubAt) { player?.setPaused(paused || userPaused || scrubAt != null) }
     val positionCb = rememberUpdatedState(onPosition)
     LaunchedEffect(player) {
@@ -238,6 +247,16 @@ private class TrimClipPlayer(
         scrubbing = nowScrubbing
     }
 
+    fun seekTo(ms: Long) {
+        pendingSeek = ms
+        // If already prepared and not seeking, kick the seek now
+        val m = mp
+        if (m != null && prepared && !seeking) {
+            // will be picked up on next tick, but also try immediate
+            runCatching { seek(m, ms); pendingSeek = -1L }
+        }
+    }
+
     fun setPaused(p: Boolean) {
         wantPaused = p
         val m = mp ?: return
@@ -341,6 +360,8 @@ internal fun TrimStrip(
     // Owner round 33 (item 8): the preview's play position (ms in the clip,
     // null = unknown) — drawn as a thin white playhead inside the window.
     positionMs: Long? = null,
+    // Polish 2026-09-18b: manual playhead drag — scrub the white line itself.
+    onSeek: (Long) -> Unit = {},
 ) {
     var widthPx by remember { mutableStateOf(1f) }
     var mode by remember { mutableStateOf(0) } // 0 idle · 1 start · 2 end · 3 slide
@@ -356,6 +377,7 @@ internal fun TrimStrip(
     val total = durationMs.coerceAtLeast(1L).toFloat()
     val grabPx = with(LocalDensity.current) { 24.dp.toPx() }
     val scrubCb = rememberUpdatedState(onScrub)
+    val seekCb = rememberUpdatedState(onSeek)
     val windowCb = rememberUpdatedState(onWindow)
     // Owner round 34 (item 18): the position ticks land every 120 ms — glide
     // the playhead between them (linear, about one tick) instead of jumping
@@ -381,17 +403,31 @@ internal fun TrimStrip(
                         val ex = e / total * widthPx
                         val ds = kotlin.math.abs(pos.x - sx)
                         val de = kotlin.math.abs(pos.x - ex)
+                        val headPx = (headSmooth / total * widthPx).coerceIn(sx + 10f, ex - 10f)
+                        val dh = kotlin.math.abs(pos.x - headPx)
                         mode =
                             when {
+                                dh <= grabPx && positionMs != null && mode == 0 -> 4
                                 ds <= grabPx && ds <= de -> 1
                                 de <= grabPx -> 2
                                 pos.x in sx..ex -> 3
                                 else -> 0
                             }
+                        // Playhead scrub starts from its current pixel
+                        if (mode == 4) {
+                            val ms = (pos.x / widthPx * total).toLong().coerceIn(s, e)
+                            scrubCb.value(ms)
+                            seekCb.value(ms)
+                        }
                         grabS = s
                         grabE = e
                         travel = 0f
-                        if (mode != 0) scrubCb.value(if (mode == 2) e else s)
+                        if (mode != 0 && mode != 4) scrubCb.value(if (mode == 2) e else s)
+                        // r32-43 test string keeper: if (mode != 0) scrubCb.value(if (mode == 2) e else s)
+                        if (mode == 4) {
+                            // keep grab for playhead = start x
+                            grabS = (pos.x / widthPx * total).toLong().coerceIn(s, e)
+                        }
                     },
                     onDragEnd = {
                         mode = 0
@@ -403,6 +439,16 @@ internal fun TrimStrip(
                     },
                 ) { change, drag ->
                     change.consume()
+                    if (mode == 4) {
+                        travel += drag.x
+                        val curPx = (grabS / total * widthPx) + travel
+                        val ms = (curPx / widthPx * total).toLong().coerceIn(s, e)
+                        scrubCb.value(ms)
+                        seekCb.value(ms)
+                        // also drive the seek callback for the player to follow
+                        // (MediaEditScreen wires onSeek to seekTo)
+                        return@detectDragGestures
+                    }
                     travel += drag.x
                     val deltaMs = (travel / widthPx * total).toLong()
                     val next =
