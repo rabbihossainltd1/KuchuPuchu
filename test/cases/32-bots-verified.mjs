@@ -1008,7 +1008,7 @@ const convBetween = (db, a, b) =>
       // bottom check is geometric, not index arithmetic.
       chat.includes(".padding(bottom = if (!showAttach && !showStickers) imeGlideDp else 0.dp)") &&
       chat.includes("tail.offset + tail.size <= info.viewportEndOffset + 24") &&
-      chat.includes("padForIme = 0.dp,") &&
+      chat.includes("padForIme = if (!showAttach && !showStickers) imeGlideDp else 0.dp,") &&
       chat.includes("top = 6.dp, bottom = 6.dp),") &&
       !chat.includes("bottom = 6.dp + imeGlideDp") &&
       // Owner round 44: open glides like close. Owner round 45 (item 3):

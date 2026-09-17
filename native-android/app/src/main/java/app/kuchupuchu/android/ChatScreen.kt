@@ -3404,10 +3404,14 @@ fun ChatScreen(nav: NavController, convId: String) {
             // worker feeds the clip to Gemini), so the mic works here too.
             micEnabled = true,
             theme = chatTheme,
-            // Owner round 51: the keyboard lift MOVED to the messages Box
-            // (padding above) — padding the composer as well would
-            // double the lift and float the bar over the keyboard.
-            padForIme = 0.dp,
+            // Owner round 51 was WRONG to strip this: the weighted Box
+            // fills the whole column height, so padding the Box only
+            // shrinks the LIST's content — the composer, a SIBLING below
+            // the Box's outer bounds, stayed behind the keyboard (the
+            // pill gone is what he saw). The bar MUST pad itself. No
+            // double lift: the Box padding insets only the list, this
+            // padding insets only the bar — disjoint regions.
+            padForIme = if (!showAttach && !showStickers) imeGlideDp else 0.dp,
             onFieldRect = { fieldRect = it },
             onActionRect = { actionRect = it },
             onFinishRecord = { cancelled ->
