@@ -148,10 +148,10 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
         mutableStateOf(pool.indexOfFirst { it.uri == pickedUri }.takeIf { it >= 0 } ?: 0)
     }
     var browseDir by remember { mutableStateOf(1) }
-    // Polish 2026-09-18: multi-select check-box beside the pencil — the
-    // pool starts all-selected, tapping the rounded box toggles the current
-    // uri; the send FAB badge shows the count.
-    val selectedUris = remember { mutableStateListOf<String>().apply { addAll(pool.map { it.uri.toString() }) } }
+    // Polish 2026-09-18c: pool browse starts with ONLY the picked item
+    // selected — owner: 17 always fake, should show real selected count.
+    // Tapping the box toggles current uri; badge shows true count.
+    val selectedUris = remember { mutableStateListOf<String>().apply { add(pool[idx].uri.toString()) } }
     // Every photo visited keeps its edits — the item screen snapshots its
     // EditBits on leave (kilobytes; bitmaps are re-decoded on return).
     val works = remember { HashMap<String, EditBits>() }
@@ -1367,13 +1367,13 @@ private fun MediaEditItemScreen(
                         Modifier
                             .size(26.dp)
                             .clip(CircleShape)
-                            .background(if (isSelected == true) Color.White else Color.Transparent)
+                            .background(if (isSelected == true) ActionBlue else Color.Transparent)
                             .border(1.5.dp, Color.White, CircleShape)
                             .clickable { onToggleSelect.invoke() },
                         contentAlignment = Alignment.Center,
                     ) {
                         if (isSelected == true) {
-                            Icon(Icons.Filled.Check, contentDescription = "Selected", tint = ActionBlue, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Filled.Check, contentDescription = "Selected", tint = Color.White, modifier = Modifier.size(16.dp))
                         }
                     }
                 }

@@ -477,7 +477,10 @@ fun ChatScreen(nav: NavController, convId: String) {
         var next = ScreenStore.msgsOf(convId).filter { it.optString("id") !in ScreenStore.hiddenMsgIds }
         // Owner round 34 (item 3): a row that came back may vanish again if
         // it departs again — only the currently missing stay remembered.
-        vanishedOnce.removeAll(next.map { it.optString("id") }.toSet())
+        // Fix 2026-09-18c: keep DELETED ids in vanishedOnce so re-enter does
+        // not re-animate dust (owner: deleted shows again each open).
+        // r34-3 keeper: vanishedOnce.removeAll(next.map { it.optString("id") }.toSet())
+        vanishedOnce.removeAll(next.filter { it.optString("kind") != "DELETED" }.map { it.optString("id") }.toSet())
         if (msgs.isEmpty()) {
             msgs.addAll(next)
             return
@@ -2084,6 +2087,14 @@ fun ChatScreen(nav: NavController, convId: String) {
     var glideApplied by remember(convId) { mutableStateOf(0f) }
     var glideFollow by remember(convId) { mutableStateOf(false) }
     var latchedAtBottom by remember(convId) { mutableStateOf(false) }
+    // Owner 2026-09-18c: when attach opens, keep last message above panel
+    LaunchedEffect(showAttach) {
+        if (showAttach) {
+            delay(180)
+            val total = listState.layoutInfo.totalItemsCount
+            if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }
+        }
+    }
     var savedIndex by remember(convId) { mutableStateOf(0) }
     var savedOffset by remember(convId) { mutableStateOf(0) }
     // Capture once per open so close can restore exactly (cures 1-line drift at any
@@ -2633,7 +2644,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 6.dp, bottom = if (showAttach) 346.dp else 6.dp),
+                contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 6.dp, bottom = if (showAttach) if (attachFs) 680.dp else 420.dp else 6.dp),
             ) {
                 items(
                     groupedMsgs,
@@ -4875,7 +4886,7 @@ private fun rememberImeGlidePx(): Int {
     val glided by
         androidx.compose.animation.core.animateFloatAsState(
             targetPx,
-            tween(durationMillis = 320, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            tween(durationMillis = 300, easing = androidx.compose.animation.core.FastOutSlowInEasing),
             label = "imeglide",
         )
     return glided.toInt()
