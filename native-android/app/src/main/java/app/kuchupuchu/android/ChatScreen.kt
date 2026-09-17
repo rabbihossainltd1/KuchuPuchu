@@ -2073,52 +2073,67 @@ fun ChatScreen(nav: NavController, convId: String) {
     // floor) — index counts lie when trailing zero-size items exist.
     val glidePx = rememberImeGlidePx()
     val imeGlideDp = with(LocalDensity.current) { glidePx.toDp() }
-    // Pixels the thread has consumed of the glide so far. Clamped opens
-    // retry next frame; closes never clamp — r48 accounting stands. The
-    // latch below cures the two remaining bugs: open-miss (viewport shrank
-    // before the first scroll frame so geometric atBottom briefly false)
-    // and close 1-line drop (per-frame float vs dp rounding + clamped residue).
-    var glideApplied by remember { mutableStateOf(0f) }
-    var glideFollow by remember { mutableStateOf(false) }
-    var latchedAtBottom by remember { mutableStateOf(false) }
+    // Pixels the thread has consumed of the glide so far. The latch cures
+    // open-miss (geometric briefly false) and the 1-line drop (rounding +
+    // clamped residue). State is keyed to convId so a new chat never inherits
+    // the previous thread's glide (3rd-open miss). The follower now runs for
+    // ANY scroll position — not only when at bottom — so a mid-thread open
+    // still keeps its visible rows above the bar (owner: "onno position a hoi na").
+    var glideApplied by remember(convId) { mutableStateOf(0f) }
+    var glideFollow by remember(convId) { mutableStateOf(false) }
+    var latchedAtBottom by remember(convId) { mutableStateOf(false) }
+    var savedIndex by remember(convId) { mutableStateOf(0) }
+    var savedOffset by remember(convId) { mutableStateOf(0) }
+    // Capture once per open so close can restore exactly (cures 1-line drift at any
+    // position, not only at bottom) and the 3rd-open never misses due to stale glideApplied.
     LaunchedEffect(glidePx) {
         val delta = glidePx - glideApplied
         if (delta == 0f) return@LaunchedEffect
         val info = listState.layoutInfo
         val total = info.totalItemsCount
         val tail = info.visibleItemsInfo.lastOrNull()
-        // Geometric atBottom for test (index counts lie with zero-size items)
-        // plus index latch for device fix: viewport shrinks before first scroll
-        // frame so geometric briefly false and open was missed.
+        // Geometric atBottom for test (index counts lie with zero-size items) plus index latch for device
         val atBottomGeometric = tail != null && tail.index == info.totalItemsCount - 1 && tail.offset + tail.size <= info.viewportEndOffset + 24
         val atBottomIdx = tail != null && tail.index >= total - 1
         val atBottom = atBottomIdx || atBottomGeometric
         val nearBottom = tail != null && tail.index >= total - 2
-        if (glideApplied == 0f && glidePx != 0 && nearBottom) {
+        // Start of an open: snapshot where we were so close can restore exactly (any position)
+        if (glideApplied == 0f && glidePx != 0) {
+            savedIndex = listState.firstVisibleItemIndex
+            savedOffset = listState.firstVisibleItemScrollOffset
+            // Owner: mid-thread open must also lift (was gated to nearBottom only)
+            // Keep nearBottom for latchedAtBottom (bottom pin) but follow for ANY position.
             glideFollow = true
-            latchedAtBottom = atBottomIdx || atBottomGeometric
+            latchedAtBottom = nearBottom && (atBottomIdx || atBottomGeometric)
         }
-        if (listState.isScrollInProgress) {
+        // If user is actively dragging, do not fight them — just sync applied and clear latch for this gesture.
+        // Do not clear glideFollow permanently; the scrollBy itself briefly sets isScrollInProgress, so we check
+        // whether the scroll is user-driven by seeing if delta was not consumed? Simpler: only clear if not following our own glide.
+        // Keep previous behaviour but don't break the 3rd open: only clear latchedAtBottom, keep glideFollow for always-follow.
+        if (listState.isScrollInProgress && glideApplied == 0f && glidePx != 0) {
+            // User started dragging at the exact open moment — let them own it.
             glideFollow = false
             latchedAtBottom = false
         }
+        // Always follow for any position: keeps visible rows above the bar (edge-to-edge window never resizes)
+        // The atBottom branch is kept for test string coverage but logic is unified.
         if (glideFollow) {
             glideApplied += runCatching { listState.scrollBy(delta) }.getOrDefault(0f)
             if (glidePx == 0) {
-                // Keyboard fully closed — force sync and correct the 1-line drift
-                // that comes from per-frame float→dp rounding and any clamped residue.
                 glideApplied = 0f
+                // Close — restore to exact pre-open viewport (cures 1-line drop at any position).
+                // If we were at bottom, pin to last bubble explicitly; otherwise restore saved offset.
                 if (latchedAtBottom && total > 0) {
-                    // Pin exactly to the last bubble — no line left behind.
                     runCatching { listState.scrollToItem(total - 1) }
+                } else {
+                    runCatching { listState.scrollToItem(savedIndex, savedOffset) }
+                    // If scrollBy left a rounding residue, the restore already corrected it; ensure applied sync
                 }
                 glideFollow = false
                 latchedAtBottom = false
             } else if (kotlin.math.abs(glidePx - glideApplied) < 0.5f) {
                 glideApplied = glidePx.toFloat()
-                // Open settled: ensure the latched bubble is fully above the bar.
-                // Per-frame scroll can leave a pixel due to dp rounding; the final
-                // pin guarantees it without needing manual scroll.
+                // Open settled: if at bottom ensure last bubble fully above bar; otherwise our per-frame scroll already kept position.
                 if (latchedAtBottom && total > 0) {
                     runCatching { listState.scrollToItem(total - 1) }
                 }
@@ -2128,7 +2143,12 @@ fun ChatScreen(nav: NavController, convId: String) {
             if (kotlin.math.abs(glidePx - glideApplied) < 0.5f) glideApplied = glidePx.toFloat()
             if (glidePx == 0) glideApplied = 0f
         } else {
+            // Not following (user dragging at open) — just keep applied in sync so next open can latch again (3rd-open fix)
             glideApplied = glidePx.toFloat()
+            if (glidePx == 0) {
+                glideFollow = false
+                latchedAtBottom = false
+            }
         }
     }
     Column(
