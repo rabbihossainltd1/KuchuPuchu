@@ -366,6 +366,14 @@ fun ChatScreen(nav: NavController, convId: String) {
     // own origin converts the rows' root-space rects to local ones.
     var flyOx by remember { mutableStateOf(0f) }
     var flyOy by remember { mutableStateOf(0f) }
+    // Owner round 48: bubbles report their OWN rect to the waiting clone
+    // (the r46 row reporter handed the full-width row — every media clone
+    // flew huge and off-ratio). Only the queue head's rect counts.
+    LaunchedEffect(Unit) {
+        KpFlyTarget.report = { k, r ->
+            if (k == flyQueue.firstOrNull()?.key && k in flyHidden) flyTarget = r
+        }
+    }
     // Owner round 45 (item 5): r44-3's deselect confirm is retired — every
     // close clears the ticks (back/swipe both mean "get me out").
     // Owner round 32 (item 17): the attach panel's "view once" switch — armed
@@ -1136,13 +1144,13 @@ fun ChatScreen(nav: NavController, convId: String) {
     // Owner round 46: hide the just-painted echo row and queue its clone.
     // cloneType drives only the clone's FACE (TEXT pill / PHOTO / VIDEO /
     // DOC / VOICE) — the flight engine is the same for everyone.
-    fun launchFly(clientId: String, cloneType: String, body: String = "") {
+    fun launchFly(clientId: String, cloneType: String, body: String = "", media: String = "") {
         val from = sendFromRect
         sendFromRect = Rect.Zero
         if (from.width <= 0f || from.isEmpty) return
         flyTarget = null
         flyHidden.add(clientId)
-        flyQueue.add(FlySpec(clientId, cloneType, body, from))
+        flyQueue.add(FlySpec(clientId, cloneType, body, from, media))
     }
 
     fun sendText(body: String, kind: String = "TEXT") {
@@ -1324,7 +1332,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .also { row -> if (viewOnce) row.put("viewOnce", true) }
                 .put("createdAt", java.time.Instant.now().toString()),
         )
-        launchFly(clientId, "PHOTO")
+        launchFly(clientId, "PHOTO", media = dataUrl)
         // Owner round 32 (item 48): the jump-to-bottom is its own coroutine.
         // animateScrollToItem is a scroll MUTATION — starting the next one
         // cancels whichever coroutine owns the previous, with a
@@ -1468,7 +1476,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .also { if (docMeta != null) it.put("meta", docMeta) }
                 .also { if (viewOnce && !asDocument) it.put("viewOnce", true) },
         )
-        launchFly(clientId, if (mime.startsWith("video")) "VIDEO" else "DOC")
+        launchFly(clientId, if (mime.startsWith("video")) "VIDEO" else "DOC", body = name.ifBlank { "Document" }, media = file.absolutePath)
         scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }
         runCatching { KpSounds.send(ctx) }
         // Owner round 32 (item 34): the upload + POST run on Uploads' own
@@ -2013,27 +2021,29 @@ fun ChatScreen(nav: NavController, convId: String) {
     // animations read as a screen-wide twitch/dim on the owner's device
     // (and the reveal was exactly the "animation/effect" he asked about).
     val other = c?.optJSONObject("other")
-    // Owner round 47 (item 3+4): the r45b "pad the list bottom with the
-    // glide" idea failed on his device — growing contentPadding never
-    // moves already-laid rows (the latest message stayed buried under the
-    // bar) AND it opened a scrollable void past the list end (swiping
-    // flung the rows off the top). The padding is constant again; the
-    // glide's own per-frame DELTA scrolls the list itself by the same
-    // amount, so the rows physically ride the bar up on open and settle
-    // back down on close — but only while the thread is parked at the
-    // bottom. This also restores a VISIBLE glide on open (his #4: "on
-    // open nothing happens, close feels like it glides").
+    // Owner round 48 (item 1): the r47 follower moved its baseline BEFORE
+    // checking what actually scrolled. On open, the first frames run
+    // against a list not yet re-laid out for the growing pad — forward
+    // scrolls clamp to zero and those deltas were LOST, so the thread
+    // stayed put until he dragged it by hand. Backward (close) scrolls
+    // are never clamped, which is why close always glided. Count only
+    // what the list CONSUMED: unconsumed pixels retry on the spring's
+    // next frame, when the smaller viewport has track to scroll into.
     val glidePx = rememberImeGlidePx()
     val imeGlideDp = with(LocalDensity.current) { glidePx.toDp() }
-    var glideApplied by remember { mutableStateOf(0) }
+    var glideApplied by remember { mutableStateOf(0f) }
     LaunchedEffect(Unit) {
-        snapshotFlow { glidePx }.collect { cur ->
-            val delta = cur - glideApplied
-            glideApplied = cur
+        snapshotFlow { glidePx }.collect { curPx ->
+            val delta = curPx - glideApplied
+            if (delta == 0f) return@collect
             val info = listState.layoutInfo
-            if (delta != 0 && info.totalItemsCount > 0 &&
+            if (info.totalItemsCount > 0 &&
                 (info.visibleItemsInfo.lastOrNull()?.index ?: 0) >= info.totalItemsCount - 2) {
-                runCatching { listState.scrollBy(delta.toFloat()) }
+                glideApplied += runCatching { listState.scrollBy(delta) }.getOrDefault(0f)
+            } else {
+                // Away from the bottom: those pixels belong to nobody —
+                // drop them so returning down never slams.
+                glideApplied = curPx.toFloat()
             }
         }
     }
@@ -2567,9 +2577,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                             // is mid-flight; reports the landing rect live
                             // (the list may still be scrolling to bottom).
                             .alpha(if (rowKey in flyHidden) 0f else 1f)
-                            .onGloballyPositioned {
-                                if (rowKey in flyHidden && flyQueue.firstOrNull()?.key == rowKey) flyTarget = it.boundsInRoot()
-                            }
                             .graphicsLayer {
                                 if (flyLand.value != 1f) {
                                     scaleX = flyLand.value
@@ -2729,9 +2736,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                         Modifier
                             .fillMaxWidth()
                             .alpha(if (rowKey in flyHidden) 0f else 1f)
-                            .onGloballyPositioned {
-                                if (rowKey in flyHidden && flyQueue.firstOrNull()?.key == rowKey) flyTarget = it.boundsInRoot()
-                            }
                             .graphicsLayer {
                                 if (flyLand.value != 1f) {
                                     scaleX = flyLand.value
@@ -2825,7 +2829,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         }
                         flyTarget?.let { tgt ->
                             KpFlySend(
-                                spec = FlySpec(flyNow.key, flyNow.cloneType, flyNow.body, flyNow.from.translate(Offset(-ox, -oy))),
+                                spec = FlySpec(flyNow.key, flyNow.cloneType, flyNow.body, flyNow.from.translate(Offset(-ox, -oy)), flyNow.media),
                                 target = { (flyTarget ?: tgt).translate(Offset(-ox, -oy)) },
                                 accent = chatAccent(chatTheme),
                             ) {
@@ -3916,7 +3920,17 @@ private class FlySpec(
     val cloneType: String, // TEXT / PHOTO / VIDEO / DOC / VOICE
     val body: String,
     val from: Rect,
+    // Owner round 48: the flying clone IS the content — a photo carries its
+    // real data-URI, a video its local path, a doc its file name (body).
+    val media: String = "",
 )
+
+/** One bubble->clone reporting channel: any kind of bubble hands its live
+ *  on-screen rect here while its row hides mid-flight; the chat screen
+ *  sets the sink (queue head only). */
+private object KpFlyTarget {
+    var report: (String, Rect) -> Unit = { _, _ -> }
+}
 
 /** One trail dot: where it was born, how it drifts, when it dies. */
 private class FlyDot(
@@ -4055,23 +4069,46 @@ private fun KpFlySend(
                     modifier = Modifier.align(Alignment.CenterStart).padding(horizontal = 12.dp),
                 )
             "PHOTO" -> {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(Brush.linearGradient(listOf(Color(0xFF6A8CAF), Color(0xFF3D5872)))),
-                ) {
-                    Icon(Icons.Filled.Image, null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.align(Alignment.Center).size(wDp / 3))
+                // Owner round 48: the clone shows the REAL picture (the
+                // egg hatches into the shot, fit inside the bubble's own
+                // rect) — the fake gradient tile is dead.
+                val shot = rememberBitmap(spec.media.takeIf { it.startsWith("data:") || it.startsWith("file://") }, 720)
+                if (shot != null) {
+                    Image(shot, "Photo", Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
+                } else {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(Brush.linearGradient(listOf(Color(0xFF6A8CAF), Color(0xFF3D5872)))),
+                    ) {
+                        Icon(Icons.Filled.Image, null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.align(Alignment.Center).size(wDp / 3))
+                    }
                 }
             }
             "VIDEO" -> {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(Brush.linearGradient(listOf(Color(0xFF4A4F5A), Color(0xFF23262C)))),
-                ) {
-                    Box(Modifier.align(Alignment.Center).size(wDp / 3).clip(CircleShape).background(Color.White.copy(alpha = 0.9f))) {
-                        Icon(Icons.Filled.PlayArrow, null, tint = Color(0xFF23262C), modifier = Modifier.align(Alignment.Center).size(wDp / 5))
+                // The clip's REAL first frame (local file, one bounded
+                // decode) under the play badge — no clip-art.
+                val frame by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(null, spec.media) {
+                    if (spec.media.isNotBlank()) {
+                        value = withContext(Dispatchers.IO) {
+                            runCatching {
+                                val r = android.media.MediaMetadataRetriever()
+                                r.setDataSource(spec.media)
+                                val b = r.getFrameAtTime(0L, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                                r.release()
+                                b
+                            }.getOrNull()
+                        }
                     }
+                }
+                frame?.let { shot ->
+                    Image(shot.asImageBitmap(), "Video", Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                }
+                if (frame == null) {
+                    Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color(0xFF4A4F5A), Color(0xFF23262C)))))
+                }
+                Box(Modifier.align(Alignment.Center).size(wDp / 3).clip(CircleShape).background(Color.White.copy(alpha = 0.9f))) {
+                    Icon(Icons.Filled.PlayArrow, null, tint = Color(0xFF23262C), modifier = Modifier.align(Alignment.Center).size(wDp / 5))
                 }
             }
             "VOICE" -> {
@@ -5346,7 +5383,7 @@ private fun MessageRow(
                 )
             Box(
                 Modifier
-                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
+                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()); KpFlyTarget.report(m.optString("clientId").ifBlank { m.optString("id") }, it.boundsInRoot()) }
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
                     // Owner round 13b: the hand-rolled awaitEachGesture fought
                     // the list's vertical scrolling (jank + crash on device).
@@ -5891,7 +5928,7 @@ private fun VideoMessageRow(
                 .offset { IntOffset(replyOffset.roundToInt(), 0) }
                 .shadow(2.dp, RoundedCornerShape(12.dp))
                 .clip(RoundedCornerShape(12.dp))
-                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
+                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()); KpFlyTarget.report(m.optString("clientId").ifBlank { m.optString("id") }, it.boundsInRoot()) }
                 .background(Color(0xFF0B1220))
                 .border(1.dp, if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444), RoundedCornerShape(12.dp))
                 .pointerInput(m.optString("id")) {
@@ -6109,7 +6146,7 @@ private fun ViewOnceRow(
             Box(
                 Modifier
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
+                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()); KpFlyTarget.report(m.optString("clientId").ifBlank { m.optString("id") }, it.boundsInRoot()) }
                     .widthIn(max = 240.dp)
                     .then(
                         if (video) {
@@ -6340,7 +6377,7 @@ private fun ImageMessageRow(
         Box(
             Modifier
                 .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
+                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()); KpFlyTarget.report(m.optString("clientId").ifBlank { m.optString("id") }, it.boundsInRoot()) }
                 .widthIn(max = 120.dp) // Owner round 25 / 32 item 29 / 33 item 18: smaller inline preview
                 // Owner round 10: photos float too — 3D lift + the round-8
                 // thin border.
@@ -6651,7 +6688,7 @@ private fun AlbumMessageRow(
             Box(
                 Modifier
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
+                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()); KpFlyTarget.report(m.optString("clientId").ifBlank { m.optString("id") }, it.boundsInRoot()) }
                     .width(albumWidth)
                     .shadow(2.dp, shape)
                     .clip(shape)

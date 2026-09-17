@@ -52,6 +52,12 @@ export type Env = {
    *  misconfigured deploy must break login loudly, never silently skip the
    *  audience check. */
   GOOGLE_WEB_CLIENT_ID?: string;
+  /** Cloudflare account id — the Workers-AI rescue brain's run route (r48). */
+  CF_ACCOUNT?: string;
+  /** Cloudflare API token with Workers-AI run rights (r48 rescue brain). */
+  CF_AI_TOKEN?: string;
+  /** Gemini key kept from the pre-HF era — the last-resort brain (r48). */
+  GEMINI_API_KEY?: string;
   /** Hugging Face token — since the 2026-09-16 migration EVERY KuchuPuchu AI
    *  call (chat text, photo reading, picture create/edit, voice notes) runs
    *  on HF Inference Providers and nothing else. Unset ⇒ the welcome/reply
@@ -679,7 +685,25 @@ const AI_WELCOME_FALLBACK =
  *  photo and SD3-medium draws the requested change from that description
  *  (the old schnell safety net degraded the same way). */
 const HF_ROUTER = "https://router.huggingface.co";
-const HF_CHAT_MODELS = ["moonshotai/Kimi-K2-Instruct", "deepseek-ai/DeepSeek-V3-0324"] as const;
+// Owner round 48 (item 2 — "shob message e can't reach its brain"): the
+// account's HF credit ran out (error_log showed hf-stt 402) AND the old
+// failover id was retired by the router, so chat had one working model and
+// zero visibility — hfChat never logged a word. The chain now tracks ids
+// verified live on router.huggingface.co/v1/models (fetched 2026-09-17),
+// and every exhausted chain writes its verdicts to error_log.
+const HF_CHAT_MODELS = [
+  "moonshotai/Kimi-K2-Instruct",
+  "moonshotai/Kimi-K2.5",
+  "deepseek-ai/DeepSeek-V3.2",
+  "meta-llama/Llama-3.3-70B-Instruct",
+] as const;
+/** Rescue brains: Workers AI (free quota idle since the HF move), then the
+ *  Gemini key still living as a secret. The reply path never plays dead
+ *  over a single vendor's meter again. */
+const CF_CHAT_MODELS = [
+  "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  "@cf/meta/llama-3.1-8b-instruct",
+] as const;
 const HF_VISION_MODEL = "Qwen/Qwen3.8-27B";
 const HF_IMAGE_MODEL = "stabilityai/stable-diffusion-3-medium-diffusers";
 const HF_STT_MODEL = "openai/whisper-large-v3-turbo";
@@ -702,6 +726,7 @@ async function hfChat(
 ): Promise<string | null> {
   if (!env.HF_TOKEN) return null;
   const started = Date.now();
+  const lastErrs: string[] = [];
   for (const model of models) {
     const remaining = HF_CALL_BUDGET_MS - (Date.now() - started);
     if (remaining < 4_000) break; // no point starting a call that can't finish
@@ -712,7 +737,10 @@ async function hfChat(
         body: JSON.stringify({ model, messages, max_tokens: maxTokens }),
         signal: AbortSignal.timeout(Math.min(remaining, perCallMs)),
       });
-      if (!res.ok) continue;
+      if (!res.ok) {
+        lastErrs.push(`${model} ${res.status}`);
+        continue;
+      }
       const data = (await res.json()) as {
         choices?: { message?: { content?: string | { type?: string; text?: string }[] } }[];
       };
@@ -723,11 +751,134 @@ async function hfChat(
         .trim()
         .slice(0, 600);
       if (text) return text;
-    } catch {
-      /* next model if budget allows, then the caller's fallback */
+      lastErrs.push(`${model} empty`);
+    } catch (e) {
+      lastErrs.push(`${model} ${e instanceof Error ? e.name : "err"}`);
     }
   }
+  if (lastErrs.length) {
+    // Chat alone failed silently (image/stt already logged) — never again.
+    try {
+      await env.DB.prepare("INSERT INTO error_log (id, stack, created_at) VALUES (?, ?, ?)")
+        .bind(crypto.randomUUID(), `hf-chat ${lastErrs.join(" ; ")}`.slice(0, 1900), nowIso())
+        .run();
+    } catch {}
+  }
   return null;
+}
+
+/** Owner round 48 (item 2): the rescue brain. Cloudflare Workers AI —
+ *  the free neuron quota sat idle after every feature moved to HF — then
+ *  the Gemini key kept as a secret. Text answers only; picture/voice turn
+ *  still owns their honest HF-only error paths. */
+async function cfAiChat(
+  env: Env,
+  messages: HfChatMessage[],
+  maxTokens = 120,
+): Promise<string | null> {
+  if (!env.CF_AI_TOKEN || !env.CF_ACCOUNT) return null;
+  const errs: string[] = [];
+  for (const model of CF_CHAT_MODELS) {
+    try {
+      const res = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT}/ai/run/${model}`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            Authorization: `Bearer ${env.CF_AI_TOKEN}`,
+          },
+          body: JSON.stringify({
+            messages: messages.map((m) => ({
+              role: m.role === "assistant" || m.role === "system" ? m.role : "user",
+              content: typeof m.content === "string" ? m.content : "",
+            })),
+            max_tokens: maxTokens,
+          }),
+          signal: AbortSignal.timeout(12_000),
+        },
+      );
+      if (!res.ok) {
+        errs.push(`${model} ${res.status}`);
+        continue;
+      }
+      const data = (await res.json()) as { result?: { response?: string } };
+      const text = (data.result?.response ?? "").trim().slice(0, 600);
+      if (text) return text;
+      errs.push(`${model} empty`);
+    } catch (e) {
+      errs.push(`${model} ${e instanceof Error ? e.name : "err"}`);
+    }
+  }
+  if (errs.length) {
+    try {
+      await env.DB.prepare("INSERT INTO error_log (id, stack, created_at) VALUES (?, ?, ?)")
+        .bind(crypto.randomUUID(), `cf-ai-chat ${errs.join(" ; ")}`.slice(0, 1900), nowIso())
+        .run();
+    } catch {}
+  }
+  return null;
+}
+
+async function geminiChat(
+  env: Env,
+  messages: HfChatMessage[],
+  maxTokens = 120,
+): Promise<string | null> {
+  if (!env.GEMINI_API_KEY) return null;
+  const prompt = messages
+    .map(
+      (m) =>
+        `${m.role === "assistant" ? "Assistant" : "User"}: ${typeof m.content === "string" ? m.content : ""}`,
+    )
+    .join("\n");
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${env.GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 },
+        }),
+        signal: AbortSignal.timeout(12_000),
+      },
+    );
+    if (!res.ok) {
+      try {
+        await env.DB.prepare("INSERT INTO error_log (id, stack, created_at) VALUES (?, ?, ?)")
+          .bind(crypto.randomUUID(), `gemini-chat ${res.status}`, nowIso())
+          .run();
+      } catch {}
+      return null;
+    }
+    const data = (await res.json()) as {
+      candidates?: { content?: { parts?: { text?: string }[] } }[];
+    };
+    const text = (data.candidates?.[0]?.content?.parts ?? [])
+      .map((p) => p.text ?? "")
+      .join("")
+      .trim()
+      .slice(0, 600);
+    return text || null;
+  } catch {
+    return null;
+  }
+}
+
+/** The one brain for every assistant text answer: HF chain → Workers AI →
+ *  Gemini. The setup line still covers a tokenless deploy. */
+async function aiBrain(
+  env: Env,
+  messages: HfChatMessage[],
+  maxTokens = 160,
+): Promise<string | null> {
+  const hf = await hfChat(env, messages, maxTokens);
+  if (hf) return hf;
+  const cf = await cfAiChat(env, messages, maxTokens);
+  if (cf) return cf;
+  return geminiChat(env, messages, maxTokens);
 }
 
 async function hfWelcomeText(env: Env, displayName: string | null): Promise<string | null> {
@@ -1619,7 +1770,7 @@ async function sendAiReply(
         [HF_VISION_MODEL],
       );
       if (!answer) {
-        answer = await hfChat(
+        answer = await aiBrain(
           env,
           [
             {
@@ -1635,7 +1786,7 @@ async function sendAiReply(
         );
       }
     } else {
-      answer = await hfChat(
+      answer = await aiBrain(
         env,
         [{ role: "user", content: prompt + voicePrompt + photoPrompt }],
         900,

@@ -4,6 +4,11 @@ compatibility_date = "2025-08-01"
 account_id = "92081fac7caf54a46a756c382081544b"
 workers_dev = true
 
+[vars]
+# Owner round 48: the Workers-AI rescue brain needs the account id at
+# runtime (the token stays a secret; this is config, not a secret).
+CF_ACCOUNT = "92081fac7caf54a46a756c382081544b"
+
 # One-minute cron: reap stale RINGING calls so a call nobody polls (both phones
 # backgrounded) still flips to MISSED and fires the missed-call push — the
 # "X is calling card stuck, no missed call" bug.

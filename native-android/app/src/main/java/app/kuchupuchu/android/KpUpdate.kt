@@ -316,29 +316,51 @@ object KpUpdate {
         ctx.getSharedPreferences("kp_update", Context.MODE_PRIVATE).edit()
             .putBoolean("inflight", true)
             .putLong("at", System.currentTimeMillis())
+            .putInt("expect", available?.first ?: 0)
             .remove("lastMsg")
+            .remove("lastCode")
+            .remove("settled")
             .apply()
     }
 
     fun noteStatus(ctx: Context, code: Int, msg: String?) {
-        // Only PENDING_USER_ACTION is non-terminal — everything else ends it.
+        // Owner round 48 (in-app update): a terminal status used to flip
+        // "inflight" off — so the next launch's explainer read a clean
+        // state and said NOTHING, even though the verdict was right here
+        // ("install e click korle app bondho hoye jai, abar update chai,
+        // kono karon bole na"). "settled" keeps the flight alive until the
+        // next launch consumes — and EXPLAINS — it.
         ctx.getSharedPreferences("kp_update", Context.MODE_PRIVATE).edit()
             .putInt("lastCode", code)
             .putString("lastMsg", msg ?: "")
-            .putBoolean("inflight", code == PackageInstaller.STATUS_PENDING_USER_ACTION)
+            .putBoolean("settled", code != PackageInstaller.STATUS_PENDING_USER_ACTION)
             .apply()
     }
 
-    /** Next launch after a commit: what happened? Null = nothing to say. */
+    /** Next launch after a commit: what happened? Null = nothing to say.
+     *  A SUCCESS leaves no message; a failure — whether the broadcast
+     *  landed or the process died mid-install — explains itself with the
+     *  system's own words AND re-arms the sheet with the still-downloaded
+     *  APK, so the retry never re-downloads the same build. */
     fun consumeInstallResult(ctx: Context): String? =
         runCatching {
             val prefs = ctx.getSharedPreferences("kp_update", Context.MODE_PRIVATE)
             if (!prefs.getBoolean("inflight", false)) return@runCatching null
-            prefs.edit().putBoolean("inflight", false).apply()
+            prefs.edit().putBoolean("inflight", false).remove("settled").apply()
             if (prefs.getInt("lastCode", -999) == PackageInstaller.STATUS_SUCCESS) return@runCatching null
+            val expect = prefs.getInt("expect", 0)
+            // Already on that build (or newer) — the install did land.
+            if (expect in 1..installedVersionCode(ctx)) return@runCatching null
             val msg = prefs.getString("lastMsg", "").orEmpty()
+            // The file survived (only success deletes it): offer the retry.
+            if (expect > 0) {
+                val url = prefs.getString("url", "").orEmpty()
+                if (url.isNotBlank()) available = expect to url
+                val apk = File(ctx.filesDir, "kp-update.apk")
+                if (apk.exists() && apk.length() > 0) ready = apk
+            }
             if (msg.isNotBlank()) "Update didn't install: $msg"
-            else "The update was interrupted — tap Update to try again."
+            else "The update was interrupted — tap Install to try again."
         }.getOrNull()
 
     /** PackageInstaller session — Android shows its confirm sheet ON TOP of

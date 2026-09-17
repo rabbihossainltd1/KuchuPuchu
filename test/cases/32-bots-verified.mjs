@@ -596,10 +596,16 @@ const convBetween = (db, a, b) =>
 
   // ---- Owner round 7 (2026-09-04) ----
   check(
-    "AI replies: Kimi-K2-Instruct first + DeepSeek-V3 failover (HF migration)",
+    "AI replies: live HF chain (Kimi-K2 → Kimi-K2.5 → DeepSeek-V3.2 → Llama-3.3-70B) then Workers-AI then Gemini rescue — the HF credit running out (hf-stt 402) used to take EVERY reply down silently; chain verdicts now land in error_log (r48)",
     src.includes('"moonshotai/Kimi-K2-Instruct"') &&
-      src.includes('"deepseek-ai/DeepSeek-V3-0324"') &&
-      src.includes("const HF_CHAT_MODELS"),
+      src.includes('"moonshotai/Kimi-K2.5"') &&
+      src.includes('"deepseek-ai/DeepSeek-V3.2"') &&
+      src.includes('"meta-llama/Llama-3.3-70B-Instruct"') &&
+      src.includes("const HF_CHAT_MODELS") &&
+      src.includes("async function cfAiChat(") &&
+      src.includes("async function geminiChat(") &&
+      src.includes("async function aiBrain(") &&
+      src.includes("`hf-chat ${lastErrs"),
   );
   check(
     "bot-conversation reset endpoint exists (bot chats only)",
@@ -977,7 +983,8 @@ const convBetween = (db, a, b) =>
       !chat.includes("snapshotFlow { kpIme") &&
       !chat.includes("KpImeAutoScroll") &&
       chat.includes("snapshotFlow { glidePx }") &&
-      chat.includes("listState.scrollBy(delta.toFloat())") &&
+      chat.includes("listState.scrollBy(delta)") &&
+      chat.includes("glideApplied +=") &&
       chat.includes(">= info.totalItemsCount - 2") &&
       chat.includes("top = 6.dp, bottom = 6.dp),") &&
       !chat.includes("bottom = 6.dp + imeGlideDp") &&
@@ -6457,14 +6464,17 @@ const convBetween = (db, a, b) =>
         chat.includes("fun launchFly(clientId: String, cloneType: String") &&
         (chat.match(/launchFly\(clientId, /g) || []).length >= 4 &&
         chat.includes('launchFly(clientId, "TEXT", body)') &&
-        chat.includes('launchFly(clientId, "PHOTO")') &&
+        chat.includes('launchFly(clientId, "PHOTO", media = dataUrl)') &&
+        chat.includes("rememberBitmap(spec.media.takeIf") &&
         chat.includes('launchFly(clientId, "VOICE")') &&
         chat.includes("sendFromRect = Rect.Zero") &&
         chat.includes("tween(620, easing = LinearEasing)") &&
         chat.includes("(-56).dp.toPx()") &&
         chat.includes("e > 0.45f") &&
         (chat.match(/\.alpha\(if \(rowKey in flyHidden\) 0f else 1f\)/g) || []).length === 2 &&
-        chat.includes("flyQueue.firstOrNull()?.key == rowKey) flyTarget = it.boundsInRoot()") &&
+        chat.includes("KpFlyTarget.report(") &&
+        chat.includes("private object KpFlyTarget") &&
+        chat.includes('val media: String = "",') &&
         chat.includes("onGloballyPositioned { onFieldRect(it.boundsInRoot()) }") &&
         chat.includes("onGloballyPositioned { onActionRect(it.boundsInRoot()) }") &&
         chat.includes("flyLanded == rowKey") &&
@@ -8603,9 +8613,12 @@ const convBetween = (db, a, b) =>
         src.includes("const drawn = await hfImage(env, parts, scene, clean);") &&
         !src.includes("geminiComplete(") &&
         !src.includes("cfImage(") &&
-        !src.includes("generativelanguage") &&
-        !src.includes("GEMINI_API_KEY") &&
-        !src.includes("CF_AI_TOKEN") &&
+        // Owner round 48 (item 2): rescue brains — Gemini + Workers AI stay
+        // TEXT-ONLY fallbacks behind the live HF chain; picture/voice keep
+        // their own HF-only honest failure paths.
+        src.includes("gemini-flash-latest:generateContent") &&
+        src.includes("GEMINI_API_KEY?: string") &&
+        src.includes("CF_AI_TOKEN?: string") &&
         src.includes("async function aiPhotoVisionPart(") &&
         src.includes("const AI_PHOTO_MAX_BYTES = 7_000_000;"),
     );
