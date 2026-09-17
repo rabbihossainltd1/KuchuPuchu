@@ -1,8 +1,5 @@
-package app.kuchupuchu.android
-
 @file:Suppress("UnusedContentLambdaTargetStateParameter")
-
-import android.annotation.SuppressLint
+package app.kuchupuchu.android
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.compose.BackHandler
