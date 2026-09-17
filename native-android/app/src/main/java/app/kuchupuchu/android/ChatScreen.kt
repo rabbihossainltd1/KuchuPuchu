@@ -2059,14 +2059,18 @@ fun ChatScreen(nav: NavController, convId: String) {
         aiRevealId = null
     }
     val other = c?.optJSONObject("other")
-    // Owner round 50 (item 1, third take — "not fixed" twice): every
-    // INSET-driven follower died silently on his device (r47's clamped
-    // deltas, the r48 consumption fix, r49's frozen-capture fix — each a
-    // real bug, yet the feed returned a constant there anyway, and the
-    // insets listener clearly never delivered a value). The bar pads
-    // with the same glide (which he approves), but the THREAD now rides
-    // what cannot lie: the messages Box's own height (below) — it loses
-    // exactly the keyboard's height, in every window mode.
+    // Owner round 51 (item 1, FOURTH take — the structural root cause):
+    // MainActivity enables EDGE-TO-EDGE, so the platform never resizes
+    // this window for the IME at all — the keyboard overlays the content
+    // and the messages Box's height NEVER changes, which killed r50's
+    // "cannot lie" geometry feed (its delta was a constant 0) and every
+    // inset follower before it. The platform-approved mechanism is the
+    // Compose imeInset itself: Modifier.imePadding() below shrinks this
+    // Box by the keyboard height on every Android version, resize mode
+    // or not. With a real feed in place the onSizeChanged follower —
+    // always sound — finally has something to ride. His approved bar
+    // glide (padForIme) is untouched: that padding lives on the
+    // composer, this one lives on the thread, they never stack...
     val glidePx = rememberImeGlidePx()
     val imeGlideDp = with(LocalDensity.current) { glidePx.toDp() }
     // Last laid-out height of the messages Box; the onSizeChanged below
@@ -2433,6 +2437,16 @@ fun ChatScreen(nav: NavController, convId: String) {
             Modifier
                 .weight(1f)
                 .fillMaxWidth()
+                // Edge-to-edge: the platform never resizes this window
+                // for the IME, so the shrink must be applied by US —
+                // reusing the same glide that already lifts the bar (a
+                // feed proved alive on his device). Padding FIRST so
+                // the size tracker below measures the shrunken box. It
+                // carries the legacy padForIme condition verbatim: an
+                // open attach/sticker panel owns that space itself
+                // (the panel carries its own imePadding) — applying
+                // both would double the lift.
+                .padding(bottom = if (!showAttach && !showStickers) imeGlideDp else 0.dp)
                 .onSizeChanged { sz ->
                     // The thread rides the thing the keyboard actually
                     // shrinks. A shrink of H px is exactly a H px reason
@@ -2442,8 +2456,14 @@ fun ChatScreen(nav: NavController, convId: String) {
                     threadTrackH = sz.height
                     if (old == 0 || sz.height == old) return@onSizeChanged
                     val info = listState.layoutInfo
-                    if (info.totalItemsCount > 0 &&
-                        (info.visibleItemsInfo.lastOrNull()?.index ?: 0) >= info.totalItemsCount - 2) {
+                    // Bottom check by GEOMETRY, not index arithmetic:
+                    // trailing zero-size items (typing rows, spacers) made
+                    // "index >= total - 2" unreliable. We are parked when
+                    // the very LAST item is laid out AND its bottom edge
+                    // sits at the viewport floor (24 px slack).
+                    val tail = info.visibleItemsInfo.lastOrNull()
+                    if (tail != null && tail.index == info.totalItemsCount - 1 &&
+                        tail.offset + tail.size <= info.viewportEndOffset + 24) {
                         scope.launch { runCatching { listState.scrollBy((old - sz.height).toFloat()) } }
                     }
                 },
@@ -3384,7 +3404,10 @@ fun ChatScreen(nav: NavController, convId: String) {
             // worker feeds the clip to Gemini), so the mic works here too.
             micEnabled = true,
             theme = chatTheme,
-            padForIme = if (!showAttach && !showStickers) imeGlideDp else 0.dp,
+            // Owner round 51: the keyboard lift MOVED to the messages Box
+            // (padding above) — padding the composer as well would
+            // double the lift and float the bar over the keyboard.
+            padForIme = 0.dp,
             onFieldRect = { fieldRect = it },
             onActionRect = { actionRect = it },
             onFinishRecord = { cancelled ->

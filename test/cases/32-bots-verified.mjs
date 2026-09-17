@@ -978,6 +978,23 @@ const convBetween = (db, a, b) =>
       !chat.includes(".background(if (cancelArmed) Color.White else Gold)"),
   );
   check(
+    "r51: the updater RELAUNCHES the app after an update install (setDontKillApp is API 34+ — below it a full install KILLS the process and nothing brought it back; MY_PACKAGE_REPLACED reaches the NEW build and starts the launcher again)",
+    readFileSync("native-android/app/src/main/AndroidManifest.xml", "utf8").includes(
+      "android.intent.action.MY_PACKAGE_REPLACED",
+    ) &&
+      readFileSync("native-android/app/src/main/AndroidManifest.xml", "utf8").includes(
+        ".KpRelaunchReceiver",
+      ) &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/KpUpdate.kt",
+        "utf8",
+      ).includes("class KpRelaunchReceiver") &&
+      readFileSync(
+        "native-android/app/src/main/java/app/kuchupuchu/android/KpUpdate.kt",
+        "utf8",
+      ).includes("getLaunchIntentForPackage(ctx.packageName)"),
+  );
+  check(
     "keyboard glide: ONE shared spring on the composer pad AND the thread RIDES it — a per-frame delta scroll at bottom (r45b's padding version buried the latest row and opened a scrollable void past the end; padding is constant again) — open glides like close, no 250 ms teleport",
     chat.includes("private fun rememberImeGlidePx(): Int") &&
       !chat.includes("snapshotFlow { kpIme") &&
@@ -985,10 +1002,15 @@ const convBetween = (db, a, b) =>
       chat.includes(".onSizeChanged { sz ->") &&
       chat.includes("threadTrackH") &&
       chat.includes("listState.scrollBy((old - sz.height).toFloat())") &&
-      chat.includes(">= info.totalItemsCount - 2") &&
+      // Owner round 51: edge-to-edge means the platform NEVER shrinks
+      // this window for the IME — the box pads itself with the glide
+      // (the feed proved alive by the approved bar motion), and the
+      // bottom check is geometric, not index arithmetic.
+      chat.includes(".padding(bottom = if (!showAttach && !showStickers) imeGlideDp else 0.dp)") &&
+      chat.includes("tail.offset + tail.size <= info.viewportEndOffset + 24") &&
+      chat.includes("padForIme = 0.dp,") &&
       chat.includes("top = 6.dp, bottom = 6.dp),") &&
       !chat.includes("bottom = 6.dp + imeGlideDp") &&
-      chat.includes("padForIme = if (!showAttach && !showStickers) imeGlideDp else 0.dp,") &&
       // Owner round 44: open glides like close. Owner round 45 (item 3):
       // a critical spring — frame streams are tracked live, single jumps
       // glide (a tween restart left a jelly tail on the close).
@@ -8431,7 +8453,7 @@ const convBetween = (db, a, b) =>
         chat.includes("if (EmojiRepo.isCustomId(st)) CustomEmojiOrFallback(st)"),
     );
     check(
-      "r33-11c: the panel carries the imePadding and goes compact (search row + one 44 dp LazyRow of results, no bottom row) while the keyboard is up (isImeVisible read in composition via a tiny @OptIn helper); the composer skips its own imePadding while a panel is open (padForIme = !showAttach && !showStickers); pack-name search (heart → Hearts)",
+      "r33-11c: the panel carries the imePadding and goes compact (search row + one 44 dp LazyRow of results, no bottom row) while the keyboard is up (isImeVisible read in composition via a tiny @OptIn helper); the ime glide lives on the messages Box now (r51) and is skipped while a panel is open (the panel carries its own imePadding); pack-name search (heart → Hearts)",
       sticker.includes("private fun imeShowing(): Boolean = WindowInsets.isImeVisible") &&
         sticker.includes("val searching = imeShowing()") &&
         sticker.includes(".background(Card)\n            .imePadding()\n") &&
@@ -8445,7 +8467,7 @@ const convBetween = (db, a, b) =>
         chat.includes("padForIme: Dp = 0.dp,") &&
         // Owner round 45 (item 3): the pad is the shared glide value.
         chat.includes(".padding(bottom = padForIme)") &&
-        chat.includes("padForIme = if (!showAttach && !showStickers) imeGlideDp else 0.dp,"),
+        chat.includes(".padding(bottom = if (!showAttach && !showStickers) imeGlideDp else 0.dp)"),
     );
   }
   // Item 14: a person in the phone book must never show "Add contact".

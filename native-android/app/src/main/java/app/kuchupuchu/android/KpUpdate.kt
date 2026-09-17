@@ -405,6 +405,28 @@ object KpUpdate {
 }
 
 /**
+ * Owner round 51 (item 2): relaunch the app after a successful update.
+ * setDontKillApp only exists on API 34+; below it a full install KILLS the
+ * process mid-replacement and NOTHING brought the user back ("system
+ * update window te update dile app theke ber hoye jai"). The platform
+ * delivers ACTION_MY_PACKAGE_REPLACED to the NEW build right after the
+ * swap; this receiver — declared in the manifest so it needs no running
+ * process — starts the launcher activity again. The update succeeded
+ * every time he saw this; the app just never came back to show it.
+ */
+class KpRelaunchReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(ctx: Context, intent: Intent) {
+        if (intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
+        runCatching {
+            @Suppress("UnsafeIntentLaunch")
+            ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
+                ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                ?.let { ctx.startActivity(it) }
+        }
+    }
+}
+
+/**
  * Installer session status receiver.
  *
  * Owner round 32 (item 1C): the system's "Install this update?" sheet is NOT
