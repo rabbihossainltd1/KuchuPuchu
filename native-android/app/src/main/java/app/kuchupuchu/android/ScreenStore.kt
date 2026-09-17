@@ -25,6 +25,15 @@ object ScreenStore {
     val hiddenMsgIds = mutableSetOf<String>()
 
     /**
+     * Message ids that have already finished their dust-out animation
+     * (Owner round 34+). Kept process-wide like hiddenMsgIds so revisiting
+     * a chat never re-shows a DELETED row that already vanished — the
+     * animation must play exactly once per id, not on every open.
+     * Not persisted to disk (a fresh install may re-animate once).
+     */
+    val vanishedOnceIds = mutableSetOf<String>()
+
+    /**
      * requestId -> decision for login-approval cards (Owner round 3,
      * 2026-09-04): a decision sticks for the whole app session even after
      * the message row leaves composition, so Accept/Decline never reappear

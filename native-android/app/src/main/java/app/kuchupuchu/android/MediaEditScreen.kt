@@ -1252,7 +1252,7 @@ private fun MediaEditItemScreen(
                                 // the clip into a WYSIWYG still (the export's
                                 // exact pixels for this frame); the live player
                                 // rests underneath, paused. Ink rides either way.
-                                StatusTrimPreview(pickedUri, start, end, paused = stillMode, scrubAt = scrub, seekTo = seekTo, onSeekDone = { seekTo = null; scrub = null }, onPosition = { playAt = it })
+                                StatusTrimPreview(pickedUri, start, end, paused = stillMode, scrubAt = scrub, seekTo = seekTo, onSeekDone = { seekTo = null }, onPosition = { playAt = it })
                                 val still = videoStill
                                 if (stillMode && still != null) {
                                     Image(still, "Edited frame", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
@@ -1367,13 +1367,13 @@ private fun MediaEditItemScreen(
                         Modifier
                             .size(26.dp)
                             .clip(CircleShape)
-                            .background(if (isSelected == true) Color.White else Color(0x33FFFFFF))
+                            .background(if (isSelected == true) Color.White else Color.Transparent)
                             .border(1.5.dp, Color.White, CircleShape)
                             .clickable { onToggleSelect.invoke() },
                         contentAlignment = Alignment.Center,
                     ) {
                         if (isSelected == true) {
-                            Icon(Icons.Filled.Check, contentDescription = "Selected", tint = Color.Black, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Filled.Check, contentDescription = "Selected", tint = ActionBlue, modifier = Modifier.size(16.dp))
                         }
                     }
                 }
@@ -1560,7 +1560,6 @@ private fun MediaEditItemScreen(
                         positionMs = playAt,
                         onSeek = {
                             seekTo = it
-                            scrub = it
                             playAt = it
                         },
                     )
@@ -1664,7 +1663,7 @@ private fun MediaEditItemScreen(
                                     Box(
                                         Modifier
                                             .align(Alignment.TopEnd)
-                                            .offset(x = 6.dp, y = (-6).dp)
+                                            .offset(x = 4.dp, y = (-4).dp)
                                             .size(18.dp)
                                             .clip(CircleShape)
                                             .background(Color(0xFFE53935))
@@ -1677,6 +1676,13 @@ private fun MediaEditItemScreen(
                                             fontSize = 10.sp,
                                             fontWeight = FontWeight.Bold,
                                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                            style = androidx.compose.ui.text.TextStyle(
+                                                platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false),
+                                                lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
+                                                    alignment = androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
+                                                    trim = androidx.compose.ui.text.style.LineHeightStyle.Trim.Both,
+                                                ),
+                                            ),
                                             modifier = Modifier.align(Alignment.Center),
                                         )
                                     }

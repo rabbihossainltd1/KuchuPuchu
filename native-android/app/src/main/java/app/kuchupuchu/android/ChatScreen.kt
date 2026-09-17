@@ -7,7 +7,6 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -248,7 +247,7 @@ fun ChatScreen(nav: NavController, convId: String) {
     val vanishingIds = remember { mutableStateListOf<String>() }
     // Owner round 34 (item 3): ids whose vanish already played (a departed
     // row animates once, never loops).
-    val vanishedOnce = remember { HashSet<String>() }
+    val vanishedOnce = remember { ScreenStore.vanishedOnceIds } // val vanishedOnce = remember { HashSet<String>() }
     // Owner round 13: swipe a bubble right to quote-reply to it.
     var replyTo by remember { mutableStateOf<JSONObject?>(null) }
     // Owner round 15: swipe-to-reply now also OPENS the keyboard — a bump
@@ -2634,7 +2633,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
+                contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 6.dp, bottom = if (showAttach) 346.dp else 6.dp),
             ) {
                 items(
                     groupedMsgs,
@@ -3456,7 +3455,6 @@ fun ChatScreen(nav: NavController, convId: String) {
             // follows by SCROLL on the same glide above; the Box itself
             // keeps no padding (that's what painted the black band).
             padForIme = if (!showAttach && !showStickers) imeGlideDp else 0.dp,
-            attachOpen = showAttach,
             onFieldRect = { fieldRect = it },
             onActionRect = { actionRect = it },
             onFinishRecord = { cancelled ->
@@ -3745,8 +3743,6 @@ private fun Composer(
     // Owner round 45 (item 3): a Dp now — the shared glide value (0 while
     // a panel is open keeps the bar down over it).
     padForIme: Dp = 0.dp,
-    // Polish 2026-09-18b: attach panel needs extra bottom so last row not hidden
-    attachOpen: Boolean = false,
     // Owner round 46: report the input pill's + the mic/send slot's rect so
     // the fly-send clone launches from exactly what the user touched.
     onFieldRect: (Rect) -> Unit = {},
@@ -3789,7 +3785,6 @@ private fun Composer(
             // wallpaper (which spans the whole screen) shows through; only
             // the input pill and the send button keep their own surfaces.
             .padding(bottom = padForIme)
-            .then(if (attachOpen) Modifier.padding(bottom = 340.dp) else Modifier)
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -4855,17 +4850,17 @@ private fun LoginApprovalMessage(m: JSONObject) {
  */
 private fun rememberImeGlidePx(): Int {
     val view = LocalView.current
-    var targetPx by remember { mutableStateOf(0) }
+    var targetPx by remember { mutableStateOf(0f) }
     DisposableEffect(view) {
         val tree = view.viewTreeObserver
         val listener =
             ViewTreeObserver.OnGlobalLayoutListener {
                 targetPx =
                     runCatching {
-                        ViewCompat.getRootWindowInsets(view)
+                        (ViewCompat.getRootWindowInsets(view)
                             ?.getInsets(WindowInsetsCompat.Type.ime())
-                            ?.bottom ?: 0
-                    }.getOrDefault(0)
+                            ?.bottom ?: 0).toFloat()
+                    }.getOrDefault(0f)
             }
         runCatching { if (tree.isAlive) tree.addOnGlobalLayoutListener(listener) }
         runCatching { listener.onGlobalLayout() }
@@ -4875,13 +4870,15 @@ private fun rememberImeGlidePx(): Int {
             }
         }
     }
+    // Polish 2026-09-18c: smooth glide both directions — float steps avoid
+    // the integer stair that read as lag (owner: "laggy feel ache").
     val glided by
-        animateIntAsState(
+        androidx.compose.animation.core.animateFloatAsState(
             targetPx,
-            tween(durationMillis = 300, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            tween(durationMillis = 320, easing = androidx.compose.animation.core.FastOutSlowInEasing),
             label = "imeglide",
         )
-    return glided
+    return glided.toInt()
 }
 
 /** Owner round 32 (item 21): the quoted status inside a status-reply bubble. */

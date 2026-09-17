@@ -416,7 +416,6 @@ internal fun TrimStrip(
                         // Playhead scrub starts from its current pixel
                         if (mode == 4) {
                             val ms = (pos.x / widthPx * total).toLong().coerceIn(s, e)
-                            scrubCb.value(ms)
                             seekCb.value(ms)
                         }
                         grabS = s
@@ -443,10 +442,7 @@ internal fun TrimStrip(
                         travel += drag.x
                         val curPx = (grabS / total * widthPx) + travel
                         val ms = (curPx / widthPx * total).toLong().coerceIn(s, e)
-                        scrubCb.value(ms)
                         seekCb.value(ms)
-                        // also drive the seek callback for the player to follow
-                        // (MediaEditScreen wires onSeek to seekTo)
                         return@detectDragGestures
                     }
                     travel += drag.x
@@ -499,8 +495,10 @@ internal fun TrimStrip(
             // Owner round 33 (item 8): the playhead — a white line with a
             // dark outline (visible over any frame), inside the window only,
             // hidden while a handle is held (the handle IS the position then).
+            // Polish 2026-09-18c: playhead drag (mode 4) keeps the head visible at the scrub pos.
+            // r33-8 keeper: if (head != null && mode == 0) {
             val head = positionMs
-            if (head != null && mode == 0) {
+            if (head != null && mode != 1 && mode != 2 && mode != 3) {
                 val px = (headSmooth.toLong().coerceIn(s, e) / total * size.width).coerceIn(sx + hw / 2f, ex - hw / 2f)
                 drawLine(Color(0x99000000), Offset(px, 0f), Offset(px, size.height), strokeWidth = edge * 2f)
                 drawLine(Color.White, Offset(px, 0f), Offset(px, size.height), strokeWidth = edge)
