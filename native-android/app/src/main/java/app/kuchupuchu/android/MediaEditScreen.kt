@@ -3,6 +3,11 @@ package app.kuchupuchu.android
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -24,6 +29,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -135,28 +141,52 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
     val pool = ScreenStore.editPool
     DisposableEffect(Unit) { onDispose { ScreenStore.editPool = emptyList() } }
     if (pool.size < 2) {
-        MediaEditItemScreen(nav, pickedUri, pickedIsVideo, convId, viewOnce, null, null, null)
+        MediaEditItemScreen(nav, pickedUri, pickedIsVideo, convId, viewOnce, null, null, null, null, null, 0)
         return
     }
     var idx by remember {
         mutableStateOf(pool.indexOfFirst { it.uri == pickedUri }.takeIf { it >= 0 } ?: 0)
     }
+    var browseDir by remember { mutableStateOf(1) }
+    // Polish 2026-09-18: multi-select check-box beside the pencil — the
+    // pool starts all-selected, tapping the rounded box toggles the current
+    // uri; the send FAB badge shows the count.
+    val selectedUris = remember { mutableStateListOf<String>().apply { addAll(pool.map { it.uri.toString() }) } }
     // Every photo visited keeps its edits — the item screen snapshots its
     // EditBits on leave (kilobytes; bitmaps are re-decoded on return).
     val works = remember { HashMap<String, EditBits>() }
-    val item = pool[idx]
-    val uriKey = item.uri.toString()
-    key(uriKey) {
-        MediaEditItemScreen(
-            nav,
-            item.uri,
-            item.isVideo,
-            convId,
-            viewOnce,
-            works[uriKey],
-            { bits -> works[uriKey] = bits },
-            { d -> idx = (idx + d).coerceIn(0, pool.lastIndex) },
-        )
+    AnimatedContent(
+        targetState = idx,
+        transitionSpec = {
+            val dir = browseDir
+            val slideIn = if (dir >= 0) slideInHorizontally(tween(260)) { it } else slideInHorizontally(tween(260)) { -it }
+            val slideOut = if (dir >= 0) slideOutHorizontally(tween(260)) { -it } else slideOutHorizontally(tween(260)) { it }
+            slideIn.togetherWith(slideOut)
+        },
+        label = "poolbrowse",
+    ) { targetIdx ->
+        val item = pool[targetIdx]
+        val uriKey = item.uri.toString()
+        key(uriKey) {
+            MediaEditItemScreen(
+                nav,
+                item.uri,
+                item.isVideo,
+                convId,
+                viewOnce,
+                works[uriKey],
+                { bits -> works[uriKey] = bits },
+                { d ->
+                    browseDir = d
+                    idx = (targetIdx + d).coerceIn(0, pool.lastIndex)
+                },
+                isSelected = selectedUris.contains(uriKey),
+                onToggleSelect = {
+                    if (selectedUris.contains(uriKey)) selectedUris.remove(uriKey) else selectedUris.add(uriKey)
+                },
+                selectedCount = selectedUris.size,
+            )
+        }
     }
 }
 
@@ -188,6 +218,9 @@ private fun MediaEditItemScreen(
     bits: EditBits?,
     onBits: ((EditBits) -> Unit)?,
     onBrowse: ((Int) -> Unit)?,
+    isSelected: Boolean? = null,
+    onToggleSelect: (() -> Unit)? = null,
+    selectedCount: Int = 0,
 ) {
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
@@ -1139,39 +1172,51 @@ private fun MediaEditItemScreen(
                         // firmly-horizontal drag is taken, so taps and
                         // vertical drags still belong to the stage, and
                         // browseTick keeps pen/crop/overlay drags winning.
+                        // Polish 2026-09-18: trim strip + caption + send +
+                        // top bar buttons are exempt — only the middle photo
+                        // area browses, so handles/scrub/buttons win.
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                            var travel = 0f
-                            var vert = 0f
-                            var mode = 0
-                            while (true) {
-                                val ev = awaitPointerEvent(PointerEventPass.Initial)
-                                val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
-                                if (!ch.pressed) break
-                                val dx = ch.position.x - ch.previousPosition.x
-                                val dy = ch.position.y - ch.previousPosition.y
-                                if (mode == 0) {
-                                    travel += dx
-                                    vert += dy
-                                    if (kotlin.math.abs(travel) > 24f && kotlin.math.abs(travel) > kotlin.math.abs(vert) * 1.5f) {
-                                        mode = 1
+                            val h = size.height.toFloat()
+                            if (down.position.y < 180f || down.position.y > h - 520f) {
+                                while (true) {
+                                    val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                    val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                    if (!ch.pressed) break
+                                }
+                            } else {
+                                var travel = 0f
+                                var vert = 0f
+                                var mode = 0
+                                while (true) {
+                                    val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                    val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                    if (!ch.pressed) break
+                                    val dx = ch.position.x - ch.previousPosition.x
+                                    val dy = ch.position.y - ch.previousPosition.y
+                                    if (mode == 0) {
+                                        travel += dx
+                                        vert += dy
+                                        if (kotlin.math.abs(travel) > 24f && kotlin.math.abs(travel) > kotlin.math.abs(vert) * 1.5f) {
+                                            mode = 1
+                                            ch.consume()
+                                        } else if (kotlin.math.abs(vert) > 24f) {
+                                            mode = -1
+                                        }
+                                    } else if (mode == 1) {
+                                        travel += dx
                                         ch.consume()
-                                    } else if (kotlin.math.abs(vert) > 24f) {
-                                        mode = -1
-                                    }
-                                } else if (mode == 1) {
-                                    travel += dx
-                                    ch.consume()
-                                    if (travel < -140f) {
-                                        onBrowse?.invoke(1)
+                                        if (travel < -140f) {
+                                            onBrowse?.invoke(1)
+                                            break
+                                        }
+                                        if (travel > 140f) {
+                                            onBrowse?.invoke(-1)
+                                            break
+                                        }
+                                    } else {
                                         break
                                     }
-                                    if (travel > 140f) {
-                                        onBrowse?.invoke(-1)
-                                        break
-                                    }
-                                } else {
-                                    break
                                 }
                             }
                         }
@@ -1312,6 +1357,24 @@ private fun MediaEditItemScreen(
                     penMode = !penMode
                 }) {
                     Icon(Icons.Filled.Edit, "Draw", tint = Color.White, modifier = Modifier.size(18.dp))
+                }
+                // Polish 2026-09-18: rounded check box beside the pencil — drives
+                // the pool multi-select (attachSel); tick = selected for send.
+                if (onToggleSelect != null) {
+                    Spacer(Modifier.width(6.dp))
+                    Box(
+                        Modifier
+                            .size(26.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (isSelected == true) Color.White else Color(0x33FFFFFF))
+                            .border(1.5.dp, Color.White, RoundedCornerShape(6.dp))
+                            .clickable { onToggleSelect.invoke() },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (isSelected == true) {
+                            Icon(Icons.Filled.Check, contentDescription = "Selected", tint = Color.Black, modifier = Modifier.size(16.dp))
+                        }
+                    }
                 }
                 if ((shot != null || clip != null) && (strokes.isNotEmpty() || overlayPast.isNotEmpty())) {
                     IconButton(
@@ -1566,26 +1629,44 @@ private fun MediaEditItemScreen(
                         Spacer(Modifier.width(12.dp))
                         if (ready) {
                             // Owner round 35 (item 8): the send is a small BLUE dot.
-                            Box(
-                                Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(ActionBlue)
-                                    .clickable(enabled = !busy) {
-                                        haptics.confirm()
-                                        if (cropping) exitCrop() else send()
-                                    },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                if (busy) {
-                                    CircularProgressIndicator(color = Color.White, strokeWidth = 2.5.dp, modifier = Modifier.size(20.dp))
-                                } else {
-                                    Icon(
-                                        if (statusMode) Icons.Filled.Check else Icons.AutoMirrored.Filled.Send,
-                                        contentDescription = if (statusMode) "Done" else "Send",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(20.dp),
-                                    )
+                            // Polish 2026-09-18: when pool multi-select is active the FAB
+                            // shows the count badge (2/3…) at its top-end.
+                            Box(contentAlignment = Alignment.Center) {
+                                Box(
+                                    Modifier
+                                        .size(40.dp)
+                                        .clip(CircleShape)
+                                        .background(ActionBlue)
+                                        .clickable(enabled = !busy) {
+                                            haptics.confirm()
+                                            if (cropping) exitCrop() else send()
+                                        },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    if (busy) {
+                                        CircularProgressIndicator(color = Color.White, strokeWidth = 2.5.dp, modifier = Modifier.size(20.dp))
+                                    } else {
+                                        Icon(
+                                            if (statusMode) Icons.Filled.Check else Icons.AutoMirrored.Filled.Send,
+                                            contentDescription = if (statusMode) "Done" else "Send",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(20.dp),
+                                        )
+                                    }
+                                }
+                                if (selectedCount > 1) {
+                                    Box(
+                                        Modifier
+                                            .align(Alignment.TopEnd)
+                                            .offset(x = 6.dp, y = (-6).dp)
+                                            .size(18.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFFE53935))
+                                            .border(1.dp, Color.White, CircleShape),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text("$selectedCount", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
                         }

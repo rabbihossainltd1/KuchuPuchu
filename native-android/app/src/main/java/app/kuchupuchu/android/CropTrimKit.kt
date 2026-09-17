@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -85,6 +86,30 @@ internal fun StatusTrimPreview(
             p.tick()
             positionCb.value(p.positionMs())
             delay(120)
+        }
+    }
+    // Polish 2026-09-18: video was still playing after the app went to
+    // background — pause on ON_PAUSE/ON_STOP, resume on ON_RESUME if the
+    // strip still wants to play. The AndroidView onRelease already handles
+    // the screen-close case; this handles the background case.
+    val ctxLifecycle = androidx.compose.ui.platform.LocalContext.current as? androidx.lifecycle.LifecycleOwner
+    DisposableEffect(ctxLifecycle, player, paused, userPaused, scrubAt) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, ev ->
+            when (ev) {
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE,
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> player?.setPaused(true)
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
+                    if (!paused && !userPaused && scrubAt == null) player?.setPaused(false)
+                }
+                else -> {}
+            }
+        }
+        ctxLifecycle?.lifecycle?.addObserver(obs)
+        onDispose { ctxLifecycle?.lifecycle?.removeObserver(obs) }
+    }
+    DisposableEffect(uri) {
+        onDispose {
+            runCatching { player?.release() }
         }
     }
     Box(
