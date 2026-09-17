@@ -92,6 +92,29 @@ fun KpApp() {
                 ScreenStore.pokeInbox()
                 return@onEvent
             }
+            // Owner fix 3/5: global chat-list realtime — every conv poke
+            // merges the single updated conversation instantly, on ANY screen
+            // (the previous listener lived only inside ChatListScreen's
+            // composition, so a message arriving on another tab left the list
+            // stale until it was revisited). Runs in appScope so it outlives
+            // any one screen and works while foreground or background.
+            if (ev.optString("type") == "conv") {
+                val cid = ev.optString("conversationId")
+                if (cid.isNotBlank()) {
+                    ScreenStore.appScope.launch {
+                        runCatching {
+                            val one =
+                                with(kotlinx.coroutines.Dispatchers.IO) {
+                                    Api.get("/api/conversations/$cid", true)
+                                }.optJSONObject("conversation") ?: return@launch
+                            if (Store.route == "chat/$cid") one.put("unread", 0)
+                            ScreenStore.upsertConv(one)
+                        }
+                    }
+                }
+                ScreenStore.pokeInbox()
+                if (!ev.optBoolean("msg")) return@onEvent
+            }
             if (ev.optString("type") == "conv" && ev.optBoolean("msg") && Store.foreground) {
                 // Own sends arrive as pokes too (round 13): never play the
                 // in-app sound for a message this device just sent.
