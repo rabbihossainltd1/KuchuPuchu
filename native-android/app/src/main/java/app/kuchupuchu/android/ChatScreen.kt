@@ -2074,13 +2074,23 @@ fun ChatScreen(nav: NavController, convId: String) {
     // Pixels the thread has consumed of the glide so far (clamped opens
     // retry next frame; closes never clamp — r48 accounting stands).
     var glideApplied by remember { mutableStateOf(0f) }
+    // Owner fix 2/5: latch the at-bottom decision at the start of the gesture
+    // so a stale viewport mid-animation cannot drop the remaining delta and
+    // leave the last bubble one line off on close, and the open's first frames
+    // cannot miss because the tail briefly leaves the 24px slack.
+    var glideFollow by remember { mutableStateOf(false) }
     LaunchedEffect(glidePx) {
         val delta = glidePx - glideApplied
         if (delta == 0f) return@LaunchedEffect
         val info = listState.layoutInfo
         val tail = info.visibleItemsInfo.lastOrNull()
-        if (tail != null && tail.index == info.totalItemsCount - 1 &&
-            tail.offset + tail.size <= info.viewportEndOffset + 24) {
+        val atBottom = tail != null && tail.index == info.totalItemsCount - 1 && tail.offset + tail.size <= info.viewportEndOffset + 24
+        if (glideApplied == 0f && glidePx != 0 && atBottom) glideFollow = true
+        if (listState.isScrollInProgress) glideFollow = false
+        if (glideFollow) {
+            glideApplied += runCatching { listState.scrollBy(delta) }.getOrDefault(0f)
+            if (glidePx == 0) glideFollow = false
+        } else if (atBottom) {
             glideApplied += runCatching { listState.scrollBy(delta) }.getOrDefault(0f)
         } else {
             glideApplied = glidePx.toFloat()
