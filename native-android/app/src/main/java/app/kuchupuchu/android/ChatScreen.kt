@@ -1149,10 +1149,12 @@ fun ChatScreen(nav: NavController, convId: String) {
     // Owner round 46: hide the just-painted echo row and queue its clone.
     // cloneType drives only the clone's FACE (TEXT pill / PHOTO / VIDEO /
     // DOC / VOICE) — the flight engine is the same for everyone.
+    // Owner fix 4/5: video no longer hides the echo row — the 0.5s hide→show fade is removed; no clone flight for video so the pending bubble is present immediately. Photo keeps flight but now mirrors video's processing ring.
     fun launchFly(clientId: String, cloneType: String, body: String = "", media: String = "") {
         val from = sendFromRect
         sendFromRect = Rect.Zero
         if (from.width <= 0f || from.isEmpty) return
+        if (cloneType == "VIDEO") return
         flyTarget = null
         flyHidden.add(clientId)
         flyQueue.add(FlySpec(clientId, cloneType, body, from, media))
@@ -6494,7 +6496,7 @@ private fun ImageMessageRow(
                     },
                 ),
         ) {
-            ImageBubble(m, mine)
+            ImageBubble(m, mine, isPending = pendingEcho)
             // scrim so the stamp never drowns in a bright photo
             Box(
                 Modifier
@@ -6789,37 +6791,38 @@ private fun AlbumMessageRow(
                 when {
                     photos.size == 2 -> Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
                         photos.forEach { p ->
-                            AlbumTile(p, tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenImage(p) })
+                            AlbumTile(p, tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenImage(p) }, isPending = pendingEcho)
                         }
                     }
                     photos.size == 3 -> Row(
                         Modifier.height((albumWidth - gap) * 2 / 3),
                         horizontalArrangement = Arrangement.spacedBy(gap),
                     ) {
-                        AlbumTile(photos[0], tileModifier(Modifier.weight(2f).fillMaxHeight()) { onOpenImage(photos[0]) })
+                        AlbumTile(photos[0], tileModifier(Modifier.weight(2f).fillMaxHeight()) { onOpenImage(photos[0]) }, isPending = pendingEcho)
                         Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(gap)) {
-                            AlbumTile(photos[1], tileModifier(Modifier.weight(1f).fillMaxWidth()) { onOpenImage(photos[1]) })
-                            AlbumTile(photos[2], tileModifier(Modifier.weight(1f).fillMaxWidth()) { onOpenImage(photos[2]) })
+                            AlbumTile(photos[1], tileModifier(Modifier.weight(1f).fillMaxWidth()) { onOpenImage(photos[1]) }, isPending = pendingEcho)
+                            AlbumTile(photos[2], tileModifier(Modifier.weight(1f).fillMaxWidth()) { onOpenImage(photos[2]) }, isPending = pendingEcho)
                         }
                     }
                     photos.size == 4 -> Column(verticalArrangement = Arrangement.spacedBy(gap)) {
                         photos.chunked(2).forEach { pair ->
                             Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
                                 pair.forEach { p ->
-                                    AlbumTile(p, tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenImage(p) })
+                                    AlbumTile(p, tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenImage(p) }, isPending = pendingEcho)
                                 }
                             }
                         }
                     }
                     else -> Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
                         photos.take(3).forEach { p ->
-                            AlbumTile(p, tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenImage(p) })
+                            AlbumTile(p, tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenImage(p) }, isPending = pendingEcho)
                         }
                         AlbumTile(
                             photos[3],
                             tileModifier(Modifier.weight(1f).aspectRatio(1f)) { onOpenAlbum(m) },
                             dim = true,
                             label = "See all",
+                            isPending = pendingEcho,
                         )
                     }
                 }
@@ -6865,6 +6868,7 @@ private fun AlbumTile(
     modifier: Modifier,
     dim: Boolean = false,
     label: String? = null,
+    isPending: Boolean = false,
 ) {
     val url = messageMediaUrl(photo)
     Box(modifier.background(Color(0x22000000)), contentAlignment = Alignment.Center) {
@@ -6889,15 +6893,24 @@ private fun AlbumTile(
                 contentScale = ContentScale.Crop,
             )
         }
+        // Owner fix 4/5: album tiles mirror single photo — pending shows the same processing ring.
         val upFrac = UploadProgress.fracs[photo.optString("clientId")]
-        if (upFrac != null) {
+        if (isPending || upFrac != null) {
             Box(Modifier.fillMaxSize().background(Color(0x59000000)), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(
-                    progress = { upFrac },
-                    color = Color.White,
-                    strokeWidth = 2.5.dp,
-                    modifier = Modifier.size(26.dp),
-                )
+                if (upFrac != null) {
+                    CircularProgressIndicator(
+                        progress = { upFrac },
+                        color = Color.White,
+                        strokeWidth = 2.5.dp,
+                        modifier = Modifier.size(26.dp),
+                    )
+                } else {
+                    CircularProgressIndicator(
+                        color = Color.White,
+                        strokeWidth = 2.5.dp,
+                        modifier = Modifier.size(26.dp),
+                    )
+                }
             }
         }
         if (dim) {
@@ -7181,7 +7194,7 @@ private fun MediaCaption(body: String, mine: Boolean, theme: String) {
 }
 
 @Composable
-private fun ImageBubble(m: JSONObject, mine: Boolean) {
+private fun ImageBubble(m: JSONObject, mine: Boolean, isPending: Boolean = false) {
     // Photos arrive two ways: kind=IMAGE carries mediaUrl (/api/messages/:id/media
     // or an inline dataUrl while pending), but uploads sent as kind=FILE only
     // carry fileKey. Reading mediaUrl alone left every uploaded photo on an
@@ -7271,25 +7284,34 @@ private fun ImageBubble(m: JSONObject, mine: Boolean) {
                 },
             )
         }
-        // Determinate ring while THIS photo is still uploading — the user sees
-        // exactly how much has left, not a spinner that could mean anything.
+        // Owner fix 4/5: photo processing ring mirrors video — determinate
+        // when progress exists, indeterminate spinner while the bytes are
+        // still being prepared (the video already showed this).
         val upFrac = UploadProgress.fracs[m.optString("clientId")]
-        if (upFrac != null) {
+        if (isPending || upFrac != null) {
             Box(
                 Modifier
                     .fillMaxSize()
                     .background(Color(0x59000000)),
                 contentAlignment = Alignment.Center,
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (upFrac != null) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(
+                            progress = { upFrac },
+                            color = Color.White,
+                            strokeWidth = 3.dp,
+                            modifier = Modifier.size(34.dp),
+                        )
+                        Spacer(Modifier.height(3.dp))
+                        Text("${(upFrac * 100).toInt()}%", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                } else {
                     CircularProgressIndicator(
-                        progress = { upFrac },
                         color = Color.White,
                         strokeWidth = 3.dp,
                         modifier = Modifier.size(34.dp),
                     )
-                    Spacer(Modifier.height(3.dp))
-                    Text("${(upFrac * 100).toInt()}%", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -7327,7 +7349,11 @@ private fun FileBubble(
     val isImage = fileType.startsWith("image") || fileName.endsWith(".jpg") || fileName.endsWith(".jpeg") || fileName.endsWith(".png")
     if (isImage && !asDocument) {
         val url = if (fileKey.isNotBlank()) "/api/files/$fileKey" else m.optString("mediaUrl")
-        ImageBubble(JSONObject().put("mediaUrl", url).put("body", m.optText("body")), mine)
+        ImageBubble(
+            JSONObject().put("mediaUrl", url).put("body", m.optText("body")).put("clientId", m.optString("clientId")),
+            mine,
+            isPending = pendingEcho,
+        )
         return
     }
     val isVoice = !asDocument && fileLooksVoice(m)
