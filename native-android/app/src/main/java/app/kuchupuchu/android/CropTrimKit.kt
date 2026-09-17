@@ -9,6 +9,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -396,6 +397,17 @@ internal fun TrimStrip(
             .clip(RoundedCornerShape(8.dp))
             .background(Color(0xFF1B1B1B))
             .onSizeChanged { widthPx = it.width.toFloat().coerceAtLeast(1f) }
+            .pointerInput(durationMs, s, e) {
+                // Tap anywhere in the window seeks the playhead (owner: tap or drag)
+                detectTapGestures { pos ->
+                    val sx = s / total * widthPx
+                    val ex = e / total * widthPx
+                    if (pos.x in sx..ex) {
+                        val ms = (pos.x / widthPx * total).toLong().coerceIn(s, e)
+                        seekCb.value(ms)
+                    }
+                }
+            }
             .pointerInput(durationMs) {
                 detectDragGestures(
                     onDragStart = { pos ->

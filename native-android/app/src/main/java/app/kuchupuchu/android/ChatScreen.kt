@@ -2087,14 +2087,7 @@ fun ChatScreen(nav: NavController, convId: String) {
     var glideApplied by remember(convId) { mutableStateOf(0f) }
     var glideFollow by remember(convId) { mutableStateOf(false) }
     var latchedAtBottom by remember(convId) { mutableStateOf(false) }
-    // Owner 2026-09-18c: when attach opens, keep last message above panel
-    LaunchedEffect(showAttach) {
-        if (showAttach) {
-            delay(180)
-            val total = listState.layoutInfo.totalItemsCount
-            if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }
-        }
-    }
+
     var savedIndex by remember(convId) { mutableStateOf(0) }
     var savedOffset by remember(convId) { mutableStateOf(0) }
     // Capture once per open so close can restore exactly (cures 1-line drift at any
@@ -2644,7 +2637,8 @@ fun ChatScreen(nav: NavController, convId: String) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 6.dp, bottom = if (showAttach) if (attachFs) 680.dp else 420.dp else 6.dp),
+                verticalArrangement = Arrangement.Bottom,
+                contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
             ) {
                 items(
                     groupedMsgs,
