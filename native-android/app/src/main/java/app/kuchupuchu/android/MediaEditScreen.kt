@@ -1,5 +1,7 @@
 package app.kuchupuchu.android
 
+@file:Suppress("UnusedContentLambdaTargetStateParameter")
+
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.net.Uri
@@ -200,7 +202,6 @@ private class EditBits(
 )
 
 @Composable
-@SuppressLint("UnusedContentLambdaTargetStateParameter")
 private fun MediaEditItemScreen(
     nav: NavController,
     pickedUri: Uri,
