@@ -208,10 +208,10 @@ private fun MediaEditItemScreen(
     bits: EditBits?,
     onBits: ((EditBits) -> Unit)?,
     onBrowse: ((Int) -> Unit)?,
-    browseDir: Int = 1,
     isSelected: Boolean? = null,
     onToggleSelect: (() -> Unit)? = null,
     selectedCount: Int = 0,
+    browseDir: Int = 1,
 ) {
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
