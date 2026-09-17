@@ -62,23 +62,25 @@
 ## 6. Open Bugs / Known Broken Things
 | # | Symptom | Root cause | Status | Branch / PR |
 |---|---|---|---|---|
-| 1 | HANDOFF.md stops at v137, .env LIVE_VERSION=v133, live is v147 (53 commits gap) | Docs not updated after r42..r52 | 🔴 open — needs Handoff §21 append + .env bump | audit/full-app-analysis |
-| 2 | Keyboard thread follower brittle — 6 takes (r47→r52) for same issue | Edge-to-edge + IME overlay vs resize; inset feed device-specific | 🟡 mitigated in r52 (`LaunchedEffect(glidePx)` + geometric tail), watch on device | main `ce27941` |
-| 3 | Updater relaunch killed app below API 34 (`setDontKillApp` API 34+ only) | Process killed mid-install, no receiver | ✅ fixed r51 `KpRelaunchReceiver` on `MY_PACKAGE_REPLACED`, needs device proof | main `a9a756f` |
-| 4 | HF image edit is variation not true pixel-edit | No img2img provider enabled on his HF account (only hf-inference) | 🟡 by design — needs fal/replicate provider enabled | HF migration §16 |
-| 5 | Worker has 11 `console.log` (FCM/oauth/error_log) — noisy | Intentional debug logs not removed before commit | 🟢 low — allowed for FCM diagnostics per SKILLS §6, but should be gated | `src/worker/index.ts:33xx,46xx` |
-| 6 | Owner watch items unproven on device | Requires killed-app push, status viewer, group video mesh | ⏳ queued — needs owner device retest | HANDOFF §13-20 watch lists |
+| 1 | HANDOFF.md stops at v137, .env was LIVE_VERSION=v133, live is v147 (53 commits gap) | Docs not updated after r42..r52 | ✅ fixed this session — .env bumped to v147, HANDOFF §21 needs full append | `audit/self-test-2026-09-17` |
+| 2 | **Home ⋮ uses `DropdownMenu` — violates SKILLS §4 "every popup is a bottom sheet"** | `ChatListScreen.kt:375 DropdownMenu` predates r31 sheets-only rule; test 32 whitelists ChatList | 🔴 open — migrate to `KpSheet` (1 commit, update r31-7 pin) | `audit/self-test-2026-09-17` |
+| 3 | Keyboard thread follower brittle — 6 takes (r47→r52) for same issue | Edge-to-edge + IME overlay vs resize; `onSizeChanged` dead (height constant 0), inset feed device-specific | 🟡 mitigated in r52 (`LaunchedEffect(glidePx)` + `glideApplied` + geometric tail `ChatScreen.kt:2077`), watch on device | main `ce27941` |
+| 4 | Updater relaunch killed app below API 34 (`setDontKillApp` API 34+ only) | Process killed mid-install, no receiver | ✅ fixed r51 `KpRelaunchReceiver` on `MY_PACKAGE_REPLACED` `KpUpdate.kt:404`, needs device proof | main `a9a756f` |
+| 5 | HF image edit is variation not true pixel-edit | No img2img provider enabled on his HF account (only hf-inference) | 🟡 by design — needs fal/replicate provider enabled (owner decision) | HF migration §16 |
+| 6 | Worker has 11 `console.log` (FCM/oauth/error_log) — noisy | Intentional per SKILLS §6 but ungated `src/worker/index.ts:3376,3427,3470` | 🟢 low — gate with `if (env.DEBUG_KEY)` suggested | `src/worker/index.ts` |
+| 7 | `ChatScreen.kt` 8154 lines — God file | All chat UI/bubbles/viewer/composer in one file | 🟡 medium — split candidate (Composer/Bubble/List/Viewer), needs plan | — |
+| 8 | Owner watch items unproven on device | Requires killed-app push, status viewer pause, group video mesh 3+ | ⏳ queued — needs owner device retest | HANDOFF §13-20 watch lists |
 
 ## 7. IN-PROGRESS HANDOFF  ← most important section for a new session
-- **Current branch:** `main` = `ce27941` (v147) · worker `ce27941` deployed? verify via `wrangler versions list` — last known `90034cb5` at v137, then 53 commits; latest worker version unchecked this session
-- **Exact state of the work:** Audit `audit/full-app-analysis` branch created this session: `memory.md` + `PROJECT_UNDERSTANDING.md` generated, full suite green (32/32), no code change yet. User asked full app audit (how it works + bugs).
-- **Verified:** `npm ci` + `tsc` + `prettier` + `secret-scan` + `validate-android` + `ktlint` all pass; `npm test` 32/32 (1527); repo tree mapped; 53-commit gap after HANDOFF v137 analyzed; AI chain (HF Kimi→DeepSeek→Workers AI→Gemini) verified in code; keyboard history r47-r52 traced.
-- **Not yet verified:** Live worker version after v147 deploy (needs `wrangler whoami` + health curl); killed-app FCM; status viewer pause/resume; group call mesh 3+; HF image generate live probe (token quota); Android lint `lintDebug` full run (needs Gradle, not run locally)
+- **Current branch:** `docs/full-app-audit` = `3a4ab4a` + `audit/self-test-2026-09-17` pending — self-test audit `AUDIT-2026-09-17.md` created, 8 bugs triaged, `.env` fixed to v147
+- **Exact state of the work:** Self-test full audit DONE: `AUDIT-2026-09-17.md` (10 sections, evidence tables), `PROJECT_UNDERSTANDING.md` (13 sections) + `memory.md` created and pushed (`docs/full-app-audit` → PR). Gates all green (32/32, 1527). Live health 200 verified, ChatList `DropdownMenu` violation found as HIGH bug. `.env` updated to `v147 (3.9.71, ce27941)`; `HANDOFF.md` still at v137 — §21 append (v138→v147) is next.
+- **Verified:** `npm ci` + `tsc` + `prettier` + `secret-scan` + `validate-android` + `ktlint` all pass; `npm test` 32/32 (1527); repo tree mapped; 53-commit gap after HANDOFF v137 analyzed; AI chain verified; keyboard r47→r52 traced; security audit (0 vulns, no Log., no hardcoded secrets, auth gates ok); UI scan (1 DropdownMenu violation); performance (fingerprint, D1 budget, 8154-line God file); live `/api/health` + `/api/config/firebase` + unauth 401 check.
+- **Not yet verified:** Live worker version after v147 (need `wrangler versions list` + `wrangler secret list`); killed-app FCM thumbnail with app KILLED; status viewer pause/resume on device; group call mesh 3+; HF image generate live probe (quota); Android `lintDebug` full (needs Gradle OOM); Home ⋮ sheets migration fix not yet coded.
 - **Next 3 steps, in order:**
-  1. Append HANDOFF.md §21 (v138..v147: r42→r52) + bump `/home/user/.env` LIVE_VERSION/MAIN_SHA/WORKER_VERSION/LAST_CI
-  2. Owner device retest checklist for r50→r52 keyboard glide + updater relaunch (API <34 vs 34+)
-  3. If HF image edit needs true pixel-edit → enable img2img provider in HF dashboard + wire `hfImageEdit` with multipart
-- **Blockers:** none — D1 read blocked with scoped token (needs GLOBAL_API_KEY as CLOUDFLARE_API_KEY for D1 shell), otherwise all access ok
+  1. Append `HANDOFF.md` §21 (v138→v147: r42→r52 detailed) — template from AUDIT §10
+  2. Fix HIGH bug #2: `ChatListScreen.kt:375` DropdownMenu → `KpSheet` (1 commit, update test 32 r31-7 pin)
+  3. Owner device retest checklist for r52 keyboard glide + r51 receiver (API 33 vs 34) + killed-app FCM
+- **Blockers:** none — D1 shell needs `CLOUDFLARE_GLOBAL_API_KEY` as `CLOUDFLARE_API_KEY` (scoped token 7403), otherwise all access ok
 
 ## 8. Pending Requests To Owner
 | Item | Why needed | How owner gets it | Requested | Status |
@@ -98,4 +100,5 @@
 ## 10. Session Log (keep last 10 only — delete older rows)
 | Date | Task | Root cause | Outcome | PR |
 |---|---|---|---|---|
-| 2026-09-17 | Full app audit (how it works + bugs) | HANDOFF stale + need PROJECT_UNDERSTANDING | audit branch, 2 docs, 32/32 green | audit/full-app-analysis |
+| 2026-09-17 | Full app audit (how it works + bugs) | HANDOFF stale + need PROJECT_UNDERSTANDING | `docs/full-app-audit` 2 docs, 32/32 green | `docs/full-app-audit` |
+| 2026-09-17 | Self-test full audit (8 bugs) | Need evidence-based bug triage + gates | `AUDIT-2026-09-17.md` 10 sections, `.env` fixed, 1 HIGH UI violation | `audit/self-test-2026-09-17` (pending) |
