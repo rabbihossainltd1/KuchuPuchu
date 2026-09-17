@@ -3387,7 +3387,6 @@ fun ChatScreen(nav: NavController, convId: String) {
             // column — padding IT never lifts this sibling). The thread
             // follows by SCROLL on the same glide above; the Box itself
             // keeps no padding (that's what painted the black band).
- (r52: revert r51's two keyboard regressions; follower on the live glide)
             padForIme = if (!showAttach && !showStickers) imeGlideDp else 0.dp,
             onFieldRect = { fieldRect = it },
             onActionRect = { actionRect = it },
