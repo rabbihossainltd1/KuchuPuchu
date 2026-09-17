@@ -10,9 +10,6 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.FastOutLinearInEasing
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -310,6 +307,14 @@ fun ChatScreen(nav: NavController, convId: String) {
     // on the same poll — assigned raw (never guarded) so a text prompt after
     // an image one clears the shimmer card on the next tick.
     var otherTypingKind by remember { mutableStateOf<String?>(null) }
+    // Owner round 49 (his order, verbatim: "ai reply word by word a reply
+    // dito age ... remove korcho keno?"): the per-word AI reveal RETURNS.
+    // r45b removed it next to the arrival effects — but this one is the
+    // bot's own typing feel, and the MessageRow renderer + param survived.
+    // Only AI-chat messages CREATED after open animate (history stays put).
+    val chatOpenedAtMs = remember { System.currentTimeMillis() }
+    var aiRevealId by remember { mutableStateOf<String?>(null) }
+    var aiRevealChars by remember { mutableStateOf(0) }
     // Word-by-word reveal for a freshly-arrived KuchuPuchu AI reply (owner
     // round 2026-09-04). Only messages CREATED after this screen opened are
     // animated, so conversation history never re-types itself on open.
@@ -2016,35 +2021,64 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
-    // Owner round 45 (item 1): every ENTRANCE effect is gone — the per-word
-    // AI reply reveal AND the born pop-in. A new row simply appears; both
-    // animations read as a screen-wide twitch/dim on the owner's device
-    // (and the reveal was exactly the "animation/effect" he asked about).
+    // A brand-new AI reply (created after open) types itself out word by
+    // word — restored on the owner's r49 order.
+    LaunchedEffect(msgs.size) {
+        val last = msgs.lastOrNull() ?: return@LaunchedEffect
+        if (!convId.endsWith("_kp_ai_bot")) return@LaunchedEffect
+        if (last.optString("senderId") != "kp_ai_bot" || last.optString("kind") != "TEXT") return@LaunchedEffect
+        val mid = last.optString("id")
+        if (mid == aiRevealId) return@LaunchedEffect
+        val created =
+            runCatching { java.time.Instant.parse(last.optString("createdAt")).toEpochMilli() }.getOrDefault(0L)
+        if (created < chatOpenedAtMs) return@LaunchedEffect
+        aiRevealChars = 0
+        aiRevealId = mid
+    }
+
+    LaunchedEffect(aiRevealId) {
+        val revealMid = aiRevealId ?: return@LaunchedEffect
+        val body = msgs.lastOrNull { it.optString("id") == revealMid }?.optText("body").orEmpty()
+        var pos = 0
+        while (pos < body.length) {
+            delay(if (body.length > 240) 30L else 45L)
+            pos = body.indexOf(' ', pos + 1).takeIf { it >= 0 } ?: body.length
+            aiRevealChars = pos
+            // Stay pinned to the newest line while the reply types itself —
+            // unless the user scrolled up to read (their scroll wins).
+            val info = listState.layoutInfo
+            val nearBottom =
+                info.visibleItemsInfo.lastOrNull()?.index?.let { it >= info.totalItemsCount - 2 } == true
+            // A user drag owns the scroll mutex, so this programmatic scroll
+            // throws — the reveal must keep typing (and clear at the end)
+            // instead of dying mid-word.
+            if (nearBottom) runCatching { listState.scrollToItem(info.totalItemsCount - 1) }
+        }
+        delay(250)
+        aiRevealId = null
+    }
     val other = c?.optJSONObject("other")
-    // Owner round 48 (item 1): the r47 follower moved its baseline BEFORE
-    // checking what actually scrolled. On open, the first frames run
-    // against a list not yet re-laid out for the growing pad — forward
-    // scrolls clamp to zero and those deltas were LOST, so the thread
-    // stayed put until he dragged it by hand. Backward (close) scrolls
-    // are never clamped, which is why close always glided. Count only
-    // what the list CONSUMED: unconsumed pixels retry on the spring's
-    // next frame, when the smaller viewport has track to scroll into.
+    // Owner round 49 (item 1 — proven dead on his device): snapshotFlow
+    // { glidePx } captured a LOCAL Int once — animateIntAsState hands back
+    // a fresh value each recomposition, so the lambda kept reading the
+    // FIRST one (0) and the flow emitted exactly once. The follower
+    // literally never ran. The per-value relaunch below cannot freeze:
+    // LaunchedEffect(glidePx) restarts on every spring frame with the
+    // fresh value in hand. r48's consume-accounting stands (clamped open
+    // pixels retry next frame; close scrolls never clamp; a reader up in
+    // history keeps their place).
     val glidePx = rememberImeGlidePx()
     val imeGlideDp = with(LocalDensity.current) { glidePx.toDp() }
     var glideApplied by remember { mutableStateOf(0f) }
-    LaunchedEffect(Unit) {
-        snapshotFlow { glidePx }.collect { curPx ->
-            val delta = curPx - glideApplied
-            if (delta == 0f) return@collect
-            val info = listState.layoutInfo
-            if (info.totalItemsCount > 0 &&
-                (info.visibleItemsInfo.lastOrNull()?.index ?: 0) >= info.totalItemsCount - 2) {
-                glideApplied += runCatching { listState.scrollBy(delta) }.getOrDefault(0f)
-            } else {
-                // Away from the bottom: those pixels belong to nobody —
-                // drop them so returning down never slams.
-                glideApplied = curPx.toFloat()
-            }
+    LaunchedEffect(glidePx) {
+        val delta = glidePx - glideApplied
+        if (delta == 0f) return@LaunchedEffect
+        val info = listState.layoutInfo
+        if (info.totalItemsCount > 0 &&
+            (info.visibleItemsInfo.lastOrNull()?.index ?: 0) >= info.totalItemsCount - 2) {
+            glideApplied += runCatching { listState.scrollBy(delta) }.getOrDefault(0f)
+        } else {
+            glideApplied = glidePx.toFloat()
         }
     }
     Column(
@@ -2549,9 +2583,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                     LaunchedEffect(flyLanded) {
                         if (flyLanded == rowKey) {
                             flyLand.snapTo(0.85f)
-                            flyLand.animateTo(1.06f, tween(110, easing = FastOutLinearInEasing))
-                            flyLand.animateTo(0.98f, tween(85, easing = LinearOutSlowInEasing))
-                            flyLand.animateTo(1f, tween(85, easing = FastOutSlowInEasing))
+                            // r49: one soft spring settle replaces the
+                            // three-step tween bounce — the double overshoot
+                            // read as a jerk on his device.
+                            flyLand.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMediumLow))
                             flyLanded = null
                         }
                     }
@@ -2653,6 +2688,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 val arg = JSONObject(msg.toString()).put("kpPrivate", privateChat)
                                 nav.navigate("docviewer/${mediaArg(arg)}")
                             },
+                            revealChars = if (m.optString("id") == aiRevealId) aiRevealChars else null,
                             onReply = { haptics.tap(); replyTo = it; replyFocusNonce++ },
                             onLongPress = { msg ->
                                 // Owner round 31: the action sheet (reactions on
@@ -2726,9 +2762,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                     LaunchedEffect(flyLanded) {
                         if (flyLanded == rowKey) {
                             flyLand.snapTo(0.85f)
-                            flyLand.animateTo(1.06f, tween(110, easing = FastOutLinearInEasing))
-                            flyLand.animateTo(0.98f, tween(85, easing = LinearOutSlowInEasing))
-                            flyLand.animateTo(1f, tween(85, easing = FastOutSlowInEasing))
+                            // r49: one soft spring settle replaces the
+                            // three-step tween bounce — the double overshoot
+                            // read as a jerk on his device.
+                            flyLand.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMediumLow))
                             flyLanded = null
                         }
                     }
@@ -3973,16 +4010,17 @@ private fun KpFlySend(
             while (true) {
                 delay(26)
                 val r = t.value
-                if (r >= 0.85f) break
+                if (r >= 0.8f) break
                 val tgt = target()
                 val e = 1f - (1f - r) * (1f - r) * (1f - r)
                 val lift = with(density) { (-56).dp.toPx() }
                 val arcY = kotlin.math.sin(r * Math.PI).toFloat() * lift
-                val w = spec.from.width + (tgt.width - spec.from.width) * e
+                val es2 = r * r * (3f - 2f * r)
+                val w = spec.from.width + (tgt.width - spec.from.width) * es2
                 val cx = spec.from.left + (tgt.left - spec.from.left) * e + w / 2f
                 val cy = spec.from.top +
                     (tgt.top - spec.from.top) * e +
-                    arcY + (spec.from.height + (tgt.height - spec.from.height) * e) / 2f
+                    arcY + (spec.from.height + (tgt.height - spec.from.height) * es2) / 2f
                 dots.add(
                     FlyDot(
                         cx,
@@ -3997,7 +4035,7 @@ private fun KpFlySend(
                 )
             }
         }
-        t.animateTo(1f, tween(620, easing = LinearEasing))
+        t.animateTo(1f, tween(700, easing = LinearEasing))
         onLanded()
     }
     val raw = t.value
@@ -4006,11 +4044,15 @@ private fun KpFlySend(
     val lift = with(density) { (-56).dp.toPx() }
     val cx = spec.from.left + (tgt.left - spec.from.left) * e
     val cy = spec.from.top + (tgt.top - spec.from.top) * e + kotlin.math.sin(raw * Math.PI).toFloat() * lift
-    val w = spec.from.width + (tgt.width - spec.from.width) * e
-    val h = spec.from.height + (tgt.height - spec.from.height) * e
-    val wobble = (kotlin.math.sin(raw * 2.0 * Math.PI) * (1f - raw) * 4.0).toFloat()
-    val pulse = 1f + kotlin.math.sin(raw * Math.PI).toFloat() * 0.05f
-    val fade = if (raw > 0.88f) (1f - (raw - 0.88f) / 0.12f).coerceIn(0f, 1f) else 1f
+    // r49 (item 3 — "aro smooth koro"): position keeps the launch-fast
+    // ease-out, but the FRAME walks a smoothstep — the pill keeps its
+    // shape past launch and settles into the bubble instead of ballooning.
+    val es = raw * raw * (3f - 2f * raw)
+    val w = spec.from.width + (tgt.width - spec.from.width) * es
+    val h = spec.from.height + (tgt.height - spec.from.height) * es
+    val wobble = (kotlin.math.sin(raw * 2.0 * Math.PI) * (1f - raw) * 2.2).toFloat()
+    val pulse = 1f + kotlin.math.sin(raw * Math.PI).toFloat() * 0.035f
+    val fade = if (raw > 0.9f) (1f - (raw - 0.9f) / 0.1f).coerceIn(0f, 1f) else 1f
     val wDp = with(density) { w.toDp() }
     val hDp = with(density) { h.toDp() }
     // trail: spawned dots, drawn root-absolute; reading t.value here keeps
@@ -4038,7 +4080,7 @@ private fun KpFlySend(
         Modifier
             .offset { IntOffset((cx - w * 0.06f).roundToInt(), (cy - h * 0.06f).roundToInt()) }
             .size(with(density) { (w * 1.12f).toDp() }, with(density) { (h * 1.12f).toDp() })
-            .graphicsLayer { alpha = kotlin.math.sin(raw * Math.PI).toFloat() * 0.35f * fade }
+            .graphicsLayer { alpha = kotlin.math.sin(raw * Math.PI).toFloat() * 0.30f * fade }
             .background(Brush.radialGradient(listOf(accent, Color.Transparent)), CircleShape),
     )
     // the clone: pill at the start of the flight, bubble past 45 %.
@@ -4151,10 +4193,10 @@ private fun KpFlySend(
 private fun KpFlyLandFlash(rect: Rect, accent: Color, onDone: () -> Unit) {
     val t = remember { Animatable(0f) }
     LaunchedEffect(Unit) {
-        t.animateTo(1f, tween(260, easing = LinearEasing))
+        t.animateTo(1f, tween(300, easing = LinearEasing))
         onDone()
     }
-    val grow = 1f + t.value * 0.22f
+    val grow = 1f + t.value * 0.18f
     Box(
         Modifier
             .offset {
@@ -4164,7 +4206,7 @@ private fun KpFlyLandFlash(rect: Rect, accent: Color, onDone: () -> Unit) {
                 )
             }
             .size(with(LocalDensity.current) { (rect.width * grow).toDp() }, with(LocalDensity.current) { (rect.height * grow).toDp() })
-            .graphicsLayer { alpha = (1f - t.value) * 0.45f }
+            .graphicsLayer { alpha = (1f - t.value) * 0.38f }
             .background(Brush.radialGradient(listOf(accent, Color.Transparent)), CircleShape),
     )
 }

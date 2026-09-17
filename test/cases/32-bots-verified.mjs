@@ -982,7 +982,7 @@ const convBetween = (db, a, b) =>
     chat.includes("private fun rememberImeGlidePx(): Int") &&
       !chat.includes("snapshotFlow { kpIme") &&
       !chat.includes("KpImeAutoScroll") &&
-      chat.includes("snapshotFlow { glidePx }") &&
+      chat.includes("LaunchedEffect(glidePx) {") &&
       chat.includes("listState.scrollBy(delta)") &&
       chat.includes("glideApplied +=") &&
       chat.includes(">= info.totalItemsCount - 2") &&
@@ -6456,7 +6456,7 @@ const convBetween = (db, a, b) =>
         ),
     );
     check(
-      "r46-1: morph-&-fly send (owner's savedly demo port) — the send echoes hide, a clone launches from whatever fired the send (input pill / mic-send slot / panel send circle) and flies 620 ms on an arced, wobbling, 45%-morphing path onto the hidden row, with glow + particle trail, then a 280 ms landing bounce + accent flash; EVERY type (text/photo/video/doc/voice) rides the same engine, batch flies once, stray rects can never fly a later send (one-shot baton + watchdog)",
+      "r46-1: morph-&-fly send (owner's savedly demo port) — the send echoes hide, a clone launches from whatever fired the send (input pill / mic-send slot / panel send circle) and flies 700 ms on an arced path with a smoothstep frame morph, gentle wobble/trail/glow, onto the real bubble rect, then a soft spring settle + accent flash (r49 smoothing); EVERY type rides the same engine with its REAL content, batch flies once, stray rects can never fly a later send (one-shot baton + watchdog)",
       chat.includes("private class FlySpec(") &&
         chat.includes("private fun KpFlySend(") &&
         chat.includes("private fun KpFlyLandFlash(") &&
@@ -6468,7 +6468,8 @@ const convBetween = (db, a, b) =>
         chat.includes("rememberBitmap(spec.media.takeIf") &&
         chat.includes('launchFly(clientId, "VOICE")') &&
         chat.includes("sendFromRect = Rect.Zero") &&
-        chat.includes("tween(620, easing = LinearEasing)") &&
+        chat.includes("tween(700, easing = LinearEasing)") &&
+        chat.includes("val es = raw * raw * (3f - 2f * raw)") &&
         chat.includes("(-56).dp.toPx()") &&
         chat.includes("e > 0.45f") &&
         (chat.match(/\.alpha\(if \(rowKey in flyHidden\) 0f else 1f\)/g) || []).length === 2 &&
@@ -9049,11 +9050,18 @@ const convBetween = (db, a, b) =>
         // do); the keys are still consumed once (thread + pending).
         (chat.match(/bornKeys\.remove\(rowKey\)/g) || []).length === 2 &&
         // Owner round 45 (item 1): NO pop-in at all — born is a constant
-        // false now, and the per-word reveal is gone entirely.
+        // false now. Owner round 49 (his order): the per-word AI reveal is
+        // BACK — the fade-in rows stay dead, the bot types its replies.
         !chat.includes("val born = bornKey && ") &&
         chat.includes("born = false, // Owner round 45") &&
-        !chat.includes("aiRevealRow") &&
-        !chat.includes("aiRevealId") &&
+        chat.includes("var aiRevealId") &&
+        chat.includes("var aiRevealChars") &&
+        chat.includes('convId.endsWith("_kp_ai_bot")') &&
+        chat.includes("LaunchedEffect(aiRevealId)") &&
+        chat.includes(
+          'revealChars = if (m.optString("id") == aiRevealId) aiRevealChars else null,',
+        ) &&
+        chat.includes('full.take(revealChars) + " ▍"') &&
         chat.includes('m.optString("kind") == "TEXT"') &&
         !chat.includes("Box(Modifier.fillMaxWidth().riseIn(born)) {") &&
         chat.includes("DeleteRowShell(") &&
