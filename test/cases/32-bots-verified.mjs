@@ -999,14 +999,10 @@ const convBetween = (db, a, b) =>
     chat.includes("private fun rememberImeGlidePx(): Int") &&
       !chat.includes("snapshotFlow { kpIme") &&
       !chat.includes("KpImeAutoScroll") &&
-      chat.includes(".onSizeChanged { sz ->") &&
-      chat.includes("threadTrackH") &&
-      chat.includes("listState.scrollBy((old - sz.height).toFloat())") &&
-      // Owner round 51: edge-to-edge means the platform NEVER shrinks
-      // this window for the IME — the box pads itself with the glide
-      // (the feed proved alive by the approved bar motion), and the
-      // bottom check is geometric, not index arithmetic.
-      chat.includes(".padding(bottom = if (!showAttach && !showStickers) imeGlideDp else 0.dp)") &&
+      chat.includes("LaunchedEffect(glidePx) {") &&
+      chat.includes("glideApplied += runCatching { listState.scrollBy(delta) }") &&
+      // Owner round 52: at-bottom is geometric (last row's bottom edge
+      // at the viewport floor) — index counts lie with zero-size items.
       chat.includes("tail.offset + tail.size <= info.viewportEndOffset + 24") &&
       chat.includes("padForIme = if (!showAttach && !showStickers) imeGlideDp else 0.dp,") &&
       chat.includes("top = 6.dp, bottom = 6.dp),") &&
@@ -8453,7 +8449,7 @@ const convBetween = (db, a, b) =>
         chat.includes("if (EmojiRepo.isCustomId(st)) CustomEmojiOrFallback(st)"),
     );
     check(
-      "r33-11c: the panel carries the imePadding and goes compact (search row + one 44 dp LazyRow of results, no bottom row) while the keyboard is up (isImeVisible read in composition via a tiny @OptIn helper); the ime glide lives on the messages Box now (r51) and is skipped while a panel is open (the panel carries its own imePadding); pack-name search (heart → Hearts)",
+      "r33-11c: the panel carries the imePadding and goes compact (search row + one 44 dp LazyRow of results, no bottom row) while the keyboard is up (isImeVisible read in composition via a tiny @OptIn helper); the composer skips its own imePadding while a panel is open (padForIme = !showAttach && !showStickers); pack-name search (heart → Hearts)",
       sticker.includes("private fun imeShowing(): Boolean = WindowInsets.isImeVisible") &&
         sticker.includes("val searching = imeShowing()") &&
         sticker.includes(".background(Card)\n            .imePadding()\n") &&
@@ -8467,7 +8463,7 @@ const convBetween = (db, a, b) =>
         chat.includes("padForIme: Dp = 0.dp,") &&
         // Owner round 45 (item 3): the pad is the shared glide value.
         chat.includes(".padding(bottom = padForIme)") &&
-        chat.includes(".padding(bottom = if (!showAttach && !showStickers) imeGlideDp else 0.dp)"),
+        chat.includes("padForIme = if (!showAttach && !showStickers) imeGlideDp else 0.dp,"),
     );
   }
   // Item 14: a person in the phone book must never show "Add contact".

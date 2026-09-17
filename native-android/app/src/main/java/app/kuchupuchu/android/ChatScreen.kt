@@ -123,7 +123,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -2059,23 +2058,34 @@ fun ChatScreen(nav: NavController, convId: String) {
         aiRevealId = null
     }
     val other = c?.optJSONObject("other")
-    // Owner round 51 (item 1, FOURTH take — the structural root cause):
-    // MainActivity enables EDGE-TO-EDGE, so the platform never resizes
-    // this window for the IME at all — the keyboard overlays the content
-    // and the messages Box's height NEVER changes, which killed r50's
-    // "cannot lie" geometry feed (its delta was a constant 0) and every
-    // inset follower before it. The platform-approved mechanism is the
-    // Compose imeInset itself: Modifier.imePadding() below shrinks this
-    // Box by the keyboard height on every Android version, resize mode
-    // or not. With a real feed in place the onSizeChanged follower —
-    // always sound — finally has something to ride. His approved bar
-    // glide (padForIme) is untouched: that padding lives on the
-    // composer, this one lives on the thread, they never stack...
+    // Owner round 52 (item 1 — with his ACTUAL visual description at
+    // hand): the r51 padding was TWICE wrong — it took away the pill's
+    // own ride (padForIme = 0) AND painted a keyboard-tall black band
+    // over the thread. Approved form restored: the pill glides with
+    // padForIme exactly as before, and the THREAD rides the very same
+    // glide value in lockstep — each spring frame moves the rows by
+    // that frame's delta while parked at the bottom. At edge-to-edge
+    // the window never resizes, so SCROLLING (not resizing) is what
+    // keeps the newest bubble above the rising bar. The at-bottom check
+    // is geometric now (the last row's bottom edge at the viewport
+    // floor) — index counts lie when trailing zero-size items exist.
     val glidePx = rememberImeGlidePx()
     val imeGlideDp = with(LocalDensity.current) { glidePx.toDp() }
-    // Last laid-out height of the messages Box; the onSizeChanged below
-    // turns each frame's shrink into an equal thread scroll.
-    var threadTrackH by remember { mutableStateOf(0) }
+    // Pixels the thread has consumed of the glide so far (clamped opens
+    // retry next frame; closes never clamp — r48 accounting stands).
+    var glideApplied by remember { mutableStateOf(0f) }
+    LaunchedEffect(glidePx) {
+        val delta = glidePx - glideApplied
+        if (delta == 0f) return@LaunchedEffect
+        val info = listState.layoutInfo
+        val tail = info.visibleItemsInfo.lastOrNull()
+        if (tail != null && tail.index == info.totalItemsCount - 1 &&
+            tail.offset + tail.size <= info.viewportEndOffset + 24) {
+            glideApplied += runCatching { listState.scrollBy(delta) }.getOrDefault(0f)
+        } else {
+            glideApplied = glidePx.toFloat()
+        }
+    }
     Column(
         Modifier
             .fillMaxSize()
@@ -2433,41 +2443,10 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
 
         /* ---------------- message list on coin wallpaper ---------------- */
-        Box(
-            Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                // Edge-to-edge: the platform never resizes this window
-                // for the IME, so the shrink must be applied by US —
-                // reusing the same glide that already lifts the bar (a
-                // feed proved alive on his device). Padding FIRST so
-                // the size tracker below measures the shrunken box. It
-                // carries the legacy padForIme condition verbatim: an
-                // open attach/sticker panel owns that space itself
-                // (the panel carries its own imePadding) — applying
-                // both would double the lift.
-                .padding(bottom = if (!showAttach && !showStickers) imeGlideDp else 0.dp)
-                .onSizeChanged { sz ->
-                    // The thread rides the thing the keyboard actually
-                    // shrinks. A shrink of H px is exactly a H px reason
-                    // to scroll — only while parked at the bottom, and a
-                    // user's own scroll area is never touched otherwise.
-                    val old = threadTrackH
-                    threadTrackH = sz.height
-                    if (old == 0 || sz.height == old) return@onSizeChanged
-                    val info = listState.layoutInfo
-                    // Bottom check by GEOMETRY, not index arithmetic:
-                    // trailing zero-size items (typing rows, spacers) made
-                    // "index >= total - 2" unreliable. We are parked when
-                    // the very LAST item is laid out AND its bottom edge
-                    // sits at the viewport floor (24 px slack).
-                    val tail = info.visibleItemsInfo.lastOrNull()
-                    if (tail != null && tail.index == info.totalItemsCount - 1 &&
-                        tail.offset + tail.size <= info.viewportEndOffset + 24) {
-                        scope.launch { runCatching { listState.scrollBy((old - sz.height).toFloat()) } }
-                    }
-                },
-        ) {
+        // r51's self-padding here was the black band: reverted. At
+        // edge-to-edge the thread is kept above the ride by the scroll
+        // follower above — never by shrinking this Box.
+        Box(Modifier.weight(1f).fillMaxWidth()) {
             CoinWallpaper()
             // A retried send used to leave TWO server rows with the same
             // clientId; keys collide and the chat crashed on open ("Key ...
@@ -3404,13 +3383,11 @@ fun ChatScreen(nav: NavController, convId: String) {
             // worker feeds the clip to Gemini), so the mic works here too.
             micEnabled = true,
             theme = chatTheme,
-            // Owner round 51 was WRONG to strip this: the weighted Box
-            // fills the whole column height, so padding the Box only
-            // shrinks the LIST's content — the composer, a SIBLING below
-            // the Box's outer bounds, stayed behind the keyboard (the
-            // pill gone is what he saw). The bar MUST pad itself. No
-            // double lift: the Box padding insets only the list, this
-            // padding insets only the bar — disjoint regions.
+            // The bar MUST pad itself (the weighted Box fills the whole
+            // column — padding IT never lifts this sibling). The thread
+            // follows by SCROLL on the same glide above; the Box itself
+            // keeps no padding (that's what painted the black band).
+ (r52: revert r51's two keyboard regressions; follower on the live glide)
             padForIme = if (!showAttach && !showStickers) imeGlideDp else 0.dp,
             onFieldRect = { fieldRect = it },
             onActionRect = { actionRect = it },
