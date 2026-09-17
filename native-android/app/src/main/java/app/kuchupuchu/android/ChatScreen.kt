@@ -3456,6 +3456,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             // follows by SCROLL on the same glide above; the Box itself
             // keeps no padding (that's what painted the black band).
             padForIme = if (!showAttach && !showStickers) imeGlideDp else 0.dp,
+            attachOpen = showAttach,
             onFieldRect = { fieldRect = it },
             onActionRect = { actionRect = it },
             onFinishRecord = { cancelled ->
@@ -3744,6 +3745,8 @@ private fun Composer(
     // Owner round 45 (item 3): a Dp now — the shared glide value (0 while
     // a panel is open keeps the bar down over it).
     padForIme: Dp = 0.dp,
+    // Polish 2026-09-18b: attach panel needs extra bottom so last row not hidden
+    attachOpen: Boolean = false,
     // Owner round 46: report the input pill's + the mic/send slot's rect so
     // the fly-send clone launches from exactly what the user touched.
     onFieldRect: (Rect) -> Unit = {},
@@ -3786,7 +3789,7 @@ private fun Composer(
             // wallpaper (which spans the whole screen) shows through; only
             // the input pill and the send button keep their own surfaces.
             .padding(bottom = padForIme)
-            .then(if (showAttach) Modifier.padding(bottom = 340.dp) else Modifier)
+            .then(if (attachOpen) Modifier.padding(bottom = 340.dp) else Modifier)
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
