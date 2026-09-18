@@ -827,6 +827,69 @@ async function cfAiChat(
   return null;
 }
 
+/**
+ * v165 (owner: "kp ai er jonno system hobe messaging voice messaging shob
+ * kichur jonno gemini use hobe but image create/edit request a hugging face ai
+ * use hobe"): Gemini is the assistant's brain — chat text, a photo the user
+ * sends to be READ, and a voice note to be HEARD — while picture create/edit
+ * stays on Hugging Face (see hfImage) exactly as before.
+ *
+ * Gemini takes images and audio as inline parts, so [geminiParts] is the one
+ * entry point: text-only turns pass a plain string, a turn with media passes
+ * `{ inline_data: { mime_type, data } }` parts. Both return the same shape as
+ * [geminiChat] so every caller can fall back to the HF chain on a null.
+ */
+type GeminiPart = { text: string } | { inline_data: { mime_type: string; data: string } };
+
+async function geminiParts(
+  env: Env,
+  prompt: string,
+  media: { mime: string; b64: string }[] = [],
+  maxTokens = 160,
+  timeoutMs = 12_000,
+): Promise<string | null> {
+  if (!env.GEMINI_API_KEY) return null;
+  const parts: GeminiPart[] = [
+    { text: prompt },
+    ...media.map((m) => ({
+      inline_data: { mime_type: m.mime || "application/octet-stream", data: m.b64 },
+    })),
+  ];
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${env.GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts }],
+          generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 },
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      },
+    );
+    if (!res.ok) {
+      try {
+        await env.DB.prepare("INSERT INTO error_log (id, stack, created_at) VALUES (?, ?, ?)")
+          .bind(crypto.randomUUID(), `gemini ${res.status}`, nowIso())
+          .run();
+      } catch {}
+      return null;
+    }
+    const data = (await res.json()) as {
+      candidates?: { content?: { parts?: { text?: string }[] } }[];
+    };
+    const text = (data.candidates?.[0]?.content?.parts ?? [])
+      .map((p) => p.text ?? "")
+      .join("")
+      .trim()
+      .slice(0, 600);
+    return text || null;
+  } catch {
+    return null;
+  }
+}
+
 async function geminiChat(
   env: Env,
   messages: HfChatMessage[],
@@ -874,21 +937,29 @@ async function geminiChat(
   }
 }
 
-/** The one brain for every assistant text answer: HF chain → Workers AI →
- *  Gemini. The setup line still covers a tokenless deploy. */
+/**
+ * The one brain for every assistant text answer.
+ *
+ * v165 (owner rule): GEMINI first — "messaging … shob kichur jonno gemini use
+ * hobe". The HF chain and Workers AI stay behind it as honest fallbacks, so a
+ * Gemini outage or a spent key still answers instead of going silent (which is
+ * what the r48 chain was built for). Picture create/edit never comes here:
+ * that path is hfImage on Hugging Face, by the same owner rule.
+ */
 async function aiBrain(
   env: Env,
   messages: HfChatMessage[],
   maxTokens = 160,
 ): Promise<string | null> {
+  const gem = await geminiChat(env, messages, maxTokens);
+  if (gem) return gem;
   const hf = await hfChat(env, messages, maxTokens);
   if (hf) return hf;
-  const cf = await cfAiChat(env, messages, maxTokens);
-  if (cf) return cf;
-  return geminiChat(env, messages, maxTokens);
+  return cfAiChat(env, messages, maxTokens);
 }
 
-async function hfWelcomeText(env: Env, displayName: string | null): Promise<string | null> {
+/** The welcome line rides the same brain (Gemini → HF). */
+async function aiWelcomeText(env: Env, displayName: string | null): Promise<string | null> {
   const name =
     displayName && displayName !== "KuchuPuchu user"
       ? ` Their display name is ${displayName}.`
@@ -899,6 +970,8 @@ async function hfWelcomeText(env: Env, displayName: string | null): Promise<stri
     name +
     " Write a short, warm welcome message to them: 1–2 sentences, at most 35 words, in English, at most one emoji. " +
     "Do not use hashtags, quotes, or a signature line. Reply with the message text only.";
+  const gem = await geminiParts(env, prompt, [], 120);
+  if (gem) return gem;
   return hfChat(env, [{ role: "user", content: prompt }]);
 }
 
@@ -921,7 +994,7 @@ async function sendAiWelcome(
       botId,
     );
     if (already) return;
-    const body = (await hfWelcomeText(env, displayName)) ?? AI_WELCOME_FALLBACK;
+    const body = (await aiWelcomeText(env, displayName)) ?? AI_WELCOME_FALLBACK;
     const mid = id();
     const created = nowIso();
     await run(
@@ -1191,6 +1264,35 @@ function wavSilence(): Uint8Array<ArrayBuffer> {
   return out;
 }
 
+/**
+ * v165 (owner: "voice messaging … gemini use hobe"): a voice note to the
+ * assistant is transcribed by GEMINI first — audio goes up as an inline part
+ * and the transcript comes back as text. Whisper on Hugging Face stays as the
+ * fallback (the cron warmup keeps it loaded), so a Gemini refusal, a spent key
+ * or an unsupported container still ends in words rather than silence.
+ * Returns the same shape as [hfTranscribe]: never throws.
+ */
+async function aiTranscribe(
+  env: Env,
+  bytes: ArrayBuffer,
+  mime: string,
+): Promise<{ text: string | null; err: string }> {
+  if (env.GEMINI_API_KEY && bytes.byteLength <= AI_VOICE_MAX_BYTES) {
+    const b64 = arrayBufferToBase64(bytes);
+    const heard = await geminiParts(
+      env,
+      "Transcribe this voice message exactly as spoken. Reply with the transcript only — no " +
+        "quotes, no translation, no commentary. Keep the language it was spoken in.",
+      [{ mime: mime || "audio/m4a", b64 }],
+      400,
+      20_000,
+    );
+    if (heard) return { text: heard.trim().slice(0, 800), err: "" };
+  }
+  const fb = await hfTranscribe(env, bytes, mime);
+  return { text: fb.text, err: fb.err ? `gemini-miss; ${fb.err}` : fb.err };
+}
+
 /** Owner round 31 (item 17) + the 2026-09-16 HF migration: a voice note is
  *  transcribed by Whisper on HF (raw audio bytes in, `{ text }` out) and
  *  the transcript is answered as chat text. Owner round 42 (item 3): two
@@ -1448,6 +1550,9 @@ async function sendAiReply(
     // chat text. (Before, the mic in this chat was disabled and its dead
     // button froze the app.)
     let voicePrompt = "";
+    // v165: the photo this turn is a READ of, hoisted out of the block below —
+    // the reply stage looks at it with Gemini first (see there).
+    let readPhoto: { media: string | null; meta_json: string | null } | null = null;
     if (
       newest &&
       newest.sender_id === userId &&
@@ -1466,7 +1571,8 @@ async function sendAiReply(
           if (obj) {
             const buf = await new Response(obj.body).arrayBuffer();
             if (buf.byteLength > 0 && buf.byteLength <= AI_VOICE_MAX_BYTES) {
-              const heard = await hfTranscribe(
+              // v165: Gemini first (owner rule), Whisper as the fallback.
+              const heard = await aiTranscribe(
                 env,
                 buf,
                 type || obj.httpMetadata?.contentType || "",
@@ -1635,7 +1741,10 @@ async function sendAiReply(
           const src = await aiPhotoBytes(env, newestPhoto.media, photoMime(newestPhoto));
           if (src) parts = { text: `Edit this photo as requested: ${caption}`, raw: caption, src };
         }
-        if (!parts) readSource = newestPhoto; // bare photo / a question about it
+        if (!parts) {
+          readSource = newestPhoto; // bare photo / a question about it
+          readPhoto = newestPhoto;
+        }
       } else if (newestText) {
         if (recentPhoto && wantsEdit(newestText)) {
           // photo first, then the instruction → edit that photo
@@ -1660,6 +1769,7 @@ async function sendAiReply(
             /dekh|দেখ/i.test(newestText))
         ) {
           readSource = recentPhoto; // a follow-up question about the photo
+          readPhoto = recentPhoto;
           readIsPrior = true;
         }
       }
@@ -1765,17 +1875,36 @@ async function sendAiReply(
     // the text models still answer, honestly blind instead of silent.
     let answer: string | null = null;
     if (photoParts.length > 0) {
-      answer = await hfChat(
-        env,
-        [
-          {
-            role: "user",
-            content: [{ type: "text", text: prompt + voicePrompt + photoPrompt }, ...photoParts],
-          },
-        ],
-        900,
-        [HF_VISION_MODEL],
-      );
+      // v165 (owner rule): a photo the user sends to be READ is messaging, so
+      // Gemini looks at it first (inline image part); the HF vision model is
+      // the fallback. Picture CREATE / EDIT never lands here — that is the
+      // HF image path above.
+      const seen = readPhoto;
+      if (seen && seen.media) {
+        const src = await aiPhotoBytes(env, seen.media, photoMime(seen as never));
+        if (src) {
+          answer = await geminiParts(
+            env,
+            prompt + voicePrompt + photoPrompt,
+            [{ mime: src.mime, b64: arrayBufferToBase64(src.bytes.buffer) }],
+            900,
+            20_000,
+          );
+        }
+      }
+      if (!answer) {
+        answer = await hfChat(
+          env,
+          [
+            {
+              role: "user",
+              content: [{ type: "text", text: prompt + voicePrompt + photoPrompt }, ...photoParts],
+            },
+          ],
+          900,
+          [HF_VISION_MODEL],
+        );
+      }
       if (!answer) {
         answer = await aiBrain(
           env,
@@ -1799,7 +1928,10 @@ async function sendAiReply(
         900,
       );
     }
-    const body = answer ?? (!env.HF_TOKEN ? AI_REPLY_FALLBACK : AI_REPLY_DOWN);
+    // v165: with Gemini as the primary brain, "the service is off" is only
+    // true when NO brain is configured — a spent Gemini key still has HF + CF.
+    const body =
+      answer ?? (!env.GEMINI_API_KEY && !env.HF_TOKEN ? AI_REPLY_FALLBACK : AI_REPLY_DOWN);
     const botId = await ensureAiBot(db);
     const mid = id();
     const created = nowIso();
