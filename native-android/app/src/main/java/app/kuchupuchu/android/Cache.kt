@@ -606,6 +606,11 @@ object Outbox {
             val src = File(path).takeIf { it.exists() } ?: return
             val dst = videoCacheFileFor(ctx, key)
             if (!dst.exists() || dst.length() != src.length()) src.copyTo(dst, overwrite = true)
+            // v164: the frame + ratio this phone already decoded for the
+            // send-in-flight bubble belong to this clip, so they move to the
+            // cache entry the sent message reads (no second decode, no flash
+            // of the placeholder on the way from echo to server row).
+            VideoThumbs.adopt(src.absolutePath, dst.absolutePath)
         }
     }
 

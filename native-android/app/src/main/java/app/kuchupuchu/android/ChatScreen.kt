@@ -6208,6 +6208,22 @@ internal object VideoThumbs {
         android.graphics.BitmapFactory.decodeFile(f.absolutePath)
     }.getOrNull()
 
+    /**
+     * v164: hand a slot's frame + meta to another slot — the send-in-flight
+     * copy's sidecars go to the cache entry the SENT message will use, so the
+     * bubble keeps the clip's own picture (and its ratio) across the echo →
+     * server-row swap instead of flashing the placeholder again.
+     */
+    @Synchronized
+    fun adopt(from: String, to: String) {
+        if (from == to) return
+        lru[from]?.let { lru[to] = it }
+        runCatching {
+            metaFile(from).takeIf { it.exists() }?.copyTo(metaFile(to), overwrite = true)
+            thumbFile(from).takeIf { it.exists() }?.copyTo(thumbFile(to), overwrite = true)
+        }
+    }
+
     @Synchronized
     fun put(key: String, bmp: android.graphics.Bitmap, w: Float = 0f, h: Float = 0f, ms: Long = 0L) {
         lru[key] = bmp
@@ -6248,18 +6264,26 @@ private fun VideoMessageRow(
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
     val dest = remember(m.optString("id")) { videoCacheFile(ctx, m) }
-    val cacheKey = remember(m.optString("id")) { dest.absolutePath }
     // Owner round 33 (item 19): while the clip is still going out, its frame
     // comes from the local copy (docPath) — the cache file only exists once
     // the upload has finished (Outbox.keepVideoCopy) or a download ran.
     val source = remember(m.optString("id"), m.optString("docPath")) {
         m.optString("docPath").takeIf { it.isNotBlank() }?.let { File(it) }?.takeIf { it.exists() } ?: dest
     }
+    // v164 (owner: "sending er somoy thumbnail fake dekhai keno?"): the frame
+    // slot follows the file the bubble is actually drawing. A clip that is
+    // going out has no fileKey yet, so videoCacheFile() answers the SAME path
+    // for every in-flight clip ("…/kp-video-cache/v") — the next clip's bubble
+    // then read the PREVIOUS clip's frame and ratio out of that shared slot
+    // and skipped decoding its own file (the `if (value != null)` guard), i.e.
+    // a thumbnail that belongs to another video, for the whole send. The local
+    // copy is unique per send, so the slot is the clip's own.
+    val cacheKey = source.absolutePath
     val upFrac = UploadProgress.fracs[m.optString("clientId")]
     // Round 23: seed ratio/duration from the PERSISTENT meta when it exists,
     // so the first frame already carries the video's own aspect ratio instead
     // of flashing 16:9 and jumping once the decoder reports the real size.
-    val seedMeta = remember(m.optString("id")) { VideoThumbs.readMeta(cacheKey) }
+    val seedMeta = remember(m.optString("id"), cacheKey) { VideoThumbs.readMeta(cacheKey) }
     // v163 (owner's item): the clip's OWN ratio on frame one. The persistent
     // meta is the fastest answer; when it is missing (a fresh message on a new
     // device, or the sender's own bubble right after picking), the size the
@@ -6288,6 +6312,7 @@ private fun VideoMessageRow(
     val poster by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(
         VideoThumbs.get(cacheKey) ?: VideoThumbs.readThumb(cacheKey),
         posterKey,
+        cacheKey,
     ) {
         if (value != null || posterKey.isBlank() || source.exists()) return@produceState
         value =
@@ -6296,6 +6321,12 @@ private fun VideoMessageRow(
                     val bytes = Api.download("/api/files/$posterKey")
                     val bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                     bmp?.let {
+                        // v164: the poster IS the clip's own first frame, so its
+                        // own pixels answer the bubble's ratio — the box is the
+                        // clip's real shape even when the message carries no w/h.
+                        if (it.width > 0 && it.height > 0) {
+                            ratio = MediaBox.clamp(it.width.toFloat() / it.height.toFloat())
+                        }
                         val meta = m.optJSONObject("meta")
                         VideoThumbs.put(
                             cacheKey,
@@ -6312,6 +6343,7 @@ private fun VideoMessageRow(
     val thumb by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(
         VideoThumbs.get(cacheKey) ?: VideoThumbs.readThumb(cacheKey),
         m.optString("id"),
+        cacheKey,
     ) {
         if (value != null) return@produceState
         if (!source.exists()) return@produceState
@@ -7809,11 +7841,29 @@ private fun FileBubble(
     val asDocument = sentAsDocument(m)
     val isImage = fileType.startsWith("image") || fileName.endsWith(".jpg") || fileName.endsWith(".jpeg") || fileName.endsWith(".png")
     if (isImage && !asDocument) {
-        val url = if (fileKey.isNotBlank()) "/api/files/$fileKey" else m.optString("mediaUrl")
+        // v164 (owner: "sending er somoy thumbnail fake dekhai keno?"): a photo
+        // send carries its temporary copy as docPath and has NO fileKey until
+        // the upload finishes — the old line then handed the bubble an empty
+        // url, and it painted a blank placeholder instead of the photo sitting
+        // on this phone. Draw the local copy (its own bytes, its own ratio)
+        // until the server's key takes over, and keep the ✕ live meanwhile.
+        val local = m.optString("docPath").takeIf { it.isNotBlank() }?.let { File(it) }?.takeIf { it.exists() }
+        val url =
+            when {
+                fileKey.isNotBlank() -> "/api/files/$fileKey"
+                local != null -> "file://${local.absolutePath}"
+                else -> m.optString("mediaUrl")
+            }
         ImageBubble(
-            JSONObject().put("mediaUrl", url).put("body", m.optText("body")).put("clientId", m.optString("clientId")),
+            JSONObject()
+                .put("mediaUrl", url)
+                .put("body", m.optText("body"))
+                .put("clientId", m.optString("clientId"))
+                .put("mediaW", m.optInt("mediaW"))
+                .put("mediaH", m.optInt("mediaH")),
             mine,
             isPending = pendingEcho,
+            onCancelSend = onCancelSend,
         )
         return
     }
