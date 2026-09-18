@@ -6,6 +6,13 @@
 
 import {
   BIO_MAX_LENGTH,
+  DOC_MAX_BYTES,
+  IMAGE_MAX_BYTES,
+  SINGLE_UPLOAD_MAX_BYTES,
+  UPLOAD_PART_BYTES,
+  VIDEO_MAX_BYTES,
+  VOICE_MAX_BYTES,
+  mediaLimitFor,
   LOGIN_REQUEST_TTL_MS,
   MESSAGE_MAX_LENGTH,
   ONLINE_WINDOW_MS,
@@ -2522,6 +2529,13 @@ async function ensureSchema(db: D1Database) {
     `CREATE TABLE IF NOT EXISTS files (
       key TEXT PRIMARY KEY, owner_id TEXT NOT NULL, conv_id TEXT, created_at TEXT NOT NULL
     )`,
+    // v163 (owner's new rules): a large upload arrives as many chunk requests,
+    // so the multipart session (R2 upload id + the parts collected so far) has
+    // to survive between them — one row per in-flight upload.
+    `CREATE TABLE IF NOT EXISTS uploads (
+      id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, key TEXT NOT NULL, upload_id TEXT NOT NULL,
+      size INTEGER NOT NULL, type TEXT, name TEXT, parts_json TEXT, created_at TEXT NOT NULL
+    )`,
     `CREATE TABLE IF NOT EXISTS statuses (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, kind TEXT NOT NULL,
       text TEXT, bg_style TEXT, media TEXT, meta_json TEXT,
@@ -4643,6 +4657,8 @@ export default {
       // Its own try: a failed prune (quota, maintenance) must never skip the rollups
       // or the latency probe, and vice versa.
       let pruned = 0;
+      let statuses = 0;
+      let staleUploads = 0;
       let devs = 0;
       let pruneRan = false;
       try {
@@ -4666,6 +4682,8 @@ export default {
           pruneRan,
           pruned,
           devices: devs,
+          statuses,
+          staleUploads,
           metrics,
           lat,
           dispatched,
@@ -4712,6 +4730,24 @@ export default {
           })(),
         );
       }
+      // v163 (owner): "status 24h por server thekei permanently delete" — the
+      // sweep existed but only ran when somebody LISTED statuses, so a quiet
+      // account's expired photos sat in D1 + R2 until the next open. It runs
+      // on every tick now, whether anyone is using the app or not (and takes
+      // abandoned multipart uploads with it). Its own try, at the very end:
+      // a failure here must not touch the reap / prune / rollup above.
+      try {
+        statuses = await sweepExpiredStatuses(env, env.DB);
+        staleUploads = await sweepStaleUploads(env, env.DB);
+        if (statuses || staleUploads) {
+          console.log("cron_status_sweep", JSON.stringify({ statuses, staleUploads }));
+        }
+      } catch (sErr) {
+        console.error(
+          "cron_status_sweep_error",
+          JSON.stringify({ err: sErr instanceof Error ? sErr.message : String(sErr) }),
+        );
+      }
     } catch (err) {
       console.error(
         "cron_reap_error",
@@ -4729,7 +4765,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   const path = url.pathname.replace(/\/$/, "") || "/";
   const method = request.method.toUpperCase();
   let body: Json = {};
-  if (method !== "GET" && method !== "HEAD" && !path.startsWith("/api/files")) {
+  // v163: only the TWO routes that carry raw bytes keep the request body
+  // unread so they can stream it — `/api/files` (the whole file in one
+  // request) and `/api/files/mpu/part` (one chunk straight into R2). Every
+  // other route parses JSON as before, which now includes the multipart
+  // session's own start / complete / abort: their payload is a few JSON fields,
+  // and while the old blanket `/api/files` skip applied to them they always saw
+  // `{}` — i.e. "File is empty." on every chunked upload, and a silent no-op
+  // abort. (Caught by test 33 driving the real routes.)
+  const rawBytes = (path === "/api/files" && method === "POST") || path === "/api/files/mpu/part";
+  if (method !== "GET" && method !== "HEAD" && !rawBytes) {
     const text = await request.text();
     if (text) {
       try {
@@ -8128,21 +8173,29 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const row = await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", msgDeleteMatch[1]!);
     if (!row) fail(404, "Message not found.");
     if (row.sender_id !== uid) fail(403, "You can only delete your own messages.");
-    await run(
-      db,
-      "UPDATE messages SET body = NULL, media = NULL, meta_json = NULL, kind = 'DELETED' WHERE id = ?",
-      row.id,
-    );
+    // v163 (owner): delete-for-everyone is PERMANENT now. The soft tombstone
+    // stayed in D1 forever (body/media/meta blanked, kind='DELETED'), which is
+    // exactly the row the owner asked to be rid of — and it kept the media key
+    // alive in the files table. The row goes, the object goes, and the app
+    // still gets its dust: the broadcast below carries the same shape the old
+    // UPDATE used to produce, built from the row we just read.
+    const tombstone = {
+      ...row,
+      kind: "DELETED",
+      body: null,
+      media: null,
+      meta_json: null,
+    } as MsgRow;
+    await run(db, "DELETE FROM messages WHERE id = ?", row.id);
     await syncPreviewAfterDelete(db, row);
     // Round 27: the object behind an unsent photo/video/file goes with it
     // (unless another row still references the key).
     if (row.media) ctx.waitUntil(collectOrphanedMedia(env, db, [row.media]).then(() => undefined));
     // Reuse the frame the client already knows how to paint: a "message" event
-    // carrying the full row replaces the bubble by id (see ChatScreen's fast
+    // carrying the tombstone replaces the bubble by id (see ChatScreen's fast
     // paint), so a deleted message disappears on the other devices without a new
     // event type to teach the app about.
-    const afterDelete = await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", row.id);
-    if (afterDelete) ctx.waitUntil(afterMessageChanged(env, db, row.conv_id, msgFrom(afterDelete)));
+    ctx.waitUntil(afterMessageChanged(env, db, row.conv_id, msgFrom(tombstone)));
     return json({ ok: true });
   }
 
@@ -8156,8 +8209,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // stream 3 MB straight into the bucket.
     const data = await request.arrayBuffer();
     if (data.byteLength === 0) fail(400, "File is empty.");
-    if (data.byteLength > 26_214_400) fail(400, "File too large (max 25 MB).");
     const type = safeMediaType(url.searchParams.get("type"));
+    // v163: the single-request route is the SMALL path (voice notes, pictures
+    // already inside the app's own caps). Anything bigger — up to the owner's
+    // 100 MB image / 2 GB video / 5 GB document ceilings — arrives through the
+    // multipart route below, one chunk per request.
+    if (data.byteLength > SINGLE_UPLOAD_MAX_BYTES) {
+      fail(413, "Use the chunked upload for files this large.", "USE_MULTIPART");
+    }
+    const singleLimit = mediaLimitFor(type, url.searchParams.get("name") || "file");
+    if (data.byteLength > singleLimit) fail(413, "File too large.", "TOO_LARGE");
     const ext =
       (url.searchParams.get("name") || "file")
         .split(".")
@@ -8175,6 +8236,130 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       nowIso(),
     );
     return json({ fileKey: key, size: data.byteLength }, 201);
+  }
+
+  /* ---------- multipart uploads (the owner's large-file rules) ----------
+   * One request cannot carry 2 GB, and a Worker cannot buffer it either, so a
+   * big send is split by the CLIENT: start -> N part requests -> complete.
+   * R2 keeps the parts; the `uploads` row keeps the session (upload id + the
+   * parts' etags) between requests. Every part request streams `request.body`
+   * straight into R2 — nothing is ever held whole.
+   */
+
+  if (path === "/api/files/mpu/start" && method === "POST") {
+    if (!env.MEDIA) fail(501, "File storage is not configured yet.");
+    rateLimit(`upload:${uid}`, 120, 60);
+    const name = String((body as { name?: unknown }).name || "file");
+    const type = safeMediaType(String((body as { type?: unknown }).type || ""));
+    const size = Number((body as { size?: unknown }).size || 0);
+    if (!Number.isFinite(size) || size <= 0) fail(400, "File is empty.");
+    const limit = mediaLimitFor(type, name);
+    if (size > limit) {
+      fail(413, `${describeLimit(limit)} is the most this kind of file can be.`, "TOO_LARGE");
+    }
+    const ext =
+      name
+        .split(".")
+        .pop()
+        ?.toLowerCase()
+        .replace(/[^a-z0-9]/g, "")
+        .slice(0, 10) || "bin";
+    const key = `f/${id()}.${ext}`;
+    const started = await mpu(env).createMultipartUpload(key, {
+      httpMetadata: { contentType: type },
+    });
+    const uploadId = id();
+    await run(
+      db,
+      "INSERT INTO uploads (id, owner_id, key, upload_id, size, type, name, parts_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      uploadId,
+      uid,
+      key,
+      started.uploadId,
+      size,
+      type,
+      name,
+      "[]",
+      nowIso(),
+    );
+    return json({ uploadId, partSize: UPLOAD_PART_BYTES, key }, 201);
+  }
+
+  if (path === "/api/files/mpu/part" && (method === "PUT" || method === "POST")) {
+    if (!env.MEDIA) fail(501, "File storage is not configured yet.");
+    const uploadId = url.searchParams.get("uploadId") || "";
+    const n = Number(url.searchParams.get("n") || 0);
+    if (!uploadId || !Number.isInteger(n) || n < 1 || n > 10_000) fail(400, "Bad part.");
+    const up = await one<{
+      owner_id: string;
+      key: string;
+      upload_id: string;
+      parts_json: string | null;
+    }>(db, "SELECT owner_id, key, upload_id, parts_json FROM uploads WHERE id = ?", uploadId);
+    if (!up) fail(404, "That upload is not open.");
+    if (up.owner_id !== uid) fail(403, "Not your upload.");
+    if (n > 1 && !url.searchParams.get("uploadId")) fail(400, "Bad part.");
+    if (!request.body) fail(400, "Empty part.");
+    // Streams straight through — a 8 MB part never becomes a 8 MB array here.
+    const part = await mpu(env)
+      .resumeMultipartUpload(up.key, up.upload_id)
+      .uploadPart(n, request.body);
+    const parts = parseJson<{ n: number; etag: string }[]>(up.parts_json, []);
+    const kept = parts.filter((p) => p.n !== part.partNumber);
+    kept.push({ n: part.partNumber, etag: part.etag });
+    kept.sort((a, b) => a.n - b.n);
+    await run(db, "UPDATE uploads SET parts_json = ? WHERE id = ?", JSON.stringify(kept), uploadId);
+    return json({ ok: true, n: part.partNumber, etag: part.etag, parts: kept.length });
+  }
+
+  if (path === "/api/files/mpu/complete" && method === "POST") {
+    if (!env.MEDIA) fail(501, "File storage is not configured yet.");
+    const uploadId = String((body as { uploadId?: unknown }).uploadId || "");
+    const up = await one<{
+      owner_id: string;
+      key: string;
+      upload_id: string;
+      size: number;
+      type: string | null;
+      parts_json: string | null;
+    }>(
+      db,
+      "SELECT owner_id, key, upload_id, size, type, parts_json FROM uploads WHERE id = ?",
+      uploadId,
+    );
+    if (!up) fail(404, "That upload is not open.");
+    if (up.owner_id !== uid) fail(403, "Not your upload.");
+    const parts = parseJson<{ n: number; etag: string }[]>(up.parts_json, []);
+    if (!parts.length) fail(400, "No parts arrived.");
+    const done = await mpu(env)
+      .resumeMultipartUpload(up.key, up.upload_id)
+      .complete(parts.map((p) => ({ partNumber: p.n, etag: p.etag })));
+    await run(db, "DELETE FROM uploads WHERE id = ?", uploadId);
+    await run(
+      db,
+      "INSERT OR REPLACE INTO files (key, owner_id, conv_id, created_at) VALUES (?, ?, NULL, ?)",
+      up.key,
+      uid,
+      nowIso(),
+    );
+    return json({ fileKey: up.key, size: done.size ?? up.size }, 201);
+  }
+
+  if (path === "/api/files/mpu/abort" && method === "POST") {
+    const uploadId = String((body as { uploadId?: unknown }).uploadId || "");
+    const up = await one<{ owner_id: string; key: string; upload_id: string }>(
+      db,
+      "SELECT owner_id, key, upload_id FROM uploads WHERE id = ?",
+      uploadId,
+    );
+    if (up && up.owner_id === uid && env.MEDIA) {
+      await mpu(env)
+        .resumeMultipartUpload(up.key, up.upload_id)
+        .abort()
+        .catch(() => undefined);
+    }
+    await run(db, "DELETE FROM uploads WHERE id = ?", uploadId);
+    return json({ ok: true });
   }
 
   const fileGetMatch = path.match(/^\/api\/files\/(.+)$/);
@@ -10151,6 +10336,65 @@ async function syncPreviewAfterDelete(db: D1Database, row: MsgRow) {
  * row and has nothing to collect. Best-effort: a failed delete is a leak, not
  * an error for the user — callers run this inside `ctx.waitUntil`.
  */
+/**
+ * R2 multipart (v163). The binding supports it — createMultipartUpload /
+ * resumeMultipartUpload / uploadPart / complete / abort — but the pinned
+ * workers-types build predates those declarations, so they are described here
+ * instead of being left out of the app.
+ */
+interface R2MultipartUploadLike {
+  uploadId: string;
+  uploadPart(
+    partNumber: number,
+    value: ReadableStream | ArrayBuffer | ArrayBufferView | string,
+  ): Promise<{ partNumber: number; etag: string }>;
+  complete(parts: Array<{ partNumber: number; etag: string }>): Promise<{ size?: number }>;
+  abort(): Promise<void>;
+}
+interface R2MultipartCapable {
+  createMultipartUpload(
+    key: string,
+    options?: { httpMetadata?: { contentType?: string } },
+  ): Promise<R2MultipartUploadLike>;
+  resumeMultipartUpload(key: string, uploadId: string): R2MultipartUploadLike;
+}
+
+/** The bucket, seen as the multipart-capable binding. */
+function mpu(env: Env): R2MultipartCapable {
+  return env.MEDIA as unknown as R2MultipartCapable;
+}
+
+/** A byte count the user can read in a refusal ("2 GB is the most…"). */
+function describeLimit(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024) return `${Math.round(bytes / (1024 * 1024 * 1024))} GB`;
+  return `${Math.round(bytes / (1024 * 1024))} MB`;
+}
+
+/**
+ * v163: multipart sessions that were abandoned (app killed mid-upload, network
+ * gone for good) hold R2 parts forever. A day is far longer than any real
+ * upload; the row and the parts both go.
+ */
+async function sweepStaleUploads(env: Env, db: D1Database): Promise<number> {
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const rows = await all<{ id: string; key: string; upload_id: string }>(
+    db,
+    "SELECT id, key, upload_id FROM uploads WHERE created_at < ? LIMIT 50",
+    cutoff,
+  );
+  if (!rows.length) return 0;
+  for (const r of rows) {
+    if (env.MEDIA) {
+      await mpu(env)
+        .resumeMultipartUpload(r.key, r.upload_id)
+        .abort()
+        .catch(() => undefined);
+    }
+    await run(db, "DELETE FROM uploads WHERE id = ?", r.id);
+  }
+  return rows.length;
+}
+
 async function collectOrphanedMedia(env: Env, db: D1Database, keys: Array<string | null>) {
   const bucket = env.MEDIA;
   if (!bucket) return 0;

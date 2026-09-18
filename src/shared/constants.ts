@@ -171,6 +171,36 @@ export const MESSAGE_MAX_LENGTH = 4000;
 export const BIO_MAX_LENGTH = 160;
 export const GIFT_MESSAGE_MAX = 140;
 
+/**
+ * Owner 2026-09-18 (new media rules): the ceilings the app and the worker both
+ * enforce. A phone photo straight off a 108 MP camera is a ~100 MB JPEG; a
+ * 2 GB video and a 5 GB document have to go up whole — so the numbers are the
+ * rule and the transport is what had to change (see the multipart upload
+ * below: one request can only carry so much).
+ */
+export const IMAGE_MAX_BYTES = 100 * 1024 * 1024;
+export const VIDEO_MAX_BYTES = 2 * 1024 * 1024 * 1024;
+export const DOC_MAX_BYTES = 5 * 1024 * 1024 * 1024;
+export const VOICE_MAX_BYTES = 100 * 1024 * 1024;
+
+/** One multipart chunk. R2 wants every part but the last at 5 MB or more. */
+export const UPLOAD_PART_BYTES = 8 * 1024 * 1024;
+
+/** A single /api/files POST stays under the runtime's request-body ceiling —
+ *  anything bigger goes through the multipart route. */
+export const SINGLE_UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
+
+/** The limit that applies to one upload, from its declared type / name. */
+export function mediaLimitFor(type: string, name = ""): number {
+  const t = (type || "").toLowerCase();
+  const n = (name || "").toLowerCase();
+  if (t.startsWith("image/") || /\.(jpe?g|png|webp|gif|heic|heif|bmp)$/.test(n))
+    return IMAGE_MAX_BYTES;
+  if (t.startsWith("video/") || /\.(mp4|mov|mkv|webm|3gp|avi|m4v)$/.test(n)) return VIDEO_MAX_BYTES;
+  if (t.startsWith("audio/") || /\.(m4a|aac|mp3|ogg|opus|wav|amr)$/.test(n)) return VOICE_MAX_BYTES;
+  return DOC_MAX_BYTES;
+}
+
 export const DEFAULT_SETTINGS = {
   referralRewardCoins: 80,
   refereeBonusCoins: 20,

@@ -2773,8 +2773,9 @@ const convBetween = (db, a, b) =>
         chat.includes('if (kind == "FILE" && fileLooksVideo(m) && !sentAsDocument(m)) {') &&
         chat.includes("if (isImage && !asDocument) {") &&
         // r31-27: the call site now also hands the chat theme down (voice bars).
+        // v163: the doc row also hands the ✕ (cancel send) down.
         chat.includes(
-          '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty())',
+          '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend)',
         ) &&
         readFileSync("src/worker/index.ts", "utf8").includes(
           "...(incomingMeta.document === true ? { document: true } : {}),",
@@ -3870,7 +3871,7 @@ const convBetween = (db, a, b) =>
             '.also { mm -> vm.optJSONArray("waveform")?.let { mm.put("waveform", it) } },',
           ) &&
           chat.includes(
-            '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty())',
+            '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend)',
           ),
       );
     }
@@ -5559,11 +5560,17 @@ const convBetween = (db, a, b) =>
         chat.includes("private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)") &&
         // r33-3b: the upload moved into the queue (Outbox.materialize) — queue-first.
         chat.includes("fun sendFile(\n        convId: String,\n        clientId: String,") &&
+        // v163: the same callback also stops the bytes when the send was
+        // cancelled (the ✕), which is what makes cancel mean cancel.
+        kt("Cache.kt").includes("Api.uploadFile(name, mime, f) { w, t ->") &&
         kt("Cache.kt").includes(
-          "Api.uploadFile(name, mime, f) { w, t -> UploadProgress.set(clientId, 0.9f * w / t) }",
+          'if (isCancelled(clientId)) throw ApiException(499, "Cancelled.")',
         ) &&
+        kt("Cache.kt").includes("UploadProgress.set(clientId, 0.9f * w / t)") &&
         kt("Cache.kt").includes("if (status in 400..499 && status != 408 && status != 429) {") &&
-        chat.includes("if (file.length() > VideoPlan.UPLOAD_LIMIT) {") &&
+        // v163: the flat 25 MB refusal became the per-kind ceiling.
+        chat.includes("val cap = Api.limitFor(mime, name)") &&
+        chat.includes("if (file.length() > cap) {") &&
         chat.includes(
           "Uploads.sendFile(convId, clientId, name, mime, file, docMeta) { outcome ->",
         ) &&
@@ -5665,7 +5672,9 @@ const convBetween = (db, a, b) =>
         share.includes("val clip = i.clipData ?: return emptyList()") &&
         share.includes("FilesUtil.copyDocument(app, uri, name) ?: return@runCatching null") &&
         share.includes(
-          'if (!declared.startsWith("image/") && querySize(app, uri) > VideoPlan.UPLOAD_LIMIT) {',
+          // v163: pictures skip the check only because their own ceiling is
+          // read from the same helper.
+          'if (!declared.startsWith("image/") && querySize(app, uri) > Api.limitFor(declared, name)) {',
         ) &&
         share.includes("MainActivity.pendingShare.value = SharePayload(text, items)") &&
         share.includes(
@@ -5693,7 +5702,9 @@ const convBetween = (db, a, b) =>
         share.includes(
           'if (!item.mime.startsWith("video/")) body.put("meta", JSONObject().put("document", true))',
         ) &&
-        share.includes("if (item.file.length() > VideoPlan.UPLOAD_LIMIT) return null") &&
+        share.includes(
+          "if (item.file.length() > Api.limitFor(item.mime, item.file.name)) return null",
+        ) &&
         share.includes("payload.items.forEach { runCatching { it.file.delete() } }") &&
         share.includes("ScreenStore.pokeInbox()"),
     );
@@ -6353,7 +6364,10 @@ const convBetween = (db, a, b) =>
         ) &&
         src.includes("UPDATE scheduled_messages SET status = 'PENDING' WHERE id = ?") &&
         src.includes("          lat,\n          dispatched,\n        }),") &&
-        t27.includes('"reaped|pruneRan|pruned|devices|metrics|lat|dispatched"'),
+        // v163: + the status sweep / upload counts the tick now reports.
+        t27.includes(
+          '"reaped|pruneRan|pruned|devices|statuses|staleUploads|metrics|lat|dispatched"',
+        ),
     );
     check(
       "r32-18: app — the send circle is combinedClickable: tap sends, HOLD (text typed only) opens the 'Send later' sheet — quick picks (In 1 hour / Tonight 9 PM / Tomorrow 8 AM / Tomorrow 6 PM) then 'Pick date & time' with day chips + hour / minute steppers + AM / PM, a Schedule button; the pick POSTs the text with sendAt (reply kept) and clears the composer; a refusal returns the text",
@@ -7165,9 +7179,12 @@ const convBetween = (db, a, b) =>
         cache.includes('meta?.optBoolean("voice") == true -> row.put("voicePath", p)') &&
         cache.includes('row.put("mediaUrl", "file://$p")') &&
         cache.includes('else -> row.put("docPath", p)') &&
-        // a refusal takes the temp copy with it; orphan JPEGs are swept on load
+        // a refusal takes the temp copy with it; orphan JPEGs are swept on load.
+        // v163: the two cancel sites (a queued id in the retry walk, and one
+        // cancelled mid-upload) drop it too — a cancelled send leaves nothing.
         cache.includes("private fun dropLocal(item: JSONObject) {") &&
-        (cache.match(/dropLocal\(it(?:em)?\)/g) || []).length === 2 &&
+        cache.includes("if (status == 499 || isCancelled(clientId)) {") &&
+        (cache.match(/dropLocal\(it(?:em)?\)/g) || []).length === 4 &&
         cache.includes("private fun sweepMedia() {") &&
         chat33.includes('url.startsWith("file://") -> scope.launch {') &&
         ui33.includes(
@@ -7644,8 +7661,9 @@ const convBetween = (db, a, b) =>
     );
     check(
       "r33-19: video bubble — VideoMessageRow takes pendingEcho + otherReadAt, reads UploadProgress for its clientId, decodes the pending frame from the local copy (docPath), swaps the play circle for a determinate ring + percentage while sending (indeterminate during the POST), ignores taps on the echo, and draws a scrim with the time and TickIcon (sending / sent / delivered / seen) like a photo; the duration moves to the top-start corner",
+      // v163: the row also hands the ✕ (cancel send) down.
       chat.includes(
-        "VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme)",
+        "VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme, onCancelSend)",
       ) &&
         vid.includes(
           "    pendingEcho: Boolean,\n    otherReadAt: String?,\n    selectedIds: List<String>,",
@@ -7658,9 +7676,15 @@ const convBetween = (db, a, b) =>
         vid.includes("r.setDataSource(source.absolutePath)") &&
         vid.includes("if (pendingEcho) return@combinedClickable") &&
         vid.includes("progress = { upFrac },") &&
+        // v163 (owner): the percentage text is gone — the ring's middle is
+        // the ✕, and tapping it cancels the send.
         vid.includes(
-          'Text("${(upFrac * 100).toInt()}%", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)',
+          '.clickable { onCancelSend(m.optString("clientId").ifBlank { m.optString("id") }) },',
         ) &&
+        vid.includes(
+          'Icon(Icons.Filled.Close, "Cancel send", tint = Color.White, modifier = Modifier.size(16.dp))',
+        ) &&
+        !vid.includes('Text("${(upFrac * 100).toInt()}%", color = Color.White, fontSize = 10.sp') &&
         vid.includes("TickIcon(m, pendingEcho, otherReadAt)") &&
         vid.includes('msgStamp(m.optString("createdAt")),') &&
         vid.includes("listOf(Color.Transparent, Color.Transparent, Color(0x73000000)),") &&
@@ -7750,7 +7774,7 @@ const convBetween = (db, a, b) =>
         chat14.includes("onClick = {\n                        if (selecting && !pendingEcho) {") &&
         chat14.includes("selecting: Boolean = false,") &&
         chat14.includes(
-          "theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty())",
+          "theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend)",
         ),
     );
   }

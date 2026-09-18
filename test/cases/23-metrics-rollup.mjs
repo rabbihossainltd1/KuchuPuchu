@@ -410,7 +410,8 @@ const today = new Date().toISOString().slice(0, 10);
     "the rollup is in the cron log line, so 'no data' is itself visible",
     // 0 is a real answer here (nothing to prune / nothing counted), but only if the
     // reader can tell "ran and found nothing" from "did not run" -> `pruneRan`.
-    flat.includes("pruneRan, pruned, devices: devs, metrics,"),
+    // v163: the tick also reports the status sweep + abandoned uploads.
+    flat.includes("pruneRan, pruned, devices: devs, statuses, staleUploads, metrics,"),
   );
 }
 

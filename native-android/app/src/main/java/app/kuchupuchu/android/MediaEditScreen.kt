@@ -709,7 +709,8 @@ private fun MediaEditItemScreen(
                             cut.delete()
                             b
                         }
-                    if (bytes.size > VideoPlan.UPLOAD_LIMIT) throw Exception("That video is over 25 MB.")
+                    // v163: the video ceiling is 2 GB now (chunked upload).
+                    if (bytes.size > Api.VIDEO_MAX) throw Exception("That video is over ${Api.humanLimit(Api.VIDEO_MAX)}.")
                     val up = Api.upload("status.mp4", "video/mp4", bytes)
                     Api.post(
                         "/api/statuses",

@@ -145,12 +145,49 @@ object Api {
     }
 
     /**
+     * v163 (owner's media rules): the ceilings live next to the transport that
+     * has to carry them. A photo straight off a 108 MP camera is ~100 MB, a
+     * 2 GB clip and a 5 GB document have to go up whole, and a voice note caps
+     * at 100 MB — one HTTP request cannot carry any of the big ones, so
+     * anything past [SINGLE_MAX] travels the chunked route below.
+     */
+    const val IMAGE_MAX = 100L * 1024 * 1024
+    const val VIDEO_MAX = 2L * 1024 * 1024 * 1024
+    const val DOC_MAX = 5L * 1024 * 1024 * 1024
+    const val VOICE_MAX = 100L * 1024 * 1024
+
+    /** Above this a single POST is not attempted — the server refuses it too. */
+    const val SINGLE_MAX = 25L * 1024 * 1024
+
+    /** The ceiling for one upload, from what it is. */
+    fun limitFor(mime: String, name: String = ""): Long {
+        val t = mime.lowercase()
+        val n = name.lowercase()
+        return when {
+            t.startsWith("image/") || Regex("\\.(jpe?g|png|webp|gif|heic|heif|bmp)$").containsMatchIn(n) -> IMAGE_MAX
+            t.startsWith("video/") || Regex("\\.(mp4|mov|mkv|webm|3gp|avi|m4v)$").containsMatchIn(n) -> VIDEO_MAX
+            t.startsWith("audio/") || Regex("\\.(m4a|aac|mp3|ogg|opus|wav|amr)$").containsMatchIn(n) -> VOICE_MAX
+            else -> DOC_MAX
+        }
+    }
+
+    /** "2 GB" / "100 MB" — what a refusal or a hint shows the user. */
+    fun humanLimit(bytes: Long): String =
+        if (bytes >= 1024L * 1024 * 1024) "${bytes / (1024L * 1024 * 1024)} GB" else "${bytes / (1024L * 1024)} MB"
+
+    /**
      * Owner round 32 (item 34): the streaming twin of [upload] — the body reads
      * straight from [file] in 64 KB pieces (a 25 MB document never sits on the
      * heap) and progress is published at most once per percent, not once per
      * 8 KB write (3,200 recompositions for one send).
+     *
+     * v163: anything above [SINGLE_MAX] goes through the multipart route
+     * instead — same signature, so every caller got the big-file support for
+     * free (owner: images 100 MB, video 2 GB, documents 5 GB).
      */
     fun uploadFile(name: String, mime: String, file: java.io.File, onProgress: ((Long, Long) -> Unit)? = null): JSONObject {
+        val total = file.length()
+        if (total > SINGLE_MAX) return uploadChunked(name, mime, file, onProgress)
         val path = "/api/files?name=${q(name)}&type=${q(mime)}"
         val total = file.length()
         val body =
@@ -186,6 +223,120 @@ object Api {
             .header("Accept", "application/json")
             .build()
         return executeJson(req)
+    }
+
+    /**
+     * v163: the multipart upload. The file is cut into 8 MB chunks on the
+     * phone; each chunk is one small PUT (streaming from the file, never held
+     * in memory), and the server streams it into R2. Progress is byte-exact
+     * across the whole file, so the bubble's ring and the ✕ keep working
+     * exactly as they do for a small send.
+     */
+    fun uploadChunked(name: String, mime: String, file: java.io.File, onProgress: ((Long, Long) -> Unit)? = null): JSONObject {
+        val total = file.length()
+        val start =
+            executeJson(
+                Request.Builder()
+                    .url(BASE + "/api/files/mpu/start")
+                    .post(JSONObject().put("name", name).put("type", mime).put("size", total).toString().toRequestBody(JSON))
+                    .header("Accept", "application/json")
+                    .build(),
+            )
+        val uploadId = start.optString("uploadId")
+        if (uploadId.isBlank()) throw ApiException(500, "Upload could not start.")
+        val partSize = start.optLong("partSize").takeIf { it > 0 } ?: (8L * 1024 * 1024)
+        // Hoisted out of the nested RequestBody: a captured val smart-casts
+        // cleanly, and the ring's callback is read on every 64 KB block.
+        val report = onProgress
+        var done = 0L
+        var n = 1
+        try {
+            while (done < total) {
+                val len = minOf(partSize, total - done)
+                val offset = done
+                val body =
+                    object : RequestBody() {
+                        override fun contentType(): MediaType = OCTET
+
+                        override fun contentLength(): Long = len
+
+                        override fun writeTo(sink: BufferedSink) {
+                            java.io.RandomAccessFile(file, "r").use { raf ->
+                                raf.seek(offset)
+                                val buf = ByteArray(65_536)
+                                var left = len
+                                var sent = 0L
+                                var lastPct = -1
+                                while (left > 0) {
+                                    val want = minOf(buf.size.toLong(), left).toInt()
+                                    val got = raf.read(buf, 0, want)
+                                    if (got <= 0) break
+                                    sink.write(buf, 0, got)
+                                    left -= got
+                                    sent += got
+                                    if (report != null && total > 0) {
+                                        val pct = ((offset + sent) * 100 / total).toInt()
+                                        if (pct != lastPct) {
+                                            lastPct = pct
+                                            report(offset + sent, total)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                val res =
+                    executeJson(
+                        Request.Builder()
+                            .url(BASE + "/api/files/mpu/part?uploadId=${q(uploadId)}&n=$n")
+                            .put(body)
+                            .header("Accept", "application/json")
+                            .build(),
+                    )
+                // The etags live in the server's own session row — those are
+                // what `complete` hands back to R2, so the phone keeps none of
+                // them. What it does check is that the chunk landed under the
+                // number it was sent as: a mismatch would only surface as a
+                // failure at `complete`, long after the abort could help.
+                if (res.optInt("n", n) != n) throw ApiException(500, "Upload part was refused.")
+                done += len
+                n++
+            }
+            val finished =
+                executeJson(
+                    Request.Builder()
+                        .url(BASE + "/api/files/mpu/complete")
+                        .post(JSONObject().put("uploadId", uploadId).toString().toRequestBody(JSON))
+                        .header("Accept", "application/json")
+                        .build(),
+                )
+            return finished
+        } catch (e: Exception) {
+            // Leave nothing half-finished behind: the server aborts the R2
+            // multipart and drops the session row.
+            runCatching {
+                http.newCall(
+                    Request.Builder()
+                        .url(BASE + "/api/files/mpu/abort")
+                        .post(JSONObject().put("uploadId", uploadId).toString().toRequestBody(JSON))
+                        .build(),
+                ).execute().close()
+            }
+            throw e
+        }
+    }
+
+    /** Cancels a half-sent chunked upload (the ✕'s server half). */
+    fun abortChunked(uploadId: String) {
+        if (uploadId.isBlank()) return
+        runCatching {
+            http.newCall(
+                Request.Builder()
+                    .url(BASE + "/api/files/mpu/abort")
+                    .post(JSONObject().put("uploadId", uploadId).toString().toRequestBody(JSON))
+                    .build(),
+            ).execute().close()
+        }
     }
 
     /** Streams a download straight to disk — heavy docs never hit RAM whole. */

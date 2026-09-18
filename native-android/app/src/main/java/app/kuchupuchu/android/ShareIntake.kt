@@ -55,7 +55,7 @@ class ShareActivity : ComponentActivity() {
                         // Over the 25 MB upload cap: never even copied (a
                         // picture is exempt — it is re-encoded before upload).
                         val declared = app.contentResolver.getType(uri).orEmpty().ifBlank { declaredType }
-                        if (!declared.startsWith("image/") && querySize(app, uri) > VideoPlan.UPLOAD_LIMIT) {
+                        if (!declared.startsWith("image/") && querySize(app, uri) > Api.limitFor(declared, name)) {
                             return@runCatching null
                         }
                         val (mime, file) = FilesUtil.copyDocument(app, uri, name) ?: return@runCatching null
@@ -182,7 +182,7 @@ internal object ShareSend {
             }
             // Not decodable as a picture: falls through as a document.
         }
-        if (item.file.length() > VideoPlan.UPLOAD_LIMIT) return null
+        if (item.file.length() > Api.limitFor(item.mime, item.file.name)) return null
         val up = Api.uploadFile(item.name, item.mime, item.file)
         val key = up.optString("fileKey")
         if (key.isBlank()) return null

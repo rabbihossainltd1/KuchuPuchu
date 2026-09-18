@@ -254,6 +254,33 @@ object Outbox {
     @Synchronized
     fun count(): Int = items.size
 
+    /**
+     * v163 (owner): clientIds whose send the user CANCELLED mid-flight. The
+     * bubble's ring now carries an ✕ instead of a percentage; tapping it must
+     * stop the send for real — the queue entry goes, the temporary copy goes,
+     * and a POST that was already in the air is unsent server-side the moment
+     * its row comes back (see send()'s outcome branch).
+     */
+    private val cancelled = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    fun isCancelled(clientId: String): Boolean = clientId in cancelled
+
+    /** Cancels a queued / in-flight send. True when the entry was still in the
+     *  queue (the POST had not gone out); false when it was already posted. */
+    @Synchronized
+    fun cancel(clientId: String): Boolean {
+        if (clientId.isBlank()) return false
+        cancelled.add(clientId)
+        val item = items.firstOrNull { it.optString("clientId") == clientId }
+        items.removeAll { it.optString("clientId") == clientId }
+        dropped.remove(clientId)
+        item?.optJSONObject("local")?.optString("path")?.takeIf { it.isNotBlank() }?.let { path ->
+            runCatching { File(path).delete() }
+        }
+        save()
+        return item != null
+    }
+
     /** ClientIds the server refused permanently — the chat marks those bubbles failed. */
     @Synchronized
     fun droppedIds(): Set<String> = dropped.toSet()
@@ -302,15 +329,52 @@ object Outbox {
         val mime = body.optString("fileType").ifBlank { "application/octet-stream" }
         val up =
             try {
-                Api.uploadFile(name, mime, f) { w, t -> UploadProgress.set(clientId, 0.9f * w / t) }
+                Api.uploadFile(name, mime, f) { w, t ->
+                    // v163: the ✕ has to stop the BYTES too — without this a
+                    // 2 GB clip kept streaming long after the user tapped, and
+                    // a "cancelled" send that still uploads is not cancelled.
+                    // The throw lands inside the request body's own writer, so
+                    // OkHttp tears the exchange down right there.
+                    if (isCancelled(clientId)) throw ApiException(499, "Cancelled.")
+                    UploadProgress.set(clientId, 0.9f * w / t)
+                }
             } finally {
                 UploadProgress.done(clientId)
             }
         val key = up.optString("fileKey")
         if (key.isBlank()) throw ApiException(500, "Upload returned no file key.")
         body.put("fileKey", key).put("fileSize", f.length())
+        // v163 (owner: "thumbnail/ratio original er hobe"): the file's real box
+        // rides the POST as meta.w / meta.h. This is the ONLY place that has
+        // both the bytes and a background thread, and the receiver has nothing
+        // but this message — so it is what makes the far bubble take the clip's
+        // own shape on its first frame instead of the old hardcoded 16:9 fake
+        // tile. A clip keeps its rotation (see MediaBox.readVideoDims).
+        stampBox(clientId, body, mime, f)
         setKey(clientId, key, f.length())
         return body
+    }
+
+    /**
+     * v163: measure once, write it into the body, and keep it in the queue entry
+     * too so a retry after a blip does not measure (or upload) again. Never
+     * overwrites a box the caller already knows (a captioned photo measures its
+     * own bytes before the queue is even involved).
+     */
+    @Synchronized
+    private fun stampBox(clientId: String, body: JSONObject, mime: String, f: File) {
+        val meta = body.optJSONObject("meta") ?: JSONObject()
+        if (meta.optInt("w") > 0 && meta.optInt("h") > 0) return
+        val box = MediaBox.measure(mime, f) ?: return
+        meta.put("w", box.first).put("h", box.second)
+        body.put("meta", meta)
+        // The queue holds its OWN copy of the body (enqueue deep-copies it), so
+        // the box has to be written there too — otherwise the retry after a
+        // network blip would post the message and not its shape.
+        items.firstOrNull { it.optString("clientId") == clientId }
+            ?.optJSONObject("body")
+            ?.put("meta", meta)
+        save()
     }
 
     @Synchronized
@@ -346,6 +410,12 @@ object Outbox {
                     // OFFLINE has its bytes on disk and no fileKey yet — the
                     // upload happens here, on the queue's scope, then the POST.
                     val ready = materialize(clientId, body, local)
+                    // v163: the ✕ landed while this was still going out —
+                    // stop here, never POST, and drop the queue entry.
+                    if (isCancelled(clientId)) {
+                        remove(clientId)
+                        return@launch
+                    }
                     val row = Api.post("/api/conversations/$convId/messages", ready).optJSONObject("message") ?: JSONObject()
                     remove(clientId)
                     keepVideoCopy(ready, local)
@@ -355,7 +425,16 @@ object Outbox {
                     throw e
                 } catch (e: Exception) {
                     val status = (e as? ApiException)?.status ?: 0
-                    if (status in 400..499 && status != 408 && status != 429) {
+                    if (status == 499 || isCancelled(clientId)) {
+                        // The ✕ landed. Drop the entry and the temporary copy and
+                        // answer NO outcome — the screen already removed the
+                        // bubble, and a cancel must never paint a red "failed".
+                        remove(clientId)
+                        local?.optString("path")
+                            ?.takeIf { it.isNotBlank() && local.optBoolean("temp") }
+                            ?.let { runCatching { File(it).delete() } }
+                        null
+                    } else if (status in 400..499 && status != 408 && status != 429) {
                         refuse(clientId)
                         Result.failure(e)
                     } else {
@@ -367,6 +446,15 @@ object Outbox {
                     inflight.remove(clientId)
                 }
             if (outcome == null) return@launch
+            // v163: cancelled but the POST had already landed — unsend it
+            // (the row is hard-deleted server-side) and paint nothing.
+            if (isCancelled(clientId)) {
+                outcome.getOrNull()?.optString("id")?.takeIf { it.isNotBlank() }?.let { id ->
+                    withContext(Dispatchers.IO) { runCatching { Api.delete("/api/messages/$id") } }
+                }
+                ScreenStore.pokeInbox()
+                return@launch
+            }
             val painted = withContext(Dispatchers.Main) { onResult?.invoke(outcome) ?: false }
             if (!painted) ScreenStore.pokeInbox()
         }
@@ -595,6 +683,13 @@ object Outbox {
                 }
                 if (!OutboxPolicy.isDue(item.optLong("nextAt"), System.currentTimeMillis(), force)) continue
                 if (clientId in inflight) continue
+                // v163: a send the user cancelled never goes out again — not on
+                // a backoff tick, not on a network callback.
+                if (isCancelled(clientId)) {
+                    dropLocal(item)
+                    remove(clientId)
+                    continue
+                }
                 try {
                     val body = item.optJSONObject("body")!!
                     val local = item.optJSONObject("local")
@@ -609,6 +704,12 @@ object Outbox {
                     throw e
                 } catch (e: Exception) {
                     val status = (e as? ApiException)?.status ?: 0
+                    if (status == 499 || isCancelled(clientId)) {
+                        // Cancelled mid-upload: no red bubble, no retry (above).
+                        dropLocal(item)
+                        remove(clientId)
+                        continue
+                    }
                     if (status in 400..499 && status != 408 && status != 429) {
                         markDropped(item)
                         dropLocal(item)

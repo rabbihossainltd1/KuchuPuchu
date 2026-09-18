@@ -252,7 +252,9 @@ has(list, "Api.PollCadence.failed()", "…and a bad one starts it");
 {
   const cache = kt("Cache.kt");
   const flStart = cache.indexOf("suspend fun flushNow");
-  const flush = cache.slice(flStart, flStart + 2600);
+  // v163: widened again — flushNow grew the cancel branch, and the slice has
+  // to still reach the bump/break pair at its end.
+  const flush = cache.slice(flStart, flStart + 3400);
   check("the outbox owns a real retry state per item", flStart > 0, `index=${flStart}`);
   has(cache, '.put("attempts", 0)', "fresh items start with an attempt counter");
   has(cache, '.put("nextAt", 0L)', "…a next-retry deadline…");
@@ -293,7 +295,7 @@ has(list, "Api.PollCadence.failed()", "…and a bad one starts it");
   );
   check(
     "…and it still stops walking the queue when the path itself is dead",
-    /bump\(clientId, e\.message \?: "network"\)[\s\S]{0,320}?break/.test(flush),
+    /bump\(clientId, e\.message \?: "network"\)[\s\S]{0,420}?break/.test(flush), // v163 widened: the cancel branch sits between
   );
   has(cache, "if (Api.inCooldown()) return", "the queue respects the server's Retry-After");
   has(cache, "if (flushing) return", "two coroutines can still not post the same item twice");

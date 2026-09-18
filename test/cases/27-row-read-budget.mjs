@@ -253,7 +253,8 @@ const plan = (raw, sql, ...bind) =>
   check(
     "the cron log carries counts only, never a stack, token or row body (§52)",
     // r32-18: + the number of "send later" rows the tick dispatched.
-    keys.join("|") === "reaped|pruneRan|pruned|devices|metrics|lat|dispatched" &&
+    keys.join("|") ===
+      "reaped|pruneRan|pruned|devices|statuses|staleUploads|metrics|lat|dispatched" &&
       !/stack|token|sdp|body|text/.test(payload),
     JSON.stringify(keys),
   );

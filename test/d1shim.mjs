@@ -94,9 +94,108 @@ export function makeD1() {
   };
 }
 
+/**
+ * v163: the multipart part route hands the shim `request.body` — a live
+ * ReadableStream in workerd, and (in Node) one that undici refuses to wrap in a
+ * new Response once the worker has touched it ("Response body object should not
+ * be disturbed or locked"). Read it through its own reader instead, which is
+ * what the real bucket does: bytes flow through, nothing is buffered twice.
+ */
+async function readStreamAll(value) {
+  if (typeof value === "string") return Buffer.from(value);
+  if (value && typeof value.getReader === "function") {
+    const chunks = [];
+    const reader = value.getReader();
+    for (;;) {
+      const { done, value: chunk } = await reader.read();
+      if (done) break;
+      chunks.push(Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+  }
+  if (value && typeof value.arrayBuffer === "function")
+    return Buffer.from(await value.arrayBuffer());
+  return Buffer.from(value ?? []);
+}
+
 export function makeR2() {
   const store = new Map();
+  // v163: multipart sessions (the large-file upload path) — the binding API,
+  // in memory, so the tests drive the same calls the worker makes.
+  const multiparts = new Map();
+  let mpSeq = 0;
+  const mpApi = {
+    async createMultipartUpload(key, opts = {}) {
+      const uploadId = `mpu_${++mpSeq}`;
+      multiparts.set(uploadId, { key, opts, parts: new Map() });
+      return {
+        uploadId,
+        async uploadPart(n, value) {
+          const sess = multiparts.get(uploadId);
+          const buf = await readStreamAll(value);
+          sess.parts.set(n, buf);
+          return { partNumber: n, etag: `etag-${n}-${buf.length}` };
+        },
+        async complete(parts) {
+          const sess = multiparts.get(uploadId);
+          let total = 0;
+          for (const p of [...parts].sort((a, b) => a.partNumber - b.partNumber)) {
+            const b = sess.parts.get(p.partNumber);
+            if (!b) throw new Error(`missing part ${p.partNumber}`);
+            total += b.length;
+          }
+          const body = Buffer.concat(
+            [...parts]
+              .sort((a, b) => a.partNumber - b.partNumber)
+              .map((p) => sess.parts.get(p.partNumber)),
+          );
+          store.set(key, { body, httpMetadata: sess.opts.httpMetadata || {} });
+          multiparts.delete(uploadId);
+          return { size: body.length, total };
+        },
+        async abort() {
+          multiparts.delete(uploadId);
+        },
+      };
+    },
+    resumeMultipartUpload(key, uploadId) {
+      const sess = multiparts.get(uploadId);
+      if (!sess) throw new Error("no such multipart upload");
+      return mpApi.createMultipartUpload_fake(key, uploadId, sess);
+    },
+    createMultipartUpload_fake(key, uploadId, sess) {
+      return {
+        uploadId,
+        async uploadPart(n, value) {
+          const buf = await readStreamAll(value);
+          sess.parts.set(n, buf);
+          return { partNumber: n, etag: `etag-${n}-${buf.length}` };
+        },
+        async complete(parts) {
+          let total = 0;
+          for (const p of parts) {
+            const b = sess.parts.get(p.partNumber);
+            if (!b) throw new Error(`missing part ${p.partNumber}`);
+            total += b.length;
+          }
+          const body = Buffer.concat(
+            [...parts]
+              .sort((a, b) => a.partNumber - b.partNumber)
+              .map((p) => sess.parts.get(p.partNumber)),
+          );
+          store.set(key, { body, httpMetadata: sess.opts.httpMetadata || {} });
+          multiparts.delete(uploadId);
+          return { size: body.length, total };
+        },
+        async abort() {
+          multiparts.delete(uploadId);
+        },
+      };
+    },
+  };
   return {
+    ...mpApi,
+    _multiparts: multiparts,
     async put(key, data, opts = {}) {
       const buf = Buffer.from(data);
       store.set(key, { body: buf, httpMetadata: opts.httpMetadata || {} });

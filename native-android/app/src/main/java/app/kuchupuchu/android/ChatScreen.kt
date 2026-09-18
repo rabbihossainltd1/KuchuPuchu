@@ -101,6 +101,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
@@ -546,9 +547,14 @@ fun ChatScreen(nav: NavController, convId: String) {
         // Owner round 35 (item 1): the hold IS the GRACE_MS window — sized
         // past the worst-case show (see DeleteAnim), never under it.
         val hold = oldIds.filter { it.isNotBlank() && it !in newIds && it !in ScreenStore.hiddenMsgIds && (it in vanishingIds || it !in vanishedOnce) }
-        // v160 (item 5): keep the r34-3 latch above verbatim and drop the
-        // already-dusted ids on the next pass — those rows are gone for good.
-        val holdAll = hold.filter { it !in dustLatched }
+        // v163 (owner regression: "full delete animation hobar agei message
+        // remove hoye jai"): the v161/v162 latch filter dropped EVERY held id
+        // because a delete latches its ids the moment the show starts — so the
+        // hold found nothing to hold, paintFromStore fell through to the plain
+        // replace and the row left the list ~200ms in, killing the show. The
+        // latch must never outrank a show that is still playing: ids in
+        // vanishingIds stay held, latched or not.
+        val holdAll = hold.filter { it !in dustLatched || it in vanishingIds }
         if (holdAll.isNotEmpty()) {
             val fresh = holdAll.filter { it !in vanishingIds }
             vanishingIds.addAll(fresh)
@@ -1085,6 +1091,17 @@ fun ChatScreen(nav: NavController, convId: String) {
     }
 
     /** Flags an optimistic bubble as failed so it stops pretending to upload. */
+    // v163 (owner): the ✕ on a sending bubble — the send is cancelled for
+    // real (queue entry + temp copy dropped, an in-flight POST unsent).
+    fun cancelSend(clientId: String) {
+        if (clientId.isBlank()) return
+        runCatching { haptics.tap() }
+        Outbox.cancel(clientId)
+        UploadProgress.done(clientId)
+        pending.removeAll { it.optString("clientId") == clientId }
+        paintFromStore()
+    }
+
     fun markPendingFailed(clientId: String) {
         pending.find { it.optString("clientId") == clientId }
             ?.put("failed", true)
@@ -1451,10 +1468,13 @@ fun ChatScreen(nav: NavController, convId: String) {
     }
 
     fun sendFile(name: String, mime: String, file: File, asDocument: Boolean = false, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "") {
-        // Owner round 32 (item 34): the server's 25 MB cap is checked HERE — a
-        // bigger file used to upload for minutes and then fail on that check.
-        if (file.length() > VideoPlan.UPLOAD_LIMIT) {
-            error = "That file is over 25 MB."
+        // v163 (owner's new rules): the ceiling depends on WHAT it is —
+        // image 100 MB, video 2 GB, voice 100 MB, anything else (documents)
+        // 5 GB. Checked here so a huge file is refused before a single byte
+        // leaves the phone; the upload itself goes chunked above 25 MB.
+        val cap = Api.limitFor(mime, name)
+        if (file.length() > cap) {
+            error = "That file is over ${Api.humanLimit(cap)}."
             return
         }
         // Owner round 32 (item 19): picked for LATER — upload now, park on the
@@ -1583,6 +1603,11 @@ fun ChatScreen(nav: NavController, convId: String) {
     }
 
     fun sendVoice(file: File, seconds: Int, name: String, waveform: List<Int> = emptyList()) {
+        // v163 (owner's rules): voice caps at 100 MB like an image.
+        if (file.length() > Api.VOICE_MAX) {
+            error = "That voice note is over ${Api.humanLimit(Api.VOICE_MAX)}."
+            return
+        }
         // Owner round 21: his voice-send sound on the send itself.
         runCatching { KpSounds.voiceSend(ctx) }
         val clientId = "c_${java.util.UUID.randomUUID()}"
@@ -2935,6 +2960,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             theme = chatTheme,
                             onJumpTo = { jumpTo(it) },
                             askName = rawTitle,
+                            onCancelSend = ::cancelSend,
                             onUnblockAsk = { msg ->
                                 scope.launch {
                                     val ok = runCatching {
@@ -3023,6 +3049,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             onOpenAlbum = { msg -> albumMsg = msg },
                             quoteFor = { rid -> (msgs + pending).firstOrNull { it.optString("id") == rid } },
                             onJumpTo = { jumpTo(it) },
+                            onCancelSend = ::cancelSend,
                         )
                     }
                 }
@@ -5538,6 +5565,8 @@ private fun MessageRow(
     onUnblockAsk: (JSONObject) -> Unit = {},
     onIgnoreAsk: (JSONObject) -> Unit = {},
     askName: String = "",
+    // v163: the ✕ on a sending bubble.
+    onCancelSend: (String) -> Unit = {},
 ) {
     val mine = m.optString("senderId") == myId
     val kind = m.optString("kind")
@@ -5618,7 +5647,7 @@ private fun MessageRow(
     // Owner round 20: videos render as a tappable video bubble and play
     // IN-APP (the system player could never stream these auth-only files).
     if (kind == "FILE" && fileLooksVideo(m) && !sentAsDocument(m)) {
-        VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme)
+        VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme, onCancelSend)
         return
     }
 
@@ -5846,7 +5875,7 @@ private fun MessageRow(
                             if (EmojiRepo.isCustomId(st)) CustomEmojiOrFallback(st)
                             else Text(st, fontSize = 56.sp)
                         }
-                        "FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty())
+                        "FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend)
                         // Owner round 33 (item 5): the stamp is placed by
                         // measurement after the last line (KpStamped) — the
                         // old no-break-space reserve is gone from every text
@@ -6057,6 +6086,88 @@ private fun EmojiSheetDialog(onPick: (String) -> Unit) {
 /** True when a FILE message is really just a photo (image mime / extension). */
 /** Owner round 22: decoded-frame thumbnails cached in MEMORY — a chat's
  *  videos stop re-decoding on every open. */
+/**
+ * v163 (owner: "ekhon ekta hardcoded thumbnail ache fake ar ratio eita dynamic
+ * hobe … thumbnail original er"): one place that ANSWERS the size question.
+ *
+ * [readVideoDims] is the only reader of a clip's real box on the client — it
+ * accounts for the rotation tag, because the coded size of a phone clip
+ * recorded in portrait is 1920x1080 + 90° and the player rotates it. Without
+ * that, every portrait clip laid out landscape.
+ *
+ * [payloadRatio] is the size the MESSAGE carries (the sender measures the file
+ * before it uploads, so the receiver — who has no bytes yet — can size the
+ * bubble at the true ratio on its FIRST frame instead of the old hardcoded
+ * 16:9 placeholder). Same clamp everywhere, so a bubble can never be laid out
+ * differently on the two sides.
+ */
+internal object MediaBox {
+    private const val MIN_RATIO = 0.5f
+    private const val MAX_RATIO = 2.2f
+
+    fun readVideoDims(file: java.io.File): Pair<Int, Int>? {
+        if (!file.exists()) return null
+        val r = android.media.MediaMetadataRetriever()
+        return try {
+            r.setDataSource(file.absolutePath)
+            var w = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toFloatOrNull() ?: 0f
+            var h = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toFloatOrNull() ?: 0f
+            val rot = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+            if (w <= 0f || h <= 0f) return null
+            if (rot == 90 || rot == 270) {
+                val t = w
+                w = h
+                h = t
+            }
+            w.toInt() to h.toInt()
+        } catch (_: Exception) {
+            null
+        } finally {
+            runCatching { r.release() }
+        }
+    }
+
+    fun clamp(ratio: Float): Float = ratio.coerceIn(MIN_RATIO, MAX_RATIO)
+
+    /** The ratio the message itself carries, or 0 when it carries none. */
+    fun payloadRatio(m: JSONObject): Float {
+        val w = m.optInt("mediaW")
+        val h = m.optInt("mediaH")
+        if (w <= 0 || h <= 0) return 0f
+        return clamp(w.toFloat() / h.toFloat())
+    }
+
+    /**
+     * The box of a file we are about to SEND — the number the other side needs
+     * before it has a single byte. Clips go through the retriever (rotation
+     * aware, see above); an image is read from its header only
+     * (`inJustDecodeBounds`), which is a few bytes off the disk, not a decode.
+     */
+    fun measure(
+        mime: String,
+        file: java.io.File,
+    ): Pair<Int, Int>? {
+        if (!file.exists()) return null
+        val t = mime.lowercase()
+        if (t.startsWith("video/")) return readVideoDims(file)
+        if (t.startsWith("image/")) {
+            return runCatching {
+                val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                android.graphics.BitmapFactory.decodeFile(file.absolutePath, opts)
+                if (opts.outWidth > 0 && opts.outHeight > 0) opts.outWidth to opts.outHeight else null
+            }.getOrNull()
+        }
+        return null
+    }
+
+    /** The ratio for a clip: the file's own box first, then the message's. */
+    fun videoRatio(m: JSONObject, file: java.io.File?): Float {
+        val fromFile = file?.let { readVideoDims(it) }?.let { clamp(it.first.toFloat() / it.second.toFloat()) } ?: 0f
+        if (fromFile > 0f) return fromFile
+        return payloadRatio(m)
+    }
+}
+
 internal object VideoThumbs {
     /** Memory net for the CURRENT process. */
     private val lru = object : LinkedHashMap<String, android.graphics.Bitmap>(16, 0.75f, true) {
@@ -6132,6 +6243,7 @@ private fun VideoMessageRow(
     onLongPress: (JSONObject) -> Unit,
     onOpen: (JSONObject) -> Unit,
     theme: String,
+    onCancelSend: (String) -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
@@ -6148,7 +6260,18 @@ private fun VideoMessageRow(
     // so the first frame already carries the video's own aspect ratio instead
     // of flashing 16:9 and jumping once the decoder reports the real size.
     val seedMeta = remember(m.optString("id")) { VideoThumbs.readMeta(cacheKey) }
-    var ratio by remember(m.optString("id")) { mutableStateOf(seedMeta?.ratio ?: (16f / 9f)) }
+    // v163 (owner's item): the clip's OWN ratio on frame one. The persistent
+    // meta is the fastest answer; when it is missing (a fresh message on a new
+    // device, or the sender's own bubble right after picking), the size the
+    // MESSAGE carries — measured by the sender before the upload — is already
+    // here, so the bubble never flashes the old 16:9 fake box.
+    var ratio by remember(m.optString("id")) {
+        mutableStateOf(
+            seedMeta?.ratio
+                ?: MediaBox.payloadRatio(m).takeIf { it > 0f }
+                ?: (16f / 9f),
+        )
+    }
     var duration by remember(m.optString("id")) {
         val ms0 = seedMeta?.durationMs ?: 0L
         mutableStateOf(if (ms0 > 0L) "%d:%02d".format(ms0 / 1000 / 60, ms0 / 1000 % 60) else "")
@@ -6283,6 +6406,9 @@ private fun VideoMessageRow(
                             .background(Color(0x99000000)),
                         contentAlignment = Alignment.Center,
                     ) {
+                        // v163 (owner): the ring keeps its live sweep, the
+                        // MIDDLE is the ✕ — tap to cancel the send. No more
+                        // percentage text.
                         if (upFrac != null) {
                             CircularProgressIndicator(
                                 progress = { upFrac },
@@ -6291,13 +6417,21 @@ private fun VideoMessageRow(
                                 trackColor = Color(0x40FFFFFF),
                                 modifier = Modifier.size(32.dp),
                             )
-                            Text("${(upFrac * 100).toInt()}%", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                         } else {
                             CircularProgressIndicator(
                                 color = Color.White,
                                 strokeWidth = 3.dp,
                                 modifier = Modifier.size(32.dp),
                             )
+                        }
+                        Box(
+                            Modifier
+                                .size(24.dp)
+                                .clip(CircleShape)
+                                .clickable { onCancelSend(m.optString("clientId").ifBlank { m.optString("id") }) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Filled.Close, "Cancel send", tint = Color.White, modifier = Modifier.size(16.dp))
                         }
                     }
                 } else {
@@ -6414,6 +6548,51 @@ private fun ViewOnceRow(
     var ratio by remember(photoUrl) {
         mutableStateOf(ImageRatios.get(photoUrl).takeIf { it > 0f } ?: 0f)
     }
+    // v163 (owner: "hardcoded thumbnail … fake"): a view-once VIDEO used to be
+    // a fixed 16:9 dark tile with a mark on it, whatever the clip's shape. It
+    // now takes the clip's own ratio and, when a frame is already on the
+    // device (the sender's local copy, or a clip that ran through the cache),
+    // draws that frame instead of the fake tile. Nothing is downloaded here —
+    // a view-once clip the recipient has not opened has no bytes to show.
+    val videoFile = remember(m.optString("id"), m.optString("voicePath"), m.optString("docPath")) {
+        val local =
+            m.optString("docPath").takeIf { it.isNotBlank() }?.let { File(it) }
+                ?: videoCacheFile(ctx, m)
+        local.takeIf { it.exists() }
+    }
+    var videoRatio by remember(m.optString("id")) {
+        mutableFloatStateOf(MediaBox.videoRatio(m, videoFile).takeIf { it > 0f } ?: (16f / 9f))
+    }
+    val videoFrame by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(
+        VideoThumbs.get(videoFile?.absolutePath ?: ""),
+        m.optString("id"),
+    ) {
+        if (!video) return@produceState
+        val f = videoFile ?: return@produceState
+        if (value != null) return@produceState
+        value = withContext(Dispatchers.IO) {
+            val r = android.media.MediaMetadataRetriever()
+            try {
+                r.setDataSource(f.absolutePath)
+                var w = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toFloatOrNull() ?: 0f
+                var h = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toFloatOrNull() ?: 0f
+                val rot = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+                if (rot == 90 || rot == 270) {
+                    val t = w
+                    w = h
+                    h = t
+                }
+                if (w > 0f && h > 0f) videoRatio = MediaBox.clamp(w / h)
+                val bmp = r.getFrameAtTime(0L, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                bmp?.let { VideoThumbs.put(f.absolutePath, it, w, h, 0L) }
+                bmp
+            } catch (_: Exception) {
+                null
+            } finally {
+                runCatching { r.release() }
+            }
+        }
+    }
     val upFrac = UploadProgress.fracs[m.optString("clientId")]
     Row(
         Modifier
@@ -6429,7 +6608,7 @@ private fun ViewOnceRow(
                     .widthIn(max = 240.dp)
                     .then(
                         if (video) {
-                            Modifier.aspectRatio(16f / 9f)
+                            Modifier.heightIn(max = 320.dp).aspectRatio(videoRatio)
                         } else if (photoUrl != null && ratio > 0f) {
                             Modifier
                                 .heightIn(max = 320.dp)
@@ -6513,6 +6692,30 @@ private fun ViewOnceRow(
                     )
                     // Dimmer so the white mark never drowns in a bright photo.
                     Box(Modifier.matchParentSize().background(Color(0x40000000)))
+                }
+                if (video) {
+                    // v163: the clip's own frame at its own ratio instead of
+                    // the old fake tile — view-once stays view-once: the frame
+                    // is shrunk to a 16 px mosaic (exactly what the blurred
+                    // photo achieves, without depending on API 31 blur) so no
+                    // one can recognise the clip before opening it.
+                    val frame = videoFrame
+                    val mosaic = remember(frame) {
+                        frame?.let {
+                            android.graphics.Bitmap
+                                .createScaledBitmap(it, 16, (16 * it.height / it.width).coerceAtLeast(1), false)
+                        }
+                    }
+                    if (mosaic != null) {
+                        androidx.compose.foundation.Image(
+                            bitmap = mosaic.asImageBitmap(),
+                            contentDescription = "Video",
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            filterQuality = androidx.compose.ui.graphics.FilterQuality.None,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        Box(Modifier.matchParentSize().background(Color(0x40000000)))
+                    }
                 }
                 ViewOnceOneIcon(56.dp)
                 if (pendingEcho) {
@@ -6709,7 +6912,7 @@ private fun ImageMessageRow(
                     },
                 ),
         ) {
-            ImageBubble(m, mine, isPending = pendingEcho)
+            ImageBubble(m, mine, isPending = pendingEcho, onCancelSend = onCancelSend)
             // scrim so the stamp never drowns in a bright photo
             Box(
                 Modifier
@@ -7407,7 +7610,7 @@ private fun MediaCaption(body: String, mine: Boolean, theme: String) {
 }
 
 @Composable
-private fun ImageBubble(m: JSONObject, mine: Boolean, isPending: Boolean = false) {
+private fun ImageBubble(m: JSONObject, mine: Boolean, isPending: Boolean = false, onCancelSend: ((String) -> Unit)? = null) {
     // Photos arrive two ways: kind=IMAGE carries mediaUrl (/api/messages/:id/media
     // or an inline dataUrl while pending), but uploads sent as kind=FILE only
     // carry fileKey. Reading mediaUrl alone left every uploaded photo on an
@@ -7508,23 +7711,30 @@ private fun ImageBubble(m: JSONObject, mine: Boolean, isPending: Boolean = false
                     .background(Color(0x59000000)),
                 contentAlignment = Alignment.Center,
             ) {
+                // v163 (owner): live ring, ✕ in the middle (tap = cancel the
+                // send) — the percentage text is gone.
                 if (upFrac != null) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(
-                            progress = { upFrac },
-                            color = Color.White,
-                            strokeWidth = 3.dp,
-                            modifier = Modifier.size(34.dp),
-                        )
-                        Spacer(Modifier.height(3.dp))
-                        Text("${(upFrac * 100).toInt()}%", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                    }
+                    CircularProgressIndicator(
+                        progress = { upFrac },
+                        color = Color.White,
+                        strokeWidth = 3.dp,
+                        modifier = Modifier.size(34.dp),
+                    )
                 } else {
                     CircularProgressIndicator(
                         color = Color.White,
                         strokeWidth = 3.dp,
                         modifier = Modifier.size(34.dp),
                     )
+                }
+                Box(
+                    Modifier
+                        .size(26.dp)
+                        .clip(CircleShape)
+                        .clickable { onCancelSend?.invoke(m.optString("clientId").ifBlank { m.optString("id") }) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.Close, "Cancel send", tint = Color.White, modifier = Modifier.size(16.dp))
                 }
             }
         }
@@ -7547,6 +7757,8 @@ private fun FileBubble(
     onToggleSelect: (JSONObject) -> Unit = {},
     onLongPress: (JSONObject) -> Unit = {},
     selecting: Boolean = false,
+    // v163: the ✕ on a document that is still going out.
+    onCancelSend: (String) -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
@@ -7768,6 +7980,18 @@ private fun FileBubble(
                 )
                 else -> {}
             }
+            // v163: while it is still going out, the ✕ cancels the send.
+            if (upFrac != null) {
+                Box(
+                    Modifier
+                        .size(30.dp)
+                        .clip(CircleShape)
+                        .clickable { onCancelSend(m.optString("clientId").ifBlank { id }) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.Close, "Cancel send", tint = if (mine) Color.White else Ink, modifier = Modifier.size(18.dp))
+                }
+            }
         }
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
@@ -7779,7 +8003,7 @@ private fun FileBubble(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                if (upFrac != null) "Sending · ${(upFrac * 100).toInt()}%"
+                if (upFrac != null) "Sending…"
                 else FilesUtil.displaySize(m.optInt("fileSize")),
                 fontSize = 11.sp,
                 color = if (mine) Color(0x99FFFFFF) else Muted,

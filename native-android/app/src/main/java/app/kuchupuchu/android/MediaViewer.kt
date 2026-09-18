@@ -495,7 +495,14 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
     // 0 loading · 1 ready · -1 failed
     var state by remember(b64) { mutableIntStateOf(if (dest != null && dest.exists() && dest.length() > 0L) 1 else 0) }
     var aspect by remember(b64) {
-        mutableFloatStateOf(dest?.let { VideoThumbs.readMeta(it.absolutePath)?.ratio } ?: (16f / 9f))
+        mutableFloatStateOf(
+            dest?.let { VideoThumbs.readMeta(it.absolutePath)?.ratio }
+                // v163: the message carries the clip's own box from the sender's
+                // measurement, so a clip that was never downloaded still opens
+                // in its own shape instead of the hardcoded 16:9.
+                ?: MediaBox.payloadRatio(m).takeIf { it > 0f }
+                ?: (16f / 9f),
+        )
     }
     var player by remember { mutableStateOf<KpClipPlayer?>(null) }
     var posMs by remember { mutableIntStateOf(0) }
