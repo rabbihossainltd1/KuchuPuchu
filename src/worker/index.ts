@@ -946,16 +946,65 @@ async function geminiChat(
  * what the r48 chain was built for). Picture create/edit never comes here:
  * that path is hfImage on Hugging Face, by the same owner rule.
  */
+/**
+ * v166 (owner: "ai reply dite onek late korche"): the brains used to run in a
+ * LINE — Gemini, then the whole Hugging Face chain, then the Workers-AI chain —
+ * so a slow provider was paid for IN FULL before the next one was even asked
+ * (12 s Gemini cap, then up to 25 s of HF calls, then 2 x 12 s of CF: a minute
+ * of silence on a bad day, and the owner's app sat on its typing row).
+ *
+ * Firing them together is not free of cost but it is free of WAITING: the
+ * first brain to answer wins. [hedge] starts [primary] at once and, only if it
+ * is still quiet after `delayMs`, starts [secondary] beside it — a fast
+ * Gemini is never slowed down, and a Gemini that is cold, rate-limited or
+ * unconfigured costs the user one short delay instead of its whole timeout.
+ * The loser is dropped (its own AbortSignal still bounds it).
+ */
+const AI_HEDGE_MS = 1_600;
+
+async function hedge(
+  primary: () => Promise<string | null>,
+  secondary: () => Promise<string | null>,
+  delayMs: number,
+): Promise<string | null> {
+  const answered = (p: Promise<string | null>) =>
+    p.then(
+      (v) => (v == null ? Promise.reject(new Error("no-answer")) : v),
+      () => Promise.reject(new Error("no-answer")),
+    );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const gate = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, delayMs);
+  });
+  try {
+    return await Promise.any([answered(primary()), answered(gate.then(secondary))]);
+  } catch {
+    return null;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/** The HF chain, capped so a called-beside-Gemini hedge cannot run long: two
+ *  models x 7 s, then the Workers-AI rescue. */
+function hfThenCf(env: Env, messages: HfChatMessage[], maxTokens: number): Promise<string | null> {
+  return hfChat(env, messages, maxTokens, HF_CHAT_MODELS.slice(0, 2), 7_000).then(
+    (hf) => hf ?? cfAiChat(env, messages, maxTokens),
+  );
+}
+
 async function aiBrain(
   env: Env,
   messages: HfChatMessage[],
   maxTokens = 160,
 ): Promise<string | null> {
-  const gem = await geminiChat(env, messages, maxTokens);
-  if (gem) return gem;
-  const hf = await hfChat(env, messages, maxTokens);
-  if (hf) return hf;
-  return cfAiChat(env, messages, maxTokens);
+  // No Gemini configured: there is nothing to hedge with, go straight to HF.
+  if (!env.GEMINI_API_KEY) return hfThenCf(env, messages, maxTokens);
+  return hedge(
+    () => geminiChat(env, messages, maxTokens),
+    () => hfThenCf(env, messages, maxTokens),
+    AI_HEDGE_MS,
+  );
 }
 
 /** The welcome line rides the same brain (Gemini → HF). */
@@ -1277,17 +1326,33 @@ async function aiTranscribe(
   bytes: ArrayBuffer,
   mime: string,
 ): Promise<{ text: string | null; err: string }> {
+  // v166: a voice note used to wait out Gemini's whole 20 s cap before Whisper
+  // was even asked — the reply then arrived twice as late as it had to. The two
+  // transcribers now work the same way the text brains do: Gemini immediately,
+  // Whisper 1.6 s later, first transcript wins.
   if (env.GEMINI_API_KEY && bytes.byteLength <= AI_VOICE_MAX_BYTES) {
     const b64 = arrayBufferToBase64(bytes);
-    const heard = await geminiParts(
-      env,
-      "Transcribe this voice message exactly as spoken. Reply with the transcript only — no " +
-        "quotes, no translation, no commentary. Keep the language it was spoken in.",
-      [{ mime: mime || "audio/m4a", b64 }],
-      400,
-      20_000,
+    let hfErr = "";
+    const hfLeg = async () => {
+      const fb = await hfTranscribe(env, bytes, mime);
+      hfErr = fb.err;
+      return fb.text;
+    };
+    const heard = await hedge(
+      () =>
+        geminiParts(
+          env,
+          "Transcribe this voice message exactly as spoken. Reply with the transcript only — no " +
+            "quotes, no translation, no commentary. Keep the language it was spoken in.",
+          [{ mime: mime || "audio/m4a", b64 }],
+          400,
+          20_000,
+        ),
+      hfLeg,
+      AI_HEDGE_MS,
     );
     if (heard) return { text: heard.trim().slice(0, 800), err: "" };
+    return { text: null, err: hfErr ? `gemini-miss; ${hfErr}` : "gemini-miss" };
   }
   const fb = await hfTranscribe(env, bytes, mime);
   return { text: fb.text, err: fb.err ? `gemini-miss; ${fb.err}` : fb.err };
@@ -1880,45 +1945,47 @@ async function sendAiReply(
       // the fallback. Picture CREATE / EDIT never lands here — that is the
       // HF image path above.
       const seen = readPhoto;
-      if (seen && seen.media) {
-        const src = await aiPhotoBytes(env, seen.media, photoMime(seen as never));
-        if (src) {
-          answer = await geminiParts(
-            env,
-            prompt + voicePrompt + photoPrompt,
-            [{ mime: src.mime, b64: arrayBufferToBase64(src.bytes.buffer) }],
-            900,
-            20_000,
-          );
-        }
-      }
-      if (!answer) {
-        answer = await hfChat(
+      const fullPrompt = prompt + voicePrompt + photoPrompt;
+      // v166: reading a photo is hedged exactly like text — Gemini looks at it
+      // while, 1.6 s later, the HF vision model starts on the same bytes; the
+      // first description wins. The text-only apology rides behind the HF leg
+      // so a photo the models cannot see still gets an answer, never silence.
+      const hfLeg = async () => {
+        const hf = await hfChat(
           env,
-          [
-            {
-              role: "user",
-              content: [{ type: "text", text: prompt + voicePrompt + photoPrompt }, ...photoParts],
-            },
-          ],
+          [{ role: "user", content: [{ type: "text", text: fullPrompt }, ...photoParts] }],
           900,
           [HF_VISION_MODEL],
+          12_000,
         );
-      }
-      if (!answer) {
-        answer = await aiBrain(
+        if (hf) return hf;
+        return aiBrain(
           env,
           [
             {
               role: "user",
               content:
-                prompt +
-                voicePrompt +
+                fullPrompt +
                 " The user sent a photo but it cannot be seen right now: say so briefly in one " +
                 "short line and ask them to describe it or try again.",
             },
           ],
           900,
+        );
+      };
+      const src =
+        seen && seen.media ? await aiPhotoBytes(env, seen.media, photoMime(seen as never)) : null;
+      if (!src) {
+        // No bytes to look at: the text legs answer (as before).
+        answer = await aiBrain(env, [{ role: "user", content: fullPrompt }], 900);
+      } else if (!env.GEMINI_API_KEY) {
+        answer = await hfLeg();
+      } else {
+        const b64 = arrayBufferToBase64(src.bytes.buffer);
+        answer = await hedge(
+          () => geminiParts(env, fullPrompt, [{ mime: src.mime, b64 }], 900, 20_000),
+          hfLeg,
+          AI_HEDGE_MS,
         );
       }
     } else {
