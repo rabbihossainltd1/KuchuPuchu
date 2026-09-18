@@ -506,7 +506,9 @@ fun ChatScreen(nav: NavController, convId: String) {
             vanishingIds.addAll(tombIds)
             vanishedOnce.addAll(tombIds)
         }
-        next = next.filter { it.optString("kind") != "DELETED" || (it.optString("id") !in vanishingIds && it.optString("id") !in vanishedOnce) }
+        next = next.filter { it.optString("kind") != "DELETED" || it.optString("id") !in vanishingIds }
+        // Fix dust replay: also drop tombstones already in vanishedOnce (already dusted, don't re-animate)
+        next = next.filter { it.optString("kind") != "DELETED" || it.optString("id") !in vanishedOnce }
         val oldIds = msgs.map { it.optString("id") }
         val newIds = next.map { it.optString("id") }
         if (oldIds == newIds) {
