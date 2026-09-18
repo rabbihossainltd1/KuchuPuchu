@@ -1,5 +1,5 @@
-@file:Suppress("UnusedContentLambdaTargetStateParameter")
 package app.kuchupuchu.android
+
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.compose.BackHandler
@@ -66,6 +66,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -154,30 +155,39 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
     // Every photo visited keeps its edits — the item screen snapshots its
     // EditBits on leave (kilobytes; bitmaps are re-decoded on return).
     val works = remember { HashMap<String, EditBits>() }
-    // Fix 2026-09-18d: swipe only changes the inner media, not the whole
-    // edit screen UI (owner: whole UI was sliding). Keep top bar / trim /
-    // caption static, animate only the preview.
-    val item = pool[idx]
-    val uriKey = item.uri.toString()
-    MediaEditItemScreen(
-        nav,
-        item.uri,
-        item.isVideo,
-        convId,
-        viewOnce,
-        works[uriKey],
-        { bits -> works[uriKey] = bits },
-        { d ->
-            browseDir = d
-            idx = (idx + d).coerceIn(0, pool.lastIndex)
+    AnimatedContent(
+        targetState = idx,
+        transitionSpec = {
+            val dir = browseDir
+            val slideIn = if (dir >= 0) slideInHorizontally(tween(260)) { it } else slideInHorizontally(tween(260)) { -it }
+            val slideOut = if (dir >= 0) slideOutHorizontally(tween(260)) { -it } else slideOutHorizontally(tween(260)) { it }
+            slideIn.togetherWith(slideOut)
         },
-        isSelected = selectedUris.contains(uriKey),
-        onToggleSelect = {
-            if (selectedUris.contains(uriKey)) selectedUris.remove(uriKey) else selectedUris.add(uriKey)
-        },
-        selectedCount = selectedUris.size,
-        browseDir = browseDir,
-    )
+        label = "poolbrowse",
+    ) { targetIdx ->
+        val item = pool[targetIdx]
+        val uriKey = item.uri.toString()
+        key(uriKey) {
+            MediaEditItemScreen(
+                nav,
+                item.uri,
+                item.isVideo,
+                convId,
+                viewOnce,
+                works[uriKey],
+                { bits -> works[uriKey] = bits },
+                { d ->
+                    browseDir = d
+                    idx = (targetIdx + d).coerceIn(0, pool.lastIndex)
+                },
+                isSelected = selectedUris.contains(uriKey),
+                onToggleSelect = {
+                    if (selectedUris.contains(uriKey)) selectedUris.remove(uriKey) else selectedUris.add(uriKey)
+                },
+                selectedCount = selectedUris.size,
+            )
+        }
+    }
 }
 
 /** Snapshotted per-photo edit state while browsing (owner round 45, item 7). */
@@ -211,7 +221,6 @@ private fun MediaEditItemScreen(
     isSelected: Boolean? = null,
     onToggleSelect: (() -> Unit)? = null,
     selectedCount: Int = 0,
-    browseDir: Int = 1,
 ) {
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
@@ -1221,18 +1230,6 @@ private fun MediaEditItemScreen(
         Box(Modifier.fillMaxSize()) {
             /* the stage, full-bleed: media max-fit at its own aspect; overlays + the pen layer over a photo */
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                AnimatedContent(
-                    targetState = pickedUri,
-                    transitionSpec = {
-                        val dir = browseDir
-                        val slideIn = if (dir >= 0) androidx.compose.animation.slideInHorizontally(tween(260)) { it } else androidx.compose.animation.slideInHorizontally(tween(260)) { -it }
-                        val slideOut = if (dir >= 0) androidx.compose.animation.slideOutHorizontally(tween(260)) { -it } else androidx.compose.animation.slideOutHorizontally(tween(260)) { it }
-                        slideIn togetherWith slideOut
-                    },
-                    label = "mediaOnly",
-                ) { animUri ->
-                // Keep lint happy — animUri is the AnimatedContent target (pickedUri); the stage content is already keyed to it
-                @Suppress("UNUSED_VARIABLE") val _lintKeep = animUri
                 when {
                     loadFailed -> Text("Could not open that file.", color = Color.White, fontSize = 14.sp)
                     !ready -> CircularProgressIndicator(color = ActionBlue)
@@ -1281,7 +1278,6 @@ private fun MediaEditItemScreen(
                             }
                         }
                     }
-                }
                 }
                 val note = notice
                 if (note != null) {

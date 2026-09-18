@@ -498,14 +498,15 @@ fun ChatScreen(nav: NavController, convId: String) {
             next.filter {
                 it.optString("kind") == "DELETED" &&
                     it.optString("id") in liveIds &&
-                    it.optString("id") !in vanishingIds
+                    it.optString("id") !in vanishingIds &&
+                    it.optString("id") !in vanishedOnce
             }
         if (freshTombs.isNotEmpty()) {
             val tombIds = freshTombs.map { it.optString("id") }
             vanishingIds.addAll(tombIds)
             vanishedOnce.addAll(tombIds)
         }
-        next = next.filter { it.optString("kind") != "DELETED" || it.optString("id") !in vanishingIds }
+        next = next.filter { it.optString("kind") != "DELETED" || (it.optString("id") !in vanishingIds && it.optString("id") !in vanishedOnce) }
         val oldIds = msgs.map { it.optString("id") }
         val newIds = next.map { it.optString("id") }
         if (oldIds == newIds) {
@@ -2090,6 +2091,60 @@ fun ChatScreen(nav: NavController, convId: String) {
 
     var savedIndex by remember(convId) { mutableStateOf(0) }
     var savedOffset by remember(convId) { mutableStateOf(0) }
+    // Attach panel glide — same physics as the keyboard, so the message
+    // lifts just above the panel like it does above the keyboard (owner:
+    // attach open should rise like keyboard, not jump to top nor stay behind).
+    val attachTargetPx = with(LocalDensity.current) { (if (showAttach) if (attachFs) 520.dp else 340.dp else 0.dp).toPx() }
+    val attachGlidePx by androidx.compose.animation.core.animateFloatAsState(
+        attachTargetPx,
+        tween(durationMillis = 300, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+        label = "attachglide",
+    )
+    var attachApplied by remember(convId) { mutableStateOf(0f) }
+    var attachFollow by remember(convId) { mutableStateOf(false) }
+    var attachLatched by remember(convId) { mutableStateOf(false) }
+    var attachSavedIdx by remember(convId) { mutableStateOf(0) }
+    var attachSavedOff by remember(convId) { mutableStateOf(0) }
+    LaunchedEffect(attachGlidePx) {
+        val delta = attachGlidePx - attachApplied
+        if (delta == 0f) return@LaunchedEffect
+        val info = listState.layoutInfo
+        val total = info.totalItemsCount
+        val tail = info.visibleItemsInfo.lastOrNull()
+        val atBottomGeometric = tail != null && tail.index == info.totalItemsCount - 1 && tail.offset + tail.size <= info.viewportEndOffset + 24
+        val atBottomIdx = tail != null && tail.index >= total - 1
+        val nearBottom = tail != null && tail.index >= total - 2
+        if (attachApplied == 0f && attachGlidePx != 0f) {
+            attachSavedIdx = listState.firstVisibleItemIndex
+            attachSavedOff = listState.firstVisibleItemScrollOffset
+            attachFollow = true
+            attachLatched = nearBottom && (atBottomIdx || atBottomGeometric)
+        }
+        if (listState.isScrollInProgress && attachApplied == 0f && attachGlidePx != 0f) {
+            attachFollow = false
+            attachLatched = false
+        }
+        if (attachFollow) {
+            attachApplied += runCatching { listState.scrollBy(delta) }.getOrDefault(0f)
+            if (attachGlidePx == 0f) {
+                attachApplied = 0f
+                if (attachLatched && total > 0) runCatching { listState.scrollToItem(total - 1) } else runCatching { listState.scrollToItem(attachSavedIdx, attachSavedOff) }
+                attachFollow = false
+                attachLatched = false
+            } else if (kotlin.math.abs(attachGlidePx - attachApplied) < 0.5f) {
+                attachApplied = attachGlidePx
+                if (attachLatched && total > 0) runCatching { listState.scrollToItem(total - 1) }
+            }
+        } else if (atBottomIdx || atBottomGeometric) {
+            attachApplied += runCatching { listState.scrollBy(delta) }.getOrDefault(0f)
+            if (kotlin.math.abs(attachGlidePx - attachApplied) < 0.5f) attachApplied = attachGlidePx
+            if (attachGlidePx == 0f) attachApplied = 0f
+        } else {
+            attachApplied = attachGlidePx
+            if (attachGlidePx == 0f) { attachFollow = false; attachLatched = false }
+        }
+    }
+
     // Capture once per open so close can restore exactly (cures 1-line drift at any
     // position, not only at bottom) and the 3rd-open never misses due to stale glideApplied.
     LaunchedEffect(glidePx) {
