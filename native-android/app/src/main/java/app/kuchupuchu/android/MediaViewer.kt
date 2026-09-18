@@ -48,7 +48,6 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay
-import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -87,7 +86,6 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import androidx.navigation.NavController
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -534,6 +532,10 @@ internal fun MediaMenuSheet(
         if (onForward != null) KpSheetRow(Icons.AutoMirrored.Filled.Send, "Forward", onClick = onForward)
         if (onEdit != null) KpSheetRow(Icons.Filled.Brush, "Edit", onClick = onEdit)
         if (onDelete != null) KpSheetRow(Icons.Filled.Delete, "Delete", tint = Red, onClick = onDelete)
+        // v167: the photo viewer is a full-screen DIALOG with no back chrome
+        // and no outside-dismiss — a sheet the user could not close. Every
+        // sheet gets its own way out.
+        KpSheetRow(Icons.Filled.Close, "Dismiss") { onDismiss() }
     }
 }
 
@@ -545,9 +547,9 @@ internal fun MediaMenuSheet(
  * The in-app video player screen (route `videoplayer/{b64}`): the clip is
  * downloaded once into the app's cache (files need the auth header), then
  * played on a TextureView with KuchuPuchu's own controls — play/pause/replay,
- * a scrubbable seek bar, mute, rotate (sensor landscape + hidden bars) and
- * Save to Downloads. Tap anywhere toggles the controls; they hide themselves
- * after three seconds of playback.
+ * a scrubbable seek bar, mute, and ⋮ (Save / Forward / Delete) in the top bar,
+ * where the rotate button used to sit (v167 removed it). Tap anywhere toggles
+ * the controls; they hide themselves after three seconds of playback.
  */
 @Composable
 fun VideoPlayerScreen(nav: NavController, b64: String) {
@@ -565,21 +567,6 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
             MainActivity.current?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
     }
-    var landscape by remember { mutableStateOf(false) }
-    fun setLandscape(on: Boolean) {
-        landscape = on
-        val act = MainActivity.current ?: return
-        act.requestedOrientation =
-            if (on) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-        val c = WindowCompat.getInsetsController(act.window, act.window.decorView)
-        if (on) {
-            c.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            c.hide(WindowInsetsCompat.Type.systemBars())
-        } else {
-            c.show(WindowInsetsCompat.Type.systemBars())
-        }
-    }
-
     val dest = remember(b64) { m?.let { videoCacheFile(ctx, it) } }
     val src = remember(b64) { m?.let { videoSource(it) } ?: "" }
     val title = m?.optText("kpTitle")?.ifBlank { null } ?: "Video"
@@ -646,8 +633,33 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
         if (m == null || dest == null || savingClip || saved) return
         scope.launch {
             savingClip = true
+            // v167: the clip is fetched first when Save is tapped before the
+            // player's own download finished (Save was already offered — it
+            // must never answer with "Could not save").
+            val have =
+                withContext(Dispatchers.IO) {
+                    if (dest.exists() && dest.length() > 0L) {
+                        true
+                    } else {
+                        runCatching {
+                            val tmp = java.io.File(dest.absolutePath + ".part")
+                            val done = Api.downloadToFile(src, tmp) && tmp.length() > 0L
+                            if (done) {
+                                if (!tmp.renameTo(dest)) {
+                                    tmp.copyTo(dest, overwrite = true)
+                                    tmp.delete()
+                                }
+                            } else {
+                                tmp.delete()
+                            }
+                            done
+                        }.getOrDefault(false)
+                    }
+                }
+            if (have) state = 1
             val name = m.optText("fileName").ifBlank { "KuchuPuchu_${System.currentTimeMillis()}.mp4" }
             val ok =
+                have &&
                 withContext(Dispatchers.IO) {
                     saveVideoToDownloads(ctx, dest, name, FilesUtil.mimeFor(name, m.optText("fileType")))
                 }
@@ -663,11 +675,15 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
     if (menuOpen) {
         MediaMenuSheet(
             onDismiss = { menuOpen = false },
-            // v165: savable as soon as the clip is on this phone — the old
-            // gate also required state == 1, so a clip that was already cached
-            // (or one whose inline load path differed) offered no Save at all.
+            // v167 (owner: "ager bar o same question korcho but add koroni" —
+            // the last round ANSWERED "Save + Forward + Delete" and the ⋮ was
+            // still unreachable: the seat was a floating twin that the
+            // auto-hiding chrome could leave behind). Save is attempted
+            // FIRST now — if the clip is not on this phone yet, [saveClip]
+            // fetches it and then saves, instead of the old gate silently
+            // leaving the row out.
             onSave =
-                if (m != null && dest != null && dest.exists() && dest.length() > 0L && !privateClip && !saved) {
+                if (m != null && !privateClip && !saved) {
                     ({ menuOpen = false; saveClip() })
                 } else {
                     null
@@ -859,28 +875,15 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
             }
         }
 
-        // v165: the ⋮ is ALWAYS on screen (see the note on the top bar) — its
-        // own 44 dp seat in the corner, over the clip, for the whole session.
         // v166 (owner: "video photo te je send korche je receive korche kothaw 3
         // dot nei"): a private clip's ⋮ used to be withheld along with Save /
         // Forward — so there was NO dots anywhere in that viewer, and Delete
-        // (which a private clip does allow) had no way in. The seat is always
-        // here now; the sheet is what gates Save / Forward.
-        if (m != null) {
-            Box(
-                Modifier
-                    .align(Alignment.TopEnd)
-                    .statusBarsPadding()
-                    .padding(top = 46.dp, end = 4.dp)
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(Color(0x59000000))
-                    .clickable { menuOpen = true },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Filled.MoreVert, "More", tint = Color.White, modifier = Modifier.size(22.dp))
-            }
-        }
+        // (which a private clip does allow) had no way in. The sheet is what
+        // gates Save / Forward.
+        // v167 (owner: "video 3 dot ta upore rotate button ta remove kore
+        // okhane thakbe"): the dots take the rotate button's own seat in the
+        // top bar — there is exactly ONE ⋮ on this screen, where rotate used
+        // to be, on screen whenever the bar is (a tap brings the bar back).
         if (chromeAlpha > 0.01f) {
             // ---- top bar: back · title/date · rotate · save ----
             Row(
@@ -901,8 +904,13 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
                     Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (sub.isNotBlank()) Text(sub, color = Color(0xB3FFFFFF), fontSize = 11.5.sp, maxLines = 1)
                 }
-                IconButton(onClick = { haptics.tap(); setLandscape(!landscape) }) {
-                    Icon(Icons.Filled.ScreenRotation, "Rotate", tint = if (landscape) accent else Color.White, modifier = Modifier.size(22.dp))
+                // v167 (owner: "video 3 dot ta upore rotate button ta remove
+                // kore okhane thakbe"): the rotate button is gone from the bar
+                // — the dots sit in its place.
+                if (m != null) {
+                    IconButton(onClick = { haptics.tap(); menuOpen = true }) {
+                        Icon(Icons.Filled.MoreVert, "More", tint = Color.White, modifier = Modifier.size(22.dp))
+                    }
                 }
                 // v165 (owner: "video receive korle 3 dot option nai save
                 // forward photo te jemon ache"): this ⋮ lived inside the
@@ -910,8 +918,8 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
                 // the saved tick — so a received clip that had been played
                 // (chrome hidden after 3 s) or saved once had NO way to reach
                 // Save / Forward again, while the photo viewer's ⋮ is always
-                // there. The seat is fixed now; the spinner and the tick ride
-                // BESIDE it instead of taking its place.
+                // there. The spinner and the tick have always ridden BESIDE
+                // the seat instead of taking its place; that stays.
                 if (savingClip) {
                     CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.padding(end = 6.dp).size(18.dp))
                 } else if (saved) {

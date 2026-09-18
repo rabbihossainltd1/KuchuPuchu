@@ -1462,7 +1462,13 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
                 Text(
                     stamp,
                     fontSize = 12.sp,
-                    color = if (unread > 0) GoldDeep else if (KpThemeMode.darkBlue) Muted else Color(0xFF5B7FC7),
+                    // v167 (owner: "chat list a massage unread er somoy
+                    // chat screen a na chat list a time ta yello ota blue
+                    // koro"): an unread row's stamp was the one warm GoldDeep
+                    // left in the list — he wants the app's blue there too.
+                    // Every row shows the same blue time now; unread is still
+                    // unmistakable (bold name, tick, the badge).
+                    color = if (KpThemeMode.darkBlue) Muted else Color(0xFF5B7FC7),
                 )
             }
             Spacer(Modifier.height(3.dp))

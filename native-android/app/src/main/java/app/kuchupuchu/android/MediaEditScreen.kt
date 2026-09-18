@@ -1288,6 +1288,25 @@ private fun MediaEditItemScreen(
         }
     }
 
+    /** v167 (owner: "undo redo amar screenshot a dekhano jaigay ami pain"):
+     *  the floating history pair — a 40 dp dark seat so the glyph reads over a
+     *  bright photo, one hairline, dimmed (never hidden) while it has nothing
+     *  to act on. [glyph] keeps this the same shape as [CompactTool]. */
+    @Composable
+    fun StageHistory(can: Boolean, onClick: () -> Unit, glyph: @Composable () -> Unit) {
+        Box(
+            Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(if (can) Color(0xA6000000) else Color(0x66FFFFFF))
+                .border(0.5.dp, Color(0x40FFFFFF), CircleShape)
+                .clickable(enabled = can) { onClick() },
+            contentAlignment = Alignment.Center,
+        ) {
+            glyph()
+        }
+    }
+
     /** Owner round 36 (item 6): the pen + overlay layer — one canvas shared
      *  by the photo and the video stage (gestures + draw, normalised units). */
     @Composable
@@ -1746,33 +1765,18 @@ private fun MediaEditItemScreen(
                         }
                     }
                 }
-                // v165 (owner): undo + REDO, compact. v166 (owner: "undo redo
-                // option pelam e na … left a undo right a redo"): the pair used
-                // to be drawn ONLY while one of them had work to do — on a
-                // fresh photo the row simply had no undo at all, which reads as
-                // "there is no undo button". The trio is part of the chrome
-                // now: undo on the left, redo on its right, the small clear
-                // last, all three dimmed while they have nothing to act on.
-                val canUndo = strokes.isNotEmpty() || overlayPast.isNotEmpty()
-                val canRedo = redoStack.isNotEmpty()
+                // v165 (owner): compact tools. v166 (owner: "undo redo option
+                // pelam e na … left a undo right a redo"): the pair used to be
+                // drawn ONLY while one of them had work to do — on a fresh photo
+                // the row simply had no undo at all, which reads as "there is no
+                // undo button".
+                // v167 (owner: "undo redo amar screenshot a dekhano jaigay ami
+                // pain" — his two green marks): undo + redo leave this row and
+                // float on the stage itself, at exactly the two spots he
+                // circled (see StageHistory below the bar). The bar keeps the
+                // small clear, which is what is left of the trio.
                 val canClear = strokes.isNotEmpty() || texts.isNotEmpty() || stickers.isNotEmpty()
                 if (shot != null || clip != null) {
-                    CompactTool(onClick = { haptics.tap(); undoEdit() }, enabled = canUndo) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Undo,
-                            "Undo",
-                            tint = Color.White.copy(alpha = if (canUndo) 1f else 0.35f),
-                            modifier = Modifier.size(16.dp),
-                        )
-                    }
-                    CompactTool(onClick = { haptics.tap(); redoEdit() }, enabled = canRedo) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Redo,
-                            "Redo",
-                            tint = Color.White.copy(alpha = if (canRedo) 1f else 0.35f),
-                            modifier = Modifier.size(16.dp),
-                        )
-                    }
                     CompactTool(
                         enabled = canClear,
                         onClick = {
@@ -1792,6 +1796,44 @@ private fun MediaEditItemScreen(
                             "Clear",
                             tint = Color.White.copy(alpha = if (canClear) 1f else 0.35f),
                             modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
+            }
+
+            // v167 (owner: "undo redo amar screenshot a dekhano jaigay ami
+            // pain" — he marked two spots just under the tool row, one on the
+            // left and one on the right): the history pair floats on the stage
+            // — UNDO LEFT, REDO RIGHT, the two kept as one centred set so they
+            // land on his marks (38 % / 62 % of the width on his 360 dp
+            // screen: 40 dp seats, 46 dp apart). Rotate / crop hide them so
+            // the crop frame stays clean, and every other screen keeps its own
+            // undo (they are all this same composable).
+            if ((shot != null || clip != null) && !cropping) {
+                val canUndo = strokes.isNotEmpty() || overlayPast.isNotEmpty()
+                val canRedo = redoStack.isNotEmpty()
+                Row(
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(top = 50.dp),
+                    horizontalArrangement = Arrangement.spacedBy(46.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    StageHistory(canUndo, { haptics.tap(); undoEdit() }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Undo,
+                            "Undo",
+                            tint = Color.White.copy(alpha = if (canUndo) 1f else 0.35f),
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                    StageHistory(canRedo, { haptics.tap(); redoEdit() }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Redo,
+                            "Redo",
+                            tint = Color.White.copy(alpha = if (canRedo) 1f else 0.35f),
+                            modifier = Modifier.size(20.dp),
                         )
                     }
                 }

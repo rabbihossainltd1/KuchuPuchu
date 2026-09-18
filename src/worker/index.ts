@@ -962,6 +962,11 @@ async function geminiChat(
  */
 const AI_HEDGE_MS = 1_600;
 
+/** v167: the live reply frames are throttled — at most one per 140 ms — so a
+ *  fast model cannot turn one answer into a broadcast storm on the room's
+ *  Durable Object. 7 frames a second is faster than the eye reads. */
+const AI_DELTA_MS = 140;
+
 async function hedge(
   primary: () => Promise<string | null>,
   secondary: () => Promise<string | null>,
@@ -1004,6 +1009,165 @@ async function aiBrain(
     () => geminiChat(env, messages, maxTokens),
     () => hfThenCf(env, messages, maxTokens),
     AI_HEDGE_MS,
+  );
+}
+
+/**
+ * v167 (owner: "ai reply live Hobe joto ta output pabe realtime update hobe
+ * massage word by word"): the SAME Gemini call, read as it is written.
+ *
+ * `streamGenerateContent` (SSE) sends one JSON object per `data:` line, each
+ * carrying the next piece of the answer, so [onChunk] is handed the answer SO
+ * FAR every time a piece lands — the chat paints the bubble while the model is
+ * still talking instead of waiting for the whole thing. The joined text is the
+ * return value, byte-for-byte what the non-streaming call would have produced,
+ * so the caller's fallback chain and the message row are unchanged.
+ *
+ * A stream that dies half-way is NOT an answer: it resolves null (and logs the
+ * same `gemini-chat <status>` breadcrumb the plain call does), and the caller
+ * hedges to the HF chain exactly as before. Never throws.
+ */
+async function geminiStream(
+  env: Env,
+  prompt: string,
+  media: { mime: string; b64: string }[],
+  maxTokens: number,
+  onChunk: (text: string) => void,
+  timeoutMs = 12_000,
+): Promise<string | null> {
+  if (!env.GEMINI_API_KEY) return null;
+  const parts: GeminiPart[] = [
+    { text: prompt },
+    ...media.map((m) => ({
+      inline_data: { mime_type: m.mime || "application/octet-stream", data: m.b64 },
+    })),
+  ];
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:streamGenerateContent?alt=sse&key=${env.GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts }],
+          generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 },
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      },
+    );
+    if (!res.ok || !res.body) {
+      try {
+        await env.DB.prepare("INSERT INTO error_log (id, stack, created_at) VALUES (?, ?, ?)")
+          .bind(crypto.randomUUID(), `gemini-chat ${res.status}`, nowIso())
+          .run();
+      } catch {}
+      return null;
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let frame = "";
+    let text = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      frame += decoder.decode(value, { stream: true });
+      // SSE events end at a blank line; the tail stays buffered.
+      let cut = frame.indexOf("\n\n");
+      while (cut >= 0) {
+        const event = frame.slice(0, cut);
+        frame = frame.slice(cut + 2);
+        cut = frame.indexOf("\n\n");
+        for (const line of event.split("\n")) {
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).trim();
+          if (!payload || payload === "[DONE]") continue;
+          try {
+            const data = JSON.parse(payload) as {
+              candidates?: { content?: { parts?: { text?: string }[] } }[];
+            };
+            const piece = (data.candidates?.[0]?.content?.parts ?? [])
+              .map((p) => p.text ?? "")
+              .join("");
+            if (!piece) continue;
+            text += piece;
+            // The cap is the contract every caller already relies on (600).
+            if (text.length <= 600) onChunk(text);
+          } catch {
+            // A half-written frame is not text yet — the next read completes it.
+          }
+        }
+      }
+    }
+    const out = text.trim().slice(0, 600);
+    return out || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * v167: [hedge] with a live primary. [primary] paints through the `push` it is
+ * handed (the stream above), [secondary] answers in one piece and is painted
+ * whole the moment it wins; the first answer takes it and the loser stops
+ * painting, so a late chunk can never overwrite a delivered answer. With no
+ * Gemini key there is nothing to stream — the HF chain answers as before, in
+ * one piece.
+ */
+async function hedgeStream(
+  primary: (push: (text: string) => void) => Promise<string | null>,
+  secondary: () => Promise<string | null>,
+  delayMs: number,
+  onChunk: (text: string) => void,
+): Promise<string | null> {
+  let closed = false;
+  const push = (t: string) => {
+    if (!closed) onChunk(t);
+  };
+  try {
+    return await hedge(
+      () => primary(push),
+      async () => {
+        const whole = await secondary();
+        if (whole) {
+          closed = true;
+          onChunk(whole);
+        }
+        return whole;
+      },
+      delayMs,
+    );
+  } finally {
+    closed = true;
+  }
+}
+
+/** v167: [aiBrain] with the live stream on its primary leg — the assistant's
+ *  text answers are painted as they are written, the hedge and the fallbacks
+ *  are the round-166 ones (Gemini first, HF chain + Workers AI beside it). */
+async function aiBrainStream(
+  env: Env,
+  messages: HfChatMessage[],
+  maxTokens: number,
+  onChunk: (text: string) => void,
+): Promise<string | null> {
+  const whole = async () => {
+    const t = await hfThenCf(env, messages, maxTokens);
+    if (t) onChunk(t);
+    return t;
+  };
+  if (!env.GEMINI_API_KEY) return whole();
+  // The streaming entry point takes Gemini's own flattened prompt shape.
+  const prompt = messages
+    .map(
+      (m) =>
+        `${m.role === "assistant" ? "Assistant" : "User"}: ${typeof m.content === "string" ? m.content : ""}`,
+    )
+    .join("\n");
+  return hedgeStream(
+    (push) => geminiStream(env, prompt, [], maxTokens, push, 12_000),
+    () => hfThenCf(env, messages, maxTokens),
+    AI_HEDGE_MS,
+    onChunk,
   );
 }
 
@@ -1936,6 +2100,23 @@ async function sendAiReply(
       }
     }
 
+    // v167 (owner: "ai reply live Hobe joto ta output pabe realtime update
+    // hobe massage word by word"): the answer is painted WHILE it is written.
+    // Every chunk the streaming brain produces is broadcast into this chat's
+    // room as an `ai_delta` frame (the text so far), and the app renders it in
+    // the bubble the dots used to occupy. Frames are throttled to
+    // AI_DELTA_MS; a chat with no socket simply never sees them and gets the
+    // finished row exactly as before — the live layer is an ADDITION to the
+    // reply, never a replacement for it.
+    let lastDelta = 0;
+    const push = (text: string) => {
+      const now = Date.now();
+      if (now - lastDelta < AI_DELTA_MS) return;
+      lastDelta = now;
+      ctx.waitUntil(
+        broadcastRoomEvent(env, convId, { type: "ai_delta", conversationId: convId, text }),
+      );
+    };
     // A photo turn goes to the HF vision model; when the vision call fails
     // the text models still answer, honestly blind instead of silent.
     let answer: string | null = null;
@@ -1976,23 +2157,30 @@ async function sendAiReply(
       const src =
         seen && seen.media ? await aiPhotoBytes(env, seen.media, photoMime(seen as never)) : null;
       if (!src) {
-        // No bytes to look at: the text legs answer (as before).
-        answer = await aiBrain(env, [{ role: "user", content: fullPrompt }], 900);
+        // No bytes to look at: the text legs answer (as before) — live.
+        answer = await aiBrainStream(env, [{ role: "user", content: fullPrompt }], 900, push);
       } else if (!env.GEMINI_API_KEY) {
         answer = await hfLeg();
       } else {
         const b64 = arrayBufferToBase64(src.bytes.buffer);
-        answer = await hedge(
-          () => geminiParts(env, fullPrompt, [{ mime: src.mime, b64 }], 900, 20_000),
+        // v167: the photo's read streams through the same live path (the
+        // sentence appears while the model looks at the picture); hfLeg
+        // answers in one piece and is painted whole when it wins.
+        answer = await hedgeStream(
+          (live) => geminiStream(env, fullPrompt, [{ mime: src.mime, b64 }], 900, live, 20_000),
           hfLeg,
           AI_HEDGE_MS,
+          push,
         );
       }
     } else {
-      answer = await aiBrain(
+      // v167: the everyday path — chat text and voice-note answers — is the
+      // live one (a voice note's answer starts appearing while it is written).
+      answer = await aiBrainStream(
         env,
         [{ role: "user", content: prompt + voicePrompt + photoPrompt }],
         900,
+        push,
       );
     }
     // v165: with Gemini as the primary brain, "the service is off" is only

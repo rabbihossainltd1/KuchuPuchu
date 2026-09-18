@@ -27,13 +27,36 @@
 //    starts first, the HF chain (2 models × 7 s, then Workers AI) starts 1.6 s
 //    later and the first answer wins. Gemini is still the primary.
 // 7. new#1 voice bubble / 8. new#2 link card: both are compact now.
-// 9. new#3 send animation: the clone walks STRAIGHT to the bubble (520 ms) —
-//    the arc is gone — and every type rides it with its REAL content/ratio.
+// 9. new#3 send animation: v166 straightened the clone\'s walk; v167 (owner:
+//    "kono fly effect thakbe na") deleted the engine — a send is simply in its
+//    place. What survives from v166 is the ratio contract: the bubble and its
+//    thumbnail ride the REAL media ratio while the send is in flight.
 // 10. new#4: the bubble stops 5 dp short of the right edge.
 // 11. new#5: a long body folds at 10 lines, decided by a measure taken while
 //     composing at the bubble's own width (so the fold is right on frame one).
 // 12. new#6: the in-app update popup is the owner's own maintenance-crew demo,
 //     ported to Compose (KpUpdateScene) and recoloured to the app palette.
+//
+// v167 — the owner's round after testing v166 (the same file carries it so the
+// round's rules cannot drift apart):
+//
+// 13. video: the rotate button is OUT of the player's top bar and the ⋮ took
+//     its exact seat (one dots on the screen, on screen whenever the chrome
+//     is); its menu always offers Save (a clip that is not on the phone yet is
+//     fetched first), Forward and Delete, plus a Dismiss row (the photo
+//     viewer's full-screen dialog had no other way out).
+// 14. editor: undo / redo float on the STAGE at the two spots the owner marked
+//     — 40 dp seats, one centred set, undo left of redo, hidden while cropping.
+// 15. send animation: the fly engine is gone (no clone, no travel, no landing
+//     bounce) — a send is simply in its place; what survives is the real ratio
+//     of the media while it goes out.
+// 16. the chat list's unread time is the app's blue, like every other time
+//     (the warm GoldDeep he kept pointing at is gone).
+// 17. the AI reply is LIVE: Gemini answers through streamGenerateContent and
+//     every chunk is broadcast into the chat's room (throttled to 140 ms) so
+//     the bubble is painted while the model writes; the HF legs still answer in
+//     one piece and are painted whole when they win. The behavioural half of
+//     this lock lives in 32 (a fake SSE stream + a recording room).
 //
 // There is no Android SDK in this sandbox, so the Android half is pinned as
 // source shape (CI's assembleRelease is the compile) — same convention as 32/34/35.
@@ -58,6 +81,7 @@ const store = kt("ScreenStore.kt");
 const lp = kt("LinkPreview.kt");
 const scene = kt("KpUpdateScene.kt");
 const app = kt("KpApp.kt");
+const attach = kt("AttachSheet.kt");
 const src = readFileSync(new URL("../../src/worker/index.ts", import.meta.url), "utf8");
 const pkg = readFileSync(
   new URL("../../native-android/app/build.gradle.kts", import.meta.url),
@@ -66,8 +90,8 @@ const pkg = readFileSync(
 
 /* the round's own bookkeeping */
 check(
-  "v166: versionCode 166 / versionName 3.9.90",
-  /versionCode\s*=\s*166/.test(pkg) && /versionName\s*=\s*"3\.9\.90"/.test(pkg),
+  "v167: versionCode 167 / versionName 3.9.91",
+  /versionCode\s*=\s*167/.test(pkg) && /versionName\s*=\s*"3\.9\.91"/.test(pkg),
 );
 
 /* 1 — fb#2: the clip bake can no longer look frozen or vanish */
@@ -93,13 +117,14 @@ check(
 /* 2 — fb#4: undo LEFT / redo RIGHT, always visible */
 check(
   "v166 fb#4: the undo / redo / clear trio is always on the stage (left → right: undo, redo, clear) whenever there is media, dimmed instead of hidden, and the compact 26 dp tools are unchanged",
-  edit.includes(
-    "if (shot != null || clip != null) {\n                    CompactTool(onClick = { haptics.tap(); undoEdit() }, enabled = canUndo) {",
-  ) &&
+  // v167 (owner: "undo redo amar screenshot a dekhano jaigay ami pain"): the
+  // pair floats on the stage now — same two behaviours, new seats.
+  edit.includes("if ((shot != null || clip != null) && !cropping) {") &&
+    edit.includes("StageHistory(canUndo, { haptics.tap(); undoEdit() })") &&
     edit.includes("tint = Color.White.copy(alpha = if (canUndo) 1f else 0.35f)") &&
     edit.includes("tint = Color.White.copy(alpha = if (canRedo) 1f else 0.35f)") &&
-    edit.indexOf("CompactTool(onClick = { haptics.tap(); undoEdit() }") <
-      edit.indexOf("CompactTool(onClick = { haptics.tap(); redoEdit() }") &&
+    edit.indexOf("StageHistory(canUndo, { haptics.tap(); undoEdit() })") <
+      edit.indexOf("StageHistory(canRedo, { haptics.tap(); redoEdit() })") &&
     edit.includes("val canUndo = strokes.isNotEmpty() || overlayPast.isNotEmpty()") &&
     edit.includes("val canRedo = redoStack.isNotEmpty()") &&
     (edit.match(/\.size\(26\.dp\)/g) || []).length === 3,
@@ -119,8 +144,10 @@ check(
     chat.includes(
       '.also { if (facts.first > 0 && facts.second > 0) it.put("mediaW", facts.first).put("mediaH", facts.second) }',
     ) &&
+    // v167: the clip's measured box rides the PAYLOAD (and the row), not a
+    // clone's flight box any more.
     chat.includes(
-      "ratio = if (facts.first > 0 && facts.second > 0) facts.first.toFloat() / facts.second else 0f,",
+      'if (facts.first > 0 && facts.second > 0) clipMeta.put("w", facts.first).put("h", facts.second)',
     ) &&
     kt("VideoFacts.kt").includes("internal object VideoFacts {") &&
     chat.includes("fun writeMeta(key: String, w: Float, h: Float, ms: Long)") &&
@@ -137,9 +164,7 @@ check(
   chat.includes('"darkblue" -> Color(0xFFBBD3FF)') &&
     chat.includes("if (KpThemeMode.darkBlue) Color(0xFFA9C4F2) else Color(0xFF5B7FC7)") &&
     !chat.includes("Color(0xFFD7E1F7)") &&
-    list.includes(
-      "color = if (unread > 0) GoldDeep else if (KpThemeMode.darkBlue) Muted else Color(0xFF5B7FC7),",
-    ),
+    list.includes("color = if (KpThemeMode.darkBlue) Muted else Color(0xFF5B7FC7)"),
 );
 
 /* 5 — fb#8: the ⋮ + Delete everywhere, one route back to the chat */
@@ -154,7 +179,11 @@ check(
     viewer.includes(
       "if (canSave || onForward != null || onEdit != null || onDeleteForMe != null || onDeleteForEveryone != null) {",
     ) &&
-    viewer.includes("if (m != null) {\n            Box(") &&
+    // v167: the player's ⋮ is the top-bar seat (the rotate button's old place),
+    // so it rides the same chrome the rest of the player does.
+    viewer.includes(
+      'Icon(Icons.Filled.MoreVert, "More", tint = Color.White, modifier = Modifier.size(22.dp))',
+    ) &&
     viewer.includes(
       'val canUnsend = m != null && !isEchoMsg(m) && m.optString("senderId") == Store.myId()',
     ) &&
@@ -203,8 +232,11 @@ check(
     src.includes(
       "() => geminiChat(env, messages, maxTokens),\n    () => hfThenCf(env, messages, maxTokens),",
     ) &&
+    // v167 (owner: "ai reply live Hobe … word by word"): the SAME hedge and the
+    // same 1.6 s, but the primary now paints through the stream — the photo
+    // turn's Gemini leg streams and its HF leg is painted whole when it wins.
     src.includes(
-      "answer = await hedge(\n          () => geminiParts(env, fullPrompt, [{ mime: src.mime, b64 }], 900, 20_000),\n          hfLeg,",
+      "answer = await hedgeStream(\n          (live) => geminiStream(env, fullPrompt, [{ mime: src.mime, b64 }], 900, live, 20_000),\n          hfLeg,",
     ) &&
     src.includes("const heard = await hedge(") &&
     src.includes("if (hf) return hf;\n        return aiBrain("),
@@ -240,27 +272,17 @@ check(
 
 /* 9 — new#3: the send animation */
 check(
-  "v166 new#3: the send clone walks STRAIGHT to its bubble for 520 ms (no arc), every type rides the same engine with its real content and its own ratio (launchFly takes the measured ratio; KpFlySend seeds mediaRatio from it)",
-  chat.includes(
-    'fun launchFly(\n        clientId: String,\n        cloneType: String,\n        body: String = "",\n        media: String = "",\n        ratio: Float = 0f,\n    ) {',
-  ) &&
+  "v166 new#3 + v167: the send animation is a JUMP, not a flight — the owner\'s rule (\"massage jump korbe direct position a kono fly effect thakbe na\") holds because there is no clone, no travel and no landing bounce left to do it with; the media still keeps its real ratio while it goes out (the bubble\'s own w/h)",
+  !chat.includes("KpFlySend(") &&
+    !chat.includes("fun launchFly(") &&
+    !chat.includes("flyHidden") &&
+    !chat.includes("flyLanded") &&
+    !chat.includes("sendFromRect") &&
     chat.includes(
-      'launchFly(clientId, "PHOTO", media = dataUrl, ratio = if (w > 0 && h > 0) w.toFloat() / h else 0f)',
+      'if (facts.first > 0 && facts.second > 0) clipMeta.put("w", facts.first).put("h", facts.second)',
     ) &&
-    chat.includes("t.animateTo(1f, tween(520, easing = LinearEasing))") &&
-    chat.includes("var mediaRatio by remember(spec.key) { mutableFloatStateOf(spec.ratio) }") &&
-    chat.includes(
-      '// v166 (owner: "eita change hoye direct nijer position a chole\n                // jabe kono fly na")',
-    ) &&
-    !chat.includes("(-56).dp.toPx()") &&
-    // the declaration plus the four send paths that ride it: text, photo,
-    // voice and the file/clip call
-    (chat.match(/launchFly\(\s*clientId/g) || []).length === 5 &&
-    chat.includes('launchFly(clientId, "TEXT", body)') &&
-    chat.includes('launchFly(clientId, "VOICE")') &&
-    chat.includes(
-      'launchFly(\n            clientId,\n            if (mime.startsWith("video")) "VIDEO" else "DOC",',
-    ),
+    chat.includes('.also { row -> if (w > 0 && h > 0) row.put("mediaW", w).put("mediaH", h) }') &&
+    chat.includes('if (facts.third > 0L) clipMeta.put("durMs", facts.third)'),
 );
 
 /* 10 — new#4: 5 px of air on the right */
@@ -316,5 +338,94 @@ check(
     app.includes("KpUpdateScene(KpUpdatePhase.DONE, 1f"),
 );
 
-process.stdout.write(lines.join("\n") + "\n");
+/* 13 — v167: the player's ⋮ took the rotate button's seat */
+check(
+  "v167 item 1: the rotate button and its landscape machinery are out of the player, and the ⋮ sits in that exact seat (one dots on the whole screen, in the top bar beside the title) with Save / Forward / Delete — Save fetches a clip that is not on this phone yet instead of hiding its own row",
+  !viewer.includes("Icons.Filled.ScreenRotation") &&
+    !viewer.includes("SCREEN_ORIENTATION_SENSOR_LANDSCAPE") &&
+    !viewer.includes("fun setLandscape(") &&
+    viewer.includes("IconButton(onClick = { haptics.tap(); menuOpen = true })") &&
+    viewer.includes(
+      'Icon(Icons.Filled.MoreVert, "More", tint = Color.White, modifier = Modifier.size(22.dp))',
+    ) &&
+    (viewer.match(/Icons\.Filled\.MoreVert, "More"/g) || []).length === 2 &&
+    viewer.includes("if (m != null && !privateClip && !saved) {") &&
+    viewer.includes("if (dest.exists() && dest.length() > 0L) {") &&
+    viewer.includes('KpSheetRow(Icons.Filled.Close, "Dismiss") { onDismiss() }'),
+);
+
+/* 14 — v167: undo / redo float on the stage at the owner's marked spots */
+check(
+  "v167 item 2: undo / redo are floating seats ON the stage at the two spots the owner marked — one centred set under the tool row (40 dp, 46 dp apart), undo LEFT of redo, dimmed when idle, and the crop frame keeps the stage clean",
+  edit.includes(
+    "fun StageHistory(can: Boolean, onClick: () -> Unit, glyph: @Composable () -> Unit)",
+  ) &&
+    edit.includes("if ((shot != null || clip != null) && !cropping) {") &&
+    edit.includes(
+      ".align(Alignment.TopCenter)\n                        .statusBarsPadding()\n                        .padding(top = 50.dp),",
+    ) &&
+    edit.includes("horizontalArrangement = Arrangement.spacedBy(46.dp),") &&
+    edit.indexOf("StageHistory(canUndo, { haptics.tap(); undoEdit() })") <
+      edit.indexOf("StageHistory(canRedo, { haptics.tap(); redoEdit() })") &&
+    (edit.match(/\.size\(40\.dp\)/g) || []).length === 2 &&
+    edit.includes("val canUndo = strokes.isNotEmpty() || overlayPast.isNotEmpty()") &&
+    edit.includes("val canRedo = redoStack.isNotEmpty()"),
+);
+
+/* 15 — v167: the send animation is a jump (no engine left) */
+check(
+  "v167 item 3: no fly — the clone, its launch hints, the hide/landing state and the engine itself are gone from the chat (a send is in its place at once, every type the same), while the media's own ratio still rides the sending bubble",
+  !chat.includes("KpFlySend(") &&
+    !chat.includes("KpFlyLandFlash(") &&
+    !chat.includes("private object KpFlyTarget") &&
+    !chat.includes("private class FlySpec(") &&
+    !chat.includes("fun launchFly(") &&
+    !chat.includes("flyHidden") &&
+    !chat.includes("flyLanded") &&
+    !chat.includes("sendFromRect") &&
+    !chat.includes("onFieldRect") &&
+    !chat.includes("onActionRect") &&
+    !attach.includes("onSendRect") &&
+    chat.includes(
+      'pending.find { it.optString("clientId") == clientId }?.put("mediaW", shotW)?.put("mediaH", shotH)',
+    ),
+);
+
+/* 16 — v167: the unread row's time is blue too */
+check(
+  "v167 item 4: the chat list's unread time is the app's blue — the warm GoldDeep the owner kept pointing at is gone from that row (the unread state still reads through the bold name, the tick and the badge)",
+  !list.includes("if (unread > 0) GoldDeep") &&
+    list.includes("color = if (KpThemeMode.darkBlue) Muted else Color(0xFF5B7FC7)") &&
+    !list.includes("Color(0xFFD7E1F7)"),
+);
+
+/* 17 — v167: the live AI reply */
+check(
+  "v167 item 5: the AI answer is LIVE — Gemini's streamGenerateContent feeds a throttled (140 ms) `ai_delta` frame into the chat's room with the text SO FAR, the streaming brain keeps the 1.6 s hedge and the same 900-token legs, and the app renders the growing text in the reply's own bubble (caret at the end, cleared and never re-typed when the finished row lands)",
+  src.includes(":streamGenerateContent?alt=sse") &&
+    src.includes("async function geminiStream(") &&
+    src.includes("async function hedgeStream(") &&
+    src.includes("async function aiBrainStream(") &&
+    src.includes("const AI_DELTA_MS = 140;") &&
+    src.includes('{ type: "ai_delta", conversationId: convId, text }') &&
+    src.includes(
+      'answer = await aiBrainStream(env, [{ role: "user", content: fullPrompt }], 900, push);',
+    ) &&
+    src.includes("900,\n        push,\n      );") &&
+    chat.includes('"ai_delta" ->') &&
+    chat.includes('aiLiveBody = ev.optString("text")') &&
+    chat.includes("if (aiTyping && aiLiveBody.isNotBlank()) {") &&
+    chat.includes('.put("id", "ai_live")') &&
+    chat.includes("revealChars = aiLiveBody.length,") &&
+    chat.includes(
+      'val paintedLive = aiLiveBody.isNotBlank() && aiLiveBody.trim() == last.optText("body").trim()',
+    ) &&
+    chat.includes("if (paintedLive || mid == aiRevealId) return@LaunchedEffect") &&
+    chat.includes('LaunchedEffect(aiTyping) { if (aiTyping) aiLiveBody = "" }'),
+);
+
+console.log(lines.join("\n"));
+console.log(
+  `v166-v167 round: ${lines.filter((l) => l.includes("OK")).length} ok / ${lines.filter((l) => l.includes("BROKEN")).length} broken`,
+);
 process.exit(lines.some((l) => l.includes("BROKEN")) ? 1 : 0);

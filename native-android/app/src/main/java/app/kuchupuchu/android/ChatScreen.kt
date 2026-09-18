@@ -2,7 +2,6 @@ package app.kuchupuchu.android
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -61,7 +60,6 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
@@ -121,15 +119,12 @@ import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.withTransform
@@ -181,7 +176,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import kotlin.math.roundToInt
-import kotlin.random.Random
 
 /**
  * Everything the background half of a messages refresh derives from the
@@ -322,6 +316,12 @@ fun ChatScreen(nav: NavController, convId: String) {
     val chatOpenedAtMs = remember { System.currentTimeMillis() }
     var aiRevealId by remember { mutableStateOf<String?>(null) }
     var aiRevealChars by remember { mutableStateOf(0) }
+    // v167 (owner: "ai reply live Hobe joto ta output pabe realtime update hobe
+    // massage word by word"): the answer as the SERVER has it so far. The
+    // worker streams every chunk into this chat's room (`ai_delta`), so the
+    // bubble is painted while the model is still writing instead of after the
+    // whole reply is done. Empty = nothing live (dots / the finished row).
+    var aiLiveBody by remember(convId) { mutableStateOf("") }
     // Word-by-word reveal for a freshly-arrived KuchuPuchu AI reply (owner
     // round 2026-09-04). Only messages CREATED after this screen opened are
     // animated, so conversation history never re-types itself on open.
@@ -359,33 +359,17 @@ fun ChatScreen(nav: NavController, convId: String) {
     // Owner round 45 (item 7): the panel reports its loaded recents; the
     // lone-pick pencil stages them for the editor's browse mode.
     var attachPool by remember { mutableStateOf(listOf<MediaItem>()) }
-    // Owner round 46: morph-&-fly send (the owner's savedly demo port) —
-    // a clone launches from whatever fired the send (input pill, mic/send
-    // slot, panel send circle) and flies an arced, wobbling path onto the
-    // hidden echo row. Launch rects are captured on layout; the baton is
-    // ONE-SHOT (a tap arms it, the send consumes it), so a stray rect can
-    // never fly some later send.
-    var fieldRect by remember { mutableStateOf(Rect.Zero) }
-    var actionRect by remember { mutableStateOf(Rect.Zero) }
-    var attachSendRect by remember { mutableStateOf(Rect.Zero) }
-    var sendFromRect by remember { mutableStateOf(Rect.Zero) }
-    val flyQueue = remember { mutableStateListOf<FlySpec>() }
-    val flyHidden = remember { mutableStateListOf<String>() }
-    var flyTarget by remember { mutableStateOf<Rect?>(null) }
-    var flyLanded by remember { mutableStateOf<String?>(null) }
-    var flyFlash by remember { mutableStateOf<Rect?>(null) }
-    // Owner round 47: the overlay lives inside the messages Box now — its
-    // own origin converts the rows' root-space rects to local ones.
-    var flyOx by remember { mutableStateOf(0f) }
-    var flyOy by remember { mutableStateOf(0f) }
-    // Owner round 48: bubbles report their OWN rect to the waiting clone
-    // (the r46 row reporter handed the full-width row — every media clone
-    // flew huge and off-ratio). Only the queue head's rect counts.
-    LaunchedEffect(Unit) {
-        KpFlyTarget.report = { k, r ->
-            if (k == flyQueue.firstOrNull()?.key && k in flyHidden) flyTarget = r
-        }
-    }
+    // v167 (owner: "massage jump korbe direct position a kono fly effect
+    // thakbe na" — and, asked again the same round, "kono fly effect thakbe
+    // na"): the morph-&-fly engine of rounds 46-49 is GONE. There is no
+    // clone, no launch rect, no arc/wobble/trail/glow, no landing bounce:
+    // a send is in its own place the moment it exists — the pending echo row
+    // is inserted where it belongs and drawn like any other row, the attach
+    // panel's send drops the media straight into the chat, and every type
+    // behaves the same. Every launch hint the engine needed is gone with it —
+    // the four origin rectangles, the onGloballyPositioned reporters that fed
+    // them, the per-row hide/target/landing state: they were hints for a
+    // flight that no longer happens, not code with another job.
     // Owner round 45 (item 5): r44-3's deselect confirm is retired — every
     // close clears the ticks (back/swipe both mean "get me out").
     // Owner round 32 (item 17): the attach panel's "view once" switch — armed
@@ -857,6 +841,17 @@ fun ChatScreen(nav: NavController, convId: String) {
                         Cache.bust("/api/conversations/$convId")
                         refreshMeta()
                     }
+                // v167 live AI reply: the text SO FAR, re-sent as it grows
+                // (each frame carries the whole answer, so a lost or doubled
+                // frame self-heals). Only an open AI chat cares.
+                "ai_delta" ->
+                    if (
+                        ev.optString("conversationId") == convId &&
+                        convId.endsWith("_kp_ai_bot") &&
+                        ev.optString("text").isNotBlank()
+                    ) {
+                        aiLiveBody = ev.optString("text")
+                    }
                 "message" ->
                     if (ev.optString("conversationId") == convId) {
                         // FAST PAINT: the WS "message" frame carries the FULL
@@ -1201,40 +1196,6 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
-    // Owner round 46: hide the just-painted echo row and queue its clone.
-    // cloneType drives only the clone's FACE (TEXT pill / PHOTO / VIDEO /
-    // DOC / VOICE) — the flight engine is the same for everyone.
-    // Polish 2026-09-18: all media fly without the 0.5s hide gap — the echo
-    // stays visible (no flyHidden) so the clone lands and the bubble stays
-    // in place at once; view-once also flies (VIDEO no longer early-return).
-    // Fix 2026-09-18b: re-add hide to avoid duplicate overlap — pending is
-    // hidden while the clone flies, then appears at landing with bounce.
-    // v165 (owner: "view once media ta sending animation nai"): media that
-    // comes back from the editor has no send-button rect of its own — the
-    // editor is its own screen and never reports one — so launchFly() bailed
-    // out (`from.isEmpty`) and EVERY editor send (view-once included) landed
-    // without the fly. The composer's own send seat is the honest origin.
-    fun armFly() {
-        if (sendFromRect.isEmpty) {
-            sendFromRect = listOf(actionRect, fieldRect).firstOrNull { !it.isEmpty } ?: Rect.Zero
-        }
-    }
-
-    fun launchFly(
-        clientId: String,
-        cloneType: String,
-        body: String = "",
-        media: String = "",
-        ratio: Float = 0f,
-    ) {
-        val from = sendFromRect
-        sendFromRect = Rect.Zero
-        if (from.width <= 0f || from.isEmpty) return
-        flyTarget = null
-        flyHidden.add(clientId)
-        flyQueue.add(FlySpec(clientId, cloneType, body, from, media, ratio))
-    }
-
     fun sendText(body: String, kind: String = "TEXT") {
         if (body.isBlank()) return
         val clientId = "c_${java.util.UUID.randomUUID()}"
@@ -1252,7 +1213,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .put("body", body)
                 .put("createdAt", java.time.Instant.now().toString()),
         )
-        launchFly(clientId, "TEXT", body)
         // Owner round 32 (item 48): scroll in its own coroutine — a newer
         // scroll cancels the older one, and that must not take the POST with it.
         scope.launch {
@@ -1437,7 +1397,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .also { row -> if (viewOnce) row.put("viewOnce", true) }
                 .put("createdAt", java.time.Instant.now().toString()),
         )
-        launchFly(clientId, "PHOTO", media = dataUrl, ratio = if (w > 0 && h > 0) w.toFloat() / h else 0f)
         // Owner round 32 (item 48): the jump-to-bottom is its own coroutine.
         // animateScrollToItem is a scroll MUTATION — starting the next one
         // cancels whichever coroutine owns the previous, with a
@@ -1629,13 +1588,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .also { if (clipMeta.length() > 0) it.put("meta", clipMeta) }
                 .also { if (viewOnce && !asDocument) it.put("viewOnce", true) },
         )
-        launchFly(
-            clientId,
-            if (mime.startsWith("video")) "VIDEO" else "DOC",
-            body = name.ifBlank { "Document" },
-            media = file.absolutePath,
-            ratio = if (facts.first > 0 && facts.second > 0) facts.first.toFloat() / facts.second else 0f,
-        )
         scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }
         runCatching { KpSounds.send(ctx) }
         // Owner round 32 (item 34): the upload + POST run on Uploads' own
@@ -1726,7 +1678,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .put("meta", voiceMeta())
                 .put("createdAt", java.time.Instant.now().toString()),
         )
-        launchFly(clientId, "VOICE")
         // Owner round 32 (item 48): same split as sendImage — a scroll started
         // by anything else must never cancel the upload coroutine.
         scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }
@@ -1835,7 +1786,6 @@ fun ChatScreen(nav: NavController, convId: String) {
         ScreenStore.pendingEdited.collect { edited ->
             if (edited == null || edited.convId != convId) return@collect
             ScreenStore.pendingEdited.value = null
-            armFly()
             when (val m = edited.media) {
                 is EditedMedia.Photo -> sendImage(m.dataUrl, null, edited.viewOnce, caption = edited.caption, w = m.w, h = m.h)
                 is EditedMedia.Video -> sendFile("video.mp4", m.mime, m.file, viewOnce = edited.viewOnce, caption = edited.caption, w = m.w, h = m.h, durMs = m.durMs)
@@ -1853,7 +1803,6 @@ fun ChatScreen(nav: NavController, convId: String) {
         ScreenStore.pendingEditedBatch.collect { batch ->
             if (batch.isNullOrEmpty() || batch.first().convId != convId) return@collect
             ScreenStore.pendingEditedBatch.value = null
-            armFly()
             val photos =
                 batch.count { e ->
                     val m = e.media
@@ -2223,6 +2172,19 @@ fun ChatScreen(nav: NavController, convId: String) {
             lastInThread != null &&
             !lastInThread.optBoolean("failed", false) &&
             lastInThread.optString("senderId") == Store.myId()
+    // v167: a fresh wait starts with nothing live — the previous answer's text
+    // must not sit there looking like the new one (the deltas take over from
+    // the first chunk).
+    LaunchedEffect(aiTyping) { if (aiTyping) aiLiveBody = "" }
+    // …and the growing bubble keeps the reader pinned to the bottom, exactly
+    // like the finished reply's word-by-word reveal does.
+    LaunchedEffect(aiLiveBody) {
+        if (aiLiveBody.isBlank()) return@LaunchedEffect
+        val info = listState.layoutInfo
+        val nearBottom =
+            info.visibleItemsInfo.lastOrNull()?.index?.let { it >= info.totalItemsCount - 2 } == true
+        if (nearBottom) runCatching { listState.scrollToItem(info.totalItemsCount - 1) }
+    }
 
     // Owner round 43 (item 7): a reply can take 25s+ (image gen) — longer
     // than the screen timeout, so the phone slept mid-reply (fade to black).
@@ -2257,7 +2219,13 @@ fun ChatScreen(nav: NavController, convId: String) {
         if (!convId.endsWith("_kp_ai_bot")) return@LaunchedEffect
         if (last.optString("senderId") != "kp_ai_bot" || last.optString("kind") != "TEXT") return@LaunchedEffect
         val mid = last.optString("id")
-        if (mid == aiRevealId) return@LaunchedEffect
+        // v167: a reply that was already painted LIVE must not type itself out
+        // again from zero — the bubble would visibly rewind. The streaming copy
+        // is compared with the finished row's body here (this effect runs right
+        // after the row lands, the live text is still in hand) and dropped.
+        val paintedLive = aiLiveBody.isNotBlank() && aiLiveBody.trim() == last.optText("body").trim()
+        aiLiveBody = ""
+        if (paintedLive || mid == aiRevealId) return@LaunchedEffect
         val created =
             runCatching { java.time.Instant.parse(last.optString("createdAt")).toEpochMilli() }.getOrDefault(0L)
         if (created < chatOpenedAtMs) return@LaunchedEffect
@@ -2965,21 +2933,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // pass never reads it as new.
                     val rowKey = m.optString("clientId").ifBlank { m.optString("id") }
                     bornKeys.remove(rowKey)
-                    // Owner round 46: after the fly-send clone lands ON this
-                    // key the real bubble plays its landing bounce
-                    // (0.85 -> 1.06 -> 0.98 -> 1, 280 ms — the demo's
-                    // spring-curve keyframes).
-                    val flyLand = remember(rowKey) { Animatable(1f) }
-                    LaunchedEffect(flyLanded) {
-                        if (flyLanded == rowKey) {
-                            flyLand.snapTo(0.85f)
-                            // r49: one soft spring settle replaces the
-                            // three-step tween bounce — the double overshoot
-                            // read as a jerk on his device.
-                            flyLand.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMediumLow))
-                            flyLanded = null
-                        }
-                    }
                     val vanishing = albumPhotos(m).any { it.optString("id") in vanishingIds }
                     // Owner round 33 (item 17): the jumped-to row flashes once.
                     val flashing = flashId.isNotBlank() && albumPhotos(m).any { it.optString("id") == flashId }
@@ -2998,17 +2951,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                         Modifier
                             .fillMaxWidth()
                             .animateItem(fadeInSpec = null, fadeOutSpec = null)
-                            // Owner round 46: hidden while this row's clone
-                            // is mid-flight; reports the landing rect live
-                            // (the list may still be scrolling to bottom).
-                            .alpha(if (rowKey in flyHidden) 0f else 1f)
-                            .graphicsLayer {
-                                if (flyLand.value != 1f) {
-                                    scaleX = flyLand.value
-                                    scaleY = flyLand.value
-                                    transformOrigin = TransformOrigin.Center
-                                }
-                            },
                     ) {
                         DeleteRowShell(
                             m = m,
@@ -3146,31 +3088,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // later pass.
                     val rowKey = m.optString("clientId").ifBlank { m.optString("id") }
                     bornKeys.remove(rowKey)
-                    // Owner round 46: same hide/target/landing contract as
-                    // the thread rows above — the send's echo row is THIS
-                    // one until the server ack swaps it into the thread.
-                    val flyLand = remember(rowKey) { Animatable(1f) }
-                    LaunchedEffect(flyLanded) {
-                        if (flyLanded == rowKey) {
-                            flyLand.snapTo(0.85f)
-                            // r49: one soft spring settle replaces the
-                            // three-step tween bounce — the double overshoot
-                            // read as a jerk on his device.
-                            flyLand.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMediumLow))
-                            flyLanded = null
-                        }
-                    }
                     Box(
                         Modifier
                             .fillMaxWidth()
-                            .alpha(if (rowKey in flyHidden) 0f else 1f)
-                            .graphicsLayer {
-                                if (flyLand.value != 1f) {
-                                    scaleX = flyLand.value
-                                    scaleY = flyLand.value
-                                    transformOrigin = TransformOrigin.Center
-                                }
-                            },
                     ) {
                         MessageRow(
                             m,
@@ -3194,8 +3114,37 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // Owner round 42 (item 3): an image coming gets the
                     // shimmer photo-card, not the typing dots.
                     item(key = "typing-bubble") {
-                        if (aiTyping && otherTypingKind == "image") ImageCreatingBubble()
-                        else TypingBubble(chatAccent(chatTheme))
+                        if (aiTyping && aiLiveBody.isNotBlank()) {
+                            // v167 live AI reply: the answer's REAL bubble —
+                            // same renderer, same theme, same avatar as the row
+                            // that is about to replace it — carrying the text
+                            // so far and a caret (revealChars at the end of the
+                            // body is what draws "▍"). It is not a message:
+                            // every gesture is a no-op, and its id can never
+                            // collide with a server row.
+                            val liveRow =
+                                remember(aiLiveBody) {
+                                    JSONObject()
+                                        .put("id", "ai_live")
+                                        .put("senderId", "kp_ai_bot")
+                                        .put("kind", "TEXT")
+                                        .put("body", aiLiveBody)
+                                        .put("createdAt", java.time.Instant.now().toString())
+                                }
+                            MessageRow(
+                                liveRow,
+                                isGroup,
+                                Store.myId(),
+                                otherReadAt,
+                                player,
+                                revealChars = aiLiveBody.length,
+                                theme = chatTheme,
+                            )
+                        } else if (aiTyping && otherTypingKind == "image") {
+                            ImageCreatingBubble()
+                        } else {
+                            TypingBubble(chatAccent(chatTheme))
+                        }
                     }
                 }
                 if (uploading > 0) {
@@ -3220,58 +3169,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 Text("Sending…", fontSize = 12.5.sp, color = Muted)
                             }
                         }
-                    }
-                }
-            }
-
-            // Owner round 47 (fly-send placement fix): the overlay lives
-            // INSIDE the messages Box. As a root-Column sibling after the
-            // composer it was a REAL layout child — its clone/glow boxes
-            // consumed Column height, squashed the weighted list to zero
-            // and shot the composer pill to the top on every send
-            // ("message bar ta top a uthe jai" — the owner was right, the
-            // position was a shortcut, not the animation itself). Box
-            // children wrap, so this draws without touching any layout;
-            // Compose doesn't clip, so the clone still flies from the
-            // composer below up into the list.
-            if (flyQueue.isNotEmpty() || flyFlash != null) {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .onGloballyPositioned {
-                            flyOx = it.boundsInRoot().left
-                            flyOy = it.boundsInRoot().top
-                        },
-                ) {
-                    val ox = flyOx
-                    val oy = flyOy
-                    val flyNow = flyQueue.firstOrNull()
-                    if (flyNow != null) {
-                        // Watchdog — an echo that never reports a rect (odd
-                        // race at the end of a long list) lands at once.
-                        LaunchedEffect(flyNow.key) {
-                            delay(400)
-                            if (flyTarget == null && flyQueue.firstOrNull()?.key == flyNow.key) {
-                                flyHidden.remove(flyNow.key)
-                                flyQueue.removeAll { it.key == flyNow.key }
-                            }
-                        }
-                        flyTarget?.let { tgt ->
-                            KpFlySend(
-                                spec = FlySpec(flyNow.key, flyNow.cloneType, flyNow.body, flyNow.from.translate(Offset(-ox, -oy)), flyNow.media, flyNow.ratio),
-                                target = { (flyTarget ?: tgt).translate(Offset(-ox, -oy)) },
-                                accent = chatAccent(chatTheme),
-                            ) {
-                                flyHidden.remove(flyNow.key)
-                                flyLanded = flyNow.key
-                                flyFlash = tgt
-                                flyQueue.removeAll { it.key == flyNow.key }
-                                flyTarget = null
-                            }
-                        }
-                    }
-                    flyFlash?.let { r ->
-                        KpFlyLandFlash(r.translate(Offset(-ox, -oy)), chatAccent(chatTheme)) { flyFlash = null }
                     }
                 }
             }
@@ -3756,7 +3653,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                 haptics.confirm()
                 showAttach = false
                 showStickers = false
-                sendFromRect = fieldRect
                 sendText(input)
                 input = ""
             },
@@ -3779,16 +3675,12 @@ fun ChatScreen(nav: NavController, convId: String) {
             // follows by SCROLL on the same glide above; the Box itself
             // keeps no padding (that's what painted the black band).
             padForIme = if (!showAttach && !showStickers) imeGlideDp else 0.dp,
-            onFieldRect = { fieldRect = it },
-            onActionRect = { actionRect = it },
             onFinishRecord = { cancelled ->
-                if (!cancelled) sendFromRect = actionRect
                 finishRecording(cancelled)
             },
             voiceBinNonce = voiceBinNonce,
             selectCount = selected.size,
             onSendSelection = {
-                sendFromRect = actionRect
                 sendSelectedMedia()
             },
         )
@@ -3803,7 +3695,6 @@ fun ChatScreen(nav: NavController, convId: String) {
             AttachPanel(
                 sel = attachSel,
                 onSendBatch = {
-                    sendFromRect = attachSendRect
                     sendAttachSelection()
                 },
                 // Owner round 45 (item 5): ANY close forgets the ticks —
@@ -3819,7 +3710,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                 onPool = { attachPool = it },
                 // Owner round 46: the panel's send circle reports its rect
                 // — the batch fly clone launches from there.
-                onSendRect = { attachSendRect = it },
                 // Owner round 32 (item 19): hold the panel's Send → a time
                 // (item 18's sheet); Edit on a single pick → the light editor.
                 onScheduleBatch = { showScheduleMedia = true },
@@ -4097,8 +3987,6 @@ private fun Composer(
     padForIme: Dp = 0.dp,
     // Owner round 46: report the input pill's + the mic/send slot's rect so
     // the fly-send clone launches from exactly what the user touched.
-    onFieldRect: (Rect) -> Unit = {},
-    onActionRect: (Rect) -> Unit = {},
 ) {
     val accent = chatAccent(theme)
     // Attach/sticker MUST close the keyboard first — otherwise both the IME
@@ -4159,7 +4047,6 @@ private fun Composer(
                     // the pill takes the chat theme's accent tint.
                     .clip(RoundedCornerShape(19.dp))
                     .background(accent.copy(alpha = 0.16f))
-                    .onGloballyPositioned { onFieldRect(it.boundsInRoot()) }
                     .padding(horizontal = 2.dp, vertical = 1.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 34.dp)) {
@@ -4269,7 +4156,6 @@ private fun Composer(
             Box(
                 Modifier
                     .size(42.dp)
-                    .onGloballyPositioned { onActionRect(it.boundsInRoot()) }
                     .pressScale(sendInteraction)
                     // Owner round 10: the send/mic circles carry the same 3D
                     // lift as the header call buttons now.
@@ -4295,7 +4181,7 @@ private fun Composer(
                 )
             }
         } else {
-            Box(Modifier.onGloballyPositioned { onActionRect(it.boundsInRoot()) }) {
+            Box {
                 HoldMicButton(
                     recording = recording,
                     enabled = micEnabled,
@@ -4382,303 +4268,7 @@ private fun HoldMicButton(
     }
 }
 
-/** Owner round 46 (morph-&-fly send): one queued flight spec per send. */
 private val VIDEO_NAME_EXT = listOf(".mp4", ".mov", ".mkv", ".webm", ".3gp", ".m4v", ".avi")
-
-private class FlySpec(
-    val key: String,
-    val cloneType: String, // TEXT / PHOTO / VIDEO / DOC / VOICE
-    val body: String,
-    val from: Rect,
-    // Owner round 48: the flying clone IS the content — a photo carries its
-    // real data-URI, a video its local path, a doc its file name (body).
-    val media: String = "",
-    // v166 (owner: "animation er somoy … original ratio te send hoi na"): the
-    // media's own box, measured where the media is picked — NOT discovered by
-    // the clone a few frames later (that first stretch of the flight was
-    // already on screen by then, in the send button's shape). 0 = unknown.
-    val ratio: Float = 0f,
-)
-
-/** One bubble->clone reporting channel: any kind of bubble hands its live
- *  on-screen rect here while its row hides mid-flight; the chat screen
- *  sets the sink (queue head only). */
-private object KpFlyTarget {
-    var report: (String, Rect) -> Unit = { _, _ -> }
-}
-
-/** One trail dot: where it was born, how it drifts, when it dies. */
-private class FlyDot(
-    val x: Float,
-    val y: Float,
-    val accent: Boolean,
-    val born: Long,
-    val dur: Int,
-    val driftX: Float,
-    val driftY: Float,
-    val radius: Float,
-)
-
-/**
- * Owner round 46: the fly engine itself — a direct port of the owner's
- * demo (`message-send-animation`): 620 ms linear-driven, ease-out-cubic
- * straight lerp of position/size — v166 dropped the −56 dp sine arc and the
- * 4° wobble, so every message and every medium travels the same direct line
- * from the send seat to its bubble — plus a pill→bubble color+border morph at
- * 45 %, a radial glow peaking mid-flight (0.35 alpha — the web demo's
- * blur(14px) mapped to a gradient, since Modifier.blur needs API 31 and our
- * floor is 24), ~26 ms spawn of glowing trail dots that drift down and fade
- * over 380–580 ms, and a 0.88 fade-out at the end. The target rect is re-read
- * EVERY frame (the demo's fixed rect assumed a settled list; ours scrolls to
- * bottom during the flight).
- */
-@Composable
-private fun KpFlySend(
-    spec: FlySpec,
-    target: () -> Rect,
-    accent: Color,
-    onLanded: () -> Unit,
-) {
-    val density = LocalDensity.current
-    val t = remember { Animatable(0f) }
-    val dots = remember { mutableStateListOf<FlyDot>() }
-    // v165 (owner: "sending animation a fly kore ashe tokoner ratio taw
-    // original rakho"): a photo / clip clone flies in the media's OWN shape.
-    // It reads that off the picture it is already drawing — no measuring pass
-    // on the main thread, and every send path (composer, panel, editor) gets
-    // it for free. 0 = not known yet: the clone then morphs as before.
-    var mediaRatio by remember(spec.key) { mutableFloatStateOf(spec.ratio) }
-    val pillBg = Color(0xFF2A2F38)
-    val pillEdge = Color(0xFF3A3F47)
-    LaunchedEffect(Unit) {
-        launch {
-            while (true) {
-                delay(26)
-                val r = t.value
-                if (r >= 0.8f) break
-                val tgt = target()
-                val e = 1f - (1f - r) * (1f - r) * (1f - r)
-                val es2 = r * r * (3f - 2f * r)
-                val w = spec.from.width + (tgt.width - spec.from.width) * es2
-                // v166 (owner: "eita change hoye direct nijer position a chole
-                // jabe kono fly na"): the clone walks straight from the send
-                // seat to its bubble — the 56 dp arc it used to hop through is
-                // gone, for text and for media alike.
-                val cx = spec.from.left + (tgt.left - spec.from.left) * e + w / 2f
-                val cy = spec.from.top +
-                    (tgt.top - spec.from.top) * e +
-                    (spec.from.height + (tgt.height - spec.from.height) * es2) / 2f
-                dots.add(
-                    FlyDot(
-                        cx,
-                        cy,
-                        e > 0.45f,
-                        System.currentTimeMillis(),
-                        380 + Random.nextInt(200),
-                        (Random.nextFloat() - 0.5f) * 18f * density.density,
-                        (6f + Random.nextFloat() * 14f) * density.density,
-                        (2f + Random.nextFloat() * 2f) * density.density,
-                    ),
-                )
-            }
-        }
-        t.animateTo(1f, tween(520, easing = LinearEasing))
-        onLanded()
-    }
-    val raw = t.value
-    val tgt = target()
-    val e = 1f - (1f - raw) * (1f - raw) * (1f - raw)
-    val cx = spec.from.left + (tgt.left - spec.from.left) * e
-    val cy = spec.from.top + (tgt.top - spec.from.top) * e
-    // r49 (item 3 — "aro smooth koro"): position keeps the launch-fast
-    // ease-out, but the FRAME walks a smoothstep — the pill keeps its
-    // shape past launch and settles into the bubble instead of ballooning.
-    val es = raw * raw * (3f - 2f * raw)
-    var w = spec.from.width + (tgt.width - spec.from.width) * es
-    var h = spec.from.height + (tgt.height - spec.from.height) * es
-    val mr = mediaRatio
-    if (mr > 0f && (spec.cloneType == "PHOTO" || spec.cloneType == "VIDEO")) {
-        // Fit the media's own box inside the morphing seat, so the clone is
-        // never stretched: portrait clips fly portrait the whole way.
-        if (w / h > mr) w = (h * mr) else h = (w / mr)
-    }
-    // v166: a direct move keeps a steady frame — the wobble and the pulse read
-    // as "flying", which is exactly what the owner asked to drop.
-    val pulse = 1f
-    val fade = if (raw > 0.9f) (1f - (raw - 0.9f) / 0.1f).coerceIn(0f, 1f) else 1f
-    val wDp = with(density) { w.toDp() }
-    val hDp = with(density) { h.toDp() }
-    // trail: spawned dots, drawn root-absolute; reading t.value here keeps
-    // the draw phase invalidating every frame so the dots drift/fade.
-    Canvas(Modifier.fillMaxSize()) {
-        val now = System.currentTimeMillis()
-        val it2 = dots.iterator()
-        while (it2.hasNext()) {
-            if (now - it2.next().born > 580) it2.remove()
-        }
-        if (t.value < 1f) {
-            dots.forEach { d ->
-                val dt = ((now - d.born).toFloat() / d.dur).coerceIn(0f, 1f)
-                val c = if (d.accent) accent else Color.White.copy(alpha = 0.7f)
-                drawCircle(
-                    color = c.copy(alpha = 0.9f * (1f - dt)),
-                    radius = d.radius,
-                    center = Offset(d.x + d.driftX * dt, d.y + d.driftY * dt),
-                )
-            }
-        }
-    }
-    // trailing glow (the demo's blurred div) — a radial gradient halo.
-    Box(
-        Modifier
-            .offset { IntOffset((cx - w * 0.06f).roundToInt(), (cy - h * 0.06f).roundToInt()) }
-            .size(with(density) { (w * 1.12f).toDp() }, with(density) { (h * 1.12f).toDp() })
-            .graphicsLayer { alpha = kotlin.math.sin(raw * Math.PI).toFloat() * 0.30f * fade }
-            .background(Brush.radialGradient(listOf(accent, Color.Transparent)), CircleShape),
-    )
-    // the clone: pill at the start of the flight, bubble past 45 %.
-    Box(
-        Modifier
-            .offset { IntOffset(cx.roundToInt(), cy.roundToInt()) }
-            .size(wDp, hDp)
-            .graphicsLayer {
-                scaleX = pulse
-                scaleY = pulse
-                this.alpha = fade
-                transformOrigin = TransformOrigin.Center
-            }
-            .clip(RoundedCornerShape(if (e > 0.45f) 16.dp else 20.dp))
-            .background(if (e > 0.45f) accent else pillBg)
-            .then(if (e > 0.45f) Modifier else Modifier.border(0.5.dp, pillEdge, RoundedCornerShape(20.dp))),
-    ) {
-        when (spec.cloneType) {
-            "TEXT" ->
-                Text(
-                    spec.body,
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    lineHeight = 18.sp,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.align(Alignment.CenterStart).padding(horizontal = 12.dp),
-                )
-            "PHOTO" -> {
-                // Owner round 48: the clone shows the REAL picture (the
-                // egg hatches into the shot, fit inside the bubble's own
-                // rect) — the fake gradient tile is dead.
-                val shot = rememberBitmap(spec.media.takeIf { it.startsWith("data:") || it.startsWith("file://") }, 720)
-                androidx.compose.runtime.LaunchedEffect(shot) {
-                    if (shot != null && shot.width > 0 && shot.height > 0) {
-                        mediaRatio = shot.width.toFloat() / shot.height
-                    }
-                }
-                if (shot != null) {
-                    Image(shot, "Photo", Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
-                } else {
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            .background(Brush.linearGradient(listOf(Color(0xFF6A8CAF), Color(0xFF3D5872)))),
-                    ) {
-                        Icon(Icons.Filled.Image, null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.align(Alignment.Center).size(wDp / 3))
-                    }
-                }
-            }
-            "VIDEO" -> {
-                // The clip's REAL first frame (local file, one bounded
-                // decode) under the play badge — no clip-art.
-                val frame by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(null, spec.media) {
-                    if (spec.media.isNotBlank()) {
-                        value = withContext(Dispatchers.IO) {
-                            runCatching {
-                                val r = android.media.MediaMetadataRetriever()
-                                r.setDataSource(spec.media)
-                                // v165: the clip's own box while it flies — the
-                                // retriever is already open here, so this is
-                                // two more metadata reads, not a second pass.
-                                var vw = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toFloatOrNull() ?: 0f
-                                var vh = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toFloatOrNull() ?: 0f
-                                val rot = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
-                                if (rot == 90 || rot == 270) {
-                                    val sw = vw
-                                    vw = vh
-                                    vh = sw
-                                }
-                                if (vw > 0f && vh > 0f) mediaRatio = MediaBox.clamp(vw / vh)
-                                val b = r.getFrameAtTime(0L, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                                r.release()
-                                b
-                            }.getOrNull()
-                        }
-                    }
-                }
-                frame?.let { shot ->
-                    Image(shot.asImageBitmap(), "Video", Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
-                }
-                if (frame == null) {
-                    Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color(0xFF4A4F5A), Color(0xFF23262C)))))
-                }
-                Box(Modifier.align(Alignment.Center).size(wDp / 3).clip(CircleShape).background(Color.White.copy(alpha = 0.9f))) {
-                    Icon(Icons.Filled.PlayArrow, null, tint = Color(0xFF23262C), modifier = Modifier.align(Alignment.Center).size(wDp / 5))
-                }
-            }
-            "VOICE" -> {
-                Row(
-                    Modifier.align(Alignment.CenterStart).padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(Modifier.size(hDp * 0.65f).clip(CircleShape).background(Color.White)) {
-                        Icon(Icons.Filled.PlayArrow, null, tint = accent, modifier = Modifier.align(Alignment.Center).size(hDp * 0.4f))
-                    }
-                    Spacer(Modifier.width(6.dp))
-                    listOf(6, 12, 8, 14, 10, 16, 7, 13, 9, 15, 11, 6).forEach { bh ->
-                        Box(Modifier.width(3.dp).height(bh.dp).clip(RoundedCornerShape(1.5.dp)).background(Color.White.copy(alpha = 0.55f)))
-                        Spacer(Modifier.width(3.dp))
-                    }
-                }
-            }
-            else -> {
-                // DOC — the demo's white "ext" disc + two text lines.
-                Row(
-                    Modifier.align(Alignment.CenterStart).padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(Modifier.size(hDp * 0.55f).clip(CircleShape).background(Color.White)) {
-                        Icon(Icons.Filled.Description, null, tint = accent, modifier = Modifier.align(Alignment.Center).size(hDp * 0.32f))
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    Column {
-                        Text(spec.body.ifBlank { "Document" }, color = Color.White, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text("KuchuPuchu", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
-                    }
-                }
-            }
-        }
-    }
-}
-
-/** The 260 ms accent flash at the landing rect (the demo's box-shadow glow). */
-@Composable
-private fun KpFlyLandFlash(rect: Rect, accent: Color, onDone: () -> Unit) {
-    val t = remember { Animatable(0f) }
-    LaunchedEffect(Unit) {
-        t.animateTo(1f, tween(300, easing = LinearEasing))
-        onDone()
-    }
-    val grow = 1f + t.value * 0.18f
-    Box(
-        Modifier
-            .offset {
-                IntOffset(
-                    (rect.left - rect.width * (grow - 1f) / 2f).roundToInt(),
-                    (rect.top - rect.height * (grow - 1f) / 2f).roundToInt(),
-                )
-            }
-            .size(with(LocalDensity.current) { (rect.width * grow).toDp() }, with(LocalDensity.current) { (rect.height * grow).toDp() })
-            .graphicsLayer { alpha = (1f - t.value) * 0.38f }
-            .background(Brush.radialGradient(listOf(accent, Color.Transparent)), CircleShape),
-    )
-}
 
 /**
  * Owner round 33 (item 11b): the voice-cancel dustbin. Sits at the left of
@@ -5928,7 +5518,7 @@ private fun MessageRow(
                 )
             Box(
                 Modifier
-                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()); KpFlyTarget.report(m.optString("clientId").ifBlank { m.optString("id") }, it.boundsInRoot()) }
+                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
                     // Owner round 13b: the hand-rolled awaitEachGesture fought
                     // the list's vertical scrolling (jank + crash on device).
@@ -6673,7 +6263,7 @@ private fun VideoMessageRow(
                 .offset { IntOffset(replyOffset.roundToInt(), 0) }
                 .shadow(2.dp, RoundedCornerShape(12.dp))
                 .clip(RoundedCornerShape(12.dp))
-                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()); KpFlyTarget.report(m.optString("clientId").ifBlank { m.optString("id") }, it.boundsInRoot()) }
+                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
                 .background(Color(0xFF0B1220))
                 .border(1.dp, if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444), RoundedCornerShape(12.dp))
                 .pointerInput(m.optString("id")) {
@@ -6961,7 +6551,7 @@ private fun ViewOnceRow(
             Box(
                 Modifier
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()); KpFlyTarget.report(m.optString("clientId").ifBlank { m.optString("id") }, it.boundsInRoot()) }
+                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
                     .widthIn(max = 168.dp)
                     .then(
                         if (boxRatio > 0f) {
@@ -7213,7 +6803,7 @@ private fun ImageMessageRow(
         Box(
             Modifier
                 .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()); KpFlyTarget.report(m.optString("clientId").ifBlank { m.optString("id") }, it.boundsInRoot()) }
+                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
                 .widthIn(max = 120.dp) // Owner round 25 / 32 item 29 / 33 item 18: smaller inline preview
                 // Owner round 10: photos float too — 3D lift + the round-8
                 // thin border.
@@ -7524,7 +7114,7 @@ private fun AlbumMessageRow(
             Box(
                 Modifier
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()); KpFlyTarget.report(m.optString("clientId").ifBlank { m.optString("id") }, it.boundsInRoot()) }
+                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
                     .width(albumWidth)
                     .shadow(2.dp, shape)
                     .clip(shape)

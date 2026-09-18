@@ -537,7 +537,10 @@ const convBetween = (db, a, b) =>
       chat.includes("TypingBubble(chatAccent(chatTheme))") &&
       !chat.includes('typingNow -> "typing..."') &&
       // Owner round 42 (item 3): an image coming gets the shimmer card.
-      chat.includes('if (aiTyping && otherTypingKind == "image") ImageCreatingBubble()') &&
+      // v167: the slot's FIRST branch is the live AI reply when the stream has
+      // already painted text (the dots are what is left when it has not).
+      chat.includes("if (aiTyping && aiLiveBody.isNotBlank()) {") &&
+      chat.includes('} else if (aiTyping && otherTypingKind == "image") {') &&
       chat.includes("private fun ImageCreatingBubble() {") &&
       chat.includes("val shimmer = rememberShimmerAlpha()") &&
       chat.includes('typingKind = data.optString("typingKind")') &&
@@ -810,7 +813,12 @@ const convBetween = (db, a, b) =>
       // leg still asks with the FULL prompt at the 900-token budget, and so
       // does the text leg that answers when there are no bytes to look at.
       src.includes("          900,\n          [HF_VISION_MODEL],") &&
-      src.includes('answer = await aiBrain(env, [{ role: "user", content: fullPrompt }], 900);'),
+      // v167: the same 900-token legs, now on the STREAMING brain (the answer
+      // is painted as it is written; the budget is unchanged).
+      src.includes(
+        'answer = await aiBrainStream(env, [{ role: "user", content: fullPrompt }], 900, push);',
+      ) &&
+      src.includes("900,\n        push,\n      );"),
   );
   check(
     "callee in a call → 486 LINE_BUSY (pair-redial never blocked)",
@@ -1339,8 +1347,15 @@ const convBetween = (db, a, b) =>
         mediaViewer.includes("class KpClipPlayer(") &&
         mediaViewer.includes("android.view.TextureView(c)") &&
         mediaViewer.includes("private fun SeekBar(") &&
-        mediaViewer.includes("Icons.Filled.ScreenRotation") &&
-        mediaViewer.includes("SCREEN_ORIENTATION_SENSOR_LANDSCAPE") &&
+        // v167 (owner: "video 3 dot ta upore rotate button ta remove kore okhane thakbe"):
+        // the rotate button + its landscape machinery left the player; the dots took
+        // its seat in the top bar, and Save fetches a clip that is not on the phone yet.
+        mediaViewer.includes(
+          'Icon(Icons.Filled.MoreVert, "More", tint = Color.White, modifier = Modifier.size(22.dp))',
+        ) &&
+        !mediaViewer.includes("Icons.Filled.ScreenRotation") &&
+        !mediaViewer.includes("SCREEN_ORIENTATION_SENSOR_LANDSCAPE") &&
+        mediaViewer.includes("if (dest.exists() && dest.length() > 0L) {") &&
         mediaViewer.includes("fun saveVideoToDownloads(") &&
         mediaViewer.includes("MediaStore.Downloads") &&
         chat.includes("internal object VideoThumbs") &&
@@ -2938,15 +2953,17 @@ const convBetween = (db, a, b) =>
         kt("ProfileScreen.kt").includes("canSave = !privatePerson,") &&
         kt("MediaViewer.kt").includes("KpSecure.Guard(secure || !canSave)") &&
         kt("MediaViewer.kt").includes('val privateClip = m?.optBoolean("kpPrivate") == true') &&
+        // v167 (owner: "video 3 dot ta upore rotate button ta remove kore
+        // okhane thakbe"): Save is offered whenever the clip can be put on the
+        // phone (it fetches one that is not there yet) — but a private clip
+        // STILL gets neither Save nor Forward, and Delete stays reachable for
+        // it because the ⋮ is a fixed bar seat now instead of a floating twin
+        // the auto-hiding chrome could leave behind.
+        kt("MediaViewer.kt").includes("if (m != null && !privateClip && !saved) {") &&
+        kt("MediaViewer.kt").includes("if (dest.exists() && dest.length() > 0L) {") &&
         kt("MediaViewer.kt").includes(
-          "if (m != null && dest != null && dest.exists() && dest.length() > 0L && !privateClip && !saved) {",
+          'Icon(Icons.Filled.MoreVert, "More", tint = Color.White, modifier = Modifier.size(22.dp))',
         ) &&
-        // v165 (owner): the player's ⋮ sits outside the auto-hiding chrome, so
-        // a played or saved clip still offers Save / Forward.
-        // v166 (owner: "... kothaw 3 dot nei ... Save, Forward, Delete"): the
-        // seat is unconditional now — Delete lives in it for every clip,
-        // private ones included; the sheet is what withholds Save / Forward.
-        kt("MediaViewer.kt").includes("if (m != null) {\n            Box(") &&
         kt("MediaViewer.kt").includes(
           'val canForward = m != null && !privateClip && m.optText("fileKey").isNotBlank()',
         ) &&
@@ -5333,7 +5350,8 @@ const convBetween = (db, a, b) =>
           'if (onDelete != null) KpSheetRow(Icons.Filled.Delete, "Delete", tint = Red, onClick = onDelete)',
         ) &&
         // 4 in the action sheet + the 2 in the shared delete confirm
-        (mv.match(/KpSheetRow\(/g) || []).length === 6 &&
+        // 4 in the action sheet + 2 in the delete confirm + v167's Dismiss
+        (mv.match(/KpSheetRow\(/g) || []).length === 7 &&
         // Only the photo viewer passes onEdit (the player relies on the null default).
         (mv.match(/onEdit = /g) || []).length === 1 &&
         mv.includes("onEdit = onEdit?.let { e -> { menuOpen = false; e() } },") &&
@@ -6534,45 +6552,36 @@ const convBetween = (db, a, b) =>
         ),
     );
     check(
-      "r46-1: morph-&-fly send (owner's savedly demo port; v166: the clone walks STRAIGHT to the bubble for 520 ms — the 56dp arc is gone, every type the same) — the send echoes hide, a clone launches from whatever fired the send (input pill / mic-send slot / panel send circle) with a smoothstep frame morph, gentle wobble/trail/glow, onto the real bubble rect, then a soft spring settle + accent flash (r49 smoothing); EVERY type rides the same engine with its REAL content, batch flies once, stray rects can never fly a later send (one-shot baton + watchdog)",
-      chat.includes("private class FlySpec(") &&
-        chat.includes("private fun KpFlySend(") &&
-        chat.includes("private fun KpFlyLandFlash(") &&
-        chat.includes("val flyQueue = remember { mutableStateListOf<FlySpec>() }") &&
-        chat.includes("fun launchFly(\n        clientId: String,\n        cloneType: String,") &&
-        // the declaration plus the four send paths that ride it: text, photo,
-        // voice and the file/clip call
-        (chat.match(/launchFly\(\s*clientId/g) || []).length === 5 &&
-        chat.includes('launchFly(clientId, "TEXT", body)') &&
-        chat.includes(
-          'launchFly(clientId, "PHOTO", media = dataUrl, ratio = if (w > 0 && h > 0) w.toFloat() / h else 0f)',
-        ) &&
-        chat.includes("rememberBitmap(spec.media.takeIf") &&
-        chat.includes('launchFly(clientId, "VOICE")') &&
-        chat.includes("sendFromRect = Rect.Zero") &&
-        chat.includes("tween(520, easing = LinearEasing)") &&
-        chat.includes("val es = raw * raw * (3f - 2f * raw)") &&
-        !chat.includes("(-56).dp.toPx()") &&
-        chat.includes("e > 0.45f") &&
-        (chat.match(/\.alpha\(if \(rowKey in flyHidden\) 0f else 1f\)/g) || []).length === 2 &&
-        chat.includes("KpFlyTarget.report(") &&
-        chat.includes("private object KpFlyTarget") &&
-        chat.includes('val media: String = "",') &&
-        chat.includes("onGloballyPositioned { onFieldRect(it.boundsInRoot()) }") &&
-        chat.includes("onGloballyPositioned { onActionRect(it.boundsInRoot()) }") &&
-        chat.includes("flyLanded == rowKey") &&
-        chat.includes("transformOrigin = TransformOrigin.Center") &&
-        // the watchdog: an echo that never reports a rect lands at 400 ms
-        chat.includes("delay(400)") &&
-        attach.includes("onSendRect: (androidx.compose.ui.geometry.Rect) -> Unit = {},") &&
-        attach.includes("onGloballyPositioned { onSendRect(it.boundsInRoot()) }") &&
-        chat.includes("onSendRect = { attachSendRect = it },") &&
-        // Owner round 47 (fix): the overlay draws inside the messages Box
-        // (a root-Column child consumed layout height and shoved the
-        // composer to the top on every send).
-        chat.includes("flyOx = it.boundsInRoot().left") &&
-        chat.includes("flyNow.from.translate(Offset(-ox, -oy))") &&
-        !chat.includes("// Owner round 46: the fly-send overlay"),
+      "v167 no-fly: the morph-&-fly engine of r46-r49 is GONE — a send lands in its own place with no travel, no clone, no landing bounce, and every launch/report hint the flight needed is gone with the engine (dead origin hints, not code); all five send paths still exist and still paint their pending echo row",
+      // The engine and everything it needed. Every one of these is an
+      // ABSENCE pin: re-adding any of it re-adds a flying message.
+      !chat.includes("private class FlySpec(") &&
+        !chat.includes("private fun KpFlySend(") &&
+        !chat.includes("private fun KpFlyLandFlash(") &&
+        !chat.includes("private object KpFlyTarget") &&
+        !chat.includes("fun launchFly(") &&
+        !chat.includes("fun armFly()") &&
+        !chat.includes("flyHidden") &&
+        !chat.includes("flyLanded") &&
+        !chat.includes("flyQueue") &&
+        !chat.includes("sendFromRect") &&
+        !chat.includes("onFieldRect") &&
+        !chat.includes("onActionRect") &&
+        !chat.includes("attachSendRect") &&
+        !chat.includes("transformOrigin = TransformOrigin.Center") &&
+        !attach.includes("onSendRect") &&
+        // …and the sends themselves are untouched: the echo rows are added
+        // and painted by the same five paths (text, photo, file/clip, voice,
+        // batch) — a land-in-place animation must never cost a send.
+        (chat.match(/pending\.add\(/g) || []).length >= 4 &&
+        chat.includes('fun sendText(body: String, kind: String = "TEXT") {') &&
+        chat.includes("suspend fun sendFile(") &&
+        chat.includes("fun sendImage(") &&
+        chat.includes("bornKeys.add(clientId)") &&
+        // the pending rows and the thread rows are plain rows now: no alpha
+        // gate, no scale gate anywhere on a message row.
+        !chat.includes(".alpha(if (rowKey in") &&
+        !chat.includes("scaleX = flyLand.value"),
     );
     // Owner round 39 (item 6): the 'N selected' header + Edit chip are
     // gone — the picker is Recents ▾ · HD over the grid, with the
@@ -6930,9 +6939,9 @@ const convBetween = (db, a, b) =>
         kt("MediaViewer.kt").includes(
           "val p = player ?: return@clickable\n                            haptics.tap()",
         ) &&
-        kt("MediaViewer.kt").includes(
-          "IconButton(onClick = { haptics.tap(); setLandscape(!landscape) })",
-        ),
+        // v167: the player's rotating button is gone; its tap-buzz rides the
+        // ⋮ that took the seat.
+        kt("MediaViewer.kt").includes("IconButton(onClick = { haptics.tap(); menuOpen = true })"),
     );
   }
   // r32-41: voice isolation on calls — RNNoise (BSD, bundled source) behind a
@@ -8285,7 +8294,12 @@ const convBetween = (db, a, b) =>
         // 36 dp icon buttons), so the top bar keeps ONE 36 (close).
         (edit.match(/\.size\(36\.dp\)/g) || []).length === 1 &&
         (edit.match(/\.size\(26\.dp\)/g) || []).length === 3 &&
-        (edit.match(/\.size\(40\.dp\)/g) || []).length === 1 &&
+        // v167: undo / redo float on the stage as two 40 dp seats (the pair the
+        // owner marked), so the 40 dp count is the select circle + those two.
+        (edit.match(/\.size\(40\.dp\)/g) || []).length === 2 &&
+        edit.includes(
+          "fun StageHistory(can: Boolean, onClick: () -> Unit, glyph: @Composable () -> Unit)",
+        ) &&
         edit.includes(".background(ActionBlue)") &&
         !edit.includes(".border(1.dp, if (once) ActionBlue") &&
         edit.includes('Text("Aa", color = Color.White, fontSize = 15.sp') &&
@@ -9737,6 +9751,114 @@ const convBetween = (db, a, b) =>
         (cl.match(/swipeFocusList[ ]?[({]/g) || []).length === 4 &&
         cl.includes(".then(swipeFocusTouch(convId))"),
     );
+  }
+}
+
+// v167 (owner: "ai reply ekhono slow … ai reply live Hobe joto ta output
+// pabe realtime update hobe massage word by word"): the answer is painted
+// WHILE the model writes it. A fake Gemini answers the streaming endpoint
+// with four SSE chunks 200 ms apart (the worker's own throttle is 140 ms, so
+// every one of them is a frame of its own) and a fake room records what the
+// chat would receive.
+{
+  const seenFrames = [];
+  const realFetch = globalThis.fetch;
+  const geminiAsked = [];
+  globalThis.fetch = async (input, init) => {
+    const url = typeof input === "string" ? input : input.url;
+    if (url.startsWith("https://generativelanguage.googleapis.com/")) {
+      geminiAsked.push(url);
+      const pieces = ["Bhalo ", "acho? ", "Ami ", "KuchuPuchu AI."];
+      const enc = new TextEncoder();
+      const body = new ReadableStream({
+        async start(ctrl) {
+          for (const piece of pieces) {
+            ctrl.enqueue(
+              enc.encode(
+                `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: piece }] } }] })}\n\n`,
+              ),
+            );
+            await new Promise((r) => setTimeout(r, 200));
+          }
+          ctrl.close();
+        },
+      });
+      return new Response(body, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    }
+    return realFetch(input, init);
+  };
+  const room = {
+    idFromName: (roomKey) => roomKey,
+    get: () => ({
+      fetch: async (_url, init) => {
+        seenFrames.push(JSON.parse(init.body));
+        return Response.json({ ok: true, sent: 1 });
+      },
+    }),
+  };
+  try {
+    const worker = await freshWorker();
+    const db = makeD1();
+    const env = {
+      DB: db,
+      MEDIA: makeR2(),
+      GOOGLE_WEB_CLIENT_ID: "kp-test-web-client",
+      GEMINI_API_KEY: "test-gemini-key",
+      CHAT_ROOM: room,
+    };
+    const ctx = makeCtx();
+    let ipSeq = 0;
+    const call = async (method, path, body, token) => {
+      const headers = { "content-type": "application/json" };
+      if (path.startsWith("/api/auth/"))
+        headers["cf-connecting-ip"] = `203.44.${Math.floor(ipSeq / 250)}.${(ipSeq++ % 250) + 1}`;
+      if (token) headers.authorization = `Bearer ${token}`;
+      const init = { method, headers };
+      if (body !== undefined && method !== "GET") init.body = JSON.stringify(body);
+      const res = await worker.fetch(new Request(`https://kp.test${path}`, init), env, ctx);
+      const text = await res.text();
+      await ctx.drain();
+      return { status: res.status, json: text ? JSON.parse(text) : {} };
+    };
+    const reg = makeReg(call);
+    const a = await reg("live@x.com", "livestream");
+    await call("POST", "/api/ai/welcome", {}, a.token);
+    const conv = convBetween(db, "kp_ai_bot", a.user.id);
+    seenFrames.length = 0;
+    geminiAsked.length = 0;
+    await call(
+      "POST",
+      `/api/conversations/${conv.id}/messages`,
+      { kind: "TEXT", body: "kemon acho?", clientId: "live-1" },
+      a.token,
+    );
+    // the broadcasts ride their own waitUntil slots — let them land too
+    await new Promise((r) => setTimeout(r, 60));
+    await ctx.drain();
+    const deltas = seenFrames.filter((f) => f.type === "ai_delta" && f.conversationId === conv.id);
+    const finals = seenFrames.filter((f) => f.type === "message");
+    const body = finals.length ? finals[finals.length - 1].message.body : "";
+    const growing = deltas.every(
+      (f, i) => f.text.length > 0 && (i === 0 || f.text.length > deltas[i - 1].text.length),
+    );
+    check(
+      "v167 live AI reply: the answer streams — the chat room receives the text SO FAR as it grows (Gemini's streaming endpoint, throttled to one frame per 140 ms), every frame is a prefix of the finished message, and the finished message row still lands last",
+      geminiAsked.some((u) => u.includes("streamGenerateContent?alt=sse")) &&
+        deltas.length >= 3 &&
+        growing &&
+        deltas.every((f) => body.startsWith(f.text.trimEnd())) &&
+        body.includes("KuchuPuchu AI.") &&
+        finals.some((f) => f.message.senderId === "kp_ai_bot" && f.message.kind === "TEXT"),
+      JSON.stringify({ asked: geminiAsked.length, deltas: deltas.map((f) => f.text), body }).slice(
+        0,
+        600,
+      ),
+    );
+  } finally {
+    globalThis.fetch = realFetch;
   }
 }
 

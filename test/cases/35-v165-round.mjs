@@ -11,8 +11,10 @@
 //    send is in flight, the clip's own frame once it lands), at a smaller size
 //    — and it never ships a fetchable poster frame (that is what view-once
 //    promises).
-// 5. the send clone ("fly") rides the media's original ratio too — KpFlySend
-//    fits the artwork inside the flight box instead of stretching 16:9.
+// 5. the media's own ratio is kept while it is being sent. v166 kept it on the
+//    flying clone; v167 deleted the clone (the owner: "kono fly effect thakbe
+//    na"), so the contract that matters is the bubble's own — the sending
+//    thumbnail + body ride the payload's measured w/h.
 // 6. the chat-list clock is 12-hour Bangladesh time, and the list's own stamp
 //    colour is readable on the default theme.
 // 7. a received clip's ⋮ (Save / Forward, exactly like a photo) can no longer
@@ -112,19 +114,26 @@ check(
     cache.includes('(meta.optString("thumbKey").isNotBlank() || once)'),
 );
 
-/* 5 — the send clone keeps the media's ratio */
+/* 5 — the media keeps its real ratio while it is going out (v167: no clone) */
 check(
-  "v165: the flying send clone keeps the media's original ratio — KpFlySend fits the artwork inside the flight box (photo: its bitmap; clip: the retriever's metadata) instead of stretching to the box",
-  chat.includes("var mediaRatio by remember(spec.key)") &&
-    chat.includes("if (w / h > mr) w = (h * mr) else h = (w / mr)") &&
-    chat.includes("mediaRatio = shot.width.toFloat() / shot.height") &&
-    chat.includes("MediaMetadataRetriever()") &&
-    chat.includes("fun armFly()") &&
+  "v165 + v167: the media's own ratio is kept while it is being sent — v167 removed the flying clone entirely, so the ratio now lives only where the owner asked to see it: the bubble itself (the sending thumbnail + body ride the payload's w/h, photo and clip alike). The clone, its flight box and every launch hint for it are gone.",
+  !chat.includes("KpFlySend(") &&
+    !chat.includes("fun launchFly(") &&
+    !chat.includes("fun armFly()") &&
+    !chat.includes("flyHidden") &&
+    // the clip's box, measured at the send and handed to the pending row
     chat.includes(
-      "sendFromRect = listOf(actionRect, fieldRect).firstOrNull { !it.isEmpty } ?: Rect.Zero",
+      'if (facts.first > 0 && facts.second > 0) clipMeta.put("w", facts.first).put("h", facts.second)',
     ) &&
-    // the view-once door arms the flight too (that was the missing animation)
-    (chat.match(/armFly\(\)\n/g) || []).length >= 2,
+    chat.includes(
+      '.also { if (facts.first > 0 && facts.second > 0) it.put("mediaW", facts.first).put("mediaH", facts.second) }',
+    ) &&
+    // the photo's box, measured on pick and stamped on the echo row
+    chat.includes('.also { row -> if (w > 0 && h > 0) row.put("mediaW", w).put("mediaH", h) }') &&
+    chat.includes(
+      'pending.find { it.optString("clientId") == clientId }?.put("mediaW", shotW)?.put("mediaH", shotH)',
+    ) &&
+    chat.includes('val w = m.optInt("mediaW")'),
 );
 
 /* 6 — 12-hour Bangladesh time in the chat list, and its ink */
@@ -136,9 +145,7 @@ check(
     theme.includes("fun listStamp(") &&
     theme.includes("fun atDhaka(") &&
     list.includes("val stamp = listStamp(") &&
-    list.includes(
-      "color = if (unread > 0) GoldDeep else if (KpThemeMode.darkBlue) Muted else Color(0xFF5B7FC7),",
-    ) &&
+    list.includes("color = if (KpThemeMode.darkBlue) Muted else Color(0xFF5B7FC7)") &&
     // and MY bubble stamp follows the FILL it sits on: the cream-white on the
     // dark blue bubble that he pointed at is a cool blue-grey now, and the gold
     // bubble takes the muted ink (the other bubbles keep the old white).
@@ -149,13 +156,20 @@ check(
 
 /* 7 — the clip player's ⋮ */
 check(
-  "v165: a received clip keeps its ⋮ for the whole session — the Save / Forward seat is drawn outside the auto-hiding chrome (over the clip, under the top bar) and no longer gives its place to the saving spinner or the saved tick; Save is offered whenever the clip is on this phone",
-  // v166: the seat is unconditional — Delete lives in the sheet for every
-  // clip, private ones included; Save / Forward stay gated in that sheet.
-  viewer.includes("if (m != null) {\n            Box(") &&
-    viewer.includes(".clickable { menuOpen = true }") &&
+  "v165: a received clip keeps its ⋮ (the sheet it opens never gives its place to the saving spinner or the saved tick) and Save is offered whenever the clip can be put on this phone",
+  // v166: the sheet is unconditional — Delete lives in it for every clip,
+  // private ones included; Save / Forward stay gated in that sheet.
+  // v167 (owner: "video 3 dot ta upore rotate button ta remove kore okhane
+  // thakbe"): the owner could not reach that ⋮ — it was a floating twin over
+  // the clip while the rotate button held the top bar. The dots TOOK rotate's
+  // seat; Save / Forward / Delete are all in its sheet, and Save now fetches a
+  // clip that is not on the phone yet instead of hiding its own row.
+  viewer.includes(
+    'Icon(Icons.Filled.MoreVert, "More", tint = Color.White, modifier = Modifier.size(22.dp))',
+  ) &&
+    viewer.includes("if (dest.exists() && dest.length() > 0L) {") &&
     viewer.includes("onSave =") &&
-    viewer.includes("dest.exists() && dest.length() > 0L && !privateClip && !saved") &&
+    viewer.includes("!privateClip && !saved") &&
     !viewer.includes(
       "} else if (m != null && !privateClip) {\n                    IconButton(onClick = { menuOpen = true })",
     ) &&

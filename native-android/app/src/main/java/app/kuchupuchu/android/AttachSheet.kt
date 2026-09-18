@@ -87,8 +87,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.PlatformTextStyle
@@ -155,7 +153,6 @@ fun AttachPanel(
     onPool: (List<MediaItem>) -> Unit = {},
     // Owner round 46: the send circle reports its rect so the chat's
     // fly-send clone launches from exactly here on a batch send.
-    onSendRect: (androidx.compose.ui.geometry.Rect) -> Unit = {},
     onImagePicked: (Uri) -> Unit,
     onDocumentPicked: (Uri) -> Unit,
     onContactPicked: (Uri) -> Unit,
@@ -854,7 +851,6 @@ fun AttachPanel(
                         Modifier
                             .size(28.dp)
                             .clip(CircleShape)
-                            .onGloballyPositioned { onSendRect(it.boundsInRoot()) }
                             .background(ActionBlue)
                             .combinedClickable(
                                 onLongClick = {
