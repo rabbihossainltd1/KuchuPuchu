@@ -41,6 +41,8 @@ import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
@@ -174,6 +176,13 @@ fun KpPhotoViewer(
     // in the media editor (download → mediaedit route → Done sends it back
     // to the chat like any picked media). Null = no Edit row, as before.
     onEdit: (() -> Unit)? = null,
+    // v166 (owner: "photo video … kothaw 3 dot nei … Save, Forward, Delete"):
+    // Delete joins the same ⋮. The viewer never touches the list — it hands
+    // the one request to its host, which runs the chat's own delete (the
+    // vanishing show, the dust latch, the server call, the local hide).
+    // Both null = the sheet keeps its old shape.
+    onDeleteForMe: (() -> Unit)? = null,
+    onDeleteForEveryone: (() -> Unit)? = null,
     // Owner round 32 (item 17): fired once the picture is on screen (a failed
     // load never fires it) — the chat uses it to spend a view-once opening.
     onShown: (() -> Unit)? = null,
@@ -197,6 +206,9 @@ fun KpPhotoViewer(
     // Owner round 32 (item 46): the viewer's ⋮ opens a sheet with Save /
     // Forward (nothing else); the old always-visible bottom strip is gone.
     var menuOpen by remember { mutableStateOf(false) }
+    // v166: Delete asks one question first (for everyone / for me), the same
+    // words the chat's long-press sheet uses.
+    var confirmDelete by remember { mutableStateOf(false) }
     // Owner round 34 (item 6): one page per photo; zoom resets on each flip.
     val pages = urls.ifEmpty { listOf(url) }
     val pager = rememberPagerState(initialPage = startIndex.coerceIn(pages.indices)) { pages.size }
@@ -421,7 +433,7 @@ fun KpPhotoViewer(
                     Spacer(Modifier.width(8.dp))
                     if (saving) {
                         CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.padding(end = 14.dp).size(18.dp))
-                    } else if (canSave || onForward != null || onEdit != null) {
+                    } else if (canSave || onForward != null || onEdit != null || onDeleteForMe != null || onDeleteForEveryone != null) {
                         IconButton(onClick = { menuOpen = true }) {
                             Icon(Icons.Filled.MoreVert, "More", tint = Color.White, modifier = Modifier.size(24.dp))
                         }
@@ -455,9 +467,56 @@ fun KpPhotoViewer(
             onSave = if (canSave) ({ menuOpen = false; savePhoto() }) else null,
             onForward = onForward?.let { f -> { menuOpen = false; f() } },
             onEdit = onEdit?.let { e -> { menuOpen = false; e() } },
+            onDelete =
+                if (onDeleteForMe != null || onDeleteForEveryone != null) {
+                    { menuOpen = false; confirmDelete = true }
+                } else {
+                    null
+                },
+        )
+    }
+    if (confirmDelete) {
+        KpDeleteSheet(
+            canUnsend = onDeleteForEveryone != null,
+            onDismiss = { confirmDelete = false },
+            onDeleteForMe = { confirmDelete = false; onDeleteForMe?.invoke() },
+            onDeleteForEveryone = { confirmDelete = false; onDeleteForEveryone?.invoke() },
         )
     }
 }
+
+/**
+ * v166 (owner: "… okhane Save, Forward, Delete"): the Delete step behind every
+ * viewer's ⋮. Deleting media is destructive and reads differently depending on
+ * who sent it, so this asks the two questions the chat's own long-press sheet
+ * asks — with the same words, so the outcome is identical wherever the user
+ * deletes from.
+ */
+@Composable
+internal fun KpDeleteSheet(
+    canUnsend: Boolean,
+    onDismiss: () -> Unit,
+    onDeleteForMe: () -> Unit,
+    onDeleteForEveryone: () -> Unit,
+) {
+    KpSheet(onDismiss = onDismiss) {
+        if (canUnsend) {
+            KpSheetRow(Icons.Filled.DeleteForever, "Delete for everyone", tint = Red) {
+                onDismiss()
+                onDeleteForEveryone()
+            }
+        }
+        KpSheetRow(Icons.Filled.Delete, "Delete for me", tint = Red) {
+            onDismiss()
+            onDeleteForMe()
+        }
+    }
+}
+
+/** v166: a row that is still on its way out of this phone (its echo id is the
+ *  client id) — the viewer withholds "Delete for everyone" for it, exactly as
+ *  the chat's sheet does. */
+internal fun isEchoMsg(m: JSONObject): Boolean = m.optString("id").startsWith("c_")
 
 /** Owner round 32 (item 46): the viewer / player ⋮ sheet — Save, Forward.
  *  Owner round 39 (item 1): + Edit (owner order Save / Forward / Edit) —
@@ -468,11 +527,13 @@ internal fun MediaMenuSheet(
     onSave: (() -> Unit)?,
     onForward: (() -> Unit)?,
     onEdit: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
 ) {
     KpSheet(onDismiss = onDismiss) {
         if (onSave != null) KpSheetRow(Icons.Filled.Download, "Save", onClick = onSave)
         if (onForward != null) KpSheetRow(Icons.AutoMirrored.Filled.Send, "Forward", onClick = onForward)
         if (onEdit != null) KpSheetRow(Icons.Filled.Brush, "Edit", onClick = onEdit)
+        if (onDelete != null) KpSheetRow(Icons.Filled.Delete, "Delete", tint = Red, onClick = onDelete)
     }
 }
 
@@ -568,6 +629,18 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
     // chat picker, then the clip is re-posted by its file key).
     var menuOpen by remember { mutableStateOf(false) }
     var forwarding by remember { mutableStateOf(false) }
+    // v166 (owner: "video photo te je send korche je receive korche kothaw 3 dot
+    // nei"): the player's ⋮ carries Delete too. This screen is a ROUTE — it has
+    // no list — so the request goes to the chat through ScreenStore and the
+    // player closes; the chat runs its own delete exactly as if the user had
+    // long-pressed the bubble.
+    var confirmDelete by remember { mutableStateOf(false) }
+    val canUnsend = m != null && !isEchoMsg(m) && m.optString("senderId") == Store.myId()
+    fun raiseDelete(everyone: Boolean) {
+        val id = m?.optString("id").orEmpty()
+        if (id.isNotBlank()) ScreenStore.viewerDelete.value = ScreenStore.ViewerDelete(id, everyone)
+        nav.popBackStack()
+    }
     val canForward = m != null && !privateClip && m.optText("fileKey").isNotBlank()
     fun saveClip() {
         if (m == null || dest == null || savingClip || saved) return
@@ -600,6 +673,15 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
                     null
                 },
             onForward = if (canForward) ({ menuOpen = false; forwarding = true }) else null,
+            onDelete = if (m != null) ({ menuOpen = false; confirmDelete = true }) else null,
+        )
+    }
+    if (confirmDelete) {
+        KpDeleteSheet(
+            canUnsend = canUnsend,
+            onDismiss = { confirmDelete = false },
+            onDeleteForMe = { confirmDelete = false; raiseDelete(everyone = false) },
+            onDeleteForEveryone = { confirmDelete = false; raiseDelete(everyone = true) },
         )
     }
     if (forwarding && m != null) {
@@ -779,7 +861,12 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
 
         // v165: the ⋮ is ALWAYS on screen (see the note on the top bar) — its
         // own 44 dp seat in the corner, over the clip, for the whole session.
-        if (m != null && !privateClip) {
+        // v166 (owner: "video photo te je send korche je receive korche kothaw 3
+        // dot nei"): a private clip's ⋮ used to be withheld along with Save /
+        // Forward — so there was NO dots anywhere in that viewer, and Delete
+        // (which a private clip does allow) had no way in. The seat is always
+        // here now; the sheet is what gates Save / Forward.
+        if (m != null) {
             Box(
                 Modifier
                     .align(Alignment.TopEnd)

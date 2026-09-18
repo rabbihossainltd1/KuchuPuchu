@@ -30,8 +30,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.draw.clip
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -395,6 +393,14 @@ fun KpUpdateGate() {
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
+                    // v166 (owner: "in app update downloading er somoy ei
+                    // animation ta hobe ar update available animation ta tumi ei
+                    // animation er sathe sync kore create kore daw … colour
+                    // system ta app er sathe match korbe"): the plain title +
+                    // LinearProgressIndicator pair is replaced by the owner's
+                    // own maintenance-crew scene (KpUpdateScene) — the SAME crew
+                    // is on screen whether the update is merely available or
+                    // downloading, and its palette is the app's Blue / Gold.
                     Text(
                         when {
                             justUpdated -> "Update installed"
@@ -410,17 +416,15 @@ fun KpUpdateGate() {
                     Spacer(Modifier.height(10.dp))
                     when {
                         justUpdated -> {
+                            KpUpdateScene(KpUpdatePhase.DONE, 1f, Modifier.fillMaxWidth())
+                            Spacer(Modifier.height(14.dp))
                             Text("Restart to run the new build.", color = Muted, fontSize = 13.5.sp)
                             Spacer(Modifier.height(14.dp))
                             GoldBtn("Restart", Modifier.fillMaxWidth()) { KpUpdate.restart(ctx) }
                         }
                         installing -> {
-                            LinearProgressIndicator(
-                                color = ActionBlue,
-                                trackColor = ActionBlue.copy(alpha = 0.18f),
-                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                            )
-                            Spacer(Modifier.height(10.dp))
+                            KpUpdateScene(KpUpdatePhase.DONE, 1f, Modifier.fillMaxWidth())
+                            Spacer(Modifier.height(14.dp))
                             Text(
                                 "Confirm the install in the system window.",
                                 color = Muted,
@@ -428,26 +432,20 @@ fun KpUpdateGate() {
                             )
                         }
                         ready != null -> {
+                            KpUpdateScene(KpUpdatePhase.DONE, 1f, Modifier.fillMaxWidth())
+                            Spacer(Modifier.height(14.dp))
                             Text("v${upd?.first ?: ""} downloaded and ready to install.", color = Muted, fontSize = 13.5.sp)
                             Spacer(Modifier.height(14.dp))
                             GoldBtn("Install", Modifier.fillMaxWidth()) { scope.launch { KpUpdate.installReady(ctx) } }
                         }
                         downloading -> {
-                            LinearProgressIndicator(
-                                progress = { KpUpdate.progress },
-                                color = ActionBlue,
-                                trackColor = ActionBlue.copy(alpha = 0.18f),
-                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                            )
-                            Spacer(Modifier.height(10.dp))
-                            Text(
-                                "${(KpUpdate.progress * 100).toInt()}%",
-                                color = ActionBlueDeep,
-                                fontSize = 14.sp,
-                                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
-                            )
+                            // The bar IS the scene here: real progress drives the
+                            // fill and the walking figure (KpUpdate.progress).
+                            KpUpdateScene(KpUpdatePhase.DOWNLOADING, KpUpdate.progress, Modifier.fillMaxWidth())
                         }
                         else -> {
+                            KpUpdateScene(KpUpdatePhase.AVAILABLE, 0f, Modifier.fillMaxWidth())
+                            Spacer(Modifier.height(12.dp))
                             Text("A new version v${upd?.first} is available. Update to continue.", color = Muted, fontSize = 13.5.sp)
                             Spacer(Modifier.height(14.dp))
                             GoldBtn("Update", Modifier.fillMaxWidth()) { scope.launch { KpUpdate.downloadAndInstall(ctx) } }

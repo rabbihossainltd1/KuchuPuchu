@@ -806,7 +806,11 @@ const convBetween = (db, a, b) =>
   check(
     "AI budget 900 tokens: Bengali script no longer dies mid-message",
     src.includes('[{ role: "user", content: prompt + voicePrompt + photoPrompt }],') &&
-      src.includes("answer = await hfChat("),
+      // v166: the photo turn is hedged (Gemini vs the HF vision leg) — the HF
+      // leg still asks with the FULL prompt at the 900-token budget, and so
+      // does the text leg that answers when there are no bytes to look at.
+      src.includes("          900,\n          [HF_VISION_MODEL],") &&
+      src.includes('answer = await aiBrain(env, [{ role: "user", content: fullPrompt }], 900);'),
   );
   check(
     "callee in a call → 486 LINE_BUSY (pair-redial never blocked)",
@@ -2674,16 +2678,28 @@ const convBetween = (db, a, b) =>
       JSON.stringify(withAlert),
     );
     const update = kt("KpUpdate.kt");
+    const scene = kt("KpUpdateScene.kt");
     check(
-      "r31-10: update = popup Dialog (not bottom sheet) with ActionBlue progress (no Gold bar) and explicit Install step (ready APK kept, installReady on tap) — non-skippable, appears on any screen",
+      "r31-10: update = popup Dialog (not bottom sheet) with the app-accent maintenance-crew scene (ActionBlue family — never a lone Gold bar) and explicit Install step (ready APK kept, installReady on tap) — non-skippable, appears on any screen",
       kpapp.includes("fun KpUpdateGate()") &&
         kpapp.includes("Dialog(") &&
         kpapp.includes("dismissOnBackPress = false") &&
         kpapp.includes("dismissOnClickOutside = false") &&
         !kpapp.includes("KpSheet(") &&
-        kpapp.includes("color = ActionBlue,") &&
-        kpapp.includes("trackColor = ActionBlue.copy(alpha = 0.18f)") &&
-        !kpapp.includes("color = Gold,") &&
+        // v166 (owner's own update demo, recoloured to the app): the plain
+        // ActionBlue LinearProgressIndicator is gone — the popup draws
+        // KpUpdateScene for available / downloading / done, whose accent IS
+        // ActionBlue and whose bar is that same accent family (blue in the
+        // dark app, the gold accent in the light one).
+        kpapp.includes("KpUpdateScene(KpUpdatePhase.AVAILABLE, 0f") &&
+        kpapp.includes("KpUpdateScene(KpUpdatePhase.DOWNLOADING, KpUpdate.progress") &&
+        kpapp.includes("KpUpdateScene(KpUpdatePhase.DONE, 1f") &&
+        scene.includes("val accent = ActionBlue") &&
+        scene.includes("listOf(accent, ActionBlueDeep, accent)") &&
+        // the BAR is the accent family; the demo's amber survives only in the
+        // sparks (they are sparks) — the old Gold→blue bar gradient is gone.
+        !scene.includes("listOf(Gold, GoldDeep, accent)") &&
+        scene.includes("val track = Line") &&
         kpapp.includes('GoldBtn("Install", Modifier.fillMaxWidth())') &&
         kpapp.includes("KpUpdate.installReady(ctx)") &&
         update.includes("var ready by mutableStateOf<File?>(null)") &&
@@ -2761,7 +2777,8 @@ const convBetween = (db, a, b) =>
         'fun handleDocumentPicked(uri: Uri, asDocument: Boolean = false, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "")',
       ) &&
         chat.includes(
-          'fun sendFile(name: String, mime: String, file: File, asDocument: Boolean = false, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "")',
+          // v166 (fb#5): suspend, and the clip's own w / h / durMs ride along.
+          'suspend fun sendFile(\n        name: String,\n        mime: String,\n        file: File,\n        asDocument: Boolean = false,\n        viewOnce: Boolean = false,\n        sendAt: java.time.Instant? = null,\n        caption: String = "",\n        w: Int = 0,\n        h: Int = 0,\n        durMs: Long = 0L,\n    ) {',
         ) &&
         chat.includes('asDocument -> JSONObject().put("document", true)') &&
         chat.includes(
@@ -2926,7 +2943,10 @@ const convBetween = (db, a, b) =>
         ) &&
         // v165 (owner): the player's ⋮ sits outside the auto-hiding chrome, so
         // a played or saved clip still offers Save / Forward.
-        kt("MediaViewer.kt").includes("if (m != null && !privateClip) {") &&
+        // v166 (owner: "... kothaw 3 dot nei ... Save, Forward, Delete"): the
+        // seat is unconditional now — Delete lives in it for every clip,
+        // private ones included; the sheet is what withholds Save / Forward.
+        kt("MediaViewer.kt").includes("if (m != null) {\n            Box(") &&
         kt("MediaViewer.kt").includes(
           'val canForward = m != null && !privateClip && m.optText("fileKey").isNotBlank()',
         ) &&
@@ -4118,10 +4138,10 @@ const convBetween = (db, a, b) =>
           "val album = if (batch.count { !it.isVideo && !it.once } >= 2) newAlbumId() else null",
         ) &&
         chat.includes(
-          'fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "") {',
+          'fun sendImage(\n        dataUrl: String,\n        album: String? = null,\n        viewOnce: Boolean = false,\n        sendAt: java.time.Instant? = null,\n        caption: String = "",\n        w: Int = 0,\n        h: Int = 0,\n    ) {',
         ) &&
         chat.includes('if (album != null) o.put("album", album)') &&
-        chat.includes('.also { row -> metaWith(0, 0)?.let { row.put("meta", it) } }') &&
+        chat.includes('.also { row -> metaWith(w, h)?.let { row.put("meta", it) } }') &&
         (chat.match(/metaWith\(shotW, shotH\)\?\.let \{ payload\.put\("meta", it\) \}/g) || [])
           .length === 1 &&
         chat.includes("fun handleImagePicked(uri: Uri, album: String? = null) {") &&
@@ -4827,11 +4847,11 @@ const convBetween = (db, a, b) =>
   // its own coroutine (text / voice too), no upload path awaits a scroll, and
   // the grid batch reads photos in selection order.
   const chat32 = kt("ChatScreen.kt");
+  // v166: sendImage / sendFile grew their own w / h (and sendFile a durMs),
+  // so the bodies are located by their stable opening lines.
   const sendImageBody = chat32.slice(
-    chat32.indexOf(
-      'fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "") {',
-    ),
-    chat32.indexOf("fun sendFile(name: String, mime: String, file: File"),
+    chat32.indexOf("fun sendImage("),
+    chat32.indexOf("suspend fun sendFile("),
   );
   const sendVoiceBody = chat32.slice(
     chat32.indexOf("fun sendVoice(file: File, seconds: Int"),
@@ -4839,9 +4859,7 @@ const convBetween = (db, a, b) =>
   );
   const sendTextBody = chat32.slice(
     chat32.indexOf('fun sendText(body: String, kind: String = "TEXT") {'),
-    chat32.indexOf(
-      'fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "") {',
-    ),
+    chat32.indexOf("fun sendImage("),
   );
   check(
     "r32-48: no send path awaits a list scroll — sendImage / sendVoice / sendText launch the jump-to-bottom on a separate coroutine wrapped in runCatching, the upload coroutine never contains animateScrollToItem, and the grid batch decodes photos sequentially in tick order via readAndSendImage",
@@ -5297,7 +5315,7 @@ const convBetween = (db, a, b) =>
     const chat = kt("ChatScreen.kt");
     const tab = kt("ChatMediaScreen.kt");
     check(
-      "r32-46: viewer ⋮ → sheet = Save / Forward / Edit (player: Save / Forward); one IO forward helper (forwardMessageTo) used by chat select, photo viewer, video player and the media tab",
+      "r32-46: viewer ⋮ → sheet = Save / Forward / Edit (player: Save / Forward; v166: + Delete everywhere, both directions); one IO forward helper (forwardMessageTo) used by chat select, photo viewer, video player and the media tab",
       mv.includes("internal fun MediaMenuSheet(") &&
         mv.includes(
           'if (onSave != null) KpSheetRow(Icons.Filled.Download, "Save", onClick = onSave)',
@@ -5308,7 +5326,14 @@ const convBetween = (db, a, b) =>
         mv.includes(
           'if (onEdit != null) KpSheetRow(Icons.Filled.Brush, "Edit", onClick = onEdit)',
         ) &&
-        (mv.match(/KpSheetRow\(/g) || []).length === 3 &&
+        // v166 (owner: "okhane Save, Forward, Delete"): the Delete row joins
+        // the sheet for every surface — it opens the shared confirm
+        // (KpDeleteSheet), whose wording is the chat's own.
+        mv.includes(
+          'if (onDelete != null) KpSheetRow(Icons.Filled.Delete, "Delete", tint = Red, onClick = onDelete)',
+        ) &&
+        // 4 in the action sheet + the 2 in the shared delete confirm
+        (mv.match(/KpSheetRow\(/g) || []).length === 6 &&
         // Only the photo viewer passes onEdit (the player relies on the null default).
         (mv.match(/onEdit = /g) || []).length === 1 &&
         mv.includes("onEdit = onEdit?.let { e -> { menuOpen = false; e() } },") &&
@@ -5472,11 +5497,11 @@ const convBetween = (db, a, b) =>
     const vn = kt("VoiceNote.kt");
     const chat = kt("ChatScreen.kt");
     check(
-      "r32-45: voice bubble is compact — 36dp play circle, 22dp wave, duration right under it, the bubble keeps a 4dp bottom instead of the blank 15dp band (fileLooksVoice); the recording strip paints VoiceNote.livePeaks (newest 4 s, sqrt curve, LIVE_BARS wide) between the timer and the cancel hint; both draw through DrawScope.drawVoiceBars",
+      "r32-45: voice bubble is compact — a 32dp play circle (v166, was 36), an 18dp wave (was 22), duration right under it, the bubble keeps a 4dp bottom instead of the blank 15dp band (fileLooksVoice); the recording strip paints VoiceNote.livePeaks (newest 4 s, sqrt curve, LIVE_BARS wide) between the timer and the cancel hint; both draw through DrawScope.drawVoiceBars",
       chat.includes("internal fun fileLooksVoice(m: JSONObject): Boolean {") &&
         chat.includes('val fileRow = kind == "FILE"') &&
         chat.includes("val isVoice = !asDocument && fileLooksVoice(m)") &&
-        chat.includes("modifier = Modifier.width(150.dp).height(22.dp),") &&
+        chat.includes("modifier = Modifier.width(132.dp).height(18.dp),") &&
         !chat.includes("modifier = Modifier.width(150.dp).height(30.dp),") &&
         chat.includes(
           "internal fun DrawScope.drawVoiceBars(bars: List<Int>, progress: Float, played: Color, rest: Color, newest: Boolean = false) {",
@@ -5489,7 +5514,7 @@ const convBetween = (db, a, b) =>
           "LiveVoiceWave(color = accent, modifier = Modifier.weight(1f).height(22.dp))",
         ) &&
         chat.includes('Text("‹ Slide to cancel", color = Red, fontSize = 12.5.sp, maxLines = 1)') &&
-        (chat.match(/\.size\(36\.dp\)\n\s+\.pressScale\(interaction\)/g) || []).length === 1 &&
+        (chat.match(/\.size\(32\.dp\)\n\s+\.pressScale\(interaction\)/g) || []).length === 1 &&
         vn.includes("var livePeaks: List<Int> by mutableStateOf(emptyList())") &&
         vn.includes("livePeaks = VoiceWaveform.live(amps)") &&
         (vn.match(/livePeaks = emptyList\(\)/g) || []).length === 3 &&
@@ -5845,7 +5870,7 @@ const convBetween = (db, a, b) =>
     const chat = kt("ChatScreen.kt");
     const cache = kt("Cache.kt");
     check(
-      "r32-32: LinkPreview.kt — Links.RE / clean / first / annotate (LinkAnnotation.Url + underline, taps handled by Links.open — no default handler throw), LinkPreviews (snapshot map + one file, fetched through /api/link-preview) and LinkPreviewCard (worker-relayed picture 1.91:1, title 2 lines, description, host); Cache.init warms the card file",
+      "r32-32: LinkPreview.kt — Links.RE / clean / first / annotate (LinkAnnotation.Url + underline, taps handled by Links.open — no default handler throw), LinkPreviews (snapshot map + one file, fetched through /api/link-preview) and LinkPreviewCard (v166: a 96dp worker-relayed picture band, title 2 lines, description 1 line, host); Cache.init warms the card file",
       lp.includes(
         'val RE = Regex("""(?:https?://|www\\.)[^\\s<>"\']+""", RegexOption.IGNORE_CASE)',
       ) &&
@@ -5859,7 +5884,10 @@ const convBetween = (db, a, b) =>
           "internal fun LinkPreviewCard(url: String, mine: Boolean, ink: Color, onOpen: (() -> Unit)?) {",
         ) &&
         lp.includes('model = if (image.startsWith("/")) Api.BASE + image else image,') &&
-        lp.includes("modifier = Modifier.fillMaxWidth().aspectRatio(1.91f),") &&
+        // v166 (owner: "chat a link dile link card bubble ta compact koro
+        // choto koro"): the full-width 1.91:1 banner is a short fixed band.
+        lp.includes("private val LINK_THUMB_H = 96.dp") &&
+        lp.includes("modifier = Modifier.fillMaxWidth().height(LINK_THUMB_H),") &&
         cache.includes("runCatching { LinkPreviews.init(app) }"),
     );
     check(
@@ -6201,14 +6229,14 @@ const convBetween = (db, a, b) =>
           "if (item.isVideo) handleDocumentPicked(item.uri, viewOnce = true, sendAt = sendAt, caption = item.caption) else readAndSendImage(item.uri, null, viewOnce = true, sendAt = sendAt, caption = item.caption, hd = item.hd)",
         ) &&
         chat.includes(
-          'fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "") {',
+          'fun sendImage(\n        dataUrl: String,\n        album: String? = null,\n        viewOnce: Boolean = false,\n        sendAt: java.time.Instant? = null,\n        caption: String = "",\n        w: Int = 0,\n        h: Int = 0,\n    ) {',
         ) &&
         chat.includes(
           'if (viewOnce) {\n                o.put("viewOnce", true)\n                return o\n            }',
         ) &&
         chat.includes('.also { row -> if (viewOnce) row.put("viewOnce", true) }') &&
         chat.includes(
-          'fun sendFile(name: String, mime: String, file: File, asDocument: Boolean = false, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "") {',
+          'suspend fun sendFile(\n        name: String,\n        mime: String,\n        file: File,\n        asDocument: Boolean = false,\n        viewOnce: Boolean = false,\n        sendAt: java.time.Instant? = null,\n        caption: String = "",\n        w: Int = 0,\n        h: Int = 0,\n        durMs: Long = 0L,\n    ) {',
         ) &&
         chat.includes('viewOnce -> JSONObject().put("viewOnce", true)') &&
         chat.includes(
@@ -6506,21 +6534,25 @@ const convBetween = (db, a, b) =>
         ),
     );
     check(
-      "r46-1: morph-&-fly send (owner's savedly demo port) — the send echoes hide, a clone launches from whatever fired the send (input pill / mic-send slot / panel send circle) and flies 700 ms on an arced path with a smoothstep frame morph, gentle wobble/trail/glow, onto the real bubble rect, then a soft spring settle + accent flash (r49 smoothing); EVERY type rides the same engine with its REAL content, batch flies once, stray rects can never fly a later send (one-shot baton + watchdog)",
+      "r46-1: morph-&-fly send (owner's savedly demo port; v166: the clone walks STRAIGHT to the bubble for 520 ms — the 56dp arc is gone, every type the same) — the send echoes hide, a clone launches from whatever fired the send (input pill / mic-send slot / panel send circle) with a smoothstep frame morph, gentle wobble/trail/glow, onto the real bubble rect, then a soft spring settle + accent flash (r49 smoothing); EVERY type rides the same engine with its REAL content, batch flies once, stray rects can never fly a later send (one-shot baton + watchdog)",
       chat.includes("private class FlySpec(") &&
         chat.includes("private fun KpFlySend(") &&
         chat.includes("private fun KpFlyLandFlash(") &&
         chat.includes("val flyQueue = remember { mutableStateListOf<FlySpec>() }") &&
-        chat.includes("fun launchFly(clientId: String, cloneType: String") &&
-        (chat.match(/launchFly\(clientId, /g) || []).length >= 4 &&
+        chat.includes("fun launchFly(\n        clientId: String,\n        cloneType: String,") &&
+        // the declaration plus the four send paths that ride it: text, photo,
+        // voice and the file/clip call
+        (chat.match(/launchFly\(\s*clientId/g) || []).length === 5 &&
         chat.includes('launchFly(clientId, "TEXT", body)') &&
-        chat.includes('launchFly(clientId, "PHOTO", media = dataUrl)') &&
+        chat.includes(
+          'launchFly(clientId, "PHOTO", media = dataUrl, ratio = if (w > 0 && h > 0) w.toFloat() / h else 0f)',
+        ) &&
         chat.includes("rememberBitmap(spec.media.takeIf") &&
         chat.includes('launchFly(clientId, "VOICE")') &&
         chat.includes("sendFromRect = Rect.Zero") &&
-        chat.includes("tween(700, easing = LinearEasing)") &&
+        chat.includes("tween(520, easing = LinearEasing)") &&
         chat.includes("val es = raw * raw * (3f - 2f * raw)") &&
-        chat.includes("(-56).dp.toPx()") &&
+        !chat.includes("(-56).dp.toPx()") &&
         chat.includes("e > 0.45f") &&
         (chat.match(/\.alpha\(if \(rowKey in flyHidden\) 0f else 1f\)/g) || []).length === 2 &&
         chat.includes("KpFlyTarget.report(") &&
@@ -6679,8 +6711,10 @@ const convBetween = (db, a, b) =>
           'data class EditedResult(val convId: String, val viewOnce: Boolean, val media: EditedMedia, val caption: String = "")',
         ) &&
         [
-          "Photo(val dataUrl: String)",
-          "Video(val file: java.io.File, val mime: String)",
+          // v166: the bake hands back the file's own pixels + duration, so a
+          // send can lay its bubble out like the sent row (fb#5).
+          "Photo(val dataUrl: String, val w: Int = 0, val h: Int = 0)",
+          "Video(\n        val file: java.io.File,\n        val mime: String,\n        val w: Int = 0,\n        val h: Int = 0,\n        val durMs: Long = 0L,\n    )",
           "Untouched(val uri: Uri, val isVideo: Boolean)",
           "Failed(val message: String)",
         ].every((l) => edit.includes(l)) &&
@@ -6697,10 +6731,10 @@ const convBetween = (db, a, b) =>
         chat.includes("ScreenStore.pendingEdited.collect { edited ->") &&
         chat.includes("if (edited == null || edited.convId != convId) return@collect") &&
         chat.includes(
-          "is EditedMedia.Photo -> sendImage(m.dataUrl, null, edited.viewOnce, caption = edited.caption)",
+          "is EditedMedia.Photo -> sendImage(m.dataUrl, null, edited.viewOnce, caption = edited.caption, w = m.w, h = m.h)",
         ) &&
         chat.includes(
-          'is EditedMedia.Video -> sendFile("video.mp4", m.mime, m.file, viewOnce = edited.viewOnce, caption = edited.caption)',
+          'is EditedMedia.Video -> sendFile("video.mp4", m.mime, m.file, viewOnce = edited.viewOnce, caption = edited.caption, w = m.w, h = m.h, durMs = m.durMs)',
         ) &&
         chat.includes("is EditedMedia.Failed -> error = m.message") &&
         // the shared pieces: TrimStrip / StatusTrimPreview are internal, the cap is a parameter
@@ -7151,10 +7185,8 @@ const convBetween = (db, a, b) =>
       chat33.indexOf("private fun ImageBubble("),
     );
     const sendImage33 = chat33.slice(
-      chat33.indexOf(
-        'fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "") {',
-      ),
-      chat33.indexOf("fun sendFile(name: String, mime: String, file: File"),
+      chat33.indexOf("fun sendImage("),
+      chat33.indexOf("suspend fun sendFile("),
     );
     const sendVoice33 = chat33.slice(
       chat33.indexOf("fun sendVoice(file: File, seconds: Int"),
@@ -7207,7 +7239,7 @@ const convBetween = (db, a, b) =>
         ),
     );
     check(
-      "r33-3b: Uploads is queue-first (no Deferred, no Outbox.add, no Api.post): sendFile hands the body + local path to Outbox.send; sendPhoto writes the JPEG under filesDir/kp-outbox-media/<clientId>.jpg first; sendImage / sendVoice / sendFile in the chat paint through paintSent while alive and never POST on the screen scope any more",
+      "r33-3b: Uploads is queue-first (no Deferred, no Outbox.add, no Api.post): sendFile hands the body + local path to Outbox.send; sendPhoto writes the JPEG under filesDir/kp-outbox-media/<clientId>.jpg first; sendImage / sendVoice / sendFile (v166: suspend) in the chat paint through paintSent while alive and never POST on the screen scope any more",
       uploads.includes(
         'Outbox.send(convId, clientId, body, JSONObject().put("path", file.absolutePath).put("temp", true), onResult)',
       ) &&
@@ -7378,19 +7410,22 @@ const convBetween = (db, a, b) =>
       chat.indexOf("// Owner round 12: one pinned stamp row for every bubble,"),
     );
     check(
-      "r34-19: bodies longer than ten lines fold behind a See more / See less toggle (unbounded measure first so the count is real, monotonic high-water count, typing replies exempt)",
+      "r34-19: bodies longer than ten lines fold behind a See more / See less toggle (v166: the count is measured WHILE COMPOSING at the bubble's own width, so the fold is right on the first frame; the onTextLayout high-water count stays as the second witness; typing replies exempt)",
       chat.includes("private const val BODY_COLLAPSE_LINES = 10") &&
         chat.includes("var bodyLines by remember(mid) { mutableStateOf(0) }") &&
         chat.includes("var msgExpanded by remember(mid) { mutableStateOf(false) }") &&
-        chat.includes("val capped = !msgExpanded && !typing && bodyLines > BODY_COLLAPSE_LINES") &&
+        chat.includes(
+          "val longBody = bodyLines > BODY_COLLAPSE_LINES || probeLines > BODY_COLLAPSE_LINES",
+        ) &&
+        chat.includes("val capped = !msgExpanded && !typing && longBody") &&
+        chat.includes("val probeLines =") &&
+        chat.includes("val foldProbe = rememberTextMeasurer()") &&
         chat.includes(
           "val countLines = { r: TextLayoutResult, report: (TextLayoutResult) -> Unit ->",
         ) &&
         (chat.match(/maxLines = if \(capped\) BODY_COLLAPSE_LINES else Int\.MAX_VALUE,/g) || [])
           .length === 4 &&
-        chat.includes(
-          "if (bodyLines > BODY_COLLAPSE_LINES && !typing && selectedIds.isEmpty()) {",
-        ) &&
+        chat.includes("if (longBody && !typing && selectedIds.isEmpty()) {") &&
         chat.includes('"See less"') &&
         chat.includes('"See more"') &&
         chat.includes("msgExpanded = !msgExpanded"),
@@ -7419,7 +7454,11 @@ const convBetween = (db, a, b) =>
         // ink, not a washed-out white — the wallpaper themes keep white.
         chat.includes("val mineStampInk =") &&
         chat.includes('"default" -> Muted') &&
-        chat.includes('"darkblue" -> Color(0xFFD7E1F7)') &&
+        // v166 (owner: "time colour ta ekhono white cream colour er blue na"):
+        // the near-white tints are gone — a real light blue on the blue
+        // bubble, and a mode-aware blue for the received side too.
+        chat.includes('"darkblue" -> Color(0xFFBBD3FF)') &&
+        chat.includes("if (KpThemeMode.darkBlue) Color(0xFFA9C4F2) else Color(0xFF5B7FC7)") &&
         chat.includes(
           "TickIcon(m, pendingEcho, otherReadAt, onWallpaper = emojiOnly > 0, ink = stampInk)",
         ),
@@ -7871,7 +7910,10 @@ const convBetween = (db, a, b) =>
         // and REDO replays whatever undo took.
         edit3.includes("val canUndo = strokes.isNotEmpty() || overlayPast.isNotEmpty()") &&
         edit3.includes("val canRedo = redoStack.isNotEmpty()") &&
-        edit3.includes("if ((shot != null || clip != null) && (canUndo || canRedo)) {") &&
+        // v166 (owner: "undo redo option pelam e na"): the trio is part of the
+        // chrome — drawn whenever there is media on the stage, each control
+        // dimmed while it has nothing to act on.
+        edit3.includes("if (shot != null || clip != null) {") &&
         edit3.includes("haptics.tap(); undoEdit()") &&
         edit3.includes("haptics.tap(); redoEdit()") &&
         edit3.includes(
@@ -8360,7 +8402,7 @@ const convBetween = (db, a, b) =>
         wave.includes("modifier.pointerInput(bars) {"),
     );
     check(
-      "r33-1: the voice bubble keeps a scrub fraction (painted + time line follow the finger), passes onScrub, and centres the 22dp wave on the 36dp button (top-aligned row, column offset 7dp)",
+      "r33-1: the voice bubble keeps a scrub fraction (painted + time line follow the finger), passes onScrub, and centres the 18dp wave on the 32dp button (top-aligned row, column offset 7dp)",
       chat.includes("var scrubAt by remember(id) { mutableStateOf<Float?>(null) }") &&
         chat.includes("val progress = scrubAt ?: if (active) player.progress else 0f") &&
         chat.includes(
@@ -8371,7 +8413,7 @@ const convBetween = (db, a, b) =>
           "Row(verticalAlignment = Alignment.Top) {\n            val interaction = remember { MutableInteractionSource() }",
         ) &&
         chat.includes("Column(Modifier.padding(top = 7.dp)) {\n                VoiceWave(") &&
-        chat.includes("modifier = Modifier.width(150.dp).height(22.dp),"),
+        chat.includes("modifier = Modifier.width(132.dp).height(18.dp),"),
     );
   }
   // Item 8: the status / chat-video trim strip shows a playhead — the
@@ -8668,7 +8710,9 @@ const convBetween = (db, a, b) =>
         ai.includes("if (caption && (IMAGE_EDIT_HINT.test(caption) || wantsPicture(caption))) {") &&
         ai.includes("VALUES (?, ?, ?, 'IMAGE', NULL, ?, ?)`") &&
         ai.includes("kp_media: `/api/messages/${imgMid}/media`,") &&
-        ai.includes("answer = await hfChat(") &&
+        // v166: the photo leg calls the HF vision model, and the text-only
+        // apology behind it, through the hedged helper.
+        ai.includes("const hf = await hfChat(") &&
         ai.includes(
           "answer ?? (!env.GEMINI_API_KEY && !env.HF_TOKEN ? AI_REPLY_FALLBACK : AI_REPLY_DOWN);",
         ) &&
@@ -8681,8 +8725,15 @@ const convBetween = (db, a, b) =>
         src.includes(
           'inline_data: { mime_type: m.mime || "application/octet-stream", data: m.b64 }',
         ) &&
+        // v166 (owner: "ai reply dite onek late korche"): Gemini still LEADS,
+        // but it is raced against the HF chain — the fallback starts 1.6 s in
+        // instead of after Gemini's whole timeout.
+        src.includes("const AI_HEDGE_MS = 1_600;") &&
         src.includes(
-          "const gem = await geminiChat(env, messages, maxTokens);\n  if (gem) return gem;",
+          "return await Promise.any([answered(primary()), answered(gate.then(secondary))]);",
+        ) &&
+        src.includes(
+          "() => geminiChat(env, messages, maxTokens),\n    () => hfThenCf(env, messages, maxTokens),",
         ) &&
         src.includes("const heard = await aiTranscribe(") &&
         src.includes("async function aiTranscribe(") &&

@@ -1454,7 +1454,16 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
                     ListTicks(read = otherRead.isNotBlank() && otherRead >= newestAt, delivered = delivered)
                     Spacer(Modifier.width(4.dp))
                 }
-                Text(stamp, fontSize = 12.sp, color = if (unread > 0) GoldDeep else Muted)
+                // v166 (owner: "time colour ta ekhono white cream colour er blue
+                // na"): in the day theme this row's time was the warm cream-grey
+                // Muted, which is the "white cream" he kept pointing at. The
+                // list now carries the app's blue ink for its times in BOTH
+                // modes (the dark theme's Muted is already a blue-grey).
+                Text(
+                    stamp,
+                    fontSize = 12.sp,
+                    color = if (unread > 0) GoldDeep else if (KpThemeMode.darkBlue) Muted else Color(0xFF5B7FC7),
+                )
             }
             Spacer(Modifier.height(3.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {

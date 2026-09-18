@@ -36,6 +36,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
@@ -127,6 +128,18 @@ fun DocViewerScreen(nav: NavController, b64: String) {
     var state by remember(b64) { mutableIntStateOf(if (dest != null && dest.exists() && dest.length() > 0L) 1 else 0) }
     var menuOpen by remember { mutableStateOf(false) }
     var forwarding by remember { mutableStateOf(false) }
+    // v166 (owner: "video photo documents kore dileo 3 dot nei"): the document
+    // viewer carries the same ⋮ as the photo viewer and the clip player, and
+    // Delete lives there too. Like the player it is a ROUTE, so the request
+    // goes to the chat through ScreenStore and the viewer closes — the chat
+    // runs its own delete, exactly as if the bubble had been long-pressed.
+    var confirmDelete by remember { mutableStateOf(false) }
+    val canUnsend = m != null && !isEchoMsg(m) && m.optString("senderId") == Store.myId()
+    fun raiseDelete(everyone: Boolean) {
+        val id = m?.optString("id").orEmpty()
+        if (id.isNotBlank()) ScreenStore.viewerDelete.value = ScreenStore.ViewerDelete(id, everyone)
+        nav.popBackStack()
+    }
     var saving by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
     val canForward = m != null && !privateDoc && m.optText("fileKey").isNotBlank()
@@ -184,10 +197,19 @@ fun DocViewerScreen(nav: NavController, b64: String) {
                     KpSheetRow(Icons.Filled.Code, "Code") { menuOpen = false; showCode = true }
                 }
             }
-            if (!privateDoc && !saved) KpSheetRow(Icons.Filled.Download, "Save") { menuOpen = false; saveDoc() }
+            if (!privateDoc && !saved && state == 1) KpSheetRow(Icons.Filled.Download, "Save") { menuOpen = false; saveDoc() }
             if (canForward) KpSheetRow(Icons.AutoMirrored.Filled.Send, "Forward") { menuOpen = false; forwarding = true }
-            if (!privateDoc) KpSheetRow(Icons.AutoMirrored.Filled.OpenInNew, "Open with") { menuOpen = false; openWith() }
+            if (!privateDoc && state == 1) KpSheetRow(Icons.AutoMirrored.Filled.OpenInNew, "Open with") { menuOpen = false; openWith() }
+            KpSheetRow(Icons.Filled.Delete, "Delete", tint = Red) { menuOpen = false; confirmDelete = true }
         }
+    }
+    if (confirmDelete) {
+        KpDeleteSheet(
+            canUnsend = canUnsend,
+            onDismiss = { confirmDelete = false },
+            onDeleteForMe = { confirmDelete = false; raiseDelete(everyone = false) },
+            onDeleteForEveryone = { confirmDelete = false; raiseDelete(everyone = true) },
+        )
     }
     if (forwarding && m != null) {
         ForwardDialog(
@@ -223,7 +245,11 @@ fun DocViewerScreen(nav: NavController, b64: String) {
             }
             if (saving) {
                 CircularProgressIndicator(color = Ink, strokeWidth = 2.dp, modifier = Modifier.padding(end = 14.dp).size(18.dp))
-            } else if (state == 1 && m != null) {
+            } else if (m != null) {
+                // v166: the ⋮ is always here. It used to wait for state == 1, so
+                // a document still downloading — or one that failed — offered
+                // no menu at all, and Save / Open with inside it are what a
+                // half-loaded file cannot serve anyway (they check state).
                 IconButton(onClick = { menuOpen = true }) {
                     Icon(Icons.Filled.MoreVert, "More", tint = Ink)
                 }

@@ -149,11 +149,13 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -1218,13 +1220,19 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
-    fun launchFly(clientId: String, cloneType: String, body: String = "", media: String = "") {
+    fun launchFly(
+        clientId: String,
+        cloneType: String,
+        body: String = "",
+        media: String = "",
+        ratio: Float = 0f,
+    ) {
         val from = sendFromRect
         sendFromRect = Rect.Zero
         if (from.width <= 0f || from.isEmpty) return
         flyTarget = null
         flyHidden.add(clientId)
-        flyQueue.add(FlySpec(clientId, cloneType, body, from, media))
+        flyQueue.add(FlySpec(clientId, cloneType, body, from, media, ratio))
     }
 
     fun sendText(body: String, kind: String = "TEXT") {
@@ -1333,7 +1341,25 @@ fun ChatScreen(nav: NavController, convId: String) {
     // Owner round 32 (item 18): this chat's parked "send later" rows.
     LaunchedEffect(convId) { loadScheduled() }
 
-    fun sendImage(dataUrl: String, album: String? = null, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "") {
+    /**
+     * v166 (owner: "original ratio thumbnail massage bubble body shoho fake na
+     * sending er somoy o jemon sent holeo temon"): the sender's own bubble used
+     * to start as a 96 x 120 placeholder and snap to the photo's box a moment
+     * later (the header was measured inside the upload coroutine) — while the
+     * SENT bubble has always known its box from the first frame. [w] / [h] let
+     * the caller that already measured the picture (the gallery reader, the
+     * media editor) hand the numbers over with the send, so the echo is born
+     * in exactly the shape the server row will keep.
+     */
+    fun sendImage(
+        dataUrl: String,
+        album: String? = null,
+        viewOnce: Boolean = false,
+        sendAt: java.time.Instant? = null,
+        caption: String = "",
+        w: Int = 0,
+        h: Int = 0,
+    ) {
         // Owner round 32 (item 19): a photo picked for LATER uploads now and
         // parks on the server (item 18) — no bubble, the clock chip shows it.
         if (sendAt != null) {
@@ -1391,6 +1417,10 @@ fun ChatScreen(nav: NavController, convId: String) {
             return if (o.length() > 0) o else null
         }
         bornKeys.add(clientId)
+        // v166: a measured photo arrives with its box — the ratio cache (what
+        // the bubble actually reads) and the row's own mediaW/mediaH (what the
+        // receiver reads) both get it before the row is painted.
+        if (w > 0 && h > 0) ImageRatios.put(dataUrl, w.toFloat() / h)
         pending.add(
             JSONObject()
                 .put("id", clientId)
@@ -1402,11 +1432,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .put("fileName", "photo.jpg")
                 .put("fileType", "image/jpeg")
                 .put("mediaUrl", dataUrl)
-                .also { row -> metaWith(0, 0)?.let { row.put("meta", it) } }
+                .also { row -> if (w > 0 && h > 0) row.put("mediaW", w).put("mediaH", h) }
+                .also { row -> metaWith(w, h)?.let { row.put("meta", it) } }
                 .also { row -> if (viewOnce) row.put("viewOnce", true) }
                 .put("createdAt", java.time.Instant.now().toString()),
         )
-        launchFly(clientId, "PHOTO", media = dataUrl)
+        launchFly(clientId, "PHOTO", media = dataUrl, ratio = if (w > 0 && h > 0) w.toFloat() / h else 0f)
         // Owner round 32 (item 48): the jump-to-bottom is its own coroutine.
         // animateScrollToItem is a scroll MUTATION — starting the next one
         // cancels whichever coroutine owns the previous, with a
@@ -1478,7 +1509,24 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
-    fun sendFile(name: String, mime: String, file: File, asDocument: Boolean = false, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "") {
+    /**
+     * v166: [w] / [h] / [durMs] are the clip's (or photo-file's) own facts when
+     * the caller already measured them. They go into the pending echo AND into
+     * the flight, so the bubble that is still sending has the same box, the
+     * same duration line and the same ratio as the row the server hands back.
+     */
+    suspend fun sendFile(
+        name: String,
+        mime: String,
+        file: File,
+        asDocument: Boolean = false,
+        viewOnce: Boolean = false,
+        sendAt: java.time.Instant? = null,
+        caption: String = "",
+        w: Int = 0,
+        h: Int = 0,
+        durMs: Long = 0L,
+    ) {
         // v163 (owner's new rules): the ceiling depends on WHAT it is —
         // image 100 MB, video 2 GB, voice 100 MB, anything else (documents)
         // 5 GB. Checked here so a huge file is refused before a single byte
@@ -1535,6 +1583,33 @@ fun ChatScreen(nav: NavController, convId: String) {
                 viewOnce -> JSONObject().put("viewOnce", true)
                 else -> null
             }
+        // v166 (owner: "video edit kore done dile … sending er somoy o jemon
+        // sent holeo temon"): a clip going out used to have NO box of its own —
+        // the echo was a bare 16:9 tile until the decoder answered a moment
+        // later, while the server row (meta.w/h from the sender's own probe)
+        // has the real one. The caller's numbers are used when it has them
+        // (the editor knows its bake); otherwise the clip is measured right
+        // here, off the main thread, before the row is built.
+        val isClip = mime.startsWith("video/") || VIDEO_NAME_EXT.any { file.name.lowercase().endsWith(it) }
+        val facts =
+            if (w > 0 && h > 0 && (durMs > 0L || !isClip)) {
+                Triple(w, h, durMs)
+            } else if (isClip && !asDocument) {
+                withContext(Dispatchers.IO) { VideoFacts.probe(file) ?: Triple(0, 0, 0L) }
+            } else {
+                Triple(0, 0, 0L)
+            }
+        val clipMeta = JSONObject()
+        if (facts.first > 0 && facts.second > 0) clipMeta.put("w", facts.first).put("h", facts.second)
+        if (facts.third > 0L) clipMeta.put("durMs", facts.third)
+        docMeta?.keys()?.forEach { k -> clipMeta.put(k, docMeta.get(k)) }
+        // The bubble reads its ratio/duration from the persistent sidecar of
+        // the file it is drawing — write that now, so the FIRST frame of the
+        // echo is already the clip's own shape (and it survives the echo →
+        // server-row swap the same way the sent row's does).
+        if (facts.first > 0 && facts.second > 0) {
+            VideoThumbs.writeMeta(file.absolutePath, facts.first.toFloat(), facts.second.toFloat(), facts.third)
+        }
         bornKeys.add(clientId)
         pending.add(
             JSONObject()
@@ -1550,10 +1625,17 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // only deleted once the send succeeds) — like voicePath.
                 .put("docPath", file.absolutePath)
                 .put("createdAt", java.time.Instant.now().toString())
-                .also { if (docMeta != null) it.put("meta", docMeta) }
+                .also { if (facts.first > 0 && facts.second > 0) it.put("mediaW", facts.first).put("mediaH", facts.second) }
+                .also { if (clipMeta.length() > 0) it.put("meta", clipMeta) }
                 .also { if (viewOnce && !asDocument) it.put("viewOnce", true) },
         )
-        launchFly(clientId, if (mime.startsWith("video")) "VIDEO" else "DOC", body = name.ifBlank { "Document" }, media = file.absolutePath)
+        launchFly(
+            clientId,
+            if (mime.startsWith("video")) "VIDEO" else "DOC",
+            body = name.ifBlank { "Document" },
+            media = file.absolutePath,
+            ratio = if (facts.first > 0 && facts.second > 0) facts.first.toFloat() / facts.second else 0f,
+        )
         scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }
         runCatching { KpSounds.send(ctx) }
         // Owner round 32 (item 34): the upload + POST run on Uploads' own
@@ -1685,6 +1767,8 @@ fun ChatScreen(nav: NavController, convId: String) {
        chat is open, so gallery / camera / document / audio / contact /
        location all survive the sheet closing. */
     suspend fun readAndSendImage(uri: Uri, album: String?, viewOnce: Boolean = false, sendAt: java.time.Instant? = null, caption: String = "", hd: Boolean = false) {
+        var shotW = 0
+        var shotH = 0
         // 720px / ~100KB: the old 960px/220KB photos took minutes to send AND load
         // on slow mobile data (the "image loads forever" report).
         // High-quality photos: 1440px, ~380KB inline budget (server caps at 450K).
@@ -1703,7 +1787,21 @@ fun ChatScreen(nav: NavController, convId: String) {
             error = "Could not read that photo — try another one."
         } else {
             error = ""
-            sendImage(dataUrl, album, viewOnce, sendAt, caption)
+            // v166: the header of the JPEG we are about to send — one bounded
+            // read on IO (the builder above already walked these bytes), so the
+            // echo bubble and the flying clone both start at the real ratio.
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val b64 = dataUrl.substringAfter(",", "")
+                    val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                    val opts =
+                        android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+                    shotW = opts.outWidth
+                    shotH = opts.outHeight
+                }
+            }
+            sendImage(dataUrl, album, viewOnce, sendAt, caption, shotW, shotH)
         }
     }
 
@@ -1739,8 +1837,8 @@ fun ChatScreen(nav: NavController, convId: String) {
             ScreenStore.pendingEdited.value = null
             armFly()
             when (val m = edited.media) {
-                is EditedMedia.Photo -> sendImage(m.dataUrl, null, edited.viewOnce, caption = edited.caption)
-                is EditedMedia.Video -> sendFile("video.mp4", m.mime, m.file, viewOnce = edited.viewOnce, caption = edited.caption)
+                is EditedMedia.Photo -> sendImage(m.dataUrl, null, edited.viewOnce, caption = edited.caption, w = m.w, h = m.h)
+                is EditedMedia.Video -> sendFile("video.mp4", m.mime, m.file, viewOnce = edited.viewOnce, caption = edited.caption, w = m.w, h = m.h, durMs = m.durMs)
                 is EditedMedia.Untouched ->
                     if (m.isVideo) handleDocumentPicked(m.uri, viewOnce = edited.viewOnce, caption = edited.caption)
                     else readAndSendImage(m.uri, null, viewOnce = edited.viewOnce, caption = edited.caption)
@@ -1765,7 +1863,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             batch.forEach { edited ->
                 when (val m = edited.media) {
                     is EditedMedia.Photo -> sendImage(m.dataUrl, album, edited.viewOnce, caption = edited.caption)
-                    is EditedMedia.Video -> sendFile("video.mp4", m.mime, m.file, viewOnce = edited.viewOnce, caption = edited.caption)
+                    is EditedMedia.Video -> sendFile("video.mp4", m.mime, m.file, viewOnce = edited.viewOnce, caption = edited.caption, w = m.w, h = m.h, durMs = m.durMs)
                     is EditedMedia.Untouched ->
                         if (m.isVideo) handleDocumentPicked(m.uri, viewOnce = edited.viewOnce, caption = edited.caption)
                         else readAndSendImage(m.uri, album, viewOnce = edited.viewOnce, caption = edited.caption)
@@ -1998,6 +2096,29 @@ fun ChatScreen(nav: NavController, convId: String) {
             paintFromStore()
         }
         ScreenStore.latchDust(ids)
+    }
+
+    // v166 (owner: "… kothaw 3 dot nei … Save, Forward, Delete"): a Delete
+    // raised in a full-screen surface (photo viewer, clip player, document
+    // viewer). Those screens have no list, so they only name the message; the
+    // delete itself runs HERE, through the very same two functions the chat's
+    // long-press sheet calls — same vanishing show, same dust latch, same
+    // server call, same local hide.
+    LaunchedEffect(convId) {
+        ScreenStore.viewerDelete.collect { req ->
+            if (req == null) return@collect
+            ScreenStore.viewerDelete.value = null
+            val row =
+                msgs.firstOrNull { it.optString("id") == req.msgId }
+                    ?: pending.firstOrNull { it.optString("clientId") == req.msgId }
+                    ?: return@collect
+            // An album deletes as a group — exactly what the in-chat sheet does.
+            val ids = albumPhotos(row).map { it.optString("id") }.filter { it.isNotBlank() }
+            if (ids.isEmpty()) return@collect
+            selected.clear()
+            selected.addAll(ids)
+            if (req.everyone && !pendingEchoOf(row)) unsendSelected() else deleteForMe()
+        }
     }
 
     fun forwardSelected(targets: List<String>) {
@@ -3137,7 +3258,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         }
                         flyTarget?.let { tgt ->
                             KpFlySend(
-                                spec = FlySpec(flyNow.key, flyNow.cloneType, flyNow.body, flyNow.from.translate(Offset(-ox, -oy)), flyNow.media),
+                                spec = FlySpec(flyNow.key, flyNow.cloneType, flyNow.body, flyNow.from.translate(Offset(-ox, -oy)), flyNow.media, flyNow.ratio),
                                 target = { (flyTarget ?: tgt).translate(Offset(-ox, -oy)) },
                                 accent = chatAccent(chatTheme),
                             ) {
@@ -3215,13 +3336,20 @@ fun ChatScreen(nav: NavController, convId: String) {
                                     docPath.isNotBlank() -> {
                                         val f = File(docPath)
                                         if (f.exists()) {
-                                            sendFile(
-                                                p.optString("fileName").ifBlank { f.name },
-                                                p.optString("fileType").ifBlank { "application/octet-stream" },
-                                                f,
-                                                sentAsDocument(p),
-                                                isViewOnce(p),
-                                            )
+                                            // v166: sendFile suspends (it measures a
+                                            // clip's own box before the echo is born)
+                                            // and this branch is a plain onClick
+                                            // lambda — the retry rides the screen
+                                            // scope, exactly like the pickers do.
+                                            scope.launch {
+                                                sendFile(
+                                                    p.optString("fileName").ifBlank { f.name },
+                                                    p.optString("fileType").ifBlank { "application/octet-stream" },
+                                                    f,
+                                                    sentAsDocument(p),
+                                                    isViewOnce(p),
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -3848,6 +3976,34 @@ fun ChatScreen(nav: NavController, convId: String) {
                             }
                         }
                     },
+                // v166 (owner: "photo video … kothaw 3 dot nei … Save, Forward,
+                // Delete"): Delete joins Save / Forward / Edit in the same ⋮ —
+                // for media the user sent AND for media they received. The
+                // page being looked at is the target (an album pages through
+                // them), and the request rides ScreenStore back to this chat,
+                // which owns the whole delete show.
+                onDeleteForMe = {
+                    val delMsg = viewerPhotos.getOrNull(viewerAt.coerceIn(viewerPhotos.indices))
+                    viewerPhotos = emptyList()
+                    val id = delMsg?.optString("id").orEmpty()
+                    if (id.isNotBlank()) ScreenStore.viewerDelete.value = ScreenStore.ViewerDelete(id, false)
+                },
+                // The gate is the CHAT sheet's own gate (mine && not an echo)
+                // — private chats and view-once included, so the same button
+                // that unsends from the long-press sheet unsends from here.
+                onDeleteForEveryone =
+                    if (m.optString("senderId") == Store.myId() && !isEchoMsg(m)) {
+                        {
+                            val delMsg = viewerPhotos.getOrNull(viewerAt.coerceIn(viewerPhotos.indices))
+                            viewerPhotos = emptyList()
+                            val id = delMsg?.optString("id").orEmpty()
+                            if (id.isNotBlank()) {
+                                ScreenStore.viewerDelete.value = ScreenStore.ViewerDelete(id, true)
+                            }
+                        }
+                    } else {
+                        null
+                    },
                 onShown = if (once) ({ ViewOnce.spend(m.optString("id")) }) else null,
                 urls = viewerPhotos.map { messageMediaUrl(it) },
                 subtitles = viewerPhotos.map { if (isViewOnce(it)) "View once" else viewerStamp(it.optText("createdAt")) },
@@ -4227,6 +4383,8 @@ private fun HoldMicButton(
 }
 
 /** Owner round 46 (morph-&-fly send): one queued flight spec per send. */
+private val VIDEO_NAME_EXT = listOf(".mp4", ".mov", ".mkv", ".webm", ".3gp", ".m4v", ".avi")
+
 private class FlySpec(
     val key: String,
     val cloneType: String, // TEXT / PHOTO / VIDEO / DOC / VOICE
@@ -4235,6 +4393,11 @@ private class FlySpec(
     // Owner round 48: the flying clone IS the content — a photo carries its
     // real data-URI, a video its local path, a doc its file name (body).
     val media: String = "",
+    // v166 (owner: "animation er somoy … original ratio te send hoi na"): the
+    // media's own box, measured where the media is picked — NOT discovered by
+    // the clone a few frames later (that first stretch of the flight was
+    // already on screen by then, in the send button's shape). 0 = unknown.
+    val ratio: Float = 0f,
 )
 
 /** One bubble->clone reporting channel: any kind of bubble hands its live
@@ -4259,14 +4422,15 @@ private class FlyDot(
 /**
  * Owner round 46: the fly engine itself — a direct port of the owner's
  * demo (`message-send-animation`): 620 ms linear-driven, ease-out-cubic
- * lerp of position/size, a −56 dp sine arc, a decaying 4° wobble, the
- * pill→bubble color+border morph at 45 %, a radial glow peaking mid-flight
- * (0.35 alpha — the web demo's blur(14px) mapped to a gradient, since
- * Modifier.blur needs API 31 and our floor is 24), ~26 ms spawn of glowing
- * trail dots that drift down and fade over 380–580 ms, a 5 % scale pulse,
- * and a 0.88 fade-out at the end. The target rect is re-read EVERY frame
- * (the demo's fixed rect assumed a settled list; ours scrolls to bottom
- * during the flight).
+ * straight lerp of position/size — v166 dropped the −56 dp sine arc and the
+ * 4° wobble, so every message and every medium travels the same direct line
+ * from the send seat to its bubble — plus a pill→bubble color+border morph at
+ * 45 %, a radial glow peaking mid-flight (0.35 alpha — the web demo's
+ * blur(14px) mapped to a gradient, since Modifier.blur needs API 31 and our
+ * floor is 24), ~26 ms spawn of glowing trail dots that drift down and fade
+ * over 380–580 ms, and a 0.88 fade-out at the end. The target rect is re-read
+ * EVERY frame (the demo's fixed rect assumed a settled list; ours scrolls to
+ * bottom during the flight).
  */
 @Composable
 private fun KpFlySend(
@@ -4283,7 +4447,7 @@ private fun KpFlySend(
     // It reads that off the picture it is already drawing — no measuring pass
     // on the main thread, and every send path (composer, panel, editor) gets
     // it for free. 0 = not known yet: the clone then morphs as before.
-    var mediaRatio by remember(spec.key) { mutableFloatStateOf(0f) }
+    var mediaRatio by remember(spec.key) { mutableFloatStateOf(spec.ratio) }
     val pillBg = Color(0xFF2A2F38)
     val pillEdge = Color(0xFF3A3F47)
     LaunchedEffect(Unit) {
@@ -4294,14 +4458,16 @@ private fun KpFlySend(
                 if (r >= 0.8f) break
                 val tgt = target()
                 val e = 1f - (1f - r) * (1f - r) * (1f - r)
-                val lift = with(density) { (-56).dp.toPx() }
-                val arcY = kotlin.math.sin(r * Math.PI).toFloat() * lift
                 val es2 = r * r * (3f - 2f * r)
                 val w = spec.from.width + (tgt.width - spec.from.width) * es2
+                // v166 (owner: "eita change hoye direct nijer position a chole
+                // jabe kono fly na"): the clone walks straight from the send
+                // seat to its bubble — the 56 dp arc it used to hop through is
+                // gone, for text and for media alike.
                 val cx = spec.from.left + (tgt.left - spec.from.left) * e + w / 2f
                 val cy = spec.from.top +
                     (tgt.top - spec.from.top) * e +
-                    arcY + (spec.from.height + (tgt.height - spec.from.height) * es2) / 2f
+                    (spec.from.height + (tgt.height - spec.from.height) * es2) / 2f
                 dots.add(
                     FlyDot(
                         cx,
@@ -4316,15 +4482,14 @@ private fun KpFlySend(
                 )
             }
         }
-        t.animateTo(1f, tween(700, easing = LinearEasing))
+        t.animateTo(1f, tween(520, easing = LinearEasing))
         onLanded()
     }
     val raw = t.value
     val tgt = target()
     val e = 1f - (1f - raw) * (1f - raw) * (1f - raw)
-    val lift = with(density) { (-56).dp.toPx() }
     val cx = spec.from.left + (tgt.left - spec.from.left) * e
-    val cy = spec.from.top + (tgt.top - spec.from.top) * e + kotlin.math.sin(raw * Math.PI).toFloat() * lift
+    val cy = spec.from.top + (tgt.top - spec.from.top) * e
     // r49 (item 3 — "aro smooth koro"): position keeps the launch-fast
     // ease-out, but the FRAME walks a smoothstep — the pill keeps its
     // shape past launch and settles into the bubble instead of ballooning.
@@ -4337,8 +4502,9 @@ private fun KpFlySend(
         // never stretched: portrait clips fly portrait the whole way.
         if (w / h > mr) w = (h * mr) else h = (w / mr)
     }
-    val wobble = (kotlin.math.sin(raw * 2.0 * Math.PI) * (1f - raw) * 2.2).toFloat()
-    val pulse = 1f + kotlin.math.sin(raw * Math.PI).toFloat() * 0.035f
+    // v166: a direct move keeps a steady frame — the wobble and the pulse read
+    // as "flying", which is exactly what the owner asked to drop.
+    val pulse = 1f
     val fade = if (raw > 0.9f) (1f - (raw - 0.9f) / 0.1f).coerceIn(0f, 1f) else 1f
     val wDp = with(density) { w.toDp() }
     val hDp = with(density) { h.toDp() }
@@ -4376,7 +4542,6 @@ private fun KpFlySend(
             .offset { IntOffset(cx.roundToInt(), cy.roundToInt()) }
             .size(wDp, hDp)
             .graphicsLayer {
-                rotationZ = wobble
                 scaleX = pulse
                 scaleY = pulse
                 this.alpha = fade
@@ -5623,8 +5788,14 @@ private fun MessageRow(
         !mine && theme == "night" -> Color(0xFFE6EAF2)
         else -> Ink
     }
+    // v166 (owner: "time colour ta ekhono white cream colour er blue na"): the
+    // v165 tint was a shade too pale on the blue family — it still READ as
+    // white-cream. Both sides of the blue chat carry a stamp that is visibly
+    // blue now: a light blue over the navy card of the dark app, a mid blue
+    // over the white card of the light app, so it is blue in either mode.
     val stampInk = when {
-        theme == "darkblue" -> Color(0xFFA9B4CC)
+        theme == "darkblue" ->
+            if (KpThemeMode.darkBlue) Color(0xFFA9C4F2) else Color(0xFF5B7FC7)
         !mine && theme == "night" -> Color(0xFFA9B4CC)
         else -> Muted
     }
@@ -5638,7 +5809,10 @@ private fun MessageRow(
     val mineStampInk =
         when (theme) {
             "default" -> Muted
-            "darkblue" -> Color(0xFFD7E1F7)
+            // On the blue bubble ("darkblue" is the owner's own chat theme) the
+            // stamp is a real light blue now, not the near-white tint that was
+            // still being read as cream.
+            "darkblue" -> Color(0xFFBBD3FF)
             else -> Color(0xD9FFFFFF)
         }
     val isSelected = m.optString("id") in selectedIds
@@ -5723,8 +5897,16 @@ private fun MessageRow(
             // The bubble now stretches with the screen (82% of it, floored at
             // the old 280 and capped at 420 for tablets) so the right side
             // uses as much room as there actually is.
+            // v166 (owner: "ekhon chat er massage bubble and content full right
+            // side a chole jai eita halka short koro jeno full jaiga na nei 5px
+            // kom hobe"): 5dp comes off whatever the screen gave the bubble, so
+            // the right edge keeps a little air on every device (the 280dp
+            // floor for a narrow screen is untouched).
             val bubbleMax =
-                maxOf(280.dp, minOf(420.dp, (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp * 0.82f).dp))
+                maxOf(
+                    280.dp,
+                    minOf(420.dp, (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp * 0.82f).dp) - 5.dp,
+                )
             // Owner round 31: emoji-only texts (1–3) render big, stamp underneath.
             // Owner round 32 (item 15): no "edited" marker anywhere — an edited
             // text is just the text (so an emoji-only edit stays emoji-only too).
@@ -5913,7 +6095,36 @@ private fun MessageRow(
                     var bodyLines by remember(mid) { mutableStateOf(0) }
                     var msgExpanded by remember(mid) { mutableStateOf(false) }
                     val typing = revealChars != null && revealChars < m.optText("body").length
-                    val capped = !msgExpanded && !typing && bodyLines > BODY_COLLAPSE_LINES
+                    // v166 (owner: "onek boro text massage hole shob ekbare
+                    // dekhabe na 10 line dekhai niche see more option thakbe"):
+                    // the fold is decided from a measurement taken WHILE
+                    // COMPOSING, at the widest line this bubble can hold — not
+                    // from the body's own onTextLayout. That callback can only
+                    // report after the frame has been laid out, so the first
+                    // paint always showed a long body in full and the fold had
+                    // to wait for the recomposition that followed; the count it
+                    // fed could also come out short if the early measure ran
+                    // narrower than the settled bubble. A long body always
+                    // fills the bubble's width, so its count AT max width is
+                    // its real count — the fold is therefore right on frame
+                    // one, with the onTextLayout high-water kept as a second
+                    // witness (never weaker than before).
+                    val foldProbe = rememberTextMeasurer()
+                    val foldWidth = with(LocalDensity.current) { (bubbleMax - 18.dp).roundToPx() }
+                    val foldStyle = remember { TextStyle(fontSize = 14.5.sp, lineHeight = 19.sp) }
+                    val foldBody = m.optText("body")
+                    val probeLines =
+                        remember(foldBody, foldWidth) {
+                            runCatching {
+                                foldProbe.measure(
+                                    foldBody,
+                                    foldStyle,
+                                    constraints = Constraints(maxWidth = foldWidth.coerceAtLeast(1)),
+                                ).lineCount
+                            }.getOrDefault(0)
+                        }
+                    val longBody = bodyLines > BODY_COLLAPSE_LINES || probeLines > BODY_COLLAPSE_LINES
+                    val capped = !msgExpanded && !typing && longBody
                     // Reports to the stamp holder AND keeps the high-water
                     // line count (monotonic — a capped re-measure must not
                     // shrink it back to ten and strand the toggle).
@@ -6024,7 +6235,7 @@ private fun MessageRow(
                             }
                         }
                     }
-                    if (bodyLines > BODY_COLLAPSE_LINES && !typing && selectedIds.isEmpty()) {
+                    if (longBody && !typing && selectedIds.isEmpty()) {
                         Text(
                             if (msgExpanded) "See less" else "See more",
                             fontSize = 12.5.sp,
@@ -6277,6 +6488,18 @@ internal object VideoThumbs {
             metaFile(from).takeIf { it.exists() }?.copyTo(metaFile(to), overwrite = true)
             thumbFile(from).takeIf { it.exists() }?.copyTo(thumbFile(to), overwrite = true)
         }
+    }
+
+    /**
+     * v166 (owner: "sending er somoy o jemon sent holeo temon"): the sender's
+     * own bubble reads its box/length from this sidecar. A file that is still
+     * going out has not been through [put] (that needs a decoded frame), so the
+     * numbers the sender already measured are written straight away — the echo
+     * is then the same shape as the row the server will hand back.
+     */
+    fun writeMeta(key: String, w: Float, h: Float, ms: Long) {
+        if (key.isBlank() || w <= 0f || h <= 0f) return
+        runCatching { metaFile(key).writeText("$w,$h,$ms") }
     }
 
     @Synchronized
@@ -7949,6 +8172,12 @@ private fun FileBubble(
         val progress = scrubAt ?: if (active) player.progress else 0f
         val ink = if (mine) Color.White else chatAccent(theme)
         val faint = if (mine) Color(0x66FFFFFF) else chatAccent(theme).copy(alpha = 0.35f)
+        // v166 (owner: "voice massage card bubble ta aro compact koro"): the
+        // whole card came in another notch — a 32dp button, an 18dp x 132dp
+        // wave, a 6dp seat between them and a 10.5sp line under it. The wave
+        // still centres on the button (7dp column pad = (32 - 18) / 2) and the
+        // stamp keeps its own right end, so nothing about the earlier
+        // corrections moves — only the card gets shorter.
         // Owner round 32 (item 45): compact — a 36dp button against a 22dp
         // wave with the duration right under it; the stamp shares the
         // duration line's right end (the bubble keeps no bottom band for
@@ -7957,15 +8186,15 @@ private fun FileBubble(
         // Owner round 33 (item 1): the wave used to sit HIGHER than the play
         // button — the row centred the whole column (wave + time line) on
         // the button, so the wave itself rode 8dp above its middle. The row
-        // is top-aligned now and the column starts 7dp down: the 22dp wave's
-        // centre lands exactly on the 36dp button's centre, the time line
-        // hangs under it (bubble 45dp, was 38).
+        // is top-aligned now and the column starts 7dp down — v166 shrank the
+        // pair (32dp button, 18dp wave) and kept exactly that centre: 7 =
+        // (32 − 18) / 2 — with the time line hanging under it.
         Row(verticalAlignment = Alignment.Top) {
             val interaction = remember { MutableInteractionSource() }
             val pressed by interaction.collectIsPressedAsState()
             Box(
                 Modifier
-                    .size(36.dp)
+                    .size(32.dp)
                     .pressScale(interaction)
                     .clip(CircleShape)
                     .background(if (mine) Color(0x33FFFFFF) else chatAccent(theme).copy(alpha = 0.18f))
@@ -7980,23 +8209,23 @@ private fun FileBubble(
                     loading -> CircularProgressIndicator(
                         color = ink,
                         strokeWidth = 2.dp,
-                        modifier = Modifier.size(18.dp),
+                        modifier = Modifier.size(16.dp),
                     )
                     playing -> Icon(
                         Icons.Filled.Pause,
                         contentDescription = "Pause",
                         tint = ink,
-                        modifier = Modifier.size(21.dp).scale(if (pressed) 0.85f else 1f),
+                        modifier = Modifier.size(19.dp).scale(if (pressed) 0.85f else 1f),
                     )
                     else -> Icon(
                         Icons.Filled.PlayArrow,
                         contentDescription = "Play",
                         tint = ink,
-                        modifier = Modifier.size(21.dp).scale(if (pressed) 0.85f else 1f),
+                        modifier = Modifier.size(19.dp).scale(if (pressed) 0.85f else 1f),
                     )
                 }
             }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(6.dp))
             // Owner round 25: no side padding — the tick+time stamp sits at
             // the right end of the duration line, under the wave.
             Column(Modifier.padding(top = 7.dp)) {
@@ -8005,7 +8234,7 @@ private fun FileBubble(
                     progress = progress,
                     played = ink,
                     rest = faint,
-                    modifier = Modifier.width(150.dp).height(22.dp),
+                    modifier = Modifier.width(132.dp).height(18.dp),
                     onSeek = { frac ->
                         if (!pendingEcho && fileKey.isNotBlank()) player.seekTo(ctx, id, fileKey, frac)
                     },
@@ -8013,7 +8242,7 @@ private fun FileBubble(
                         scrubAt = if (!pendingEcho && fileKey.isNotBlank()) frac else null
                     },
                 )
-                Spacer(Modifier.height(1.dp))
+                Spacer(Modifier.height(0.dp))
                 val secs = m.optJSONObject("meta")?.optInt("seconds") ?: 0
                 val vFrac = UploadProgress.fracs[m.optString("clientId")]
                 Text(
@@ -8029,7 +8258,7 @@ private fun FileBubble(
                         pendingEcho -> "Sending…"
                         else -> FilesUtil.displaySize(m.optInt("fileSize"))
                     },
-                    fontSize = 11.sp,
+                    fontSize = 10.5.sp,
                     color = if (mine) Color(0x99FFFFFF) else Muted,
                     maxLines = 1,
                     // Owner round 26: keep the sending/duration line clear of

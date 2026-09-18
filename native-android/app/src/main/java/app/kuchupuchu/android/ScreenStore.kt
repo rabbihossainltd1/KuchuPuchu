@@ -295,6 +295,21 @@ object ScreenStore {
      */
     val pendingAvatarUri = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
 
+    /**
+     * v166 (owner: "video photo te je send korche je receive korche kothaw 3 dot
+     * nei … okhane Save, Forward, Delete"): a Delete raised from a full-screen
+     * surface (photo viewer, clip player, document viewer).
+     *
+     * Those screens never touch the list — the CHAT does, and it already owns
+     * the whole delete show (vanishing rows, the dust latch, the server call,
+     * the local hide). So the viewer only ASKS: it names the message and which
+     * delete it is, the chat runs exactly what its own long-press sheet runs.
+     */
+    class ViewerDelete(val msgId: String, val everyone: Boolean)
+
+    /** Set by a viewer, consumed (nulled) by the chat that owns the message. */
+    val viewerDelete = kotlinx.coroutines.flow.MutableStateFlow<ViewerDelete?>(null)
+
     /** Owner round 34 (item 16b): the name on the editor's recipient chip —
      *  set by the chat that opens the editor. */
     var editTitle: String = ""

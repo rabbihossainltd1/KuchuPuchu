@@ -51,14 +51,17 @@ const pkg = readFileSync(
 
 /* 1+2 — the profile-photo editor and the Done chip */
 check(
-  "v165: the profile-photo editor has no HD pill and no Save button (avatar mode), and Done is the smaller near-transparent grey chip — the stage scrim stays the only strong surface",
+  "v165: the profile-photo editor has no HD pill and no Save button (avatar mode), and Done is the smaller near-transparent grey chip (v166: same chip, now the bake's own progress line) — the stage scrim stays the only strong surface",
   edit.includes("if (clip == null && !statusMode && !avatarMode) {") &&
     edit.includes("if (!avatarMode) {") &&
     edit.includes(".background(Color(0x2EFFFFFF))") &&
     edit.includes("Color(0x4DFFFFFF)") &&
-    edit.includes(
-      'Text("Done", color = Color.White.copy(alpha = 0.94f), fontSize = 11.5.sp, fontWeight = FontWeight.Medium)',
-    ) &&
+    // v166 (fb#2): the same chip carries the bake's number while a clip is
+    // being written — "Applying 42%" replaces "Done", dimmed while busy.
+    edit.includes("val pct = applyPct") &&
+    edit.includes('if (busy && pct >= 0f) "Applying ${(pct * 100).toInt()}%" else "Done",') &&
+    edit.includes("color = Color.White.copy(alpha = if (busy) 0.7f else 0.94f),") &&
+    edit.includes("fontSize = 11.5.sp,") &&
     !edit.includes(
       'Text("Done", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)',
     ) &&
@@ -73,7 +76,10 @@ check(
   "v165: undo + redo are in every editor — one 26 dp trio (undo / redo / clear) replaces the two 36 dp buttons, strokes pop before the overlay history, redo replays what undo took and any fresh edit clears the redo lane",
   edit.includes("val canUndo = strokes.isNotEmpty() || overlayPast.isNotEmpty()") &&
     edit.includes("val canRedo = redoStack.isNotEmpty()") &&
-    edit.includes("if ((shot != null || clip != null) && (canUndo || canRedo)) {") &&
+    // v166 (owner: "undo redo option pelam e na … left a undo right a redo"):
+    // the trio is part of the chrome — drawn whenever there is media on the
+    // stage, each control dimmed while it has nothing to act on.
+    edit.includes("if (shot != null || clip != null) {") &&
     edit.includes("haptics.tap(); undoEdit()") &&
     edit.includes("haptics.tap(); redoEdit()") &&
     edit.includes(
@@ -130,11 +136,13 @@ check(
     theme.includes("fun listStamp(") &&
     theme.includes("fun atDhaka(") &&
     list.includes("val stamp = listStamp(") &&
-    list.includes("color = if (unread > 0) GoldDeep else Muted") &&
+    list.includes(
+      "color = if (unread > 0) GoldDeep else if (KpThemeMode.darkBlue) Muted else Color(0xFF5B7FC7),",
+    ) &&
     // and MY bubble stamp follows the FILL it sits on: the cream-white on the
     // dark blue bubble that he pointed at is a cool blue-grey now, and the gold
     // bubble takes the muted ink (the other bubbles keep the old white).
-    chat.includes('"darkblue" -> Color(0xFFD7E1F7)') &&
+    chat.includes('"darkblue" -> Color(0xFFBBD3FF)') &&
     chat.includes('"default" -> Muted') &&
     chat.includes("else -> Color(0xD9FFFFFF)"),
 );
@@ -142,7 +150,9 @@ check(
 /* 7 — the clip player's ⋮ */
 check(
   "v165: a received clip keeps its ⋮ for the whole session — the Save / Forward seat is drawn outside the auto-hiding chrome (over the clip, under the top bar) and no longer gives its place to the saving spinner or the saved tick; Save is offered whenever the clip is on this phone",
-  viewer.includes("if (m != null && !privateClip) {") &&
+  // v166: the seat is unconditional — Delete lives in the sheet for every
+  // clip, private ones included; Save / Forward stay gated in that sheet.
+  viewer.includes("if (m != null) {\n            Box(") &&
     viewer.includes(".clickable { menuOpen = true }") &&
     viewer.includes("onSave =") &&
     viewer.includes("dest.exists() && dest.length() > 0L && !privateClip && !saved") &&
@@ -162,8 +172,12 @@ check(
     src.includes(
       "generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent",
     ) &&
+    // v166 (owner: "ai reply dite onek late korche"): Gemini still LEADS the
+    // text / photo / voice turns, but it is raced against the HF chain — the
+    // fallback starts 1.6 s in instead of after Gemini's whole timeout.
+    src.includes("const AI_HEDGE_MS = 1_600;") &&
     src.includes(
-      "const gem = await geminiChat(env, messages, maxTokens);\n  if (gem) return gem;",
+      "() => geminiChat(env, messages, maxTokens),\n    () => hfThenCf(env, messages, maxTokens),",
     ) &&
     src.includes("async function aiTranscribe(") &&
     src.includes("const heard = await aiTranscribe(") &&
@@ -171,7 +185,9 @@ check(
     src.includes("async function aiWelcomeText(") &&
     src.includes("const gem = await geminiParts(env, prompt, [], 120);") &&
     src.includes("const seen = readPhoto;") &&
-    src.includes("if (seen && seen.media) {") &&
+    src.includes(
+      "seen && seen.media ? await aiPhotoBytes(env, seen.media, photoMime(seen as never)) : null;",
+    ) &&
     src.includes("const drawn = await hfImage(env, parts, scene, clean);") &&
     src.includes('const HF_IMAGE_MODEL = "stabilityai/stable-diffusion-3-medium-diffusers";') &&
     src.includes(
@@ -202,11 +218,11 @@ check(
 );
 
 /* the round's own bookkeeping */
+// The version bump itself is pinned by the newest round's own case (36); this
+// one keeps the dependency the round added.
 check(
-  "v165: versionCode 165 / versionName 3.9.89 and material-icons-extended is present (undo / redo glyphs)",
-  /versionCode\s*=\s*165/.test(pkg) &&
-    /versionName\s*=\s*"3\.9\.89"/.test(pkg) &&
-    pkg.includes("material-icons-extended"),
+  "v165: material-icons-extended is present (undo / redo glyphs)",
+  pkg.includes("material-icons-extended"),
 );
 
 process.stdout.write(lines.join("\n") + "\n");

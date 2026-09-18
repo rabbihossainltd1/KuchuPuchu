@@ -247,6 +247,10 @@ private fun MediaEditItemScreen(
     var playAt by remember(pickedUri) { mutableStateOf<Long?>(null) }
     var seekTo by remember(pickedUri) { mutableStateOf<Long?>(null) }
     var busy by remember { mutableStateOf(false) }
+    // v166 (owner: "video edit kore done dile lag kore ar done o hoi na"):
+    // a clip bake is a real transcode — without a number on screen it read as
+    // a freeze and as "Done didn't work". -1f = no bake running, else 0..1.
+    var applyPct by remember { mutableStateOf(-1f) }
     // v164 (owner: "done dile just edit ta apply hobe, save ba send hobe na,
     // editor kholai thakbe"): Done bakes what has been drawn / written / stuck /
     // cropped / trimmed into a NEW working file and makes it the media this
@@ -948,7 +952,17 @@ private fun MediaEditItemScreen(
                                 out.delete()
                                 VideoExport.passthrough(ctx, mediaUri, s, e, out)
                             }
-                            EditedMedia.Video(out, "video/mp4")
+                            // v166: the baked clip's own facts (the export may
+                            // have cropped or turned it — exactly why the source
+                            // numbers would be the wrong ones).
+                            val baked = VideoExport.probe(ctx, android.net.Uri.fromFile(out))
+                            EditedMedia.Video(
+                                out,
+                                "video/mp4",
+                                baked?.displayW ?: 0,
+                                baked?.displayH ?: 0,
+                                baked?.durationMs ?: 0L,
+                            )
                         } else {
                             EditedMedia.Untouched(mediaUri, true)
                         }
@@ -959,7 +973,9 @@ private fun MediaEditItemScreen(
                         if (!edited) {
                             EditedMedia.Untouched(mediaUri, false)
                         } else {
-                            EditedMedia.Photo(bakeFull(bmp, drawn, filt, wrote, placed, hdShot) ?: throw Exception("Could not save the drawing."))
+                            val url = bakeFull(bmp, drawn, filt, wrote, placed, hdShot) ?: throw Exception("Could not save the drawing.")
+                            val box = jpegBox(url)
+                            EditedMedia.Photo(url, box.first, box.second)
                         }
                     }
                 }.getOrElse { EditedMedia.Failed(it.message ?: "Could not edit that file.") }
@@ -1004,6 +1020,8 @@ private fun MediaEditItemScreen(
                 (clip != null && (start > 0L || end < clip.durationMs))
         if (!anything) return
         busy = true
+        // A photo bake is instant; a clip bake walks 0..1 (see the chip).
+        applyPct = if (pickedIsVideo) 0f else -1f
         haptics.confirm()
         val img = runCatching { shot?.asAndroidBitmap() }.getOrNull()
         val vSource = source
@@ -1030,13 +1048,42 @@ private fun MediaEditItemScreen(
                         val overlay = bakeVideoOverlay(drawn, wrote, placed, ovW, ovH, box)
                         val layers = overlay != null || filt != null || turn != 0 || box != null
                         try {
-                            VideoExport.export(ctx, srcUri, s, e, box, file, overlay = overlay, colorMat = filt?.array, userTurns = turn)
+                            VideoExport.export(
+                                ctx,
+                                srcUri,
+                                s,
+                                e,
+                                box,
+                                file,
+                                // v166: the number the chip shows comes from the
+                                // encoder itself — one frame in, one step on.
+                                onProgress = { f -> applyPct = f.coerceIn(0f, 1f) },
+                                overlay = overlay,
+                                colorMat = filt?.array,
+                                userTurns = turn,
+                            )
                         } catch (err: Exception) {
                             // A bare trim may ride the degraded passthrough; a
                             // real layer must never silently vanish.
                             if (layers) throw err
                             file.delete()
                             VideoExport.passthrough(ctx, srcUri, s, e, file)
+                        } finally {
+                            // The full-frame overlay is a screen-sized ARGB
+                            // bitmap (33 MB at 4K) — it has been consumed by
+                            // the encoder, so it goes back right here instead of
+                            // waiting for the GC while the editor keeps running.
+                            runCatching { overlay?.recycle() }
+                        }
+                        // v166: never hand the stage a file that cannot be
+                        // played. An encoder that "succeeded" into a 0-byte or
+                        // duration-less mp4 used to become mediaUri anyway — the
+                        // editor then had nothing to show (and re-probing it is
+                        // what made the whole thing feel stuck).
+                        val ok = file.length() > 0L && VideoExport.probe(ctx, android.net.Uri.fromFile(file))?.durationMs?.let { it > 0L } == true
+                        if (!ok) {
+                            file.delete()
+                            throw Exception("The clip could not be saved.")
                         }
                         androidx.core.content.FileProvider.getUriForFile(
                             ctx,
@@ -1059,9 +1106,16 @@ private fun MediaEditItemScreen(
                 }.getOrNull()
             withContext(Dispatchers.Main) {
                 busy = false
+                applyPct = -1f
                 if (out == null) {
+                    // v166: the layers are still here — nothing was baked away,
+                    // so the user can try again or Send as-is. The notice names
+                    // the clip when it is a clip (a photo bake cannot fail this
+                    // way).
                     haptics.reject()
-                    notice = "Could not apply that edit."
+                    notice =
+                        if (pickedIsVideo) "Could not apply that clip edit — try again."
+                        else "Could not apply that edit."
                 } else {
                     // The stage now shows the baked file: mediaUri drives every
                     // load, so this is what re-reads the picture / clip and
@@ -1584,7 +1638,11 @@ private fun MediaEditItemScreen(
                 // button: there would be nothing to apply.
                 // v165 (owner): smaller, and its fill is a near-transparent
                 // grey with a hairline — the solid blue chip shouted.
-                if (hasEdits) {
+                if (hasEdits || busy) {
+                    // v166: the same chip carries the bake's number — "Applying
+                    // 42%" replaces "Done" while the clip is being written, so
+                    // a long trim can never look like a frozen button.
+                    val pct = applyPct
                     Box(
                         Modifier
                             .clip(RoundedCornerShape(13.dp))
@@ -1597,7 +1655,12 @@ private fun MediaEditItemScreen(
                             .padding(horizontal = 9.dp, vertical = 3.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text("Done", color = Color.White.copy(alpha = 0.94f), fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+                        Text(
+                            if (busy && pct >= 0f) "Applying ${(pct * 100).toInt()}%" else "Done",
+                            color = Color.White.copy(alpha = if (busy) 0.7f else 0.94f),
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
                     }
                     Spacer(Modifier.width(5.dp))
                 }
@@ -1683,12 +1746,17 @@ private fun MediaEditItemScreen(
                         }
                     }
                 }
-                // v165 (owner): undo + REDO, compact — small round seats that
-                // only light up when there is something to walk back (or
-                // forward) to, plus the small clear.
+                // v165 (owner): undo + REDO, compact. v166 (owner: "undo redo
+                // option pelam e na … left a undo right a redo"): the pair used
+                // to be drawn ONLY while one of them had work to do — on a
+                // fresh photo the row simply had no undo at all, which reads as
+                // "there is no undo button". The trio is part of the chrome
+                // now: undo on the left, redo on its right, the small clear
+                // last, all three dimmed while they have nothing to act on.
                 val canUndo = strokes.isNotEmpty() || overlayPast.isNotEmpty()
                 val canRedo = redoStack.isNotEmpty()
-                if ((shot != null || clip != null) && (canUndo || canRedo)) {
+                val canClear = strokes.isNotEmpty() || texts.isNotEmpty() || stickers.isNotEmpty()
+                if (shot != null || clip != null) {
                     CompactTool(onClick = { haptics.tap(); undoEdit() }, enabled = canUndo) {
                         Icon(
                             Icons.AutoMirrored.Filled.Undo,
@@ -1706,7 +1774,9 @@ private fun MediaEditItemScreen(
                         )
                     }
                     CompactTool(
+                        enabled = canClear,
                         onClick = {
+                            if (!canClear) return@CompactTool
                             haptics.tap()
                             if (strokes.isNotEmpty()) strokes.clear()
                             if (texts.isNotEmpty() || stickers.isNotEmpty()) {
@@ -1717,7 +1787,12 @@ private fun MediaEditItemScreen(
                             }
                         },
                     ) {
-                        Icon(Icons.Filled.Delete, "Clear", tint = Color.White, modifier = Modifier.size(16.dp))
+                        Icon(
+                            Icons.Filled.Delete,
+                            "Clear",
+                            tint = Color.White.copy(alpha = if (canClear) 1f else 0.35f),
+                            modifier = Modifier.size(16.dp),
+                        )
                     }
                 }
             }
@@ -2167,11 +2242,22 @@ private fun MediaEditItemScreen(
 data class EditedResult(val convId: String, val viewOnce: Boolean, val media: EditedMedia, val caption: String = "")
 
 sealed class EditedMedia {
-    /** A drawn-on photo, as the same JPEG data URL the picker path produces. */
-    data class Photo(val dataUrl: String) : EditedMedia()
+    /**
+     * A drawn-on photo, as the same JPEG data URL the picker path produces.
+     * v166: [w] / [h] are the BAKED file's own pixels (an HD bake is bigger
+     * than the working copy), so the chat can lay its bubble and its flying
+     * clone out at the real ratio from the first frame.
+     */
+    data class Photo(val dataUrl: String, val w: Int = 0, val h: Int = 0) : EditedMedia()
 
     /** A trimmed clip in the cache — sent as a FILE like a picked video. */
-    data class Video(val file: java.io.File, val mime: String) : EditedMedia()
+    data class Video(
+        val file: java.io.File,
+        val mime: String,
+        val w: Int = 0,
+        val h: Int = 0,
+        val durMs: Long = 0L,
+    ) : EditedMedia()
 
     /** Nothing changed: the chat sends the original pick as it would have. */
     data class Untouched(val uri: Uri, val isVideo: Boolean) : EditedMedia()
@@ -2466,6 +2552,15 @@ internal fun paintPenStrokes(canvas: android.graphics.Canvas, strokes: List<PenS
 
 /** Owner round 36 (item 6): the video export's overlay — pen + text +
  *  sticker baked transparent at the export's output size (null when empty). */
+/** v166: the pixels inside a JPEG data URL — header only, no decode. */
+internal fun jpegBox(dataUrl: String): Pair<Int, Int> =
+    runCatching {
+        val bytes = android.util.Base64.decode(dataUrl.substringAfter(",", ""), android.util.Base64.DEFAULT)
+        val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+        if (opts.outWidth > 0 && opts.outHeight > 0) opts.outWidth to opts.outHeight else 0 to 0
+    }.getOrDefault(0 to 0)
+
 internal fun bakeVideoOverlay(strokes: List<PenStroke>, texts: List<EditText>, stickers: List<EditSticker>, w: Int, h: Int, box: CropBox? = null): Bitmap? {
     if (strokes.isEmpty() && texts.isEmpty() && stickers.isEmpty()) return null
     val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)

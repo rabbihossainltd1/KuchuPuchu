@@ -6,10 +6,7 @@ import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -166,6 +163,9 @@ object LinkPreviews {
  * is unknown or the page had nothing to show — the link in the text is still
  * a link. [onOpen] null = the chat is in select mode, taps go to the bubble.
  */
+/** v166: the link card's banner height — a thumbnail, not a hero image. */
+private val LINK_THUMB_H = 96.dp
+
 @Composable
 internal fun LinkPreviewCard(url: String, mine: Boolean, ink: Color, onOpen: (() -> Unit)?) {
     val card = LinkPreviews.card(url) ?: return
@@ -176,11 +176,18 @@ internal fun LinkPreviewCard(url: String, mine: Boolean, ink: Color, onOpen: (()
     val image = card.optText("image")
     if (title.isBlank() && image.isBlank()) return
     var imageBroken by remember(image) { mutableStateOf(false) }
+    // v166 (owner: "chat a link dile link card bubble ta compact koro choto
+    // koro"): the card used to be a full-width 1.91:1 banner — a ~146 dp-tall
+    // picture on top of up to five lines of text, the tallest thing in any
+    // thread. It is a THUMBNAIL card now: a 96 dp banner, tighter type (title
+    // 2 lines, description 1, host 1) and 7/5 padding. Nothing is dropped —
+    // the image still leads, the title still names the page — it just takes
+    // about a third less of the bubble.
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(bottom = 4.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .padding(bottom = 3.dp)
+            .clip(RoundedCornerShape(9.dp))
             .background(if (mine) Color(0x26FFFFFF) else if (KpThemeMode.darkBlue) ActionBlue.copy(alpha = 0.18f) else GoldSoft)
             .then(if (onOpen != null) Modifier.clickable(onClick = onOpen) else Modifier),
     ) {
@@ -191,16 +198,16 @@ internal fun LinkPreviewCard(url: String, mine: Boolean, ink: Color, onOpen: (()
                 model = if (image.startsWith("/")) Api.BASE + image else image,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxWidth().aspectRatio(1.91f),
+                modifier = Modifier.fillMaxWidth().height(LINK_THUMB_H),
                 onError = { imageBroken = true },
             )
         }
-        Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
+        Column(Modifier.padding(horizontal = 7.dp, vertical = 5.dp)) {
             if (title.isNotBlank()) {
                 Text(
                     title,
-                    fontSize = 13.sp,
-                    lineHeight = 17.sp,
+                    fontSize = 12.5.sp,
+                    lineHeight = 16.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = ink,
                     maxLines = 2,
@@ -210,16 +217,15 @@ internal fun LinkPreviewCard(url: String, mine: Boolean, ink: Color, onOpen: (()
             if (description.isNotBlank()) {
                 Text(
                     description,
-                    fontSize = 12.sp,
-                    lineHeight = 16.sp,
+                    fontSize = 11.5.sp,
+                    lineHeight = 15.sp,
                     color = ink.copy(alpha = 0.82f),
-                    maxLines = 2,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
             if (host.isNotBlank()) {
-                Spacer(Modifier.height(1.dp))
-                Text(host, fontSize = 11.sp, color = ink.copy(alpha = 0.65f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(host, fontSize = 10.5.sp, color = ink.copy(alpha = 0.65f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }

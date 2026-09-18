@@ -112,19 +112,22 @@ const store = kt("ScreenStore.kt");
 {
   /* 3 — Done applies, and the profile photo shares the editor */
   check(
-    'v164: the clip length is out of the top bar and Done is in its place — the button exists ONLY while there is an edit to apply (same idea as the bakes\' own "edited" test)',
+    'v164: the clip length is out of the top bar and Done is in its place — the button exists ONLY while there is an edit to apply (same idea as the bakes\' own "edited" test; v166: while the bake runs it stays and counts)',
     !edit.includes("editClipLabel") &&
       edit.includes("val hasEdits =") &&
       edit.includes("strokes.isNotEmpty() || texts.isNotEmpty() || stickers.isNotEmpty() ||") &&
       edit.includes("rotation != 0 || filterIdx != 0 || cropBox != null || hd ||") &&
       edit.includes("(clip != null && (start > 0L || end < clip.durationMs))") &&
-      edit.includes("if (hasEdits) {") &&
+      edit.includes("if (hasEdits || busy) {") &&
       // v165 (owner: "done button er size kom koro ar background border
       // intensity gray almost transparent rakho") — same button, smaller and
       // grey; the chip's own round pins the new literals in case 35.
-      edit.includes(
-        'Text("Done", color = Color.White.copy(alpha = 0.94f), fontSize = 11.5.sp, fontWeight = FontWeight.Medium)',
-      ) &&
+      // v166 (fb#2): the same chip carries the bake's number while a clip is
+      // being written — "Applying 42%" replaces "Done", dimmed while busy.
+      edit.includes("val pct = applyPct") &&
+      edit.includes('if (busy && pct >= 0f) "Applying ${(pct * 100).toInt()}%" else "Done",') &&
+      edit.includes("color = Color.White.copy(alpha = if (busy) 0.7f else 0.94f),") &&
+      edit.includes("fontSize = 11.5.sp,") &&
       edit.includes("haptics.tap()\n                                applyEdits()"),
   );
   check(
