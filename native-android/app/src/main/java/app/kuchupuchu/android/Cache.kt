@@ -397,14 +397,19 @@ object Outbox {
         val photo = mime.startsWith("image/") || PHOTO_EXT.any { f.name.lowercase().endsWith(it) }
         if (!clip && !photo) return
         val meta = body.optJSONObject("meta") ?: JSONObject()
-        if (clip && meta.optInt("h") > 0 && meta.optString("thumbKey").isNotBlank()) return
+        // v165: a view-once clip ships its BOX (so the tile is the clip's own
+        // shape) but never a poster — a poster is a real frame of the clip and
+        // anyone holding the message could fetch it before opening, which is
+        // exactly what view-once promises cannot happen.
+        val once = meta.optBoolean("viewOnce") == true
+        if (clip && meta.optInt("h") > 0 && (meta.optString("thumbKey").isNotBlank() || once)) return
         if (photo && meta.optInt("h") > 0) return
         val box = VideoFacts.probe(f)
         if (box != null) {
             if (box.first > 0 && box.second > 0) meta.put("w", box.first).put("h", box.second)
             if (box.third > 0L) meta.put("durMs", box.third)
         }
-        if (clip) {
+        if (clip && !once) {
             val poster = VideoFacts.poster(f, 480)
             if (poster != null) {
                 val up = Api.upload("poster.jpg", "image/jpeg", poster)

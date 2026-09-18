@@ -542,7 +542,12 @@ async function mk() {
   check(
     "v163: every bubble that draws media takes the message's own box before any hardcoded 16:9 — the clip bubble, the full-screen viewer, and the view-once tile (which now draws the clip's own frame as a 16 px mosaic instead of the fake tile, and keeps a neutral box only when nothing is known, i.e. a view-once clip the recipient has not opened)",
     chat.includes("?: MediaBox.payloadRatio(m).takeIf { it > 0f }") &&
-      chat.includes("Modifier.heightIn(max = 320.dp).aspectRatio(videoRatio)") &&
+      // v165 (owner: "eitar size kom koro ar sending er somoy original ratio
+      // rakho"): the same tile, smaller, and its box now also answers for a
+      // view-once PHOTO still in flight (the payload's own w/h) — the clip's
+      // ratio is one of the three sources [boxRatio] picks from.
+      chat.includes("Modifier.heightIn(max = 220.dp).aspectRatio(boxRatio)") &&
+      chat.includes("val boxRatio =\n        when {\n            video -> videoRatio") &&
       viewer.includes("?: m?.let { MediaBox.payloadRatio(it) }?.takeIf { it > 0f }") &&
       chat.includes('var videoRatio by remember(m.optString("id")) {') &&
       chat.includes(

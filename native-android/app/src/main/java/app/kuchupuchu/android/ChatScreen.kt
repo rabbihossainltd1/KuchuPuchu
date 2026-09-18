@@ -1207,6 +1207,17 @@ fun ChatScreen(nav: NavController, convId: String) {
     // in place at once; view-once also flies (VIDEO no longer early-return).
     // Fix 2026-09-18b: re-add hide to avoid duplicate overlap — pending is
     // hidden while the clone flies, then appears at landing with bounce.
+    // v165 (owner: "view once media ta sending animation nai"): media that
+    // comes back from the editor has no send-button rect of its own — the
+    // editor is its own screen and never reports one — so launchFly() bailed
+    // out (`from.isEmpty`) and EVERY editor send (view-once included) landed
+    // without the fly. The composer's own send seat is the honest origin.
+    fun armFly() {
+        if (sendFromRect.isEmpty) {
+            sendFromRect = listOf(actionRect, fieldRect).firstOrNull { !it.isEmpty } ?: Rect.Zero
+        }
+    }
+
     fun launchFly(clientId: String, cloneType: String, body: String = "", media: String = "") {
         val from = sendFromRect
         sendFromRect = Rect.Zero
@@ -1726,6 +1737,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         ScreenStore.pendingEdited.collect { edited ->
             if (edited == null || edited.convId != convId) return@collect
             ScreenStore.pendingEdited.value = null
+            armFly()
             when (val m = edited.media) {
                 is EditedMedia.Photo -> sendImage(m.dataUrl, null, edited.viewOnce, caption = edited.caption)
                 is EditedMedia.Video -> sendFile("video.mp4", m.mime, m.file, viewOnce = edited.viewOnce, caption = edited.caption)
@@ -1743,6 +1755,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         ScreenStore.pendingEditedBatch.collect { batch ->
             if (batch.isNullOrEmpty() || batch.first().convId != convId) return@collect
             ScreenStore.pendingEditedBatch.value = null
+            armFly()
             val photos =
                 batch.count { e ->
                     val m = e.media
@@ -4265,6 +4278,12 @@ private fun KpFlySend(
     val density = LocalDensity.current
     val t = remember { Animatable(0f) }
     val dots = remember { mutableStateListOf<FlyDot>() }
+    // v165 (owner: "sending animation a fly kore ashe tokoner ratio taw
+    // original rakho"): a photo / clip clone flies in the media's OWN shape.
+    // It reads that off the picture it is already drawing — no measuring pass
+    // on the main thread, and every send path (composer, panel, editor) gets
+    // it for free. 0 = not known yet: the clone then morphs as before.
+    var mediaRatio by remember(spec.key) { mutableFloatStateOf(0f) }
     val pillBg = Color(0xFF2A2F38)
     val pillEdge = Color(0xFF3A3F47)
     LaunchedEffect(Unit) {
@@ -4310,8 +4329,14 @@ private fun KpFlySend(
     // ease-out, but the FRAME walks a smoothstep — the pill keeps its
     // shape past launch and settles into the bubble instead of ballooning.
     val es = raw * raw * (3f - 2f * raw)
-    val w = spec.from.width + (tgt.width - spec.from.width) * es
-    val h = spec.from.height + (tgt.height - spec.from.height) * es
+    var w = spec.from.width + (tgt.width - spec.from.width) * es
+    var h = spec.from.height + (tgt.height - spec.from.height) * es
+    val mr = mediaRatio
+    if (mr > 0f && (spec.cloneType == "PHOTO" || spec.cloneType == "VIDEO")) {
+        // Fit the media's own box inside the morphing seat, so the clone is
+        // never stretched: portrait clips fly portrait the whole way.
+        if (w / h > mr) w = (h * mr) else h = (w / mr)
+    }
     val wobble = (kotlin.math.sin(raw * 2.0 * Math.PI) * (1f - raw) * 2.2).toFloat()
     val pulse = 1f + kotlin.math.sin(raw * Math.PI).toFloat() * 0.035f
     val fade = if (raw > 0.9f) (1f - (raw - 0.9f) / 0.1f).coerceIn(0f, 1f) else 1f
@@ -4377,6 +4402,11 @@ private fun KpFlySend(
                 // egg hatches into the shot, fit inside the bubble's own
                 // rect) — the fake gradient tile is dead.
                 val shot = rememberBitmap(spec.media.takeIf { it.startsWith("data:") || it.startsWith("file://") }, 720)
+                androidx.compose.runtime.LaunchedEffect(shot) {
+                    if (shot != null && shot.width > 0 && shot.height > 0) {
+                        mediaRatio = shot.width.toFloat() / shot.height
+                    }
+                }
                 if (shot != null) {
                     Image(shot, "Photo", Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
                 } else {
@@ -4398,6 +4428,18 @@ private fun KpFlySend(
                             runCatching {
                                 val r = android.media.MediaMetadataRetriever()
                                 r.setDataSource(spec.media)
+                                // v165: the clip's own box while it flies — the
+                                // retriever is already open here, so this is
+                                // two more metadata reads, not a second pass.
+                                var vw = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toFloatOrNull() ?: 0f
+                                var vh = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toFloatOrNull() ?: 0f
+                                val rot = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+                                if (rot == 90 || rot == 270) {
+                                    val sw = vw
+                                    vw = vh
+                                    vh = sw
+                                }
+                                if (vw > 0f && vh > 0f) mediaRatio = MediaBox.clamp(vw / vh)
                                 val b = r.getFrameAtTime(0L, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                                 r.release()
                                 b
@@ -5586,6 +5628,19 @@ private fun MessageRow(
         !mine && theme == "night" -> Color(0xFFA9B4CC)
         else -> Muted
     }
+    // v165 (owner: "time colour dark blue teo white cream ache eita thik koro"):
+    // MY stamp was one hardcoded near-white — the same cream-white on every
+    // bubble. On the gold ("default") bubble it was invisible; on the dark blue
+    // bubble it was that cream tint sitting on blue, which is what he pointed
+    // at. It follows the fill now: the dark muted ink on the light gold bubble,
+    // a COOL light ink (blue-grey, not cream) on the dark blue bubble, and the
+    // old white stays for night / mint / rose (no regression there).
+    val mineStampInk =
+        when (theme) {
+            "default" -> Muted
+            "darkblue" -> Color(0xFFD7E1F7)
+            else -> Color(0xD9FFFFFF)
+        }
     val isSelected = m.optString("id") in selectedIds
     val haptics = rememberHaptics()
 
@@ -5869,7 +5924,7 @@ private fun MessageRow(
                     when (kind) {
                         "STICKER" -> KpStamped(
                             below = true,
-                            stamp = { BubbleStamp(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk) },
+                            stamp = { BubbleStamp(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk, mineStampInk) },
                         ) { _ ->
                             val st = m.optString("body")
                             if (EmojiRepo.isCustomId(st)) CustomEmojiOrFallback(st)
@@ -5882,7 +5937,7 @@ private fun MessageRow(
                         // body: it only fit Roboto, so Bangla and emoji had
                         // the time / ticks on the glyphs.
                         "DELETED" -> KpStamped(
-                            stamp = { BubbleStamp(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk) },
+                            stamp = { BubbleStamp(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk, mineStampInk) },
                         ) { onLayout ->
                             Text(
                                 "This message was deleted",
@@ -5897,7 +5952,7 @@ private fun MessageRow(
                             // it (never over it) — now on a measured row.
                             KpStamped(
                                 below = true,
-                                stamp = { BubbleStamp(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk) },
+                                stamp = { BubbleStamp(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk, mineStampInk) },
                             ) { onLayout ->
                                 Text(
                                     m.optText("body").trim(),
@@ -5931,7 +5986,7 @@ private fun MessageRow(
                                 )
                             }
                             KpStamped(
-                                stamp = { BubbleStamp(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk) },
+                                stamp = { BubbleStamp(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk, mineStampInk) },
                             ) { onLayout ->
                                 if (revealChars != null && revealChars < full.length) {
                                     // The AI reply is still typing itself out —
@@ -5994,7 +6049,7 @@ private fun MessageRow(
                         Modifier.align(Alignment.BottomEnd).padding(end = 2.dp, bottom = 1.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        BubbleStamp(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk)
+                        BubbleStamp(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk, mineStampInk)
                     }
                 }
             }
@@ -6661,6 +6716,18 @@ private fun ViewOnceRow(
         }
     }
     val upFrac = UploadProgress.fracs[m.optString("clientId")]
+    // v165 (owner: "eitar size kom koro ar sending er somoy original ratio
+    // rakho"): the tile is smaller, and its box is the media's OWN shape even
+    // while the send is still in flight. A pending view-once photo has no
+    // pixels to measure yet, but the message already carries the box the
+    // sender measured (mediaW / mediaH), so the tile no longer sits in a
+    // fixed 180 x 220 seat and then snaps when the row lands.
+    val boxRatio =
+        when {
+            video -> videoRatio
+            ratio > 0f -> ratio
+            else -> MediaBox.payloadRatio(m).takeIf { it > 0f } ?: 0f
+        }
     Row(
         Modifier
             .fillMaxWidth()
@@ -6672,18 +6739,14 @@ private fun ViewOnceRow(
                 Modifier
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
                     .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()); KpFlyTarget.report(m.optString("clientId").ifBlank { m.optString("id") }, it.boundsInRoot()) }
-                    .widthIn(max = 240.dp)
+                    .widthIn(max = 168.dp)
                     .then(
-                        if (video) {
-                            Modifier.heightIn(max = 320.dp).aspectRatio(videoRatio)
-                        } else if (photoUrl != null && ratio > 0f) {
-                            Modifier
-                                .heightIn(max = 320.dp)
-                                .aspectRatio(ratio)
+                        if (boxRatio > 0f) {
+                            Modifier.heightIn(max = 220.dp).aspectRatio(boxRatio)
                         } else {
                             Modifier
-                                .widthIn(min = 180.dp)
-                                .height(220.dp)
+                                .widthIn(min = 132.dp)
+                                .height(168.dp)
                         },
                     )
                     .shadow(2.dp, bubbleShape)
@@ -8389,6 +8452,9 @@ private fun BubbleStamp(
     otherReadAt: String?,
     emojiOnly: Int,
     stampInk: Color,
+    // v165: the ink for MY own bubble, chosen against its FILL (see MessageRow)
+    // instead of the old hardcoded near-white that vanished on the gold bubble.
+    mineStampInk: Color = Color(0xD9FFFFFF),
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
@@ -8397,7 +8463,7 @@ private fun BubbleStamp(
             lineHeight = 12.sp,
             maxLines = 1,
             softWrap = false,
-            color = if (mine && emojiOnly == 0) Color(0xD9FFFFFF) else stampInk,
+            color = if (mine && emojiOnly == 0) mineStampInk else stampInk,
         )
         if (mine) {
             Spacer(Modifier.width(3.dp))

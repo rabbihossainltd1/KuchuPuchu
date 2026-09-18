@@ -2922,8 +2922,11 @@ const convBetween = (db, a, b) =>
         kt("MediaViewer.kt").includes("KpSecure.Guard(secure || !canSave)") &&
         kt("MediaViewer.kt").includes('val privateClip = m?.optBoolean("kpPrivate") == true') &&
         kt("MediaViewer.kt").includes(
-          "onSave = if (m != null && dest != null && state == 1 && !privateClip && !saved) ({ menuOpen = false; saveClip() }) else null,",
+          "if (m != null && dest != null && dest.exists() && dest.length() > 0L && !privateClip && !saved) {",
         ) &&
+        // v165 (owner): the player's ⋮ sits outside the auto-hiding chrome, so
+        // a played or saved clip still offers Save / Forward.
+        kt("MediaViewer.kt").includes("if (m != null && !privateClip) {") &&
         kt("MediaViewer.kt").includes(
           'val canForward = m != null && !privateClip && m.optText("fileKey").isNotBlank()',
         ) &&
@@ -5096,7 +5099,7 @@ const convBetween = (db, a, b) =>
       // measured row under the glyph (KpStamped below = true).
       chat1516.includes("modifier = Modifier.padding(start = 2.dp, end = 2.dp),") &&
       !chat1516.includes("end = if (mine) 30.dp else 10.dp") &&
-      chat1516.includes("color = if (mine && emojiOnly == 0) Color(0xD9FFFFFF) else stampInk,") &&
+      chat1516.includes("color = if (mine && emojiOnly == 0) mineStampInk else stampInk,") &&
       chat1516.includes(
         "TickIcon(m, pendingEcho, otherReadAt, onWallpaper = emojiOnly > 0, ink = stampInk)",
       ) &&
@@ -7400,14 +7403,23 @@ const convBetween = (db, a, b) =>
         (textBranch.match(/countLines\(it, onLayout\)/g) || []).length === 4 &&
         (
           textBranch.match(
-            /BubbleStamp\(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk\)/g,
+            /BubbleStamp\(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk, mineStampInk\)/g,
           ) || []
         ).length === 4 &&
         !textBranch.includes("val reserve =") &&
         textBranch.includes('val full = m.optText("body")\n') &&
         chat.includes("private fun BubbleStamp(") &&
-        (chat.match(/BubbleStamp\(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk\)/g) || [])
-          .length === 5 &&
+        (
+          chat.match(
+            /BubbleStamp\(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk, mineStampInk\)/g,
+          ) || []
+        ).length === 5 &&
+        // v165 (owner: the list clock "dark blue teo white cream"): a bubble
+        // the user wrote on the default theme stamps in the palette's muted
+        // ink, not a washed-out white — the wallpaper themes keep white.
+        chat.includes("val mineStampInk =") &&
+        chat.includes('"default" -> Muted') &&
+        chat.includes('"darkblue" -> Color(0xFFD7E1F7)') &&
         chat.includes(
           "TickIcon(m, pendingEcho, otherReadAt, onWallpaper = emojiOnly > 0, ink = stampInk)",
         ),
@@ -7854,11 +7866,16 @@ const convBetween = (db, a, b) =>
           "native.drawRect(cx - sel.rx * w, cy - sel.ry * h, cx + sel.rx * w, cy + sel.ry * h, ring)",
         ) &&
         !edit3.includes("val reach = ") &&
+        // v165 (owner: undo/redo in all editors): the top bar asks undoEdit(),
+        // which pops the last stroke and otherwise walks the overlay history —
+        // and REDO replays whatever undo took.
+        edit3.includes("val canUndo = strokes.isNotEmpty() || overlayPast.isNotEmpty()") &&
+        edit3.includes("val canRedo = redoStack.isNotEmpty()") &&
+        edit3.includes("if ((shot != null || clip != null) && (canUndo || canRedo)) {") &&
+        edit3.includes("haptics.tap(); undoEdit()") &&
+        edit3.includes("haptics.tap(); redoEdit()") &&
         edit3.includes(
-          "if ((shot != null || clip != null) && (strokes.isNotEmpty() || overlayPast.isNotEmpty())) {",
-        ) &&
-        edit3.includes(
-          "if (strokes.isNotEmpty()) strokes.removeAt(strokes.size - 1) else undoOverlay()",
+          "val st = strokes.removeAt(strokes.size - 1)\n            live = null\n            redoStack.add { strokes.add(st) }",
         ),
     );
   }
@@ -8222,7 +8239,10 @@ const convBetween = (db, a, b) =>
         edit.includes(".align(Alignment.TopCenter)") &&
         edit.includes(".align(Alignment.BottomCenter)") &&
         (edit.match(/\.size\(32\.dp\)/g) || []).length === 2 &&
-        (edit.match(/\.size\(36\.dp\)/g) || []).length === 3 &&
+        // v165: undo / redo / clear are three 26 dp seats (they replaced two
+        // 36 dp icon buttons), so the top bar keeps ONE 36 (close).
+        (edit.match(/\.size\(36\.dp\)/g) || []).length === 1 &&
+        (edit.match(/\.size\(26\.dp\)/g) || []).length === 3 &&
         (edit.match(/\.size\(40\.dp\)/g) || []).length === 1 &&
         edit.includes(".background(ActionBlue)") &&
         !edit.includes(".border(1.dp, if (once) ActionBlue") &&
@@ -8616,7 +8636,9 @@ const convBetween = (db, a, b) =>
           'newest && newest.kind === "TEXT" && newest.sender_id === userId ? (newest.body ?? "") : "";',
         ) &&
         ai.includes("const photoParts: unknown[] = [];") &&
-        ai.includes("if (!parts) readSource = newestPhoto;") &&
+        ai.includes(
+          "if (!parts) {\n          readSource = newestPhoto; // bare photo / a question about it\n          readPhoto = newestPhoto;\n        }",
+        ) &&
         ai.includes("readSource = recentPhoto; // a follow-up question about the photo") &&
         ai.includes("if (recentPhoto && wantsEdit(newestText)) {") &&
         // Owner round 42 (item 3): the predicates live at module level now
@@ -8648,11 +8670,28 @@ const convBetween = (db, a, b) =>
         ai.includes("kp_media: `/api/messages/${imgMid}/media`,") &&
         ai.includes("answer = await hfChat(") &&
         ai.includes(
-          "const body = answer ?? (!env.HF_TOKEN ? AI_REPLY_FALLBACK : AI_REPLY_DOWN);",
+          "answer ?? (!env.GEMINI_API_KEY && !env.HF_TOKEN ? AI_REPLY_FALLBACK : AI_REPLY_DOWN);",
         ) &&
-        // Owner round 39 (item 5): an HF-side failure says so honestly
-        // (module-level const, outside the sendAiReply slice).
-        src.includes("const AI_REPLY_DOWN =") &&
+        // v165 (owner: "messaging voice messaging shob kichur jonno gemini
+        // use hobe but image create/edit request a hugging face ai use hobe"):
+        // Gemini leads chat text, a photo the user sends to be READ, and a
+        // voice note; the HF chain + Whisper stay behind it as fallbacks; the
+        // picture CREATE / EDIT path is still HF's alone.
+        src.includes("async function geminiParts(") &&
+        src.includes(
+          'inline_data: { mime_type: m.mime || "application/octet-stream", data: m.b64 }',
+        ) &&
+        src.includes(
+          "const gem = await geminiChat(env, messages, maxTokens);\n  if (gem) return gem;",
+        ) &&
+        src.includes("const heard = await aiTranscribe(") &&
+        src.includes("async function aiTranscribe(") &&
+        src.includes("async function aiWelcomeText(") &&
+        ai.includes("const seen = readPhoto;") &&
+        src.includes("const drawn = await hfImage(env, parts, scene, clean);"),
+      // Owner round 39 (item 5): an HF-side failure says so honestly
+      // (module-level const, outside the sendAiReply slice).
+      src.includes("const AI_REPLY_DOWN =") &&
         src.includes("can't reach its brain right now") &&
         ai.includes("it cannot be seen right now: say so briefly") &&
         src.includes(

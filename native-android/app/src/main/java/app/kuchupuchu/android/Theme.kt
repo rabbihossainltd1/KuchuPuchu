@@ -175,9 +175,12 @@ fun atDhaka(instant: java.time.Instant): java.time.ZonedDateTime = instant.atZon
 
 fun dhakaNow(): java.time.ZonedDateTime = java.time.ZonedDateTime.now(DHAKA)
 
-/** Chat-list style timestamp: 14:05 / Yesterday / Mon / 12 Aug — always in
+/** Chat-list style timestamp: 2:05 PM / Yesterday / Mon / 12 Aug — always in
  *  Bangladesh Standard Time (owner rule): Asia/Dhaka, UTC+6, no DST, whatever
- *  the device's timezone happens to be. */
+ *  the device's timezone happens to be. v165 (owner: "chat list a time format
+ *  12h Bangladesh standard time use koro"): the list row still printed a
+ *  24-hour clock (14:05) while every other surface in the app was already
+ *  12-hour — the one spot the v163 audit missed. */
 fun listStamp(iso: String): String {
     if (iso.isBlank()) return ""
     val t = try {
@@ -189,7 +192,12 @@ fun listStamp(iso: String): String {
     val z = atDhaka(t)
     return when {
         z.toLocalDate() == now.toLocalDate() ->
-            String.format("%02d:%02d", z.hour, z.minute)
+            String.format(
+                "%d:%02d %s",
+                (z.hour % 12).let { if (it == 0) 12 else it },
+                z.minute,
+                if (z.hour >= 12) "PM" else "AM",
+            )
         z.toLocalDate() == now.toLocalDate().minusDays(1) -> "Yesterday"
         now.toLocalDate().toEpochDay() - z.toLocalDate().toEpochDay() < 7 ->
             z.dayOfWeek.toString().take(3).let { d -> d[0].toString() + d.substring(1).lowercase() }

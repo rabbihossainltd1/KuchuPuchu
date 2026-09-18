@@ -36,6 +36,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Check
@@ -557,17 +558,52 @@ private fun MediaEditItemScreen(
     // Owner round 36 (item 3): overlay undo — one snapshot per finished
     // gesture / add / remove, never per move event (a drag would flood it).
     val overlayPast = remember { mutableStateListOf<Pair<List<EditText>, List<EditSticker>>>() }
+    // v165 (owner: "all edit a undo redo button rakho tobe compact kore dio"):
+    // REDO beside undo, in every editor flow (chat send, status post, profile
+    // photo). Every undo hands back the action it took, so redo is its exact
+    // inverse; a NEW edit clears the redo branch (nothing ahead of a fresh
+    // stroke to walk back to).
+    val redoStack = remember { mutableStateListOf<() -> Unit>() }
+
     fun pushOverlayPast() {
         overlayPast.add(texts.toList() to stickers.toList())
         if (overlayPast.size > 50) overlayPast.removeAt(0)
+        redoStack.clear()
     }
     fun undoOverlay() {
         val last = overlayPast.removeLastOrNull() ?: return
+        val nowTexts = texts.toList()
+        val nowStickers = stickers.toList()
+        redoStack.add {
+            texts.clear()
+            texts.addAll(nowTexts)
+            stickers.clear()
+            stickers.addAll(nowStickers)
+        }
         texts.clear()
         texts.addAll(last.first)
         stickers.clear()
         stickers.addAll(last.second)
         if (selectedId != null && texts.none { it.id == selectedId } && stickers.none { it.id == selectedId }) selectedId = null
+    }
+
+    // v165: the two ends of the undo lane sit HERE, after the state they touch
+    // (redoStack above, undoOverlay above) — a local function only sees what is
+    // declared before it.
+    /** One undo: the last pen stroke, else the last overlay snapshot. */
+    fun undoEdit() {
+        if (strokes.isNotEmpty()) {
+            val st = strokes.removeAt(strokes.size - 1)
+            live = null
+            redoStack.add { strokes.add(st) }
+            return
+        }
+        undoOverlay()
+    }
+
+    /** The inverse of [undoEdit] — replays the last undone action. */
+    fun redoEdit() {
+        redoStack.removeLastOrNull()?.invoke()
     }
 
     fun removeOverlay(id: String) {
@@ -1182,6 +1218,22 @@ private fun MediaEditItemScreen(
         }
     }
 
+    /** v165 (owner: "compact kore dio"): a small round seat for the undo /
+     *  redo / clear trio — 26 dp, no fill, one hairline while live. */
+    @Composable
+    fun CompactTool(onClick: () -> Unit, enabled: Boolean = true, glyph: @Composable () -> Unit) {
+        Box(
+            Modifier
+                .size(26.dp)
+                .clip(CircleShape)
+                .background(if (enabled) Color(0x1FFFFFFF) else Color.Transparent)
+                .clickable(enabled = enabled) { onClick() },
+            contentAlignment = Alignment.Center,
+        ) {
+            glyph()
+        }
+    }
+
     /** Owner round 36 (item 6): the pen + overlay layer — one canvas shared
      *  by the photo and the video stage (gestures + draw, normalised units). */
     @Composable
@@ -1200,7 +1252,12 @@ private fun MediaEditItemScreen(
                                     live = PenStroke(penColor, penWidth, mutableListOf(Offset(pos.x / w, pos.y / h)))
                                 },
                                 onDragEnd = {
-                                    live?.let { if (it.points.size > 1) strokes.add(it) }
+                                    live?.let {
+                                        if (it.points.size > 1) {
+                                            strokes.add(it)
+                                            redoStack.clear()
+                                        }
+                                    }
                                     live = null
                                 },
                                 onDragCancel = { live = null },
@@ -1525,27 +1582,37 @@ private fun MediaEditItemScreen(
                 // the layers into the working file) and leaves the editor open.
                 // Nothing is sent and nothing goes to the gallery. No edit, no
                 // button: there would be nothing to apply.
+                // v165 (owner): smaller, and its fill is a near-transparent
+                // grey with a hairline — the solid blue chip shouted.
                 if (hasEdits) {
                     Box(
                         Modifier
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(ActionBlue)
+                            .clip(RoundedCornerShape(13.dp))
+                            .background(Color(0x2EFFFFFF))
+                            .border(0.5.dp, Color(0x4DFFFFFF), RoundedCornerShape(13.dp))
                             .clickable(enabled = !busy) {
                                 haptics.tap()
                                 applyEdits()
                             }
-                            .padding(horizontal = 12.dp, vertical = 5.dp),
+                            .padding(horizontal = 9.dp, vertical = 3.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text("Done", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Done", color = Color.White.copy(alpha = 0.94f), fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
                     }
-                    Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.width(5.dp))
                 }
                 Spacer(Modifier.weight(1f))
-                ToolButton(onClick = { saveCurrent() }) {
-                    Icon(Icons.Filled.Download, "Save to gallery", tint = Color.White, modifier = Modifier.size(18.dp))
+                // v165 (owner: "profile picture a edit a save button remove
+                // koro"): the profile flow has no save-to-gallery — the baked
+                // file goes to the profile and nowhere else.
+                if (!avatarMode) {
+                    ToolButton(onClick = { saveCurrent() }) {
+                        Icon(Icons.Filled.Download, "Save to gallery", tint = Color.White, modifier = Modifier.size(18.dp))
+                    }
                 }
-                if (clip == null && !statusMode) {
+                // v165 (owner): a profile photo and a status post carry no HD
+                // switch — the pill is the chat send's alone.
+                if (clip == null && !statusMode && !avatarMode) {
                     // The HD pill: filled while the bigger send is armed.
                     Box(
                         Modifier
@@ -1616,17 +1683,29 @@ private fun MediaEditItemScreen(
                         }
                     }
                 }
-                if ((shot != null || clip != null) && (strokes.isNotEmpty() || overlayPast.isNotEmpty())) {
-                    IconButton(
-                        onClick = {
-                            haptics.tap()
-                            if (strokes.isNotEmpty()) strokes.removeAt(strokes.size - 1) else undoOverlay()
-                        },
-                        modifier = Modifier.size(36.dp),
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.Undo, "Undo", tint = Color.White, modifier = Modifier.size(20.dp))
+                // v165 (owner): undo + REDO, compact — small round seats that
+                // only light up when there is something to walk back (or
+                // forward) to, plus the small clear.
+                val canUndo = strokes.isNotEmpty() || overlayPast.isNotEmpty()
+                val canRedo = redoStack.isNotEmpty()
+                if ((shot != null || clip != null) && (canUndo || canRedo)) {
+                    CompactTool(onClick = { haptics.tap(); undoEdit() }, enabled = canUndo) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Undo,
+                            "Undo",
+                            tint = Color.White.copy(alpha = if (canUndo) 1f else 0.35f),
+                            modifier = Modifier.size(16.dp),
+                        )
                     }
-                    IconButton(
+                    CompactTool(onClick = { haptics.tap(); redoEdit() }, enabled = canRedo) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Redo,
+                            "Redo",
+                            tint = Color.White.copy(alpha = if (canRedo) 1f else 0.35f),
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                    CompactTool(
                         onClick = {
                             haptics.tap()
                             if (strokes.isNotEmpty()) strokes.clear()
@@ -1637,9 +1716,8 @@ private fun MediaEditItemScreen(
                                 selectedId = null
                             }
                         },
-                        modifier = Modifier.size(36.dp),
                     ) {
-                        Icon(Icons.Filled.Delete, "Clear", tint = Color.White, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Filled.Delete, "Clear", tint = Color.White, modifier = Modifier.size(16.dp))
                     }
                 }
             }

@@ -2,7 +2,9 @@ package app.kuchupuchu.android
 
 import android.content.pm.ActivityInfo
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -185,6 +187,8 @@ fun KpPhotoViewer(
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var scale by remember { mutableFloatStateOf(1f) }
+    // v165: the running double-tap zoom (a second double-tap takes it over).
+    var zoomJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var offX by remember { mutableFloatStateOf(0f) }
     var offY by remember { mutableFloatStateOf(0f) }
     val drag = remember { Animatable(0f) }
@@ -312,17 +316,51 @@ fun KpPhotoViewer(
                         detectTapGestures(
                             onTap = { chrome = !chrome },
                             onDoubleTap = { p ->
-                                if (scale > 1f) {
-                                    scale = 1f
-                                    offX = 0f
-                                    offY = 0f
-                                } else {
-                                    scale = 2.5f
-                                    val maxX = size.width * (scale - 1f) / 2f
-                                    val maxY = size.height * (scale - 1f) / 2f
-                                    offX = ((size.width / 2f - p.x) * (scale - 1f)).coerceIn(-maxX, maxX)
-                                    offY = ((size.height / 2f - p.y) * (scale - 1f)).coerceIn(-maxY, maxY)
-                                }
+                                // v165 (owner: "double tap korle rudely zoom
+                                // hocche eita animation er sathe kore daw"):
+                                // the tap used to TELEPORT the picture to 2.5x
+                                // (and back). The target is the same; it is
+                                // walked there now — a short spring that reads
+                                // as a zoom instead of a jump. Pinch is
+                                // untouched and cancels the animation by
+                                // writing the same state the animation drives.
+                                val target = if (scale > 1f) 1f else 2.5f
+                                val tx =
+                                    if (target > 1f) {
+                                        val maxX = size.width * (target - 1f) / 2f
+                                        ((size.width / 2f - p.x) * (target - 1f)).coerceIn(-maxX, maxX)
+                                    } else {
+                                        0f
+                                    }
+                                val ty =
+                                    if (target > 1f) {
+                                        val maxY = size.height * (target - 1f) / 2f
+                                        ((size.height / 2f - p.y) * (target - 1f)).coerceIn(-maxY, maxY)
+                                    } else {
+                                        0f
+                                    }
+                                val s0 = scale
+                                val x0 = offX
+                                val y0 = offY
+                                zoomJob?.cancel()
+                                zoomJob =
+                                    scope.launch {
+                                        androidx.compose.animation.core.animate(
+                                            0f,
+                                            1f,
+                                            animationSpec = spring(
+                                                dampingRatio = 0.86f,
+                                                stiffness = Spring.StiffnessMediumLow,
+                                            ),
+                                        ) { k, _ ->
+                                            scale = s0 + (target - s0) * k
+                                            offX = x0 + (tx - x0) * k
+                                            offY = y0 + (ty - y0) * k
+                                        }
+                                        scale = target
+                                        offX = tx
+                                        offY = ty
+                                    }
                             },
                         )
                     },
@@ -517,6 +555,15 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
     var saved by remember { mutableStateOf(false) }
     var savingClip by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    // v165 (owner: "photo va video zoom korar jonno double tap korle rudely
+    // zoom hocche … smoothly zoom hoi"): the clip zooms under a double tap the
+    // way the photo does — same 2.5x, same spring, same walk there instead of
+    // a jump. The gesture sits on the same detector that toggles the chrome;
+    // pinch is not claimed (the player keeps its own controls).
+    var vScale by remember { mutableFloatStateOf(1f) }
+    var vOffX by remember { mutableFloatStateOf(0f) }
+    var vOffY by remember { mutableFloatStateOf(0f) }
+    var vZoomJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     // Owner round 32 (item 46): ⋮ → Save / Forward sheet (Forward = the
     // chat picker, then the clip is re-posted by its file key).
     var menuOpen by remember { mutableStateOf(false) }
@@ -543,7 +590,15 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
     if (menuOpen) {
         MediaMenuSheet(
             onDismiss = { menuOpen = false },
-            onSave = if (m != null && dest != null && state == 1 && !privateClip && !saved) ({ menuOpen = false; saveClip() }) else null,
+            // v165: savable as soon as the clip is on this phone — the old
+            // gate also required state == 1, so a clip that was already cached
+            // (or one whose inline load path differed) offered no Save at all.
+            onSave =
+                if (m != null && dest != null && dest.exists() && dest.length() > 0L && !privateClip && !saved) {
+                    ({ menuOpen = false; saveClip() })
+                } else {
+                    null
+                },
             onForward = if (canForward) ({ menuOpen = false; forwarding = true }) else null,
         )
     }
@@ -615,7 +670,47 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
         Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .pointerInput(Unit) { detectTapGestures { chrome = !chrome } },
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { chrome = !chrome },
+                    onDoubleTap = { p ->
+                        val target = if (vScale > 1f) 1f else 2.5f
+                        val tx =
+                            if (target > 1f) {
+                                val maxX = size.width * (target - 1f) / 2f
+                                ((size.width / 2f - p.x) * (target - 1f)).coerceIn(-maxX, maxX)
+                            } else {
+                                0f
+                            }
+                        val ty =
+                            if (target > 1f) {
+                                val maxY = size.height * (target - 1f) / 2f
+                                ((size.height / 2f - p.y) * (target - 1f)).coerceIn(-maxY, maxY)
+                            } else {
+                                0f
+                            }
+                        val s0 = vScale
+                        val x0 = vOffX
+                        val y0 = vOffY
+                        vZoomJob?.cancel()
+                        vZoomJob =
+                            scope.launch {
+                                androidx.compose.animation.core.animate(
+                                    0f,
+                                    1f,
+                                    animationSpec = spring(dampingRatio = 0.86f, stiffness = Spring.StiffnessMediumLow),
+                                ) { k, _ ->
+                                    vScale = s0 + (target - s0) * k
+                                    vOffX = x0 + (tx - x0) * k
+                                    vOffY = y0 + (ty - y0) * k
+                                }
+                                vScale = target
+                                vOffX = tx
+                                vOffY = ty
+                            }
+                    },
+                )
+            },
     ) {
         when {
             m == null || dest == null || state == -1 -> {
@@ -634,7 +729,17 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
                 }
             }
             else -> {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = vScale
+                            scaleY = vScale
+                            translationX = vOffX
+                            translationY = vOffY
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
                     AndroidView(
                         factory = { c ->
                             android.view.TextureView(c).apply {
@@ -672,6 +777,23 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
             }
         }
 
+        // v165: the ⋮ is ALWAYS on screen (see the note on the top bar) — its
+        // own 44 dp seat in the corner, over the clip, for the whole session.
+        if (m != null && !privateClip) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(top = 46.dp, end = 4.dp)
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(Color(0x59000000))
+                    .clickable { menuOpen = true },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.MoreVert, "More", tint = Color.White, modifier = Modifier.size(22.dp))
+            }
+        }
         if (chromeAlpha > 0.01f) {
             // ---- top bar: back · title/date · rotate · save ----
             Row(
@@ -695,14 +817,18 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
                 IconButton(onClick = { haptics.tap(); setLandscape(!landscape) }) {
                     Icon(Icons.Filled.ScreenRotation, "Rotate", tint = if (landscape) accent else Color.White, modifier = Modifier.size(22.dp))
                 }
+                // v165 (owner: "video receive korle 3 dot option nai save
+                // forward photo te jemon ache"): this ⋮ lived inside the
+                // auto-hiding bar AND was replaced by the saving spinner /
+                // the saved tick — so a received clip that had been played
+                // (chrome hidden after 3 s) or saved once had NO way to reach
+                // Save / Forward again, while the photo viewer's ⋮ is always
+                // there. The seat is fixed now; the spinner and the tick ride
+                // BESIDE it instead of taking its place.
                 if (savingClip) {
-                    CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.padding(end = 14.dp).size(18.dp))
+                    CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.padding(end = 6.dp).size(18.dp))
                 } else if (saved) {
-                    Icon(Icons.Filled.Check, "Saved", tint = Color.White, modifier = Modifier.padding(end = 14.dp).size(22.dp))
-                } else if (m != null && !privateClip) {
-                    IconButton(onClick = { menuOpen = true }) {
-                        Icon(Icons.Filled.MoreVert, "More", tint = Color.White, modifier = Modifier.size(24.dp))
-                    }
+                    Icon(Icons.Filled.Check, "Saved", tint = Color.White, modifier = Modifier.padding(end = 6.dp).size(20.dp))
                 }
             }
             // ---- centre: play / pause / replay ----

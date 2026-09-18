@@ -119,8 +119,11 @@ const store = kt("ScreenStore.kt");
       edit.includes("rotation != 0 || filterIdx != 0 || cropBox != null || hd ||") &&
       edit.includes("(clip != null && (start > 0L || end < clip.durationMs))") &&
       edit.includes("if (hasEdits) {") &&
+      // v165 (owner: "done button er size kom koro ar background border
+      // intensity gray almost transparent rakho") — same button, smaller and
+      // grey; the chip's own round pins the new literals in case 35.
       edit.includes(
-        'Text("Done", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)',
+        'Text("Done", color = Color.White.copy(alpha = 0.94f), fontSize = 11.5.sp, fontWeight = FontWeight.Medium)',
       ) &&
       edit.includes("haptics.tap()\n                                applyEdits()"),
   );
