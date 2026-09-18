@@ -384,6 +384,19 @@ internal fun TrimStrip(
     val scrubCb = rememberUpdatedState(onScrub)
     val seekCb = rememberUpdatedState(onSeek)
     val windowCb = rememberUpdatedState(onWindow)
+    // v161 (item 2/4): the gestures' KEYS are stable again.
+    // v160 keyed the drag's pointerInput on `positionMs` — a value that ticks
+    // with the playing clip — so the recognizer was torn down and rebuilt
+    // mid-drag: onDragEnd never ran, `scrub` stayed non-null and the preview
+    // stayed paused for good ("video te drag korle pause hoye jai, ar play
+    // hoi na"). s/e/widthPx are state-backed (a closure reads them live);
+    // only positionMs is a parameter and needs the live wrapper.
+    val posNow = rememberUpdatedState(positionMs)
+    // v161 (item 2): the strip is the only thing that ever pauses the preview
+    // (scrubAt != null). If this strip leaves composition mid-gesture — swipe
+    // to the next item, tool switch, screen close — the release must still
+    // land, or the clip stays paused with no way back.
+    DisposableEffect(Unit) { onDispose { scrubCb.value(null) } }
     // Owner round 34 (item 18): the position ticks land every 120 ms — glide
     // the playhead between them (linear, about one tick) instead of jumping
     // tick to tick. Hoisted into composition: the value is drawn by the
@@ -401,7 +414,7 @@ internal fun TrimStrip(
             .clip(RoundedCornerShape(8.dp))
             .background(Color(0xFF1B1B1B))
             .onSizeChanged { widthPx = it.width.toFloat().coerceAtLeast(1f) }
-            .pointerInput(durationMs, s, e) {
+            .pointerInput(durationMs) {
                 // A tap inside the window seeks that spot (owner round 45).
                 // The drag below has its own recognizer: tap and drag never
                 // fight, because this one only fires when the finger lifts
@@ -415,7 +428,7 @@ internal fun TrimStrip(
                     }
                 }
             }
-            .pointerInput(durationMs, s, e, positionMs) {
+            .pointerInput(durationMs) {
                 detectDragGestures(
                     onDragStart = { pos ->
                         val sx = s / total * widthPx
@@ -426,7 +439,7 @@ internal fun TrimStrip(
                         val dh = kotlin.math.abs(pos.x - headPx)
                         mode =
                             when {
-                                dh <= grabPx && positionMs != null && mode == 0 -> 4
+                                dh <= grabPx && pos != null && mode == 0 -> 4
                                 ds <= grabPx && ds <= de -> 1
                                 de <= grabPx -> 2
                                 pos.x in sx..ex -> 3

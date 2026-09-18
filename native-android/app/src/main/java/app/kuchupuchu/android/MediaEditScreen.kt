@@ -272,7 +272,10 @@ private fun MediaEditItemScreen(
     var cropTouched by remember(pickedUri, bits) { mutableStateOf(bits?.cropTouched ?: false) }
     var cropPreset by remember(pickedUri, bits) { mutableStateOf(bits?.cropPreset ?: "Original") }
     // Owner round 45 (item 7): snapshot this photo's work for the browse back.
-    DisposableEffect(Unit) {
+    // v161 (item 2): keyed on pickedUri — the chrome no longer re-composes per
+    // item (the media alone changes), so this snapshot has to fire on the SWIPE
+    // itself, otherwise edits were dropped when moving between photos.
+    DisposableEffect(pickedUri) {
         onDispose {
             onBits?.invoke(
                 EditBits(

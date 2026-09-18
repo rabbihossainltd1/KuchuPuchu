@@ -119,6 +119,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -519,6 +520,10 @@ fun ChatScreen(nav: NavController, convId: String) {
         next = next.filter { it.optString("kind") != "DELETED" || it.optString("id") !in vanishingIds }
         // Fix dust replay: also drop tombstones already in vanishedOnce (already dusted, don't re-animate)
         next = next.filter { it.optString("kind") != "DELETED" || it.optString("id") !in vanishedOnce }
+        // v161 (item 5): an id whose dust already played is done — a paint
+        // must not bring it back as a tombstone OR as the live row a stale
+        // cache/socket echo still carries.
+        next = next.filter { it.optString("id") !in dustLatched }
         val oldIds = msgs.map { it.optString("id") }
         val newIds = next.map { it.optString("id") }
         if (oldIds == newIds) {
@@ -928,7 +933,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 // (the owner's "profile theke back ashle
                                 // deleted message abar ashe").
                                 liveId.isNotBlank() &&
-                                    (liveId in ScreenStore.hiddenMsgIds || (liveMsg.optString("kind") == "DELETED" && liveId in dustLatched)) -> Unit
+                                    (liveId in ScreenStore.hiddenMsgIds || liveId in dustLatched) -> Unit
                                 // New inbound message: chronological = append at the
                                 // end (the thread is oldest-first).
                                 else -> {
@@ -1901,6 +1906,9 @@ fun ChatScreen(nav: NavController, convId: String) {
         // Owner round 33 (item 11b): the bubbles explode while the server
         // delete runs; the list drops them on the next paint.
         vanishingIds.addAll(ids)
+        // v161 (item 5): latched the moment the show starts — the id can
+        // never dust a second time (see ScreenStore.dustLatchedIds).
+        ScreenStore.latchDust(ids)
         scope.launch {
             ids.forEach { id ->
                 runCatching { withContext(Dispatchers.IO) { Api.delete("/api/messages/$id") } }
@@ -1926,6 +1934,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             ids.forEach { ScreenStore.hideMessage(it) }
             paintFromStore()
         }
+        ScreenStore.latchDust(ids)
     }
 
     fun forwardSelected(targets: List<String>) {
@@ -2119,36 +2128,81 @@ fun ChatScreen(nav: NavController, convId: String) {
 
     var savedIndex by remember(convId) { mutableStateOf(0) }
     var savedOffset by remember(convId) { mutableStateOf(0) }
-    // Attach panel glide — same 300ms as keyboard, but simpler: no
-    // saved-index restore (that caused drift on 340<->520 toggles). When
-    // at the bottom we just follow the delta; when mid-thread we keep
-    // the viewport still. Final snap cleans rounding residue.
-    val attachTargetPx = with(LocalDensity.current) { (if (showAttach) if (attachFs) 520.dp else 340.dp else 0.dp).toPx() }
-    val attachGlidePx by androidx.compose.animation.core.animateFloatAsState(
-        attachTargetPx,
-        tween(durationMillis = 300, easing = androidx.compose.animation.core.FastOutSlowInEasing),
-        label = "attachglide",
-    )
-    var attachApplied by remember(showAttach, attachFs, convId) { mutableStateOf(0f) }
-    LaunchedEffect(attachGlidePx) {
-        val delta = attachGlidePx - attachApplied
-        if (delta == 0f) return@LaunchedEffect
-        val info = listState.layoutInfo
-        val total = info.totalItemsCount
-        val tail = info.visibleItemsInfo.lastOrNull()
-        val atBottom = tail != null && (tail.index >= total - 1 || (tail.index == total - 1 && tail.offset + tail.size <= info.viewportEndOffset + 24))
-        if (atBottom) {
-            // At bottom: follow the panel exactly, snap at the end to kill residue
-            val consumed = runCatching { listState.scrollBy(delta) }.getOrDefault(0f)
-            attachApplied += consumed
-            if (kotlin.math.abs(attachGlidePx - attachApplied) < 0.5f) attachApplied = attachGlidePx
-            // If we couldn't consume full delta (clamped at top), sync anyway to avoid drift
-            if (kotlin.math.abs(consumed - delta) > 0.5f) attachApplied = attachGlidePx
-        } else {
-            // Mid-thread: keep viewport still, just sync the applied value
-            attachApplied = attachGlidePx
+    // ---------------------------------------------------------------
+    // Attach panel rider (v161, owner items 1 + 6).
+    //
+    // AttachSheet's panel is a REAL child of this screen's Column
+    // (`Column(...).height(panelH)`, panelH = animateDpAsState(tween(220))
+    // between 40% of the screen and screen-132dp), so opening it SHRINKS
+    // this thread's viewport in that very animation, and the newest row
+    // slides out of sight behind it. v158-v160 tried to compensate with
+    // GUESSES (340/520 dp @ 300 ms) plus a saved-index restore; the guesses
+    // never matched the panel, the message stopped lifting and the close
+    // drifted (owner: "uporei jai na", "ektu niche chole jai").
+    //
+    // This rider is MEASURED instead: whatever changes the thread's viewport
+    // (the panel, its fullscreen toggle, the composer hiding once a photo is
+    // ticked, anything) lifts the thread by exactly the pixels it lost while
+    // the reader was at the tail, and gives them back on the way out. No dp
+    // constants, no restore — nothing left to drift.
+    // ---------------------------------------------------------------
+    var listVpPx by remember(convId) { mutableStateOf(0) }
+    var panelRideUntil by remember(convId) { mutableStateOf(0L) }
+    var panelRidePin by remember(convId) { mutableStateOf(true) }
+    var panelRideResidue by remember(convId) { mutableStateOf(0f) }
+    val panelOpenNow = rememberUpdatedState(showAttach || showStickers)
+    val imeNow = rememberUpdatedState(glidePx)
+    LaunchedEffect(showAttach, showStickers) {
+        if (showAttach || showStickers) panelRideUntil = Long.MAX_VALUE
+        else if (panelRideUntil != 0L) panelRideUntil = System.currentTimeMillis() + 450
+    }
+    // The pin is re-read only while no panel transition is in flight, so the
+    // first (shrinking) frame still rides the reading taken before the panel.
+    LaunchedEffect(convId) {
+        snapshotFlow {
+            val info = listState.layoutInfo
+            val tail = info.visibleItemsInfo.lastOrNull()
+            Triple(tail?.let { it.index to (it.offset + it.size) }, info.totalItemsCount, info.viewportEndOffset)
+        }.collect { (tail, total, vpEnd) ->
+            if (panelOpenNow.value || System.currentTimeMillis() < panelRideUntil) return@collect
+            panelRidePin = tail != null && tail.first >= total - 1 && tail.second <= vpEnd + 24
         }
-        if (attachGlidePx == 0f) attachApplied = 0f
+    }
+    LaunchedEffect(convId) {
+        var prev = 0
+        snapshotFlow { listVpPx to imeNow.value }.collect { (h, ime) ->
+            val from = prev
+            prev = h
+            if (from <= 0 || h <= 0 || h == from) return@collect
+            val riding = panelOpenNow.value || System.currentTimeMillis() < panelRideUntil
+            // The keyboard owns its own rider (padForIme + LaunchedEffect(glidePx)):
+            // never correct the same pixels twice.
+            if (!riding || ime > 1) return@collect
+            val info = listState.layoutInfo
+            val tail = info.visibleItemsInfo.lastOrNull()
+            val atTail = tail != null && tail.index >= info.totalItemsCount - 1
+            val want = (from - h).toFloat() + panelRideResidue
+            if (want > 0f) {
+                // The viewport shrank — lift the thread, but only for a reader
+                // who was parked at the newest message.
+                if (panelRidePin || atTail) {
+                    panelRidePin = true
+                    panelRideResidue = want - runCatching { listState.scrollBy(want) }.getOrDefault(0f)
+                } else {
+                    panelRideResidue = 0f
+                }
+            } else {
+                // The viewport grew again (panel closing / composer back) —
+                // the same pixels, given straight back, so the thread lands
+                // exactly where it started.
+                if (panelRidePin && (atTail || (tail?.index ?: 0) >= info.totalItemsCount - 3)) {
+                    panelRideResidue = want - runCatching { listState.scrollBy(want) }.getOrDefault(0f)
+                } else {
+                    panelRideResidue = 0f
+                }
+            }
+            if (!riding && kotlin.math.abs(panelRideResidue) < 0.5f) panelRideResidue = 0f
+        }
     }
 
     // Capture once per open so close can restore exactly (cures 1-line drift at any
@@ -2578,7 +2632,14 @@ fun ChatScreen(nav: NavController, convId: String) {
         // r51's self-padding here was the black band: reverted. At
         // edge-to-edge the thread is kept above the ride by the scroll
         // follower above — never by shrinking this Box.
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                // v161: the thread's viewport is MEASURED here — the attach
+                // panel rider above rides every change of this height.
+                .onSizeChanged { listVpPx = it.height },
+        ) {
             CoinWallpaper()
             // A retried send used to leave TWO server rows with the same
             // clientId; keys collide and the chat crashed on open ("Key ...
@@ -2593,6 +2654,15 @@ fun ChatScreen(nav: NavController, convId: String) {
                 androidx.compose.runtime.derivedStateOf {
                     val seenKeys = HashSet<String>()
                     msgs.filter { m ->
+                        // v161 (item 5): the last word — an id whose dust
+                        // already played is never rendered again (not as the
+                        // tombstone, not as a re-appended live row, not after
+                        // a profile trip, not after a restart). The one
+                        // exception is the show currently in flight, which is
+                        // exactly the row sitting in vanishingIds.
+                        val mid = m.optString("id")
+                        val dusted = mid.isNotBlank() && mid in dustLatched && mid !in vanishingIds
+                        !dusted &&
                         // Owner round 25: unsent messages VANISH — no
                         // "This message was deleted" tombstone any more.
                         // Owner round 38 (item 4): …except MID-SHOW. The live
