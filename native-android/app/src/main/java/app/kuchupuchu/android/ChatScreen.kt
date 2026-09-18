@@ -5641,7 +5641,7 @@ private fun MessageRow(
         return
     }
     if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {
-        ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme)
+        ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme, onCancelSend)
         return
     }
     // Owner round 20: videos render as a tappable video bubble and play
@@ -6273,8 +6273,41 @@ private fun VideoMessageRow(
         )
     }
     var duration by remember(m.optString("id")) {
-        val ms0 = seedMeta?.durationMs ?: 0L
+        // v163: the sender measured the clip, so its length is known before the
+        // file is — the bubble stops saying nothing until a download happens.
+        val ms0 = seedMeta?.durationMs ?: m.optJSONObject("meta")?.optLong("durMs") ?: 0L
         mutableStateOf(if (ms0 > 0L) "%d:%02d".format(ms0 / 1000 / 60, ms0 / 1000 % 60) else "")
+    }
+    // v163 (owner: "original thumbnail a send hobe"): the poster JPEG the
+    // sender's device made from the clip's first frame (meta.thumbKey). It is
+    // what a receiver draws before it has any of the video — the old bubble
+    // showed a blank tile with a play icon on it ("fake"). It is cached in the
+    // same on-disk slot as a decoded frame, so the next open is instant and no
+    // second fetch happens.
+    val posterKey = m.optJSONObject("meta")?.optString("thumbKey").orEmpty()
+    val poster by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(
+        VideoThumbs.get(cacheKey) ?: VideoThumbs.readThumb(cacheKey),
+        posterKey,
+    ) {
+        if (value != null || posterKey.isBlank() || source.exists()) return@produceState
+        value =
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val bytes = Api.download("/api/files/$posterKey")
+                    val bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    bmp?.let {
+                        val meta = m.optJSONObject("meta")
+                        VideoThumbs.put(
+                            cacheKey,
+                            it,
+                            (meta?.optInt("w") ?: 0).toFloat(),
+                            (meta?.optInt("h") ?: 0).toFloat(),
+                            meta?.optLong("durMs") ?: 0L,
+                        )
+                    }
+                    bmp
+                }.getOrNull()
+            }
     }
     val thumb by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(
         VideoThumbs.get(cacheKey) ?: VideoThumbs.readThumb(cacheKey),
@@ -6379,7 +6412,9 @@ private fun VideoMessageRow(
                     .background(Color(0xFF101A2E)),
                 contentAlignment = Alignment.Center,
             ) {
-                val bmp = thumb
+                // A decoded local frame wins over the sent poster (they are the
+                // same picture, but the local one is the real thing).
+                val bmp = thumb ?: poster
                 if (bmp != null) {
                     androidx.compose.foundation.Image(
                         bitmap = bmp.asImageBitmap(),
@@ -6834,6 +6869,7 @@ private fun ImageMessageRow(
     onReply: (JSONObject) -> Unit = {},
     onLongPress: (JSONObject) -> Unit = {},
     theme: String,
+    onCancelSend: ((String) -> Unit)? = null,
 ) {
     val haptics = rememberHaptics()
     // Owner round 21: the photo reply-swipe sound plays from the row.

@@ -543,7 +543,7 @@ async function mk() {
     "v163: every bubble that draws media takes the message's own box before any hardcoded 16:9 — the clip bubble, the full-screen viewer, and the view-once tile (which now draws the clip's own frame as a 16 px mosaic instead of the fake tile, and keeps a neutral box only when nothing is known, i.e. a view-once clip the recipient has not opened)",
     chat.includes("?: MediaBox.payloadRatio(m).takeIf { it > 0f }") &&
       chat.includes("Modifier.heightIn(max = 320.dp).aspectRatio(videoRatio)") &&
-      viewer.includes("?: MediaBox.payloadRatio(m).takeIf { it > 0f }") &&
+      viewer.includes("?: m?.let { MediaBox.payloadRatio(it) }?.takeIf { it > 0f }") &&
       chat.includes('var videoRatio by remember(m.optString("id")) {') &&
       chat.includes(
         "android.graphics.Bitmap\n                                .createScaledBitmap(it, 16,",
@@ -566,6 +566,66 @@ async function mk() {
       cache.includes("if (status == 499 || isCancelled(clientId)) {") &&
       cache.includes('Api.delete("/api/messages/$id")') &&
       !chat.includes("(upFrac * 100).toInt()}%"),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 6. the second half of v163 — the poster a clip carries, and the delete show
+//    that used to be cut short
+// ---------------------------------------------------------------------------
+{
+  const chat = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/ChatScreen.kt",
+    "utf8",
+  );
+  const cache = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/Cache.kt",
+    "utf8",
+  );
+  const facts = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/VideoFacts.kt",
+    "utf8",
+  );
+  const anim = readFileSync(
+    "native-android/app/src/main/java/app/kuchupuchu/android/DeleteAnim.kt",
+    "utf8",
+  );
+  const worker = readFileSync("src/worker/index.ts", "utf8");
+
+  check(
+    'v163 (owner: "original thumbnail a send hobe"): a clip is SENT with a poster made from its own first frame — VideoFacts reads the box rotation-aware and encodes a <=480 px JPEG, the queue uploads it and writes meta.w/h/durMs/thumbKey into the payload before the POST, and the bubble draws that poster when it has no local copy (so a receiver sees the real thumbnail without downloading the clip)',
+    facts.includes("internal object VideoFacts {") &&
+      facts.includes("fun probe(f: File): Triple<Int, Int, Long>? {") &&
+      facts.includes("fun poster(f: File, maxW: Int = 480, quality: Int = 80): ByteArray? {") &&
+      facts.includes("if (rot == 90 || rot == 270) {") &&
+      facts.includes("postRotate(rot.toFloat())") &&
+      cache.includes("private fun enrichMedia(clientId: String, body: JSONObject, f: File) {") &&
+      cache.includes('meta.put("durMs", box.third)') &&
+      cache.includes('val up = Api.upload("poster.jpg", "image/jpeg", poster)') &&
+      cache.includes('if (key.isNotBlank()) meta.put("thumbKey", key)') &&
+      cache.includes("if (f.exists() && !isCancelled(clientId)) enrichMedia(clientId, body, f)") &&
+      chat.includes('val posterKey = m.optJSONObject("meta")?.optString("thumbKey").orEmpty()') &&
+      chat.includes("val bmp = thumb ?: poster") &&
+      chat.includes("VideoThumbs.put(") &&
+      chat.includes('?: m.optJSONObject("meta")?.optLong("durMs") ?: 0L'),
+  );
+  check(
+    "v163: …and the poster is reachable by the OTHER side — the send binds meta.thumbKey to the conversation in the same write batch as the clip (no 403 on a bubble that was supposed to stop being blank), and the key is shape-checked before it can reach a row",
+    worker.includes("const thumbKey = thumbKeyOf(kind, imageData ?? fileKey, incomingMeta);") &&
+      worker.includes("...(thumbKey\n        ? [") &&
+      worker.includes(".bind(convId, thumbKey, uid),") &&
+      worker.includes("function thumbKeyOf(") &&
+      worker.includes("if (!/^f\\/[A-Za-z0-9._-]+$/.test(key)) return undefined;"),
+  );
+  check(
+    'v163 (owner regression: "majhe majhe full delete animation hobar agei message remove hoye jai"): a delete show\'s geometry is RETRIED for a short window instead of being a single all-or-nothing read — a miss used to drop the row on the spot — and a row that never gets one still plays the short show instead of popping',
+    anim.includes("const val GEOM_TRIES = 10") &&
+      anim.includes("const val GEOM_RETRY_MS = 40L") &&
+      anim.includes("repeat(DeleteAnim.GEOM_TRIES) {") &&
+      anim.includes("noGeom = true") &&
+      anim.includes("|| capFailed || noGeom)") &&
+      !anim.includes("nothing to play — drop now") &&
+      chat.includes("val holdAll = hold.filter { it !in dustLatched || it in vanishingIds }"),
   );
 }
 

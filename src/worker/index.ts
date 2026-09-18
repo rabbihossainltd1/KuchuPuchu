@@ -7827,6 +7827,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const mid = id();
     const incomingMeta = (body.meta as Record<string, unknown> | undefined) ?? {};
     const dims = imageDims(kind, imageData ?? fileKey, incomingMeta);
+    // v163: the poster the sender measured off the clip (see the media rules).
+    // Opaque key, shape-checked, never trusted as a URL.
+    const thumbKey = thumbKeyOf(kind, imageData ?? fileKey, incomingMeta);
     // Owner round 31 (item 29): photos sent together share ONE album id, so
     // every device folds them into a single grouped bubble. Each photo stays
     // its own row (unsend / forward / react per photo keep working); the id
@@ -7928,6 +7931,21 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
                 "UPDATE files SET conv_id = ? WHERE key = ? AND owner_id = ? AND conv_id IS NULL",
               )
               .bind(convId, fileKey, uid),
+          ]
+        : []),
+      // v163 (owner's thumbnail rule): a clip travels with a poster JPEG
+      // (meta.thumbKey). It is bound to this conversation in the same batch as
+      // the clip itself — without this the OTHER side is refused with 403 when
+      // it fetches the poster (the object is the sender's, and no message row
+      // carries it as its media), i.e. the bubble would fall back to the very
+      // blank tile the poster exists to replace.
+      ...(thumbKey
+        ? [
+            db
+              .prepare(
+                "UPDATE files SET conv_id = ? WHERE key = ? AND owner_id = ? AND conv_id IS NULL",
+              )
+              .bind(convId, thumbKey, uid),
           ]
         : []),
       db
@@ -9903,6 +9921,25 @@ function imageDims(
   if (!Number.isFinite(w) || !Number.isFinite(h) || w < 1 || h < 1 || w > 20000 || h > 20000)
     return {};
   return { w, h };
+}
+
+/**
+ * v163: a video / photo upload may carry a small poster JPEG made from its own
+ * first frame (`meta.thumbKey`, uploaded through the ordinary /api/files
+ * route). It is what the receiving bubble draws before it has a single byte of
+ * the clip, so the key is validated like every other upload key and dropped
+ * unless it is usable — a bad value must never reach a message row.
+ */
+function thumbKeyOf(
+  kind: string,
+  hasMedia: unknown,
+  meta: Record<string, unknown>,
+): string | undefined {
+  if (kind !== "FILE" || !hasMedia) return undefined;
+  const key = typeof meta.thumbKey === "string" ? meta.thumbKey.trim() : "";
+  if (!key || key.length > 200) return undefined;
+  if (!/^f\/[A-Za-z0-9._-]+$/.test(key)) return undefined;
+  return key;
 }
 
 function msgFrom(row: MsgRow) {

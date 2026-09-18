@@ -80,6 +80,15 @@ internal object DeleteAnim {
     // case, so heavy rows (photos: full particle field, slowest draw) were
     // yanked mid-dust on ordinary phones.
     const val GRACE_MS = 3200L
+    // v163 (owner: "majhe majhe full delete animation hobar agei message
+    // remove hoye jai"): the geometry a show needs is taken ONCE, and a row
+    // whose entry a previous show consumed (or which simply had not been laid
+    // out yet) got a null back — the shell then dropped it on the spot, which
+    // is exactly "the message leaves before the animation". The rects are
+    // re-registered by the very next layout pass, so the take is RETRIED for a
+    // short window instead of being a single all-or-nothing shot.
+    const val GEOM_TRIES = 10
+    const val GEOM_RETRY_MS = 40L
     const val MAX_W = 360
     const val BLOCK = 2
     const val EXTRA = 14f
@@ -326,13 +335,31 @@ internal fun DeleteRowShell(
 ) {
     var dead by remember(rowKey, m.optString("kind")) { mutableStateOf(false) }
     if (dead) return
+    // v163: latched through STATE, so a retry can still fill it (see below).
+    var geom by remember(rowKey) { mutableStateOf<DeleteFlip?>(null) }
+    var noGeom by remember(rowKey) { mutableStateOf(false) }
     // Owner round 36 (item 5): the tombstone's rise — latched when the dust
     // settles INTO an unsent row instead of leaving a hole.
     var settled by remember(rowKey, m.optString("kind")) { mutableStateOf(false) }
     var shot by remember(rowKey) { mutableStateOf<DeleteShot?>(null) }
     var capFailed by remember(rowKey) { mutableStateOf(false) }
     // Snapshot at the flip: later layouts (collapse) must not move the show.
-    val flip = remember(rowKey, vanishing) { if (vanishing) DeleteGeoms.snapshot(rowKey) else null }
+    // v163: retried over a short window — a single consume-once read meant a
+    // mid-show recomposition (or a rect not registered yet) ended the show
+    // instantly (see GEOM_TRIES).
+    LaunchedEffect(rowKey, vanishing) {
+        if (!vanishing) return@LaunchedEffect
+        repeat(DeleteAnim.GEOM_TRIES) {
+            geom = DeleteGeoms.snapshot(rowKey)
+            if (geom != null) return@LaunchedEffect
+            delay(DeleteAnim.GEOM_RETRY_MS)
+        }
+        // Composed but never laid out: there is nothing to capture — the SHORT
+        // show still plays (the fallback branch), then the row goes. A hard
+        // pop here was the bug.
+        noGeom = true
+    }
+    val flip = geom
     fun finishDead() {
         if (dead) return
         // Owner round 36 (item 5): unsend's tombstone (same id — the live
@@ -351,7 +378,9 @@ internal fun DeleteRowShell(
         dead = true
         onGone()
     }
-    val fallback = vanishing && shot == null && flip != null && (flip.bubble == null || capFailed)
+    val fallback =
+        vanishing && shot == null &&
+            ((flip != null && flip.bubble == null) || capFailed || noGeom)
     Box(
         Modifier
             .fillMaxWidth()
@@ -365,16 +394,17 @@ internal fun DeleteRowShell(
         if (fallback) Box(Modifier.vanishOut(true) { finishDead() }) { bubble() }
         if (shot != null) DestroyCanvas(shot!!, onDone = { finishDead() })
         if (vanishing && shot == null && !fallback) {
-            if (flip == null) {
-                // Composed but never laid out: nothing to play — drop now.
-                LaunchedEffect(rowKey) { finishDead() }
-            } else {
-                LaunchedEffect(rowKey) {
+            // The geometry may still be arriving (the retry above); the bubble
+            // keeps its slot meanwhile — the same frame it retires, the canvas
+            // takes over.
+            val f = flip
+            if (f != null && f.bubble != null) {
+                LaunchedEffect(rowKey, f) {
                     // The action sheet needs a beat to finish exiting, or the
                     // capture frames it sliding over the bubble.
                     delay(DeleteAnim.PRE_MS)
-                    val bmp = DeleteAnim.capture(flip.bubble!!)
-                    if (bmp == null) capFailed = true else shot = DeleteShot(bmp, flip.row, flip.bubble)
+                    val bmp = DeleteAnim.capture(f.bubble)
+                    if (bmp == null) capFailed = true else shot = DeleteShot(bmp, f.row, f.bubble)
                 }
             }
         }

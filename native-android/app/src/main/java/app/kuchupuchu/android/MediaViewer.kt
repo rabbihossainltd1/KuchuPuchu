@@ -500,7 +500,7 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
                 // v163: the message carries the clip's own box from the sender's
                 // measurement, so a clip that was never downloaded still opens
                 // in its own shape instead of the hardcoded 16:9.
-                ?: MediaBox.payloadRatio(m).takeIf { it > 0f }
+                ?: m?.let { MediaBox.payloadRatio(it) }?.takeIf { it > 0f }
                 ?: (16f / 9f),
         )
     }

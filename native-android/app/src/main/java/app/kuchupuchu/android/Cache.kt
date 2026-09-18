@@ -263,6 +263,10 @@ object Outbox {
      */
     private val cancelled = java.util.Collections.synchronizedSet(HashSet<String>())
 
+    /** Extensions the poster/box step recognises when the mime says nothing. */
+    private val PHOTO_EXT = listOf(".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".bmp", ".gif")
+    private val VIDEO_EXT = listOf(".mp4", ".mov", ".mkv", ".webm", ".3gp", ".m4v", ".avi")
+
     fun isCancelled(clientId: String): Boolean = clientId in cancelled
 
     /** Cancels a queued / in-flight send. True when the entry was still in the
@@ -320,8 +324,21 @@ object Outbox {
      * A payload that already has its key is returned as is.
      */
     private fun materialize(clientId: String, body: JSONObject, local: JSONObject?): JSONObject {
-        if (body.optString("kind") != "FILE" || body.optString("fileKey").isNotBlank()) return body
         val path = local?.optString("path").orEmpty()
+        if (path.isNotBlank()) {
+            val f = File(path)
+            // v163 (owner: "video/photo send korle original ratio te original
+            // thumbnail a send hobe"): the media's OWN box and (for a clip) a
+            // real poster ride the message. This runs on IO, in the one place
+            // that is about to POST it, so every path (chat, share intake, the
+            // editor's export) gets it — and the receiver can draw the true
+            // thumbnail and the true shape without downloading the clip first.
+            if (f.exists() && !isCancelled(clientId)) enrichMedia(clientId, body, f)
+            else if (!f.exists() && body.optString("fileKey").isBlank()) {
+                throw ApiException(410, "That file is no longer on this phone.")
+            }
+        }
+        if (body.optString("kind") != "FILE" || body.optString("fileKey").isNotBlank()) return body
         if (path.isBlank()) return body
         val f = File(path)
         if (!f.exists()) throw ApiException(410, "That file is no longer on this phone.")
@@ -353,6 +370,57 @@ object Outbox {
         stampBox(clientId, body, mime, f)
         setKey(clientId, key, f.length())
         return body
+    }
+
+    /**
+     * v163: a clip's poster + its own box + its duration, and a photo's box,
+     * measured once and written into the payload as `meta`:
+     *
+     *   w / h    – the real, rotation-aware box. The server republishes these as
+     *              mediaW / mediaH, so the OTHER side lays the bubble out at the
+     *              clip's own ratio on its first frame (the old hardcoded 16:9
+     *              tile is what the owner called "fake").
+     *   durMs    – the length, shown on the bubble before anything is fetched.
+     *   thumbKey – a small JPEG of the first frame, uploaded like any file, so
+     *              the receiver shows the real thumbnail instead of the blank
+     *              tile it used to have until the whole clip downloaded.
+     *
+     * Nothing is redone on a retry: the queue's own copy gets the same meta and
+     * the keys are checked first.
+     */
+    private fun enrichMedia(clientId: String, body: JSONObject, f: File) {
+        val mime = body.optString("fileType").ifBlank { f.name.substringAfterLast('.', "") }.lowercase()
+        val isDoc = body.optJSONObject("meta")?.optBoolean("document") == true
+        val isVoice = body.optJSONObject("meta")?.optBoolean("voice") == true
+        if (isDoc || isVoice) return
+        val clip = mime.startsWith("video/") || VIDEO_EXT.any { f.name.lowercase().endsWith(it) }
+        val photo = mime.startsWith("image/") || PHOTO_EXT.any { f.name.lowercase().endsWith(it) }
+        if (!clip && !photo) return
+        val meta = body.optJSONObject("meta") ?: JSONObject()
+        if (clip && meta.optInt("h") > 0 && meta.optString("thumbKey").isNotBlank()) return
+        if (photo && meta.optInt("h") > 0) return
+        val box = VideoFacts.probe(f)
+        if (box != null) {
+            if (box.first > 0 && box.second > 0) meta.put("w", box.first).put("h", box.second)
+            if (box.third > 0L) meta.put("durMs", box.third)
+        }
+        if (clip) {
+            val poster = VideoFacts.poster(f, 480)
+            if (poster != null) {
+                val up = Api.upload("poster.jpg", "image/jpeg", poster)
+                val key = up.optString("fileKey")
+                if (key.isNotBlank()) meta.put("thumbKey", key)
+            }
+        }
+        if (meta.length() == 0) return
+        body.put("meta", meta)
+        // The queue holds its OWN deep copy (enqueue), so the meta has to land
+        // there too — otherwise a retry after a network blip would post the
+        // message without its shape or poster.
+        items.firstOrNull { it.optString("clientId") == clientId }
+            ?.optJSONObject("body")
+            ?.put("meta", JSONObject(meta.toString()))
+        save()
     }
 
     /**

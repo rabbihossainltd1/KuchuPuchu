@@ -1662,8 +1662,9 @@ const convBetween = (db, a, b) =>
     chat.includes("if (mine) {") &&
       chat.includes("(replyDrag + dragAmount).coerceIn(-replyThreshold * 1.5f, 0f)") &&
       chat.includes("if (mine) replyThreshold * 1.5f else replyThreshold") &&
+      // v163: the row also hands the ✕ (cancel send) down.
       chat.includes(
-        "ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme)",
+        "ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme, onCancelSend)",
       ),
   );
   check(

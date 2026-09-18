@@ -189,7 +189,7 @@ object Api {
         val total = file.length()
         if (total > SINGLE_MAX) return uploadChunked(name, mime, file, onProgress)
         val path = "/api/files?name=${q(name)}&type=${q(mime)}"
-        val total = file.length()
+
         val body =
             object : RequestBody() {
                 override fun contentType(): MediaType = OCTET
