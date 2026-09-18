@@ -222,6 +222,11 @@ private class TrimClipPlayer(
     private fun seek(p: android.media.MediaPlayer, ms: Long) {
         seeking = true
         seekSince = android.os.SystemClock.uptimeMillis()
+        // v162 (item 2): land the reference on the TARGET at once. tick()'s
+        // "behind the last landing -> restart from the start handle" rule used
+        // to compare against the PREVIOUS position while a backward seek was
+        // still moving, and replayed the clip from the top mid-drag.
+        landedAt = ms
         runCatching {
             if (android.os.Build.VERSION.SDK_INT >= 26) {
                 p.seekTo(ms, android.media.MediaPlayer.SEEK_CLOSEST)
@@ -448,6 +453,7 @@ internal fun TrimStrip(
                         // Playhead scrub starts from its current pixel
                         if (mode == 4) {
                             val ms = (pos.x / widthPx * total).toLong().coerceIn(s, e)
+                            scrubCb.value(ms)
                             seekCb.value(ms)
                         }
                         grabS = s
@@ -475,6 +481,11 @@ internal fun TrimStrip(
                         travel += drag.x
                         val curPx = (grabS / total * widthPx) + travel
                         val ms = (curPx / widthPx * total).toLong().coerceIn(s, e)
+                        // v162 (item 2): hold the frame for the whole drag (the
+                        // hold is what pauses the preview) and seek — releasing
+                        // clears it, so playback resumes from the playhead
+                        // instead of running from wherever it drifted to.
+                        scrubCb.value(ms)
                         seekCb.value(ms)
                         return@detectDragGestures
                     }

@@ -276,6 +276,16 @@ object ScreenStore {
      *  chat it was opened from — consumed (nulled) by that chat on arrival. */
     val pendingEdited = kotlinx.coroutines.flow.MutableStateFlow<EditedResult?>(null)
 
+    /**
+     * v162 (owner: "multiple select kore send korle just ektay media jai"):
+     * the editor's blue circle used to hand back the CURRENT item alone, even
+     * with several ticked (the round badge showed the real count, so the send
+     * looked broken). The ticked set now comes back as one batch — the current
+     * item with its edits, the rest exactly as picked — and the chat sends
+     * them like any attach batch (shared album id for 2+ photos).
+     */
+    val pendingEditedBatch = kotlinx.coroutines.flow.MutableStateFlow<List<EditedResult>?>(null)
+
     /** Owner round 34 (item 16b): the name on the editor's recipient chip —
      *  set by the chat that opens the editor. */
     var editTitle: String = ""

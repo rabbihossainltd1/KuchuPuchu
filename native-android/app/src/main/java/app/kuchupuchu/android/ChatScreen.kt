@@ -1711,6 +1711,31 @@ fun ChatScreen(nav: NavController, convId: String) {
             }
         }
     }
+    // v162: a batch from the editor's tick set (see ScreenStore.pendingEditedBatch).
+    // Sent exactly like an attach batch: 2+ photos share one album id, videos
+    // ride as documents, view-once / captions travel per item.
+    LaunchedEffect(convId) {
+        ScreenStore.pendingEditedBatch.collect { batch ->
+            if (batch.isNullOrEmpty() || batch.first().convId != convId) return@collect
+            ScreenStore.pendingEditedBatch.value = null
+            val photos =
+                batch.count { e ->
+                    val m = e.media
+                    m is EditedMedia.Photo || (m is EditedMedia.Untouched && !m.isVideo)
+                }
+            val album = if (photos >= 2) newAlbumId() else null
+            batch.forEach { edited ->
+                when (val m = edited.media) {
+                    is EditedMedia.Photo -> sendImage(m.dataUrl, album, edited.viewOnce, caption = edited.caption)
+                    is EditedMedia.Video -> sendFile("video.mp4", m.mime, m.file, viewOnce = edited.viewOnce, caption = edited.caption)
+                    is EditedMedia.Untouched ->
+                        if (m.isVideo) handleDocumentPicked(m.uri, viewOnce = edited.viewOnce, caption = edited.caption)
+                        else readAndSendImage(m.uri, album, viewOnce = edited.viewOnce, caption = edited.caption)
+                    is EditedMedia.Failed -> error = m.message
+                }
+            }
+        }
+    }
     // Owner round 39 (item 8): the welcome used to fire only at login —
     // old accounts (and threads emptied by a session reset) opened an
     // empty AI chat with no greeting. The server guards once-per-account,
@@ -2129,79 +2154,74 @@ fun ChatScreen(nav: NavController, convId: String) {
     var savedIndex by remember(convId) { mutableStateOf(0) }
     var savedOffset by remember(convId) { mutableStateOf(0) }
     // ---------------------------------------------------------------
-    // Attach panel rider (v161, owner items 1 + 6).
+    // Attach panel rider (v161, reworked v162 after the owner's device test).
     //
-    // AttachSheet's panel is a REAL child of this screen's Column
-    // (`Column(...).height(panelH)`, panelH = animateDpAsState(tween(220))
-    // between 40% of the screen and screen-132dp), so opening it SHRINKS
-    // this thread's viewport in that very animation, and the newest row
-    // slides out of sight behind it. v158-v160 tried to compensate with
-    // GUESSES (340/520 dp @ 300 ms) plus a saved-index restore; the guesses
-    // never matched the panel, the message stopped lifting and the close
-    // drifted (owner: "uporei jai na", "ektu niche chole jai").
+    // The panel is a REAL child of this screen's Column
+    // (`Column(...).height(panelH)`, panelH = animateDpAsState(tween(220)), 40%
+    // of the screen <-> screen-132dp), so opening it SHRINKS the thread's
+    // viewport and the newest row slips behind it. v161 watched that height
+    // through a snapshotFlow collector: conflated emissions + a suspension per
+    // correction meant the lift trailed the panel ("time lage") and the first
+    // delta of a repeat open could be swallowed by the flag ordering. This
+    // version runs on the FRAME clock and scrolls with the non-suspending
+    // dispatchRawDelta, so every frame's loss is paid in that same frame —
+    // no lag, no lost delta, repeat opens identical.
     //
-    // This rider is MEASURED instead: whatever changes the thread's viewport
-    // (the panel, its fullscreen toggle, the composer hiding once a photo is
-    // ticked, anything) lifts the thread by exactly the pixels it lost while
-    // the reader was at the tail, and gives them back on the way out. No dp
-    // constants, no restore — nothing left to drift.
+    // Two riders exist in the thread: padForIme (the keyboard, active only
+    // while NO panel is open) and this one. They are mutually exclusive here
+    // on purpose: with a panel open the composer's pad is 0, and the panel
+    // carries the imePadding — so tapping the message bar (keyboard up, panel
+    // open) is THIS rider's job. That was the "message niche pore thake" case.
     // ---------------------------------------------------------------
     var listVpPx by remember(convId) { mutableStateOf(0) }
-    var panelRideUntil by remember(convId) { mutableStateOf(0L) }
     var panelRidePin by remember(convId) { mutableStateOf(true) }
     var panelRideResidue by remember(convId) { mutableStateOf(0f) }
-    val panelOpenNow = rememberUpdatedState(showAttach || showStickers)
-    val imeNow = rememberUpdatedState(glidePx)
+    var panelRideClosedAt by remember(convId) { mutableStateOf(0L) }
     LaunchedEffect(showAttach, showStickers) {
-        if (showAttach || showStickers) panelRideUntil = Long.MAX_VALUE
-        else if (panelRideUntil != 0L) panelRideUntil = System.currentTimeMillis() + 450
-    }
-    // The pin is re-read only while no panel transition is in flight, so the
-    // first (shrinking) frame still rides the reading taken before the panel.
-    LaunchedEffect(convId) {
-        snapshotFlow {
-            val info = listState.layoutInfo
-            val tail = info.visibleItemsInfo.lastOrNull()
-            Triple(tail?.let { it.index to (it.offset + it.size) }, info.totalItemsCount, info.viewportEndOffset)
-        }.collect { (tail, total, vpEnd) ->
-            if (panelOpenNow.value || System.currentTimeMillis() < panelRideUntil) return@collect
-            panelRidePin = tail != null && tail.first >= total - 1 && tail.second <= vpEnd + 24
-        }
+        if (!showAttach && !showStickers) panelRideClosedAt = android.os.SystemClock.uptimeMillis()
     }
     LaunchedEffect(convId) {
-        var prev = 0
-        snapshotFlow { listVpPx to imeNow.value }.collect { (h, ime) ->
-            val from = prev
-            prev = h
-            if (from <= 0 || h <= 0 || h == from) return@collect
-            val riding = panelOpenNow.value || System.currentTimeMillis() < panelRideUntil
-            // The keyboard owns its own rider (padForIme + LaunchedEffect(glidePx)):
-            // never correct the same pixels twice.
-            if (!riding || ime > 1) return@collect
+        var anchor = 0
+        var frame = 0
+        while (true) {
+            androidx.compose.runtime.withFrameNanos { }
+            frame++
+            val h = listVpPx
+            if (h <= 0) continue
+            val open = showAttach || showStickers
+            if (anchor == 0) {
+                anchor = h
+                continue
+            }
+            if (h == anchor) {
+                // Idle: keep the tail pin fresh (skipping every other frame —
+                // it only decides whether a reader was parked at the newest row).
+                if (!open && frame % 4 == 0) {
+                    val info = listState.layoutInfo
+                    val tail = info.visibleItemsInfo.lastOrNull()
+                    panelRidePin = tail != null && tail.index >= info.totalItemsCount - 1 && tail.offset + tail.size <= info.viewportEndOffset + 24
+                }
+                continue
+            }
+            val delta = (anchor - h).toFloat()
+            anchor = h
+            val riding = open || android.os.SystemClock.uptimeMillis() - panelRideClosedAt < 450L
+            // padForIme covers the keyboard only while no panel is open.
+            val keyboardOwns = !open && glidePx > 1
+            if (!riding || keyboardOwns) continue
             val info = listState.layoutInfo
             val tail = info.visibleItemsInfo.lastOrNull()
             val atTail = tail != null && tail.index >= info.totalItemsCount - 1
-            val want = (from - h).toFloat() + panelRideResidue
-            if (want > 0f) {
-                // The viewport shrank — lift the thread, but only for a reader
-                // who was parked at the newest message.
-                if (panelRidePin || atTail) {
-                    panelRidePin = true
-                    panelRideResidue = want - runCatching { listState.scrollBy(want) }.getOrDefault(0f)
-                } else {
-                    panelRideResidue = 0f
-                }
-            } else {
-                // The viewport grew again (panel closing / composer back) —
-                // the same pixels, given straight back, so the thread lands
-                // exactly where it started.
-                if (panelRidePin && (atTail || (tail?.index ?: 0) >= info.totalItemsCount - 3)) {
-                    panelRideResidue = want - runCatching { listState.scrollBy(want) }.getOrDefault(0f)
-                } else {
-                    panelRideResidue = 0f
-                }
+            val nearTail = tail != null && tail.index >= info.totalItemsCount - 3
+            val want = delta + panelRideResidue
+            val take = if (want > 0f) (panelRidePin || atTail) else (panelRidePin && (atTail || nearTail))
+            if (!take) {
+                panelRideResidue = 0f
+                continue
             }
-            if (!riding && kotlin.math.abs(panelRideResidue) < 0.5f) panelRideResidue = 0f
+            if (want > 0f) panelRidePin = true
+            panelRideResidue = want - runCatching { listState.dispatchRawDelta(want) }.getOrDefault(0f)
+            if (!open && kotlin.math.abs(panelRideResidue) < 0.5f) panelRideResidue = 0f
         }
     }
 

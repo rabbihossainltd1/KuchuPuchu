@@ -153,6 +153,9 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
     // isolation via works map and remember(pickedUri) inside the item.
     val item = pool[idx]
     val uriKey = item.uri.toString()
+    // v162: the ticked set in TICK ORDER (selectedUris keeps it) — the send
+    // circle now sends all of them, not just the item on screen.
+    val ticked = selectedUris.mapNotNull { u -> pool.firstOrNull { it.uri.toString() == u } }
     MediaEditItemScreen(
         nav,
         item.uri,
@@ -170,6 +173,7 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
             if (selectedUris.contains(uriKey)) selectedUris.remove(uriKey) else selectedUris.add(uriKey)
         },
         selectedCount = selectedUris.size,
+        ticked = ticked,
     )
 }
 
@@ -204,6 +208,9 @@ private fun MediaEditItemScreen(
     isSelected: Boolean? = null,
     onToggleSelect: (() -> Unit)? = null,
     selectedCount: Int = 0,
+    // v162: every ticked item of the pool, in tick order (empty = no pool
+    // browse, e.g. the attach pencil's single-item trip).
+    ticked: List<MediaItem> = emptyList(),
 ) {
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
@@ -881,7 +888,20 @@ private fun MediaEditItemScreen(
                         }
                     }
                 }.getOrElse { EditedMedia.Failed(it.message ?: "Could not edit that file.") }
-            ScreenStore.pendingEdited.value = EditedResult(convId, once, result, cap)
+            // v162: the ticks are the batch. Several ticked -> every one of
+            // them goes back to the chat in a single batch (the on-screen item
+            // carries its edits when it is ticked, the rest ride exactly as
+            // picked); one ticked / no pool -> the old single hand-back.
+            val currentTicked = ticked.any { it.uri.toString() == pickedUri.toString() }
+            if (ticked.size > 1 || (ticked.size == 1 && !currentTicked)) {
+                ScreenStore.pendingEditedBatch.value =
+                    ticked.map { t ->
+                        if (t.uri.toString() == pickedUri.toString()) EditedResult(convId, once, result, cap)
+                        else EditedResult(convId, t.once, EditedMedia.Untouched(t.uri, t.isVideo), t.caption)
+                    }
+            } else {
+                ScreenStore.pendingEdited.value = EditedResult(convId, once, result, cap)
+            }
         }
         nav.popBackStack()
     }
