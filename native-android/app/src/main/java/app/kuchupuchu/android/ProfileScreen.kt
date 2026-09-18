@@ -381,6 +381,14 @@ fun ProfileScreen(nav: NavController, userId: String) {
                             photoBusy = false
                         }
                     }
+            // v164 (owner): the editor handed a baked profile photo back — upload it.
+            LaunchedEffect(Unit) {
+                ScreenStore.pendingAvatarUri.collect { picked ->
+                    if (picked.isNullOrBlank()) return@collect
+                    ScreenStore.pendingAvatarUri.value = null
+                    uploadAvatar(android.net.Uri.parse(picked))
+                }
+            }
             Box {
                 KpAvatar(
                     u.optText("displayName").ifBlank { "?" },
@@ -425,7 +433,21 @@ fun ProfileScreen(nav: NavController, userId: String) {
             // Owner round 34 (item 1): the in-app gallery sheet (attach-style).
             if (galleryOpen && isMe) {
                 AvatarGallerySheet(
-                    onPick = { galleryOpen = false; uploadAvatar(it) },
+                    onPick = { uri ->
+                        galleryOpen = false
+                        // v164 (owner): a picked profile photo opens the app's
+                        // own editor before anything is uploaded — crop /
+                        // rotate / text / emoji / pen, with Done applying the
+                        // edit and the circle meaning "use this photo". The
+                        // baked file comes back through
+                        // ScreenStore.pendingAvatarUri and is uploaded here.
+                        ScreenStore.editPool = emptyList()
+                        ScreenStore.editStageUri = null
+                        nav.navigate(
+                            "mediaedit/avatar/0/" +
+                                statusPickArg(MediaItem(uri, false, 0, "", System.currentTimeMillis())),
+                        )
+                    },
                     onDismiss = { galleryOpen = false },
                 )
             }

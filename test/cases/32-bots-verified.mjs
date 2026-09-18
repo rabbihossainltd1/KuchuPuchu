@@ -4172,13 +4172,16 @@ const convBetween = (db, a, b) =>
       );
       check(
         "r31-30: status mode — no caption bar (posts carry no text), no Post / 'Choose photo or video' buttons; dark stage + Close + one Done check; the >60s rejection is gone",
-        edit30.includes("if (!statusMode) {") &&
+        // v164: the guard also keeps the caption bar out of the profile-photo
+        // flow, which shares this screen.
+        edit30.includes("if (!statusMode && !avatarMode) {") &&
           !edit30.includes('GoldBtn("Post")') &&
           !edit30.includes('GoldBtn("Choose photo or video")') &&
           !edit30.includes("Video status can be at most 1 minute.") &&
           edit30.includes(".fillMaxSize()\n            .background(Color.Black)") &&
           edit30.includes('Icon(Icons.Filled.Close, "Close", tint = Color.White') &&
-          edit30.includes('contentDescription = if (statusMode) "Done" else "Send",') &&
+          edit30.includes('"Done"') &&
+          edit30.includes("contentDescription =") &&
           edit30.includes('.put("text", ""),'),
       );
       check(
@@ -4196,8 +4199,10 @@ const convBetween = (db, a, b) =>
           kit.includes("internal fun CropOverlay(") &&
           edit30.includes('listOf("Original", "9:16", "1:1", "Free").forEach { name ->') &&
           edit30.includes('.put("seconds", ((e - s + 500L) / 1000L).toInt().coerceAtLeast(1))') &&
-          edit30.includes("VideoExport.export(ctx, pickedUri, s, e, box, cut,") &&
-          edit30.includes("VideoExport.passthrough(ctx, pickedUri, s, e, cut)") &&
+          // v164: the bakes read the editor's WORKING media (Done can bake an
+          // applied copy into it), which is the pick until it does.
+          edit30.includes("VideoExport.export(ctx, mediaUri, s, e, box, cut,") &&
+          edit30.includes("VideoExport.passthrough(ctx, mediaUri, s, e, cut)") &&
           edit30.includes(
             "if (!VideoPlan.needsTranscode(box, s, e, vSource.durationMs, size, mime) && !hasEdits) {",
           ),
@@ -4911,7 +4916,8 @@ const convBetween = (db, a, b) =>
       ) &&
       share32.includes("player?.setPaused(paused || userPaused || scrubAt != null)") &&
       edit43.includes(
-        "StatusTrimPreview(pickedUri, start, end, paused = stillMode, scrubAt = scrub",
+        // v164: the preview plays the working media.
+        "StatusTrimPreview(mediaUri, start, end, paused = stillMode, scrubAt = scrub",
       ) &&
       edit43.includes("onPosition = { playAt = it }"),
   );
@@ -6654,13 +6660,15 @@ const convBetween = (db, a, b) =>
         edit.includes("Icons.AutoMirrored.Filled.Undo") &&
         edit.includes("maxMs = Long.MAX_VALUE,") &&
         edit.includes(
-          "StatusTrimPreview(pickedUri, start, end, paused = stillMode, scrubAt = scrub",
+          // v164: the stage / preview / bakes all read the WORKING media
+          // (mediaUri) — pickedUri until Done bakes an applied copy into it.
+          "StatusTrimPreview(mediaUri, start, end, paused = stillMode, scrubAt = scrub",
         ) &&
         edit.includes("onPosition = { playAt = it }") &&
         edit.includes(
-          "VideoExport.export(ctx, pickedUri, s, e, box, out, overlay = overlay, colorMat = filt?.array, userTurns = turn)",
+          "VideoExport.export(ctx, mediaUri, s, e, box, out, overlay = overlay, colorMat = filt?.array, userTurns = turn)",
         ) &&
-        edit.includes("VideoExport.passthrough(ctx, pickedUri, s, e, out)") &&
+        edit.includes("VideoExport.passthrough(ctx, mediaUri, s, e, out)") &&
         edit.includes(
           "ScreenStore.pendingEdited.value = EditedResult(convId, once, result, cap)",
         ) &&
@@ -8140,7 +8148,9 @@ const convBetween = (db, a, b) =>
         edit6.includes("paintPenStrokes(canvas, strokes, w, h)") &&
         (
           edit6.match(
-            /VideoExport\.export\(ctx, pickedUri, s, e, box, out, overlay = overlay, colorMat = filt\?\.array, userTurns = turn\)/g,
+            // v164: all three out-bakes (send / add-more / save) read the
+            // working media, so an APPLIED clip is what leaves the editor.
+            /VideoExport\.export\(ctx, mediaUri, s, e, box, out, overlay = overlay, colorMat = filt\?\.array, userTurns = turn\)/g,
           ) || []
         ).length === 3 &&
         (edit6.match(/if \(hasEdits\) throw err/g) || []).length === 4,
@@ -8181,7 +8191,8 @@ const convBetween = (db, a, b) =>
         edit7.includes("val stageShot = if (cropping) shotFull else shot") &&
         edit7.includes("h: Int, box: CropBox? = null") &&
         edit7.includes("canvas.scale(1f / b.w, 1f / b.h)") &&
-        (edit7.match(/\|\| box != null/g) || []).length === 6 &&
+        // v164: +1 in applyEdits (Done bakes the box) and +1 in useAsAvatar.
+        (edit7.match(/\|\| box != null/g) || []).length === 8 &&
         (edit7.match(/, box, (out|cut),/g) || []).length === 4 &&
         !store7.includes("pendingStatusEdited") &&
         !edit7.includes("pendingStatusEdited") &&

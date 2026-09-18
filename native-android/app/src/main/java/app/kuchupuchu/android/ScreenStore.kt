@@ -286,6 +286,15 @@ object ScreenStore {
      */
     val pendingEditedBatch = kotlinx.coroutines.flow.MutableStateFlow<List<EditedResult>?>(null)
 
+    /**
+     * v164 (owner: "profile picture upload korar somoy image select korle edit
+     * option gula thakbe"): a picked profile photo opens the app's own editor
+     * first (crop / rotate / text / emoji / pen) and the baked file comes back
+     * through this flow — ProfileScreen consumes it (nulls it) and uploads it
+     * as the new avatar.
+     */
+    val pendingAvatarUri = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
     /** Owner round 34 (item 16b): the name on the editor's recipient chip —
      *  set by the chat that opens the editor. */
     var editTitle: String = ""
