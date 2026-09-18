@@ -248,6 +248,10 @@ fun ChatScreen(nav: NavController, convId: String) {
     // Owner round 34 (item 3): ids whose vanish already played (a departed
     // row animates once, never loops).
     val vanishedOnce = remember { ScreenStore.vanishedOnceIds } // val vanishedOnce = remember { HashSet<String>() }
+    // v160 (item 5): the replay-proof latch (see ScreenStore.dustLatchedIds).
+    // vanishedOnce is pruned when a row comes back; this one never is, so an
+    // id that already dusted can never start a second show.
+    val dustLatched = remember { ScreenStore.dustLatchedIds }
     // Owner round 13: swipe a bubble right to quote-reply to it.
     var replyTo by remember { mutableStateOf<JSONObject?>(null) }
     // Owner round 15: swipe-to-reply now also OPENS the keyboard — a bump
@@ -481,6 +485,10 @@ fun ChatScreen(nav: NavController, convId: String) {
         // not re-animate dust (owner: deleted shows again each open).
         // r34-3 keeper: vanishedOnce.removeAll(next.map { it.optString("id") }.toSet())
         vanishedOnce.removeAll(next.filter { it.optString("kind") != "DELETED" }.map { it.optString("id") }.toSet())
+        // v160 (item 5): the latched tombstones leave BEFORE the empty-list
+        // early return — that return used to carry them straight into msgs,
+        // and every later paint could then restart their dust.
+        next = next.filter { it.optString("kind") != "DELETED" || it.optString("id") !in dustLatched }
         if (msgs.isEmpty()) {
             msgs.addAll(next)
             return
@@ -499,12 +507,14 @@ fun ChatScreen(nav: NavController, convId: String) {
                 it.optString("kind") == "DELETED" &&
                     it.optString("id") in liveIds &&
                     it.optString("id") !in vanishingIds &&
-                    it.optString("id") !in vanishedOnce
+                    it.optString("id") !in vanishedOnce &&
+                    it.optString("id") !in dustLatched
             }
         if (freshTombs.isNotEmpty()) {
             val tombIds = freshTombs.map { it.optString("id") }
             vanishingIds.addAll(tombIds)
             vanishedOnce.addAll(tombIds)
+            ScreenStore.latchDust(tombIds)
         }
         next = next.filter { it.optString("kind") != "DELETED" || it.optString("id") !in vanishingIds }
         // Fix dust replay: also drop tombstones already in vanishedOnce (already dusted, don't re-animate)
@@ -531,11 +541,15 @@ fun ChatScreen(nav: NavController, convId: String) {
         // Owner round 35 (item 1): the hold IS the GRACE_MS window — sized
         // past the worst-case show (see DeleteAnim), never under it.
         val hold = oldIds.filter { it.isNotBlank() && it !in newIds && it !in ScreenStore.hiddenMsgIds && (it in vanishingIds || it !in vanishedOnce) }
-        if (hold.isNotEmpty()) {
-            val fresh = hold.filter { it !in vanishingIds }
+        // v160 (item 5): keep the r34-3 latch above verbatim and drop the
+        // already-dusted ids on the next pass — those rows are gone for good.
+        val holdAll = hold.filter { it !in dustLatched }
+        if (holdAll.isNotEmpty()) {
+            val fresh = holdAll.filter { it !in vanishingIds }
             vanishingIds.addAll(fresh)
             vanishedOnce.addAll(fresh)
-            val keep = msgs.filter { it.optString("id") in hold }
+            ScreenStore.latchDust(fresh)
+            val keep = msgs.filter { it.optString("id") in holdAll }
             val pos = msgs.map { it.optString("id") }.withIndex().associate { it.value to it.index }
             val merged = (next + keep).sortedBy { pos[it.optString("id")] ?: Int.MAX_VALUE }
             msgs.clear()
@@ -853,9 +867,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                             // GONE server-side — the row plays the vanish show
                             // and leaves, no tombstone, on both sides.
                             if (liveMsg.optString("kind") == "VANISHED" && liveId.isNotBlank()) {
-                                if (msgs.any { it.optString("id") == liveId } && liveId !in vanishingIds) {
+                                if (msgs.any { it.optString("id") == liveId } && liveId !in vanishingIds && liveId !in dustLatched) {
                                     vanishingIds.add(liveId)
                                     vanishedOnce.add(liveId)
+                                    ScreenStore.latchDust(liveId)
                                     scope.launch {
                                         delay(DeleteAnim.GRACE_MS)
                                         msgs.removeAll { it.optString("id") == liveId }
@@ -895,14 +910,25 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 // on the ORIGINAL so it dusts out like ours.
                                 // Removal stays at onGone + the next paint.
                                 idxExisting >= 0 && liveMsg.optString("kind") == "DELETED" -> {
-                                    if (liveId.isNotBlank() && liveId !in vanishingIds) {
+                                    if (liveId.isNotBlank() && liveId !in vanishingIds && liveId !in dustLatched) {
                                         vanishingIds.add(liveId)
                                         vanishedOnce.add(liveId)
+                                        ScreenStore.latchDust(liveId)
                                     }
                                 }
                                 idxExisting >= 0 -> msgs[idxExisting] = liveMsg
                                 liveCid.isNotBlank() && msgs.any { it.optString("clientId") == liveCid } ->
                                     msgs[msgs.indexOfFirst { it.optString("clientId") == liveCid }] = liveMsg
+                                // v160 (item 5): a row deleted on THIS device
+                                // ("delete for me") or an already-dusted
+                                // tombstone is never re-appended by a socket
+                                // frame — the peer reacting to it, a retry or
+                                // any re-broadcast of the original object used
+                                // to put the deleted bubble back on screen
+                                // (the owner's "profile theke back ashle
+                                // deleted message abar ashe").
+                                liveId.isNotBlank() &&
+                                    (liveId in ScreenStore.hiddenMsgIds || (liveMsg.optString("kind") == "DELETED" && liveId in dustLatched)) -> Unit
                                 // New inbound message: chronological = append at the
                                 // end (the thread is oldest-first).
                                 else -> {
@@ -2093,58 +2119,36 @@ fun ChatScreen(nav: NavController, convId: String) {
 
     var savedIndex by remember(convId) { mutableStateOf(0) }
     var savedOffset by remember(convId) { mutableStateOf(0) }
-    // Attach panel glide — same physics as the keyboard, so the message
-    // lifts just above the panel like it does above the keyboard (owner:
-    // attach open should rise like keyboard, not jump to top nor stay behind).
+    // Attach panel glide — same 300ms as keyboard, but simpler: no
+    // saved-index restore (that caused drift on 340<->520 toggles). When
+    // at the bottom we just follow the delta; when mid-thread we keep
+    // the viewport still. Final snap cleans rounding residue.
     val attachTargetPx = with(LocalDensity.current) { (if (showAttach) if (attachFs) 520.dp else 340.dp else 0.dp).toPx() }
     val attachGlidePx by androidx.compose.animation.core.animateFloatAsState(
         attachTargetPx,
         tween(durationMillis = 300, easing = androidx.compose.animation.core.FastOutSlowInEasing),
         label = "attachglide",
     )
-    var attachApplied by remember(convId) { mutableStateOf(0f) }
-    var attachFollow by remember(convId) { mutableStateOf(false) }
-    var attachLatched by remember(convId) { mutableStateOf(false) }
-    var attachSavedIdx by remember(convId) { mutableStateOf(0) }
-    var attachSavedOff by remember(convId) { mutableStateOf(0) }
+    var attachApplied by remember(showAttach, attachFs, convId) { mutableStateOf(0f) }
     LaunchedEffect(attachGlidePx) {
         val delta = attachGlidePx - attachApplied
         if (delta == 0f) return@LaunchedEffect
         val info = listState.layoutInfo
         val total = info.totalItemsCount
         val tail = info.visibleItemsInfo.lastOrNull()
-        val atBottomGeometric = tail != null && tail.index == info.totalItemsCount - 1 && tail.offset + tail.size <= info.viewportEndOffset + 24
-        val atBottomIdx = tail != null && tail.index >= total - 1
-        val nearBottom = tail != null && tail.index >= total - 2
-        if (attachApplied == 0f && attachGlidePx != 0f) {
-            attachSavedIdx = listState.firstVisibleItemIndex
-            attachSavedOff = listState.firstVisibleItemScrollOffset
-            attachFollow = true
-            attachLatched = nearBottom && (atBottomIdx || atBottomGeometric)
-        }
-        if (listState.isScrollInProgress && attachApplied == 0f && attachGlidePx != 0f) {
-            attachFollow = false
-            attachLatched = false
-        }
-        if (attachFollow) {
-            attachApplied += runCatching { listState.scrollBy(delta) }.getOrDefault(0f)
-            if (attachGlidePx == 0f) {
-                attachApplied = 0f
-                if (attachLatched && total > 0) runCatching { listState.scrollToItem(total - 1) } else runCatching { listState.scrollToItem(attachSavedIdx, attachSavedOff) }
-                attachFollow = false
-                attachLatched = false
-            } else if (kotlin.math.abs(attachGlidePx - attachApplied) < 0.5f) {
-                attachApplied = attachGlidePx
-                if (attachLatched && total > 0) runCatching { listState.scrollToItem(total - 1) }
-            }
-        } else if (atBottomIdx || atBottomGeometric) {
-            attachApplied += runCatching { listState.scrollBy(delta) }.getOrDefault(0f)
+        val atBottom = tail != null && (tail.index >= total - 1 || (tail.index == total - 1 && tail.offset + tail.size <= info.viewportEndOffset + 24))
+        if (atBottom) {
+            // At bottom: follow the panel exactly, snap at the end to kill residue
+            val consumed = runCatching { listState.scrollBy(delta) }.getOrDefault(0f)
+            attachApplied += consumed
             if (kotlin.math.abs(attachGlidePx - attachApplied) < 0.5f) attachApplied = attachGlidePx
-            if (attachGlidePx == 0f) attachApplied = 0f
+            // If we couldn't consume full delta (clamped at top), sync anyway to avoid drift
+            if (kotlin.math.abs(consumed - delta) > 0.5f) attachApplied = attachGlidePx
         } else {
+            // Mid-thread: keep viewport still, just sync the applied value
             attachApplied = attachGlidePx
-            if (attachGlidePx == 0f) { attachFollow = false; attachLatched = false }
         }
+        if (attachGlidePx == 0f) attachApplied = 0f
     }
 
     // Capture once per open so close can restore exactly (cures 1-line drift at any

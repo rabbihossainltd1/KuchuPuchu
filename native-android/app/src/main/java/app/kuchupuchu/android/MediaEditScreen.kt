@@ -3,11 +3,6 @@ package app.kuchupuchu.android
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -66,7 +61,6 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -155,39 +149,28 @@ fun MediaEditScreen(nav: NavController, pickedUri: Uri, pickedIsVideo: Boolean, 
     // Every photo visited keeps its edits — the item screen snapshots its
     // EditBits on leave (kilobytes; bitmaps are re-decoded on return).
     val works = remember { HashMap<String, EditBits>() }
-    AnimatedContent(
-        targetState = idx,
-        transitionSpec = {
-            val dir = browseDir
-            val slideIn = if (dir >= 0) slideInHorizontally(tween(260)) { it } else slideInHorizontally(tween(260)) { -it }
-            val slideOut = if (dir >= 0) slideOutHorizontally(tween(260)) { -it } else slideOutHorizontally(tween(260)) { it }
-            slideIn.togetherWith(slideOut)
+    // Fix: only inner media slides, outer chrome stays. Keep per-photo
+    // isolation via works map and remember(pickedUri) inside the item.
+    val item = pool[idx]
+    val uriKey = item.uri.toString()
+    MediaEditItemScreen(
+        nav,
+        item.uri,
+        item.isVideo,
+        convId,
+        viewOnce,
+        works[uriKey],
+        { bits -> works[uriKey] = bits },
+        { d ->
+            browseDir = d
+            idx = (idx + d).coerceIn(0, pool.lastIndex)
         },
-        label = "poolbrowse",
-    ) { targetIdx ->
-        val item = pool[targetIdx]
-        val uriKey = item.uri.toString()
-        key(uriKey) {
-            MediaEditItemScreen(
-                nav,
-                item.uri,
-                item.isVideo,
-                convId,
-                viewOnce,
-                works[uriKey],
-                { bits -> works[uriKey] = bits },
-                { d ->
-                    browseDir = d
-                    idx = (targetIdx + d).coerceIn(0, pool.lastIndex)
-                },
-                isSelected = selectedUris.contains(uriKey),
-                onToggleSelect = {
-                    if (selectedUris.contains(uriKey)) selectedUris.remove(uriKey) else selectedUris.add(uriKey)
-                },
-                selectedCount = selectedUris.size,
-            )
-        }
-    }
+        isSelected = selectedUris.contains(uriKey),
+        onToggleSelect = {
+            if (selectedUris.contains(uriKey)) selectedUris.remove(uriKey) else selectedUris.add(uriKey)
+        },
+        selectedCount = selectedUris.size,
+    )
 }
 
 /** Snapshotted per-photo edit state while browsing (owner round 45, item 7). */
@@ -238,19 +221,19 @@ private fun MediaEditItemScreen(
         }
     }
 
-    var photo by remember { mutableStateOf<ImageBitmap?>(null) }
-    var source by remember { mutableStateOf<VideoExport.Source?>(null) }
-    var loadFailed by remember { mutableStateOf(false) }
-    var start by remember { mutableStateOf(0L) }
-    var end by remember { mutableStateOf(0L) }
-    var scrub by remember { mutableStateOf<Long?>(null) }
+    var photo by remember(pickedUri) { mutableStateOf<ImageBitmap?>(null) }
+    var source by remember(pickedUri) { mutableStateOf<VideoExport.Source?>(null) }
+    var loadFailed by remember(pickedUri) { mutableStateOf(false) }
+    var start by remember(pickedUri) { mutableStateOf(0L) }
+    var end by remember(pickedUri) { mutableStateOf(0L) }
+    var scrub by remember(pickedUri) { mutableStateOf<Long?>(null) }
     // Owner round 33 (item 8): the preview's play position for the strip's playhead.
-    var playAt by remember { mutableStateOf<Long?>(null) }
-    var seekTo by remember { mutableStateOf<Long?>(null) }
+    var playAt by remember(pickedUri) { mutableStateOf<Long?>(null) }
+    var seekTo by remember(pickedUri) { mutableStateOf<Long?>(null) }
     var busy by remember { mutableStateOf(false) }
-    val thumbs = remember { mutableStateListOf<ImageBitmap?>() }
+    val thumbs = remember(pickedUri) { mutableStateListOf<ImageBitmap?>() }
     // Pen: strokes in normalised picture units; the live one is drawn as it grows.
-    val strokes = remember { mutableStateListOf<PenStroke>().also { l -> bits?.let { l.addAll(it.strokes) } } }
+    val strokes = remember(pickedUri, bits) { mutableStateListOf<PenStroke>().also { l -> bits?.let { l.addAll(it.strokes) } } }
     var live by remember { mutableStateOf<PenStroke?>(null) }
     var penColor by remember { mutableStateOf(PEN_COLOURS[0]) }
     var penWidth by remember { mutableStateOf(PEN_WIDTHS[1]) }
@@ -258,22 +241,24 @@ private fun MediaEditItemScreen(
     // (the stage is drag-to-move for overlays while it is off), the ① toggle
     // and the HD switch live here, overlays sit in normalised units.
     var penMode by remember { mutableStateOf(false) }
-    var rotation by remember { mutableStateOf(bits?.rotation ?: 0) }
-    var filterIdx by remember { mutableStateOf(bits?.filterIdx ?: 0) }
-    val texts = remember { mutableStateListOf<EditText>().also { l -> bits?.let { l.addAll(it.texts) } } }
-    val stickers = remember { mutableStateListOf<EditSticker>().also { l -> bits?.let { l.addAll(it.stickers) } } }
+    var rotation by remember(pickedUri, bits) { mutableStateOf(bits?.rotation ?: 0) }
+    var filterIdx by remember(pickedUri, bits) { mutableStateOf(bits?.filterIdx ?: 0) }
+    val texts = remember(pickedUri, bits) { mutableStateListOf<EditText>().also { l -> bits?.let { l.addAll(it.texts) } } }
+    val stickers = remember(pickedUri, bits) { mutableStateListOf<EditSticker>().also { l -> bits?.let { l.addAll(it.stickers) } } }
     var selectedId by remember { mutableStateOf<String?>(null) }
-    var once by remember { mutableStateOf(bits?.once ?: viewOnce) }
-    var hd by remember { mutableStateOf(bits?.hd ?: false) }
-    var caption by remember { mutableStateOf(bits?.caption ?: "") }
+    var once by remember(pickedUri, bits) { mutableStateOf(bits?.once ?: viewOnce) }
+    var hd by remember(pickedUri, bits) { mutableStateOf(bits?.hd ?: false) }
+    var caption by remember(pickedUri, bits) { mutableStateOf(bits?.caption ?: "") }
     var notice by remember { mutableStateOf<String?>(null) }
     var showTextSheet by remember { mutableStateOf(false) }
     var showStickerSheet by remember { mutableStateOf(false) }
     var filtersOpen by remember { mutableStateOf(false) }
-    var filterThumbs by remember { mutableStateOf<List<ImageBitmap?>>(emptyList()) }
+    // v160 (item 2): keyed to the picked item — a swipe must never leave
+    // the previous photo's filter strip or freeze-frame behind.
+    var filterThumbs by remember(pickedUri) { mutableStateOf<List<ImageBitmap?>>(emptyList()) }
     // Owner round 36 (item 6): the video still-mode frame (exact export
     // pixels for the playhead — turns + filter baked in, see below).
-    var videoStill by remember { mutableStateOf<ImageBitmap?>(null) }
+    var videoStill by remember(pickedUri) { mutableStateOf<ImageBitmap?>(null) }
     // Owner round 37 (item 2): the status share screen is GONE — the
     // picker lands straight here, and Done posts the status. No caption
     // (status posts carry none), no once, no add-more, no HD.
@@ -281,11 +266,11 @@ private fun MediaEditItemScreen(
     // Owner round 37 (item 2): the crop tool (photo + video, chat + status).
     // cropBox commits into normalised full-frame coords; while the box is
     // open the stage shows the FULL frame and the draft rides above it.
-    var cropping by remember { mutableStateOf(false) }
-    var cropBox by remember { mutableStateOf<CropBox?>(bits?.cropBox) }
-    var cropDraft by remember { mutableStateOf(bits?.cropDraft ?: CropBox.FULL) }
-    var cropTouched by remember { mutableStateOf(bits?.cropTouched ?: false) }
-    var cropPreset by remember { mutableStateOf(bits?.cropPreset ?: "Original") }
+    var cropping by remember(pickedUri) { mutableStateOf(false) }
+    var cropBox by remember(pickedUri, bits) { mutableStateOf<CropBox?>(bits?.cropBox) }
+    var cropDraft by remember(pickedUri, bits) { mutableStateOf(bits?.cropDraft ?: CropBox.FULL) }
+    var cropTouched by remember(pickedUri, bits) { mutableStateOf(bits?.cropTouched ?: false) }
+    var cropPreset by remember(pickedUri, bits) { mutableStateOf(bits?.cropPreset ?: "Original") }
     // Owner round 45 (item 7): snapshot this photo's work for the browse back.
     DisposableEffect(Unit) {
         onDispose {
@@ -1230,6 +1215,9 @@ private fun MediaEditItemScreen(
         Box(Modifier.fillMaxSize()) {
             /* the stage, full-bleed: media max-fit at its own aspect; overlays + the pen layer over a photo */
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                // Owner v160 (item 2): chrome stays put, ONLY the media swaps
+                // on swipe. Everything read here is keyed to pickedUri, so the
+                // inner media always belongs to the selected item.
                 when {
                     loadFailed -> Text("Could not open that file.", color = Color.White, fontSize = 14.sp)
                     !ready -> CircularProgressIndicator(color = ActionBlue)

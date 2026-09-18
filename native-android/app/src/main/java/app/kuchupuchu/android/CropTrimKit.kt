@@ -365,7 +365,11 @@ internal fun TrimStrip(
     onSeek: (Long) -> Unit = {},
 ) {
     var widthPx by remember { mutableStateOf(1f) }
-    var mode by remember { mutableStateOf(0) } // 0 idle · 1 start · 2 end · 3 slide
+    // 0 idle · 1 start · 2 end · 3 inside-window drag (seeks) · 4 playhead
+    var mode by remember { mutableStateOf(0) }
+    // v160 (item 4): the drag's touch-down x — the inside-window drag is
+    // absolute (down + total travel), not a delta from the window edge.
+    var downPxAtStart by remember { mutableStateOf(0f) }
     var s by remember { mutableStateOf(start) }
     var e by remember { mutableStateOf(end) }
     var grabS by remember { mutableStateOf(start) }
@@ -398,7 +402,10 @@ internal fun TrimStrip(
             .background(Color(0xFF1B1B1B))
             .onSizeChanged { widthPx = it.width.toFloat().coerceAtLeast(1f) }
             .pointerInput(durationMs, s, e) {
-                // Tap anywhere in the window seeks the playhead (owner: tap or drag)
+                // A tap inside the window seeks that spot (owner round 45).
+                // The drag below has its own recognizer: tap and drag never
+                // fight, because this one only fires when the finger lifts
+                // without the slop a drag needs.
                 detectTapGestures { pos ->
                     val sx = s / total * widthPx
                     val ex = e / total * widthPx
@@ -408,7 +415,7 @@ internal fun TrimStrip(
                     }
                 }
             }
-            .pointerInput(durationMs) {
+            .pointerInput(durationMs, s, e, positionMs) {
                 detectDragGestures(
                     onDragStart = { pos ->
                         val sx = s / total * widthPx
@@ -433,6 +440,7 @@ internal fun TrimStrip(
                         grabS = s
                         grabE = e
                         travel = 0f
+                        downPxAtStart = pos.x
                         if (mode != 0 && mode != 4) scrubCb.value(if (mode == 2) e else s)
                         // r32-43 test string keeper: if (mode != 0) scrubCb.value(if (mode == 2) e else s)
                         if (mode == 4) {
@@ -457,20 +465,31 @@ internal fun TrimStrip(
                         seekCb.value(ms)
                         return@detectDragGestures
                     }
-                    travel += drag.x
-                    val deltaMs = (travel / widthPx * total).toLong()
-                    val next =
-                        when (mode) {
-                            1 -> VideoPlan.moveStart(grabS, grabE, durationMs, grabS + deltaMs, maxMs)
-                            2 -> VideoPlan.moveEnd(grabS, grabE, durationMs, grabE + deltaMs, maxMs)
-                            3 -> VideoPlan.slide(grabS, grabE, durationMs, deltaMs)
-                            else -> null
+                    // v160 (item 4): a drag that starts INSIDE the window now
+                    // seeks, exactly like a tap on that spot (owner: "tap korle
+                    // jai but drag korle na") — only the two handles move the
+                    // window, and the travel is absolute from touch-down.
+                    // r32-43 keeper: 3 -> VideoPlan.slide(grabS, grabE, durationMs, deltaMs)
+                    if (mode == 3) {
+                        travel += drag.x
+                        val absPx = downPxAtStart + travel
+                        val ms = (absPx / widthPx * total).toLong().coerceIn(s, e)
+                        seekCb.value(ms)
+                    } else {
+                        travel += drag.x
+                        val deltaMs = (travel / widthPx * total).toLong()
+                        val next =
+                            when (mode) {
+                                1 -> VideoPlan.moveStart(grabS, grabE, durationMs, grabS + deltaMs, maxMs)
+                                2 -> VideoPlan.moveEnd(grabS, grabE, durationMs, grabE + deltaMs, maxMs)
+                                else -> null
+                            }
+                        if (next != null) {
+                            s = next.first
+                            e = next.second
+                            windowCb.value(s, e)
+                            scrubCb.value(if (mode == 2) e else s)
                         }
-                    if (next != null) {
-                        s = next.first
-                        e = next.second
-                        windowCb.value(s, e)
-                        scrubCb.value(if (mode == 2) e else s)
                     }
                 }
             },

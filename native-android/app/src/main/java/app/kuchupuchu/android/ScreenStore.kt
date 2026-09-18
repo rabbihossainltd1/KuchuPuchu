@@ -34,6 +34,19 @@ object ScreenStore {
     val vanishedOnceIds = mutableSetOf<String>()
 
     /**
+     * v160 (item 5): the NEVER-PRUNED dust latch, and unlike vanishedOnceIds
+     * it is persisted to disk. vanishedOnceIds gets pruned the moment a row
+     * with the same id comes back live (r34-3: a returned row may vanish
+     * again) — that pruning was the replay hole: leave the chat (or open a
+     * profile that re-reads the same conversation) and the next paint found
+     * the id out of vanishedOnce while the store still carried the live row,
+     * so the tombstone started its dust all over again. Once an id's dust has
+     * played, this set keeps it: no paint, no tombstone, no re-entry and no
+     * restart can bring that show back.
+     */
+    val dustLatchedIds = mutableSetOf<String>()
+
+    /**
      * requestId -> decision for login-approval cards (Owner round 3,
      * 2026-09-04): a decision sticks for the whole app session even after
      * the message row leaves composition, so Accept/Decline never reappear
@@ -41,6 +54,7 @@ object ScreenStore {
      */
     val loginApprovals = mutableMapOf<String, String>()
     private var hiddenFile: File? = null
+    private var dustFile: File? = null
 
     /**
      * Conversations archived on THIS device (WhatsApp-style swipe right).
@@ -223,6 +237,30 @@ object ScreenStore {
         runCatching { hiddenFile?.writeText(JSONObject().put("ids", JSONArray(hiddenMsgIds.toList())).toString()) }
     }
 
+    fun latchDust(id: String) {
+        if (id.isBlank() || id in dustLatchedIds) return
+        dustLatchedIds.add(id)
+        saveDust()
+    }
+
+    fun latchDust(ids: Collection<String>) {
+        var added = false
+        ids.forEach { if (it.isNotBlank() && dustLatchedIds.add(it)) added = true }
+        if (added) saveDust()
+    }
+
+    private fun saveDust() {
+        runCatching { dustFile?.writeText(JSONObject().put("ids", JSONArray(dustLatchedIds.toList())).toString()) }
+    }
+
+    private fun loadDust() {
+        runCatching {
+            val raw = dustFile?.takeIf { it.exists() }?.readText() ?: return@runCatching
+            val arr = JSONObject(raw).optJSONArray("ids") ?: return@runCatching
+            for (i in 0 until arr.length()) arr.optString(i).takeIf { it.isNotBlank() }?.let { dustLatchedIds.add(it) }
+        }
+    }
+
     private fun loadHidden() {
         runCatching {
             val raw = hiddenFile?.takeIf { it.exists() }?.readText() ?: return@runCatching
@@ -389,10 +427,12 @@ object ScreenStore {
     fun hydrate(ctx: Context) {
         disk = File(ctx.filesDir, "kp-screens.json")
         hiddenFile = File(ctx.filesDir, "kp-hidden.json")
+        dustFile = File(ctx.filesDir, "kp-dusted.json")
         archiveFile = File(ctx.filesDir, "kp-archive.json")
         statusHiddenFile = File(ctx.filesDir, "kp-statushidden.json")
         pinnedFile = File(ctx.filesDir, "kp-pinned.json")
         loadHidden()
+        loadDust()
         loadArchive()
         loadPinned()
         loadStatusHidden()
