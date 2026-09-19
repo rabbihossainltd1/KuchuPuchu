@@ -847,9 +847,7 @@ const convBetween = (db, a, b) =>
   check(
     "v169: timestamp + ticks ride OUTSIDE the bubble - one row under it on every kind (end for mine, start for theirs); nothing is pinned inside the bubble any more",
     chat.includes("horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,") &&
-      chat.includes(
-        "BubbleStamp(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk, stampInk)",
-      ) &&
+      chat.includes("BubbleStamp(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk)") &&
       !chat.includes("Modifier.align(Alignment.BottomEnd).padding(end = 2.dp, bottom = 1.dp),") &&
       !chat.includes("appendInlineContent"),
   );
@@ -7435,11 +7433,8 @@ const convBetween = (db, a, b) =>
         !textBranch.includes("val reserve =") &&
         textBranch.includes('val full = m.optText("body")\n') &&
         chat.includes("private fun BubbleStamp(") &&
-        (
-          chat.match(
-            /BubbleStamp\(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk, stampInk\)/g,
-          ) || []
-        ).length === 1 &&
+        (chat.match(/BubbleStamp\(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk\)/g) || [])
+          .length === 1 &&
         !chat.includes("val mineStampInk =") &&
         chat.includes("color = stampInk,") &&
         // v166's mode-aware blue survives as the single stamp ink

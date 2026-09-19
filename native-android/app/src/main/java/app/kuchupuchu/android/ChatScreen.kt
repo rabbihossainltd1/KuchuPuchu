@@ -3124,9 +3124,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                             onCancelSend = ::cancelSend,
                             // r43 (pack): this row plays its arrival animation
                             // when it is at the head of the queue.
-                            fxActive = fxHead != null && fxHead == m.id,
+                            fxActive = fxHead != null && fxHead == m.optString("id"),
                             onFxDone = {
-                                fxQueue.remove(m.id)
+                                fxQueue.remove(m.optString("id"))
                                 fxHead = fxQueue.firstOrNull()
                             },
                             fxSend = m.optString("id") in fxSend,
@@ -5964,7 +5964,7 @@ private fun MessageRow(
                 horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                BubbleStamp(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk, stampInk)
+                BubbleStamp(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk)
             }
             // Owner round 16: reaction chips under the bubble.
             MessageReactions(m)

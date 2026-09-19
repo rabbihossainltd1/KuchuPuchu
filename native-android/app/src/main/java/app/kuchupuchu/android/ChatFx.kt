@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import kotlin.math.PI
@@ -49,7 +50,10 @@ fun fxScaleOf(ctx: android.content.Context): Float = runCatching {
 
 /** The system animator scale; 0 means "remove animations" - skip to the end. */
 @Composable
-fun fxAnimatorScale(): Float = remember { fxScaleOf(LocalContext.current) }
+fun fxAnimatorScale(): Float {
+    val ctx = LocalContext.current
+    return remember { fxScaleOf(ctx) }
+}
 
 /** Received media reveal: de-blur + fade + settle, 900 ms (SPEC #3). */
 @Composable
@@ -116,7 +120,6 @@ fun Modifier.fxFlyIn(active: Boolean, durMs: Int, onDone: () -> Unit = {}): Modi
         scaleX = 0.92f + 0.08f * v + arc * 0.05f
         scaleY = 0.92f + 0.08f * v + arc * 0.05f
         alpha = if (v < 0.08f) v / 0.08f else 1f
-        transformOrigin = androidx.compose.ui.layout.TransformOrigin(1f, 1f)
     }
 }
 
@@ -141,7 +144,6 @@ fun Modifier.fxLanding(trigger: Any?): Modifier {
     return graphicsLayer {
         scaleX = sx.value
         scaleY = sy.value
-        transformOrigin = androidx.compose.ui.layout.TransformOrigin(1f, 1f)
     }
 }
 
@@ -228,7 +230,7 @@ fun fxLetterSpans(text: String, active: Boolean): AnnotatedString {
             append(text)
         } else {
             append(text)
-            addStyle(SpanStyle(alpha = 0f), revealed, text.length)
+            addStyle(SpanStyle(color = Color(0x00000000)), revealed, text.length)
         }
     }
 }
@@ -336,7 +338,7 @@ object EmojiAnimationRegistry {
             cp in 0x1F600..0x1F64F -> faces
             cp in 0x1F900..0x1F92F -> faces
             cp in 0x1F641..0x1F64F -> faces
-            cp in 0x1F440..0x1F4AA or (cp in 0x1F90C..0x1F91F) or (cp in 0x1F930..0x1F93F) or
+            (cp in 0x1F440..0x1F4AA) || (cp in 0x1F90C..0x1F91F) || (cp in 0x1F930..0x1F93F) ||
                 (cp in 0x1F970..0x1F97F) -> EmojiAnim("thumb-in", "tilt", EmojiFx.NONE)
             cp in 0x1F400..0x1F43F || cp in 0x1F980..0x1F9BF -> EmojiAnim("bounce-in", "bounce", EmojiFx.NONE)
             cp in 0x1F32D..0x1F37F || cp in 0x2615..0x2616 || cp == 0x1F37A -> EmojiAnim("drop-in", "tilt", EmojiFx.NONE)
@@ -767,7 +769,7 @@ fun AnimatedEmoji(
                 alpha = k.a
             },
         ) {
-            androidx.compose.material3.Text(ch, fontSize = androidx.compose.ui.unit.sp(sp))
+            androidx.compose.material3.Text(ch, fontSize = sp.sp)
         }
         androidx.compose.foundation.Canvas(Modifier.matchParentSize()) {
             if (play && el > 100) drawFx(spec.fx, el - 100, ch.hashCode())
