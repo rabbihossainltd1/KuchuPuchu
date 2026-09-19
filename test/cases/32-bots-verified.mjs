@@ -8740,9 +8740,10 @@ const convBetween = (db, a, b) =>
           'inline_data: { mime_type: m.mime || "application/octet-stream", data: m.b64 }',
         ) &&
         // v166 (owner: "ai reply dite onek late korche"): Gemini still LEADS,
-        // but it is raced against the HF chain — the fallback starts 1.6 s in
+        // but it is raced against the HF chain — the fallback starts mid-hedge
         // instead of after Gemini's whole timeout.
-        src.includes("const AI_HEDGE_MS = 1_600;") &&
+        // v168: the hedge is 800 ms - the reply starts streaming twice as early.
+        src.includes("const AI_HEDGE_MS = 800;") &&
         src.includes(
           "return await Promise.any([answered(primary()), answered(gate.then(secondary))]);",
         ) &&

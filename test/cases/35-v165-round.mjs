@@ -189,8 +189,9 @@ check(
     ) &&
     // v166 (owner: "ai reply dite onek late korche"): Gemini still LEADS the
     // text / photo / voice turns, but it is raced against the HF chain — the
-    // fallback starts 1.6 s in instead of after Gemini's whole timeout.
-    src.includes("const AI_HEDGE_MS = 1_600;") &&
+    // fallback starts mid-hedge instead of after Gemini's whole timeout.
+    // v168: that hedge is 800 ms now (was 1.6 s).
+    src.includes("const AI_HEDGE_MS = 800;") &&
     src.includes(
       "() => geminiChat(env, messages, maxTokens),\n    () => hfThenCf(env, messages, maxTokens),",
     ) &&

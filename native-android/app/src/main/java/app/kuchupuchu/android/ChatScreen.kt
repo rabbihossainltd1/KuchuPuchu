@@ -2182,6 +2182,35 @@ fun ChatScreen(nav: NavController, convId: String) {
     // must not sit there looking like the new one (the deltas take over from
     // the first chunk).
     LaunchedEffect(aiTyping) { if (aiTyping) aiLiveBody = "" }
+    // v168 (owner: "ai reply animation word by word and smooth kore daw"):
+    // the LIVE bubble types too - the streamed text no longer pops in whole
+    // chunks. Each 26 ms step snaps to the end of the next word (at most two
+    // words a step, so a chunky delta never stalls the pen); the moment the
+    // answer completes the rest lands at once. MessageRow's caret rides this
+    // count exactly as it rides the committed reveal's - the reply that was
+    // painted live hands over to its row without a rewind (v167 guard).
+    var liveReveal by remember { mutableStateOf(0) }
+    LaunchedEffect(aiLiveBody, aiTyping) {
+        if (aiLiveBody.isEmpty()) {
+            liveReveal = 0
+            return@LaunchedEffect
+        }
+        if (!aiTyping) {
+            liveReveal = aiLiveBody.length
+            return@LaunchedEffect
+        }
+        var pos = liveReveal
+        while (pos < aiLiveBody.length) {
+            var words = 0
+            while (pos < aiLiveBody.length && words < 2) {
+                while (pos < aiLiveBody.length && !aiLiveBody[pos].isWhitespace()) pos++
+                words++
+                while (pos < aiLiveBody.length && aiLiveBody[pos].isWhitespace()) pos++
+            }
+            liveReveal = pos
+            delay(26)
+        }
+    }
     // …and the growing bubble keeps the reader pinned to the bottom, exactly
     // like the finished reply's word-by-word reveal does.
     LaunchedEffect(aiLiveBody) {
@@ -3143,7 +3172,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 Store.myId(),
                                 otherReadAt,
                                 player,
-                                revealChars = aiLiveBody.length,
+                                revealChars = liveReveal.coerceAtMost(aiLiveBody.length),
                                 theme = chatTheme,
                             )
                         } else if (aiTyping && otherTypingKind == "image") {

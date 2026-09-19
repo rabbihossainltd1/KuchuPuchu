@@ -24,7 +24,7 @@
 //    round-trips to the chat that owns the list through ScreenStore — the
 //    identical two functions the in-chat long-press sheet runs.
 // 6. fb#9 "ai reply dite onek late korche": the brain is HEDGED — Gemini
-//    starts first, the HF chain (2 models × 7 s, then Workers AI) starts 1.6 s
+//    starts first, the HF chain (2 models × 7 s, then Workers AI) starts mid-hedge
 //    later and the first answer wins. Gemini is still the primary.
 // 7. new#1 voice bubble / 8. new#2 link card: both are compact now.
 // 9. new#3 send animation: v166 straightened the clone\'s walk; v167 (owner:
@@ -220,8 +220,8 @@ check(
 
 /* 6 — fb#9: the hedged brain */
 check(
-  "v166 fb#9: the brain is hedged — AI_HEDGE_MS 1 600, hedge() racing the primary against the gated secondary through Promise.any, hfThenCf capped at 2 HF models × 7 s then Workers AI, aiBrain = Gemini primary (or the HF chain alone without a key); the photo turn hedges Gemini against the HF vision leg and the voice turn against Whisper",
-  src.includes("const AI_HEDGE_MS = 1_600;") &&
+  "v166 fb#9: the brain is hedged — AI_HEDGE_MS 800 since v168 (was 1 600), hedge() racing the primary against the gated secondary through Promise.any, hfThenCf capped at 2 HF models × 7 s then Workers AI, aiBrain = Gemini primary (or the HF chain alone without a key); the photo turn hedges Gemini against the HF vision leg and the voice turn against Whisper",
+  src.includes("const AI_HEDGE_MS = 800;") &&
     src.includes("async function hedge(") &&
     src.includes(
       "return await Promise.any([answered(primary()), answered(gate.then(secondary))]);",
@@ -235,7 +235,7 @@ check(
       "() => geminiChat(env, messages, maxTokens),\n    () => hfThenCf(env, messages, maxTokens),",
     ) &&
     // v167 (owner: "ai reply live Hobe … word by word"): the SAME hedge and the
-    // same 1.6 s, but the primary now paints through the stream — the photo
+    // same hedge (800 ms since v168), but the primary now paints through the stream — the photo
     // turn's Gemini leg streams and its HF leg is painted whole when it wins.
     src.includes(
       "answer = await hedgeStream(\n          (live) => geminiStream(env, fullPrompt, [{ mime: src.mime, b64 }], 900, live, 20_000),\n          hfLeg,",
@@ -401,7 +401,7 @@ check(
 
 /* 17 — v167: the live AI reply */
 check(
-  "v167 item 5: the AI answer is LIVE — Gemini's streamGenerateContent feeds a throttled (140 ms) `ai_delta` frame into the chat's room with the text SO FAR, the streaming brain keeps the 1.6 s hedge and the same 900-token legs, and the app renders the growing text in the reply's own bubble (caret at the end, cleared and never re-typed when the finished row lands)",
+  "v167 item 5: the AI answer is LIVE — Gemini's streamGenerateContent feeds a throttled (140 ms) `ai_delta` frame into the chat's room with the text SO FAR, the streaming brain keeps the hedge (800 ms since v168) and the same 900-token legs, and the app renders the growing text in the reply's own bubble (caret at the end, cleared and never re-typed when the finished row lands)",
   src.includes(":streamGenerateContent?alt=sse") &&
     src.includes("async function geminiStream(") &&
     src.includes("async function hedgeStream(") &&
@@ -416,7 +416,8 @@ check(
     chat.includes('aiLiveBody = ev.optString("text")') &&
     chat.includes("if (aiTyping && aiLiveBody.isNotBlank()) {") &&
     chat.includes('.put("id", "ai_live")') &&
-    chat.includes("revealChars = aiLiveBody.length,") &&
+    // v168: the live bubble reads the word-by-word chaser, not the whole body.
+    chat.includes("revealChars = liveReveal.coerceAtMost(aiLiveBody.length),") &&
     chat.includes(
       'val paintedLive = aiLiveBody.isNotBlank() && aiLiveBody.trim() == last.optText("body").trim()',
     ) &&

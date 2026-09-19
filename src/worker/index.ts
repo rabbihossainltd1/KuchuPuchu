@@ -960,7 +960,10 @@ async function geminiChat(
  * unconfigured costs the user one short delay instead of its whole timeout.
  * The loser is dropped (its own AbortSignal still bounds it).
  */
-const AI_HEDGE_MS = 1_600;
+// v168 (owner: "ai response slow fast daw"): 800 ms - the reply starts
+// streaming twice as early; the word-by-word reveal on the app side
+// (r42-5) carries the human feel from here.
+const AI_HEDGE_MS = 800;
 
 /** v167: the live reply frames are throttled — at most one per 140 ms — so a
  *  fast model cannot turn one answer into a broadcast storm on the room's

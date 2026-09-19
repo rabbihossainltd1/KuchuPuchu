@@ -35,6 +35,7 @@ const kt = (f) => readFileSync(new URL(f, root), "utf8");
 const edit = kt("MediaEditScreen.kt");
 const vexport = kt("VideoExport.kt");
 const chat = kt("ChatScreen.kt");
+const worker = readFileSync(new URL("../../src/worker/index.ts", import.meta.url), "utf8");
 const viewer = kt("MediaViewer.kt");
 const mediaTab = kt("ChatMediaScreen.kt");
 const calls = kt("CallScreens.kt");
@@ -115,6 +116,23 @@ check(
     chat.includes("KpSecure.Guard(privateChat)") &&
     viewer.includes("KpSecure.Guard(secure || !canSave)") &&
     viewer.includes("if (m != null && !privateClip && !saved) {"),
+);
+
+/* 5 — the AI reply starts sooner and types word by word */
+check(
+  "v168 item 5: the typing bubble hedges the model after 800 ms (was 1_600 - the reply starts streaming twice as early) and the LIVE AI bubble reveals WORD BY WORD - each 26 ms step snaps to a word boundary (max two words a step so a chunky delta never stalls the pen) - replacing the instant full-body paint; the completed answer lands whole and the committed-row reveal (r49) is untouched",
+  worker.includes("const AI_HEDGE_MS = 800;") &&
+    !worker.includes("AI_HEDGE_MS = 1_600") &&
+    chat.includes("var liveReveal by remember { mutableStateOf(0) }") &&
+    chat.includes("words < 2") &&
+    chat.includes("delay(26)") &&
+    chat.includes("!aiLiveBody[pos].isWhitespace()") &&
+    chat.includes("revealChars = liveReveal.coerceAtMost(aiLiveBody.length),") &&
+    !chat.includes("revealChars = aiLiveBody.length,") &&
+    // the completed answer still lands whole, and the handover guards stay
+    chat.includes("liveReveal = aiLiveBody.length") &&
+    chat.includes("if (paintedLive || mid == aiRevealId) return@LaunchedEffect") &&
+    chat.includes("pos = body.indexOf(' ', pos + 1).takeIf { it >= 0 } ?: body.length"),
 );
 
 console.log(lines.join("\n"));
