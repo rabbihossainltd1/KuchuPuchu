@@ -2201,14 +2201,27 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
         var pos = liveReveal
         while (pos < aiLiveBody.length) {
+            // v169 (owner: "ektu late kore typing kore ekbare onek fast
+            // word by word reply dicche eita kono good experience na"):
+            // a STEADY pen - one word a step at 40 ms while the buffer is
+            // small, easing up to two / four / eight words a step only when
+            // the stream races far ahead, so the reveal reads as typing,
+            // never as a burst.
+            val behind = aiLiveBody.length - pos
+            val cap = when {
+                behind > 60 -> 8
+                behind > 28 -> 4
+                behind > 12 -> 2
+                else -> 1
+            }
             var words = 0
-            while (pos < aiLiveBody.length && words < 2) {
+            while (pos < aiLiveBody.length && words < cap) {
                 while (pos < aiLiveBody.length && !aiLiveBody[pos].isWhitespace()) pos++
                 words++
                 while (pos < aiLiveBody.length && aiLiveBody[pos].isWhitespace()) pos++
             }
             liveReveal = pos
-            delay(26)
+            delay(40)
         }
     }
     // …and the growing bubble keeps the reader pinned to the bottom, exactly

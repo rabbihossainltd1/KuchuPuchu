@@ -130,12 +130,12 @@ check(
 
 /* 5 — the AI reply starts sooner and types word by word */
 check(
-  "v168 item 5: the typing bubble hedges the model after 800 ms (was 1_600 - the reply starts streaming twice as early) and the LIVE AI bubble reveals WORD BY WORD - each 26 ms step snaps to a word boundary (max two words a step so a chunky delta never stalls the pen) - replacing the instant full-body paint; the completed answer lands whole and the committed-row reveal (r49) is untouched",
+  "v168 item 5: the typing bubble hedges the model after 800 ms (was 1_600 - the reply starts streaming twice as early) and the LIVE AI bubble reveals WORD BY WORD - a steady 40 ms pen (one word a step while the buffer is small, proportional catch-up when the stream races) - replacing the instant full-body paint and the v168 burst; the completed answer lands whole and the committed-row reveal (r49) is untouched",
   worker.includes("const AI_HEDGE_MS = 800;") &&
     !worker.includes("AI_HEDGE_MS = 1_600") &&
     chat.includes("var liveReveal by remember { mutableStateOf(0) }") &&
-    chat.includes("words < 2") &&
-    chat.includes("delay(26)") &&
+    chat.includes("behind > 60 -> 8") &&
+    chat.includes("delay(40)") &&
     chat.includes("!aiLiveBody[pos].isWhitespace()") &&
     chat.includes("revealChars = liveReveal.coerceAtMost(aiLiveBody.length),") &&
     !chat.includes("revealChars = aiLiveBody.length,") &&
