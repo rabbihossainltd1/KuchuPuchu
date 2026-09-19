@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.requiredMinWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
@@ -1835,18 +1836,19 @@ fun ChatScreen(nav: NavController, convId: String) {
                 val name = job.row.optString("fileName")
                 val mime = job.row.optString("fileType")
                 val cap = job.row.optString("body")
-                val withCaption =
-                    if (cap.isBlank()) {
-                        null
-                    } else {
-                        JSONObject()
-                            .put("kind", "FILE")
-                            .put("fileName", name)
-                            .put("fileType", mime)
-                            .put("fileSize", file.length())
-                            .put("body", cap)
-                            .put("clientId", cid)
-                    }
+                // v172: the posted payload carries the clip's true shape, so
+                // the painted (server) row keeps the original ratio too.
+                val payload =
+                    JSONObject()
+                        .put("kind", "FILE")
+                        .put("fileName", name)
+                        .put("fileType", mime)
+                        .put("fileSize", file.length())
+                        .put("body", cap)
+                        .put("clientId", cid)
+                        .put("mediaW", job.row.optInt("mediaW"))
+                        .put("mediaH", job.row.optInt("mediaH"))
+                        .also { p -> job.row.optJSONObject("meta")?.let { p.put("meta", it) } }
                 val cb: (Result<JSONObject>) -> Boolean = cb@{ outcome ->
                     outcome.onSuccess { runCatching { KpSounds.sent(ctx) } }
                     if (!alive.get()) return@cb false
@@ -1858,8 +1860,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     }
                     true
                 }
-                if (withCaption == null) Uploads.sendFile(convId, cid, name, mime, file, null, onResult = cb)
-                else Uploads.sendFile(convId, cid, name, mime, file, null, withCaption, onResult = cb)
+                Uploads.sendFile(convId, cid, name, mime, file, null, payload, onResult = cb)
             }
         }
     }
@@ -5635,11 +5636,9 @@ private fun MessageRow(
             .fillMaxWidth()
             .padding(vertical = 2.dp)
             .fxSlotOpen(fxFresh)
-            .fxFlyIn(mine && fxFresh, if (kind == "TEXT") 520 else 560) {
+            .fxFlyIn(mine && fxFresh, if (kind == "TEXT") 420 else 460) {
                 fxLanded = m.optString("id")
-            }
-            .fxLanding(fxLanded)
-            .fxShineRipple(fxLanded),
+            },
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
         Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
@@ -5725,10 +5724,13 @@ private fun MessageRow(
                     // hoye ... massage bubble body aro ektu boro hobe jodi
                     // time tick fill na kore"): a text bubble is never
                     // narrower than the stamp riding under it.
-                    // v171 (owner: the stamp still overhangs a short
-                    // bubble) - the floor goes up until it cannot.
-                    .widthIn(min = if (emojiOnly > 0) 0.dp else 104.dp, max = bubbleMax)
+                    .widthIn(max = bubbleMax)
                     .wrapContentWidth()
+                    // v172 (owner r46 item 4): wrapContentWidth IGNORES the
+                    // incoming minimum - the 104 dp floor is therefore
+                    // enforced AFTER it, as a required size, so a short
+                    // bubble really is wider than the stamp under it.
+                    .then(if (emojiOnly > 0) Modifier else Modifier.requiredMinWidth(104.dp))
                     // Owner round 10: the same soft 3D lift the call buttons
                     // have — bubbles float on the wallpaper now.
                     // Owner round 32 (item 8): an emoji-only message has NO
@@ -5766,7 +5768,12 @@ private fun MessageRow(
                     // the text. Other kinds keep the small bottom band —
                     // except FILE rows (items 45 / 34), whose second line
                     // already leaves the stamp its corner.
-                    .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp),
+                    .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp)
+                    // v172 (owner: "light effect ta just message a hobe
+                    // full chat a na"): the landing squash + shine + ripple
+                    // ride the BUBBLE only.
+                    .fxLanding(fxLanded)
+                    .fxShineRipple(fxLanded),
             ) {
                 val senderName = m.optText("senderName")
                 Column {

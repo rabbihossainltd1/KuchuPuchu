@@ -160,7 +160,7 @@ check(
     // bubble instead, which is what actually shrinks the card's footprint.
     !chat.includes("val voiceNote") &&
     chat.includes(
-      ".padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp),",
+      ".padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp)",
     ) &&
     chat.includes("horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,") &&
     // r33's scrub-to-seek and the spinner survive verbatim
@@ -214,8 +214,16 @@ check(
   "v169 item 7b (r44): the send flight rides the PENDING row - it rises out of the composer (translation/scale/alpha only, never width/height), lands with the squash and the shine + ripple, and paintSent pre-marks the real id so the painted row replaces it silently",
   fx7.includes("fun fxFlyIn") &&
     fx7.includes("translationY = (1f - v) * 120f * density - arc * 10f * density") &&
+    // r46 item 6: the flight is a straight JUMP - the bubble rises at its
+    // real size (no scaleX/scaleY shrink-and-grow) from the composer's
+    // right edge to its slot.
+    fx7.includes("translationX = (1f - v) * -150f * density") &&
+    !fx7.includes("scaleX =") &&
     chat.includes("FxArrivals.markSeen(id)") &&
-    chat.includes('.fxFlyIn(mine && fxFresh, if (kind == "TEXT") 520 else 560)') &&
+    chat.includes('.fxFlyIn(mine && fxFresh, if (kind == "TEXT") 420 else 460)') &&
+    // r46 item 6: the landing + shine + ripple ride the BUBBLE box, never
+    // the full-width row (the light swept the whole chat before).
     chat.includes(".fxLanding(fxLanded)") &&
-    chat.includes(".fxShineRipple(fxLanded)"),
+    chat.includes(".fxShineRipple(fxLanded)") &&
+    chat.indexOf(".fxShineRipple(fxLanded)") < chat.indexOf(".padding(start = 10.dp, top = 4.dp,"),
 );

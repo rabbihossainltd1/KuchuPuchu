@@ -5131,7 +5131,14 @@ const convBetween = (db, a, b) =>
         "emojiOnly > 0 -> Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))",
       ) &&
       // v170: the floor is now 96 dp - wide enough for the stamp under it.
-      chat1516.includes(".widthIn(min = if (emojiOnly > 0) 0.dp else 104.dp, max = bubbleMax)") &&
+      chat1516.includes(".widthIn(max = bubbleMax)") &&
+      chat1516.includes(".wrapContentWidth()") &&
+      // r46 item 4: the floor is a requiredMinWidth AFTER wrapContentWidth -
+      // wrapContentWidth ignores the incoming MIN, so a widthIn(min=...)
+      // placed outside it never held on device (72 dp and 104 dp both lost).
+      chat1516.includes(
+        ".then(if (emojiOnly > 0) Modifier else Modifier.requiredMinWidth(104.dp))",
+      ) &&
       // r33-5: the fixed 30 dp end room is gone — the stamp gets its own
       // measured row under the glyph (KpStamped below = true).
       chat1516.includes("modifier = Modifier.padding(start = 2.dp, end = 2.dp),") &&
