@@ -6778,7 +6778,9 @@ const convBetween = (db, a, b) =>
         edit.includes('Text("Aa", color = Color.White') &&
         edit.includes("Icons.Filled.Edit") &&
         edit.includes("CenteredOnceIcon(28.dp") &&
-        edit.includes("Swipe up for filters") &&
+        // v169: the swipe-up hint is gone; the rail owns the filter strip.
+        !edit.includes("Swipe up for filters") &&
+        edit.includes("Icons.Filled.AutoAwesome") &&
         edit.includes("ColorMatrix(filterMatrix.array)") &&
         edit.includes("Add a caption...") &&
         edit.includes("ScreenStore.editTitle") &&
@@ -7903,14 +7905,14 @@ const convBetween = (db, a, b) =>
   {
     const edit3 = kt("MediaEditScreen.kt");
     check(
-      "r36-3: overlay undo — snapshot history (push on add / gesture-start / delete / clear, cap 50), undo pops strokes first then overlays, clear wipes strokes + overlays together; the selection is a sharp rectangle, not a ring",
+      "r36-3: overlay undo — snapshot history (push on add / gesture-start / delete, cap 50), undo pops strokes first then overlays; v169 retired the trash seat (undo covers it); the selection is a sharp rectangle, not a ring",
       edit3.includes(
         "val overlayPast = remember { mutableStateListOf<Pair<List<EditText>, List<EditSticker>>>() }",
       ) &&
         edit3.includes("fun pushOverlayPast()") &&
         edit3.includes("fun undoOverlay()") &&
         edit3.includes("removeLastOrNull()") &&
-        (edit3.match(/pushOverlayPast\(\)/g) || []).length === 8 &&
+        (edit3.match(/pushOverlayPast\(\)/g) || []).length === 7 &&
         edit3.includes(
           "native.drawRect(cx - sel.rx * w, cy - sel.ry * h, cx + sel.rx * w, cy + sel.ry * h, ring)",
         ) &&
@@ -8290,11 +8292,11 @@ const convBetween = (db, a, b) =>
         edit.includes("Brush.verticalGradient") &&
         edit.includes(".align(Alignment.TopCenter)") &&
         edit.includes(".align(Alignment.BottomCenter)") &&
-        // v168: the tool seats are 40 dp StageHistory (rail + corners) — the
-        // 32 dp ToolButton and 26 dp CompactTool seats are gone; ONE 32 dp
-        // (the caption-bar mic) and TWO 26 dp (attach checkbox + pen chips)
-        // remain, and the top bar keeps ONE 36 (close).
-        (edit.match(/\.size\(32\.dp\)/g) || []).length === 1 &&
+        // v169: the rail seats stay 40 dp StageHistory; undo / redo are plain
+        // 32 dp IconButtons in the top bar centre (mic keeps its 32 dp), the
+        // 26 dp pair (attach checkbox + pen chips) and the one 36 dp close
+        // survive.
+        (edit.match(/\.size\(32\.dp\)/g) || []).length === 3 &&
         (edit.match(/\.size\(36\.dp\)/g) || []).length === 1 &&
         (edit.match(/\.size\(26\.dp\)/g) || []).length === 2 &&
         // v167: undo / redo float on the stage as two 40 dp seats (the pair the

@@ -43,35 +43,37 @@ const profile = kt("ProfileScreen.kt");
 const secure = kt("KpSecure.kt");
 const src = readFileSync(new URL("../../src/worker/index.ts", import.meta.url), "utf8");
 
-/* 1 — the editor chrome: right rail + corner history */
+/* 1 — the editor chrome v2: plain centred history, checkbox corner, new rail */
 check(
-  "v168 item 1: every edit tool is one 40 dp seat on a right-side vertical rail (rotate / crop / sticker / text / pen / clear / save top-to-bottom, evenly spaced, aligned TopEnd under the bar), undo rides the top-LEFT beside the X and redo is the top-RIGHT corner, and the old left-to-right fold (ToolButton / CompactTool / the floating 46 dp pair) is gone",
-  edit.includes(".align(Alignment.TopEnd)") &&
+  "v169 item 1: undo + redo are plain 32 dp IconButtons SIDE BY SIDE in the top bar CENTRE (no circle, no border), the select checkbox stays the top bar's right-most seat, HD keeps its seat, and the right rail reads pen / sticker / crop / text / rotate / effects / save with every seat live - the trash seat and the swipe-up hint are gone",
+  edit.includes("IconButton(onClick = { haptics.tap(); undoEdit() }, enabled = canUndo") &&
+    edit.includes("IconButton(onClick = { haptics.tap(); redoEdit() }, enabled = canRedo") &&
+    edit.indexOf("Icons.AutoMirrored.Filled.Undo") <
+      edit.indexOf("Icons.AutoMirrored.Filled.Redo") &&
+    edit.includes(".align(Alignment.TopEnd)") &&
     edit.includes(".padding(top = 52.dp, end = 8.dp),") &&
     edit.includes("verticalArrangement = Arrangement.spacedBy(8.dp),") &&
-    edit.includes("horizontalAlignment = Alignment.CenterHorizontally,") &&
-    edit.includes("StageHistory(true, { haptics.tap(); rotateTap() })") &&
-    edit.includes(
-      "StageHistory(cropping, { haptics.tap(); if (cropping) exitCrop() else enterCrop() })",
-    ) &&
-    edit.includes("StageHistory(penMode, {") &&
-    edit.includes("StageHistory(canClear, {") &&
-    edit.includes("StageHistory(true, { haptics.tap(); saveCurrent() })") &&
-    edit.includes("StageHistory(canUndo, { haptics.tap(); undoEdit() })") &&
-    edit.includes("StageHistory(canRedo, { haptics.tap(); redoEdit() })") &&
-    // top-bar order: X, then UNDO ... REDO last; rail order: rotate ... save
-    edit.indexOf('Icon(Icons.Filled.Close, "Close"') <
-      edit.indexOf("StageHistory(canUndo, { haptics.tap(); undoEdit() })") &&
-    edit.indexOf("StageHistory(canUndo, { haptics.tap(); undoEdit() })") <
-      edit.indexOf("StageHistory(canRedo, { haptics.tap(); redoEdit() })") &&
+    // rail order: pen, sticker, crop, text, rotate, effects, save
+    edit.indexOf("penMode = !penMode") <
+      edit.indexOf('Icon(Icons.Filled.EmojiEmotions, "Stickers"') &&
+    edit.indexOf('Icon(Icons.Filled.EmojiEmotions, "Stickers"') <
+      edit.indexOf("if (cropping) exitCrop() else enterCrop()") &&
+    edit.indexOf("if (cropping) exitCrop() else enterCrop()") <
+      edit.indexOf('Text("Aa", color = Color.White, fontSize = 15.sp') &&
+    edit.indexOf('Text("Aa", color = Color.White, fontSize = 15.sp') <
+      edit.indexOf("StageHistory(true, { haptics.tap(); rotateTap() })") &&
     edit.indexOf("StageHistory(true, { haptics.tap(); rotateTap() })") <
-      edit.indexOf("StageHistory(penMode, {") &&
-    edit.indexOf("StageHistory(penMode, {") < edit.indexOf("StageHistory(canClear, {") &&
-    edit.indexOf("StageHistory(canClear, {") <
+      edit.indexOf("Icons.Filled.AutoAwesome") &&
+    edit.indexOf("Icons.Filled.AutoAwesome") <
       edit.indexOf("StageHistory(true, { haptics.tap(); saveCurrent() })") &&
-    !edit.includes("ToolButton(") &&
-    !edit.includes("fun CompactTool(") &&
-    !edit.includes("spacedBy(46.dp)"),
+    // gone: the trash seat, the swipe hint, the armed-seat bug, v168 corners
+    !edit.includes("StageHistory(canClear") &&
+    !edit.includes('Icon(Icons.Filled.Delete, "Clear"') &&
+    !edit.includes("Swipe up for filters") &&
+    !edit.includes("StageHistory(penMode, {") &&
+    !edit.includes("StageHistory(cropping, {") &&
+    !edit.includes("StageHistory(canUndo") &&
+    !edit.includes("StageHistory(canRedo"),
 );
 
 /* 2 — the video editor's play/pause seat */

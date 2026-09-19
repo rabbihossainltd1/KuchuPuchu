@@ -98,15 +98,26 @@ const store = kt("ScreenStore.kt");
       edit.includes(".align(Alignment.TopEnd)") &&
       edit.includes(".padding(top = 52.dp, end = 8.dp),") &&
       edit.includes("verticalArrangement = Arrangement.spacedBy(8.dp),") &&
+      // v169: rail order is pen / sticker / crop / text / rotate / effects /
+      // save, every seat live, no trash.
       edit.includes("StageHistory(true, { haptics.tap(); rotateTap() })") &&
       edit.includes(
-        "StageHistory(cropping, { haptics.tap(); if (cropping) exitCrop() else enterCrop() })",
+        "StageHistory(true, { haptics.tap(); if (cropping) exitCrop() else enterCrop() })",
       ) &&
-      edit.includes("StageHistory(penMode, {") &&
-      edit.includes("StageHistory(canClear, {") &&
+      edit.includes(
+        "StageHistory(true, {\n                        haptics.tap()\n                        exitCrop()\n                        penMode = !penMode",
+      ) &&
+      edit.includes("Icons.Filled.AutoAwesome") &&
+      !edit.includes("StageHistory(canClear") &&
+      !edit.includes('Icon(Icons.Filled.Delete, "Clear"') &&
+      edit.indexOf("penMode = !penMode") <
+        edit.indexOf('Icon(Icons.Filled.EmojiEmotions, "Stickers"') &&
+      edit.indexOf('Icon(Icons.Filled.EmojiEmotions, "Stickers"') <
+        edit.indexOf("if (cropping) exitCrop() else enterCrop()") &&
+      edit.indexOf("if (cropping) exitCrop() else enterCrop()") <
+        edit.indexOf("StageHistory(true, { haptics.tap(); rotateTap() })") &&
       edit.indexOf("StageHistory(true, { haptics.tap(); rotateTap() })") <
-        edit.indexOf("StageHistory(penMode, {") &&
-      edit.indexOf("StageHistory(penMode, {") < edit.indexOf("StageHistory(canClear, {") &&
+        edit.indexOf("Icons.Filled.AutoAwesome") &&
       edit.includes('Icon(Icons.Filled.EmojiEmotions, "Stickers", tint = Color.White') &&
       edit.includes(
         'Text("Aa", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)',

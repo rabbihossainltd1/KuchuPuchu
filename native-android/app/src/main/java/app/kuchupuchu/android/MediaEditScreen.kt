@@ -11,7 +11,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -39,15 +38,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Crop
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEmotions
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
@@ -1487,7 +1484,6 @@ private fun MediaEditItemScreen(
     // the tools, clear included.
     val canUndo = strokes.isNotEmpty() || overlayPast.isNotEmpty()
     val canRedo = redoStack.isNotEmpty()
-    val canClear = strokes.isNotEmpty() || texts.isNotEmpty() || stickers.isNotEmpty()
 
     // Owner round 45 (item 7): a horizontal swipe browses the pool — gated
     // off while drawing, cropping or nudging an overlay, so those drags
@@ -1673,9 +1669,13 @@ private fun MediaEditItemScreen(
                 IconButton(onClick = { if (cropping) exitCrop() else nav.popBackStack() }, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.Filled.Close, "Close", tint = Color.White, modifier = Modifier.size(20.dp))
                 }
-                // v168: UNDO - the top-LEFT seat, right beside the X.
+                // v169 (owner: "undo redo button gula eto boro ar background
+                // border rakhcho keno ar eto dure dure thakbe na middle a
+                // thakbe pasha pashi"): the pair rides the TOP BAR CENTRE,
+                // side by side, plain glyphs - no circle, no border.
+                Spacer(Modifier.weight(1f))
                 if (shot != null || clip != null) {
-                    StageHistory(canUndo, { haptics.tap(); undoEdit() }) {
+                    IconButton(onClick = { haptics.tap(); undoEdit() }, enabled = canUndo, modifier = Modifier.size(32.dp)) {
                         Icon(
                             Icons.AutoMirrored.Filled.Undo,
                             "Undo",
@@ -1683,8 +1683,16 @@ private fun MediaEditItemScreen(
                             modifier = Modifier.size(20.dp),
                         )
                     }
-                    Spacer(Modifier.width(5.dp))
+                    IconButton(onClick = { haptics.tap(); redoEdit() }, enabled = canRedo, modifier = Modifier.size(32.dp)) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Redo,
+                            "Redo",
+                            tint = Color.White.copy(alpha = if (canRedo) 1f else 0.35f),
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
                 }
+                Spacer(Modifier.weight(1f))
                 // v164 (owner): the clip length used to sit here. Done takes
                 // its place — it APPLIES what the user has made so far (bake
                 // the layers into the working file) and leaves the editor open.
@@ -1756,18 +1764,6 @@ private fun MediaEditItemScreen(
                         }
                     }
                 }
-                // v168 (owner: "undo redo button 2ta upore left right ei
-                // thakuk"): REDO - the top-RIGHT corner seat.
-                if (shot != null || clip != null) {
-                    StageHistory(canRedo, { haptics.tap(); redoEdit() }) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Redo,
-                            "Redo",
-                            tint = Color.White.copy(alpha = if (canRedo) 1f else 0.35f),
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                }
             }
 
             // v168 (owner: "edit options gula ... right side a upor niche
@@ -1783,11 +1779,20 @@ private fun MediaEditItemScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    StageHistory(true, { haptics.tap(); rotateTap() }) {
-                        Icon(Icons.Filled.RotateRight, "Rotate", tint = Color.White, modifier = Modifier.size(20.dp))
-                    }
-                    StageHistory(cropping, { haptics.tap(); if (cropping) exitCrop() else enterCrop() }) {
-                        Icon(Icons.Filled.Crop, "Crop", tint = if (cropping) ActionBlue else Color.White, modifier = Modifier.size(20.dp))
+                    // v169 (owner: "otar theke ektu niche thakbe edit pencil
+                    // icon otar niche thakbe emoji icon otar niche thakbe crop
+                    // otar niche Aa ... rotate ... effect ... save; ekhane
+                    // delete icon remove hobe"): the rail's NEW order, and
+                    // every seat is LIVE (a first tap always works - v168
+                    // armed the pen / crop seats with their own state and a
+                    // cold tap did nothing). The effects seat replaces the
+                    // old swipe-up hint; undo covers the trash.
+                    StageHistory(true, {
+                        haptics.tap()
+                        exitCrop()
+                        penMode = !penMode
+                    }) {
+                        Icon(Icons.Filled.Edit, "Draw", tint = if (penMode) ActionBlue else Color.White, modifier = Modifier.size(20.dp))
                     }
                     StageHistory(true, {
                         haptics.tap()
@@ -1796,6 +1801,9 @@ private fun MediaEditItemScreen(
                     }) {
                         Icon(Icons.Filled.EmojiEmotions, "Stickers", tint = Color.White, modifier = Modifier.size(20.dp))
                     }
+                    StageHistory(true, { haptics.tap(); if (cropping) exitCrop() else enterCrop() }) {
+                        Icon(Icons.Filled.Crop, "Crop", tint = if (cropping) ActionBlue else Color.White, modifier = Modifier.size(20.dp))
+                    }
                     StageHistory(true, {
                         haptics.tap()
                         exitCrop()
@@ -1803,25 +1811,14 @@ private fun MediaEditItemScreen(
                     }) {
                         Text("Aa", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     }
-                    StageHistory(penMode, {
-                        haptics.tap()
-                        exitCrop()
-                        penMode = !penMode
-                    }) {
-                        Icon(Icons.Filled.Edit, "Draw", tint = if (penMode) ActionBlue else Color.White, modifier = Modifier.size(20.dp))
+                    StageHistory(true, { haptics.tap(); rotateTap() }) {
+                        Icon(Icons.Filled.RotateRight, "Rotate", tint = Color.White, modifier = Modifier.size(20.dp))
                     }
-                    StageHistory(canClear, {
-                        if (!canClear) return@StageHistory
+                    StageHistory(true, {
                         haptics.tap()
-                        if (strokes.isNotEmpty()) strokes.clear()
-                        if (texts.isNotEmpty() || stickers.isNotEmpty()) {
-                            pushOverlayPast()
-                            texts.clear()
-                            stickers.clear()
-                            selectedId = null
-                        }
+                        filtersOpen = !filtersOpen
                     }) {
-                        Icon(Icons.Filled.Delete, "Clear", tint = Color.White.copy(alpha = if (canClear) 1f else 0.35f), modifier = Modifier.size(20.dp))
+                        Icon(Icons.Filled.AutoAwesome, "Effects", tint = if (filtersOpen) ActionBlue else Color.White, modifier = Modifier.size(20.dp))
                     }
                     // v165 (owner: "profile picture a edit a save button
                     // remove koro"): the profile flow has no save-to-gallery.
@@ -1846,34 +1843,9 @@ private fun MediaEditItemScreen(
                 // Owner round 36 (item 6): filters ride video too (the still
                 // below previews them — a TextureView takes no ColorFilter).
                 if ((shot != null || clip != null) && !cropping) {
-                    var swipeTotal by remember { mutableStateOf(0f) }
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable { filtersOpen = !filtersOpen }
-                            .pointerInput(Unit) {
-                                detectVerticalDragGestures(
-                                    onDragStart = { swipeTotal = 0f },
-                                    onVerticalDrag = { _, amount -> swipeTotal += amount },
-                                    onDragEnd = {
-                                        if (swipeTotal < -30f) filtersOpen = true
-                                        else if (swipeTotal > 30f) filtersOpen = false
-                                    },
-                                )
-                            }
-                            .padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            if (filtersOpen) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                            if (filtersOpen) "Hide filters" else "Show filters",
-                            tint = Color(0xFF9AA4B2),
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text("Swipe up for filters", color = Color(0xFF9AA4B2), fontSize = 12.sp)
-                    }
+                    // v169 (owner: "effect icon ekhon ota niche swipe up a
+                    // ache okhan theke remove hobe"): the hint row is gone -
+                    // the rail's Effects seat owns the strip now.
                     if (filtersOpen) {
                         LazyRow(
                             Modifier.fillMaxWidth().padding(bottom = 4.dp),
