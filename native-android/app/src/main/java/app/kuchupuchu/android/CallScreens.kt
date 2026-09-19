@@ -73,7 +73,6 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.zIndex
@@ -265,9 +264,9 @@ fun IncomingCallScreen(call: CallUi) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Spacer(Modifier.weight(0.7f))
-            PulseRing {
-                CallAvatar(call, 108.dp)
-            }
+            // r55 (owner item 4): the ring's avatar no longer zooms in and
+            // out - a calm static picture, like the connected screens.
+            CallAvatar(call, 108.dp)
             Spacer(Modifier.height(26.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(call.otherName, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
@@ -1421,22 +1420,6 @@ private fun StripAction(
             modifier = Modifier.size(21.dp),
         )
     }
-}
-
-/** Avatar wrapper with a soft breathing pulse (ringing screens). */
-@Composable
-private fun PulseRing(content: @Composable () -> Unit) {
-    val t = rememberInfiniteTransition(label = "pulse")
-    val s by t.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.06f,
-        animationSpec = infiniteRepeatable(
-            tween(1100),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "scale",
-    )
-    Box(Modifier.scale(s)) { content() }
 }
 
 /**
