@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material3.CircularProgressIndicator
@@ -247,6 +248,12 @@ private fun MediaEditItemScreen(
     var playAt by remember(pickedUri) { mutableStateOf<Long?>(null) }
     var seekTo by remember(pickedUri) { mutableStateOf<Long?>(null) }
     var busy by remember { mutableStateOf(false) }
+    // v168 (owner: "video edit er somoy ply pause kora jai na eita add kore
+    // daw"): the stage's own play/pause state. StatusTrimPreview's built-in
+    // tap-to-pause never fires here - the overlay canvas above it claims
+    // every tap - so the clip gets a real seat (and r42-3's apply parks the
+    // fresh clip on it).
+    var vidPaused by remember { mutableStateOf(false) }
     // v166 (owner: "video edit kore done dile lag kore ar done o hoi na"):
     // a clip bake is a real transcode — without a number on screen it read as
     // a freeze and as "Done didn't work". -1f = no bake running, else 0..1.
@@ -1569,12 +1576,38 @@ private fun MediaEditItemScreen(
                                 // the clip into a WYSIWYG still (the export's
                                 // exact pixels for this frame); the live player
                                 // rests underneath, paused. Ink rides either way.
-                                StatusTrimPreview(mediaUri, start, end, paused = stillMode, scrubAt = scrub, seekTo = seekTo, onSeekDone = { seekTo = null }, onPosition = { playAt = it })
+                                StatusTrimPreview(mediaUri, start, end, paused = stillMode || vidPaused, scrubAt = scrub, seekTo = seekTo, onSeekDone = { seekTo = null }, onPosition = { playAt = it })
                                 val still = videoStill
                                 if (stillMode && still != null) {
                                     Image(still, "Edited frame", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
                                 }
                                 StageCanvas()
+                                // v168 (owner: "video edit er somoy ply pause
+                                // kora jai na"): the clip's play/pause seat -
+                                // centred over the ink layer, out of the way
+                                // while cropping, drawing, baking, or while a
+                                // turn / filter holds the WYSIWYG still.
+                                if (!cropping && !penMode && !busy && !stillMode) {
+                                    Box(
+                                        Modifier
+                                            .align(Alignment.Center)
+                                            .size(48.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0x59000000))
+                                            .clickable {
+                                                haptics.tap()
+                                                vidPaused = !vidPaused
+                                            },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            if (vidPaused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
+                                            if (vidPaused) "Play" else "Pause",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(30.dp),
+                                        )
+                                    }
+                                }
                             }
                             if (cropping) {
                                 CropOverlay(

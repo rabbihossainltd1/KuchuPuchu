@@ -4955,7 +4955,7 @@ const convBetween = (db, a, b) =>
       share32.includes("player?.setPaused(paused || userPaused || scrubAt != null)") &&
       edit43.includes(
         // v164: the preview plays the working media.
-        "StatusTrimPreview(mediaUri, start, end, paused = stillMode, scrubAt = scrub",
+        "StatusTrimPreview(mediaUri, start, end, paused = stillMode || vidPaused, scrubAt = scrub",
       ) &&
       edit43.includes("onPosition = { playAt = it }"),
   );
@@ -6706,7 +6706,7 @@ const convBetween = (db, a, b) =>
         edit.includes(
           // v164: the stage / preview / bakes all read the WORKING media
           // (mediaUri) — pickedUri until Done bakes an applied copy into it.
-          "StatusTrimPreview(mediaUri, start, end, paused = stillMode, scrubAt = scrub",
+          "StatusTrimPreview(mediaUri, start, end, paused = stillMode || vidPaused, scrubAt = scrub",
         ) &&
         edit.includes("onPosition = { playAt = it }") &&
         edit.includes(

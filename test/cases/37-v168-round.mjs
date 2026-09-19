@@ -68,6 +68,19 @@ check(
     !edit.includes("spacedBy(46.dp)"),
 );
 
+/* 2 — the video editor's play/pause seat */
+check(
+  "v168 item 2: the clip's stage carries a real play/pause seat (48 dp, centred over the ink layer, hidden while cropping / drawing / baking / still) driving a hoisted vidPaused into StatusTrimPreview's paused - the player's own tap-to-pause can never fire under the overlay canvas",
+  edit.includes("var vidPaused by remember { mutableStateOf(false) }") &&
+    edit.includes(
+      "StatusTrimPreview(mediaUri, start, end, paused = stillMode || vidPaused, scrubAt = scrub",
+    ) &&
+    edit.includes("if (!cropping && !penMode && !busy && !stillMode) {") &&
+    edit.includes("if (vidPaused) Icons.Filled.PlayArrow else Icons.Filled.Pause,") &&
+    edit.includes("vidPaused = !vidPaused") &&
+    edit.includes("import androidx.compose.material.icons.filled.Pause"),
+);
+
 console.log(lines.join("\n"));
 console.log(
   `v168 round: ${lines.filter((l) => l.includes("OK")).length} ok / ${lines.filter((l) => l.includes("BROKEN")).length} broken`,
