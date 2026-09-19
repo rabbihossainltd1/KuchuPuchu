@@ -4882,16 +4882,10 @@ const convBetween = (db, a, b) =>
     chat32.indexOf("fun sendImage("),
   );
   check(
-    "r32-48: no send path awaits a list scroll — sendImage / sendVoice / sendText launch the jump-to-bottom on a separate coroutine wrapped in runCatching, the upload coroutine never contains animateScrollToItem, and the grid batch decodes photos sequentially in tick order via readAndSendImage",
-    sendImageBody.includes(
-      "scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }",
-    ) &&
-      sendVoiceBody.includes(
-        "scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }",
-      ) &&
-      sendTextBody.includes(
-        "if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }",
-      ) &&
+    "r32-48 (r52): no send path awaits a list scroll — sendImage / sendVoice / sendText hand the jump-to-bottom to pendingScrollAfterLand and the flight's landing effect runs animateScrollToItem, the upload coroutine never contains animateScrollToItem, and the grid batch decodes photos sequentially in tick order via readAndSendImage",
+    sendImageBody.includes("pendingScrollAfterLand = true") &&
+      sendVoiceBody.includes("pendingScrollAfterLand = true") &&
+      sendTextBody.includes("pendingScrollAfterLand = true") &&
       // the upload coroutine starts with the sound, never with a scroll
       sendImageBody.includes(
         "scope.launch {\n            runCatching { KpSounds.send(ctx) }\n            var shotW = 0",
@@ -6281,7 +6275,7 @@ const convBetween = (db, a, b) =>
     check(
       "r34-16a: app — a view-once message renders ViewOnceRow: the photo at its original ratio (ImageRatios-cached) blurred past recognition via ViewOnceBlur, the ViewOnceOneIcon mark in the middle, a dark tile for video / uploads; the recipient opens it (sender's tap does nothing), reply-drag + long-press intact, no 'Opened' state anywhere; the album fold, resend and the media grid never take it",
       chat.includes(
-        "if (isViewOnce(m)) {\n        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700)) {\n            ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)",
+        "if (isViewOnce(m)) {\n        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine) { onFlightLanded() }) {\n            ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)",
       ) &&
         chat.indexOf("if (isViewOnce(m)) {") <
           chat.indexOf(
@@ -7162,7 +7156,7 @@ const convBetween = (db, a, b) =>
         policyTest.includes("OutboxPolicy.nextWakeMs(listOf(now + OutboxPolicy.waitMs(1)), now)"),
     );
     check(
-      "r33-3a: the chat sends text through Outbox.send (no Api.post on the screen scope, r32-48 scroll coroutine kept, draft released right after the queue owns it), paints the reply row via paintSent while alive, seeds queued rows from Outbox.pendingFor on open, and the leave effect flips `alive`",
+      "r33-3a: the chat sends text through Outbox.send (no Api.post on the screen scope, r32-48 r52 scroll handoff kept, draft released right after the queue owns it), paints the reply row via paintSent while alive, seeds queued rows from Outbox.pendingFor on open, and the leave effect flips `alive`",
       sendText33.includes("Outbox.send(convId, clientId, payload) { outcome ->") &&
         !sendText33.includes("Api.post(") &&
         !sendText33.includes("Outbox.add(") &&
@@ -7172,9 +7166,7 @@ const convBetween = (db, a, b) =>
         // the refusal pass runs BEFORE the marker GET (an "unchanged" page used to skip it)
         chat33.indexOf("fun reconcileRefused() {") < chat33.indexOf("fun refreshMessages(") &&
         /scope\.launch \{\n\s+try \{\n\s+reconcileRefused\(\)/.test(chat33) &&
-        sendText33.includes(
-          "if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }",
-        ) &&
+        sendText33.includes("pendingScrollAfterLand = true") &&
         sendText33.includes("if (!alive.get()) return@send false") &&
         sendText33.includes("outcome.onSuccess { row -> paintSent(row) }") &&
         sendText33.includes("Drafts.clear(convId)") &&
@@ -7343,21 +7335,17 @@ const convBetween = (db, a, b) =>
       chat.indexOf('fun sendText(body: String, kind: String = "TEXT") {'),
     );
     check(
-      "r33-2: chat — the socket fast-paint and paintSent decide 'near the bottom' BEFORE the rows move (last visible index >= total - 2, no drag) and then follow the thread in their own coroutine; a reader scrolled up is left alone",
+      "r33-2 (r52): chat — the socket fast-paint and paintSent decide 'near the bottom' BEFORE the rows move (last visible index >= total - 2, no drag); a live arrival hands the follow-scroll to the flight's landing (pendingScrollAfterLand), paintSent follows instantly only when the bubble was not flying; a reader scrolled up is left alone",
       fastPaint.includes("val info = listState.layoutInfo") &&
         fastPaint.indexOf("val follow =") < fastPaint.indexOf("msgs.add(liveMsg)") &&
         fastPaint.includes(
           "info.visibleItemsInfo.lastOrNull()?.index?.let { it >= info.totalItemsCount - 2 } == true",
         ) &&
-        fastPaint.includes(
-          "if (follow) {\n                                        scope.launch {\n                                            val total = msgs.size + pending.size\n                                            if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }",
-        ) &&
+        fastPaint.includes("if (follow) pendingScrollAfterLand = true") &&
         paintSent.indexOf("val follow =") < paintSent.indexOf("if (idx >= 0) {") > -1 &&
-        paintSent.indexOf("FxArrivals.markSeen(id)") > -1 &&
+        paintSent.includes("val wasFlying = FxArrivals.mark(id) != null") &&
         paintSent.includes("!listState.isScrollInProgress &&") &&
-        paintSent.includes(
-          "if (follow) {\n            scope.launch {\n                val total = msgs.size + pending.size\n                if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }",
-        ),
+        paintSent.includes("if (wasFlying) pendingScrollAfterLand = true"),
     );
     check(
       "r33-2: calls — ScreenStore.callsVersion (warmed) is bumped 1.5s after an engine teardown and by the missed-call push; the tab's effect keys on it and forces the history GET past the 20s cache; status — inbox pokes and a 12s foreground tick re-read /api/statuses (forced), contacts are ordered newest-update-first",
@@ -7706,7 +7694,7 @@ const convBetween = (db, a, b) =>
         chat.includes(
           'val flashing = flashId.isNotBlank() && albumPhotos(m).any { it.optString("id") == flashId }',
         ) &&
-        chat.includes("if (idx == 0 && scrolling) loadOlder()"),
+        chat.includes("if (idx <= 2 && scrolling) loadOlder()"),
     );
   }
   // Item 19: a video send shows its upload progress (photo-style ring with

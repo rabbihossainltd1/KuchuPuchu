@@ -168,32 +168,23 @@ check(
     chat.includes("modifier = Modifier.size(16.dp),"),
 );
 
-console.log(lines.join("\n"));
-console.log(
-  `v168 round: ${lines.filter((l) => l.includes("OK")).length} ok / ${lines.filter((l) => l.includes("BROKEN")).length} broken`,
-);
-process.exit(lines.some((l) => l.includes("BROKEN")) ? 1 : 0);
-
 /* 7 — the owner's animation pack (ChatAnimationsComplete): receive side */
-const fx7 = fs.readFileSync(
-  "native-android/app/src/main/java/app/kuchupuchu/android/ChatFx.kt",
-  "utf8",
-);
+const fx7 = kt("ChatFx.kt");
 check(
   "v169 item 7 (r44): the receive animation pack is in - a shared Compose-only ChatFx.kt (emoji registry with entry/idle/fx, slot open, letter-by-letter reveal, de-blur media reveal, landing squash, shine + ripple) that respects the animator duration scale; arrivals are marked synchronously at the row's FIRST composition (FxArrivals) so nothing ever lands-then-replays, history composes before the screen arms, and the AI bot's rows never animate here",
   fx7.includes("object EmojiAnimationRegistry") &&
     fx7.includes('"\ud83d\ude02" to EmojiAnim("shake-in", "shake", EmojiFx.TEARS)') &&
     fx7.includes("object FxArrivals") &&
-    fx7.includes("fun fxSlotOpen") &&
+    fx7.includes("fun Modifier.fxSlotOpen") &&
     fx7.includes("fun fxLetterSpans") &&
     fx7.includes("fun fxAnimatorScale") &&
     fx7.includes("fun fxScaleOf") &&
     fx7.includes("ANIMATOR_DURATION_SCALE") &&
-    fx7.includes("fun fxLanding") &&
-    fx7.includes("fun fxShineRipple") &&
-    fx7.includes("fun fxBlurIn") &&
-    fx7.includes("fun fxPopIn") &&
-    fx7.includes("fun fxProgressLine") &&
+    fx7.includes("fun Modifier.fxLanding") &&
+    fx7.includes("fun Modifier.fxShineRipple") &&
+    fx7.includes("fun Modifier.fxBlurIn") &&
+    fx7.includes("fun Modifier.fxPopIn") &&
+    fx7.includes("fun Modifier.fxProgressLine") &&
     fx7.includes("fun AnimatedEmoji") &&
     chat.includes("val fxFresh =") &&
     chat.includes(
@@ -210,22 +201,40 @@ check(
     chat.includes(".fxProgressLine(fxGrow, docInk)"),
 );
 
+/* 7b - r52: the Claude pack's measured send flight (SendFlight.kt) */
+const fx8 = kt("SendFlight.kt");
 check(
-  "v169 item 7b (r44): the send flight rides the PENDING row - it rises out of the composer (translation/scale/alpha only, never width/height), lands with the squash and the shine + ripple, and paintSent pre-marks the real id so the painted row replaces it silently",
-  fx7.includes("fun fxFlyIn") &&
-    fx7.includes("translationY = (1f - v) * y0dp * density - arc * 10f * density") &&
-    // r46 item 6: the flight is a straight JUMP - the bubble rises at its
-    // real size (no scaleX/scaleY shrink-and-grow) from the composer's
-    // right edge to its slot.
-    fx7.includes("translationX = (1f - v) * x0dp * density") &&
-    !fx7.includes("scaleX =") &&
-    chat.includes("FxArrivals.markSeen(id)") &&
-    chat.includes('.fxFlyIn(fxFresh, if (kind == "TEXT") 500 else 540)') &&
+  "v169 item 7b (r52): the send/receive flight rides the PENDING row from the MEASURED composer pill - the pill exports its window bounds (fxComposerAnchor), the bubble flies at its original size along a quadratic arc (translation/alpha only, no scaleX/scaleY), the follow-scroll waits for the landing (pendingScrollAfterLand) so the seat never moves mid-flight, and paintSent pre-marks the real id so the painted row replaces it silently",
+  fx8.includes("object FlightAnchors") &&
+    fx8.includes("fun Modifier.fxComposerAnchor()") &&
+    fx8.includes("fun Modifier.fxFlyIn(") &&
+    fx8.includes("val startX = if (isSent) pill.right - s.width else pill.left") &&
+    fx8.includes("val lift = sin(e * PI.toFloat()) * 8f * density") &&
+    !fx8.includes("scaleX =") &&
+    chat.includes(".fxComposerAnchor()") &&
+    chat.includes("val wasFlying = FxArrivals.mark(id) != null") &&
+    chat.includes(
+      '.fxFlyIn(fxFresh, if (kind == "TEXT") 680 else if (voiceRow) 720 else 700, isSent = mine)',
+    ) &&
+    chat.includes("var pendingScrollAfterLand by remember { mutableStateOf(false) }") &&
+    chat.includes("LaunchedEffect(flightLandedNonce)") &&
+    chat.includes("onFlightLanded = { flightLandedNonce++ }") &&
     // r46 item 6: the landing + shine + ripple ride the BUBBLE box, never
     // the full-width row (the light swept the whole chat before).
-    chat.includes(".fxSoftIn(!fxFresh)") &&
-    fx7.includes("fun Modifier.fxSoftIn") &&
     chat.includes(".fxLanding(fxLanded)") &&
     chat.includes(".fxShineRipple(fxLanded)") &&
-    chat.indexOf(".fxShineRipple(fxLanded)") < chat.indexOf(".padding(start = 10.dp, top = 4.dp,"),
+    chat.includes(".fxLanding(fxLanded)\n                    .fxShineRipple(fxLanded),"),
 );
+check(
+  "r52: history stays smooth - older pages prefetch before row 0 (idx <= 2) and land on the exact row+offset the fling was on; the See more/See less toggle lives OUTSIDE the bubble so the bubble's combinedClickable can never eat the second tap",
+  chat.includes("if (idx <= 2 && scrolling) loadOlder()") &&
+    chat.includes("listState.scrollToItem(freshOld.size + fi, fo)") &&
+    chat.includes('r52 (owner: "see more work korleo see less working na")') &&
+    chat.indexOf('"See less"') > chat.indexOf(".fxShineRipple(fxLanded)"),
+);
+
+console.log(lines.join("\n"));
+console.log(
+  `v168 round: ${lines.filter((l) => l.includes("OK")).length} ok / ${lines.filter((l) => l.includes("BROKEN")).length} broken`,
+);
+process.exit(lines.some((l) => l.includes("BROKEN")) ? 1 : 0);
