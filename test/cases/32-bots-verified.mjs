@@ -2809,7 +2809,7 @@ const convBetween = (db, a, b) =>
         // r31-27: the call site now also hands the chat theme down (voice bars).
         // v163: the doc row also hands the ✕ (cancel send) down.
         chat.includes(
-          '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend)',
+          '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend, fxGrow = fxFresh)',
         ) &&
         readFileSync("src/worker/index.ts", "utf8").includes(
           "...(incomingMeta.document === true ? { document: true } : {}),",
@@ -3913,7 +3913,7 @@ const convBetween = (db, a, b) =>
             '.also { mm -> vm.optJSONArray("waveform")?.let { mm.put("waveform", it) } },',
           ) &&
           chat.includes(
-            '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend)',
+            '"FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend, fxGrow = fxFresh)',
           ),
       );
     }
@@ -4956,7 +4956,7 @@ const convBetween = (db, a, b) =>
       share32.includes("player?.setPaused(paused || userPaused || scrubAt != null)") &&
       edit43.includes(
         // v164: the preview plays the working media.
-        "StatusTrimPreview(mediaUri, start, end, paused = stillMode || vidPaused, scrubAt = scrub",
+        "paused = vidPaused,\n                                    turn = rotation,",
       ) &&
       edit43.includes("onPosition = { playAt = it }"),
   );
@@ -5524,9 +5524,10 @@ const convBetween = (db, a, b) =>
         chat.includes("modifier = Modifier.width(112.dp).height(16.dp),") &&
         !chat.includes("modifier = Modifier.width(150.dp).height(30.dp),") &&
         chat.includes(
-          "internal fun DrawScope.drawVoiceBars(bars: List<Int>, progress: Float, played: Color, rest: Color, newest: Boolean = false) {",
+          "internal fun DrawScope.drawVoiceBars(bars: List<Int>, progress: Float, played: Color, rest: Color, newest: Boolean = false, reveal: Float = Float.MAX_VALUE) {",
         ) &&
-        chat.includes("drawVoiceBars(bars, progress, played, rest)") &&
+        chat.includes("drawVoiceBars(bars, progress, played, rest, reveal =") &&
+        chat.includes("val g = (reveal - i).coerceIn(0f, 1f)") &&
         chat.includes(
           "Canvas(modifier) { drawVoiceBars(VoiceNote.livePeaks, 1f, color, color, newest = true) }",
         ) &&
@@ -6271,7 +6272,7 @@ const convBetween = (db, a, b) =>
     check(
       "r34-16a: app — a view-once message renders ViewOnceRow: the photo at its original ratio (ImageRatios-cached) blurred past recognition via ViewOnceBlur, the ViewOnceOneIcon mark in the middle, a dark tile for video / uploads; the recipient opens it (sender's tap does nothing), reply-drag + long-press intact, no 'Opened' state anywhere; the album fold, resend and the media grid never take it",
       chat.includes(
-        "if (isViewOnce(m)) {\n        Box(Modifier.fxSlotOpen(fxActive).fxFlyIn(fxSend, 700, onFxSendDone)) {\n            ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)",
+        "if (isViewOnce(m)) {\n        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(mine && fxFresh, 700)) {\n            ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)",
       ) &&
         chat.indexOf("if (isViewOnce(m)) {") <
           chat.indexOf(
@@ -6706,7 +6707,7 @@ const convBetween = (db, a, b) =>
         edit.includes(
           // v164: the stage / preview / bakes all read the WORKING media
           // (mediaUri) — pickedUri until Done bakes an applied copy into it.
-          "StatusTrimPreview(mediaUri, start, end, paused = stillMode || vidPaused, scrubAt = scrub",
+          "paused = vidPaused,\n                                    turn = rotation,",
         ) &&
         edit.includes("onPosition = { playAt = it }") &&
         edit.includes(
@@ -7342,7 +7343,7 @@ const convBetween = (db, a, b) =>
           "if (follow) {\n                                        scope.launch {\n                                            val total = msgs.size + pending.size\n                                            if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }",
         ) &&
         paintSent.indexOf("val follow =") < paintSent.indexOf("if (idx >= 0) {") > -1 &&
-        paintSent.indexOf("fxSend.add(id)") > -1 &&
+        paintSent.indexOf("FxArrivals.markSeen(id)") > -1 &&
         paintSent.includes("!listState.isScrollInProgress &&") &&
         paintSent.includes(
           "if (follow) {\n            scope.launch {\n                val total = msgs.size + pending.size\n                if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }",
@@ -7815,7 +7816,7 @@ const convBetween = (db, a, b) =>
         chat14.includes("onClick = {\n                        if (selecting && !pendingEcho) {") &&
         chat14.includes("selecting: Boolean = false,") &&
         chat14.includes(
-          "theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend)",
+          "theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend, fxGrow = fxFresh)",
         ),
     );
   }
@@ -8183,7 +8184,10 @@ const convBetween = (db, a, b) =>
         edit6.includes("fun StageCanvas(onStageTap: () -> Unit = {}) {") &&
         edit6.includes("StageCanvas(onStageTap = {") &&
         (edit6.match(/StageCanvas\(\)/g) || []).length === 1 &&
-        edit6.includes("val stillMode = clip != null && (rotation != 0 || filterMatrix != null)") &&
+        // v170: the WYSIWYG still is gone - turns / filter / crop ride the LIVE player.
+        edit6.includes("turn = rotation,") &&
+        edit6.includes("colorMat = filterMatrix?.array,") &&
+        edit6.includes("crop = if (cropping) null else cropBox,") &&
         edit6.includes("internal fun bakeVideoOverlay(") &&
         edit6.includes("internal fun grabVideoFrame(") &&
         edit6.includes("internal fun paintPenStrokes(") &&
@@ -8438,7 +8442,7 @@ const convBetween = (db, a, b) =>
           "drawLine(Color.White, Offset(px, 0f), Offset(px, size.height), strokeWidth = edge)",
         ) &&
         (edit.match(/positionMs = playAt,/g) || []).length === 1 &&
-        edit.includes("onPosition = { playAt = it })"),
+        edit.includes("onPosition = { playAt = it },"),
     );
   }
   // Item 9: the chat-list PICTURE is its own tap target — a live status opens

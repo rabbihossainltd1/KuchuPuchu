@@ -209,36 +209,16 @@ fun ChatScreen(nav: NavController, convId: String) {
     // list row) — no "…" flash while the fetch round-trips.
     val conv = remember { mutableStateOf<JSONObject?>(ScreenStore.convDetailOf(convId) ?: convRowSnapshot(convId)) }
     val msgs = remember { mutableStateListOf<JSONObject>() }
-    // r43 (owner's animation pack): receive animations - only messages that
-    // arrive while the chat is open play, queued one at a time; the sender's
-    // own rows never play (their flight belongs to the SEND pack).
-    val fxctx = LocalContext.current
-    val fxQueue = remember { androidx.compose.runtime.mutableStateListOf<String>() }
-    val fxSend = remember { androidx.compose.runtime.mutableStateListOf<String>() }
-    val fxSeen = remember { mutableSetOf<String>() }
-    var fxHead by remember { mutableStateOf<String?>(null) }
+    // r44 (owner: "age message giye pore animation hoi duplicate vabe"):
+    // the queue is GONE - arrival bookkeeping is synchronous (FxArrivals).
+    // The screen arms only after the history has composed, so a row can
+    // never land first and replay its animation afterwards.
+    DisposableEffect(convId) {
+        FxArrivals.armed = false
+        onDispose { FxArrivals.armed = false }
+    }
     LaunchedEffect(msgs.size) {
-        val ids = msgs.map { it.optString("id") }.filter { it.isNotEmpty() }
-        val fresh =
-            if (fxSeen.isEmpty()) {
-                emptyList()
-            } else {
-                ids.filter { it !in fxSeen && fxScaleOf(fxctx) > 0f }
-            }
-        fxSeen.clear()
-        fxSeen.addAll(ids)
-        if (fxQueue.isEmpty()) {
-            for (id in fresh.take(6)) {
-                val mm = msgs.firstOrNull { it.optString("id") == id } ?: continue
-                val k = mm.optString("kind")
-                if ((k == "TEXT" || k == "FILE" || k == "STICKER" || k == "IMAGE") &&
-                    mm.optString("senderId") != Store.myId()
-                ) {
-                    fxQueue.add(id)
-                }
-            }
-        }
-        if (fxHead == null) fxHead = fxQueue.firstOrNull()
+        if (msgs.isNotEmpty()) FxArrivals.armed = true
     }
     val pending = remember { mutableStateListOf<JSONObject>() }
     var input by remember { mutableStateOf("") }
@@ -1218,8 +1198,9 @@ fun ChatScreen(nav: NavController, convId: String) {
             msgs[idx] = row
         } else {
             msgs.add(row)
-            // r43 (pack): a sent bubble flies out of the composer.
-            fxSend.add(id)
+            // r44: the pending row already flew in - the painted row just
+            // takes its seat without a second animation.
+            FxArrivals.markSeen(id)
         }
         pending.removeAll { it.optString("clientId") == cid || it.optString("id") == id }
         // Painted here = not "new" for the next marker GET (no second scroll / read post).
@@ -3122,15 +3103,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                             onJumpTo = { jumpTo(it) },
                             askName = rawTitle,
                             onCancelSend = ::cancelSend,
-                            // r43 (pack): this row plays its arrival animation
-                            // when it is at the head of the queue.
-                            fxActive = fxHead != null && fxHead == m.optString("id"),
-                            onFxDone = {
-                                fxQueue.remove(m.optString("id"))
-                                fxHead = fxQueue.firstOrNull()
-                            },
-                            fxSend = m.optString("id") in fxSend,
-                            onFxSendDone = { fxSend.remove(m.optString("id")) },
                             onUnblockAsk = { msg ->
                                 scope.launch {
                                     val ok = runCatching {
@@ -5458,33 +5430,19 @@ private fun MessageRow(
     askName: String = "",
     // v163: the ✕ on a sending bubble.
     onCancelSend: (String) -> Unit = {},
-    // r43 (pack): receive animations - true only for the queued head.
-    fxActive: Boolean = false,
-    onFxDone: () -> Unit = {},
-    // r43 (pack): send flight - the bubble just painted by paintSent.
-    fxSend: Boolean = false,
-    onFxSendDone: () -> Unit = {},
 ) {
     val mine = m.optString("senderId") == myId
     val kind = m.optString("kind")
-    // r43 (pack): the arrival animation owns its own done-signal - the queue
-    // head plays, then the next row starts.
-    LaunchedEffect(fxActive) {
-        if (fxActive) {
-            val ms =
-                when (kind) {
-                    "TEXT" -> 1900L
-                    "FILE" -> 1000L
-                    "STICKER" -> 700L
-                    "IMAGE" -> 950L
-                    else -> 800L
-                }
-            kotlinx.coroutines.delay(ms)
-            onFxDone()
-        }
-    }
     // Owner round 21: event sounds (reply swipe) play from the row itself.
     val ctx = LocalContext.current
+    // r44: the arrival stamp is decided ONCE, at this row's FIRST
+    // composition - the animation rides frame one, never a replay. The AI
+    // bot's committed rows never animate here (the live chaser is their
+    // animation; a replay is what the owner saw as "vanish, then again").
+    val fxFresh =
+        remember {
+            FxArrivals.mark(m.optString("id")) != null && m.optString("senderId") != "kp_ai_bot"
+        } && fxScaleOf(ctx) > 0f
     // Owner round 15: the night theme's other-bubble is dark in BOTH app
     // themes — its text needs a light ink or it vanishes in light mode.
     // Owner round 20: the DARK-BLUE default chat has dark bubbles on both
@@ -5555,7 +5513,7 @@ private fun MessageRow(
     // image uploads (picked as documents) get the same treatment.
     // Owner round 31 (item 29): photos sent together = one grouped bubble.
     if (m.has("kpAlbum")) {
-        Box(Modifier.fxSlotOpen(fxActive).fxBlurIn(fxActive).fxFlyIn(fxSend, 700, onFxSendDone)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(mine && fxFresh, 700)) {
             AlbumMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenAlbum, onReply, onLongPress, theme)
         }
         return
@@ -5565,13 +5523,13 @@ private fun MessageRow(
     // opens the media ONCE for the recipient; the opening deletes the row
     // for everyone, so there is no opened state left to render.
     if (isViewOnce(m)) {
-        Box(Modifier.fxSlotOpen(fxActive).fxFlyIn(fxSend, 700, onFxSendDone)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(mine && fxFresh, 700)) {
             ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)
         }
         return
     }
     if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {
-        Box(Modifier.fxSlotOpen(fxActive).fxBlurIn(fxActive).fxFlyIn(fxSend, 700, onFxSendDone)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(mine && fxFresh, 700)) {
             ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme, onCancelSend)
         }
         return
@@ -5579,7 +5537,7 @@ private fun MessageRow(
     // Owner round 20: videos render as a tappable video bubble and play
     // IN-APP (the system player could never stream these auth-only files).
     if (kind == "FILE" && fileLooksVideo(m) && !sentAsDocument(m)) {
-        Box(Modifier.fxSlotOpen(fxActive).fxBlurIn(fxActive).fxFlyIn(fxSend, 720, onFxSendDone)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(mine && fxFresh, 720)) {
             VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme, onCancelSend)
         }
         return
@@ -5596,10 +5554,9 @@ private fun MessageRow(
         Modifier
             .fillMaxWidth()
             .padding(vertical = 2.dp)
-            .fxSlotOpen(fxActive)
-            .fxFlyIn(fxSend, if (kind == "TEXT") 680 else 700) {
+            .fxSlotOpen(fxFresh)
+            .fxFlyIn(mine && fxFresh, if (kind == "TEXT") 680 else 700) {
                 fxLanded = m.optString("id")
-                onFxSendDone()
             }
             .fxLanding(fxLanded)
             .fxShineRipple(fxLanded),
@@ -5855,7 +5812,7 @@ private fun MessageRow(
                             if (EmojiRepo.isCustomId(st)) CustomEmojiOrFallback(st)
                             else Text(st, fontSize = 56.sp)
                         }
-                        "FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend)
+                        "FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend, fxGrow = fxFresh)
                         // Owner round 33 (item 5): the stamp is placed by
                         // measurement after the last line (KpStamped) — the
                         // old no-break-space reserve is gone from every text
@@ -5872,9 +5829,10 @@ private fun MessageRow(
                             // it (never over it) — now on a measured row.
                             // v169: no wrapper - the stamp rides under the
                             // bubble (outside) for every kind now.
-                            if (fxActive && emojiOnly == 1) {
-                                AnimatedEmoji(m.optText("body").trim(), 44f, true)
+                            if (emojiOnly == 1) {
+                                AnimatedEmoji(m.optText("body").trim(), 44f, fxFresh)
                             } else {
+                            Box(Modifier.fxPopIn(fxFresh)) {
                             Text(
                                     m.optText("body").trim(),
                                     fontSize = if (emojiOnly == 1) 44.sp else 34.sp,
@@ -5884,6 +5842,7 @@ private fun MessageRow(
                                 overflow = if (capped) TextOverflow.Ellipsis else TextOverflow.Clip,
                                 onTextLayout = { countLines(it, { _ -> }) },
                             )
+                            }
                             }
                         } else {
                             val full = m.optText("body")
@@ -5930,7 +5889,7 @@ private fun MessageRow(
                                     )
                                 } else {
                                     Text(
-                                        fxLetterSpans(full, fxActive),
+                                        fxLetterSpans(full, fxFresh),
                                         fontSize = 14.5.sp,
                                         lineHeight = 19.sp,
                                         color = bodyInk,
@@ -7451,7 +7410,19 @@ internal fun VoiceWave(
     modifier: Modifier = Modifier,
     onSeek: (Float) -> Unit = {},
     onScrub: ((Float?) -> Unit)? = null,
+    // r44 (pack): a live arrival grows the bars one by one (60 + i·22 ms).
+    grow: Boolean = false,
 ) {
+    var growAt by remember(grow) { mutableStateOf(-1L) }
+    LaunchedEffect(grow) {
+        if (!grow) return@LaunchedEffect
+        val t0 = android.os.SystemClock.uptimeMillis()
+        while (android.os.SystemClock.uptimeMillis() - t0 < 40L * bars.size.coerceAtLeast(1) + 400L) {
+            growAt = android.os.SystemClock.uptimeMillis() - t0
+            kotlinx.coroutines.delay(16)
+        }
+        growAt = -1L
+    }
     // Owner round 33 (item 1): the gesture reads the CURRENT callbacks — the
     // pointerInput is keyed on the bars only, so the progress recompositions
     // (12x a second while playing) never restart a drag in flight.
@@ -7508,7 +7479,7 @@ internal fun VoiceWave(
             }
         },
     ) {
-        drawVoiceBars(bars, progress, played, rest)
+        drawVoiceBars(bars, progress, played, rest, reveal = if (growAt >= 0L) (growAt - 40f) / 22f else Float.MAX_VALUE)
     }
 }
 
@@ -7526,7 +7497,7 @@ private fun LiveVoiceWave(color: Color, modifier: Modifier = Modifier) {
  *  caps, a 3dp dot for silence. With [newest] a canvas too narrow for every
  *  bar at 2dp (the live strip on a small phone) shows the newest ones instead
  *  of squeezing all of them into hairlines. */
-internal fun DrawScope.drawVoiceBars(bars: List<Int>, progress: Float, played: Color, rest: Color, newest: Boolean = false) {
+internal fun DrawScope.drawVoiceBars(bars: List<Int>, progress: Float, played: Color, rest: Color, newest: Boolean = false, reveal: Float = Float.MAX_VALUE) {
     if (bars.isEmpty() || size.width <= 0f) return
     val gap = 2.dp.toPx()
     val fit = ((size.width + gap) / (2.dp.toPx() + gap)).toInt().coerceAtLeast(1)
@@ -7539,7 +7510,11 @@ internal fun DrawScope.drawVoiceBars(bars: List<Int>, progress: Float, played: C
     val playedUntil = progress.coerceIn(0f, 1f) * size.width
     for (i in 0 until n) {
         val x = i * (stroke + gap) + stroke / 2f
-        val h = (minH + (size.height - minH) * (shown[i].coerceIn(0, 100) / 100f)) / 2f
+        // r44: bars appear one by one on a live arrival (reveal walks the
+        // strip at one bar per 22 ms after a 60 ms beat).
+        val g = (reveal - i).coerceIn(0f, 1f)
+        if (g <= 0f) continue
+        val h = (minH + (size.height - minH) * (shown[i].coerceIn(0, 100) / 100f)) / 2f * (0.25f + 0.75f * g)
         drawLine(
             color = if (x <= playedUntil) played else rest,
             start = Offset(x, mid - h),
@@ -7819,6 +7794,8 @@ private fun FileBubble(
     selecting: Boolean = false,
     // v163: the ✕ on a document that is still going out.
     onCancelSend: (String) -> Unit = {},
+    // r44 (pack): a live arrival grows the voice bars / pops the document.
+    fxGrow: Boolean = false,
 ) {
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
@@ -7941,6 +7918,7 @@ private fun FileBubble(
                     progress = progress,
                     played = ink,
                     rest = faint,
+                    grow = fxGrow,
                     modifier = Modifier.width(112.dp).height(16.dp),
                     onSeek = { frac ->
                         if (!pendingEcho && fileKey.isNotBlank()) player.seekTo(ctx, id, fileKey, frac)
@@ -7989,6 +7967,9 @@ private fun FileBubble(
         modifier =
             Modifier
                 .width(200.dp) // fixed width so the bubble never grows/shrinks on tap
+                // r44 (pack): the document pops in and its underline fills.
+                .fxPopIn(fxGrow)
+                .fxProgressLine(fxGrow, docInk)
                 .combinedClickable(
                     onClick = {
                         if (selecting && !pendingEcho) {
