@@ -108,10 +108,18 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
     LaunchedEffect(convId) {
         runCatching {
             val data = withContext(Dispatchers.IO) { Api.get("/api/conversations/$convId/media", true) }
-            images = data.arr("images").objects()
-            videos = data.arr("videos").objects()
-            docs = data.arr("docs").objects()
-            links = data.arr("links").objects()
+            // r55 (owner item 8): messages deleted for THIS phone are gone
+            // from the thread but their files still come down in this
+            // payload - the panel must agree with the chat. Drop anything
+            // whose owning message is hidden.
+            fun List<JSONObject>.visible() = filter {
+                val mid = it.optJSONObject("msg")?.optString("id")
+                mid.isNullOrBlank() || !ScreenStore.hiddenMsgIds.contains(mid)
+            }
+            images = data.arr("images").objects().visible()
+            videos = data.arr("videos").objects().visible()
+            docs = data.arr("docs").objects().visible()
+            links = data.arr("links").objects().visible()
         }
     }
 
