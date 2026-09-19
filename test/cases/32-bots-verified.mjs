@@ -8210,8 +8210,10 @@ const convBetween = (db, a, b) =>
         vx6.includes(
           "private fun colorUniforms(mat: FloatArray?): Pair<FloatArray, FloatArray> {",
         ) &&
-        edit6.includes("fun StageCanvas() {") &&
-        (edit6.match(/StageCanvas\(\)/g) || []).length === 3 &&
+        // v169: the video stage hands clean taps to onStageTap.
+        edit6.includes("fun StageCanvas(onStageTap: () -> Unit = {}) {") &&
+        edit6.includes("StageCanvas(onStageTap = {") &&
+        (edit6.match(/StageCanvas\(\)/g) || []).length === 1 &&
         edit6.includes("val stillMode = clip != null && (rotation != 0 || filterMatrix != null)") &&
         edit6.includes("internal fun bakeVideoOverlay(") &&
         edit6.includes("internal fun grabVideoFrame(") &&
@@ -8293,10 +8295,11 @@ const convBetween = (db, a, b) =>
         edit.includes(".align(Alignment.TopCenter)") &&
         edit.includes(".align(Alignment.BottomCenter)") &&
         // v169: the rail seats stay 40 dp StageHistory; undo / redo are plain
-        // 32 dp IconButtons in the top bar centre (mic keeps its 32 dp), the
-        // 26 dp pair (attach checkbox + pen chips) and the one 36 dp close
+        // 32 dp IconButtons in the top bar centre (mic keeps its 32 dp) and
+        // the paused-only play glyph is a 32 dp icon in a 56 dp seat; the 26
+        // dp pair (attach checkbox + pen chips) and the one 36 dp close
         // survive.
-        (edit.match(/\.size\(32\.dp\)/g) || []).length === 3 &&
+        (edit.match(/\.size\(32\.dp\)/g) || []).length === 4 &&
         (edit.match(/\.size\(36\.dp\)/g) || []).length === 1 &&
         (edit.match(/\.size\(26\.dp\)/g) || []).length === 2 &&
         // v167: undo / redo float on the stage as two 40 dp seats (the pair the

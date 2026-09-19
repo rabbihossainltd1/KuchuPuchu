@@ -76,17 +76,25 @@ check(
     !edit.includes("StageHistory(canRedo"),
 );
 
-/* 2 — the video editor's play/pause seat */
+/* 2 — the video editor: tap-to-pause, paused-only glyph, live player */
 check(
-  "v168 item 2: the clip's stage carries a real play/pause seat (48 dp, centred over the ink layer, hidden while cropping / drawing / baking / still) driving a hoisted vidPaused into StatusTrimPreview's paused - the player's own tap-to-pause can never fire under the overlay canvas",
-  edit.includes("var vidPaused by remember { mutableStateOf(false) }") &&
-    edit.includes(
-      "StatusTrimPreview(mediaUri, start, end, paused = stillMode || vidPaused, scrubAt = scrub",
-    ) &&
-    edit.includes("if (!cropping && !penMode && !busy && !stillMode) {") &&
-    edit.includes("if (vidPaused) Icons.Filled.PlayArrow else Icons.Filled.Pause,") &&
+  "v169 item 2: a plain tap on the stage toggles play/pause (the overlay loop hands clean taps to onStageTap), the 56 dp play glyph shows ONLY while paused and hides on resume, and the preview's TextureView + player are re-keyed by uri so the clip still plays after a bake swaps the file (v168's always-on 48 dp seat is gone)",
+  edit.includes("fun StageCanvas(onStageTap: () -> Unit = {}) {") &&
+    edit.includes("onStageTap()") &&
+    edit.includes("StageCanvas(onStageTap = {") &&
     edit.includes("vidPaused = !vidPaused") &&
-    edit.includes("import androidx.compose.material.icons.filled.Pause"),
+    edit.includes("if (vidPaused && !cropping && !penMode && !busy && !stillMode) {") &&
+    edit.includes(
+      'Icon(Icons.Filled.PlayArrow, "Play", tint = Color.White, modifier = Modifier.size(32.dp))',
+    ) &&
+    !edit.includes("Icons.Filled.Pause") &&
+    readFileSync(
+      new URL(
+        "../../native-android/app/src/main/java/app/kuchupuchu/android/CropTrimKit.kt",
+        import.meta.url,
+      ),
+      "utf8",
+    ).includes("androidx.compose.runtime.key(uri) {"),
 );
 
 /* 3 — the clip bake is fast and lands paused */

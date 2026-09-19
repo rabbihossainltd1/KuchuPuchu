@@ -131,19 +131,26 @@ internal fun StatusTrimPreview(
             },
         contentAlignment = Alignment.Center,
     ) {
-        androidx.compose.ui.viewinterop.AndroidView(
-            factory = { c ->
-                android.view.TextureView(c).apply {
-                    isOpaque = false
-                    player = TrimClipPlayer(this, c, uri).also { it.attach() }
-                }
-            },
-            onRelease = {
-                runCatching { player?.release() }
-                player = null
-            },
-            modifier = Modifier.fillMaxSize(),
-        )
+        // v169 (owner: "apply hobar por puse hoye jai video play korleo hoi
+        // na"): the AndroidView factory runs ONCE per composition - when the
+        // bake swapped the uri, a released player sat on a dead TextureView
+        // and no tap could start it. Re-keying by uri rebuilds the pair on
+        // every fresh clip.
+        androidx.compose.runtime.key(uri) {
+            androidx.compose.ui.viewinterop.AndroidView(
+                factory = { c ->
+                    android.view.TextureView(c).apply {
+                        isOpaque = false
+                        player = TrimClipPlayer(this, c, uri).also { it.attach() }
+                    }
+                },
+                onRelease = {
+                    runCatching { player?.release() }
+                    player = null
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
         if (userPaused) {
             Box(Modifier.size(56.dp).clip(CircleShape).background(Color(0x66000000)), contentAlignment = Alignment.Center) {
                 Icon(Icons.Filled.PlayArrow, "Play", tint = Color.White, modifier = Modifier.size(32.dp))

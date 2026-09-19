@@ -45,7 +45,6 @@ import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEmotions
-import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RotateRight
@@ -1296,7 +1295,7 @@ private fun MediaEditItemScreen(
     /** Owner round 36 (item 6): the pen + overlay layer — one canvas shared
      *  by the photo and the video stage (gestures + draw, normalised units). */
     @Composable
-    fun StageCanvas() {
+    fun StageCanvas(onStageTap: () -> Unit = {}) {
         Canvas(
             Modifier
                 .fillMaxSize()
@@ -1458,7 +1457,10 @@ private fun MediaEditItemScreen(
                                         c.consume()
                                     }
                                 }
-                                if (!moved && hit == null) selectedId = null
+                                if (!moved && hit == null) {
+                                    selectedId = null
+                                    onStageTap()
+                                }
                             }
                         }
                     },
@@ -1593,31 +1595,32 @@ private fun MediaEditItemScreen(
                                 if (stillMode && still != null) {
                                     Image(still, "Edited frame", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
                                 }
-                                StageCanvas()
-                                // v168 (owner: "video edit er somoy ply pause
-                                // kora jai na"): the clip's play/pause seat -
-                                // centred over the ink layer, out of the way
-                                // while cropping, drawing, baking, or while a
-                                // turn / filter holds the WYSIWYG still.
-                                if (!cropping && !penMode && !busy && !stillMode) {
+                                // v169 (owner: "video te tap korlei puse
+                                // hobe ... only puse korle icon dekhabe resume
+                                // korle hide hoye jabe"): a plain tap on the
+                                // stage toggles the clip; the glyph rides
+                                // ONLY the paused state (the player's own
+                                // 56 dp play seat), never the playing one.
+                                StageCanvas(onStageTap = {
+                                    if (!cropping && !penMode && !busy && !stillMode) {
+                                        haptics.tap()
+                                        vidPaused = !vidPaused
+                                    }
+                                })
+                                if (vidPaused && !cropping && !penMode && !busy && !stillMode) {
                                     Box(
                                         Modifier
                                             .align(Alignment.Center)
-                                            .size(48.dp)
+                                            .size(56.dp)
                                             .clip(CircleShape)
-                                            .background(Color(0x59000000))
+                                            .background(Color(0x66000000))
                                             .clickable {
                                                 haptics.tap()
-                                                vidPaused = !vidPaused
+                                                vidPaused = false
                                             },
                                         contentAlignment = Alignment.Center,
                                     ) {
-                                        Icon(
-                                            if (vidPaused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
-                                            if (vidPaused) "Play" else "Pause",
-                                            tint = Color.White,
-                                            modifier = Modifier.size(30.dp),
-                                        )
+                                        Icon(Icons.Filled.PlayArrow, "Play", tint = Color.White, modifier = Modifier.size(32.dp))
                                     }
                                 }
                             }
