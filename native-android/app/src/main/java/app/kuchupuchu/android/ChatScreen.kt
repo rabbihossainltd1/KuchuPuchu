@@ -1175,12 +1175,17 @@ fun ChatScreen(nav: NavController, convId: String) {
                     it.optString("id") !in have && it.optString("id") !in ScreenStore.hiddenMsgIds
                 }
             if (freshOld.isNotEmpty()) {
+                // r52 (owner: "fast scrolling korle atke jai"): keep the
+                // exact row+offset the fling was on, so a page landing
+                // never yanks or stalls the gesture.
+                val fi = listState.firstVisibleItemIndex
+                val fo = listState.firstVisibleItemScrollOffset
                 olderIds.addAll(freshOld.map { it.optString("id") })
                 ScreenStore.setMsgs(convId, freshOld + msgs.toList())
                 paintFromStore()
                 // The list grew at the TOP by N rows; without this the viewport
                 // keeps the same index and the user is thrown N rows down.
-                listState.scrollToItem(freshOld.size)
+                listState.scrollToItem(freshOld.size + fi, fo)
             }
             hasMoreOlder = data.optBoolean("hasMore")
             data.optJSONObject("oldest")?.let { olderCursor = it }
@@ -1196,7 +1201,7 @@ fun ChatScreen(nav: NavController, convId: String) {
     // a settled list at index 0 would re-fire this on every recomposition.
     LaunchedEffect(convId) {
         snapshotFlow { listState.firstVisibleItemIndex to listState.isScrollInProgress }
-            .collect { (idx, scrolling) -> if (idx == 0 && scrolling) loadOlder() }
+            .collect { (idx, scrolling) -> if (idx <= 2 && scrolling) loadOlder() }
     }
 
     // Owner round 13 (2026-09-05, fixed 13b): keyboard opening used to COVER
