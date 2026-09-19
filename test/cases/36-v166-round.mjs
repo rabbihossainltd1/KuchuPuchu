@@ -90,8 +90,8 @@ const pkg = readFileSync(
 
 /* the round's own bookkeeping */
 check(
-  "v172: versionCode 172 / versionName 3.9.96",
-  /versionCode\s*=\s*172/.test(pkg) && /versionName\s*=\s*"3\.9\.96"/.test(pkg),
+  "v173: versionCode 173 / versionName 3.9.97",
+  /versionCode\s*=\s*173/.test(pkg) && /versionName\s*=\s*"3\.9\.97"/.test(pkg),
 );
 
 /* 1 — fb#2: the clip bake can no longer look frozen or vanish */
@@ -253,10 +253,10 @@ check(
     chat.includes("modifier = Modifier.size(17.dp).scale(if (pressed) 0.85f else 1f),") &&
     chat.includes("modifier = Modifier.size(16.dp),") &&
     chat.includes("Spacer(Modifier.width(6.dp))") &&
-    chat.includes("modifier = Modifier.width(112.dp).height(16.dp),") &&
-    chat.includes("Column(Modifier.padding(top = 6.dp)) {") &&
+    chat.includes("modifier = Modifier.width(150.dp).height(16.dp),") &&
+    chat.includes("Column {\n                VoiceWave(") &&
     chat.includes("fontSize = 10.sp,") &&
-    chat.includes("Spacer(Modifier.height(0.dp))"),
+    chat.includes("modifier = Modifier.align(Alignment.End),"),
 );
 
 /* 8 — new#2: the link card is a thumbnail card */

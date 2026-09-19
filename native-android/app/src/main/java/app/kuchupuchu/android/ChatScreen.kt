@@ -695,11 +695,20 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // a plain rebuild would drop them on the next tick — scroll back two
                 // pages, receive one message, watch the chat jump. They are carried
                 // over (minus anything the window now contains, so no duplicates).
+                // r47 (owner: "live message korle kichu message auto
+                // delete hoye jacche"): carry over EVERY row we were
+                // showing that the fresh window no longer contains - not
+                // only the ones paged back through loadOlder. The old
+                // olderIds-only filter dropped the tail of the first page
+                // on the first live tick (rows older than the server
+                // window that were never paged back) and they vanished
+                // mid-chat. Server-side deletes still remove rows: dusted
+                // and hidden ids are excluded here.
+                val newest = fresh.mapTo(HashSet()) { it.optString("id") }
                 val carried =
-                    if (olderIds.isEmpty()) emptyList()
-                    else {
-                        val newest = fresh.mapTo(HashSet()) { it.optString("id") }
-                        msgs.filter { it.optString("id") in olderIds && it.optString("id") !in newest }
+                    msgs.filter {
+                        val rid = it.optString("id")
+                        rid.isNotBlank() && rid !in newest && rid !in ScreenStore.hiddenMsgIds && rid !in dustLatched
                     }
                 if (olderIds.isEmpty()) olderCursor = parsed.oldest
                 hasMoreOlder = parsed.hasMore
@@ -883,6 +892,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                             // sound"); the send/sent tones already cover ours.
                             val fromOther = liveMsg.optString("senderId").let { it.isNotBlank() && it != Store.myId() }
                             val liveId = liveMsg.optString("id")
+                            // r47: our own echo never replays an arrival
+                            // flight - the optimistic bubble already flew.
+                            if (!fromOther && liveId.isNotBlank()) FxArrivals.markSeen(liveId)
                             // Owner round 34 (item 16a): a spent view-once is
                             // GONE server-side — the row plays the vanish show
                             // and leaves, no tombstone, on both sides.
@@ -1211,13 +1223,15 @@ fun ChatScreen(nav: NavController, convId: String) {
         val follow =
             !listState.isScrollInProgress &&
                 info.visibleItemsInfo.lastOrNull()?.index?.let { it >= info.totalItemsCount - 2 } == true
+        // r47 (owner: "sent hole barti kono animation ba fade effect ba
+        // hide hoye abar asha rakha jabe na"): the server id is marked
+        // seen BEFORE the swap, on BOTH paths - the painted row always
+        // takes the pending bubble's seat silently, never re-flies.
+        FxArrivals.markSeen(id)
         if (idx >= 0) {
             msgs[idx] = row
         } else {
             msgs.add(row)
-            // r44: the pending row already flew in - the painted row just
-            // takes its seat without a second animation.
-            FxArrivals.markSeen(id)
         }
         pending.removeAll { it.optString("clientId") == cid || it.optString("id") == id }
         // Painted here = not "new" for the next marker GET (no second scroll / read post).
@@ -1691,6 +1705,11 @@ fun ChatScreen(nav: NavController, convId: String) {
         // Owner round 21: his voice-send sound on the send itself.
         runCatching { KpSounds.voiceSend(ctx) }
         val clientId = "c_${java.util.UUID.randomUUID()}"
+        // r47 (owner: "kono message er reply hisabe voice dile voice reply
+        // hisabe hoi na"): a recorded answer carries the quote exactly
+        // like a typed one, and consumes it.
+        val replyId = replyTo?.optString("id")?.takeIf { it.isNotBlank() }
+        replyTo = null
         // Owner round 31 (item 27): the recorded bars ride along in meta so the
         // pending bubble, the sent bubble and the receiver all draw the same wave.
         fun voiceMeta() =
@@ -1711,6 +1730,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // is only deleted once the send succeeds).
                 .put("voicePath", file.absolutePath)
                 .put("meta", voiceMeta())
+                .also { if (replyId != null) it.put("replyTo", replyId) }
                 .put("createdAt", java.time.Instant.now().toString()),
         )
         // Owner round 32 (item 48): same split as sendImage — a scroll started
@@ -1731,6 +1751,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     .put("fileSize", file.length())
                     .put("clientId", clientId)
                     .put("meta", voiceMeta())
+                    .also { if (replyId != null) it.put("replyTo", replyId) }
             Uploads.sendFile(convId, clientId, name, "audio/mp4", file, null, payload) { outcome ->
                 outcome.onSuccess { runCatching { KpSounds.sent(ctx) } }
                 if (!alive.get()) return@sendFile false
@@ -2549,7 +2570,9 @@ fun ChatScreen(nav: NavController, convId: String) {
             } else if (kotlin.math.abs(glidePx - glideApplied) < 0.5f) {
                 glideApplied = glidePx.toFloat()
                 // Open settled: if at bottom ensure last bubble fully above bar; otherwise our per-frame scroll already kept position.
-                if (latchedAtBottom && total > 0) {
+                // r47: near-bottom readers get the same pin (owner: "latest
+                // message always composer pill er upor thakbe").
+                if ((latchedAtBottom || nearBottom) && total > 0) {
                     runCatching { listState.scrollToItem(total - 1) }
                 }
             }
@@ -2563,6 +2586,19 @@ fun ChatScreen(nav: NavController, convId: String) {
             if (glidePx == 0) {
                 glideFollow = false
                 latchedAtBottom = false
+            }
+        }
+    }
+    // r47 (owner: "keyboard open korle ba jekono kichui hok, latest
+    // message composer pill er upor thekei auto uthbe"): the open-glide
+    // rides the keyboard open itself; a bubble that lands WHILE the board
+    // is up gets parked above the bar here. A reader scrolled up into
+    // history is never yanked (near-tail gate).
+    LaunchedEffect(msgs.size, pending.size) {
+        if (glidePx > 1 && !listState.isScrollInProgress) {
+            val info = listState.layoutInfo
+            if (info.visibleItemsInfo.lastOrNull()?.index?.let { it >= info.totalItemsCount - 2 } == true) {
+                runCatching { listState.scrollToItem(info.totalItemsCount - 1) }
             }
         }
     }
@@ -5730,7 +5766,7 @@ private fun MessageRow(
                     // incoming minimum - the 104 dp floor is therefore
                     // enforced AFTER it, as a required size, so a short
                     // bubble really is wider than the stamp under it.
-                    .then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = 104.dp))
+                    .then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = 92.dp))
                     // Owner round 10: the same soft 3D lift the call buttons
                     // have — bubbles float on the wallpaper now.
                     // Owner round 32 (item 8): an emoji-only message has NO
@@ -7963,7 +7999,9 @@ private fun FileBubble(
         // is top-aligned now and the column starts 7dp down — v166 shrank the
         // pair (32dp button, 18dp wave) and kept exactly that centre: 7 =
         // (32 − 18) / 2 — with the time line hanging under it.
-        Row(verticalAlignment = Alignment.Top) {
+        // r47 (owner's WhatsApp screenshot): the play button centres on
+        // the wave+time column - no top gap, no blank band under it.
+        Row(verticalAlignment = Alignment.CenterVertically) {
             val interaction = remember { MutableInteractionSource() }
             val pressed by interaction.collectIsPressedAsState()
             Box(
@@ -8002,14 +8040,14 @@ private fun FileBubble(
             Spacer(Modifier.width(6.dp))
             // Owner round 25: no side padding — the tick+time stamp sits at
             // the right end of the duration line, under the wave.
-            Column(Modifier.padding(top = 6.dp)) {
+            Column {
                 VoiceWave(
                     bars = bars,
                     progress = progress,
                     played = ink,
                     rest = faint,
                     grow = fxGrow,
-                    modifier = Modifier.width(112.dp).height(16.dp),
+                    modifier = Modifier.width(150.dp).height(16.dp),
                     onSeek = { frac ->
                         if (!pendingEcho && fileKey.isNotBlank()) player.seekTo(ctx, id, fileKey, frac)
                     },
@@ -8017,7 +8055,6 @@ private fun FileBubble(
                         scrubAt = if (!pendingEcho && fileKey.isNotBlank()) frac else null
                     },
                 )
-                Spacer(Modifier.height(0.dp))
                 val secs = m.optJSONObject("meta")?.optInt("seconds") ?: 0
                 val vFrac = UploadProgress.fracs[m.optString("clientId")]
                 Text(
@@ -8038,7 +8075,7 @@ private fun FileBubble(
                     maxLines = 1,
                     // Owner round 26: keep the sending/duration line clear of
                     // the bottom-right stamp ("voice sending er somoy overlap").
-                    modifier = Modifier.padding(end = if (mine) 50.dp else 34.dp),
+                    modifier = Modifier.align(Alignment.End),
                 )
             }
         }

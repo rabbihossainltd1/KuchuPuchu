@@ -1896,8 +1896,7 @@ const convBetween = (db, a, b) =>
   );
   check(
     "r26: voice sending line clear of the stamp; no in-bar clear cross in chat search",
-    chat.includes("modifier = Modifier.padding(end = if (mine) 50.dp else 34.dp),") &&
-      !chat.includes('"Clear"'),
+    chat.includes("modifier = Modifier.align(Alignment.End),") && !chat.includes('"Clear"'),
   );
   check(
     "r26/r30: status reactions burst up (Animatable, repeatable, nothing selected); the original stays and pulses",
@@ -5137,7 +5136,7 @@ const convBetween = (db, a, b) =>
       // wrapContentWidth ignores the incoming MIN, so a widthIn(min=...)
       // placed outside it never held on device (72 dp and 104 dp both lost).
       chat1516.includes(
-        ".then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = 104.dp))",
+        ".then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = 92.dp))",
       ) &&
       // r33-5: the fixed 30 dp end room is gone — the stamp gets its own
       // measured row under the glyph (KpStamped below = true).
@@ -5528,7 +5527,7 @@ const convBetween = (db, a, b) =>
       chat.includes("internal fun fileLooksVoice(m: JSONObject): Boolean {") &&
         chat.includes('val fileRow = kind == "FILE"') &&
         chat.includes("val isVoice = !asDocument && fileLooksVoice(m)") &&
-        chat.includes("modifier = Modifier.width(112.dp).height(16.dp),") &&
+        chat.includes("modifier = Modifier.width(150.dp).height(16.dp),") &&
         !chat.includes("modifier = Modifier.width(150.dp).height(30.dp),") &&
         chat.includes(
           "internal fun DrawScope.drawVoiceBars(bars: List<Int>, progress: Float, played: Color, rest: Color, newest: Boolean = false, reveal: Float = Float.MAX_VALUE) {",
@@ -8414,10 +8413,10 @@ const convBetween = (db, a, b) =>
         ) &&
         chat.includes("(active || scrubAt != null) && secs > 0 -> {") &&
         chat.includes(
-          "Row(verticalAlignment = Alignment.Top) {\n            val interaction = remember { MutableInteractionSource() }",
+          "Row(verticalAlignment = Alignment.CenterVertically) {\n            val interaction = remember { MutableInteractionSource() }",
         ) &&
-        chat.includes("Column(Modifier.padding(top = 6.dp)) {\n                VoiceWave(") &&
-        chat.includes("modifier = Modifier.width(112.dp).height(16.dp),"),
+        chat.includes("Column {\n                VoiceWave(") &&
+        chat.includes("modifier = Modifier.width(150.dp).height(16.dp),"),
     );
   }
   // Item 8: the status / chat-video trim strip shows a playhead — the

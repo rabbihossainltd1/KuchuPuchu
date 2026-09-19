@@ -151,8 +151,8 @@ check(
   "v168 item 6 (owner: 'voice message ta er bubble ta body shoho onek boro ... choto kore daw'): the voice bubble came in another notch WITH its body - a 28 dp play circle (17 dp glyphs), a 112 x 16 dp wave centred by the 6 dp column pad, a 10 sp time line, and the bubble's own text padding tightened around the card (voiceNote: 8/3/6/3); the r33 scrub-to-seek row and the 16 dp spinner seat are untouched",
   chat.includes(".size(28.dp)\n                    .pressScale(interaction)") &&
     (chat.match(/size\(17\.dp\)\.scale\(if \(pressed\) 0\.85f else 1f\)/g) || []).length === 2 &&
-    chat.includes("Column(Modifier.padding(top = 6.dp)) {") &&
-    chat.includes("modifier = Modifier.width(112.dp).height(16.dp),") &&
+    chat.includes("Column {\n                VoiceWave(") &&
+    chat.includes("modifier = Modifier.width(150.dp).height(16.dp),") &&
     chat.includes(
       "fontSize = 10.sp,\n                    color = if (mine) Color(0x99FFFFFF) else Muted,",
     ) &&
@@ -217,7 +217,7 @@ check(
     // r46 item 6: the flight is a straight JUMP - the bubble rises at its
     // real size (no scaleX/scaleY shrink-and-grow) from the composer's
     // right edge to its slot.
-    fx7.includes("translationX = (1f - v) * -150f * density") &&
+    fx7.includes("translationX = (1f - v) * -48f * density") &&
     !fx7.includes("scaleX =") &&
     chat.includes("FxArrivals.markSeen(id)") &&
     chat.includes('.fxFlyIn(mine && fxFresh, if (kind == "TEXT") 420 else 460)') &&

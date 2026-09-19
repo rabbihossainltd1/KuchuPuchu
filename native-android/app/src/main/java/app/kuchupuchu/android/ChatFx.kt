@@ -203,7 +203,10 @@ fun Modifier.fxFlyIn(active: Boolean, durMs: Int, onDone: () -> Unit = {}): Modi
         // light arc; nothing scales, nothing re-wraps.
         val arc = sin(v * PI).toFloat()
         translationY = (1f - v) * 120f * density - arc * 10f * density
-        translationX = (1f - v) * -150f * density
+        // r47 (owner: "massage ekhono message bar er theke jai side
+        // theke ashe"): the horizontal drift shrank to a whisper - the
+        // flight reads as RISING out of the composer, not sliding sideways.
+        translationX = (1f - v) * -48f * density
         alpha = if (v < 0.08f) v / 0.08f else 1f
     }
 }
