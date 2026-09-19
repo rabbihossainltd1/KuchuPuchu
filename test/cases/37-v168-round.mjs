@@ -248,7 +248,7 @@ check(
 check(
   "r55 item 1: See less works both ways - the fold toggle collapses an expanded long body, the bubble animates its size change (animateContentSize before combinedClickable), and the state write happens before the haptic",
   chat.includes(
-    "else if (!pendingEcho && longBody && !typing && msgExpanded) msgExpanded = false",
+    ".clickable {\n                                    msgExpanded = !msgExpanded\n                                    runCatching { haptics.tap() }",
   ) &&
     chat.includes(".animateContentSize()") &&
     chat.includes(".animateContentSize()\n                    .combinedClickable("),

@@ -49,7 +49,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material.Icon
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
@@ -5895,7 +5894,6 @@ private fun MessageRow(
                         // gesture race can eat (selection mode still wins).
                         onClick = {
                             if (selectedIds.isNotEmpty() && !pendingEcho) onToggleSelect(m)
-                            else if (!pendingEcho && longBody && !typing && msgExpanded) msgExpanded = false
                         },
                         onLongClick = {
                             if (!pendingEcho) {
@@ -6139,20 +6137,27 @@ private fun MessageRow(
                     // the v177 layout that provably rendered See more; the
                     // top-level hoist from r52 broke the fold on-device.
                     if (longBody && !typing && selectedIds.isEmpty()) {
-                        Text(
-                            if (msgExpanded) "See less" else "See more",
-                            fontSize = 12.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = chatAccent(theme),
-                            modifier =
-                                Modifier.padding(top = 2.dp).clickable {
-                                    // r55 (owner: "see less not working"):
-                                    // state FIRST, haptics guarded - nothing
-                                    // between the tap and the flip.
+                        // r55 (owner: "see less not working"): same seat as
+                        // the v177 layout, but the tap target is now the
+                        // FULL-WIDTH row - the tiny 12.5sp glyph was losing
+                        // the gesture race against the bubble's own
+                        // clickable. State flips FIRST, haptics guarded.
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable {
                                     msgExpanded = !msgExpanded
                                     runCatching { haptics.tap() }
-                                },
-                        )
+                                }
+                                .padding(top = 2.dp, bottom = 2.dp),
+                        ) {
+                            Text(
+                                if (msgExpanded) "See less" else "See more",
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = chatAccent(theme),
+                            )
+                        }
                     }
                 }
             }
