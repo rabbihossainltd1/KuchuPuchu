@@ -1858,8 +1858,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                     }
                     true
                 }
-                if (withCaption == null) Uploads.sendFile(convId, cid, name, mime, file, null, cb)
-                else Uploads.sendFile(convId, cid, name, mime, file, null, withCaption, cb)
+                if (withCaption == null) Uploads.sendFile(convId, cid, name, mime, file, null, onResult = cb)
+                else Uploads.sendFile(convId, cid, name, mime, file, null, withCaption, onResult = cb)
             }
         }
     }

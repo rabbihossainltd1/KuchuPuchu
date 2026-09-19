@@ -926,12 +926,13 @@ private fun MediaEditItemScreen(
                     .put("createdAt", java.time.Instant.now().toString())
                     .put("meta", JSONObject().put("duration", (e - s).coerceAtLeast(0L)))
                     .also { if (once) it.put("viewOnce", true) }
-            ScreenStore.pendingVideoSend =
+            ScreenStore.pendingVideoSend.value =
                 ScreenStore.PendingVideoSend(convId, row) { c ->
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         val out = java.io.File(c.cacheDir, "edit_${System.currentTimeMillis()}.mp4")
-                        val effRot = (vSource.rotation + (turn % 4) * 90) % 360
-                        val (ovW, ovH) = VideoPlan.outputSize(vSource.codedW, vSource.codedH, effRot, box)
+                        val vs = vSource ?: return@withContext null
+                        val effRot = (vs.rotation + (turn % 4) * 90) % 360
+                        val (ovW, ovH) = VideoPlan.outputSize(vs.codedW, vs.codedH, effRot, box)
                         val overlay = bakeVideoOverlay(drawn, wrote, placed, ovW, ovH, box)
                         val layers = overlay != null || filt != null || turn != 0 || box != null
                         try {
