@@ -90,8 +90,8 @@ const pkg = readFileSync(
 
 /* the round's own bookkeeping */
 check(
-  "v179: versionCode 179 / versionName 3.9.103",
-  /versionCode\s*=\s*179/.test(pkg) && /versionName\s*=\s*"3\.9\.103"/.test(pkg),
+  "v180: versionCode 180 / versionName 3.9.104",
+  /versionCode\s*=\s*180/.test(pkg) && /versionName\s*=\s*"3\.9\.104"/.test(pkg),
 );
 
 /* 1 — fb#2: the clip bake can no longer look frozen or vanish */
@@ -294,7 +294,7 @@ check(
   "v166 new#4: the bubble's ceiling is 5 dp smaller than the screen gives it (82 % / 280–420 dp minus 5), so no bubble runs flush into the right edge",
   chat.includes(
     "minOf(420.dp, (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp * 0.82f).dp) - 5.dp,",
-  ) && chat.includes("maxOf(\n            280.dp,"),
+  ) && chat.includes("maxOf(\n                    280.dp,"),
 );
 
 /* 11 — new#5: ten lines, then See more */

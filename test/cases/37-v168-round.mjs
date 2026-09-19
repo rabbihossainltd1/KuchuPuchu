@@ -208,10 +208,11 @@ check(
   fx8.includes("object FlightAnchors") &&
     fx8.includes("fun Modifier.fxComposerAnchor()") &&
     fx8.includes("fun Modifier.fxFlyIn(") &&
-    fx8.includes("val startX = if (isSent) pill.right - s.width else pill.left") &&
+    fx8.includes("startAbs = Offset(s.left, startY)") &&
+    fx8.includes("translationX = 0f") &&
     fx8.includes("val lift = sin(v * PI.toFloat()) * 8f * density") &&
     fx8.includes("snapshotFlow { seat }.filterNotNull().first()") &&
-    fx8.includes("val p0 = Offset(startAbs.x - s.left, startAbs.y - s.top)") &&
+    fx8.includes("val p0 = Offset(0f, startAbs.y - s.top)") &&
     !fx8.includes("scaleX =") &&
     chat.includes(".fxComposerAnchor()") &&
     chat.includes("FxArrivals.markSeen(id)") &&
@@ -232,15 +233,16 @@ check(
       "scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }",
     ) &&
     chat.includes("var donor: JSONObject? = null") &&
-    chat.includes("color = stampInk,") &&
+    chat.includes('r54 (owner: "see more ekhono removed ache")') &&
+    chat.includes("color = chatAccent(theme),") &&
     chat.includes("(pinned && nearBottom && !listState.isScrollInProgress)"),
 );
 check(
-  "r52: history stays smooth - older pages prefetch before row 0 (idx <= 2) and land on the exact row+offset the fling was on; the See more/See less toggle lives OUTSIDE the bubble so the bubble's combinedClickable can never eat the second tap",
+  "r52/r54: history stays smooth - older pages prefetch before row 0 (idx <= 2) and land on the exact row+offset the fling was on; the See more/See less toggle rides INSIDE the bubble under the body (the v177 layout that renders), folding at ten lines",
   chat.includes("if (idx <= 2 && scrolling) loadOlder()") &&
     chat.includes("listState.scrollToItem(freshOld.size + fi, fo)") &&
-    chat.includes('r52 (owner: "see more work korleo see less working na")') &&
-    chat.indexOf('"See less"') > chat.indexOf(".fxShineRipple(fxLanded)"),
+    chat.includes('r54 (owner: "see more ekhono removed ache")') &&
+    chat.indexOf('"See less"') > chat.indexOf("when (kind) {"),
 );
 
 console.log(lines.join("\n"));
