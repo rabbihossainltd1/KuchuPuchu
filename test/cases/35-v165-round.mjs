@@ -84,10 +84,11 @@ check(
     edit.includes("if (shot != null || clip != null) {") &&
     edit.includes("haptics.tap(); undoEdit()") &&
     edit.includes("haptics.tap(); redoEdit()") &&
-    edit.includes(
-      "fun CompactTool(onClick: () -> Unit, enabled: Boolean = true, glyph: @Composable () -> Unit)",
-    ) &&
-    (edit.match(/\.size\(26\.dp\)/g) || []).length === 3 &&
+    // v168: the CompactTool seat left with the fold — undo / redo / clear are
+    // 40 dp StageHistory seats (top-bar corners + the right rail). The 26 dp
+    // size stays on the attach checkbox and the pen-width chips.
+    !edit.includes("fun CompactTool(") &&
+    (edit.match(/\.size\(26\.dp\)/g) || []).length === 2 &&
     (edit.match(/\.size\(36\.dp\)/g) || []).length === 1 &&
     edit.includes("Icons.AutoMirrored.Filled.Undo") &&
     edit.includes("Icons.AutoMirrored.Filled.Redo") &&

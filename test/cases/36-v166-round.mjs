@@ -116,18 +116,20 @@ check(
 
 /* 2 — fb#4: undo LEFT / redo RIGHT, always visible */
 check(
-  "v166 fb#4: the undo / redo / clear trio is always on the stage (left → right: undo, redo, clear) whenever there is media, dimmed instead of hidden, and the compact 26 dp tools are unchanged",
-  // v167 (owner: "undo redo amar screenshot a dekhano jaigay ami pain"): the
-  // pair floats on the stage now — same two behaviours, new seats.
-  edit.includes("if ((shot != null || clip != null) && !cropping) {") &&
+  "v166 fb#4 (seats moved by v168): undo / redo / clear are always present whenever there is media — undo + redo are the top bar's two corners, clear is the right rail's last tool seat — dimmed instead of hidden",
+  // v167 moved the pair onto the stage; v168 (owner: "undo redo button 2ta
+  // upore left right ei thakuk") puts undo / redo in the top bar's corners and
+  // clear on the tool rail — same behaviours, new seats.
+  edit.includes("if (shot != null || clip != null) {") &&
     edit.includes("StageHistory(canUndo, { haptics.tap(); undoEdit() })") &&
     edit.includes("tint = Color.White.copy(alpha = if (canUndo) 1f else 0.35f)") &&
     edit.includes("tint = Color.White.copy(alpha = if (canRedo) 1f else 0.35f)") &&
+    edit.includes("StageHistory(canClear, {") &&
     edit.indexOf("StageHistory(canUndo, { haptics.tap(); undoEdit() })") <
       edit.indexOf("StageHistory(canRedo, { haptics.tap(); redoEdit() })") &&
     edit.includes("val canUndo = strokes.isNotEmpty() || overlayPast.isNotEmpty()") &&
     edit.includes("val canRedo = redoStack.isNotEmpty()") &&
-    (edit.match(/\.size\(26\.dp\)/g) || []).length === 3,
+    (edit.match(/\.size\(26\.dp\)/g) || []).length === 2,
 );
 
 /* 3 — fb#5: the sending clip is the clip's own shape */
@@ -354,20 +356,18 @@ check(
     viewer.includes('KpSheetRow(Icons.Filled.Close, "Dismiss") { onDismiss() }'),
 );
 
-/* 14 — v167: undo / redo float on the stage at the owner's marked spots */
+/* 14 — v167's floating pair, moved by v168 to the top bar's two corners */
 check(
-  "v167 item 2: undo / redo are floating seats ON the stage at the two spots the owner marked — one centred set under the tool row (40 dp, 46 dp apart), undo LEFT of redo, dimmed when idle, and the crop frame keeps the stage clean",
+  'v167 item 2 (moved by v168 — owner: "undo redo button 2ta upore left right ei thakuk"): undo / redo are the top bar\'s two corners — undo beside the X on the LEFT, redo at the RIGHT end — the same 40 dp StageHistory seats, dimmed when idle; the floating pair under the bar is gone',
   edit.includes(
     "fun StageHistory(can: Boolean, onClick: () -> Unit, glyph: @Composable () -> Unit)",
   ) &&
-    edit.includes("if ((shot != null || clip != null) && !cropping) {") &&
-    edit.includes(
-      ".align(Alignment.TopCenter)\n                        .statusBarsPadding()\n                        .padding(top = 50.dp),",
-    ) &&
-    edit.includes("horizontalArrangement = Arrangement.spacedBy(46.dp),") &&
+    !edit.includes("horizontalArrangement = Arrangement.spacedBy(46.dp),") &&
+    !edit.includes(".padding(top = 50.dp),") &&
+    edit.includes("StageHistory(canUndo, { haptics.tap(); undoEdit() })") &&
+    edit.includes("StageHistory(canRedo, { haptics.tap(); redoEdit() })") &&
     edit.indexOf("StageHistory(canUndo, { haptics.tap(); undoEdit() })") <
       edit.indexOf("StageHistory(canRedo, { haptics.tap(); redoEdit() })") &&
-    (edit.match(/\.size\(40\.dp\)/g) || []).length === 2 &&
     edit.includes("val canUndo = strokes.isNotEmpty() || overlayPast.isNotEmpty()") &&
     edit.includes("val canRedo = redoStack.isNotEmpty()"),
 );

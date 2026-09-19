@@ -1254,44 +1254,10 @@ private fun MediaEditItemScreen(
         }
     }
 
-    /** One round top-bar tool (the pen lights up while its mode is armed). */
-    @Composable
-    fun ToolButton(active: Boolean = false, onClick: () -> Unit, glyph: @Composable () -> Unit) {
-        Box(
-            Modifier
-                .size(32.dp)
-                .clip(CircleShape)
-                .background(if (active) ActionBlue else Color.Transparent)
-                .clickable {
-                    haptics.tap()
-                    onClick()
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            glyph()
-        }
-    }
-
-    /** v165 (owner: "compact kore dio"): a small round seat for the undo /
-     *  redo / clear trio — 26 dp, no fill, one hairline while live. */
-    @Composable
-    fun CompactTool(onClick: () -> Unit, enabled: Boolean = true, glyph: @Composable () -> Unit) {
-        Box(
-            Modifier
-                .size(26.dp)
-                .clip(CircleShape)
-                .background(if (enabled) Color(0x1FFFFFFF) else Color.Transparent)
-                .clickable(enabled = enabled) { onClick() },
-            contentAlignment = Alignment.Center,
-        ) {
-            glyph()
-        }
-    }
-
     /** v167 (owner: "undo redo amar screenshot a dekhano jaigay ami pain"):
      *  the floating history pair — a 40 dp dark seat so the glyph reads over a
      *  bright photo, one hairline, dimmed (never hidden) while it has nothing
-     *  to act on. [glyph] keeps this the same shape as [CompactTool]. */
+     *  to act on. [glyph] keeps the seat's shape identical on every row. */
     @Composable
     fun StageHistory(can: Boolean, onClick: () -> Unit, glyph: @Composable () -> Unit) {
         Box(
@@ -1492,6 +1458,14 @@ private fun MediaEditItemScreen(
     val topScrim = Brush.verticalGradient(listOf(Color(0x99000000), Color.Transparent))
     val bottomScrim = Brush.verticalGradient(listOf(Color.Transparent, Color(0x99000000)))
 
+    // v168 (owner: "undo redo button 2ta upore left right ei thakuk" + the
+    // tools "right side a upor niche"): the chrome reads its abilities here -
+    // the top bar takes undo (left) and redo (right), the right rail takes
+    // the tools, clear included.
+    val canUndo = strokes.isNotEmpty() || overlayPast.isNotEmpty()
+    val canRedo = redoStack.isNotEmpty()
+    val canClear = strokes.isNotEmpty() || texts.isNotEmpty() || stickers.isNotEmpty()
+
     // Owner round 45 (item 7): a horizontal swipe browses the pool — gated
     // off while drawing, cropping or nudging an overlay, so those drags
     // always win. Left = next photo, right = previous.
@@ -1650,6 +1624,18 @@ private fun MediaEditItemScreen(
                 IconButton(onClick = { if (cropping) exitCrop() else nav.popBackStack() }, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.Filled.Close, "Close", tint = Color.White, modifier = Modifier.size(20.dp))
                 }
+                // v168: UNDO - the top-LEFT seat, right beside the X.
+                if (shot != null || clip != null) {
+                    StageHistory(canUndo, { haptics.tap(); undoEdit() }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Undo,
+                            "Undo",
+                            tint = Color.White.copy(alpha = if (canUndo) 1f else 0.35f),
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(5.dp))
+                }
                 // v164 (owner): the clip length used to sit here. Done takes
                 // its place — it APPLIES what the user has made so far (bake
                 // the layers into the working file) and leaves the editor open.
@@ -1684,16 +1670,8 @@ private fun MediaEditItemScreen(
                     Spacer(Modifier.width(5.dp))
                 }
                 Spacer(Modifier.weight(1f))
-                // v165 (owner: "profile picture a edit a save button remove
-                // koro"): the profile flow has no save-to-gallery — the baked
-                // file goes to the profile and nowhere else.
-                if (!avatarMode) {
-                    ToolButton(onClick = { saveCurrent() }) {
-                        Icon(Icons.Filled.Download, "Save to gallery", tint = Color.White, modifier = Modifier.size(18.dp))
-                    }
-                }
                 // v165 (owner): a profile photo and a status post carry no HD
-                // switch — the pill is the chat send's alone.
+                // switch - the pill is the chat send's alone.
                 if (clip == null && !statusMode && !avatarMode) {
                     // The HD pill: filled while the bigger send is armed.
                     Box(
@@ -1711,44 +1689,8 @@ private fun MediaEditItemScreen(
                     }
                     Spacer(Modifier.width(2.dp))
                 }
-                // v164 (owner: "je buttons gula ache pencil text emoji crop
-                // rotate egula collapse thakbe, just pencil icon thakbe —
-                // okhane click korle egula expand hoye asbe"): the four tools
-                // stay folded away behind the pencil. Tapping the pencil
-                // unfolds them AND arms the pen (that is the pencil's own
-                // tool), tapping it again folds them back. While a crop is
-                // open the row stays out, so crop can be toggled off.
-                if (penMode || cropping) {
-                    // Owner round 36 (item 6): rotate / sticker / text / pen ride video too.
-                    ToolButton(onClick = { rotateTap() }) {
-                        Icon(Icons.Filled.RotateRight, "Rotate", tint = Color.White, modifier = Modifier.size(18.dp))
-                    }
-                    // Owner round 37 (item 2): the crop tool (photo + video) —
-                    // the share screen's box + presets, on this one screen.
-                    ToolButton(active = cropping, onClick = { if (cropping) exitCrop() else enterCrop() }) {
-                        Icon(Icons.Filled.Crop, "Crop", tint = Color.White, modifier = Modifier.size(18.dp))
-                    }
-                    ToolButton(onClick = {
-                        exitCrop()
-                        showStickerSheet = true
-                    }) {
-                        Icon(Icons.Filled.EmojiEmotions, "Stickers", tint = Color.White, modifier = Modifier.size(18.dp))
-                    }
-                    ToolButton(onClick = {
-                        exitCrop()
-                        showTextSheet = true
-                    }) {
-                        Text("Aa", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-                ToolButton(active = penMode, onClick = {
-                    exitCrop()
-                    penMode = !penMode
-                }) {
-                    Icon(Icons.Filled.Edit, "Draw", tint = Color.White, modifier = Modifier.size(18.dp))
-                }
-                // Polish 2026-09-18: rounded check box beside the pencil — drives
-                // the pool multi-select (attachSel); tick = selected for send.
+                // Polish 2026-09-18: rounded check box - drives the pool
+                // multi-select (attachSel); tick = selected for send.
                 if (onToggleSelect != null) {
                     Spacer(Modifier.width(6.dp))
                     Box(
@@ -1765,69 +1707,9 @@ private fun MediaEditItemScreen(
                         }
                     }
                 }
-                // v165 (owner): compact tools. v166 (owner: "undo redo option
-                // pelam e na … left a undo right a redo"): the pair used to be
-                // drawn ONLY while one of them had work to do — on a fresh photo
-                // the row simply had no undo at all, which reads as "there is no
-                // undo button".
-                // v167 (owner: "undo redo amar screenshot a dekhano jaigay ami
-                // pain" — his two green marks): undo + redo leave this row and
-                // float on the stage itself, at exactly the two spots he
-                // circled (see StageHistory below the bar). The bar keeps the
-                // small clear, which is what is left of the trio.
-                val canClear = strokes.isNotEmpty() || texts.isNotEmpty() || stickers.isNotEmpty()
+                // v168 (owner: "undo redo button 2ta upore left right ei
+                // thakuk"): REDO - the top-RIGHT corner seat.
                 if (shot != null || clip != null) {
-                    CompactTool(
-                        enabled = canClear,
-                        onClick = {
-                            if (!canClear) return@CompactTool
-                            haptics.tap()
-                            if (strokes.isNotEmpty()) strokes.clear()
-                            if (texts.isNotEmpty() || stickers.isNotEmpty()) {
-                                pushOverlayPast()
-                                texts.clear()
-                                stickers.clear()
-                                selectedId = null
-                            }
-                        },
-                    ) {
-                        Icon(
-                            Icons.Filled.Delete,
-                            "Clear",
-                            tint = Color.White.copy(alpha = if (canClear) 1f else 0.35f),
-                            modifier = Modifier.size(16.dp),
-                        )
-                    }
-                }
-            }
-
-            // v167 (owner: "undo redo amar screenshot a dekhano jaigay ami
-            // pain" — he marked two spots just under the tool row, one on the
-            // left and one on the right): the history pair floats on the stage
-            // — UNDO LEFT, REDO RIGHT, the two kept as one centred set so they
-            // land on his marks (38 % / 62 % of the width on his 360 dp
-            // screen: 40 dp seats, 46 dp apart). Rotate / crop hide them so
-            // the crop frame stays clean, and every other screen keeps its own
-            // undo (they are all this same composable).
-            if ((shot != null || clip != null) && !cropping) {
-                val canUndo = strokes.isNotEmpty() || overlayPast.isNotEmpty()
-                val canRedo = redoStack.isNotEmpty()
-                Row(
-                    Modifier
-                        .align(Alignment.TopCenter)
-                        .statusBarsPadding()
-                        .padding(top = 50.dp),
-                    horizontalArrangement = Arrangement.spacedBy(46.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    StageHistory(canUndo, { haptics.tap(); undoEdit() }) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Undo,
-                            "Undo",
-                            tint = Color.White.copy(alpha = if (canUndo) 1f else 0.35f),
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
                     StageHistory(canRedo, { haptics.tap(); redoEdit() }) {
                         Icon(
                             Icons.AutoMirrored.Filled.Redo,
@@ -1835,6 +1717,69 @@ private fun MediaEditItemScreen(
                             tint = Color.White.copy(alpha = if (canRedo) 1f else 0.35f),
                             modifier = Modifier.size(20.dp),
                         )
+                    }
+                }
+            }
+
+            // v168 (owner: "edit options gula ... right side a upor niche
+            // vabe sajay daw"): every edit tool is one 40 dp seat on a
+            // right-side vertical rail - rotate / crop / sticker / text /
+            // pen / clear / save, top to bottom, one size, evenly spaced.
+            if (shot != null || clip != null) {
+                Column(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .statusBarsPadding()
+                        .padding(top = 52.dp, end = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    StageHistory(true, { haptics.tap(); rotateTap() }) {
+                        Icon(Icons.Filled.RotateRight, "Rotate", tint = Color.White, modifier = Modifier.size(20.dp))
+                    }
+                    StageHistory(cropping, { haptics.tap(); if (cropping) exitCrop() else enterCrop() }) {
+                        Icon(Icons.Filled.Crop, "Crop", tint = if (cropping) ActionBlue else Color.White, modifier = Modifier.size(20.dp))
+                    }
+                    StageHistory(true, {
+                        haptics.tap()
+                        exitCrop()
+                        showStickerSheet = true
+                    }) {
+                        Icon(Icons.Filled.EmojiEmotions, "Stickers", tint = Color.White, modifier = Modifier.size(20.dp))
+                    }
+                    StageHistory(true, {
+                        haptics.tap()
+                        exitCrop()
+                        showTextSheet = true
+                    }) {
+                        Text("Aa", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    }
+                    StageHistory(penMode, {
+                        haptics.tap()
+                        exitCrop()
+                        penMode = !penMode
+                    }) {
+                        Icon(Icons.Filled.Edit, "Draw", tint = if (penMode) ActionBlue else Color.White, modifier = Modifier.size(20.dp))
+                    }
+                    StageHistory(canClear, {
+                        if (!canClear) return@StageHistory
+                        haptics.tap()
+                        if (strokes.isNotEmpty()) strokes.clear()
+                        if (texts.isNotEmpty() || stickers.isNotEmpty()) {
+                            pushOverlayPast()
+                            texts.clear()
+                            stickers.clear()
+                            selectedId = null
+                        }
+                    }) {
+                        Icon(Icons.Filled.Delete, "Clear", tint = Color.White.copy(alpha = if (canClear) 1f else 0.35f), modifier = Modifier.size(20.dp))
+                    }
+                    // v165 (owner: "profile picture a edit a save button
+                    // remove koro"): the profile flow has no save-to-gallery.
+                    if (!avatarMode) {
+                        StageHistory(true, { haptics.tap(); saveCurrent() }) {
+                            Icon(Icons.Filled.Download, "Save to gallery", tint = Color.White, modifier = Modifier.size(20.dp))
+                        }
                     }
                 }
             }

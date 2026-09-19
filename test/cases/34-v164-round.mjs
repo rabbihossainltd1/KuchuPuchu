@@ -90,22 +90,30 @@ const store = kt("ScreenStore.kt");
 }
 
 {
-  /* 2 — the tools fold behind the pencil */
+  /* 2 — v168 retired the fold: the tools are a right-side rail */
   check(
-    "v164: the editor's rotate / crop / sticker / text stay folded away behind the pencil — the pencil unfolds them (and arms the pen, which is its own tool) and folds them back; a crop that is open keeps the row out so crop can still be toggled off",
-    edit.includes("if (penMode || cropping) {") &&
-      edit.includes("ToolButton(onClick = { rotateTap() }) {") &&
+    'v164 (retired by v168 — owner: "egula ekhon left to right a sajano ache tumi egula right side a upor niche vabe sajay daw"): the pencil fold is gone — rotate / crop / sticker / text / pen / clear / save are one 40 dp vertical rail on the RIGHT side, top to bottom, one size, evenly spaced; the pen seat arms the pen and lights while armed, crop toggles, save hides for the avatar flow',
+    !edit.includes("if (penMode || cropping) {") &&
+      !edit.includes("ToolButton(") &&
+      edit.includes(".align(Alignment.TopEnd)") &&
+      edit.includes(".padding(top = 52.dp, end = 8.dp),") &&
+      edit.includes("verticalArrangement = Arrangement.spacedBy(8.dp),") &&
+      edit.includes("StageHistory(true, { haptics.tap(); rotateTap() })") &&
       edit.includes(
-        "ToolButton(active = cropping, onClick = { if (cropping) exitCrop() else enterCrop() }) {",
+        "StageHistory(cropping, { haptics.tap(); if (cropping) exitCrop() else enterCrop() })",
       ) &&
+      edit.includes("StageHistory(penMode, {") &&
+      edit.includes("StageHistory(canClear, {") &&
+      edit.indexOf("StageHistory(true, { haptics.tap(); rotateTap() })") <
+        edit.indexOf("StageHistory(penMode, {") &&
+      edit.indexOf("StageHistory(penMode, {") < edit.indexOf("StageHistory(canClear, {") &&
       edit.includes('Icon(Icons.Filled.EmojiEmotions, "Stickers", tint = Color.White') &&
       edit.includes(
         'Text("Aa", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)',
       ) &&
       edit.includes(
-        "ToolButton(active = penMode, onClick = {\n                    exitCrop()\n                    penMode = !penMode\n                }) {",
-      ) &&
-      edit.indexOf("if (penMode || cropping) {") < edit.indexOf("ToolButton(active = penMode"),
+        "if (!avatarMode) {\n                        StageHistory(true, { haptics.tap(); saveCurrent() }) {",
+      ),
   );
 }
 

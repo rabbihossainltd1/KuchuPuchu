@@ -8289,11 +8289,13 @@ const convBetween = (db, a, b) =>
         edit.includes("Brush.verticalGradient") &&
         edit.includes(".align(Alignment.TopCenter)") &&
         edit.includes(".align(Alignment.BottomCenter)") &&
-        (edit.match(/\.size\(32\.dp\)/g) || []).length === 2 &&
-        // v165: undo / redo / clear are three 26 dp seats (they replaced two
-        // 36 dp icon buttons), so the top bar keeps ONE 36 (close).
+        // v168: the tool seats are 40 dp StageHistory (rail + corners) — the
+        // 32 dp ToolButton and 26 dp CompactTool seats are gone; ONE 32 dp
+        // (the caption-bar mic) and TWO 26 dp (attach checkbox + pen chips)
+        // remain, and the top bar keeps ONE 36 (close).
+        (edit.match(/\.size\(32\.dp\)/g) || []).length === 1 &&
         (edit.match(/\.size\(36\.dp\)/g) || []).length === 1 &&
-        (edit.match(/\.size\(26\.dp\)/g) || []).length === 3 &&
+        (edit.match(/\.size\(26\.dp\)/g) || []).length === 2 &&
         // v167: undo / redo float on the stage as two 40 dp seats (the pair the
         // owner marked), so the 40 dp count is the select circle + those two.
         (edit.match(/\.size\(40\.dp\)/g) || []).length === 2 &&
