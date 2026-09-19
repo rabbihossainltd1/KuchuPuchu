@@ -214,7 +214,7 @@ check(
     chat.includes(".fxComposerAnchor()") &&
     chat.includes("val wasFlying = FxArrivals.mark(id) != null") &&
     chat.includes(
-      '.fxFlyIn(fxFresh, if (kind == "TEXT") 680 else if (voiceRow) 720 else 700, isSent = mine)',
+      '.fxFlyIn(fxFresh, if (kind == "TEXT") 680 else if (kind == "FILE" && fileLooksVoice(m)) 720 else 700, isSent = mine)',
     ) &&
     chat.includes("var pendingScrollAfterLand by remember { mutableStateOf(false) }") &&
     chat.includes("LaunchedEffect(flightLandedNonce)") &&
