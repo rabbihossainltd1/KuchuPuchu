@@ -11,6 +11,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -67,6 +69,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.ImageBitmap
@@ -237,6 +240,12 @@ private fun MediaEditItemScreen(
     }
 
     var photo by remember(pickedUri) { mutableStateOf<ImageBitmap?>(null) }
+    // r55 (owner item 5): pinch-to-zoom on the stage. graphicsLayer is
+    // display-only — Compose inverts it for hit-testing, so the pen,
+    // overlays and crop handles underneath keep their true coordinates.
+    // Keyed to pickedUri so browsing the pool resets the view.
+    var stageZoom by remember(pickedUri) { mutableStateOf(1f) }
+    var stagePan by remember(pickedUri) { mutableStateOf(Offset.Zero) }
     var source by remember(pickedUri) { mutableStateOf<VideoExport.Source?>(null) }
     var loadFailed by remember(pickedUri) { mutableStateOf(false) }
     var start by remember(pickedUri) { mutableStateOf(0L) }
@@ -1578,7 +1587,8 @@ private fun MediaEditItemScreen(
     // Owner round 45 (item 7): a horizontal swipe browses the pool — gated
     // off while drawing, cropping or nudging an overlay, so those drags
     // always win. Left = next photo, right = previous.
-    val browseTick = onBrowse != null && !penMode && !cropping && selectedId == null && !busy
+    val browseTick =
+        onBrowse != null && !penMode && !cropping && selectedId == null && !busy && stageZoom <= 1f
     Box(
         Modifier
             .fillMaxSize()
@@ -1652,7 +1662,63 @@ private fun MediaEditItemScreen(
         // chrome floats OVER it on soft black scrims, nothing boxes it in.
         Box(Modifier.fillMaxSize()) {
             /* the stage, full-bleed: media max-fit at its own aspect; overlays + the pen layer over a photo */
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            // r55 (owner item 5): the zoomable stage. Pinch = zoom (1x-4x)
+            // + drag; one finger pans while zoomed; double-tap zooms to
+            // 2.2x or resets. All of it stands down while the pen, crop
+            // or an overlay drag owns the screen.
+            val zoomable = !penMode && !cropping && selectedId == null
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = stageZoom
+                        scaleY = stageZoom
+                        translationX = stagePan.x
+                        translationY = stagePan.y
+                    }
+                    .then(
+                        if (!zoomable) {
+                            Modifier
+                        } else {
+                            Modifier
+                                .pointerInput(stageZoom > 1f) {
+                                    detectTransformGestures { _, pan, zoom, _ ->
+                                        val z = (stageZoom * zoom).coerceIn(1f, 4f)
+                                        stageZoom = z
+                                        val maxX = (z - 1f) * size.width / 2f
+                                        val maxY = (z - 1f) * size.height / 2f
+                                        stagePan =
+                                            Offset(
+                                                (stagePan.x + pan.x).coerceIn(-maxX, maxX),
+                                                (stagePan.y + pan.y).coerceIn(-maxY, maxY),
+                                            )
+                                        if (z <= 1f) stagePan = Offset.Zero
+                                    }
+                                }
+                                .pointerInput(stageZoom > 1f) {
+                                    detectTapGestures(
+                                        onDoubleTap = { tap ->
+                                            if (stageZoom > 1f) {
+                                                stageZoom = 1f
+                                                stagePan = Offset.Zero
+                                            } else {
+                                                val z = 2.2f
+                                                stageZoom = z
+                                                val maxX = (z - 1f) * size.width / 2f
+                                                val maxY = (z - 1f) * size.height / 2f
+                                                stagePan =
+                                                    Offset(
+                                                        ((size.width / 2f - tap.x) * (z - 1f)).coerceIn(-maxX, maxX),
+                                                        ((size.height / 2f - tap.y) * (z - 1f)).coerceIn(-maxY, maxY),
+                                                    )
+                                            }
+                                        },
+                                    )
+                                }
+                        },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
                 // Owner v160 (item 2): chrome stays put, ONLY the media swaps
                 // on swipe. Everything read here is keyed to pickedUri, so the
                 // inner media always belongs to the selected item.
