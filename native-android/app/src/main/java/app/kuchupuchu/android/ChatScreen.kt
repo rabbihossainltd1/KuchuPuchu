@@ -6060,20 +6060,24 @@ private fun MessageRow(
                                 }
                         }
                     }
-                    if (longBody && !typing && selectedIds.isEmpty()) {
-                        Text(
-                            if (msgExpanded) "See less" else "See more",
-                            fontSize = 12.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = chatAccent(theme),
-                            modifier =
-                                Modifier.padding(top = 2.dp).clickable {
-                                    haptics.tap()
-                                    msgExpanded = !msgExpanded
-                                },
-                        )
-                    }
                 }
+            }
+            // r52 (owner: "see more work korleo see less working na"): the
+            // toggle lives OUTSIDE the bubble now - the bubble's
+            // combinedClickable could eat the second tap on some devices,
+            // and outside the card it is its own clean hit target.
+            if (longBody && !typing && selectedIds.isEmpty()) {
+                Text(
+                    if (msgExpanded) "See less" else "See more",
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = chatAccent(theme),
+                    modifier =
+                        Modifier.padding(top = 2.dp).clickable {
+                            haptics.tap()
+                            msgExpanded = !msgExpanded
+                        },
+                )
             }
             // v169 (owner: "single tick double tick seen tick send time eshob
             // message body te na message er niche thakbe" + the example
