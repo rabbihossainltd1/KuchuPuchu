@@ -74,7 +74,7 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
     // Owner round 32 (item 5): a private GROUP is guarded the same way.
     val convSnap = ScreenStore.convDetailOf(convId) ?: ScreenStore.convs.firstOrNull { it.optString("id") == convId }
     val privateChat =
-        KpSecure.privatePeer(convSnap) || KpSecure.selfPrivate() ||
+        KpSecure.privatePeer(convSnap) ||
             (convSnap?.optBoolean("isGroup") == true && convSnap.optBoolean("privateGroup"))
     KpSecure.Guard(privateChat)
     // Owner round 32 (item 46): the viewer's ⋮ sheet offers Forward here too.

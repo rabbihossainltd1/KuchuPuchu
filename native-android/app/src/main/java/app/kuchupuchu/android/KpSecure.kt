@@ -15,7 +15,9 @@ import org.json.JSONObject
  * video call with them, their profile picture, a photo / video they sent —
  * the window carries FLAG_SECURE, so screenshots, screen recording and the
  * recents thumbnail come out black on the OTHER phone as well as on theirs.
- * The same flag guards the app for the user's own private profile.
+ * v168 (owner: "private profile onnoder jonno hobe nijer jonno na"): the
+ * flag is about OTHERS - a user's own private profile never blacks
+ * their own screen and never withholds their own saves.
  *
  * Save / Forward on their pictures and videos are hidden by the callers
  * through [privateUser] / [privatePeer]; this file only owns the window flag.
@@ -33,9 +35,6 @@ object KpSecure {
     /** Is the other side of this 1:1 conversation (list row or detail) private? */
     fun privatePeer(conv: JSONObject?): Boolean =
         conv != null && !conv.optBoolean("isGroup") && privateUser(conv.optJSONObject("other"))
-
-    /** The signed-in user switched their own profile to private. */
-    fun selfPrivate(): Boolean = Store.me?.optJSONObject("privacy")?.optBoolean("privateProfile") == true
 
     @Synchronized
     fun acquire(window: Window?) {

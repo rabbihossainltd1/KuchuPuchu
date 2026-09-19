@@ -2936,15 +2936,15 @@ const convBetween = (db, a, b) =>
       kt("KpSecure.kt").includes("WindowManager.LayoutParams.FLAG_SECURE") &&
         kt("KpSecure.kt").includes("fun Guard(on: Boolean) {") &&
         kt("KpSecure.kt").includes("fun privatePeer(conv: JSONObject?): Boolean =") &&
-        chat.includes("val privateChat = KpSecure.privatePeer(c) || KpSecure.selfPrivate()") &&
+        // v168: selfPrivate left the gate - a private profile protects against
+        // others, never against the owner themself (the peer rule is intact).
+        chat.includes("val privateChat = KpSecure.privatePeer(c) || privateGroup") &&
         chat.includes("KpSecure.Guard(privateChat)") &&
         // r32-17: a view-once photo / video rides the same guards.
         chat.includes("if (!echo && !privateChat && !isViewOnce(m)) {") &&
         chat.includes("canSave = !privateChat && !once,") &&
         chat.includes('.put("kpPrivate", privateChat)') &&
-        kt("CallScreens.kt").includes(
-          "KpSecure.Guard(call.otherPrivate || KpSecure.selfPrivate())",
-        ) &&
+        kt("CallScreens.kt").includes("KpSecure.Guard(call.otherPrivate)") &&
         // r32-5b: a group call reads privateGroup instead — same field, two sources.
         kt("CallEngine.kt").includes(
           'else other.optBoolean("privateProfile") || current?.otherPrivate == true,',
@@ -6003,9 +6003,7 @@ const convBetween = (db, a, b) =>
         ) &&
         chat.includes('Api.delete("/api/conversations/$convId/members/${Store.myId()}")') &&
         chat.includes('val privateGroup = isGroup && c?.optBoolean("privateGroup") == true') &&
-        chat.includes(
-          "val privateChat = KpSecure.privatePeer(c) || KpSecure.selfPrivate() || privateGroup",
-        ) &&
+        chat.includes("val privateChat = KpSecure.privatePeer(c) || privateGroup") &&
         chat.includes("AddMembersSheet(") &&
         group.includes("internal fun AddMembersSheet("),
     );

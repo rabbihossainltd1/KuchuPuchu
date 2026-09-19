@@ -2146,7 +2146,13 @@ fun ChatScreen(nav: NavController, convId: String) {
     // capture, no Save / Forward, no gallery (the server closes it too).
     val groupAdmin = isGroup && c?.optText("ownerId") == Store.myId()
     val privateGroup = isGroup && c?.optBoolean("privateGroup") == true
-    val privateChat = KpSecure.privatePeer(c) || KpSecure.selfPrivate() || privateGroup
+    // v168 (owner: "private profile onnoder jonno hobe nijer jonno na -
+    // amar profile private but ami jar sathe chat korchi tar profile private
+    // na tobe ami media save screenshot eshob nite parbo"): a private profile
+    // shields its owner FROM OTHERS - it never blocks the owner themself.
+    // selfPrivate left this gate; a PRIVATE PEER (or a private group) still
+    // withholds save / forward / capture exactly as r31-21 built it.
+    val privateChat = KpSecure.privatePeer(c) || privateGroup
     KpSecure.Guard(privateChat)
     // Recompose exactly when the six-second typing lease expires. Computing
     // directly from currentTimeMillis() left the label visible indefinitely

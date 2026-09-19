@@ -36,6 +36,10 @@ const edit = kt("MediaEditScreen.kt");
 const vexport = kt("VideoExport.kt");
 const chat = kt("ChatScreen.kt");
 const viewer = kt("MediaViewer.kt");
+const mediaTab = kt("ChatMediaScreen.kt");
+const calls = kt("CallScreens.kt");
+const profile = kt("ProfileScreen.kt");
+const secure = kt("KpSecure.kt");
 const src = readFileSync(new URL("../../src/worker/index.ts", import.meta.url), "utf8");
 
 /* 1 — the editor chrome: right rail + corner history */
@@ -93,6 +97,24 @@ check(
     // the degraded trim path and the never-vanish-a-layer guard survive
     edit.includes("if (layers) throw err") &&
     edit.includes("VideoExport.passthrough(ctx, srcUri, s, e, file)"),
+);
+
+/* 4 — a private profile protects against others, never against yourself */
+check(
+  "v168 item 4 (owner: 'private profile onnoder jonno hobe nijer jonno na'): selfPrivate is GONE from every client gate and from KpSecure - my own private profile no longer hides save / forward / capture on my side (chat, media tab, calls, my own profile page); a PRIVATE PEER or private group still flips privateChat and withholds all of it exactly as r31-21 built",
+  !chat.includes("KpSecure.selfPrivate") &&
+    !mediaTab.includes("KpSecure.selfPrivate") &&
+    !calls.includes("KpSecure.selfPrivate") &&
+    !profile.includes("KpSecure.selfPrivate") &&
+    !secure.includes("fun selfPrivate") &&
+    chat.includes("val privateChat = KpSecure.privatePeer(c) || privateGroup") &&
+    calls.includes("KpSecure.Guard(call.otherPrivate)") &&
+    profile.includes("val privatePerson = !isMe && KpSecure.privateUser(u)") &&
+    // the peer rule survives untouched
+    chat.includes("canSave = !privateChat && !once,") &&
+    chat.includes("KpSecure.Guard(privateChat)") &&
+    viewer.includes("KpSecure.Guard(secure || !canSave)") &&
+    viewer.includes("if (m != null && !privateClip && !saved) {"),
 );
 
 console.log(lines.join("\n"));

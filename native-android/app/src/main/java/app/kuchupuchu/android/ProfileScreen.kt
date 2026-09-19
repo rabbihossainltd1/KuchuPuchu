@@ -453,7 +453,10 @@ fun ProfileScreen(nav: NavController, userId: String) {
             }
             // Owner round 31 item 21: a private profile's page and picture
             // cannot be captured, and the picture cannot be saved.
-            val privatePerson = KpSecure.privateUser(u) || (isMe && KpSecure.selfPrivate())
+            // v168 (owner: "private profile onnoder jonno hobe nijer jonno
+            // na"): my own private page and picture are mine to capture and
+            // save; only SOMEONE ELSE's private profile withholds them.
+            val privatePerson = !isMe && KpSecure.privateUser(u)
             KpSecure.Guard(privatePerson)
             viewerUrl?.let { url ->
                 // Owner round 31: the app's own photo viewer (MediaViewer.kt).
