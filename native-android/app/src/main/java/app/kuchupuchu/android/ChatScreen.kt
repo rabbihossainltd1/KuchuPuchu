@@ -209,6 +209,36 @@ fun ChatScreen(nav: NavController, convId: String) {
     // list row) — no "…" flash while the fetch round-trips.
     val conv = remember { mutableStateOf<JSONObject?>(ScreenStore.convDetailOf(convId) ?: convRowSnapshot(convId)) }
     val msgs = remember { mutableStateListOf<JSONObject>() }
+    // r43 (owner's animation pack): receive animations - only messages that
+    // arrive while the chat is open play, queued one at a time; the sender's
+    // own rows never play (their flight belongs to the SEND pack).
+    val fxctx = LocalContext.current
+    val fxQueue = remember { androidx.compose.runtime.mutableStateListOf<String>() }
+    val fxSeen = remember { mutableSetOf<String>() }
+    var fxHead by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(msgs.size) {
+        val ids = msgs.map { it.optString("id") }.filter { it.isNotEmpty() }
+        val fresh =
+            if (fxSeen.isEmpty()) {
+                emptyList()
+            } else {
+                ids.filter { it !in fxSeen && fxScaleOf(fxctx) > 0f }
+            }
+        fxSeen.clear()
+        fxSeen.addAll(ids)
+        if (fxQueue.isEmpty()) {
+            for (id in fresh.take(6)) {
+                val mm = msgs.firstOrNull { it.optString("id") == id } ?: continue
+                val k = mm.optString("kind")
+                if ((k == "TEXT" || k == "FILE" || k == "STICKER" || k == "IMAGE") &&
+                    mm.optString("senderId") != Store.myId()
+                ) {
+                    fxQueue.add(id)
+                }
+            }
+        }
+        if (fxHead == null) fxHead = fxQueue.firstOrNull()
+    }
     val pending = remember { mutableStateListOf<JSONObject>() }
     var input by remember { mutableStateOf("") }
     // §39 paging state. `olderIds` is what lets the rebuild above keep what the
@@ -3085,6 +3115,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                             onJumpTo = { jumpTo(it) },
                             askName = rawTitle,
                             onCancelSend = ::cancelSend,
+                            // r43 (pack): this row plays its arrival animation
+                            // when it is at the head of the queue.
+                            fxActive = fxHead != null && fxHead == m.id,
+                            onFxDone = {
+                                fxQueue.remove(m.id)
+                                fxHead = fxQueue.firstOrNull()
+                            },
                             onUnblockAsk = { msg ->
                                 scope.launch {
                                     val ok = runCatching {
@@ -5412,9 +5449,28 @@ private fun MessageRow(
     askName: String = "",
     // v163: the ✕ on a sending bubble.
     onCancelSend: (String) -> Unit = {},
+    // r43 (pack): receive animations - true only for the queued head.
+    fxActive: Boolean = false,
+    onFxDone: () -> Unit = {},
 ) {
     val mine = m.optString("senderId") == myId
     val kind = m.optString("kind")
+    // r43 (pack): the arrival animation owns its own done-signal - the queue
+    // head plays, then the next row starts.
+    LaunchedEffect(fxActive) {
+        if (fxActive) {
+            val ms =
+                when (kind) {
+                    "TEXT" -> 1900L
+                    "FILE" -> 1000L
+                    "STICKER" -> 700L
+                    "IMAGE" -> 950L
+                    else -> 800L
+                }
+            kotlinx.coroutines.delay(ms)
+            onFxDone()
+        }
+    }
     // Owner round 21: event sounds (reply swipe) play from the row itself.
     val ctx = LocalContext.current
     // Owner round 15: the night theme's other-bubble is dark in BOTH app
@@ -5487,7 +5543,9 @@ private fun MessageRow(
     // image uploads (picked as documents) get the same treatment.
     // Owner round 31 (item 29): photos sent together = one grouped bubble.
     if (m.has("kpAlbum")) {
-        AlbumMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenAlbum, onReply, onLongPress, theme)
+        Box(Modifier.fxSlotOpen(fxActive).fxBlurIn(fxActive)) {
+            AlbumMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenAlbum, onReply, onLongPress, theme)
+        }
         return
     }
     // Owner round 34 (item 16a): a view-once photo / video shows the pixels
@@ -5495,17 +5553,23 @@ private fun MessageRow(
     // opens the media ONCE for the recipient; the opening deletes the row
     // for everyone, so there is no opened state left to render.
     if (isViewOnce(m)) {
-        ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)
+        Box(Modifier.fxSlotOpen(fxActive)) {
+            ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)
+        }
         return
     }
     if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {
-        ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme, onCancelSend)
+        Box(Modifier.fxSlotOpen(fxActive).fxBlurIn(fxActive)) {
+            ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme, onCancelSend)
+        }
         return
     }
     // Owner round 20: videos render as a tappable video bubble and play
     // IN-APP (the system player could never stream these auth-only files).
     if (kind == "FILE" && fileLooksVideo(m) && !sentAsDocument(m)) {
-        VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme, onCancelSend)
+        Box(Modifier.fxSlotOpen(fxActive).fxBlurIn(fxActive)) {
+            VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme, onCancelSend)
+        }
         return
     }
 
@@ -5518,7 +5582,8 @@ private fun MessageRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 2.dp),
+            .padding(vertical = 2.dp)
+            .fxSlotOpen(fxActive),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
         Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
@@ -5784,6 +5849,9 @@ private fun MessageRow(
                             // it (never over it) — now on a measured row.
                             // v169: no wrapper - the stamp rides under the
                             // bubble (outside) for every kind now.
+                            if (fxActive && emojiOnly == 1) {
+                                AnimatedEmoji(m.optText("body").trim(), 44f, true)
+                            } else {
                             Text(
                                     m.optText("body").trim(),
                                     fontSize = if (emojiOnly == 1) 44.sp else 34.sp,
@@ -5793,6 +5861,7 @@ private fun MessageRow(
                                 overflow = if (capped) TextOverflow.Ellipsis else TextOverflow.Clip,
                                 onTextLayout = { countLines(it, { _ -> }) },
                             )
+                            }
                         } else {
                             val full = m.optText("body")
                             // Owner round 32 (item 32): a link in the text
@@ -5838,7 +5907,7 @@ private fun MessageRow(
                                     )
                                 } else {
                                     Text(
-                                        full,
+                                        fxLetterSpans(full, fxActive),
                                         fontSize = 14.5.sp,
                                         lineHeight = 19.sp,
                                         color = bodyInk,

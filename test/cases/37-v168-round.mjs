@@ -172,3 +172,30 @@ console.log(
   `v168 round: ${lines.filter((l) => l.includes("OK")).length} ok / ${lines.filter((l) => l.includes("BROKEN")).length} broken`,
 );
 process.exit(lines.some((l) => l.includes("BROKEN")) ? 1 : 0);
+
+/* 7 — the owner's animation pack (ChatAnimationsComplete): receive side */
+const fx7 = fs.readFileSync(
+  "native-android/app/src/main/java/app/kuchupuchu/android/ChatFx.kt",
+  "utf8",
+);
+check(
+  "v169 item 7: the receive animation pack is in - a shared Compose-only ChatFx.kt (emoji registry with entry/idle/fx, slot open, letter-by-letter reveal, de-blur media reveal, landing squash, shine + ripple) that respects the animator duration scale, live arrivals queue one at a time, own rows and history never replay",
+  fx7.includes("object EmojiAnimationRegistry") &&
+    fx7.includes('"\ud83d\ude02" to EmojiAnim("shake-in", "shake", EmojiFx.TEARS)') &&
+    fx7.includes("fun fxSlotOpen") &&
+    fx7.includes("fun fxLetterSpans") &&
+    fx7.includes("fun fxAnimatorScale") &&
+    fx7.includes("fun fxScaleOf") &&
+    fx7.includes("ANIMATOR_DURATION_SCALE") &&
+    fx7.includes("fun fxLanding") &&
+    fx7.includes("fun fxShineRipple") &&
+    fx7.includes("fun fxBlurIn") &&
+    fx7.includes("fun AnimatedEmoji") &&
+    chat.includes("fxActive = fxHead != null && fxHead == m.id") &&
+    chat.includes(".fxSlotOpen(fxActive)") &&
+    chat.includes("fxLetterSpans(full, fxActive)") &&
+    chat.includes('AnimatedEmoji(m.optText("body").trim(), 44f, true)') &&
+    chat.includes("val fxQueue = remember") &&
+    chat.includes('mm.optString("senderId") != Store.myId()') &&
+    chat.includes(".fxBlurIn(fxActive)"),
+);
