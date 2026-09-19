@@ -31,7 +31,7 @@ private const val INCOMING_ID = 7101
 private const val ONGOING_ID = 7102
 // v4: incoming-call ring on the ALARM stream — rings even on silent, with
 // the new tring-tring tone.
-private const val CH_IN = "kp-calls-v4"
+private const val CH_IN = "kp-calls-v5"
 private const val CH_FG = "kp-call-fg"
 
 /** Ringtone + vibration while an incoming call rings. */
@@ -279,18 +279,13 @@ object CallNotify {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         if (nm.getNotificationChannel(CH_IN) == null) {
             val ch = NotificationChannel(CH_IN, "Incoming calls", NotificationManager.IMPORTANCE_HIGH)
-            // Owner round 13 (2026-09-05): incoming rings play the INCOMING
-            // tone (original default or the user's pick) — the caller-side
-            // ringback file was doing double duty here.
-            ch.setSound(
-                Uri.parse("android.resource://${ctx.packageName}/${SoundPrefs.incomingRingRes(ctx)}"),
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build(),
-            )
-            ch.enableVibration(true)
-            ch.vibrationPattern = longArrayOf(0, 500, 400, 500)
+            // r47 (owner: "selected ringtone thakleo default ringtone o
+            // bajhe"): the channel is SILENT (new id - channel settings are
+            // frozen after creation). CallSounds.startRing is the ONE ring
+            // source: the user's custom pick or the pack tone. The old
+            // channel played its own frozen tone ON TOP of the live player.
+            ch.setSound(null, null)
+            ch.enableVibration(false)
             nm.createNotificationChannel(ch)
         }
         if (nm.getNotificationChannel(CH_FG) == null) {
