@@ -42,12 +42,14 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.Icon
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
@@ -759,7 +761,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                     runCatching { listState.animateScrollToItem(total - 1) }
                 }
                 lastTopId = newTop
-                if (markRead || (newMessage && prevTop.isNotBlank())) {
+                // r55 (owner item 9): a backgrounded app is NOT reading the
+                // chat - marking read there made sends "seen" on phones that
+                // had left the app. The foreground ticker re-reads on resume.
+                if (Store.foreground && (markRead || (newMessage && prevTop.isNotBlank()))) {
                     runCatching { withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/read") } }
                     // Clear the list badge NOW — waiting for the next list poll
                     // made the unread counter hang around after reading.
@@ -1072,6 +1077,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                         runCatching { java.time.Instant.parse(ev.optString("at")).toEpochMilli() }
                             .getOrNull()
                             ?.let { ms -> if (ms > 0) otherTypingAt = ms }
+                        // r55: a recording ping rides the same frame.
+                        otherTypingKind = ev.optString("kind").takeIf { it.isNotBlank() }
                     }
             }
         }
@@ -2103,8 +2110,23 @@ fun ChatScreen(nav: NavController, convId: String) {
     }
 
     LaunchedEffect(recording) {
+        var lastPing = 0L
         while (recording) {
             recMs = VoiceNote.elapsedMs().toInt()
+            // r55 (owner item 7): while I record, the OTHER side sees a mic
+            // animation where the typing dots live - the recording phone
+            // pings typing with kind=voice every 3 s (the lease is 6 s).
+            val now = System.currentTimeMillis()
+            if (now - lastPing > 3_000) {
+                lastPing = now
+                scope.launch {
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            Api.post("/api/conversations/$convId/typing", JSONObject().put("kind", "voice"))
+                        }
+                    }
+                }
+            }
             delay(100)
         }
     }
@@ -2359,33 +2381,34 @@ fun ChatScreen(nav: NavController, convId: String) {
             liveReveal = aiLiveBody.length
             return@LaunchedEffect
         }
-        var pos = liveReveal
-        while (pos < aiLiveBody.length) {
-            // v169 (owner: "ektu late kore typing kore ekbare onek fast
-            // word by word reply dicche eita kono good experience na"):
-            // a STEADY pen - one word a step at 40 ms while the buffer is
-            // small, easing up to two / four / eight words a step only when
-            // the stream races far ahead, so the reveal reads as typing,
-            // never as a burst.
-            // v171 (owner r45 item 4: "typing animation onek khon dhore
-            // dekhai tarpor hotath onek fast"): the catch-up is gentler -
-            // four words a step at the very most, so a buffered reply still
-            // reads as typing, never as a flash.
-            val behind = aiLiveBody.length - pos
-            val cap = when {
-                behind > 80 -> 4
-                behind > 36 -> 3
-                behind > 12 -> 2
-                else -> 1
+        // r55 (owner: "typing animation ta realtime na fake dekhai theke
+        // theke"): a FRAME-SMOOTH pen - fractional characters per second,
+        // never a word staircase. The speed follows the stream: it types at
+        // a human pen while the buffer is small and only eases faster when
+        // the stream races ahead, so the bubble reads as realtime typing.
+        var frac = liveReveal.toFloat()
+        var last = 0L
+        while (true) {
+            val now = android.os.SystemClock.uptimeMillis()
+            val dt = if (last == 0L) 0f else (now - last) / 1000f
+            last = now
+            val target = aiLiveBody.length.toFloat()
+            if (frac < target) {
+                val behind = target - frac
+                val cps = when {
+                    behind > 120 -> 90f
+                    behind > 40 -> 55f
+                    else -> 26f
+                }
+                frac = minOf(target, frac + cps * dt)
+                val shown = frac.toInt()
+                if (shown != liveReveal) liveReveal = shown
             }
-            var words = 0
-            while (pos < aiLiveBody.length && words < cap) {
-                while (pos < aiLiveBody.length && !aiLiveBody[pos].isWhitespace()) pos++
-                words++
-                while (pos < aiLiveBody.length && aiLiveBody[pos].isWhitespace()) pos++
+            if (!aiTyping) {
+                liveReveal = aiLiveBody.length
+                break
             }
-            liveReveal = pos
-            delay(40)
+            if (frac >= target) delay(30) else delay(16)
         }
     }
     // …and the growing bubble keeps the reader pinned to the bottom, exactly
@@ -2459,10 +2482,15 @@ fun ChatScreen(nav: NavController, convId: String) {
     LaunchedEffect(aiRevealId) {
         val revealMid = aiRevealId ?: return@LaunchedEffect
         val body = msgs.lastOrNull { it.optString("id") == revealMid }?.optText("body").orEmpty()
-        var pos = 0
-        while (pos < body.length) {
-            delay(if (body.length > 240) 30L else 45L)
-            pos = body.indexOf(' ', pos + 1).takeIf { it >= 0 } ?: body.length
+        // r55: char-smooth pen here too - no word steps, no stutter.
+        var frac = 0f
+        var last = 0L
+        while (frac < body.length) {
+            val now = android.os.SystemClock.uptimeMillis()
+            val dt = if (last == 0L) 0f else (now - last) / 1000f
+            last = now
+            frac = minOf(body.length.toFloat(), frac + 26f * dt)
+            val pos = frac.toInt()
             aiRevealChars = pos
             // Stay pinned to the newest line while the reply types itself —
             // unless the user scrolled up to read (their scroll wins).
@@ -2473,6 +2501,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             // throws — the reveal must keep typing (and clear at the end)
             // instead of dying mid-word.
             if (nearBottom) runCatching { listState.scrollToItem(info.totalItemsCount - 1) }
+            delay(16)
         }
         delay(250)
         aiRevealId = null
@@ -3380,6 +3409,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                             )
                         } else if (aiTyping && otherTypingKind == "image") {
                             ImageCreatingBubble()
+                        } else if (otherTypingKind == "voice") {
+                            // r55 (owner item 7): they are recording a voice
+                            // note - a small pulsing mic, not typing dots.
+                            RecordingBubble(chatAccent(chatTheme))
                         } else {
                             TypingBubble(chatAccent(chatTheme))
                         }
@@ -5854,8 +5887,16 @@ private fun MessageRow(
                             else -> chatOtherFill(theme)
                         },
                     )
+                    // r55: a smooth expand / collapse when the fold flips.
+                    .animateContentSize()
                     .combinedClickable(
-                        onClick = { if (selectedIds.isNotEmpty() && !pendingEcho) onToggleSelect(m) },
+                        // r55 (owner: "see less not working"): the EXPANDED
+                        // body itself collapses on tap - a big target that no
+                        // gesture race can eat (selection mode still wins).
+                        onClick = {
+                            if (selectedIds.isNotEmpty() && !pendingEcho) onToggleSelect(m)
+                            else if (!pendingEcho && longBody && !typing && msgExpanded) msgExpanded = false
+                        },
                         onLongClick = {
                             if (!pendingEcho) {
                                 haptics.tap()
@@ -6105,8 +6146,11 @@ private fun MessageRow(
                             color = chatAccent(theme),
                             modifier =
                                 Modifier.padding(top = 2.dp).clickable {
-                                    haptics.tap()
+                                    // r55 (owner: "see less not working"):
+                                    // state FIRST, haptics guarded - nothing
+                                    // between the tap and the flip.
                                     msgExpanded = !msgExpanded
+                                    runCatching { haptics.tap() }
                                 },
                         )
                     }
@@ -8738,6 +8782,48 @@ private fun TypingBubble(dot: Color) {
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * r55 (owner item 7): the other side is RECORDING A VOICE NOTE - a small
+ * pulsing microphone in the typing bubble's seat, instead of typing dots.
+ */
+@Composable
+private fun RecordingBubble(mic: Color) {
+    val t = rememberInfiniteTransition(label = "rec")
+    val a by t.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.35f,
+        animationSpec = infiniteRepeatable(tween(650), RepeatMode.Reverse),
+        label = "alpha",
+    )
+    val s2 by t.animateFloat(
+        initialValue = 0.9f,
+        targetValue = 1.1f,
+        animationSpec = infiniteRepeatable(tween(650), RepeatMode.Reverse),
+        label = "scale",
+    )
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp),
+        horizontalArrangement = Arrangement.Start,
+    ) {
+        Box(
+            Modifier
+                .widthIn(min = 64.dp)
+                .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 5.dp, bottomEnd = 16.dp))
+                .background(Brush.linearGradient(listOf(Card, Card)))
+                .padding(horizontal = 14.dp, vertical = 11.dp),
+        ) {
+            Icon(
+                Icons.Filled.Mic,
+                contentDescription = null,
+                tint = mic.copy(alpha = a),
+                modifier = Modifier.size(18.dp).graphicsLayer { scaleX = s2; scaleY = s2 },
+            )
         }
     }
 }
