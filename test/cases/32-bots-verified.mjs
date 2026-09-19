@@ -5131,7 +5131,7 @@ const convBetween = (db, a, b) =>
         "emojiOnly > 0 -> Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))",
       ) &&
       // v170: the floor is now 96 dp - wide enough for the stamp under it.
-      chat1516.includes(".widthIn(min = if (emojiOnly > 0) 0.dp else 96.dp, max = bubbleMax)") &&
+      chat1516.includes(".widthIn(min = if (emojiOnly > 0) 0.dp else 104.dp, max = bubbleMax)") &&
       // r33-5: the fixed 30 dp end room is gone — the stamp gets its own
       // measured row under the glyph (KpStamped below = true).
       chat1516.includes("modifier = Modifier.padding(start = 2.dp, end = 2.dp),") &&
@@ -7280,7 +7280,8 @@ const convBetween = (db, a, b) =>
         // sendAt (scheduled) paths still post directly — they are not optimistic bubbles
         (sendImage33.match(/Api\.post\(/g) || []).length === 1 &&
         // r34-16b: sendFile grew a captioned arm (the same callback on both arms).
-        (chat33.match(/outcome\.onSuccess \{ row -> paintSent\(row\) \}/g) || []).length === 5,
+        // v171: the background clip send paints through the same hook.
+        (chat33.match(/outcome\.onSuccess \{ row -> paintSent\(row\) \}/g) || []).length === 6,
     );
   }
   // r33 item 2: auto-scroll to the new thing everywhere. Keyed LazyColumns
@@ -8238,8 +8239,9 @@ const convBetween = (db, a, b) =>
         edit7.includes("h: Int, box: CropBox? = null") &&
         edit7.includes("canvas.scale(1f / b.w, 1f / b.h)") &&
         // v164: +1 in applyEdits (Done bakes the box) and +1 in useAsAvatar.
-        (edit7.match(/\|\| box != null/g) || []).length === 8 &&
-        (edit7.match(/, box, (out|cut),/g) || []).length === 4 &&
+        // v171: the background clip bake carries the box too.
+        (edit7.match(/\|\| box != null/g) || []).length === 9 &&
+        (edit7.match(/, box, (out|cut),/g) || []).length === 5 &&
         !store7.includes("pendingStatusEdited") &&
         !edit7.includes("pendingStatusEdited") &&
         !app7.includes("statusphoto/") &&

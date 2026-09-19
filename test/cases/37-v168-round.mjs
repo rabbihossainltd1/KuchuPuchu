@@ -134,7 +134,8 @@ check(
   worker.includes("const AI_HEDGE_MS = 800;") &&
     !worker.includes("AI_HEDGE_MS = 1_600") &&
     chat.includes("var liveReveal by remember { mutableStateOf(0) }") &&
-    chat.includes("behind > 60 -> 8") &&
+    chat.includes("behind > 80 -> 4") &&
+    chat.includes("behind > 36 -> 3") &&
     chat.includes("delay(40)") &&
     chat.includes("!aiLiveBody[pos].isWhitespace()") &&
     chat.includes("revealChars = liveReveal.coerceAtMost(aiLiveBody.length),") &&
@@ -212,9 +213,9 @@ check(
 check(
   "v169 item 7b (r44): the send flight rides the PENDING row - it rises out of the composer (translation/scale/alpha only, never width/height), lands with the squash and the shine + ripple, and paintSent pre-marks the real id so the painted row replaces it silently",
   fx7.includes("fun fxFlyIn") &&
-    fx7.includes("translationY = (1f - v) * 150f * density - arc * 8f * density") &&
+    fx7.includes("translationY = (1f - v) * 120f * density - arc * 10f * density") &&
     chat.includes("FxArrivals.markSeen(id)") &&
-    chat.includes('.fxFlyIn(mine && fxFresh, if (kind == "TEXT") 680 else 700)') &&
+    chat.includes('.fxFlyIn(mine && fxFresh, if (kind == "TEXT") 520 else 560)') &&
     chat.includes(".fxLanding(fxLanded)") &&
     chat.includes(".fxShineRipple(fxLanded)"),
 );
