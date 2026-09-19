@@ -547,7 +547,7 @@ const convBetween = (db, a, b) =>
       chat.includes('} else if (aiTyping && otherTypingKind == "image") {') &&
       chat.includes("private fun ImageCreatingBubble() {") &&
       chat.includes("val shimmer = rememberShimmerAlpha()") &&
-      chat.includes('typingKind = data.optString("typingKind")') &&
+      chat.includes('typingKind = data.optString("typingKind").takeIf { it.isNotBlank() }') &&
       chat.includes("otherTypingKind = parsed.typingKind"),
   );
   check(
@@ -8282,7 +8282,7 @@ const convBetween = (db, a, b) =>
         edit.includes("w * 0.11f * s.scale") &&
         edit.includes("0.075f * s.scale") &&
         edit.includes("DEL_MARK_HIT") &&
-        edit.includes("Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center)") &&
+        edit.includes(".graphicsLayer {\n                        scaleX = stageZoom") &&
         edit.includes("Brush.verticalGradient") &&
         edit.includes(".align(Alignment.TopCenter)") &&
         edit.includes(".align(Alignment.BottomCenter)") &&

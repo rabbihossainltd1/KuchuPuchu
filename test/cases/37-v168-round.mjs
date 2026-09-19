@@ -130,20 +130,19 @@ check(
 
 /* 5 — the AI reply starts sooner and types word by word */
 check(
-  "v168 item 5: the typing bubble hedges the model after 800 ms (was 1_600 - the reply starts streaming twice as early) and the LIVE AI bubble reveals WORD BY WORD - a steady 40 ms pen (one word a step while the buffer is small, proportional catch-up when the stream races) - replacing the instant full-body paint and the v168 burst; the completed answer lands whole and the committed-row reveal (r49) is untouched",
+  "v168 item 5 (r55 update): the typing bubble hedges the model after 800 ms (was 1_600) and the LIVE AI bubble reveals through a FRAME-SMOOTH fractional-char pen (dt-timed 26/55/90 cps, 16/30 ms frames - the r55 realtime fix; the word staircase is gone by design); the completed answer lands whole and the handover guards stay",
   worker.includes("const AI_HEDGE_MS = 800;") &&
     !worker.includes("AI_HEDGE_MS = 1_600") &&
     chat.includes("var liveReveal by remember { mutableStateOf(0) }") &&
-    chat.includes("behind > 80 -> 4") &&
-    chat.includes("behind > 36 -> 3") &&
-    chat.includes("delay(40)") &&
-    chat.includes("!aiLiveBody[pos].isWhitespace()") &&
+    chat.includes("behind > 120 -> 90f") &&
+    chat.includes("behind > 40 -> 55f") &&
+    chat.includes("frac = minOf(target, frac + cps * dt)") &&
+    chat.includes("if (frac >= target) delay(30) else delay(16)") &&
     chat.includes("revealChars = liveReveal.coerceAtMost(aiLiveBody.length),") &&
     !chat.includes("revealChars = aiLiveBody.length,") &&
     // the completed answer still lands whole, and the handover guards stay
     chat.includes("liveReveal = aiLiveBody.length") &&
-    chat.includes("if (paintedLive || mid == aiRevealId) return@LaunchedEffect") &&
-    chat.includes("pos = body.indexOf(' ', pos + 1).takeIf { it >= 0 } ?: body.length"),
+    chat.includes("if (paintedLive || mid == aiRevealId) return@LaunchedEffect"),
 );
 
 /* 6 — the voice card is compact, body included */
@@ -243,6 +242,61 @@ check(
     chat.includes("listState.scrollToItem(freshOld.size + fi, fo)") &&
     chat.includes('r54 (owner: "see more ekhono removed ache")') &&
     chat.indexOf('"See less"') > chat.indexOf("when (kind) {"),
+);
+
+/* r55 — the owner's round 55 after testing v180 */
+check(
+  "r55 item 1: See less works both ways - the fold toggle collapses an expanded long body, the bubble animates its size change (animateContentSize before combinedClickable), and the state write happens before the haptic",
+  chat.includes(
+    "else if (!pendingEcho && longBody && !typing && msgExpanded) msgExpanded = false",
+  ) &&
+    chat.includes(".animateContentSize()") &&
+    chat.includes(".animateContentSize()\n                    .combinedClickable("),
+);
+check(
+  "r55 item 3: the flight seat stays live for the WHOLE flight (gate is !done, set only after animateTo) - the stale-seat freeze that made v179/v180 fly invisible is gone",
+  fx8.includes("if (active && !done) seat = c.boundsInWindow()") &&
+    fx8.includes("done = true") &&
+    !fx8.includes("if (active && !fired) seat"),
+);
+check(
+  "r55 item 4: the ringing avatar no longer zooms - PulseRing and its scale import are gone, IncomingCallScreen shows the plain CallAvatar",
+  !calls.includes("PulseRing") &&
+    !calls.includes("import androidx.compose.ui.draw.scale") &&
+    calls.includes("CallAvatar(call, 108.dp)"),
+);
+check(
+  "r55 item 5: the media editor stage pinch-zooms (1x-4x) + pans + double-taps, gated off while pen/crop/overlay own the screen, browse swipe stands down while zoomed",
+  edit.includes("var stageZoom by remember(pickedUri) { mutableStateOf(1f) }") &&
+    edit.includes("scaleX = stageZoom") &&
+    edit.includes("detectTransformGestures") &&
+    edit.includes("(stageZoom * zoom).coerceIn(1f, 4f)") &&
+    edit.includes("&& stageZoom <= 1f"),
+);
+check(
+  "r55 item 6: the typing reveal is a frame-smooth fractional-char pen (dt-timed, no word steps) on both the live-AI and committed rows",
+  chat.includes("frac + 26f * dt") &&
+    chat.includes("android.os.SystemClock.uptimeMillis()") &&
+    chat.includes("aiRevealChars = pos"),
+);
+check(
+  "r55 item 7: recording shows a pulsing microphone in the receiver's typing seat - the client pings kind=voice while recording, the worker persists + broadcasts kind, and RecordingBubble renders in the typing row",
+  chat.includes(
+    'Api.post("/api/conversations/$convId/typing", JSONObject().put("kind", "voice"))',
+  ) &&
+    chat.includes("private fun RecordingBubble(mic: Color)") &&
+    chat.includes('otherTypingKind == "voice"') &&
+    worker.includes("kind = excluded.kind") &&
+    worker.includes("        kind,\n      }),"),
+);
+check(
+  "r55 item 8: media deleted for this phone never shows in the profile media panel - every list drops hiddenMsgIds owners",
+  mediaTab.includes("ScreenStore.hiddenMsgIds.contains(mid)") &&
+    mediaTab.includes('images = data.arr("images").objects().visible()'),
+);
+check(
+  "r55 item 9: the chat only marks read while the app is actually foreground - the poll-tick read POST is gated on Store.foreground",
+  chat.includes("if (Store.foreground && (markRead || (newMessage && prevTop.isNotBlank())))"),
 );
 
 console.log(lines.join("\n"));
