@@ -90,8 +90,8 @@ const pkg = readFileSync(
 
 /* the round's own bookkeeping */
 check(
-  "v176: versionCode 176 / versionName 3.9.100",
-  /versionCode\s*=\s*176/.test(pkg) && /versionName\s*=\s*"3\.9\.100"/.test(pkg),
+  "v177: versionCode 177 / versionName 3.9.101",
+  /versionCode\s*=\s*177/.test(pkg) && /versionName\s*=\s*"3\.9\.101"/.test(pkg),
 );
 
 /* 1 — fb#2: the clip bake can no longer look frozen or vanish */
@@ -254,9 +254,7 @@ check(
     chat.includes("modifier = Modifier.size(16.dp),") &&
     chat.includes("Spacer(Modifier.width(6.dp))") &&
     chat.includes("modifier = Modifier.width(150.dp).height(22.dp),") &&
-    chat.includes(
-      "Column(Modifier.align(Alignment.CenterVertically)) {\n                VoiceWave(",
-    ) &&
+    chat.includes("Column(Modifier.padding(top = 3.dp)) {\n                VoiceWave(") &&
     chat.includes("fontSize = 10.sp,") &&
     chat.includes("Column(horizontalAlignment = Alignment.CenterHorizontally) {"),
 );
