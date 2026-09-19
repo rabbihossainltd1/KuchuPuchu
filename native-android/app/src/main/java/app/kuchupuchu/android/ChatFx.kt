@@ -186,8 +186,8 @@ fun Modifier.fxSlotOpen(active: Boolean, fromDp: Float = -30f, ms: Int = 480): M
 fun Modifier.fxFlyIn(
     active: Boolean,
     durMs: Int,
-    x0dp: Float = -140f,
-    y0dp: Float = 40f,
+    x0dp: Float = 0f,
+    y0dp: Float = 56f,
     onDone: () -> Unit = {},
 ): Modifier {
     val scale = fxAnimatorScale()
@@ -208,13 +208,12 @@ fun Modifier.fxFlyIn(
         // the composer pill (below-left) to its seat on the right, with a
         // light arc; nothing scales, nothing re-wraps.
         val arc = sin(v * PI).toFloat()
-        // r48 (owner: "send receive animation ekhono hoini message bar
-        // theke"): the launch now STARTS ON the composer pill - visible
-        // and on-screen - and flies up to the seat: a short rise (+40dp)
-        // plus a horizontal launch from the pill centre (-140dp sent /
-        // +80dp received). Starting BELOW the screen (the old +120dp)
-        // read as "sliding in from the side"; a whisper drift read as
-        // "no animation at all".
+        // r49 (owner: "just start from message composer pill ... otar
+        // upor theke animation start hoilei fix"): the flight is a
+        // STRAIGHT RISE out of the composer pill - zero horizontal
+        // travel. Every sideways start (-150, -48, -140/+80) read as
+        // "coming from the left side"; the pill sits right below the
+        // seat, so the bubble simply lifts 56dp off it and settles.
         translationY = (1f - v) * y0dp * density - arc * 10f * density
         translationX = (1f - v) * x0dp * density
         alpha = if (v < 0.08f) v / 0.08f else 1f

@@ -516,7 +516,9 @@ const convBetween = (db, a, b) =>
       // r33-5: text-like bodies (text, emoji-only, sticker, deleted) carry the stamp in-column.
       // v169: the voice body is back to the shared frame; the stamp left the
       // bubble entirely (it rides under it now).
-      chat.includes("bottom = if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp") &&
+      chat.includes(
+        "bottom = if (voiceRow) 0.dp else if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp",
+      ) &&
       chat.includes('val textLike = kind == "TEXT" || kind == "STICKER" || kind == "DELETED"'),
   );
   check(
@@ -1896,7 +1898,8 @@ const convBetween = (db, a, b) =>
   );
   check(
     "r26: voice sending line clear of the stamp; no in-bar clear cross in chat search",
-    chat.includes("modifier = Modifier.align(Alignment.End),") && !chat.includes('"Clear"'),
+    chat.includes("Column(horizontalAlignment = Alignment.CenterHorizontally) {") &&
+      !chat.includes('"Clear"'),
   );
   check(
     "r26/r30: status reactions burst up (Animatable, repeatable, nothing selected); the original stays and pulses",
@@ -5136,7 +5139,7 @@ const convBetween = (db, a, b) =>
       // wrapContentWidth ignores the incoming MIN, so a widthIn(min=...)
       // placed outside it never held on device (72 dp and 104 dp both lost).
       chat1516.includes(
-        ".then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = 92.dp))",
+        ".then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = 88.dp))",
       ) &&
       // r33-5: the fixed 30 dp end room is gone — the stamp gets its own
       // measured row under the glyph (KpStamped below = true).
@@ -6278,7 +6281,7 @@ const convBetween = (db, a, b) =>
     check(
       "r34-16a: app — a view-once message renders ViewOnceRow: the photo at its original ratio (ImageRatios-cached) blurred past recognition via ViewOnceBlur, the ViewOnceOneIcon mark in the middle, a dark tile for video / uploads; the recipient opens it (sender's tap does nothing), reply-drag + long-press intact, no 'Opened' state anywhere; the album fold, resend and the media grid never take it",
       chat.includes(
-        "if (isViewOnce(m)) {\n        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, if (mine) -140f else 80f)) {\n            ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)",
+        "if (isViewOnce(m)) {\n        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700)) {\n            ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)",
       ) &&
         chat.indexOf("if (isViewOnce(m)) {") <
           chat.indexOf(
@@ -7673,17 +7676,17 @@ const convBetween = (db, a, b) =>
         thumb.includes("Icons.Filled.InsertDriveFile") &&
         thumb.includes("Modifier.size(34.dp).clip(RoundedCornerShape(6.dp))") &&
         bar.includes(
-          'val thumbed = !isViewOnce(replyTo) && quoteKind(replyTo).isNotBlank() && quoteKind(replyTo) != "Voice"',
+          'val thumbed = !isViewOnce(replyTo) && quoteKind(replyTo).isNotBlank() && quoteKind(replyTo) != "Voice message"',
         ) &&
         bar.includes(
-          'else if (quoteKind(replyTo) == "Voice") "Voice message" else quoteText(replyTo).take(80),',
+          'else if (quoteKind(replyTo) == "Voice message") "Voice message" else quoteText(replyTo).take(80),',
         ) &&
         bar.includes("if (thumbed) QuoteThumb(replyTo, Ink)") &&
         chat.includes(
-          'val thumbed = q != null && !isViewOnce(q) && quoteKind(q).isNotBlank() && quoteKind(q) != "Voice"',
+          'val thumbed = q != null && !isViewOnce(q) && quoteKind(q).isNotBlank() && quoteKind(q) != "Voice message"',
         ) &&
         chat.includes(
-          'else q?.let { qq -> if (quoteKind(qq) == "Voice") "Voice message" else quoteText(qq).take(48) } ?: "Original message"',
+          'else q?.let { qq -> if (quoteKind(qq) == "Voice message") "Voice message" else quoteText(qq).take(48) } ?: "Original message"',
         ) &&
         chat.includes(
           "if (thumbed && q != null) QuoteThumb(q, if (mine) Color(0xE6FFFFFF) else Ink)",

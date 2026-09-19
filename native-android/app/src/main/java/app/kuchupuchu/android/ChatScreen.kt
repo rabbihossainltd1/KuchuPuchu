@@ -5416,7 +5416,7 @@ private fun ReplyQuoteBar(replyTo: JSONObject?, theme: String, onCancel: () -> U
     if (replyTo == null) return
     // Owner round 33 (item 17): a media original shows its small content
     // card at the end of the bar (never for a view-once).
-    val thumbed = !isViewOnce(replyTo) && quoteKind(replyTo).isNotBlank() && quoteKind(replyTo) != "Voice"
+    val thumbed = !isViewOnce(replyTo) && quoteKind(replyTo).isNotBlank() && quoteKind(replyTo) != "Voice message"
     // Owner round 16: the old GoldSoft card + Muted text was unreadable —
     // a card surface with a gold bar and full-ink text.
     Row(
@@ -5452,7 +5452,7 @@ private fun ReplyQuoteBar(replyTo: JSONObject?, theme: String, onCancel: () -> U
                 append("  ")
                 append(
                     if (isViewOnce(replyTo)) (if (fileLooksVideo(replyTo)) "Video · View once" else "Photo · View once")
-                    else if (quoteKind(replyTo) == "Voice") "Voice message" else quoteText(replyTo).take(80),
+                    else if (quoteKind(replyTo) == "Voice message") "Voice message" else quoteText(replyTo).take(80),
                 )
             },
             fontSize = 12.sp,
@@ -5636,7 +5636,7 @@ private fun MessageRow(
     // image uploads (picked as documents) get the same treatment.
     // Owner round 31 (item 29): photos sent together = one grouped bubble.
     if (m.has("kpAlbum")) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, if (mine) -140f else 80f)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700)) {
             AlbumMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenAlbum, onReply, onLongPress, theme)
         }
         return
@@ -5646,13 +5646,13 @@ private fun MessageRow(
     // opens the media ONCE for the recipient; the opening deletes the row
     // for everyone, so there is no opened state left to render.
     if (isViewOnce(m)) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, if (mine) -140f else 80f)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700)) {
             ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)
         }
         return
     }
     if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, if (mine) -140f else 80f)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700)) {
             ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme, onCancelSend)
         }
         return
@@ -5660,7 +5660,7 @@ private fun MessageRow(
     // Owner round 20: videos render as a tappable video bubble and play
     // IN-APP (the system player could never stream these auth-only files).
     if (kind == "FILE" && fileLooksVideo(m) && !sentAsDocument(m)) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 720, if (mine) -140f else 80f)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 720)) {
             VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme, onCancelSend)
         }
         return
@@ -5678,7 +5678,7 @@ private fun MessageRow(
             .fillMaxWidth()
             .padding(vertical = 2.dp)
             .fxSlotOpen(fxFresh)
-            .fxFlyIn(fxFresh, if (kind == "TEXT") 420 else 460, if (mine) -140f else 80f) {
+            .fxFlyIn(fxFresh, if (kind == "TEXT") 420 else 460) {
                 fxLanded = m.optString("id")
             },
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
@@ -5706,6 +5706,9 @@ private fun MessageRow(
             // and a document row's size line — share ONE line with the stamp,
             // so FILE bubbles keep no bottom band (photos / videos never get here).
             val fileRow = kind == "FILE"
+    // r49 (owner: voice bubble nicher theke 4px cut hobe): a voice
+    // card keeps NO bottom band at all.
+    val voiceRow = kind == "FILE" && fileLooksVoice(m)
             // Owner round 33 (item 5): text-like bodies (text, emoji-only,
             // sticker, deleted) carry their stamp INSIDE the column, placed by
             // measurement (KpStamped) — no reserve, no overlay, no band.
@@ -5772,7 +5775,7 @@ private fun MessageRow(
                     // incoming minimum - the 104 dp floor is therefore
                     // enforced AFTER it, as a required size, so a short
                     // bubble really is wider than the stamp under it.
-                    .then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = 92.dp))
+                    .then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = 88.dp))
                     // Owner round 10: the same soft 3D lift the call buttons
                     // have — bubbles float on the wallpaper now.
                     // Owner round 32 (item 8): an emoji-only message has NO
@@ -5810,7 +5813,7 @@ private fun MessageRow(
                     // the text. Other kinds keep the small bottom band —
                     // except FILE rows (items 45 / 34), whose second line
                     // already leaves the stamp its corner.
-                    .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp)
+                    .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (voiceRow) 0.dp else if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp)
                     // v172 (owner: "light effect ta just message a hobe
                     // full chat a na"): the landing squash + shine + ripple
                     // ride the BUBBLE only.
@@ -5837,10 +5840,10 @@ private fun MessageRow(
                             else (q?.optText("senderName") ?: "").ifBlank { "Original" }
                         val what =
                             if (q != null && isViewOnce(q)) (if (fileLooksVideo(q)) "Video · View once" else "Photo · View once")
-                            else q?.let { qq -> if (quoteKind(qq) == "Voice") "Voice message" else quoteText(qq).take(48) } ?: "Original message"
+                            else q?.let { qq -> if (quoteKind(qq) == "Voice message") "Voice message" else quoteText(qq).take(48) } ?: "Original message"
                         // Owner round 33 (item 17): a media original gets a small
                         // content card beside the words (never for a view-once).
-                        val thumbed = q != null && !isViewOnce(q) && quoteKind(q).isNotBlank() && quoteKind(q) != "Voice"
+                        val thumbed = q != null && !isViewOnce(q) && quoteKind(q).isNotBlank() && quoteKind(q) != "Voice message"
                         Row(
                             Modifier
                                 .padding(bottom = 2.dp)
@@ -8013,7 +8016,10 @@ private fun FileBubble(
         Row(verticalAlignment = Alignment.Top) {
             val interaction = remember { MutableInteractionSource() }
             val pressed by interaction.collectIsPressedAsState()
-            Box(
+            // r49 (owner: "voice timer ta play icon er niche thakbe"):
+            // the duration line hangs centred UNDER the play button.
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(
                 Modifier
                     .size(28.dp)
                     .pressScale(interaction)
@@ -8045,28 +8051,10 @@ private fun FileBubble(
                         modifier = Modifier.size(17.dp).scale(if (pressed) 0.85f else 1f),
                     )
                 }
-            }
-            Spacer(Modifier.width(6.dp))
-            // Owner round 25: no side padding — the tick+time stamp sits at
-            // the right end of the duration line, under the wave.
-            Column(Modifier.padding(top = 6.dp)) {
-                VoiceWave(
-                    bars = bars,
-                    progress = progress,
-                    played = ink,
-                    rest = faint,
-                    grow = fxGrow,
-                    modifier = Modifier.width(150.dp).height(20.dp),
-                    onSeek = { frac ->
-                        if (!pendingEcho && fileKey.isNotBlank()) player.seekTo(ctx, id, fileKey, frac)
-                    },
-                    onScrub = { frac ->
-                        scrubAt = if (!pendingEcho && fileKey.isNotBlank()) frac else null
-                    },
-                )
-                Spacer(Modifier.height(2.dp))
+                }
                 val secs = m.optJSONObject("meta")?.optInt("seconds") ?: 0
                 val vFrac = UploadProgress.fracs[m.optString("clientId")]
+                Spacer(Modifier.height(2.dp))
                 Text(
                     when {
                         vFrac != null -> "Sending · ${(vFrac * 100).toInt()}%"
@@ -8083,9 +8071,25 @@ private fun FileBubble(
                     fontSize = 10.sp,
                     color = if (mine) Color(0x99FFFFFF) else Muted,
                     maxLines = 1,
-                    // Owner round 26: keep the sending/duration line clear of
-                    // the bottom-right stamp ("voice sending er somoy overlap").
-                    modifier = Modifier.align(Alignment.End),
+                )
+            }
+            Spacer(Modifier.width(6.dp))
+            // Owner round 25: the wave column carries only the wave now -
+            // the duration line moved under the play button (r49).
+            Column(Modifier.padding(top = 6.dp)) {
+                VoiceWave(
+                    bars = bars,
+                    progress = progress,
+                    played = ink,
+                    rest = faint,
+                    grow = fxGrow,
+                    modifier = Modifier.width(150.dp).height(20.dp),
+                    onSeek = { frac ->
+                        if (!pendingEcho && fileKey.isNotBlank()) player.seekTo(ctx, id, fileKey, frac)
+                    },
+                    onScrub = { frac ->
+                        scrubAt = if (!pendingEcho && fileKey.isNotBlank()) frac else null
+                    },
                 )
             }
         }

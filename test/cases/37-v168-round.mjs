@@ -160,7 +160,7 @@ check(
     // bubble instead, which is what actually shrinks the card's footprint.
     !chat.includes("val voiceNote") &&
     chat.includes(
-      ".padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp)",
+      ".padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (voiceRow) 0.dp else if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp)",
     ) &&
     chat.includes("horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,") &&
     // r33's scrub-to-seek and the spinner survive verbatim
@@ -220,9 +220,7 @@ check(
     fx7.includes("translationX = (1f - v) * x0dp * density") &&
     !fx7.includes("scaleX =") &&
     chat.includes("FxArrivals.markSeen(id)") &&
-    chat.includes(
-      '.fxFlyIn(fxFresh, if (kind == "TEXT") 420 else 460, if (mine) -140f else 80f)',
-    ) &&
+    chat.includes('.fxFlyIn(fxFresh, if (kind == "TEXT") 420 else 460)') &&
     // r46 item 6: the landing + shine + ripple ride the BUBBLE box, never
     // the full-width row (the light swept the whole chat before).
     chat.includes(".fxLanding(fxLanded)") &&
