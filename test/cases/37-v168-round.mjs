@@ -204,26 +204,36 @@ check(
 /* 7b - r52: the Claude pack's measured send flight (SendFlight.kt) */
 const fx8 = kt("SendFlight.kt");
 check(
-  "v169 item 7b (r52): the send/receive flight rides the PENDING row from the MEASURED composer pill - the pill exports its window bounds (fxComposerAnchor), the bubble flies at its original size along a quadratic arc (translation/alpha only, no scaleX/scaleY), the follow-scroll waits for the landing (pendingScrollAfterLand) so the seat never moves mid-flight, and paintSent pre-marks the real id so the painted row replaces it silently",
+  "v169 item 7b (r53): the send/receive flight rides the PENDING row from the MEASURED composer pill - the pill exports its window bounds (fxComposerAnchor), the bubble flies at its original size along a quadratic arc (translation/alpha only, no scaleX/scaleY), the seat is tracked LIVE so the send-time scroll can move it mid-flight and the bubble still lands exactly on it, and paintSent pre-marks the real id so the painted row replaces it silently",
   fx8.includes("object FlightAnchors") &&
     fx8.includes("fun Modifier.fxComposerAnchor()") &&
     fx8.includes("fun Modifier.fxFlyIn(") &&
     fx8.includes("val startX = if (isSent) pill.right - s.width else pill.left") &&
-    fx8.includes("val lift = sin(e * PI.toFloat()) * 8f * density") &&
+    fx8.includes("val lift = sin(v * PI.toFloat()) * 8f * density") &&
+    fx8.includes("snapshotFlow { seat }.filterNotNull().first()") &&
+    fx8.includes("val p0 = Offset(startAbs.x - s.left, startAbs.y - s.top)") &&
     !fx8.includes("scaleX =") &&
     chat.includes(".fxComposerAnchor()") &&
-    chat.includes("val wasFlying = FxArrivals.mark(id) != null") &&
+    chat.includes("FxArrivals.markSeen(id)") &&
     chat.includes(
       '.fxFlyIn(fxFresh, if (kind == "TEXT") 680 else if (kind == "FILE" && fileLooksVoice(m)) 720 else 700, isSent = mine)',
     ) &&
-    chat.includes("var pendingScrollAfterLand by remember { mutableStateOf(false) }") &&
-    chat.includes("LaunchedEffect(flightLandedNonce)") &&
-    chat.includes("onFlightLanded = { flightLandedNonce++ }") &&
     // r46 item 6: the landing + shine + ripple ride the BUBBLE box, never
     // the full-width row (the light swept the whole chat before).
     chat.includes(".fxLanding(fxLanded)") &&
     chat.includes(".fxShineRipple(fxLanded)") &&
     chat.includes(".fxLanding(fxLanded)\n                    .fxShineRipple(fxLanded),"),
+);
+check(
+  "r53: the send never hides - the send paths scroll to the bottom right away (no deferred-flight flag anywhere), the flight chases the moving seat instead; paintSent sweeps pending/msgs without iterators (the voice-send ConcurrentModificationException), the See more / See less toggle speaks the stamp's wallpaper ink outside the bubble, and the 2.5 s open-pin never drags back a reader who is scrolling away",
+  !chat.includes("pendingScrollAfterLand") &&
+    !chat.includes("onFlightLanded") &&
+    chat.includes(
+      "scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }",
+    ) &&
+    chat.includes("var donor: JSONObject? = null") &&
+    chat.includes("color = stampInk,") &&
+    chat.includes("(pinned && nearBottom && !listState.isScrollInProgress)"),
 );
 check(
   "r52: history stays smooth - older pages prefetch before row 0 (idx <= 2) and land on the exact row+offset the fling was on; the See more/See less toggle lives OUTSIDE the bubble so the bubble's combinedClickable can never eat the second tap",
