@@ -931,9 +931,11 @@ private fun MediaEditItemScreen(
                     .put("body", cap)
                     .put("createdAt", java.time.Instant.now().toString())
                     .also { r ->
-                        val effRot0 = (vSource.rotation + (turn % 4) * 90) % 360
-                        val (w0, h0) = VideoPlan.outputSize(vSource.codedW, vSource.codedH, effRot0, box)
-                        r.put("mediaW", w0).put("mediaH", h0)
+                        vSource?.let { vs0 ->
+                            val effRot0 = (vs0.rotation + (turn % 4) * 90) % 360
+                            val (w0, h0) = VideoPlan.outputSize(vs0.codedW, vs0.codedH, effRot0, box)
+                            r.put("mediaW", w0).put("mediaH", h0)
+                        }
                     }
                     .put("docPath", docTarget)
                     .put(

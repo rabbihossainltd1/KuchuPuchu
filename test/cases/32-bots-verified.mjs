@@ -5137,7 +5137,7 @@ const convBetween = (db, a, b) =>
       // wrapContentWidth ignores the incoming MIN, so a widthIn(min=...)
       // placed outside it never held on device (72 dp and 104 dp both lost).
       chat1516.includes(
-        ".then(if (emojiOnly > 0) Modifier else Modifier.requiredMinWidth(104.dp))",
+        ".then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = 104.dp))",
       ) &&
       // r33-5: the fixed 30 dp end room is gone — the stamp gets its own
       // measured row under the glyph (KpStamped below = true).
