@@ -102,10 +102,18 @@ const store = kt("ScreenStore.kt");
       // save, every seat live, no trash.
       edit.includes("StageHistory(true, { haptics.tap(); rotateTap() })") &&
       edit.includes(
-        "StageHistory(true, { haptics.tap(); if (cropping) exitCrop() else enterCrop() })",
+        "StageHistory(true, {\n                        haptics.tap()\n                        if (cropping) exitCrop() else enterCrop()\n                        if (!cropping) {",
       ) &&
       edit.includes(
         "StageHistory(true, {\n                        haptics.tap()\n                        exitCrop()\n                        penMode = !penMode",
+      ) &&
+      edit.includes(
+        "if (penMode) {\n                            showTextSheet = false\n                            showStickerSheet = false\n                            filtersOpen = false\n                        }",
+      ) &&
+      // r46 item 1: every tool seat closes the other tools - one editor at a
+      // time, like WhatsApp (the sticker/text sheets are exclusive too).
+      edit.includes(
+        "exitCrop()\n                        showStickerSheet = true\n                        penMode = false\n                        showTextSheet = false\n                        filtersOpen = false",
       ) &&
       edit.includes("Icons.Filled.AutoAwesome") &&
       !edit.includes("StageHistory(canClear") &&

@@ -903,6 +903,12 @@ private fun MediaEditItemScreen(
         if (pickedIsVideo && source != null) {
             val cid = "c_${java.util.UUID.randomUUID()}"
             val cap = caption.trim()
+            // v172 (owner: "video ta original thumbnail ar original ratio
+            // te thakche na"): the pending bubble carries the clip's true
+            // shape (turns + crop included) and a docPath of its own - the
+            // working clip is mirrored there in the background, so the
+            // thumb decodes from the clip's OWN bytes, never a shared slot.
+            val docTarget = java.io.File(ctx.cacheDir, "vidsend_${System.currentTimeMillis()}.mp4").absolutePath
             val drawn = strokes.toList()
             val wrote = texts.toList()
             val placed = stickers.toList()
@@ -924,11 +930,31 @@ private fun MediaEditItemScreen(
                     .put("fileType", mime)
                     .put("body", cap)
                     .put("createdAt", java.time.Instant.now().toString())
-                    .put("meta", JSONObject().put("duration", (e - s).coerceAtLeast(0L)))
+                    .also { r ->
+                        val effRot0 = (vSource.rotation + (turn % 4) * 90) % 360
+                        val (w0, h0) = VideoPlan.outputSize(vSource.codedW, vSource.codedH, effRot0, box)
+                        r.put("mediaW", w0).put("mediaH", h0)
+                    }
+                    .put("docPath", docTarget)
+                    .put(
+                        "meta",
+                        JSONObject()
+                            .put("duration", (e - s).coerceAtLeast(0L))
+                            .put("durMs", (e - s).coerceAtLeast(0L)),
+                    )
                     .also { if (once) it.put("viewOnce", true) }
             ScreenStore.pendingVideoSend.value =
                 ScreenStore.PendingVideoSend(convId, row) { c ->
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        // The bubble's docPath gets the clip's own bytes first
+                        // (a stream copy), then the one bake reads that copy.
+                        val mirror = java.io.File(docTarget)
+                        if (!mirror.exists()) {
+                            c.contentResolver.openInputStream(srcUri)?.use { input ->
+                                mirror.outputStream().use { out0 -> input.copyTo(out0, 256 * 1024) }
+                            } ?: return@withContext null
+                        }
+                        val srcForBake = android.net.Uri.fromFile(mirror)
                         val out = java.io.File(c.cacheDir, "edit_${System.currentTimeMillis()}.mp4")
                         val vs = vSource ?: return@withContext null
                         val effRot = (vs.rotation + (turn % 4) * 90) % 360
@@ -937,14 +963,14 @@ private fun MediaEditItemScreen(
                         val layers = overlay != null || filt != null || turn != 0 || box != null
                         try {
                             if (!layers) {
-                                VideoExport.passthrough(c, srcUri, s, e, out)
+                                VideoExport.passthrough(c, srcForBake, s, e, out)
                             } else {
-                                VideoExport.export(c, srcUri, s, e, box, out, overlay = overlay, colorMat = filt?.array, userTurns = turn)
+                                VideoExport.export(c, srcForBake, s, e, box, out, overlay = overlay, colorMat = filt?.array, userTurns = turn)
                             }
                         } catch (err: Exception) {
                             if (layers) throw err
                             out.delete()
-                            VideoExport.passthrough(c, srcUri, s, e, out)
+                            VideoExport.passthrough(c, srcForBake, s, e, out)
                         } finally {
                             runCatching { overlay?.recycle() }
                         }
@@ -1864,6 +1890,14 @@ private fun MediaEditItemScreen(
                         haptics.tap()
                         exitCrop()
                         penMode = !penMode
+                        // v172 (owner: "ekta tool use kore arekta tool a
+                        // click korleo ager tool ta close hoi na"): one tool
+                        // at a time - opening one folds the rest.
+                        if (penMode) {
+                            showTextSheet = false
+                            showStickerSheet = false
+                            filtersOpen = false
+                        }
                     }) {
                         Icon(Icons.Filled.Edit, "Draw", tint = if (penMode) ActionBlue else Color.White, modifier = Modifier.size(20.dp))
                     }
@@ -1871,16 +1905,31 @@ private fun MediaEditItemScreen(
                         haptics.tap()
                         exitCrop()
                         showStickerSheet = true
+                        penMode = false
+                        showTextSheet = false
+                        filtersOpen = false
                     }) {
                         Icon(Icons.Filled.EmojiEmotions, "Stickers", tint = Color.White, modifier = Modifier.size(20.dp))
                     }
-                    StageHistory(true, { haptics.tap(); if (cropping) exitCrop() else enterCrop() }) {
+                    StageHistory(true, {
+                        haptics.tap()
+                        if (cropping) exitCrop() else enterCrop()
+                        if (!cropping) {
+                            penMode = false
+                            showTextSheet = false
+                            showStickerSheet = false
+                            filtersOpen = false
+                        }
+                    }) {
                         Icon(Icons.Filled.Crop, "Crop", tint = if (cropping) ActionBlue else Color.White, modifier = Modifier.size(20.dp))
                     }
                     StageHistory(true, {
                         haptics.tap()
                         exitCrop()
                         showTextSheet = true
+                        penMode = false
+                        showStickerSheet = false
+                        filtersOpen = false
                     }) {
                         Text("Aa", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     }
@@ -1890,6 +1939,11 @@ private fun MediaEditItemScreen(
                     StageHistory(true, {
                         haptics.tap()
                         filtersOpen = !filtersOpen
+                        if (filtersOpen) {
+                            penMode = false
+                            showTextSheet = false
+                            showStickerSheet = false
+                        }
                     }) {
                         Icon(Icons.Filled.AutoAwesome, "Effects", tint = if (filtersOpen) ActionBlue else Color.White, modifier = Modifier.size(20.dp))
                     }
