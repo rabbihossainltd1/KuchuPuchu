@@ -227,7 +227,6 @@ fun Modifier.fxFlyIn(
  * or the reveal completes (received): (1.05, 0.94) -> (0.97, 1.05) ->
  * (1.02, 0.99) -> (1, 1), 520 ms, origin bottom-end (sent) / bottom-start.
  */
-@Composable
 // r50: the gentle history-row reveal - a 200 ms alpha ease, no
 // translation, no slot growth. Cheap enough that a fast scroll never
 // pays for it, soft enough that old rows don't just pop.
@@ -241,6 +240,7 @@ fun Modifier.fxSoftIn(active: Boolean, durMs: Int = 200): Modifier {
     return graphicsLayer { alpha = 0.55f + 0.45f * t.value }
 }
 
+@Composable
 fun Modifier.fxLanding(trigger: Any?): Modifier {
     val scale = fxAnimatorScale()
     val sx = remember { Animatable(1f) }
