@@ -83,7 +83,7 @@ check(
     edit.includes("onStageTap()") &&
     edit.includes("StageCanvas(onStageTap = {") &&
     edit.includes("vidPaused = !vidPaused") &&
-    edit.includes("if (vidPaused && !cropping && !penMode && !busy && !stillMode) {") &&
+    edit.includes("if (vidPaused && !cropping && !penMode && !busy) {") &&
     edit.includes(
       'Icon(Icons.Filled.PlayArrow, "Play", tint = Color.White, modifier = Modifier.size(32.dp))',
     ) &&
@@ -179,9 +179,10 @@ const fx7 = fs.readFileSync(
   "utf8",
 );
 check(
-  "v169 item 7: the receive animation pack is in - a shared Compose-only ChatFx.kt (emoji registry with entry/idle/fx, slot open, letter-by-letter reveal, de-blur media reveal, landing squash, shine + ripple) that respects the animator duration scale, live arrivals queue one at a time, own rows and history never replay",
+  "v169 item 7 (r44): the receive animation pack is in - a shared Compose-only ChatFx.kt (emoji registry with entry/idle/fx, slot open, letter-by-letter reveal, de-blur media reveal, landing squash, shine + ripple) that respects the animator duration scale; arrivals are marked synchronously at the row's FIRST composition (FxArrivals) so nothing ever lands-then-replays, history composes before the screen arms, and the AI bot's rows never animate here",
   fx7.includes("object EmojiAnimationRegistry") &&
     fx7.includes('"\ud83d\ude02" to EmojiAnim("shake-in", "shake", EmojiFx.TEARS)') &&
+    fx7.includes("object FxArrivals") &&
     fx7.includes("fun fxSlotOpen") &&
     fx7.includes("fun fxLetterSpans") &&
     fx7.includes("fun fxAnimatorScale") &&
@@ -190,23 +191,30 @@ check(
     fx7.includes("fun fxLanding") &&
     fx7.includes("fun fxShineRipple") &&
     fx7.includes("fun fxBlurIn") &&
+    fx7.includes("fun fxPopIn") &&
+    fx7.includes("fun fxProgressLine") &&
     fx7.includes("fun AnimatedEmoji") &&
-    chat.includes("fxActive = fxHead != null && fxHead == m.id") &&
-    chat.includes(".fxSlotOpen(fxActive)") &&
-    chat.includes("fxLetterSpans(full, fxActive)") &&
-    chat.includes('AnimatedEmoji(m.optText("body").trim(), 44f, true)') &&
-    chat.includes("val fxQueue = remember") &&
-    chat.includes('mm.optString("senderId") != Store.myId()') &&
-    chat.includes(".fxBlurIn(fxActive)"),
+    chat.includes("val fxFresh =") &&
+    chat.includes(
+      'FxArrivals.mark(m.optString("id")) != null && m.optString("senderId") != "kp_ai_bot"',
+    ) &&
+    chat.includes("FxArrivals.armed = false") &&
+    chat.includes("if (msgs.isNotEmpty()) FxArrivals.armed = true") &&
+    chat.includes(".fxSlotOpen(fxFresh)") &&
+    chat.includes("fxLetterSpans(full, fxFresh)") &&
+    chat.includes('AnimatedEmoji(m.optText("body").trim(), 44f, fxFresh)') &&
+    chat.includes(".fxBlurIn(fxFresh)") &&
+    chat.includes("grow = fxGrow,") &&
+    chat.includes(".fxPopIn(fxGrow)") &&
+    chat.includes(".fxProgressLine(fxGrow, docInk)"),
 );
 
 check(
-  "v169 item 7b: the send flight - paintSent arms the freshly painted own row, the bubble rises out of the composer (translation/scale/alpha only - never width/height, so text never re-wraps), lands with the squash and the shine + ripple",
+  "v169 item 7b (r44): the send flight rides the PENDING row - it rises out of the composer (translation/scale/alpha only, never width/height), lands with the squash and the shine + ripple, and paintSent pre-marks the real id so the painted row replaces it silently",
   fx7.includes("fun fxFlyIn") &&
     fx7.includes("translationY = (1f - v) * 150f * density - arc * 8f * density") &&
-    chat.includes("fxSend.add(id)") &&
-    chat.includes('fxSend = m.optString("id") in fxSend') &&
-    chat.includes('.fxFlyIn(fxSend, if (kind == "TEXT") 680 else 700)') &&
+    chat.includes("FxArrivals.markSeen(id)") &&
+    chat.includes('.fxFlyIn(mine && fxFresh, if (kind == "TEXT") 680 else 700)') &&
     chat.includes(".fxLanding(fxLanded)") &&
     chat.includes(".fxShineRipple(fxLanded)"),
 );

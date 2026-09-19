@@ -5684,7 +5684,11 @@ private fun MessageRow(
                             onDragCancel = { replyDrag = 0f },
                         )
                     }
-                    .widthIn(min = if (emojiOnly > 0) 0.dp else 72.dp, max = bubbleMax)
+                    // v170 (owner: "short massage bubble onek bushi short
+                    // hoye ... massage bubble body aro ektu boro hobe jodi
+                    // time tick fill na kore"): a text bubble is never
+                    // narrower than the stamp riding under it.
+                    .widthIn(min = if (emojiOnly > 0) 0.dp else 96.dp, max = bubbleMax)
                     .wrapContentWidth()
                     // Owner round 10: the same soft 3D lift the call buttons
                     // have — bubbles float on the wallpaper now.

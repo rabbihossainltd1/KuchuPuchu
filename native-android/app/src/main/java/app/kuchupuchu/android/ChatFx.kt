@@ -22,6 +22,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -69,6 +70,87 @@ fun Modifier.fxBlurIn(active: Boolean): Modifier {
         scaleX = 0.96f + 0.04f * v
         scaleY = 0.96f + 0.04f * v
     }.then(if (v < 1f) Modifier.blur((10 * (1f - v)).dp) else Modifier)
+}
+
+/* --------------------------------------------------- arrival bookkeeping */
+
+/**
+ * r44 (owner: "age message giye pore animation hoi duplicate vabe"): a row
+ * id is marked ONCE, synchronously, at the row's FIRST composition - so an
+ * animation is always part of frame one and can never be a replay. History
+ * composes before the screen arms (and gets null), re-composed rows find
+ * their id already seen, and paintSent pre-marks the id its pending row
+ * flew in with, so the painted row just replaces it silently.
+ */
+object FxArrivals {
+    var armed = false
+    private val seen =
+        java.util.Collections.synchronizedMap(
+            object : java.util.LinkedHashMap<String, Long>(64, 0.75f, false) {
+                override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>?): Boolean = size > 500
+            },
+        )
+
+    fun mark(id: String): Long? {
+        if (id.isEmpty()) return null
+        synchronized(seen) {
+            if (seen.containsKey(id)) return null
+            val now = android.os.SystemClock.uptimeMillis()
+            seen[id] = now
+            return if (armed) now else null
+        }
+    }
+
+    fun markSeen(id: String) {
+        if (id.isNotEmpty()) seen[id] = android.os.SystemClock.uptimeMillis()
+    }
+}
+
+/** Pop entry for the multi-glyph emoji cluster and the document tile. */
+@Composable
+fun Modifier.fxPopIn(active: Boolean): Modifier {
+    val scale = fxAnimatorScale()
+    val t = remember { Animatable(if (active && scale > 0f) 0f else 1f) }
+    LaunchedEffect(active) {
+        if (active && scale > 0f) t.animateTo(1f, tween(650, easing = FastOutSlowInEasing))
+    }
+    val v = t.value
+    return graphicsLayer {
+        val s = 0.3f + 0.7f * v + sin(v * PI).toFloat() * 0.08f
+        scaleX = s
+        scaleY = s
+        alpha = (v * 4f).coerceAtMost(1f)
+    }
+}
+
+/** The document row's arrival progress underline (1100 ms fill). */
+@Composable
+fun Modifier.fxProgressLine(active: Boolean, tint: Color): Modifier {
+    val scale = fxAnimatorScale()
+    var clock by remember(active) { mutableStateOf(-1L) }
+    LaunchedEffect(active) {
+        if (active && scale > 0f) {
+            val t0 = android.os.SystemClock.uptimeMillis()
+            while (android.os.SystemClock.uptimeMillis() - t0 < 1300L) {
+                clock = android.os.SystemClock.uptimeMillis() - t0
+                kotlinx.coroutines.delay(16)
+            }
+            clock = -1L
+        }
+    }
+    return drawBehind {
+        val el = clock
+        if (el >= 0L) {
+            val p = (el / 1100f).coerceIn(0f, 1f)
+            val y = size.height - 1.dp.toPx()
+            drawLine(
+                color = tint,
+                start = Offset(0f, y),
+                end = Offset(size.width * FastOutSlowInEasing.transform(p), y),
+                strokeWidth = 2.dp.toPx(),
+            )
+        }
+    }
 }
 
 /* ---------------------------------------------------------------- slot open */
@@ -743,7 +825,10 @@ fun AnimatedEmoji(
 ) {
     val spec = remember(ch) { EmojiAnimationRegistry.forEmoji(ch) }
     val scale = fxAnimatorScale()
-    val play = active && scale > 0f
+    // r44 (owner: "emojis dile kono animation nai jemon ta example a deoa
+    // ache"): the idle loop + the effect overlay run for as long as the
+    // glyph is on screen - only the ENTRY waits for a live arrival.
+    val play = scale > 0f
     var now by remember { mutableStateOf(0L) }
     val t0 = remember { android.os.SystemClock.uptimeMillis() }
     LaunchedEffect(play) {
@@ -755,7 +840,7 @@ fun AnimatedEmoji(
     }
     val el = (now - staggerMs).coerceAtLeast(0L)
     val inMs = inDurationMs(spec.inName)
-    val p = if (play) (el.toFloat() / inMs).coerceIn(0f, 1f) else 1f
+    val p = if (active && play) (el.toFloat() / inMs).coerceIn(0f, 1f) else 1f
     val k = inSample(spec.inName, p, 1f)
     val idle = if (p >= 1f) idleSample(spec.idle, el) else Kf(0f)
     androidx.compose.foundation.layout.Box {

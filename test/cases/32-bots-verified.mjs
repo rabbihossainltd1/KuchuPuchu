@@ -5130,7 +5130,8 @@ const convBetween = (db, a, b) =>
       chat1516.includes(
         "emojiOnly > 0 -> Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))",
       ) &&
-      chat1516.includes(".widthIn(min = if (emojiOnly > 0) 0.dp else 72.dp, max = bubbleMax)") &&
+      // v170: the floor is now 96 dp - wide enough for the stamp under it.
+      chat1516.includes(".widthIn(min = if (emojiOnly > 0) 0.dp else 96.dp, max = bubbleMax)") &&
       // r33-5: the fixed 30 dp end room is gone — the stamp gets its own
       // measured row under the glyph (KpStamped below = true).
       chat1516.includes("modifier = Modifier.padding(start = 2.dp, end = 2.dp),") &&

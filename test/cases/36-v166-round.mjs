@@ -99,7 +99,12 @@ check(
   'v166 fb#2: the clip bake reports itself — the Done chip carries the export\'s own progress ("Applying n%", dimmed while busy), the full-frame overlay is recycled in a finally, and a 0-byte / duration-less mp4 is deleted and thrown instead of becoming mediaUri',
   edit.includes("var applyPct by remember { mutableStateOf(-1f) }") &&
     edit.includes("if (busy) return") &&
-    edit.includes("applyPct = if (pickedIsVideo) 0f else -1f") &&
+    // v170: a clip's Done no longer walks the encoder - photos bake (-1), clips
+    // ride the live preview (the send does the one and only bake).
+    edit.includes("applyPct = -1f") &&
+    edit.includes(
+      "if (pickedIsVideo) {\n            haptics.confirm()\n            return\n        }",
+    ) &&
     edit.includes("onProgress = { f -> applyPct = f.coerceIn(0f, 1f) },") &&
     edit.includes("runCatching { overlay?.recycle() }") &&
     edit.includes(
