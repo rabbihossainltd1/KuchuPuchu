@@ -5564,7 +5564,14 @@ private fun MessageRow(
     // animation; a replay is what the owner saw as "vanish, then again").
     val fxFresh =
         remember {
-            FxArrivals.mark(m.optString("id")) != null && m.optString("senderId") != "kp_ai_bot"
+            // r50 (owner: "old chat scrolling korle sending animation hoi
+            // ... remove hobe"): the flight is for LIVE arrivals only - a
+            // row whose createdAt is already old (history, loadOlder, a
+            // reopen) never flies; it gets the soft fade below instead.
+            val liveBorn =
+                runCatching { java.time.Instant.parse(m.optString("createdAt")).toEpochMilli() }
+                    .getOrDefault(0L) > System.currentTimeMillis() - 8_000L
+            liveBorn && FxArrivals.mark(m.optString("id")) != null && m.optString("senderId") != "kp_ai_bot"
         } && fxScaleOf(ctx) > 0f
     // Owner round 15: the night theme's other-bubble is dark in BOTH app
     // themes — its text needs a light ink or it vanishes in light mode.
@@ -5636,7 +5643,7 @@ private fun MessageRow(
     // image uploads (picked as documents) get the same treatment.
     // Owner round 31 (item 29): photos sent together = one grouped bubble.
     if (m.has("kpAlbum")) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxSoftIn(!fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700)) {
             AlbumMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenAlbum, onReply, onLongPress, theme)
         }
         return
@@ -5646,13 +5653,13 @@ private fun MessageRow(
     // opens the media ONCE for the recipient; the opening deletes the row
     // for everyone, so there is no opened state left to render.
     if (isViewOnce(m)) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxSoftIn(!fxFresh).fxFlyIn(fxFresh, 700)) {
             ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)
         }
         return
     }
     if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxSoftIn(!fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700)) {
             ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme, onCancelSend)
         }
         return
@@ -5660,7 +5667,7 @@ private fun MessageRow(
     // Owner round 20: videos render as a tappable video bubble and play
     // IN-APP (the system player could never stream these auth-only files).
     if (kind == "FILE" && fileLooksVideo(m) && !sentAsDocument(m)) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 720)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxSoftIn(!fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 720)) {
             VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme, onCancelSend)
         }
         return
@@ -5678,7 +5685,8 @@ private fun MessageRow(
             .fillMaxWidth()
             .padding(vertical = 2.dp)
             .fxSlotOpen(fxFresh)
-            .fxFlyIn(fxFresh, if (kind == "TEXT") 420 else 460) {
+            .fxSoftIn(!fxFresh)
+            .fxFlyIn(fxFresh, if (kind == "TEXT") 500 else 540) {
                 fxLanded = m.optString("id")
             },
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
@@ -5775,7 +5783,7 @@ private fun MessageRow(
                     // incoming minimum - the 104 dp floor is therefore
                     // enforced AFTER it, as a required size, so a short
                     // bubble really is wider than the stamp under it.
-                    .then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = 88.dp))
+                    .then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = 82.dp))
                     // Owner round 10: the same soft 3D lift the call buttons
                     // have — bubbles float on the wallpaper now.
                     // Owner round 32 (item 8): an emoji-only message has NO
@@ -8054,7 +8062,6 @@ private fun FileBubble(
                 }
                 val secs = m.optJSONObject("meta")?.optInt("seconds") ?: 0
                 val vFrac = UploadProgress.fracs[m.optString("clientId")]
-                Spacer(Modifier.height(2.dp))
                 Text(
                     when {
                         vFrac != null -> "Sending · ${(vFrac * 100).toInt()}%"
@@ -8069,6 +8076,7 @@ private fun FileBubble(
                         else -> FilesUtil.displaySize(m.optInt("fileSize"))
                     },
                     fontSize = 10.sp,
+                    lineHeight = 12.sp,
                     color = if (mine) Color(0x99FFFFFF) else Muted,
                     maxLines = 1,
                 )
@@ -8076,14 +8084,16 @@ private fun FileBubble(
             Spacer(Modifier.width(6.dp))
             // Owner round 25: the wave column carries only the wave now -
             // the duration line moved under the play button (r49).
-            Column(Modifier.padding(top = 6.dp)) {
+            // r50: centred on the play+time column so no blank band is left
+            // under the wave.
+            Column(Modifier.align(Alignment.CenterVertically)) {
                 VoiceWave(
                     bars = bars,
                     progress = progress,
                     played = ink,
                     rest = faint,
                     grow = fxGrow,
-                    modifier = Modifier.width(150.dp).height(20.dp),
+                    modifier = Modifier.width(150.dp).height(22.dp),
                     onSeek = { frac ->
                         if (!pendingEcho && fileKey.isNotBlank()) player.seekTo(ctx, id, fileKey, frac)
                     },

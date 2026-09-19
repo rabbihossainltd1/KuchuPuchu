@@ -151,10 +151,12 @@ check(
   "v168 item 6 (owner: 'voice message ta er bubble ta body shoho onek boro ... choto kore daw'): the voice bubble came in another notch WITH its body - a 28 dp play circle (17 dp glyphs), a 112 x 16 dp wave centred by the 6 dp column pad, a 10 sp time line, and the bubble's own text padding tightened around the card (voiceNote: 8/3/6/3); the r33 scrub-to-seek row and the 16 dp spinner seat are untouched",
   chat.includes(".size(28.dp)\n                    .pressScale(interaction)") &&
     (chat.match(/size\(17\.dp\)\.scale\(if \(pressed\) 0\.85f else 1f\)/g) || []).length === 2 &&
-    chat.includes("Column(Modifier.padding(top = 6.dp)) {\n                VoiceWave(") &&
-    chat.includes("modifier = Modifier.width(150.dp).height(20.dp),") &&
     chat.includes(
-      "fontSize = 10.sp,\n                    color = if (mine) Color(0x99FFFFFF) else Muted,",
+      "Column(Modifier.align(Alignment.CenterVertically)) {\n                VoiceWave(",
+    ) &&
+    chat.includes("modifier = Modifier.width(150.dp).height(22.dp),") &&
+    chat.includes(
+      "fontSize = 10.sp,\n                    lineHeight = 12.sp,\n                    color = if (mine) Color(0x99FFFFFF) else Muted,",
     ) &&
     // v169: the body frame is back to the shared one - the stamp left the
     // bubble instead, which is what actually shrinks the card's footprint.
@@ -197,7 +199,7 @@ check(
     fx7.includes("fun AnimatedEmoji") &&
     chat.includes("val fxFresh =") &&
     chat.includes(
-      'FxArrivals.mark(m.optString("id")) != null && m.optString("senderId") != "kp_ai_bot"',
+      'liveBorn && FxArrivals.mark(m.optString("id")) != null && m.optString("senderId") != "kp_ai_bot"',
     ) &&
     chat.includes("FxArrivals.armed = false") &&
     chat.includes("if (msgs.isNotEmpty()) FxArrivals.armed = true") &&
@@ -220,9 +222,11 @@ check(
     fx7.includes("translationX = (1f - v) * x0dp * density") &&
     !fx7.includes("scaleX =") &&
     chat.includes("FxArrivals.markSeen(id)") &&
-    chat.includes('.fxFlyIn(fxFresh, if (kind == "TEXT") 420 else 460)') &&
+    chat.includes('.fxFlyIn(fxFresh, if (kind == "TEXT") 500 else 540)') &&
     // r46 item 6: the landing + shine + ripple ride the BUBBLE box, never
     // the full-width row (the light swept the whole chat before).
+    chat.includes(".fxSoftIn(!fxFresh)") &&
+    fx7.includes("fun Modifier.fxSoftIn") &&
     chat.includes(".fxLanding(fxLanded)") &&
     chat.includes(".fxShineRipple(fxLanded)") &&
     chat.indexOf(".fxShineRipple(fxLanded)") < chat.indexOf(".padding(start = 10.dp, top = 4.dp,"),

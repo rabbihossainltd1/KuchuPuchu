@@ -5139,7 +5139,7 @@ const convBetween = (db, a, b) =>
       // wrapContentWidth ignores the incoming MIN, so a widthIn(min=...)
       // placed outside it never held on device (72 dp and 104 dp both lost).
       chat1516.includes(
-        ".then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = 88.dp))",
+        ".then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = 82.dp))",
       ) &&
       // r33-5: the fixed 30 dp end room is gone — the stamp gets its own
       // measured row under the glyph (KpStamped below = true).
@@ -5530,7 +5530,7 @@ const convBetween = (db, a, b) =>
       chat.includes("internal fun fileLooksVoice(m: JSONObject): Boolean {") &&
         chat.includes('val fileRow = kind == "FILE"') &&
         chat.includes("val isVoice = !asDocument && fileLooksVoice(m)") &&
-        chat.includes("modifier = Modifier.width(150.dp).height(20.dp),") &&
+        chat.includes("modifier = Modifier.width(150.dp).height(22.dp),") &&
         !chat.includes("modifier = Modifier.width(150.dp).height(30.dp),") &&
         chat.includes(
           "internal fun DrawScope.drawVoiceBars(bars: List<Int>, progress: Float, played: Color, rest: Color, newest: Boolean = false, reveal: Float = Float.MAX_VALUE) {",
@@ -6281,7 +6281,7 @@ const convBetween = (db, a, b) =>
     check(
       "r34-16a: app — a view-once message renders ViewOnceRow: the photo at its original ratio (ImageRatios-cached) blurred past recognition via ViewOnceBlur, the ViewOnceOneIcon mark in the middle, a dark tile for video / uploads; the recipient opens it (sender's tap does nothing), reply-drag + long-press intact, no 'Opened' state anywhere; the album fold, resend and the media grid never take it",
       chat.includes(
-        "if (isViewOnce(m)) {\n        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700)) {\n            ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)",
+        "if (isViewOnce(m)) {\n        Box(Modifier.fxSlotOpen(fxFresh).fxSoftIn(!fxFresh).fxFlyIn(fxFresh, 700)) {\n            ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)",
       ) &&
         chat.indexOf("if (isViewOnce(m)) {") <
           chat.indexOf(
@@ -8426,8 +8426,10 @@ const convBetween = (db, a, b) =>
         chat.includes(
           "Row(verticalAlignment = Alignment.Top) {\n            val interaction = remember { MutableInteractionSource() }",
         ) &&
-        chat.includes("Column(Modifier.padding(top = 6.dp)) {\n                VoiceWave(") &&
-        chat.includes("modifier = Modifier.width(150.dp).height(20.dp),"),
+        chat.includes(
+          "Column(Modifier.align(Alignment.CenterVertically)) {\n                VoiceWave(",
+        ) &&
+        chat.includes("modifier = Modifier.width(150.dp).height(22.dp),"),
     );
   }
   // Item 8: the status / chat-video trim strip shows a playhead — the
