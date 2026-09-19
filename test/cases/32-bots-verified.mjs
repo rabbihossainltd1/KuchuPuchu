@@ -6272,7 +6272,7 @@ const convBetween = (db, a, b) =>
     check(
       "r34-16a: app — a view-once message renders ViewOnceRow: the photo at its original ratio (ImageRatios-cached) blurred past recognition via ViewOnceBlur, the ViewOnceOneIcon mark in the middle, a dark tile for video / uploads; the recipient opens it (sender's tap does nothing), reply-drag + long-press intact, no 'Opened' state anywhere; the album fold, resend and the media grid never take it",
       chat.includes(
-        "if (isViewOnce(m)) {\n        Box(Modifier.fxSlotOpen(fxActive)) {\n            ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)",
+        "if (isViewOnce(m)) {\n        Box(Modifier.fxSlotOpen(fxActive).fxFlyIn(fxSend, 700, onFxSendDone)) {\n            ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)",
       ) &&
         chat.indexOf("if (isViewOnce(m)) {") <
           chat.indexOf(
@@ -7342,8 +7342,8 @@ const convBetween = (db, a, b) =>
         fastPaint.includes(
           "if (follow) {\n                                        scope.launch {\n                                            val total = msgs.size + pending.size\n                                            if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }",
         ) &&
-        paintSent.indexOf("val follow =") <
-          paintSent.indexOf("if (idx >= 0) msgs[idx] = row else msgs.add(row)") &&
+        paintSent.indexOf("val follow =") < paintSent.indexOf("if (idx >= 0) {") > -1 &&
+        paintSent.indexOf("fxSend.add(id)") > -1 &&
         paintSent.includes("!listState.isScrollInProgress &&") &&
         paintSent.includes(
           "if (follow) {\n            scope.launch {\n                val total = msgs.size + pending.size\n                if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }",

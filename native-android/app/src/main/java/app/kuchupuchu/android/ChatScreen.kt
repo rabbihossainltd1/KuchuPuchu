@@ -214,6 +214,7 @@ fun ChatScreen(nav: NavController, convId: String) {
     // own rows never play (their flight belongs to the SEND pack).
     val fxctx = LocalContext.current
     val fxQueue = remember { androidx.compose.runtime.mutableStateListOf<String>() }
+    val fxSend = remember { androidx.compose.runtime.mutableStateListOf<String>() }
     val fxSeen = remember { mutableSetOf<String>() }
     var fxHead by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(msgs.size) {
@@ -1213,7 +1214,13 @@ fun ChatScreen(nav: NavController, convId: String) {
         val follow =
             !listState.isScrollInProgress &&
                 info.visibleItemsInfo.lastOrNull()?.index?.let { it >= info.totalItemsCount - 2 } == true
-        if (idx >= 0) msgs[idx] = row else msgs.add(row)
+        if (idx >= 0) {
+            msgs[idx] = row
+        } else {
+            msgs.add(row)
+            // r43 (pack): a sent bubble flies out of the composer.
+            fxSend.add(id)
+        }
         pending.removeAll { it.optString("clientId") == cid || it.optString("id") == id }
         // Painted here = not "new" for the next marker GET (no second scroll / read post).
         if (idx < 0) lastTopId = id
@@ -3122,6 +3129,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 fxQueue.remove(m.id)
                                 fxHead = fxQueue.firstOrNull()
                             },
+                            fxSend = m.optString("id") in fxSend,
+                            onFxSendDone = { fxSend.remove(m.optString("id")) },
                             onUnblockAsk = { msg ->
                                 scope.launch {
                                     val ok = runCatching {
@@ -5452,6 +5461,9 @@ private fun MessageRow(
     // r43 (pack): receive animations - true only for the queued head.
     fxActive: Boolean = false,
     onFxDone: () -> Unit = {},
+    // r43 (pack): send flight - the bubble just painted by paintSent.
+    fxSend: Boolean = false,
+    onFxSendDone: () -> Unit = {},
 ) {
     val mine = m.optString("senderId") == myId
     val kind = m.optString("kind")
@@ -5543,7 +5555,7 @@ private fun MessageRow(
     // image uploads (picked as documents) get the same treatment.
     // Owner round 31 (item 29): photos sent together = one grouped bubble.
     if (m.has("kpAlbum")) {
-        Box(Modifier.fxSlotOpen(fxActive).fxBlurIn(fxActive)) {
+        Box(Modifier.fxSlotOpen(fxActive).fxBlurIn(fxActive).fxFlyIn(fxSend, 700, onFxSendDone)) {
             AlbumMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenAlbum, onReply, onLongPress, theme)
         }
         return
@@ -5553,13 +5565,13 @@ private fun MessageRow(
     // opens the media ONCE for the recipient; the opening deletes the row
     // for everyone, so there is no opened state left to render.
     if (isViewOnce(m)) {
-        Box(Modifier.fxSlotOpen(fxActive)) {
+        Box(Modifier.fxSlotOpen(fxActive).fxFlyIn(fxSend, 700, onFxSendDone)) {
             ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)
         }
         return
     }
     if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {
-        Box(Modifier.fxSlotOpen(fxActive).fxBlurIn(fxActive)) {
+        Box(Modifier.fxSlotOpen(fxActive).fxBlurIn(fxActive).fxFlyIn(fxSend, 700, onFxSendDone)) {
             ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme, onCancelSend)
         }
         return
@@ -5567,7 +5579,7 @@ private fun MessageRow(
     // Owner round 20: videos render as a tappable video bubble and play
     // IN-APP (the system player could never stream these auth-only files).
     if (kind == "FILE" && fileLooksVideo(m) && !sentAsDocument(m)) {
-        Box(Modifier.fxSlotOpen(fxActive).fxBlurIn(fxActive)) {
+        Box(Modifier.fxSlotOpen(fxActive).fxBlurIn(fxActive).fxFlyIn(fxSend, 720, onFxSendDone)) {
             VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme, onCancelSend)
         }
         return
@@ -5579,11 +5591,18 @@ private fun MessageRow(
     var replyDrag by remember { mutableStateOf(0f) }
     val replyOffset by animateFloatAsState(replyDrag, spring(stiffness = 1400f), label = "replydrag")
     val replyThreshold = with(LocalDensity.current) { 36.dp.toPx() }
+    var fxLanded by remember { mutableStateOf<String?>(null) }
     Row(
         Modifier
             .fillMaxWidth()
             .padding(vertical = 2.dp)
-            .fxSlotOpen(fxActive),
+            .fxSlotOpen(fxActive)
+            .fxFlyIn(fxSend, if (kind == "TEXT") 680 else 700) {
+                fxLanded = m.optString("id")
+                onFxSendDone()
+            }
+            .fxLanding(fxLanded)
+            .fxShineRipple(fxLanded),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
         Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {

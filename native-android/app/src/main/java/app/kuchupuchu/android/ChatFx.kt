@@ -87,6 +87,39 @@ fun Modifier.fxSlotOpen(active: Boolean, fromDp: Float = -30f, ms: Int = 480): M
     }
 }
 
+/* -------------------------------------------------------- the send flight */
+
+/**
+ * The sent bubble's flight (send/SPEC.md, ported pragmatically): the row IS
+ * the final bubble - only translation / scale / alpha animate (never width
+ * or height, so text never re-wraps mid-flight). It rises from the composer
+ * with a small arc, settles at full size, and hands off to the landing
+ * squash + shine via [onDone]. Durations: text 680, media 700-720, chip 560.
+ */
+@Composable
+fun Modifier.fxFlyIn(active: Boolean, durMs: Int, onDone: () -> Unit = {}): Modifier {
+    val scale = fxAnimatorScale()
+    val t = remember { Animatable(if (active && scale > 0f) 0f else 1f) }
+    var fired by remember { mutableStateOf(false) }
+    LaunchedEffect(active) {
+        if (active && !fired) {
+            fired = true
+            if (scale > 0f) t.animateTo(1f, tween(durMs, easing = FastOutSlowInEasing))
+            onDone()
+        }
+    }
+    val v = t.value
+    return graphicsLayer {
+        val arc = sin(v * PI).toFloat()
+        translationY = (1f - v) * 150f * density - arc * 8f * density
+        translationX = (1f - v) * 24f * density
+        scaleX = 0.92f + 0.08f * v + arc * 0.05f
+        scaleY = 0.92f + 0.08f * v + arc * 0.05f
+        alpha = if (v < 0.08f) v / 0.08f else 1f
+        transformOrigin = androidx.compose.ui.layout.TransformOrigin(1f, 1f)
+    }
+}
+
 /* ------------------------------------------------------- landing (squash) */
 
 /**

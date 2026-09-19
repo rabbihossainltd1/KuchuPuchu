@@ -199,3 +199,14 @@ check(
     chat.includes('mm.optString("senderId") != Store.myId()') &&
     chat.includes(".fxBlurIn(fxActive)"),
 );
+
+check(
+  "v169 item 7b: the send flight - paintSent arms the freshly painted own row, the bubble rises out of the composer (translation/scale/alpha only - never width/height, so text never re-wraps), lands with the squash and the shine + ripple",
+  fx7.includes("fun fxFlyIn") &&
+    fx7.includes("translationY = (1f - v) * 150f * density - arc * 8f * density") &&
+    chat.includes("fxSend.add(id)") &&
+    chat.includes('fxSend = m.optString("id") in fxSend') &&
+    chat.includes('.fxFlyIn(fxSend, if (kind == "TEXT") 680 else 700)') &&
+    chat.includes(".fxLanding(fxLanded)") &&
+    chat.includes(".fxShineRipple(fxLanded)"),
+);
