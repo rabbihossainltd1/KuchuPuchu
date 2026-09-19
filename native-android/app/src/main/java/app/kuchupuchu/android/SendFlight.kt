@@ -74,11 +74,16 @@ fun Modifier.fxFlyIn(
     val progress = remember { Animatable(if (active && scale > 0f) 0f else 1f) }
     var seat by remember { mutableStateOf<Rect?>(null) }
     var fired by remember { mutableStateOf(false) }
+    var done by remember { mutableStateOf(false) }
     var startAbs by remember { mutableStateOf(Offset.Zero) }
 
-    // The seat keeps updating while the row flies: the send-time scroll is moving it.
+    // r55 (owner: flight "same ache ager moto"): the seat MUST keep updating
+    // for the WHOLE flight - the send-time scroll moves the row while the
+    // bubble is in the air. The old gate (!fired) froze it at the first
+    // measurement, so the arc played against a stale seat and read as no
+    // flight at all.
     val measure = Modifier.onGloballyPositioned { c ->
-        if (active && !fired) seat = c.boundsInWindow()
+        if (active && !done) seat = c.boundsInWindow()
     }
 
     LaunchedEffect(active) {
@@ -103,6 +108,7 @@ fun Modifier.fxFlyIn(
         startAbs = Offset(s.left, startY)
         progress.snapTo(0f)
         progress.animateTo(1f, androidx.compose.animation.core.tween((durMs * scale).toInt(), easing = FlightEase))
+        done = true
         onDone()
     }
 
