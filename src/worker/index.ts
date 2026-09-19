@@ -7792,13 +7792,22 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     );
     if (blockedHere) return json({ ok: true });
     const at = nowIso();
+    // r55 (owner item 7): the ping carries WHAT the sender is doing — "text"
+    // (the default) or "voice" while they record a voice note. The other
+    // side's chat swaps the typing dots for a pulsing microphone. The
+    // typing.kind column has existed since the indicator shipped; the POST
+    // simply never wrote it.
+    const rawKind = body.kind;
+    const kind =
+      typeof rawKind === "string" && rawKind.length > 0 && rawKind.length <= 16 ? rawKind : "text";
     await run(
       db,
-      `INSERT INTO typing (conv_id, user_id, at) VALUES (?, ?, ?)
-       ON CONFLICT (conv_id, user_id) DO UPDATE SET at = excluded.at`,
+      `INSERT INTO typing (conv_id, user_id, at, kind) VALUES (?, ?, ?, ?)
+       ON CONFLICT (conv_id, user_id) DO UPDATE SET at = excluded.at, kind = excluded.kind`,
       convId,
       uid,
       at,
+      kind,
     );
     // Realtime typing indicator: the other side's "typing…" header lights up
     // instantly instead of on its next poll tick.
@@ -7808,6 +7817,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         conversationId: convId,
         userId: uid,
         at,
+        kind,
       }),
     );
     // Cheap lazy expiry: pings older than a minute are dead weight.
