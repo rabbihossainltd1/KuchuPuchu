@@ -62,6 +62,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -1279,12 +1280,13 @@ private fun MediaEditItemScreen(
      *  to act on. [glyph] keeps the seat's shape identical on every row. */
     @Composable
     fun StageHistory(can: Boolean, onClick: () -> Unit, glyph: @Composable () -> Unit) {
+        // v170 (owner: "edit options gular border background remove hobe
+        // just icon tahkbe"): bare glyphs - no circle, no border; a seat
+        // that cannot fire just dims.
         Box(
             Modifier
                 .size(40.dp)
-                .clip(CircleShape)
-                .background(if (can) Color(0xA6000000) else Color(0x66FFFFFF))
-                .border(0.5.dp, Color(0x40FFFFFF), CircleShape)
+                .alpha(if (can) 1f else 0.35f)
                 .clickable(enabled = can) { onClick() },
             contentAlignment = Alignment.Center,
         ) {
@@ -1672,7 +1674,35 @@ private fun MediaEditItemScreen(
                 IconButton(onClick = { if (cropping) exitCrop() else nav.popBackStack() }, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.Filled.Close, "Close", tint = Color.White, modifier = Modifier.size(20.dp))
                 }
-                // v169 (owner: "undo redo button gula eto boro ar background
+                // v170 (owner: "done button left side a thakbe"): Done rides
+                // on the LEFT now, next to the ✕.
+                if (hasEdits || busy) {
+                    // v166: the same chip carries the bake's number — "Applying
+                    // 42%" replaces "Done" while the clip is being written, so
+                    // a long trim can never look like a frozen button.
+                    val pct = applyPct
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(13.dp))
+                            .background(Color(0x2EFFFFFF))
+                            .border(0.5.dp, Color(0x4DFFFFFF), RoundedCornerShape(13.dp))
+                            .clickable(enabled = !busy) {
+                                haptics.tap()
+                                applyEdits()
+                            }
+                            .padding(horizontal = 9.dp, vertical = 3.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            if (busy && pct >= 0f) "Applying ${(pct * 100).toInt()}%" else "Done",
+                            color = Color.White.copy(alpha = if (busy) 0.7f else 0.94f),
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                    Spacer(Modifier.width(5.dp))
+                }
+                                // v169 (owner: "undo redo button gula eto boro ar background
                 // border rakhcho keno ar eto dure dure thakbe na middle a
                 // thakbe pasha pashi"): the pair rides the TOP BAR CENTRE,
                 // side by side, plain glyphs - no circle, no border.
@@ -1703,33 +1733,7 @@ private fun MediaEditItemScreen(
                 // button: there would be nothing to apply.
                 // v165 (owner): smaller, and its fill is a near-transparent
                 // grey with a hairline — the solid blue chip shouted.
-                if (hasEdits || busy) {
-                    // v166: the same chip carries the bake's number — "Applying
-                    // 42%" replaces "Done" while the clip is being written, so
-                    // a long trim can never look like a frozen button.
-                    val pct = applyPct
-                    Box(
-                        Modifier
-                            .clip(RoundedCornerShape(13.dp))
-                            .background(Color(0x2EFFFFFF))
-                            .border(0.5.dp, Color(0x4DFFFFFF), RoundedCornerShape(13.dp))
-                            .clickable(enabled = !busy) {
-                                haptics.tap()
-                                applyEdits()
-                            }
-                            .padding(horizontal = 9.dp, vertical = 3.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            if (busy && pct >= 0f) "Applying ${(pct * 100).toInt()}%" else "Done",
-                            color = Color.White.copy(alpha = if (busy) 0.7f else 0.94f),
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Medium,
-                        )
-                    }
-                    Spacer(Modifier.width(5.dp))
-                }
-                Spacer(Modifier.weight(1f))
+Spacer(Modifier.weight(1f))
                 // v165 (owner): a profile photo and a status post carry no HD
                 // switch - the pill is the chat send's alone.
                 if (clip == null && !statusMode && !avatarMode) {
