@@ -993,6 +993,14 @@ private fun MediaEditItemScreen(
         if (busy) return
         // A crop that is still open is an edit too: commit it first.
         if (cropping) exitCrop()
+        // v171 (owner: "done dile edit apply hoye sei options ta close
+        // hoye jabe"): applying folds whatever tool was open - the pen
+        // drops, the sheets close, the selection lets go.
+        penMode = false
+        showTextSheet = false
+        showStickerSheet = false
+        filtersOpen = false
+        selectedId = null
         val anything =
             strokes.isNotEmpty() || texts.isNotEmpty() || stickers.isNotEmpty() ||
                 rotation != 0 || filterIdx != 0 || cropBox != null || hd ||

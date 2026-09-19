@@ -277,6 +277,18 @@ object ScreenStore {
     val pendingEdited = kotlinx.coroutines.flow.MutableStateFlow<EditedResult?>(null)
 
     /**
+     * v171 (owner r45 item 3): a clip send that bakes in the BACKGROUND -
+     * the chat paints the pending bubble the moment Done is tapped and the
+     * one encode rides behind it; the upload reuses the same clientId.
+     */
+    class PendingVideoSend(
+        val convId: String,
+        val row: org.json.JSONObject,
+        val bake: suspend (android.content.Context) -> java.io.File?,
+    )
+    val pendingVideoSend = kotlinx.coroutines.flow.MutableStateFlow<PendingVideoSend?>(null)
+
+    /**
      * v162 (owner: "multiple select kore send korle just ektay media jai"):
      * the editor's blue circle used to hand back the CURRENT item alone, even
      * with several ticked (the round badge showed the real count, so the send

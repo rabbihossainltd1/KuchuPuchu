@@ -1187,6 +1187,22 @@ fun ChatScreen(nav: NavController, convId: String) {
     fun paintSent(row: JSONObject) {
         val id = row.optString("id")
         val cid = row.optString("clientId")
+        // v171 (owner r45 item 6: "sent hole 1 second er jonno hide hoye
+        // abar ashe ... hide hobe na ekdomi"): the painted row inherits the
+        // pending bubble's local bytes - a just-sent photo keeps its pixels
+        // (kpLocalUrl), a clip keeps its local copy (docPath) - nothing
+        // blanks out for a re-download.
+        if (cid.isNotBlank()) {
+            (pending.firstOrNull { it.optString("clientId") == cid }
+                ?: msgs.firstOrNull { it.optString("clientId") == cid })?.let { p ->
+                if (row.optString("docPath").isBlank() && p.optString("docPath").isNotBlank()) {
+                    row.put("docPath", p.optString("docPath"))
+                }
+                if (row.optString("senderId") == Store.myId() && p.optString("mediaUrl").startsWith("data:")) {
+                    row.put("kpLocalUrl", p.optString("mediaUrl"))
+                }
+            }
+        }
         if (id.isBlank()) return
         val idx = msgs.indexOfFirst { it.optString("id") == id || (cid.isNotBlank() && it.optString("clientId") == cid) }
         // Owner round 33 (item 2): decided BEFORE the rows move.
@@ -1798,6 +1814,55 @@ fun ChatScreen(nav: NavController, convId: String) {
             sendFile(name, mime, file, asDocument, viewOnce, sendAt, caption)
         }
     }
+    // v171 (owner r45 item 3): a clip's send paints the bubble the moment
+    // Done is tapped; the one encode rides in the background and the
+    // upload reuses the same clientId, so paintSent swaps it silently.
+    LaunchedEffect(convId) {
+        ScreenStore.pendingVideoSend.collect { job ->
+            if (job == null || job.convId != convId) return@collect
+            ScreenStore.pendingVideoSend.value = null
+            val cid = job.row.optString("clientId")
+            pending.add(job.row)
+            scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }
+            scope.launch {
+                val file = runCatching { job.bake(ctx) }.getOrNull()
+                if (file == null) {
+                    markPendingFailed(cid)
+                    error = "Could not apply that clip edit — tap the banner to retry."
+                    reconcileRefused()
+                    return@launch
+                }
+                val name = job.row.optString("fileName")
+                val mime = job.row.optString("fileType")
+                val cap = job.row.optString("body")
+                val withCaption =
+                    if (cap.isBlank()) {
+                        null
+                    } else {
+                        JSONObject()
+                            .put("kind", "FILE")
+                            .put("fileName", name)
+                            .put("fileType", mime)
+                            .put("fileSize", file.length())
+                            .put("body", cap)
+                            .put("clientId", cid)
+                    }
+                val cb: (Result<JSONObject>) -> Boolean = cb@{ outcome ->
+                    outcome.onSuccess { runCatching { KpSounds.sent(ctx) } }
+                    if (!alive.get()) return@cb false
+                    outcome.onSuccess { row -> paintSent(row) }
+                    outcome.onFailure { failure ->
+                        markPendingFailed(cid)
+                        error = (failure.message ?: "Could not send the clip.") + "  Tap the banner to retry."
+                        reconcileRefused()
+                    }
+                    true
+                }
+                if (withCaption == null) Uploads.sendFile(convId, cid, name, mime, file, null, cb)
+                else Uploads.sendFile(convId, cid, name, mime, file, null, withCaption, cb)
+            }
+        }
+    }
     // Owner round 32 (item 19): the media editor hands its result back here —
     // a drawn-on photo / trimmed clip goes out like any picked media.
     LaunchedEffect(convId) {
@@ -2225,10 +2290,14 @@ fun ChatScreen(nav: NavController, convId: String) {
             // small, easing up to two / four / eight words a step only when
             // the stream races far ahead, so the reveal reads as typing,
             // never as a burst.
+            // v171 (owner r45 item 4: "typing animation onek khon dhore
+            // dekhai tarpor hotath onek fast"): the catch-up is gentler -
+            // four words a step at the very most, so a buffered reply still
+            // reads as typing, never as a flash.
             val behind = aiLiveBody.length - pos
             val cap = when {
-                behind > 60 -> 8
-                behind > 28 -> 4
+                behind > 80 -> 4
+                behind > 36 -> 3
                 behind > 12 -> 2
                 else -> 1
             }
@@ -2299,6 +2368,17 @@ fun ChatScreen(nav: NavController, convId: String) {
         aiRevealId = mid
     }
 
+    // v171 (owner r45 item 4: "replying er somoy message er kichu line
+    // niche chole jai"): while the live reply grows, the thread's bottom
+    // stays in view - the growing bubble never sinks off screen.
+    LaunchedEffect(liveReveal) {
+        if (aiLiveBody.isEmpty()) return@LaunchedEffect
+        val info = listState.layoutInfo
+        val last = info.totalItemsCount - 1
+        if (info.visibleItemsInfo.lastOrNull()?.index?.let { it >= last - 1 } == true) {
+            listState.scrollToItem(last)
+        }
+    }
     LaunchedEffect(aiRevealId) {
         val revealMid = aiRevealId ?: return@LaunchedEffect
         val body = msgs.lastOrNull { it.optString("id") == revealMid }?.optText("body").orEmpty()
@@ -5555,7 +5635,7 @@ private fun MessageRow(
             .fillMaxWidth()
             .padding(vertical = 2.dp)
             .fxSlotOpen(fxFresh)
-            .fxFlyIn(mine && fxFresh, if (kind == "TEXT") 680 else 700) {
+            .fxFlyIn(mine && fxFresh, if (kind == "TEXT") 520 else 560) {
                 fxLanded = m.optString("id")
             }
             .fxLanding(fxLanded)
@@ -5645,7 +5725,9 @@ private fun MessageRow(
                     // hoye ... massage bubble body aro ektu boro hobe jodi
                     // time tick fill na kore"): a text bubble is never
                     // narrower than the stamp riding under it.
-                    .widthIn(min = if (emojiOnly > 0) 0.dp else 96.dp, max = bubbleMax)
+                    // v171 (owner: the stamp still overhangs a short
+                    // bubble) - the floor goes up until it cannot.
+                    .widthIn(min = if (emojiOnly > 0) 0.dp else 104.dp, max = bubbleMax)
                     .wrapContentWidth()
                     // Owner round 10: the same soft 3D lift the call buttons
                     // have — bubbles float on the wallpaper now.
@@ -7652,7 +7734,8 @@ private fun ImageBubble(m: JSONObject, mine: Boolean, isPending: Boolean = false
     // infinite spinner — the fileKey→URL conversion used to happen in
     // FileBubble, which the image fast-path now bypasses.
     val url =
-        m.optText("mediaUrl").takeIf { it.isNotBlank() }
+        (if (mine) m.optText("kpLocalUrl").takeIf { it.isNotBlank() } else null)
+            ?: m.optText("mediaUrl").takeIf { it.isNotBlank() }
             ?: m.optText("fileKey").takeIf { it.isNotBlank() }?.let { key ->
                 if (key.startsWith("data:") || key.startsWith("http") || key.startsWith("/")) key
                 else "/api/files/$key"

@@ -196,11 +196,14 @@ fun Modifier.fxFlyIn(active: Boolean, durMs: Int, onDone: () -> Unit = {}): Modi
     }
     val v = t.value
     return graphicsLayer {
+        // v171 (owner r45 item 6): the flight starts AT the composer pill -
+        // just below the row, slightly left of the mine bubble - and arcs
+        // into place like the demo's bezier.
         val arc = sin(v * PI).toFloat()
-        translationY = (1f - v) * 150f * density - arc * 8f * density
-        translationX = (1f - v) * 24f * density
-        scaleX = 0.92f + 0.08f * v + arc * 0.05f
-        scaleY = 0.92f + 0.08f * v + arc * 0.05f
+        translationY = (1f - v) * 120f * density - arc * 10f * density
+        translationX = (1f - v) * -24f * density
+        scaleX = 0.8f + 0.2f * v + arc * 0.05f
+        scaleY = 0.8f + 0.2f * v + arc * 0.05f
         alpha = if (v < 0.08f) v / 0.08f else 1f
     }
 }
