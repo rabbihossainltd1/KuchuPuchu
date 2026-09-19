@@ -5643,7 +5643,7 @@ private fun MessageRow(
     // image uploads (picked as documents) get the same treatment.
     // Owner round 31 (item 29): photos sent together = one grouped bubble.
     if (m.has("kpAlbum")) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxSoftIn(!fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700)) {
             AlbumMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenAlbum, onReply, onLongPress, theme)
         }
         return
@@ -5653,13 +5653,13 @@ private fun MessageRow(
     // opens the media ONCE for the recipient; the opening deletes the row
     // for everyone, so there is no opened state left to render.
     if (isViewOnce(m)) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxSoftIn(!fxFresh).fxFlyIn(fxFresh, 700)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700)) {
             ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)
         }
         return
     }
     if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxSoftIn(!fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700)) {
             ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme, onCancelSend)
         }
         return
@@ -5667,7 +5667,7 @@ private fun MessageRow(
     // Owner round 20: videos render as a tappable video bubble and play
     // IN-APP (the system player could never stream these auth-only files).
     if (kind == "FILE" && fileLooksVideo(m) && !sentAsDocument(m)) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxSoftIn(!fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 720)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 720)) {
             VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme, onCancelSend)
         }
         return
@@ -5685,7 +5685,6 @@ private fun MessageRow(
             .fillMaxWidth()
             .padding(vertical = 2.dp)
             .fxSlotOpen(fxFresh)
-            .fxSoftIn(!fxFresh)
             .fxFlyIn(fxFresh, if (kind == "TEXT") 500 else 540) {
                 fxLanded = m.optString("id")
             },
@@ -5783,7 +5782,7 @@ private fun MessageRow(
                     // incoming minimum - the 104 dp floor is therefore
                     // enforced AFTER it, as a required size, so a short
                     // bubble really is wider than the stamp under it.
-                    .then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = 82.dp))
+                    .then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = 79.dp))
                     // Owner round 10: the same soft 3D lift the call buttons
                     // have — bubbles float on the wallpaper now.
                     // Owner round 32 (item 8): an emoji-only message has NO
@@ -8084,9 +8083,10 @@ private fun FileBubble(
             Spacer(Modifier.width(6.dp))
             // Owner round 25: the wave column carries only the wave now -
             // the duration line moved under the play button (r49).
-            // r50: centred on the play+time column so no blank band is left
-            // under the wave.
-            Column(Modifier.align(Alignment.CenterVertically)) {
+            // r51 (owner: "play icon er middle er sathe wave er alignment
+            // thik nai"): the wave's middle sits ON the play icon's middle:
+            // (28 - 22) / 2 = 3dp top.
+            Column(Modifier.padding(top = 3.dp)) {
                 VoiceWave(
                     bars = bars,
                     progress = progress,
