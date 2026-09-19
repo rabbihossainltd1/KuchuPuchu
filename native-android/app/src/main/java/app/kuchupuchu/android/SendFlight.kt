@@ -17,7 +17,6 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import kotlin.math.PI
-import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 import kotlinx.coroutines.flow.filterNotNull
@@ -95,9 +94,13 @@ fun Modifier.fxFlyIn(
         // start point (the pill itself does not move during the flight).
         val s = snapshotFlow { seat }.filterNotNull().first()
         fired = true
-        val startX = if (isSent) pill.right - s.width else pill.left
+        // r54 (owner: "halka left theke jump kore message position a jai"):
+        // the rise is STRAIGHT VERTICAL - the bubble keeps its own seat's x
+        // and lifts from the composer bar's height. Rounds 46-49 all rejected
+        // sideways flights; aligning the start to the pill's edges always
+        // left a horizontal slide for narrow bubbles.
         val startY = pill.top + (pill.height - s.height) / 2f
-        startAbs = Offset(startX, startY)
+        startAbs = Offset(s.left, startY)
         progress.snapTo(0f)
         progress.animateTo(1f, androidx.compose.animation.core.tween((durMs * scale).toInt(), easing = FlightEase))
         onDone()
@@ -112,15 +115,16 @@ fun Modifier.fxFlyIn(
                 // Not measured yet: a flying row stays invisible, a settled one paints.
                 alpha = if (v >= 1f) 1f else 0f
             } else {
-                // Quadratic bezier in translation space: P0 = pill start measured
-                // against the CURRENT seat, P2 = 0 (the seat), P1 = lifted control.
-                val p0 = Offset(startAbs.x - s.left, startAbs.y - s.top)
+                // Quadratic bezier in translation space: P0 = bar-height start
+                // measured against the CURRENT seat (pure y), P2 = 0 (the
+                // seat), P1 = lifted control - translationX stays ZERO so the
+                // bubble rises in a straight vertical line, never a side-jump.
+                val p0 = Offset(0f, startAbs.y - s.top)
                 val p2 = Offset.Zero
-                val ctrlX = max(p0.x, p2.x) + 22f * density * (if (isSent) 1f else -1f)
                 val ctrlY = min(p0.y, p2.y) - 48f * density
-                val pos = bezier(p0, Offset(ctrlX, ctrlY), p2, v)
+                val pos = bezier(p0, Offset(0f, ctrlY), p2, v)
                 val lift = sin(v * PI.toFloat()) * 8f * density
-                translationX = pos.x
+                translationX = 0f
                 translationY = pos.y - lift
                 alpha = if (v < 0.06f) v / 0.06f else 1f
             }
