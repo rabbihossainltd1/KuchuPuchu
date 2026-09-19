@@ -252,6 +252,10 @@ fun ChatScreen(nav: NavController, convId: String) {
     // (my sends, live arrivals) rise into the list; rows painted from the
     // store or a page fetch stay still. Keyed by clientId-or-id, one shot.
     val bornKeys = remember { HashSet<String>() }
+    // r48: the open-landing pin survives the first refreshes (a notify
+    // click used to land at the newest, then the authoritative page swap
+    // left the viewport mid-thread - "scroll kore dekhte hoi").
+    var pinBottomUntil by remember { mutableStateOf(0L) }
     // Item 11b: a message that is being deleted shrinks away first; the
     // rows themselves leave when the vanish has played.
     val vanishingIds = remember { mutableStateListOf<String>() }
@@ -739,7 +743,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // ("first time scroll korle last message e niye jai").
                 // A real new message needs a known previous top.
                 val newMessage = prevTop.isNotBlank() && newTop.isNotBlank() && newTop != prevTop
-                if (total > 0 && (forceScroll || (newMessage && nearBottom))) {
+                val pinned = android.os.SystemClock.uptimeMillis() < pinBottomUntil
+                if (total > 0 && (forceScroll || pinned || (newMessage && nearBottom))) {
                     // Owner round 32 (item 48): a scroll that a newer scroll
                     // interrupts throws here; the mark-read below must still run.
                     runCatching { listState.animateScrollToItem(total - 1) }
@@ -829,6 +834,7 @@ fun ChatScreen(nav: NavController, convId: String) {
     LaunchedEffect(msgs.size, pending.size) {
         if (!didInitialScroll && msgs.isNotEmpty()) {
             didInitialScroll = true
+            pinBottomUntil = android.os.SystemClock.uptimeMillis() + 2500
             // Round 24: never fight an in-progress user scroll — if the list
             // filled while the user was already dragging it, leave it alone.
             if (!listState.isScrollInProgress) {
@@ -5410,7 +5416,7 @@ private fun ReplyQuoteBar(replyTo: JSONObject?, theme: String, onCancel: () -> U
     if (replyTo == null) return
     // Owner round 33 (item 17): a media original shows its small content
     // card at the end of the bar (never for a view-once).
-    val thumbed = !isViewOnce(replyTo) && quoteKind(replyTo).isNotBlank()
+    val thumbed = !isViewOnce(replyTo) && quoteKind(replyTo).isNotBlank() && quoteKind(replyTo) != "Voice"
     // Owner round 16: the old GoldSoft card + Muted text was unreadable —
     // a card surface with a gold bar and full-ink text.
     Row(
@@ -5446,7 +5452,7 @@ private fun ReplyQuoteBar(replyTo: JSONObject?, theme: String, onCancel: () -> U
                 append("  ")
                 append(
                     if (isViewOnce(replyTo)) (if (fileLooksVideo(replyTo)) "Video · View once" else "Photo · View once")
-                    else quoteText(replyTo).take(80),
+                    else if (quoteKind(replyTo) == "Voice") "Voice message" else quoteText(replyTo).take(80),
                 )
             },
             fontSize = 12.sp,
@@ -5630,7 +5636,7 @@ private fun MessageRow(
     // image uploads (picked as documents) get the same treatment.
     // Owner round 31 (item 29): photos sent together = one grouped bubble.
     if (m.has("kpAlbum")) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(mine && fxFresh, 700)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, if (mine) -140f else 80f)) {
             AlbumMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenAlbum, onReply, onLongPress, theme)
         }
         return
@@ -5640,13 +5646,13 @@ private fun MessageRow(
     // opens the media ONCE for the recipient; the opening deletes the row
     // for everyone, so there is no opened state left to render.
     if (isViewOnce(m)) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(mine && fxFresh, 700)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, if (mine) -140f else 80f)) {
             ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)
         }
         return
     }
     if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(mine && fxFresh, 700)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, if (mine) -140f else 80f)) {
             ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme, onCancelSend)
         }
         return
@@ -5654,7 +5660,7 @@ private fun MessageRow(
     // Owner round 20: videos render as a tappable video bubble and play
     // IN-APP (the system player could never stream these auth-only files).
     if (kind == "FILE" && fileLooksVideo(m) && !sentAsDocument(m)) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(mine && fxFresh, 720)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 720, if (mine) -140f else 80f)) {
             VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme, onCancelSend)
         }
         return
@@ -5672,7 +5678,7 @@ private fun MessageRow(
             .fillMaxWidth()
             .padding(vertical = 2.dp)
             .fxSlotOpen(fxFresh)
-            .fxFlyIn(mine && fxFresh, if (kind == "TEXT") 420 else 460) {
+            .fxFlyIn(fxFresh, if (kind == "TEXT") 420 else 460, if (mine) -140f else 80f) {
                 fxLanded = m.optString("id")
             },
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
@@ -5831,10 +5837,10 @@ private fun MessageRow(
                             else (q?.optText("senderName") ?: "").ifBlank { "Original" }
                         val what =
                             if (q != null && isViewOnce(q)) (if (fileLooksVideo(q)) "Video · View once" else "Photo · View once")
-                            else q?.let { quoteText(it).take(48) } ?: "Original message"
+                            else q?.let { qq -> if (quoteKind(qq) == "Voice") "Voice message" else quoteText(qq).take(48) } ?: "Original message"
                         // Owner round 33 (item 17): a media original gets a small
                         // content card beside the words (never for a view-once).
-                        val thumbed = q != null && !isViewOnce(q) && quoteKind(q).isNotBlank()
+                        val thumbed = q != null && !isViewOnce(q) && quoteKind(q).isNotBlank() && quoteKind(q) != "Voice"
                         Row(
                             Modifier
                                 .padding(bottom = 2.dp)
@@ -7629,7 +7635,7 @@ internal fun DrawScope.drawVoiceBars(bars: List<Int>, progress: Float, played: C
     val shown = if (newest && bars.size > fit) bars.subList(bars.size - fit, bars.size) else bars
     val n = shown.size
     // Bars never fatten past 3dp on a wide strip — they stay bars, not blocks.
-    val stroke = ((size.width - gap * (n - 1)) / n).coerceIn(1.5f, 3.dp.toPx())
+    val stroke = ((size.width - gap * (n - 1)) / n).coerceIn(2f, 3.5.dp.toPx())
     val minH = 3.dp.toPx()
     val mid = size.height / 2f
     val playedUntil = progress.coerceIn(0f, 1f) * size.width
@@ -7999,9 +8005,12 @@ private fun FileBubble(
         // is top-aligned now and the column starts 7dp down — v166 shrank the
         // pair (32dp button, 18dp wave) and kept exactly that centre: 7 =
         // (32 − 18) / 2 — with the time line hanging under it.
-        // r47 (owner's WhatsApp screenshot): the play button centres on
-        // the wave+time column - no top gap, no blank band under it.
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // r48 (owner: "wave upore uthe geche ... time aro upore uthai
+        // daw ar ager position a diye daw ... bar gula mota kore daw ws
+        // er moto"): back to top-aligned - the wave centres on the play
+        // button exactly like v172, the time tucks RIGHT under the wave
+        // (2dp, right end), no blank band.
+        Row(verticalAlignment = Alignment.Top) {
             val interaction = remember { MutableInteractionSource() }
             val pressed by interaction.collectIsPressedAsState()
             Box(
@@ -8040,14 +8049,14 @@ private fun FileBubble(
             Spacer(Modifier.width(6.dp))
             // Owner round 25: no side padding — the tick+time stamp sits at
             // the right end of the duration line, under the wave.
-            Column {
+            Column(Modifier.padding(top = 6.dp)) {
                 VoiceWave(
                     bars = bars,
                     progress = progress,
                     played = ink,
                     rest = faint,
                     grow = fxGrow,
-                    modifier = Modifier.width(150.dp).height(16.dp),
+                    modifier = Modifier.width(150.dp).height(20.dp),
                     onSeek = { frac ->
                         if (!pendingEcho && fileKey.isNotBlank()) player.seekTo(ctx, id, fileKey, frac)
                     },
@@ -8055,6 +8064,7 @@ private fun FileBubble(
                         scrubAt = if (!pendingEcho && fileKey.isNotBlank()) frac else null
                     },
                 )
+                Spacer(Modifier.height(2.dp))
                 val secs = m.optJSONObject("meta")?.optInt("seconds") ?: 0
                 val vFrac = UploadProgress.fracs[m.optString("clientId")]
                 Text(

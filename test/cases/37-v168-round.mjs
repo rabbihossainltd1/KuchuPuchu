@@ -151,8 +151,8 @@ check(
   "v168 item 6 (owner: 'voice message ta er bubble ta body shoho onek boro ... choto kore daw'): the voice bubble came in another notch WITH its body - a 28 dp play circle (17 dp glyphs), a 112 x 16 dp wave centred by the 6 dp column pad, a 10 sp time line, and the bubble's own text padding tightened around the card (voiceNote: 8/3/6/3); the r33 scrub-to-seek row and the 16 dp spinner seat are untouched",
   chat.includes(".size(28.dp)\n                    .pressScale(interaction)") &&
     (chat.match(/size\(17\.dp\)\.scale\(if \(pressed\) 0\.85f else 1f\)/g) || []).length === 2 &&
-    chat.includes("Column {\n                VoiceWave(") &&
-    chat.includes("modifier = Modifier.width(150.dp).height(16.dp),") &&
+    chat.includes("Column(Modifier.padding(top = 6.dp)) {\n                VoiceWave(") &&
+    chat.includes("modifier = Modifier.width(150.dp).height(20.dp),") &&
     chat.includes(
       "fontSize = 10.sp,\n                    color = if (mine) Color(0x99FFFFFF) else Muted,",
     ) &&
@@ -213,14 +213,16 @@ check(
 check(
   "v169 item 7b (r44): the send flight rides the PENDING row - it rises out of the composer (translation/scale/alpha only, never width/height), lands with the squash and the shine + ripple, and paintSent pre-marks the real id so the painted row replaces it silently",
   fx7.includes("fun fxFlyIn") &&
-    fx7.includes("translationY = (1f - v) * 120f * density - arc * 10f * density") &&
+    fx7.includes("translationY = (1f - v) * y0dp * density - arc * 10f * density") &&
     // r46 item 6: the flight is a straight JUMP - the bubble rises at its
     // real size (no scaleX/scaleY shrink-and-grow) from the composer's
     // right edge to its slot.
-    fx7.includes("translationX = (1f - v) * -48f * density") &&
+    fx7.includes("translationX = (1f - v) * x0dp * density") &&
     !fx7.includes("scaleX =") &&
     chat.includes("FxArrivals.markSeen(id)") &&
-    chat.includes('.fxFlyIn(mine && fxFresh, if (kind == "TEXT") 420 else 460)') &&
+    chat.includes(
+      '.fxFlyIn(fxFresh, if (kind == "TEXT") 420 else 460, if (mine) -140f else 80f)',
+    ) &&
     // r46 item 6: the landing + shine + ripple ride the BUBBLE box, never
     // the full-width row (the light swept the whole chat before).
     chat.includes(".fxLanding(fxLanded)") &&

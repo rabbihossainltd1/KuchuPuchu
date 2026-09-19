@@ -183,7 +183,13 @@ fun Modifier.fxSlotOpen(active: Boolean, fromDp: Float = -30f, ms: Int = 480): M
  * squash + shine via [onDone]. Durations: text 680, media 700-720, chip 560.
  */
 @Composable
-fun Modifier.fxFlyIn(active: Boolean, durMs: Int, onDone: () -> Unit = {}): Modifier {
+fun Modifier.fxFlyIn(
+    active: Boolean,
+    durMs: Int,
+    x0dp: Float = -140f,
+    y0dp: Float = 40f,
+    onDone: () -> Unit = {},
+): Modifier {
     val scale = fxAnimatorScale()
     val t = remember { Animatable(if (active && scale > 0f) 0f else 1f) }
     var fired by remember { mutableStateOf(false) }
@@ -202,11 +208,15 @@ fun Modifier.fxFlyIn(active: Boolean, durMs: Int, onDone: () -> Unit = {}): Modi
         // the composer pill (below-left) to its seat on the right, with a
         // light arc; nothing scales, nothing re-wraps.
         val arc = sin(v * PI).toFloat()
-        translationY = (1f - v) * 120f * density - arc * 10f * density
-        // r47 (owner: "massage ekhono message bar er theke jai side
-        // theke ashe"): the horizontal drift shrank to a whisper - the
-        // flight reads as RISING out of the composer, not sliding sideways.
-        translationX = (1f - v) * -48f * density
+        // r48 (owner: "send receive animation ekhono hoini message bar
+        // theke"): the launch now STARTS ON the composer pill - visible
+        // and on-screen - and flies up to the seat: a short rise (+40dp)
+        // plus a horizontal launch from the pill centre (-140dp sent /
+        // +80dp received). Starting BELOW the screen (the old +120dp)
+        // read as "sliding in from the side"; a whisper drift read as
+        // "no animation at all".
+        translationY = (1f - v) * y0dp * density - arc * 10f * density
+        translationX = (1f - v) * x0dp * density
         alpha = if (v < 0.08f) v / 0.08f else 1f
     }
 }

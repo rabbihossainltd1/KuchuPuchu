@@ -5527,7 +5527,7 @@ const convBetween = (db, a, b) =>
       chat.includes("internal fun fileLooksVoice(m: JSONObject): Boolean {") &&
         chat.includes('val fileRow = kind == "FILE"') &&
         chat.includes("val isVoice = !asDocument && fileLooksVoice(m)") &&
-        chat.includes("modifier = Modifier.width(150.dp).height(16.dp),") &&
+        chat.includes("modifier = Modifier.width(150.dp).height(20.dp),") &&
         !chat.includes("modifier = Modifier.width(150.dp).height(30.dp),") &&
         chat.includes(
           "internal fun DrawScope.drawVoiceBars(bars: List<Int>, progress: Float, played: Color, rest: Color, newest: Boolean = false, reveal: Float = Float.MAX_VALUE) {",
@@ -6278,7 +6278,7 @@ const convBetween = (db, a, b) =>
     check(
       "r34-16a: app — a view-once message renders ViewOnceRow: the photo at its original ratio (ImageRatios-cached) blurred past recognition via ViewOnceBlur, the ViewOnceOneIcon mark in the middle, a dark tile for video / uploads; the recipient opens it (sender's tap does nothing), reply-drag + long-press intact, no 'Opened' state anywhere; the album fold, resend and the media grid never take it",
       chat.includes(
-        "if (isViewOnce(m)) {\n        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(mine && fxFresh, 700)) {\n            ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)",
+        "if (isViewOnce(m)) {\n        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, if (mine) -140f else 80f)) {\n            ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)",
       ) &&
         chat.indexOf("if (isViewOnce(m)) {") <
           chat.indexOf(
@@ -7672,11 +7672,19 @@ const convBetween = (db, a, b) =>
         thumb.includes("Icons.Filled.Mic") &&
         thumb.includes("Icons.Filled.InsertDriveFile") &&
         thumb.includes("Modifier.size(34.dp).clip(RoundedCornerShape(6.dp))") &&
-        bar.includes("val thumbed = !isViewOnce(replyTo) && quoteKind(replyTo).isNotBlank()") &&
-        bar.includes("else quoteText(replyTo).take(80),") &&
+        bar.includes(
+          'val thumbed = !isViewOnce(replyTo) && quoteKind(replyTo).isNotBlank() && quoteKind(replyTo) != "Voice"',
+        ) &&
+        bar.includes(
+          'else if (quoteKind(replyTo) == "Voice") "Voice message" else quoteText(replyTo).take(80),',
+        ) &&
         bar.includes("if (thumbed) QuoteThumb(replyTo, Ink)") &&
-        chat.includes("val thumbed = q != null && !isViewOnce(q) && quoteKind(q).isNotBlank()") &&
-        chat.includes('else q?.let { quoteText(it).take(48) } ?: "Original message"') &&
+        chat.includes(
+          'val thumbed = q != null && !isViewOnce(q) && quoteKind(q).isNotBlank() && quoteKind(q) != "Voice"',
+        ) &&
+        chat.includes(
+          'else q?.let { qq -> if (quoteKind(qq) == "Voice") "Voice message" else quoteText(qq).take(48) } ?: "Original message"',
+        ) &&
         chat.includes(
           "if (thumbed && q != null) QuoteThumb(q, if (mine) Color(0xE6FFFFFF) else Ink)",
         ),
@@ -8413,10 +8421,10 @@ const convBetween = (db, a, b) =>
         ) &&
         chat.includes("(active || scrubAt != null) && secs > 0 -> {") &&
         chat.includes(
-          "Row(verticalAlignment = Alignment.CenterVertically) {\n            val interaction = remember { MutableInteractionSource() }",
+          "Row(verticalAlignment = Alignment.Top) {\n            val interaction = remember { MutableInteractionSource() }",
         ) &&
-        chat.includes("Column {\n                VoiceWave(") &&
-        chat.includes("modifier = Modifier.width(150.dp).height(16.dp),"),
+        chat.includes("Column(Modifier.padding(top = 6.dp)) {\n                VoiceWave(") &&
+        chat.includes("modifier = Modifier.width(150.dp).height(20.dp),"),
     );
   }
   // Item 8: the status / chat-video trim strip shows a playhead — the
