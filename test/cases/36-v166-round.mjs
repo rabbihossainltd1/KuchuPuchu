@@ -159,7 +159,8 @@ check(
 /* 4 — fb#7: the time ink is blue, in both app themes */
 check(
   "v166 fb#7: the bubble's time ink is a real blue on the blue chat — mine 0xFFBBD3FF, the received side mode-aware (0xFFA9C4F2 dark / 0xFF5B7FC7 light) — the near-white 0xFFD7E1F7 tint is gone, and the chat list's own clock carries the same blue in the light app",
-  chat.includes('"darkblue" -> Color(0xFFBBD3FF)') &&
+  // v169: the stamp is under the bubble now - one mode-aware ink.
+  chat.includes("val stampInk = when {") &&
     chat.includes("if (KpThemeMode.darkBlue) Color(0xFFA9C4F2) else Color(0xFF5B7FC7)") &&
     !chat.includes("Color(0xFFD7E1F7)") &&
     list.includes("color = if (KpThemeMode.darkBlue) Muted else Color(0xFF5B7FC7)"),

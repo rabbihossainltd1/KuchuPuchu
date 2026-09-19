@@ -155,11 +155,13 @@ check(
     chat.includes(
       "fontSize = 10.sp,\n                    color = if (mine) Color(0x99FFFFFF) else Muted,",
     ) &&
-    chat.includes("val voiceNote = fileRow && !sentAsDocument(m) && fileLooksVoice(m)") &&
-    chat.includes("start = if (voiceNote) 8.dp else 10.dp,") &&
+    // v169: the body frame is back to the shared one - the stamp left the
+    // bubble instead, which is what actually shrinks the card's footprint.
+    !chat.includes("val voiceNote") &&
     chat.includes(
-      "bottom = if (voiceNote) 3.dp else if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp,",
+      ".padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp),",
     ) &&
+    chat.includes("horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,") &&
     // r33's scrub-to-seek and the spinner survive verbatim
     chat.includes("(active || scrubAt != null) && secs > 0 -> {") &&
     chat.includes("modifier = Modifier.size(16.dp),"),

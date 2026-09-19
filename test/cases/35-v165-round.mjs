@@ -147,12 +147,10 @@ check(
     theme.includes("fun atDhaka(") &&
     list.includes("val stamp = listStamp(") &&
     list.includes("color = if (KpThemeMode.darkBlue) Muted else Color(0xFF5B7FC7)") &&
-    // and MY bubble stamp follows the FILL it sits on: the cream-white on the
-    // dark blue bubble that he pointed at is a cool blue-grey now, and the gold
-    // bubble takes the muted ink (the other bubbles keep the old white).
-    chat.includes('"darkblue" -> Color(0xFFBBD3FF)') &&
-    chat.includes('"default" -> Muted') &&
-    chat.includes("else -> Color(0xD9FFFFFF)"),
+    // v169: the stamp left the bubble - it rides under it on the wallpaper,
+    // so the mode-aware stampInk (blue on the blue chat) is the only ink.
+    chat.includes("val stampInk = when {") &&
+    chat.includes("if (KpThemeMode.darkBlue) Color(0xFFA9C4F2) else Color(0xFF5B7FC7)"),
 );
 
 /* 7 — the clip player's ⋮ */

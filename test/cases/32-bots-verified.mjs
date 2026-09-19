@@ -514,10 +514,9 @@ const convBetween = (db, a, b) =>
     !chat.includes("\u00A0\u00A0") &&
       // r32-45/34: FILE rows (voice + document) keep no band (their second line hosts the stamp);
       // r33-5: text-like bodies (text, emoji-only, sticker, deleted) carry the stamp in-column.
-      // v168: voice notes (voiceNote) tighten it one notch further.
-      chat.includes(
-        "bottom = if (voiceNote) 3.dp else if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp",
-      ) &&
+      // v169: the voice body is back to the shared frame; the stamp left the
+      // bubble entirely (it rides under it now).
+      chat.includes("bottom = if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp") &&
       chat.includes('val textLike = kind == "TEXT" || kind == "STICKER" || kind == "DELETED"'),
   );
   check(
@@ -846,11 +845,12 @@ const convBetween = (db, a, b) =>
         engine.indexOf("turn:openrelay.metered.ca:80"),
   );
   check(
-    "timestamp + tick pinned to the bubble's bottom-end (media / files), measured after the last line for text (r33-5)",
-    chat.includes("Alignment.BottomEnd") &&
+    "v169: timestamp + ticks ride OUTSIDE the bubble - one row under it on every kind (end for mine, start for theirs); nothing is pinned inside the bubble any more",
+    chat.includes("horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,") &&
       chat.includes(
-        "if (!textLike) {\n                    Row(\n                        Modifier.align(Alignment.BottomEnd).padding(end = 2.dp, bottom = 1.dp),",
+        "BubbleStamp(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk, stampInk)",
       ) &&
+      !chat.includes("Modifier.align(Alignment.BottomEnd).padding(end = 2.dp, bottom = 1.dp),") &&
       !chat.includes("appendInlineContent"),
   );
   const calls = readFileSync(
@@ -5137,7 +5137,7 @@ const convBetween = (db, a, b) =>
       // measured row under the glyph (KpStamped below = true).
       chat1516.includes("modifier = Modifier.padding(start = 2.dp, end = 2.dp),") &&
       !chat1516.includes("end = if (mine) 30.dp else 10.dp") &&
-      chat1516.includes("color = if (mine && emojiOnly == 0) mineStampInk else stampInk,") &&
+      chat1516.includes("color = stampInk,") &&
       chat1516.includes(
         "TickIcon(m, pendingEcho, otherReadAt, onWallpaper = emojiOnly > 0, ink = stampInk)",
       ) &&
@@ -7399,27 +7399,13 @@ const convBetween = (db, a, b) =>
   {
     const ui = kt("Ui.kt");
     const chat = kt("ChatScreen.kt");
-    const stamped = ui.slice(ui.indexOf("fun KpStamped("));
     check(
-      "r33-5: KpStamped — a Layout with two content slots (body + stamp); reads the body's last line end (getLineRight / getLineLeft for RTL) from the TextLayoutResult, places the stamp inline when tail + gap + stamp fits, else on its own row; the holder is read in measure, never in composition",
-      ui.includes("class KpTextLayoutHolder {") &&
-        ui.includes("val onLayout: (TextLayoutResult) -> Unit = { result = it }") &&
-        stamped.includes(
-          "Layout(contents = listOf({ text(holder.onLayout) }, stamp), modifier = modifier)",
-        ) &&
-        stamped.includes("rtl -> textP.width - floor(tl.getLineLeft(line)).toInt()") &&
-        stamped.includes("else -> ceil(tl.getLineRight(line)).toInt()") &&
-        stamped.includes("val need = tailEnd + gap.roundToPx() + stampP.width") &&
-        stamped.includes("val inline = !below && need <= maxW") &&
-        stamped.includes(
-          "val stampY = if (inline) (textBase - stampBase).coerceAtLeast(0) else textP.height + 2.dp.roundToPx()",
-        ) &&
-        stamped.includes("stampP.place(if (rtl) 0 else w - stampP.width, stampY)") &&
-        ui.includes("import androidx.compose.ui.text.style.ResolvedTextDirection"),
+      "v169: KpStamped is RETIRED - the stamp no longer shares the bubble's column, so the measured two-slot Layout and its holder are gone from Ui.kt",
+      !ui.includes("fun KpStamped(") && !ui.includes("class KpTextLayoutHolder {"),
     );
     const textBranch = chat.slice(
-      chat.indexOf('"STICKER" -> KpStamped('),
-      chat.indexOf("// Owner round 12: one pinned stamp row for every bubble,"),
+      chat.indexOf('"STICKER" -> {'),
+      chat.indexOf("// Owner round 16: reaction chips under the bubble."),
     );
     check(
       "r34-19: bodies longer than ten lines fold behind a See more / See less toggle (v166: the count is measured WHILE COMPOSING at the bubble's own width, so the fold is right on the first frame; the onTextLayout high-water count stays as the second witness; typing replies exempt)",
@@ -7443,33 +7429,20 @@ const convBetween = (db, a, b) =>
         chat.includes("msgExpanded = !msgExpanded"),
     );
     check(
-      "r33-5: chat — TEXT / DELETED / emoji-only / STICKER bodies render inside KpStamped (emoji + sticker with below = true), every body Text hands onTextLayout to the holder; the reveal, linked and plain texts all do; one BubbleStamp composable serves the in-column stamp and the media overlay",
-      (textBranch.match(/KpStamped\(/g) || []).length === 4 &&
-        (textBranch.match(/below = true,/g) || []).length === 2 &&
-        (textBranch.match(/onTextLayout = onLayout,/g) || []).length === 1 &&
-        (textBranch.match(/countLines\(it, onLayout\)/g) || []).length === 4 &&
-        (
-          textBranch.match(
-            /BubbleStamp\(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk, mineStampInk\)/g,
-          ) || []
-        ).length === 4 &&
+      "v169: chat — bodies render PLAIN (no KpStamped); the fold's countLines still hears every body Text via a no-op report; ONE stamp Row under the bubble serves every kind in the single wallpaper ink",
+      (textBranch.match(/KpStamped\(/g) || []).length === 0 &&
+        (textBranch.match(/countLines\(it, \{ _ -> \}\)/g) || []).length === 4 &&
         !textBranch.includes("val reserve =") &&
         textBranch.includes('val full = m.optText("body")\n') &&
         chat.includes("private fun BubbleStamp(") &&
         (
           chat.match(
-            /BubbleStamp\(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk, mineStampInk\)/g,
+            /BubbleStamp\(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk, stampInk\)/g,
           ) || []
-        ).length === 5 &&
-        // v165 (owner: the list clock "dark blue teo white cream"): a bubble
-        // the user wrote on the default theme stamps in the palette's muted
-        // ink, not a washed-out white — the wallpaper themes keep white.
-        chat.includes("val mineStampInk =") &&
-        chat.includes('"default" -> Muted') &&
-        // v166 (owner: "time colour ta ekhono white cream colour er blue na"):
-        // the near-white tints are gone — a real light blue on the blue
-        // bubble, and a mode-aware blue for the received side too.
-        chat.includes('"darkblue" -> Color(0xFFBBD3FF)') &&
+        ).length === 1 &&
+        !chat.includes("val mineStampInk =") &&
+        chat.includes("color = stampInk,") &&
+        // v166's mode-aware blue survives as the single stamp ink
         chat.includes("if (KpThemeMode.darkBlue) Color(0xFFA9C4F2) else Color(0xFF5B7FC7)") &&
         chat.includes(
           "TickIcon(m, pendingEcho, otherReadAt, onWallpaper = emojiOnly > 0, ink = stampInk)",
