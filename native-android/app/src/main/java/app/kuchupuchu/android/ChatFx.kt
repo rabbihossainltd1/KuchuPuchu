@@ -182,44 +182,6 @@ fun Modifier.fxSlotOpen(active: Boolean, fromDp: Float = -30f, ms: Int = 480): M
  * with a small arc, settles at full size, and hands off to the landing
  * squash + shine via [onDone]. Durations: text 680, media 700-720, chip 560.
  */
-@Composable
-fun Modifier.fxFlyIn(
-    active: Boolean,
-    durMs: Int,
-    x0dp: Float = 0f,
-    y0dp: Float = 110f,
-    onDone: () -> Unit = {},
-): Modifier {
-    val scale = fxAnimatorScale()
-    val t = remember { Animatable(if (active && scale > 0f) 0f else 1f) }
-    var fired by remember { mutableStateOf(false) }
-    LaunchedEffect(active) {
-        if (active && !fired) {
-            fired = true
-            if (scale > 0f) t.animateTo(1f, tween(durMs, easing = FastOutSlowInEasing))
-            onDone()
-        }
-    }
-    val v = t.value
-    return graphicsLayer {
-        // v172 (owner r46 item 6: "direct composer pill theke right side
-        // a jump ... original ratio original bubble original body te"):
-        // the bubble is its FINAL size the whole way - a plain jump from
-        // the composer pill (below-left) to its seat on the right, with a
-        // light arc; nothing scales, nothing re-wraps.
-        val arc = sin(v * PI).toFloat()
-        // r49 (owner: "just start from message composer pill ... otar
-        // upor theke animation start hoilei fix"): the flight is a
-        // STRAIGHT RISE out of the composer pill - zero horizontal
-        // travel. Every sideways start (-150, -48, -140/+80) read as
-        // "coming from the left side"; the pill sits right below the
-        // seat, so the bubble simply lifts 56dp off it and settles.
-        translationY = (1f - v) * y0dp * density - arc * 10f * density
-        translationX = (1f - v) * x0dp * density
-        alpha = if (v < 0.08f) v / 0.08f else 1f
-    }
-}
-
 /* ------------------------------------------------------- landing (squash) */
 
 /**

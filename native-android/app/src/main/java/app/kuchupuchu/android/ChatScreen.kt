@@ -256,6 +256,10 @@ fun ChatScreen(nav: NavController, convId: String) {
     // click used to land at the newest, then the authoritative page swap
     // left the viewport mid-thread - "scroll kore dekhte hoi").
     var pinBottomUntil by remember { mutableStateOf(0L) }
+    // r52 (Claude pack): a flying row owns the scroll - the follow-scroll
+    // waits for its onDone so the seat never moves mid-flight.
+    var pendingScrollAfterLand by remember { mutableStateOf(false) }
+    var flightLandedNonce by remember { mutableStateOf(0) }
     // Item 11b: a message that is being deleted shrinks away first; the
     // rows themselves leave when the vanish has played.
     val vanishingIds = remember { mutableStateListOf<String>() }
@@ -831,6 +835,15 @@ fun ChatScreen(nav: NavController, convId: String) {
     // coming BACK re-ran the jump and the chat landed on the latest message
     // instead of where the video was ("video play kore back korle").
     var didInitialScroll by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(flightLandedNonce) {
+        if (pendingScrollAfterLand && flightLandedNonce > 0) {
+            pendingScrollAfterLand = false
+            val total = msgs.size + pending.size
+            if (total > 0 && !listState.isScrollInProgress) {
+                runCatching { listState.animateScrollToItem(total - 1) }
+            }
+        }
+    }
     LaunchedEffect(msgs.size, pending.size) {
         if (!didInitialScroll && msgs.isNotEmpty()) {
             didInitialScroll = true
@@ -996,12 +1009,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                                     // Our own optimistic bubble from a previous send
                                     // that the server just confirmed.
                                     pending.removeAll { it.optString("clientId") == liveCid }
-                                    if (follow) {
-                                        scope.launch {
-                                            val total = msgs.size + pending.size
-                                            if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }
-                                        }
-                                    }
+                                    if (follow) pendingScrollAfterLand = true
                                 }
                             }
                             ScreenStore.setMsgs(convId, msgs.toList())
@@ -1233,7 +1241,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         // hide hoye abar asha rakha jabe na"): the server id is marked
         // seen BEFORE the swap, on BOTH paths - the painted row always
         // takes the pending bubble's seat silently, never re-flies.
-        FxArrivals.markSeen(id)
+        val wasFlying = FxArrivals.mark(id) != null
         if (idx >= 0) {
             msgs[idx] = row
         } else {
@@ -1244,10 +1252,14 @@ fun ChatScreen(nav: NavController, convId: String) {
         if (idx < 0) lastTopId = id
         ScreenStore.setMsgs(convId, msgs.toList())
         if (follow) {
-            scope.launch {
-                val total = msgs.size + pending.size
-                if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }
-            }
+            // r52: if the pending bubble is still in the air, the scroll
+            // waits for its landing; a settled row scrolls right away.
+            if (wasFlying) pendingScrollAfterLand = true
+            else
+                scope.launch {
+                    val total = msgs.size + pending.size
+                    if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }
+                }
         }
     }
 
@@ -1270,10 +1282,8 @@ fun ChatScreen(nav: NavController, convId: String) {
         )
         // Owner round 32 (item 48): scroll in its own coroutine — a newer
         // scroll cancels the older one, and that must not take the POST with it.
-        scope.launch {
-            val total = msgs.size + pending.size
-            if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }
-        }
+        // r52: the fresh bubble flies first; the scroll rides its landing.
+        pendingScrollAfterLand = true
         // Owner round 11: tap sound on the send itself…
         runCatching { KpSounds.send(ctx) }
         // Owner round 33 (item 3): queue-FIRST, off this screen's scope. The
@@ -1459,7 +1469,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         // scroll inline, photo #2's launch cancelled photo #1's *before its
         // upload began*, #3 cancelled #2, … so of an N-photo album only the
         // last photo ever reached the server ("multi-photo sends one").
-        scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }
+        pendingScrollAfterLand = true
         scope.launch {
             runCatching { KpSounds.send(ctx) }
             var shotW = 0
@@ -1643,7 +1653,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .also { if (clipMeta.length() > 0) it.put("meta", clipMeta) }
                 .also { if (viewOnce && !asDocument) it.put("viewOnce", true) },
         )
-        scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }
+        pendingScrollAfterLand = true
         runCatching { KpSounds.send(ctx) }
         // Owner round 32 (item 34): the upload + POST run on Uploads' own
         // scope — this screen only awaits the outcome for its bubble. They
@@ -1741,7 +1751,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         )
         // Owner round 32 (item 48): same split as sendImage — a scroll started
         // by anything else must never cancel the upload coroutine.
-        scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }
+        pendingScrollAfterLand = true
         scope.launch {
             runCatching { KpSounds.send(ctx) }
             // Owner round 33 (item 3): the recording is a file already — the
@@ -1851,7 +1861,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             ScreenStore.pendingVideoSend.value = null
             val cid = job.row.optString("clientId")
             pending.add(job.row)
-            scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }
+            pendingScrollAfterLand = true
             scope.launch {
                 val file = runCatching { job.bake(ctx) }.getOrNull()
                 if (file == null) {
@@ -3224,6 +3234,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             onMessageOwner = { ownerId -> openChatWithUser(ownerId) },
                             theme = chatTheme,
                             onJumpTo = { jumpTo(it) },
+                            onFlightLanded = { flightLandedNonce++ },
                             askName = rawTitle,
                             onCancelSend = ::cancelSend,
                             onUnblockAsk = { msg ->
@@ -3292,6 +3303,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             onOpenAlbum = { msg -> albumMsg = msg },
                             quoteFor = { rid -> (msgs + pending).firstOrNull { it.optString("id") == rid } },
                             onJumpTo = { jumpTo(it) },
+                            onFlightLanded = { flightLandedNonce++ },
                             onCancelSend = ::cancelSend,
                         )
                     }
@@ -4229,6 +4241,9 @@ private fun Composer(
         } else if (!recording) {
             Column(
                 Modifier
+                    // r52 (Claude pack): the pill writes its window bounds so
+                    // flying bubbles can lift off the exact measured pill.
+                    .fxComposerAnchor()
                     .weight(1f)
                     .heightIn(min = 38.dp)
                     // Owner round 18: the pill is BACK — only the recording
@@ -5553,6 +5568,9 @@ private fun MessageRow(
     askName: String = "",
     // v163: the ✕ on a sending bubble.
     onCancelSend: (String) -> Unit = {},
+    // r52 (Claude pack): the row tells the chat when its flight landed so
+    // the deferred follow-scroll can run after the seat stopped moving.
+    onFlightLanded: () -> Unit = {},
 ) {
     val mine = m.optString("senderId") == myId
     val kind = m.optString("kind")
@@ -5643,7 +5661,7 @@ private fun MessageRow(
     // image uploads (picked as documents) get the same treatment.
     // Owner round 31 (item 29): photos sent together = one grouped bubble.
     if (m.has("kpAlbum")) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine) { onFlightLanded() }) {
             AlbumMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenAlbum, onReply, onLongPress, theme)
         }
         return
@@ -5653,13 +5671,13 @@ private fun MessageRow(
     // opens the media ONCE for the recipient; the opening deletes the row
     // for everyone, so there is no opened state left to render.
     if (isViewOnce(m)) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine) { onFlightLanded() }) {
             ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)
         }
         return
     }
     if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine) { onFlightLanded() }) {
             ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme, onCancelSend)
         }
         return
@@ -5667,7 +5685,7 @@ private fun MessageRow(
     // Owner round 20: videos render as a tappable video bubble and play
     // IN-APP (the system player could never stream these auth-only files).
     if (kind == "FILE" && fileLooksVideo(m) && !sentAsDocument(m)) {
-        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 720)) {
+        Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine) { onFlightLanded() }) {
             VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme, onCancelSend)
         }
         return
@@ -5685,8 +5703,9 @@ private fun MessageRow(
             .fillMaxWidth()
             .padding(vertical = 2.dp)
             .fxSlotOpen(fxFresh)
-            .fxFlyIn(fxFresh, if (kind == "TEXT") 500 else 540) {
+            .fxFlyIn(fxFresh, if (kind == "TEXT") 680 else if (voiceRow) 720 else 700, isSent = mine) {
                 fxLanded = m.optString("id")
+                onFlightLanded()
             },
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
