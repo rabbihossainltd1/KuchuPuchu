@@ -894,6 +894,71 @@ private fun MediaEditItemScreen(
             addMore(stageUri)
             return
         }
+        // v171 (owner r45 item 3: "edit kore send korle onek late kore jai
+        // video ta chat a ... applying ta background a rakho, eita real
+        // instant koro fake na"): a clip no longer blocks its own send -
+        // the bubble lands in the chat NOW (pending row + flight) and the
+        // one bake rides in the background; the upload reuses the row's
+        // clientId and paintSent swaps it in silently.
+        if (pickedIsVideo && source != null) {
+            val cid = "c_${java.util.UUID.randomUUID()}"
+            val cap = caption.trim()
+            val drawn = strokes.toList()
+            val wrote = texts.toList()
+            val placed = stickers.toList()
+            val filt = filterMatrix
+            val turn = rotation
+            val box = cropBox?.takeIf { !it.isFull() }
+            val s = start
+            val e = end
+            val vSource = source
+            val srcUri = mediaUri
+            val mime = (ctx.contentResolver.getType(mediaUri) ?: "").ifBlank { "video/mp4" }
+            val row =
+                JSONObject()
+                    .put("id", cid)
+                    .put("clientId", cid)
+                    .put("senderId", Store.myId())
+                    .put("kind", "FILE")
+                    .put("fileName", "video.mp4")
+                    .put("fileType", mime)
+                    .put("body", cap)
+                    .put("createdAt", java.time.Instant.now().toString())
+                    .put("meta", JSONObject().put("duration", (e - s).coerceAtLeast(0L)))
+                    .also { if (once) it.put("viewOnce", true) }
+            ScreenStore.pendingVideoSend =
+                ScreenStore.PendingVideoSend(convId, row) { c ->
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        val out = java.io.File(c.cacheDir, "edit_${System.currentTimeMillis()}.mp4")
+                        val effRot = (vSource.rotation + (turn % 4) * 90) % 360
+                        val (ovW, ovH) = VideoPlan.outputSize(vSource.codedW, vSource.codedH, effRot, box)
+                        val overlay = bakeVideoOverlay(drawn, wrote, placed, ovW, ovH, box)
+                        val layers = overlay != null || filt != null || turn != 0 || box != null
+                        try {
+                            if (!layers) {
+                                VideoExport.passthrough(c, srcUri, s, e, out)
+                            } else {
+                                VideoExport.export(c, srcUri, s, e, box, out, overlay = overlay, colorMat = filt?.array, userTurns = turn)
+                            }
+                        } catch (err: Exception) {
+                            if (layers) throw err
+                            out.delete()
+                            VideoExport.passthrough(c, srcUri, s, e, out)
+                        } finally {
+                            runCatching { overlay?.recycle() }
+                        }
+                        val ok = out.length() > 0L && VideoExport.probe(c, android.net.Uri.fromFile(out))?.durationMs?.let { it > 0L } == true
+                        if (!ok) {
+                            out.delete()
+                            null
+                        } else {
+                            out
+                        }
+                    }
+                }
+            nav.popBackStack()
+            return
+        }
         if (busy) return
         busy = true
         val cap = caption.trim()
