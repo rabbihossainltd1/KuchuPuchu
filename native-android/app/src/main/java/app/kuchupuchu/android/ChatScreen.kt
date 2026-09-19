@@ -5732,67 +5732,6 @@ private fun MessageRow(
     val replyOffset by animateFloatAsState(replyDrag, spring(stiffness = 1400f), label = "replydrag")
     val replyThreshold = with(LocalDensity.current) { 36.dp.toPx() }
     var fxLanded by remember { mutableStateOf<String?>(null) }
-    // Owner round 2026-09-04: long bodies used to flatten at 280dp.
-    // The bubble now stretches with the screen (82% of it, floored at
-    // the old 280 and capped at 420 for tablets) so the right side
-    // uses as much room as there actually is.
-    // v166 (owner: "ekhon chat er massage bubble and content full right
-    // side a chole jai eita halka short koro jeno full jaiga na nei 5px
-    // kom hobe"): 5dp comes off whatever the screen gave the bubble, so
-    // the right edge keeps a little air on every device (the 280dp
-    // floor for a narrow screen is untouched).
-    val bubbleMax =
-        maxOf(
-            280.dp,
-            minOf(420.dp, (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp * 0.82f).dp) - 5.dp,
-        )
-    // Owner round 34 (item 19): long bodies collapse to ten
-    // lines with a See more / See less toggle under the
-    // bubble. The count is measured unbounded first (a capped
-    // measure could only ever report ten), so a long message
-    // shows full for a frame, then folds. Typing AI replies
-    // stay unbounded until the reveal finishes.
-    val mid = m.optString("id")
-    var bodyLines by remember(mid) { mutableStateOf(0) }
-    var msgExpanded by remember(mid) { mutableStateOf(false) }
-    val typing = revealChars != null && revealChars < m.optText("body").length
-    // v166 (owner: "onek boro text massage hole shob ekbare
-    // dekhabe na 10 line dekhai niche see more option thakbe"):
-    // the fold is decided from a measurement taken WHILE
-    // COMPOSING, at the widest line this bubble can hold — not
-    // from the body's own onTextLayout. That callback can only
-    // report after the frame has been laid out, so the first
-    // paint always showed a long body in full and the fold had
-    // to wait for the recomposition that followed; the count it
-    // fed could also come out short if the early measure ran
-    // narrower than the settled bubble. A long body always
-    // fills the bubble's width, so its count AT max width is
-    // its real count — the fold is therefore right on frame
-    // one, with the onTextLayout high-water kept as a second
-    // witness (never weaker than before).
-    val foldProbe = rememberTextMeasurer()
-    val foldWidth = with(LocalDensity.current) { (bubbleMax - 18.dp).roundToPx() }
-    val foldStyle = remember { TextStyle(fontSize = 14.5.sp, lineHeight = 19.sp) }
-    val foldBody = m.optText("body")
-    val probeLines =
-        remember(foldBody, foldWidth) {
-            runCatching {
-                foldProbe.measure(
-                    foldBody,
-                    foldStyle,
-                    constraints = Constraints(maxWidth = foldWidth.coerceAtLeast(1)),
-                ).lineCount
-            }.getOrDefault(0)
-        }
-    val longBody = bodyLines > BODY_COLLAPSE_LINES || probeLines > BODY_COLLAPSE_LINES
-    val capped = !msgExpanded && !typing && longBody
-    // Reports to the stamp holder AND keeps the high-water
-    // line count (monotonic — a capped re-measure must not
-    // shrink it back to ten and strand the toggle).
-    val countLines = { r: TextLayoutResult, report: (TextLayoutResult) -> Unit ->
-        report(r)
-        if (r.lineCount > bodyLines) bodyLines = r.lineCount
-    }
     Row(
         Modifier
             .fillMaxWidth()
@@ -5804,6 +5743,20 @@ private fun MessageRow(
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
         Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
+            // Owner round 2026-09-04: long bodies used to flatten at 280dp.
+            // The bubble now stretches with the screen (82% of it, floored at
+            // the old 280 and capped at 420 for tablets) so the right side
+            // uses as much room as there actually is.
+            // v166 (owner: "ekhon chat er massage bubble and content full right
+            // side a chole jai eita halka short koro jeno full jaiga na nei 5px
+            // kom hobe"): 5dp comes off whatever the screen gave the bubble, so
+            // the right edge keeps a little air on every device (the 280dp
+            // floor for a narrow screen is untouched).
+            val bubbleMax =
+                maxOf(
+                    280.dp,
+                    minOf(420.dp, (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp * 0.82f).dp) - 5.dp,
+                )
             // Owner round 31: emoji-only texts (1–3) render big, stamp underneath.
             // Owner round 32 (item 15): no "edited" marker anywhere — an edited
             // text is just the text (so an emoji-only edit stays emoji-only too).
@@ -5999,6 +5952,53 @@ private fun MessageRow(
                     if (!mine && isGroup && senderName.isNotBlank()) {
                         Text(senderName, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = GoldDeep)
                     }
+                    // Owner round 34 (item 19): long bodies collapse to ten
+                    // lines with a See more / See less toggle under the
+                    // bubble. The count is measured unbounded first (a capped
+                    // measure could only ever report ten), so a long message
+                    // shows full for a frame, then folds. Typing AI replies
+                    // stay unbounded until the reveal finishes.
+                    val mid = m.optString("id")
+                    var bodyLines by remember(mid) { mutableStateOf(0) }
+                    var msgExpanded by remember(mid) { mutableStateOf(false) }
+                    val typing = revealChars != null && revealChars < m.optText("body").length
+                    // v166 (owner: "onek boro text massage hole shob ekbare
+                    // dekhabe na 10 line dekhai niche see more option thakbe"):
+                    // the fold is decided from a measurement taken WHILE
+                    // COMPOSING, at the widest line this bubble can hold — not
+                    // from the body's own onTextLayout. That callback can only
+                    // report after the frame has been laid out, so the first
+                    // paint always showed a long body in full and the fold had
+                    // to wait for the recomposition that followed; the count it
+                    // fed could also come out short if the early measure ran
+                    // narrower than the settled bubble. A long body always
+                    // fills the bubble's width, so its count AT max width is
+                    // its real count — the fold is therefore right on frame
+                    // one, with the onTextLayout high-water kept as a second
+                    // witness (never weaker than before).
+                    val foldProbe = rememberTextMeasurer()
+                    val foldWidth = with(LocalDensity.current) { (bubbleMax - 18.dp).roundToPx() }
+                    val foldStyle = remember { TextStyle(fontSize = 14.5.sp, lineHeight = 19.sp) }
+                    val foldBody = m.optText("body")
+                    val probeLines =
+                        remember(foldBody, foldWidth) {
+                            runCatching {
+                                foldProbe.measure(
+                                    foldBody,
+                                    foldStyle,
+                                    constraints = Constraints(maxWidth = foldWidth.coerceAtLeast(1)),
+                                ).lineCount
+                            }.getOrDefault(0)
+                        }
+                    val longBody = bodyLines > BODY_COLLAPSE_LINES || probeLines > BODY_COLLAPSE_LINES
+                    val capped = !msgExpanded && !typing && longBody
+                    // Reports to the stamp holder AND keeps the high-water
+                    // line count (monotonic — a capped re-measure must not
+                    // shrink it back to ten and strand the toggle).
+                    val countLines = { r: TextLayoutResult, report: (TextLayoutResult) -> Unit ->
+                        report(r)
+                        if (r.lineCount > bodyLines) bodyLines = r.lineCount
+                    }
                     when (kind) {
                         "STICKER" -> {
                             val st = m.optString("body")
@@ -6093,26 +6093,24 @@ private fun MessageRow(
                                 }
                         }
                     }
+                    // r54 (owner: "see more ekhono removed ache"): the toggle
+                    // and the fold state are BACK in the bubble, byte-for-byte
+                    // the v177 layout that provably rendered See more; the
+                    // top-level hoist from r52 broke the fold on-device.
+                    if (longBody && !typing && selectedIds.isEmpty()) {
+                        Text(
+                            if (msgExpanded) "See less" else "See more",
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = chatAccent(theme),
+                            modifier =
+                                Modifier.padding(top = 2.dp).clickable {
+                                    haptics.tap()
+                                    msgExpanded = !msgExpanded
+                                },
+                        )
+                    }
                 }
-            }
-            // r52 (owner: "see more work korleo see less working na"): the
-            // toggle lives OUTSIDE the bubble - the bubble's combinedClickable
-            // could eat the second tap on some devices, and outside the card
-            // it is its own clean hit target. r53 (owner: "see more option
-            // tai remove kore diyecho"): it speaks the STAMP's wallpaper ink
-            // now - the bubble-interior accent all but vanished out here.
-            if (longBody && !typing && selectedIds.isEmpty()) {
-                Text(
-                    if (msgExpanded) "See less" else "See more",
-                    fontSize = 12.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = stampInk,
-                    modifier =
-                        Modifier.padding(top = 2.dp).clickable {
-                            haptics.tap()
-                            msgExpanded = !msgExpanded
-                        },
-                )
             }
             // v169 (owner: "single tick double tick seen tick send time eshob
             // message body te na message er niche thakbe" + the example
