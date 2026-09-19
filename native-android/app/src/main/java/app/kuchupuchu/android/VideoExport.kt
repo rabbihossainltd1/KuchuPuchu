@@ -323,6 +323,10 @@ object VideoExport {
                     setInteger(MediaFormat.KEY_BIT_RATE, VideoPlan.bitrate(endMs - startMs, outW, outH, fps))
                     setInteger(MediaFormat.KEY_FRAME_RATE, fps)
                     setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+                    // v168 (owner: "applying a onek somoy nei"): this encode
+                    // is a user-waiting foreground job - realtime priority
+                    // tells the codec to favour speed.
+                    setInteger(MediaFormat.KEY_PRIORITY, 0)
                 }
             val enc = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
             encoder = enc

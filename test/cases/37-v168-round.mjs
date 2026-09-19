@@ -33,6 +33,7 @@ const root = new URL(
 );
 const kt = (f) => readFileSync(new URL(f, root), "utf8");
 const edit = kt("MediaEditScreen.kt");
+const vexport = kt("VideoExport.kt");
 const chat = kt("ChatScreen.kt");
 const viewer = kt("MediaViewer.kt");
 const src = readFileSync(new URL("../../src/worker/index.ts", import.meta.url), "utf8");
@@ -79,6 +80,19 @@ check(
     edit.includes("if (vidPaused) Icons.Filled.PlayArrow else Icons.Filled.Pause,") &&
     edit.includes("vidPaused = !vidPaused") &&
     edit.includes("import androidx.compose.material.icons.filled.Pause"),
+);
+
+/* 3 — the clip bake is fast and lands paused */
+check(
+  "v168 item 3: a Done whose only edit is the trim is a passthrough remux (no encoder at all - instant, the WhatsApp/Telegram feel), a bake with real layers still walks the encoder but at realtime priority (KEY_PRIORITY 0), and when a bake lands the stage AUTO-PAUSES on the fresh clip",
+  edit.includes(
+    "if (!layers) {\n                                VideoExport.passthrough(ctx, srcUri, s, e, file)",
+  ) &&
+    edit.includes("if (pickedIsVideo) vidPaused = true") &&
+    vexport.includes("setInteger(MediaFormat.KEY_PRIORITY, 0)") &&
+    // the degraded trim path and the never-vanish-a-layer guard survive
+    edit.includes("if (layers) throw err") &&
+    edit.includes("VideoExport.passthrough(ctx, srcUri, s, e, file)"),
 );
 
 console.log(lines.join("\n"));

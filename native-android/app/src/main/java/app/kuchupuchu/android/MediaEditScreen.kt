@@ -1055,20 +1055,31 @@ private fun MediaEditItemScreen(
                         val overlay = bakeVideoOverlay(drawn, wrote, placed, ovW, ovH, box)
                         val layers = overlay != null || filt != null || turn != 0 || box != null
                         try {
-                            VideoExport.export(
-                                ctx,
-                                srcUri,
-                                s,
-                                e,
-                                box,
-                                file,
-                                // v166: the number the chip shows comes from the
-                                // encoder itself — one frame in, one step on.
-                                onProgress = { f -> applyPct = f.coerceIn(0f, 1f) },
-                                overlay = overlay,
-                                colorMat = filt?.array,
-                                userTurns = turn,
-                            )
+                            // v168 (owner: "done a click korle applying a onek
+                            // somoy nei ... eita fast koro ws tg er moto
+                            // instant"): a bare trim has nothing to re-encode -
+                            // the samples ride straight into the new box (a
+                            // remux, not a transcode), which is as close to
+                            // instant as a bake gets. Only real layers walk
+                            // the encoder, and it walks at realtime priority.
+                            if (!layers) {
+                                VideoExport.passthrough(ctx, srcUri, s, e, file)
+                            } else {
+                                VideoExport.export(
+                                    ctx,
+                                    srcUri,
+                                    s,
+                                    e,
+                                    box,
+                                    file,
+                                    // v166: the number the chip shows comes from the
+                                    // encoder itself — one frame in, one step on.
+                                    onProgress = { f -> applyPct = f.coerceIn(0f, 1f) },
+                                    overlay = overlay,
+                                    colorMat = filt?.array,
+                                    userTurns = turn,
+                                )
+                            }
                         } catch (err: Exception) {
                             // A bare trim may ride the degraded passthrough; a
                             // real layer must never silently vanish.
@@ -1143,6 +1154,10 @@ private fun MediaEditItemScreen(
                     cropTouched = false
                     cropPreset = "Original"
                     hd = false
+                    // v168 (owner: "edit done dile apply hobar por auto puse
+                    // hoye jai"): the fresh clip parks on its first frame -
+                    // the r42-2 play seat is the tap that starts it.
+                    if (pickedIsVideo) vidPaused = true
                     haptics.confirm()
                 }
             }
