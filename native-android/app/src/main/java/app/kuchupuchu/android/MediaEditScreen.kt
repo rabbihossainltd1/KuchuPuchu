@@ -293,7 +293,6 @@ private fun MediaEditItemScreen(
     var filterThumbs by remember(mediaUri) { mutableStateOf<List<ImageBitmap?>>(emptyList()) }
     // Owner round 36 (item 6): the video still-mode frame (exact export
     // pixels for the playhead — turns + filter baked in, see below).
-    var videoStill by remember(mediaUri) { mutableStateOf<ImageBitmap?>(null) }
     // Owner round 37 (item 2): the status share screen is GONE — the
     // picker lands straight here, and Done posts the status. No caption
     // (status posts carry none), no once, no add-more, no HD.
@@ -441,7 +440,10 @@ private fun MediaEditItemScreen(
                     // Owner round 36 (item 6): user turns swap the frame.
                     val w = clip.displayW.toFloat()
                     val h = clip.displayH.toFloat()
-                    if (rotation % 2 == 1) h / w.coerceAtLeast(1f) else w / h.coerceAtLeast(1f)
+                    val turned = if (rotation % 2 == 1) h / w.coerceAtLeast(1f) else w / h.coerceAtLeast(1f)
+                    // v170: a committed crop narrows the stage to its box.
+                    val box = cropBox?.takeIf { !it.isFull() }
+                    if (box == null) turned else turned * (box.w / box.h.coerceAtLeast(0.01f))
                 }
             else -> 9f / 16f
         }
@@ -479,38 +481,10 @@ private fun MediaEditItemScreen(
             }
         }
     }
-    // Owner round 36 (item 6): turns / filters freeze the clip into a
-    // WYSIWYG still — the playhead (or scrub target) rotated + filtered
-    // exactly like the export. The player hides underneath, so no
-    // tick-churn: this only re-grabs when the frame, turns or filter change.
-    val stillMode = clip != null && (rotation != 0 || filterMatrix != null)
-    LaunchedEffect(mediaUri, rotation, filterIdx, scrub, stillMode, cropBox) {
-        if (!stillMode || clip == null) {
-            videoStill = null
-            return@LaunchedEffect
-        }
-        // A scrub lands the playhead first; grab where it settles.
-        if (scrub != null) delay(150)
-        val atMs = (scrub ?: playAt ?: start).coerceAtLeast(0L)
-        val turn = rotation
-        val filt = filterMatrix
-        videoStill =
-            withContext(Dispatchers.IO) {
-                val frame = grabVideoFrame(ctx, mediaUri, atMs) ?: return@withContext null
-                val turned = if (turn != 0) rotateEditBitmap(frame, turn) else frame
-                val box = cropBox?.takeIf { !it.isFull() }
-                val cropped =
-                    if (box == null) turned
-                    else {
-                        val x = (box.x * turned.width).toInt().coerceIn(0, turned.width - 1)
-                        val y = (box.y * turned.height).toInt().coerceIn(0, turned.height - 1)
-                        val w = (box.w * turned.width).toInt().coerceIn(1, turned.width - x)
-                        val h = (box.h * turned.height).toInt().coerceIn(1, turned.height - y)
-                        Bitmap.createBitmap(turned, x, y, w, h)
-                    }
-                applyEditFilter(cropped, filt).asImageBitmap()
-            }
-    }
+    // v170 (owner r44 item 3): the WYSIWYG still is GONE - turns, filter
+    // and crop ride the live player (TextureView transform + a hardware
+    // layer ColorFilter), WhatsApp/Telegram style: the clip never freezes
+    // while editing and nothing re-encodes until the send.
     // The transient notice ("Saved to gallery") clears itself.
     LaunchedEffect(notice) {
         if (notice != null) {
@@ -1024,9 +998,19 @@ private fun MediaEditItemScreen(
                 rotation != 0 || filterIdx != 0 || cropBox != null || hd ||
                 (clip != null && (start > 0L || end < clip.durationMs))
         if (!anything) return
+        // v170 (owner r44 item 3: "prottekta edit a applying a onek time
+        // jacche instant na. whatsapp telegram ora kivabe instant edit
+        // apply kore sevabe koro"): for a CLIP, Done no longer re-encodes -
+        // the turns / filter / crop / ink already ride the live player, so
+        // "applied" is just the committed look. The one and only bake
+        // happens at send / save, exactly like WhatsApp and Telegram.
+        if (pickedIsVideo) {
+            haptics.confirm()
+            return
+        }
         busy = true
         // A photo bake is instant; a clip bake walks 0..1 (see the chip).
-        applyPct = if (pickedIsVideo) 0f else -1f
+        applyPct = -1f
         haptics.confirm()
         val img = runCatching { shot?.asAndroidBitmap() }.getOrNull()
         val vSource = source
@@ -1592,11 +1576,19 @@ private fun MediaEditItemScreen(
                                 // the clip into a WYSIWYG still (the export's
                                 // exact pixels for this frame); the live player
                                 // rests underneath, paused. Ink rides either way.
-                                StatusTrimPreview(mediaUri, start, end, paused = stillMode || vidPaused, scrubAt = scrub, seekTo = seekTo, onSeekDone = { seekTo = null }, onPosition = { playAt = it })
-                                val still = videoStill
-                                if (stillMode && still != null) {
-                                    Image(still, "Edited frame", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
-                                }
+                                StatusTrimPreview(
+                                    mediaUri,
+                                    start,
+                                    end,
+                                    paused = vidPaused,
+                                    turn = rotation,
+                                    colorMat = filterMatrix?.array,
+                                    crop = if (cropping) null else cropBox,
+                                    scrubAt = scrub,
+                                    seekTo = seekTo,
+                                    onSeekDone = { seekTo = null },
+                                    onPosition = { playAt = it },
+                                )
                                 // v169 (owner: "video te tap korlei puse
                                 // hobe ... only puse korle icon dekhabe resume
                                 // korle hide hoye jabe"): a plain tap on the
@@ -1604,12 +1596,12 @@ private fun MediaEditItemScreen(
                                 // ONLY the paused state (the player's own
                                 // 56 dp play seat), never the playing one.
                                 StageCanvas(onStageTap = {
-                                    if (!cropping && !penMode && !busy && !stillMode) {
+                                    if (!cropping && !penMode && !busy) {
                                         haptics.tap()
                                         vidPaused = !vidPaused
                                     }
                                 })
-                                if (vidPaused && !cropping && !penMode && !busy && !stillMode) {
+                                if (vidPaused && !cropping && !penMode && !busy) {
                                     Box(
                                         Modifier
                                             .align(Alignment.Center)
@@ -1702,7 +1694,7 @@ private fun MediaEditItemScreen(
                     }
                     Spacer(Modifier.width(5.dp))
                 }
-                                // v169 (owner: "undo redo button gula eto boro ar background
+                // v169 (owner: "undo redo button gula eto boro ar background
                 // border rakhcho keno ar eto dure dure thakbe na middle a
                 // thakbe pasha pashi"): the pair rides the TOP BAR CENTRE,
                 // side by side, plain glyphs - no circle, no border.
@@ -1733,7 +1725,7 @@ private fun MediaEditItemScreen(
                 // button: there would be nothing to apply.
                 // v165 (owner): smaller, and its fill is a near-transparent
                 // grey with a hairline — the solid blue chip shouted.
-Spacer(Modifier.weight(1f))
+                Spacer(Modifier.weight(1f))
                 // v165 (owner): a profile photo and a status post carry no HD
                 // switch - the pill is the chat send's alone.
                 if (clip == null && !statusMode && !avatarMode) {

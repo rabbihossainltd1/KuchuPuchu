@@ -70,6 +70,12 @@ internal fun StatusTrimPreview(
     start: Long,
     end: Long,
     paused: Boolean,
+    // v170 (owner r44 item 3): the editor's turns / filter / crop ride the
+    // LIVE player - a TextureView transform + a hardware-layer ColorFilter,
+    // the WA/Telegram way - instead of freezing the clip into a still.
+    turn: Int = 0,
+    colorMat: FloatArray? = null,
+    crop: CropBox? = null,
     scrubAt: Long? = null,
     // Polish 2026-09-18b: manual playhead seek — drag the white line to scrub.
     seekTo: Long? = null,
@@ -142,6 +148,35 @@ internal fun StatusTrimPreview(
                     android.view.TextureView(c).apply {
                         isOpaque = false
                         player = TrimClipPlayer(this, c, uri).also { it.attach() }
+                    }
+                },
+                update = { tv ->
+                    // v170: turns + crop are one view-space matrix (rotate,
+                    // fit, then zoom into the crop); the filter is a paint on
+                    // a hardware layer - all of it while the clip keeps
+                    // playing.
+                    val w = tv.width.toFloat().coerceAtLeast(1f)
+                    val h = tv.height.toFloat().coerceAtLeast(1f)
+                    val m = android.graphics.Matrix()
+                    val t = ((turn % 4) + 4) % 4
+                    if (t != 0) {
+                        m.postRotate(t * 90f, w / 2f, h / 2f)
+                        if (t % 2 == 1) m.postScale(w / h, h / w, w / 2f, h / 2f)
+                    }
+                    crop?.takeIf { !it.isFull() }?.let { b ->
+                        m.postScale(1f / b.w, 1f / b.h, 0f, 0f)
+                        m.postTranslate(-b.x / b.w * w, -b.y / b.h * h)
+                    }
+                    tv.setTransform(m)
+                    if (colorMat != null) {
+                        tv.setLayerType(
+                            android.view.View.LAYER_TYPE_HARDWARE,
+                            android.graphics.Paint().apply {
+                                colorFilter = android.graphics.ColorMatrixColorFilter(colorMat)
+                            },
+                        )
+                    } else {
+                        tv.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
                     }
                 },
                 onRelease = {
