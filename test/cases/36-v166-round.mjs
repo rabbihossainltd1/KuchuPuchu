@@ -246,14 +246,14 @@ check(
 
 /* 7 — new#1: the voice bubble is smaller again */
 check(
-  "v166 new#1: the voice card shrank — a 32 dp play circle (19 dp glyphs, 16 dp spinner), a 6 dp gap, a 132 × 18 dp wave and the 10.5 sp time line, with the column's 7 dp top keeping the wave centred on the button",
-  chat.includes(".size(32.dp)\n                    .pressScale(interaction)") &&
-    chat.includes("modifier = Modifier.size(19.dp).scale(if (pressed) 0.85f else 1f),") &&
+  "v166 new#1: the voice card shrank — and v168 shrank it again: a 28 dp play circle (17 dp glyphs, 16 dp spinner), a 6 dp gap, a 112 × 16 dp wave and the 10 sp time line, with the column's 6 dp top keeping the wave centred on the button (and the bubble's own padding tightened via voiceNote)",
+  chat.includes(".size(28.dp)\n                    .pressScale(interaction)") &&
+    chat.includes("modifier = Modifier.size(17.dp).scale(if (pressed) 0.85f else 1f),") &&
     chat.includes("modifier = Modifier.size(16.dp),") &&
     chat.includes("Spacer(Modifier.width(6.dp))") &&
-    chat.includes("modifier = Modifier.width(132.dp).height(18.dp),") &&
-    chat.includes("Column(Modifier.padding(top = 7.dp)) {") &&
-    chat.includes("fontSize = 10.5.sp,") &&
+    chat.includes("modifier = Modifier.width(112.dp).height(16.dp),") &&
+    chat.includes("Column(Modifier.padding(top = 6.dp)) {") &&
+    chat.includes("fontSize = 10.sp,") &&
     chat.includes("Spacer(Modifier.height(0.dp))"),
 );
 

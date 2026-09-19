@@ -135,6 +135,26 @@ check(
     chat.includes("pos = body.indexOf(' ', pos + 1).takeIf { it >= 0 } ?: body.length"),
 );
 
+/* 6 — the voice card is compact, body included */
+check(
+  "v168 item 6 (owner: 'voice message ta er bubble ta body shoho onek boro ... choto kore daw'): the voice bubble came in another notch WITH its body - a 28 dp play circle (17 dp glyphs), a 112 x 16 dp wave centred by the 6 dp column pad, a 10 sp time line, and the bubble's own text padding tightened around the card (voiceNote: 8/3/6/3); the r33 scrub-to-seek row and the 16 dp spinner seat are untouched",
+  chat.includes(".size(28.dp)\n                    .pressScale(interaction)") &&
+    (chat.match(/size\(17\.dp\)\.scale\(if \(pressed\) 0\.85f else 1f\)/g) || []).length === 2 &&
+    chat.includes("Column(Modifier.padding(top = 6.dp)) {") &&
+    chat.includes("modifier = Modifier.width(112.dp).height(16.dp),") &&
+    chat.includes(
+      "fontSize = 10.sp,\n                    color = if (mine) Color(0x99FFFFFF) else Muted,",
+    ) &&
+    chat.includes("val voiceNote = fileRow && !sentAsDocument(m) && fileLooksVoice(m)") &&
+    chat.includes("start = if (voiceNote) 8.dp else 10.dp,") &&
+    chat.includes(
+      "bottom = if (voiceNote) 3.dp else if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp,",
+    ) &&
+    // r33's scrub-to-seek and the spinner survive verbatim
+    chat.includes("(active || scrubAt != null) && secs > 0 -> {") &&
+    chat.includes("modifier = Modifier.size(16.dp),"),
+);
+
 console.log(lines.join("\n"));
 console.log(
   `v168 round: ${lines.filter((l) => l.includes("OK")).length} ok / ${lines.filter((l) => l.includes("BROKEN")).length} broken`,

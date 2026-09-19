@@ -514,7 +514,10 @@ const convBetween = (db, a, b) =>
     !chat.includes("\u00A0\u00A0") &&
       // r32-45/34: FILE rows (voice + document) keep no band (their second line hosts the stamp);
       // r33-5: text-like bodies (text, emoji-only, sticker, deleted) carry the stamp in-column.
-      chat.includes("bottom = if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp") &&
+      // v168: voice notes (voiceNote) tighten it one notch further.
+      chat.includes(
+        "bottom = if (voiceNote) 3.dp else if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp",
+      ) &&
       chat.includes('val textLike = kind == "TEXT" || kind == "STICKER" || kind == "DELETED"'),
   );
   check(
@@ -5515,11 +5518,11 @@ const convBetween = (db, a, b) =>
     const vn = kt("VoiceNote.kt");
     const chat = kt("ChatScreen.kt");
     check(
-      "r32-45: voice bubble is compact — a 32dp play circle (v166, was 36), an 18dp wave (was 22), duration right under it, the bubble keeps a 4dp bottom instead of the blank 15dp band (fileLooksVoice); the recording strip paints VoiceNote.livePeaks (newest 4 s, sqrt curve, LIVE_BARS wide) between the timer and the cancel hint; both draw through DrawScope.drawVoiceBars",
+      "r32-45: voice bubble is compact — a 28dp play circle (v168, was 32/36), a 16dp wave (was 18/22), duration right under it, the bubble keeps a 3dp bottom for voice notes instead of the blank 15dp band (voiceNote); the recording strip paints VoiceNote.livePeaks (newest 4 s, sqrt curve, LIVE_BARS wide) between the timer and the cancel hint; both draw through DrawScope.drawVoiceBars",
       chat.includes("internal fun fileLooksVoice(m: JSONObject): Boolean {") &&
         chat.includes('val fileRow = kind == "FILE"') &&
         chat.includes("val isVoice = !asDocument && fileLooksVoice(m)") &&
-        chat.includes("modifier = Modifier.width(132.dp).height(18.dp),") &&
+        chat.includes("modifier = Modifier.width(112.dp).height(16.dp),") &&
         !chat.includes("modifier = Modifier.width(150.dp).height(30.dp),") &&
         chat.includes(
           "internal fun DrawScope.drawVoiceBars(bars: List<Int>, progress: Float, played: Color, rest: Color, newest: Boolean = false) {",
@@ -5532,7 +5535,7 @@ const convBetween = (db, a, b) =>
           "LiveVoiceWave(color = accent, modifier = Modifier.weight(1f).height(22.dp))",
         ) &&
         chat.includes('Text("‹ Slide to cancel", color = Red, fontSize = 12.5.sp, maxLines = 1)') &&
-        (chat.match(/\.size\(32\.dp\)\n\s+\.pressScale\(interaction\)/g) || []).length === 1 &&
+        (chat.match(/\.size\(28\.dp\)\n\s+\.pressScale\(interaction\)/g) || []).length === 1 &&
         vn.includes("var livePeaks: List<Int> by mutableStateOf(emptyList())") &&
         vn.includes("livePeaks = VoiceWaveform.live(amps)") &&
         (vn.match(/livePeaks = emptyList\(\)/g) || []).length === 3 &&
@@ -8426,8 +8429,8 @@ const convBetween = (db, a, b) =>
         chat.includes(
           "Row(verticalAlignment = Alignment.Top) {\n            val interaction = remember { MutableInteractionSource() }",
         ) &&
-        chat.includes("Column(Modifier.padding(top = 7.dp)) {\n                VoiceWave(") &&
-        chat.includes("modifier = Modifier.width(132.dp).height(18.dp),"),
+        chat.includes("Column(Modifier.padding(top = 6.dp)) {\n                VoiceWave(") &&
+        chat.includes("modifier = Modifier.width(112.dp).height(16.dp),"),
     );
   }
   // Item 8: the status / chat-video trim strip shows a playhead — the

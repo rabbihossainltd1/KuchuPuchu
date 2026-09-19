@@ -5540,6 +5540,10 @@ private fun MessageRow(
             // and a document row's size line — share ONE line with the stamp,
             // so FILE bubbles keep no bottom band (photos / videos never get here).
             val fileRow = kind == "FILE"
+            // v168 (owner: "voice message ta er bubble ta body shoho onek
+            // boro ... choto kore daw"): a voice note is a card, not a text
+            // row — the bubble sheds its text padding around the frame too.
+            val voiceNote = fileRow && !sentAsDocument(m) && fileLooksVoice(m)
             // Owner round 33 (item 5): text-like bodies (text, emoji-only,
             // sticker, deleted) carry their stamp INSIDE the column, placed by
             // measurement (KpStamped) — no reserve, no overlay, no band.
@@ -5635,7 +5639,12 @@ private fun MessageRow(
                     // the text. Other kinds keep the small bottom band —
                     // except FILE rows (items 45 / 34), whose second line
                     // already leaves the stamp its corner.
-                    .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp),
+                    .padding(
+                        start = if (voiceNote) 8.dp else 10.dp,
+                        top = if (voiceNote) 3.dp else 4.dp,
+                        end = if (voiceNote) 6.dp else 8.dp,
+                        bottom = if (voiceNote) 3.dp else if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp,
+                    ),
             ) {
                 val senderName = m.optText("senderName")
                 Column {
@@ -7797,12 +7806,13 @@ private fun FileBubble(
         val progress = scrubAt ?: if (active) player.progress else 0f
         val ink = if (mine) Color.White else chatAccent(theme)
         val faint = if (mine) Color(0x66FFFFFF) else chatAccent(theme).copy(alpha = 0.35f)
-        // v166 (owner: "voice massage card bubble ta aro compact koro"): the
-        // whole card came in another notch — a 32dp button, an 18dp x 132dp
-        // wave, a 6dp seat between them and a 10.5sp line under it. The wave
-        // still centres on the button (7dp column pad = (32 - 18) / 2) and the
-        // stamp keeps its own right end, so nothing about the earlier
-        // corrections moves — only the card gets shorter.
+        // v168 (owner: "voice message ta er bubble ta body shoho onek boro
+        // ... eta choto kore daw"): the card came in one more notch on top of
+        // v166 — a 28dp button, a 16dp x 112dp wave, a 6dp seat and a 10sp
+        // line under it, and the bubble's own text padding tightened around
+        // it (voiceNote). The wave still centres on the button (6dp column
+        // pad = (28 - 16) / 2); the stamp keeps its own right end, so nothing
+        // about the earlier corrections moves — only the card gets smaller.
         // Owner round 32 (item 45): compact — a 36dp button against a 22dp
         // wave with the duration right under it; the stamp shares the
         // duration line's right end (the bubble keeps no bottom band for
@@ -7819,7 +7829,7 @@ private fun FileBubble(
             val pressed by interaction.collectIsPressedAsState()
             Box(
                 Modifier
-                    .size(32.dp)
+                    .size(28.dp)
                     .pressScale(interaction)
                     .clip(CircleShape)
                     .background(if (mine) Color(0x33FFFFFF) else chatAccent(theme).copy(alpha = 0.18f))
@@ -7840,26 +7850,26 @@ private fun FileBubble(
                         Icons.Filled.Pause,
                         contentDescription = "Pause",
                         tint = ink,
-                        modifier = Modifier.size(19.dp).scale(if (pressed) 0.85f else 1f),
+                        modifier = Modifier.size(17.dp).scale(if (pressed) 0.85f else 1f),
                     )
                     else -> Icon(
                         Icons.Filled.PlayArrow,
                         contentDescription = "Play",
                         tint = ink,
-                        modifier = Modifier.size(19.dp).scale(if (pressed) 0.85f else 1f),
+                        modifier = Modifier.size(17.dp).scale(if (pressed) 0.85f else 1f),
                     )
                 }
             }
             Spacer(Modifier.width(6.dp))
             // Owner round 25: no side padding — the tick+time stamp sits at
             // the right end of the duration line, under the wave.
-            Column(Modifier.padding(top = 7.dp)) {
+            Column(Modifier.padding(top = 6.dp)) {
                 VoiceWave(
                     bars = bars,
                     progress = progress,
                     played = ink,
                     rest = faint,
-                    modifier = Modifier.width(132.dp).height(18.dp),
+                    modifier = Modifier.width(112.dp).height(16.dp),
                     onSeek = { frac ->
                         if (!pendingEcho && fileKey.isNotBlank()) player.seekTo(ctx, id, fileKey, frac)
                     },
@@ -7883,7 +7893,7 @@ private fun FileBubble(
                         pendingEcho -> "Sending…"
                         else -> FilesUtil.displaySize(m.optInt("fileSize"))
                     },
-                    fontSize = 10.5.sp,
+                    fontSize = 10.sp,
                     color = if (mine) Color(0x99FFFFFF) else Muted,
                     maxLines = 1,
                     // Owner round 26: keep the sending/duration line clear of
