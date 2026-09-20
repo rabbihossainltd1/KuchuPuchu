@@ -1,6 +1,7 @@
 // Imported, not spelled out: inside a Gradle Kotlin DSL script `java` is the JavaPlugin
 // extension accessor, so `java.util.Base64` parses as `project.java.util` and the script
 // fails to compile with "Unresolved reference: util". (This is what CI caught.)
+import java.security.MessageDigest
 import java.util.Base64
 
 plugins {
@@ -27,6 +28,33 @@ val kpReleaseKeystore: File? = kpKeystoreB64?.let { b64 ->
     out
 }
 
+// M4 phase 1 (audit 2026-09-21): the debug key is moving to the
+// KP_DEBUG_KEYSTORE_B64 CI secret — the SAME bytes as the committed
+// debug.keystore, so signatures (and in-place updates) do not change.
+// Until the secret exists the committed file stays the fallback; phase 2
+// (after the owner confirms the secret) deletes the file and falls back
+// to AGP's default debug key instead.
+val kpDebugKeystoreB64: String? = System.getenv("KP_DEBUG_KEYSTORE_B64")?.takeIf { it.isNotBlank() }
+val kpDebugKeystore: File? = kpDebugKeystoreB64?.let { b64 ->
+    val out = layout.buildDirectory.file("keystores/kp-debug.keystore").get().asFile
+    out.parentFile.mkdirs()
+    out.writeBytes(Base64.getMimeDecoder().decode(b64))
+    out
+}
+
+fun sha256Hex(f: File): String {
+    val md = MessageDigest.getInstance("SHA-256")
+    val buf = ByteArray(8192)
+    f.inputStream().use { ins ->
+        while (true) {
+            val r = ins.read(buf)
+            if (r <= 0) break
+            md.update(buf, 0, r)
+        }
+    }
+    return md.digest().joinToString("") { "%02x".format(it) }
+}
+
 android {
     namespace = "app.kuchupuchu.android"
     compileSdk = 35
@@ -45,7 +73,16 @@ android {
     }
     signingConfigs {
         getByName("debug") {
-            storeFile = file("debug.keystore")
+            // M4 phase 1: secret first, committed file until it exists. The
+            // printed hash proves continuity: after the owner pastes the
+            // secret, CI must print the same sha256 as the committed file
+            // (else the paste was wrong and phase 2 must wait).
+            val dbg = kpDebugKeystore ?: file("debug.keystore")
+            println(
+                "kp-debug-keystore source=" + (if (kpDebugKeystore != null) "secret" else "repo-file") +
+                    " sha256=" + sha256Hex(dbg),
+            )
+            storeFile = dbg
             storePassword = "android"
             keyAlias = "androiddebugkey"
             keyPassword = "android"
