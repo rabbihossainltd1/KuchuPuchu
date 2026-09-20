@@ -255,6 +255,15 @@ check(
 );
 /* r56 — the owner's round 56 */
 check(
+  "r56 item 2: live typing/voice indicator clears on send/message arrival, pings voice on record start, deletes typing in batch on send",
+  src.includes('db.prepare("DELETE FROM typing WHERE conv_id = ? AND user_id = ?")') &&
+    src.includes('rawKind === "clear"') &&
+    chat.includes("otherTypingAt = 0L") &&
+    chat.includes(
+      'Api.post("/api/conversations/$convId/typing", JSONObject().put("kind", "clear"))',
+    ),
+);
+check(
   "r56 item 1: See more/See less uses Color.White, collapses on expanded bubble tap as well as row tap, and has smooth spring animation",
   chat.includes("color = Color.White,") &&
     chat.includes(

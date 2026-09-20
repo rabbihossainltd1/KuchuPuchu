@@ -7798,6 +7798,20 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // typing.kind column has existed since the indicator shipped; the POST
     // simply never wrote it.
     const rawKind = body.kind;
+    // r56 item 2: clearing typing when cancelled / finished.
+    if (rawKind === "clear" || rawKind === "none") {
+      await run(db, "DELETE FROM typing WHERE conv_id = ? AND user_id = ?", convId, uid);
+      ctx.waitUntil(
+        broadcastRoomEvent(env, convId, {
+          type: "typing",
+          conversationId: convId,
+          userId: uid,
+          at: "",
+          kind: null,
+        }),
+      );
+      return json({ ok: true });
+    }
     const kind =
       typeof rawKind === "string" && rawKind.length > 0 && rawKind.length <= 16 ? rawKind : "text";
     await run(
@@ -8016,12 +8030,19 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       convId,
       uid,
     );
+    // r56 item 2: stale typing check — if the other user already sent a message at/after typingRow.at, it is stale
+    const lastOtherMsg = rows.find((r) => r.sender_id && r.sender_id !== uid);
+    const typingIsStale =
+      !typingRow ||
+      (lastOtherMsg && Date.parse(lastOtherMsg.created_at) >= Date.parse(typingRow.at));
     const typingAt =
-      typingRow && Date.now() - Date.parse(typingRow.at) < 6_000 ? typingRow.at : null;
+      !typingIsStale && typingRow && Date.now() - Date.parse(typingRow.at) < 6_000
+        ? typingRow.at
+        : null;
     // Owner round 42 (item 3): what the AI is making. Ungated by design — a
     // 25 s image gen outlives the 6 s typing lease, and the app binds the
     // kind to its own generating state, not the clock.
-    const typingKind = typingRow?.kind ?? null;
+    const typingKind = !typingIsStale ? (typingRow?.kind ?? null) : null;
     // Freshness marker: page contents (id/text/edited/delivery per row) +
     // read + typing, so every field the client consumes participates in the
     // check - including repeat edits of the same row.
@@ -8360,6 +8381,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           "UPDATE members SET unread = unread + 1 WHERE conv_id = ? AND user_id != ? AND EXISTS (SELECT 1 FROM messages WHERE id = ?)",
         )
         .bind(convId, uid, mid),
+      // r56 item 2: clear typing on message send so recipients never see fake typing after send
+      db.prepare("DELETE FROM typing WHERE conv_id = ? AND user_id = ?").bind(convId, uid),
     ])) as { meta?: { changes?: number } }[];
     if ((written[0]?.meta?.changes ?? 1) === 0) {
       // The race lost to a twin (never a second row, never a 500): hand back
@@ -8395,6 +8418,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // (below) still wakes fully backgrounded apps — WS is the foreground path.
     ctx.waitUntil(
       broadcastRoomEvent(env, convId, { type: "message", conversationId: convId, message }),
+    );
+    // r56 item 2: clear typing realtime frame on send
+    ctx.waitUntil(
+      broadcastRoomEvent(env, convId, {
+        type: "typing",
+        conversationId: convId,
+        userId: uid,
+        at: "",
+        kind: null,
+      }),
     );
     // Owner round 32 (item 35): a photo's push names where the picture lives
     // (the same authorized path the chat itself loads, fetched with the
