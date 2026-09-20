@@ -25,11 +25,15 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -375,6 +379,97 @@ fun Modifier.fxPadlockSnap(trigger: Any?): Modifier {
     return graphicsLayer {
         rotationZ = rot.value
     }
+}
+
+/**
+ * Voice note send flight (r57): starts small at the voice button (mic),
+ * expands smoothly from small to full original bubble size, and glides
+ * from the voice button directly into its seat in the chat stream.
+ */
+@Composable
+fun Modifier.fxVoiceLaunch(trigger: Any?): Modifier {
+    val scale = fxAnimatorScale()
+    val density = LocalDensity.current.density
+    val p = remember(trigger) { Animatable(if (trigger != null && scale > 0f) 0f else 1f) }
+    var seat by remember(trigger) { mutableStateOf<Rect?>(null) }
+    var launched by remember(trigger) { mutableStateOf(false) }
+
+    LaunchedEffect(trigger) {
+        if (trigger != null && scale > 0f) {
+            val mic = FlightAnchors.micBounds
+            if (mic != null) {
+                launched = true
+                p.snapTo(0f)
+                p.animateTo(1f, tween(520, easing = FastOutSlowInEasing))
+            }
+        }
+    }
+
+    return this
+        .onGloballyPositioned { if (trigger != null) seat = it.boundsInWindow() }
+        .graphicsLayer {
+            if (trigger == null || scale <= 0f || !launched) return@graphicsLayer
+            val v = p.value
+            if (v >= 1f) return@graphicsLayer
+            val mic = FlightAnchors.micBounds
+            val s = seat
+            if (mic != null && s != null) {
+                val startX = mic.centerX - s.centerX
+                val startY = mic.centerY - s.centerY
+                val arc = sin(v * PI.toFloat()) * 24f * density
+                translationX = startX * (1f - v)
+                translationY = startY * (1f - v) - arc
+                val sVal = 0.28f + 0.72f * v
+                scaleX = sVal
+                scaleY = sVal
+                alpha = if (v < 0.08f) v / 0.08f else 1f
+            }
+        }
+}
+
+/**
+ * Media & Document send flight (r57): jumps out with an upward arc from the
+ * attach panel / paperclip anchor right into its chat seat position.
+ */
+@Composable
+fun Modifier.fxAttachJump(trigger: Any?): Modifier {
+    val scale = fxAnimatorScale()
+    val density = LocalDensity.current.density
+    val p = remember(trigger) { Animatable(if (trigger != null && scale > 0f) 0f else 1f) }
+    var seat by remember(trigger) { mutableStateOf<Rect?>(null) }
+    var jumped by remember(trigger) { mutableStateOf(false) }
+
+    LaunchedEffect(trigger) {
+        if (trigger != null && scale > 0f) {
+            val att = FlightAnchors.attachBounds ?: FlightAnchors.composerBounds
+            if (att != null) {
+                jumped = true
+                p.snapTo(0f)
+                p.animateTo(1f, tween(540, easing = FastOutSlowInEasing))
+            }
+        }
+    }
+
+    return this
+        .onGloballyPositioned { if (trigger != null) seat = it.boundsInWindow() }
+        .graphicsLayer {
+            if (trigger == null || scale <= 0f || !jumped) return@graphicsLayer
+            val v = p.value
+            if (v >= 1f) return@graphicsLayer
+            val att = FlightAnchors.attachBounds ?: FlightAnchors.composerBounds
+            val s = seat
+            if (att != null && s != null) {
+                val startX = att.centerX - s.centerX
+                val startY = att.centerY - s.centerY
+                val jumpArc = sin(v * PI.toFloat()) * 38f * density
+                translationX = startX * (1f - v)
+                translationY = startY * (1f - v) - jumpArc
+                val sVal = 0.35f + 0.65f * v
+                scaleX = sVal
+                scaleY = sVal
+                alpha = if (v < 0.08f) v / 0.08f else 1f
+            }
+        }
 }
 
 /* ------------------------------------------------------ letter-by-letter */
