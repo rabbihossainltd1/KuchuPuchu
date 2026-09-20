@@ -2470,6 +2470,37 @@ function rateLimit(key: string, capacity: number, refillPerMinute: number) {
   }
 }
 
+/**
+ * M2 (audit 2026-09-21): the GLOBAL side of rate limiting. rateLimit() above
+ * is per-isolate (each edge isolate keeps its own buckets), so a caller
+ * spread over many isolates gets cap x isolates. This is a fixed-window
+ * counter in D1 — every isolate reads/writes the same row, so the cap holds
+ * globally. Callers keep their in-memory check first (cheap, precise,
+ * refilling) and add this as the backstop with 2x headroom, so single-
+ * isolate bursts still feel the smooth bucket while floods die globally.
+ * D1 is single-writer, so the read-modify-write below cannot interleave.
+ */
+async function rateLimitGlobal(db: D1Database, key: string, cap: number) {
+  const window = Math.floor(Date.now() / 60_000);
+  const row = await one<{ count: number }>(
+    db,
+    "SELECT count FROM rate_limits WHERE key = ? AND window = ?",
+    key,
+    window,
+  );
+  const count = row?.count ?? 0;
+  if (count >= cap) {
+    fail(429, "Too many attempts. Wait a minute and try again.", "RATE_LIMITED", "60");
+  }
+  await run(
+    db,
+    "INSERT OR REPLACE INTO rate_limits (key, window, count) VALUES (?, ?, ?)",
+    key,
+    window,
+    count + 1,
+  );
+}
+
 /** Best-effort client key for rate limiting (CF-Connecting-IP on Cloudflare). */
 function clientIp(request: Request) {
   return (
@@ -2967,6 +2998,13 @@ async function ensureSchema(db: D1Database) {
     `CREATE INDEX IF NOT EXISTS idx_calls_caller ON calls(caller_id, created_at)`,
     `CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id)`,
     `CREATE INDEX IF NOT EXISTS idx_files_owner ON files(owner_id)`,
+    // M2 (audit 2026-09-21): global (cross-isolate) fixed-window counters
+    // backing rateLimitGlobal. PK serves the point lookups; the cron prunes
+    // windows older than the live one, so the table stays tiny.
+    `CREATE TABLE IF NOT EXISTS rate_limits (
+      key TEXT NOT NULL, window INTEGER NOT NULL, count INTEGER NOT NULL,
+      PRIMARY KEY (key, window)
+    )`,
   ];
   // Additive migrations: columns and indexes added after the first deploy. Run
   // one by one and never inside the batch — a duplicate-column error must not
@@ -5146,6 +5184,19 @@ export default {
           JSON.stringify({ err: sErr instanceof Error ? sErr.message : String(sErr) }),
         );
       }
+      // M2: rate_limits holds only the live minute-window; drop older ones.
+      try {
+        await run(
+          env.DB,
+          "DELETE FROM rate_limits WHERE window < ?",
+          Math.floor(Date.now() / 60_000) - 1,
+        );
+      } catch (rlErr) {
+        console.error(
+          "cron_ratelimit_prune_error",
+          JSON.stringify({ err: rlErr instanceof Error ? rlErr.message : String(rlErr) }),
+        );
+      }
     } catch (err) {
       console.error(
         "cron_reap_error",
@@ -5288,6 +5339,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   if (path === "/api/auth/verify-phone" && method === "POST") {
     rateLimit(`pv:${clientIp(request)}`, 15, 10);
+    await rateLimitGlobal(db, `gpv:${clientIp(request)}`, 30);
     const phone = normalizePhone(body.phone);
     const sim = parseSimResult(body.sim);
     const deviceId = parseDeviceId(body.deviceId);
@@ -5452,6 +5504,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   if (path === "/api/auth/google/bind" && method === "POST") {
     rateLimit(`gb:${clientIp(request)}`, 10, 5);
+    await rateLimitGlobal(db, `ggb:${clientIp(request)}`, 20);
     const phone = normalizePhone(body.phone);
     const deviceId = parseDeviceId(body.deviceId);
     const displayName =
@@ -5567,6 +5620,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // the matching deviceId is the capability; the session is minted here,
     // exactly once, when the old device has approved.
     rateLimit(`lp:${clientIp(request)}`, 120, 60);
+    await rateLimitGlobal(db, `glp:${clientIp(request)}`, 300);
     const requestId = String(body.requestId || "")
       .trim()
       .slice(0, 64);
@@ -5623,6 +5677,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   if (path === "/api/auth/login/cancel" && method === "POST") {
     rateLimit(`lc:${clientIp(request)}`, 15, 10);
+    await rateLimitGlobal(db, `glc:${clientIp(request)}`, 30);
     const requestId = String(body.requestId || "")
       .trim()
       .slice(0, 64);
@@ -5648,6 +5703,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // and tightly rate-limited: phone enumeration stays as (un)profitable
     // as it already is through verify-phone's status codes.
     rateLimit(`rlookup:${clientIp(request)}`, 10, 5);
+    await rateLimitGlobal(db, `grlookup:${clientIp(request)}`, 20);
     const phone = normalizePhone(body.phone);
     const user = await one<{ id: string }>(
       db,
@@ -5661,8 +5717,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // §21: the old device is gone, so the ONLY acceptable proof is the Google
     // identity bound to the account. The entered phone just finds the account.
     rateLimit(`rs:${clientIp(request)}`, 5, 2);
+    await rateLimitGlobal(db, `grs:${clientIp(request)}`, 10);
     const phone = normalizePhone(body.phone);
     rateLimit(`rsp:${phone}`, 5, 2);
+    await rateLimitGlobal(db, `grsp:${phone}`, 10);
     const user = await one<UserRow>(db, "SELECT * FROM users WHERE phone_e164 = ?", phone);
     if (!user || user.auth_status !== "ACTIVE" || !user.google_subject)
       fail(404, "No recoverable account was found for that number.", "NO_RECOVERY_TARGET");
@@ -5696,6 +5754,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
   if (path === "/api/auth/recovery/complete" && method === "POST") {
     rateLimit(`rc:${clientIp(request)}`, 10, 5);
+    await rateLimitGlobal(db, `grc:${clientIp(request)}`, 20);
     const requestId = String(body.requestId || "")
       .trim()
       .slice(0, 64);
