@@ -2381,6 +2381,21 @@ fun ChatScreen(nav: NavController, convId: String) {
             typingLeaseActive = false
         }
     }
+    // r56 item 2: auto-scroll to typing / voice indicator so user doesn't have to scroll manually
+    LaunchedEffect(typingLeaseActive, otherTypingKind) {
+        if (typingLeaseActive) {
+            delay(50)
+            val info = listState.layoutInfo
+            val total = info.totalItemsCount
+            if (total > 0) {
+                val nearBottom =
+                    info.visibleItemsInfo.lastOrNull()?.index?.let { it >= total - 3 } ?: true
+                if (nearBottom) {
+                    runCatching { listState.animateScrollToItem(total - 1) }
+                }
+            }
+        }
+    }
     // KuchuPuchu AI typing (owner round 2026-09-04): the bot ALWAYS answers
     // the user's latest message (server-guaranteed, with a fallback reply),
     // so "the newest thing in the thread is MY message and it didn't fail"
@@ -6168,17 +6183,23 @@ private fun MessageRow(
                         Row(
                             Modifier
                                 .fillMaxWidth()
+                                .heightIn(min = 38.dp)
                                 .clickable {
                                     msgExpanded = !msgExpanded
                                     runCatching { haptics.tap() }
                                 }
-                                .padding(top = 2.dp, bottom = 2.dp),
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
                                 if (msgExpanded) "See less" else "See more",
                                 fontSize = 12.5.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color.White,
+                                modifier = Modifier.clickable {
+                                    msgExpanded = !msgExpanded
+                                    runCatching { haptics.tap() }
+                                },
                             )
                         }
                     }
