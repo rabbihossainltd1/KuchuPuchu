@@ -1587,8 +1587,12 @@ private fun MediaEditItemScreen(
     // Owner round 45 (item 7): a horizontal swipe browses the pool — gated
     // off while drawing, cropping or nudging an overlay, so those drags
     // always win. Left = next photo, right = previous.
+    // r56 (owner item 3: "first attempt a halka zoom hoi second attempt free zoom hoi"):
+    // browseTick must NOT depend on stageZoom <= 1f; swapping the modifier node on the
+    // parent Box mid-pinch cancelled the child's pinch gesture on the first attempt!
+    // Instead, the browse gesture handler below checks stageZoom and stands down when zoomed.
     val browseTick =
-        onBrowse != null && !penMode && !cropping && selectedId == null && !busy && stageZoom <= 1f
+        onBrowse != null && !penMode && !cropping && selectedId == null && !busy
     Box(
         Modifier
             .fillMaxSize()
@@ -1612,7 +1616,7 @@ private fun MediaEditItemScreen(
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                             val h = size.height.toFloat()
-                            if (down.position.y < 180f || down.position.y > h - 520f) {
+                            if (down.position.y < 180f || down.position.y > h - 520f || !(onBrowse != null && stageZoom <= 1f)) {
                                 while (true) {
                                     val ev = awaitPointerEvent(PointerEventPass.Initial)
                                     val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
