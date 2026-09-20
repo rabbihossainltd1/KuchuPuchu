@@ -693,8 +693,18 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // Live read receipts: the sender's ticks turn blue without
                 // reopening the chat.
                 parsed.readAt?.let { otherReadAt = it }
-                if (parsed.typingAt > 0) otherTypingAt = parsed.typingAt
+                // r56 item 2: do not show typing indicator if a newer message from other user already arrived
+                val lastOtherMsgTime = fresh.lastOrNull { it.optString("senderId") != Store.myId() }?.optString("createdAt") ?: ""
+                val typingStale = lastOtherMsgTime.isNotBlank() && parsed.typingAt > 0 &&
+                    (runCatching { java.time.Instant.parse(lastOtherMsgTime).toEpochMilli() }.getOrDefault(0L) >= parsed.typingAt)
+                if (parsed.typingAt > 0 && !typingStale) {
+                    otherTypingAt = System.currentTimeMillis()
+                } else {
+                    otherTypingAt = 0L
+                    typingLeaseActive = false
+                }
                 otherTypingKind = parsed.typingKind
+                if (typingStale) otherTypingKind = null
                 val newTop = parsed.topId
                 // §39: rows the user paged back to are not in the newest window, so
                 // a plain rebuild would drop them on the next tick — scroll back two
@@ -894,6 +904,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                     }
                 "message" ->
                     if (ev.optString("conversationId") == convId) {
+                        // r56 item 2: new message arrived -> clear typing indicator immediately
+                        otherTypingAt = 0L
+                        otherTypingKind = null
+                        typingLeaseActive = false
                         // FAST PAINT: the WS "message" frame carries the FULL
                         // message object (msgFrom), so we drop the bubble into
                         // the thread instantly instead of waiting a GET round
@@ -1073,11 +1087,17 @@ fun ChatScreen(nav: NavController, convId: String) {
                         ev.optString("conversationId") == convId &&
                         ev.optString("userId") != Store.myId()
                     ) {
-                        runCatching { java.time.Instant.parse(ev.optString("at")).toEpochMilli() }
-                            .getOrNull()
-                            ?.let { ms -> if (ms > 0) otherTypingAt = ms }
-                        // r55: a recording ping rides the same frame.
-                        otherTypingKind = ev.optString("kind").takeIf { it.isNotBlank() }
+                        // r56 item 2: live typing ping uses local monotonic time to eliminate clock skew; empty at = clear
+                        val atStr = ev.optString("at")
+                        val kStr = ev.optString("kind")
+                        if (atStr.isBlank() || kStr == "clear" || kStr == "none") {
+                            otherTypingAt = 0L
+                            otherTypingKind = null
+                            typingLeaseActive = false
+                        } else {
+                            otherTypingAt = System.currentTimeMillis()
+                            otherTypingKind = kStr.takeIf { it.isNotBlank() }
+                        }
                     }
             }
         }
@@ -1330,6 +1350,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }
         }
         // Owner round 11: tap sound on the send itself…
+        lastTypingPing = 0L
         runCatching { KpSounds.send(ctx) }
         // Owner round 33 (item 3): queue-FIRST, off this screen's scope. The
         // POST used to run on the composable's coroutine scope with the queue
@@ -2077,6 +2098,14 @@ fun ChatScreen(nav: NavController, convId: String) {
                 if (VoiceNote.start(ctx)) {
                     recMs = 0
                     recording = true
+                    // r56 item 2: ping voice immediately on recording start
+                    scope.launch {
+                        runCatching {
+                            withContext(Dispatchers.IO) {
+                                Api.post("/api/conversations/$convId/typing", JSONObject().put("kind", "voice"))
+                            }
+                        }
+                    }
                 } else {
                     error = "Mic is not available. Check the mic permission."
                 }
@@ -2087,6 +2116,14 @@ fun ChatScreen(nav: NavController, convId: String) {
     fun finishRecording(cancelled: Boolean) {
         if (!recording) return
         recording = false
+        // r56 item 2: clear voice indicator immediately when recording finishes or cancels
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    Api.post("/api/conversations/$convId/typing", JSONObject().put("kind", "clear"))
+                }
+            }
+        }
         if (cancelled) {
             // Owner round 21: his voice-cancel sound.
             runCatching { KpSounds.voiceCancel(ctx) }
