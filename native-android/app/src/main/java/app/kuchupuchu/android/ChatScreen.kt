@@ -6196,10 +6196,6 @@ private fun MessageRow(
                                 fontSize = 12.5.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color.White,
-                                modifier = Modifier.clickable {
-                                    msgExpanded = !msgExpanded
-                                    runCatching { haptics.tap() }
-                                },
                             )
                         }
                     }
@@ -8860,18 +8856,19 @@ private fun RecordingBubble(mic: Color) {
             .padding(vertical = 3.dp),
         horizontalArrangement = Arrangement.Start,
     ) {
+        // r56 item 2 (owner: "voice indicator ta choto compact koro"): compact badge with tight padding & 15dp icon
         Box(
             Modifier
-                .widthIn(min = 64.dp)
-                .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 5.dp, bottomEnd = 16.dp))
+                .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 4.dp, bottomEnd = 12.dp))
                 .background(Brush.linearGradient(listOf(Card, Card)))
-                .padding(horizontal = 14.dp, vertical = 11.dp),
+                .padding(horizontal = 9.dp, vertical = 6.dp),
+            contentAlignment = Alignment.Center,
         ) {
             Icon(
                 Icons.Filled.Mic,
                 contentDescription = null,
                 tint = mic.copy(alpha = a),
-                modifier = Modifier.size(18.dp).graphicsLayer { scaleX = s2; scaleY = s2 },
+                modifier = Modifier.size(15.dp).graphicsLayer { scaleX = s2; scaleY = s2 },
             )
         }
     }
