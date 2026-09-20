@@ -819,7 +819,7 @@ private fun rnd(seed: Int, i: Int): Float {
     return ((y xor (y ushr 16)) and 0x7FFFF).toFloat() / 0x80000.toFloat()
 }
 
-private fun DrawScope.drawFx(fx: EmojiFx, tMs: Long, seed: Int) {
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawFx(fx: EmojiFx, tMs: Long, seed: Int) {
     val cx = size.width / 2f
     val cy = size.height / 2f
     val dp = size.height / 56f
