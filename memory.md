@@ -49,6 +49,27 @@
   - Reduced minimum width for received short text messages to compact `52.dp` (`requiredWidthIn(min = if (!mine) 52.dp else 70.dp)`), making received short messages like "hi" or "ok" truly compact.
 - Directive 4: Version bumped to `v193` (`versionCode = 193`, `versionName = "3.9.116"`).
 
+## Round 62 User Directives & Status
+- Directive 1: Voice message flight animation & layout fix:
+  - User feedback: "1. fixed almost just voice massage er animation er somoy original body na hoye fake animation hocche left side a extra space dekha jacche original rakho."
+  - Root Cause:
+    1. In `FileBubble`, `VoiceWave` was passed `grow = fxGrow` (`fxGrow = fxFresh`), which caused waveform bars to reveal one by one over time (`reveal = (growAt - 40f) / 22f`), rendering an empty canvas area initially instead of showing the complete real waveform.
+    2. In `MessageRow`, `Box` had `.animateContentSize(...)` which animated the bubble's width during entry, causing it to stretch and move its left boundary.
+    3. In `MessageRow`, `Box` had `.fxSideSlide(...)` which ran simultaneously with the outer `Row.fxFlyIn(...)`, doubling the horizontal translation and pushing the bubble too far right while creating empty space on the left.
+  - Fix:
+    1. Set `grow = false` in `VoiceWave` so the complete, original waveform is rendered immediately with all bars visible from the very first frame.
+    2. Restricted `animateContentSize` to `textLike && longBody` only, preventing any size animation or stretching on voice message bubbles.
+    3. Excluded `voiceRow` from duplicate `fxSideSlide` so voice messages glide smoothly via `Row.fxFlyIn` without duplicate offset or left-side void.
+- Directive 2: View-once icon styling & animation:
+  - User feedback: "2. shob ok just tomar zoom in zoom out animation ta pochondo hoi i ar ei icons er dim background remove koro just icon ta animate korbe."
+  - Fix:
+    1. Removed zoom-in / zoom-out pulse scale (`pulseScale` 0.92f <-> 1.08f) from center view-once badge.
+    2. Removed the 62dp circular dim backdrop (`.clip(CircleShape).background(Color(0x66000000))`) so the icon floats directly over the blurred media with no dim disc behind it.
+    3. Implemented clean continuous rotation on the outer dotted ring of the view-once icon (`ringRotation` 0f -> 360f), while keeping the central bold digit "1" stationary and upright, ensuring only the icon itself animates cleanly without any breathing scale or dim background.
+- Directive 3: Received short message bubble size confirmation:
+  - User confirmed: "3. fixed". Maintained compact 52.dp minimum width for received short messages and 70.dp for sent.
+- Directive 4: Bumped version to `v194` (`versionCode = 194`, `versionName = "3.9.117"`).
+
 ## Test Gates
 - All 37/37 test cases passing (1611 assertions).
 - ktlint clean.

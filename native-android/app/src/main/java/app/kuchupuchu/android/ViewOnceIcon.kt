@@ -14,6 +14,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.Dp
@@ -34,32 +35,42 @@ import kotlin.math.roundToInt
  */
 @Composable
 internal fun ViewOnceOneIcon(iconSize: Dp, tint: Color = Color.White) {
+    ViewOnceOneIcon(iconSize, tint, 0f)
+}
+
+@Composable
+internal fun ViewOnceOneIcon(iconSize: Dp, tint: Color = Color.White, ringRotation: Float = 0f) {
     Canvas(Modifier.size(iconSize)) {
         // px per SVG unit (the source viewBox is 100x100).
         val u = size.minDimension / 100f
         if (u <= 0f) return@Canvas
-        drawArc(
-            color = tint,
-            startAngle = 49.9f,
-            sweepAngle = 260.2f,
-            useCenter = false,
-            topLeft = Offset(8f * u, 18f * u),
-            size = Size(64f * u, 64f * u),
-            style = Stroke(width = 5.5f * u, cap = StrokeCap.Round),
-        )
-        // The dotted gap on the right (x, y, r triples from the SVG).
-        val dots =
-            floatArrayOf(
-                60.6f, 25.5f, 2.5f,
-                69f, 36.5f, 3.6f,
-                72f, 50f, 4.2f,
-                69f, 63.5f, 3.6f,
-                60.6f, 74.5f, 2.5f,
+        val pivot = Offset(40f * u, 50f * u)
+        withTransform({
+            rotate(ringRotation, pivot)
+        }) {
+            drawArc(
+                color = tint,
+                startAngle = 49.9f,
+                sweepAngle = 260.2f,
+                useCenter = false,
+                topLeft = Offset(8f * u, 18f * u),
+                size = Size(64f * u, 64f * u),
+                style = Stroke(width = 5.5f * u, cap = StrokeCap.Round),
             )
-        var i = 0
-        while (i < dots.size) {
-            drawCircle(tint, radius = dots[i + 2] * u, center = Offset(dots[i] * u, dots[i + 1] * u))
-            i += 3
+            // The dotted gap on the right (x, y, r triples from the SVG).
+            val dots =
+                floatArrayOf(
+                    60.6f, 25.5f, 2.5f,
+                    69f, 36.5f, 3.6f,
+                    72f, 50f, 4.2f,
+                    69f, 63.5f, 3.6f,
+                    60.6f, 74.5f, 2.5f,
+                )
+            var i = 0
+            while (i < dots.size) {
+                drawCircle(tint, radius = dots[i + 2] * u, center = Offset(dots[i] * u, dots[i + 1] * u))
+                i += 3
+            }
         }
         // The digit: the SVG's <text> element, same anchor/baseline/size.
         drawContext.canvas.nativeCanvas.drawText(
@@ -86,6 +97,11 @@ internal fun ViewOnceOneIcon(iconSize: Dp, tint: Color = Color.White) {
  */
 @Composable
 internal fun CenteredOnceIcon(iconSize: Dp, tint: Color = Color.White) {
+    CenteredOnceIcon(iconSize, tint, 0f)
+}
+
+@Composable
+internal fun CenteredOnceIcon(iconSize: Dp, tint: Color = Color.White, ringRotation: Float = 0f) {
     val px = with(LocalDensity.current) { iconSize.toPx() }
     Box(
         Modifier
@@ -97,7 +113,7 @@ internal fun CenteredOnceIcon(iconSize: Dp, tint: Color = Color.White) {
             },
         contentAlignment = Alignment.Center,
     ) {
-        ViewOnceOneIcon(iconSize, tint)
+        ViewOnceOneIcon(iconSize, tint, ringRotation)
     }
 }
 

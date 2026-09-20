@@ -6011,7 +6011,9 @@ private fun MessageRow(
                     )
                     // r55: a smooth expand / collapse when the fold flips.
                     // r56 (owner: "smooth expand collapse animation"): spring damping ratio + stiffness tuned for buttery fold animation.
-                    .animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f))
+                    // r62 (owner: "voice massage er animation er somoy original body na hoye fake animation hocche ... original rakho"):
+                    // animateContentSize only on collapsible text bodies; voice notes keep exact original body dimensions with no resize.
+                    .then(if (textLike && longBody) Modifier.animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f)) else Modifier)
                     .combinedClickable(
                         onClick = {
                             if (selectedIds.isNotEmpty() && !pendingEcho) {
@@ -6041,7 +6043,8 @@ private fun MessageRow(
                     // already leaves the stamp its corner.
                     .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (voiceRow) 0.dp else if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp)
                     // r58: live sent messages animate from right, received from left; history stays quiet
-                    .fxSideSlide(active = fxFresh, isSent = mine)
+                    // r62 (owner: "left side a extra space dekha jacche original rakho"): voice notes fly via fxFlyIn directly with original body; no duplicate box translation.
+                    .then(if (voiceRow) Modifier else Modifier.fxSideSlide(active = fxFresh, isSent = mine))
                     // v172 (owner: "light effect ta just message a hobe
                     // full chat a na"): the landing squash + shine + ripple
                     // ride the BUBBLE only.
@@ -6889,15 +6892,15 @@ private fun ViewOnceRow(
     // r60 (owner: "keo njje view once send korle nije jeno view korte pare"):
     // sender can also open/preview their sent view-once media until recipient vanishes it.
     val canOpen = !pendingEcho
-    val oncePulse = rememberInfiniteTransition(label = "oncePulse")
-    val pulseScale by oncePulse.animateFloat(
-        initialValue = 0.92f,
-        targetValue = 1.08f,
+    val onceAnim = rememberInfiniteTransition(label = "onceRing")
+    val ringRotation by onceAnim.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
         animationSpec = infiniteRepeatable(
-            animation = tween(900, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
+            animation = tween(3600, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
         ),
-        label = "onceScale",
+        label = "onceRingRot",
     )
     var replyDrag by remember { mutableStateOf(0f) }
     val replyOffset by animateFloatAsState(replyDrag, spring(stiffness = 1400f), label = "oncereplydrag")
@@ -7108,23 +7111,15 @@ private fun ViewOnceRow(
                         }
                     }
                 }
-                // Center circular dark badge holding the view once mark
-                // r60 (owner: "majher view once icon ta boro hobe aro ... animate korbe view hobar age"):
-                // larger centered badge with smooth breathing pulse animation before viewed.
+                // Center view-once mark (r62: dim background circle removed, zoom pulse removed, only icon ring animates)
                 // ViewOnceOneIcon(56.dp)
                 Box(
                     Modifier
                         .align(Alignment.Center)
-                        .graphicsLayer {
-                            scaleX = pulseScale
-                            scaleY = pulseScale
-                        }
-                        .size(62.dp)
-                        .clip(CircleShape)
-                        .background(Color(0x66000000)),
+                        .size(52.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CenteredOnceIcon(48.dp)
+                    CenteredOnceIcon(50.dp, ringRotation = ringRotation)
                 }
                 if (pendingEcho) {
                     // An upload in flight: the determinate ring under the mark.
@@ -8336,7 +8331,9 @@ private fun FileBubble(
                     progress = progress,
                     played = ink,
                     rest = faint,
-                    grow = fxGrow,
+                    // r62 (owner: "voice massage er animation er somoy original body na hoye fake animation hocche ... original rakho"):
+                    // original full waveform rendered immediately without fake grow animation.
+                    grow = false, // grow = fxGrow,
                     modifier = Modifier.width(150.dp).height(22.dp),
                     onSeek = { frac ->
                         if (!pendingEcho && fileKey.isNotBlank()) player.seekTo(ctx, id, fileKey, frac)
