@@ -123,7 +123,8 @@ internal fun mediaArgDecode(b64: String): JSONObject? =
 
 /** The viewable URL of a photo message: inline/absolute mediaUrl, else the file key. */
 internal fun messageMediaUrl(m: JSONObject): String =
-    m.optText("mediaUrl").takeIf { it.isNotBlank() }
+    m.optText("kpLocalUrl").takeIf { it.isNotBlank() }
+        ?: m.optText("mediaUrl").takeIf { it.isNotBlank() }
         ?: m.optText("fileKey").takeIf { it.isNotBlank() }?.let { key ->
             if (key.startsWith("data:") || key.startsWith("http") || key.startsWith("/")) key else "/api/files/$key"
         } ?: ""

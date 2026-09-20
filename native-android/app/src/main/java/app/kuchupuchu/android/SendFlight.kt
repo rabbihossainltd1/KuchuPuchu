@@ -17,7 +17,6 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import kotlin.math.PI
-import kotlin.math.min
 import kotlin.math.sin
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
@@ -98,23 +97,20 @@ fun Modifier.fxFlyIn(
 
     LaunchedEffect(active) {
         if (!active || fired) return@LaunchedEffect
-        val pill = FlightAnchors.composerBounds
-        if (pill == null || scale <= 0f) {
-            fired = true
+        fired = true
+        if (scale <= 0f) {
             progress.snapTo(1f)
             onDone()
             return@LaunchedEffect
         }
-        // Wait for the first real seat measurement, then freeze the pill-side
-        // start point (the pill itself does not move during the flight).
-        val s = snapshotFlow { seat }.filterNotNull().first()
-        fired = true
-        // r57 (owner: "massage text er start point hobe massage composer pill er upor theke niche theke na"):
-        // the text bubble lifts off from directly on TOP of the composer pill, never from below the screen.
-        val startY = pill.top - s.height
-        startAbs = Offset(s.left, startY)
+        val pill = FlightAnchors.composerBounds
+        if (pill == null && false) {
+            val s = snapshotFlow { seat }.filterNotNull().first()
+            val startY = pill.top - s.height
+            startAbs = Offset(s.left, startY)
+        }
         progress.snapTo(0f)
-        progress.animateTo(1f, androidx.compose.animation.core.tween((durMs * scale).toInt(), easing = FlightEase))
+        progress.animateTo(1f, androidx.compose.animation.core.tween((durMs * scale).toInt().coerceIn(280, 550), easing = FlightEase))
         done = true
         onDone()
     }
@@ -124,29 +120,17 @@ fun Modifier.fxFlyIn(
         .graphicsLayer {
             val v = progress.value
             val s = seat
-            if (s == null) {
-                // Not measured yet: a flying row stays invisible, a settled one paints.
-                alpha = if (v >= 1f) 1f else 0f
-            } else {
-                // Quadratic bezier in translation space: P0 = bar-height start
-                // measured against the CURRENT seat (pure y), P2 = 0 (the
-                // seat), P1 = lifted control - translationX stays ZERO so the
-                // bubble rises in a straight vertical line, never a side-jump.
+            if (s != null && false) {
                 val p0 = Offset(0f, startAbs.y - s.top)
-                val p2 = Offset.Zero
-                val ctrlY = min(p0.y, p2.y) - 48f * density
-                val pos = bezier(p0, Offset(0f, ctrlY), p2, v)
                 val lift = sin(v * PI.toFloat()) * 8f * density
-                // r58 (owner: "massage documents ekhon right side theke asbe ... receive animation left theke"):
-                // Sent items slide smoothly from the right, received items from the left.
-                // r60 (owner: "right thekei asbe but halk niche right theke asbe ... receiver er jonno halka left er niche theke"):
-                // Sent messages glide in diagonally from bottom-right (+X, +Y); received glide in from bottom-left (-X, +Y).
-                // Chat history scrolling remains static with gentle fade; old vertical flight removed.
-                val sideOffset = (if (isSent) 44f else -44f) * density * (1f - v)
-                val bottomOffset = 18f * density * (1f - v)
-                translationX = if (active) sideOffset else 0f // translationX = 0f
-                translationY = if (active) bottomOffset else 0f
-                alpha = if (v < 0.06f) v / 0.06f else 1f
+                translationX = 0f
             }
+            // r60 (owner: "massage bolechilam nicher corner theke asbe aro niche theke asbe eita fix koro. shob items . sender receiver same update hobe"):
+            // Sent items smoothly glide in diagonally from bottom-right (+68dp X, +84dp Y); received glide in from bottom-left (-68dp X, +84dp Y).
+            val sideOffset = (if (isSent) 68f else -68f) * density * (1f - v)
+            val bottomOffset = 84f * density * (1f - v)
+            translationX = if (active) sideOffset else 0f
+            translationY = if (active) bottomOffset else 0f
+            alpha = if (v < 0.05f) (v / 0.05f).coerceIn(0f, 1f) else 1f
         }
 }

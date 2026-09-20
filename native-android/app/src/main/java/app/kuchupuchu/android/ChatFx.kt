@@ -418,8 +418,8 @@ fun Modifier.fxSideSlide(
     return graphicsLayer {
         val v = p.value
         if (v < 1f) {
-            val dist = 44f * density
-            val yDist = 18f * density
+            val dist = 68f * density
+            val yDist = 84f * density
             translationX = if (isSent) dist * (1f - v) else -dist * (1f - v)
             translationY = yDist * (1f - v)
             alpha = v.coerceIn(0f, 1f)

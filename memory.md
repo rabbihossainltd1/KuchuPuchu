@@ -33,6 +33,22 @@
   - `conv.value` assignment and metadata refresh on message arrival/polling enhanced in `ChatScreen.kt`.
 - Directive 5: Version bumped to `v192` (`versionCode = 192`, `versionName = "3.9.115"`), released on GitHub, and Cloudflare Worker deployed.
 
+## Round 61 User Directives & Status
+- Directive 1: Corner flight animation coming further down from bottom corner:
+  - Sent messages: animate smoothly into chat diagonally from the bottom-right (+68dp X, +84dp Y to 0,0) with soft ease and alpha ramp.
+  - Received messages: animate smoothly into chat diagonally from the bottom-left (-68dp X, +84dp Y to 0,0).
+  - All items (text, voice, photo, video, document, album, view-once) animated consistently.
+  - Removed dependency on `pill == null` or `seat == null` aborts in `SendFlight.kt` so animation reliably triggers every time.
+- Directive 2: View-once media bubble refinements:
+  - Enlarged center view-once badge (`size(62.dp)`, `CenteredOnceIcon(48.dp)`) with smooth breathing pulse scale animation (0.92f <-> 1.08f) before viewed.
+  - Removed top-left capsule pill (`Icons.Filled.Refresh` + `1`).
+  - Removed dim background box from timestamp, rendered clean single-line timestamp in bottom right corner with smaller font (10.sp).
+  - Fixed ratio jumping on send/sent: sender's `paintSent` inherits `mediaW`/`mediaH` and populates `ImageRatios` from donor pending echo; `photoUrlOf` prefers `kpLocalUrl`.
+  - Allowed sender to view their own sent view-once media until the opponent views and vanishes it (`canOpen = !pendingEcho`, `onShown` and `kpOnce` gated so sender views don't spend the single opening).
+- Directive 3: Received short message bubble sizing:
+  - Reduced minimum width for received short text messages to compact `52.dp` (`requiredWidthIn(min = if (!mine) 52.dp else 70.dp)`), making received short messages like "hi" or "ok" truly compact.
+- Directive 4: Version bumped to `v193` (`versionCode = 193`, `versionName = "3.9.116"`).
+
 ## Test Gates
 - All 37/37 test cases passing (1611 assertions).
 - ktlint clean.

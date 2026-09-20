@@ -73,7 +73,6 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Mood
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Videocam
@@ -1281,6 +1280,17 @@ fun ChatScreen(nav: NavController, convId: String) {
                 if (row.optString("senderId") == Store.myId() && p.optString("mediaUrl").startsWith("data:")) {
                     row.put("kpLocalUrl", p.optString("mediaUrl"))
                 }
+                if (row.optInt("mediaW") <= 0 && p.optInt("mediaW") > 0) {
+                    row.put("mediaW", p.optInt("mediaW"))
+                }
+                if (row.optInt("mediaH") <= 0 && p.optInt("mediaH") > 0) {
+                    row.put("mediaH", p.optInt("mediaH"))
+                }
+                val donorRatio = MediaBox.payloadRatio(p)
+                if (donorRatio > 0f) {
+                    val rUrl = row.optString("mediaUrl")
+                    if (rUrl.isNotBlank()) ImageRatios.put(rUrl, donorRatio)
+                }
             }
         }
         if (id.isBlank()) return
@@ -1747,9 +1757,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                     .put("fileSize", file.length())
                     .put("body", caption)
                     .put("clientId", clientId)
-                    .also { if (docMeta != null) it.put("meta", docMeta) }
+                    .also { if (docMeta != null) it.put("meta", if (clipMeta.length() > 0) clipMeta else docMeta) }
             }
         // The outcome callback is the same on both arms — only the body differs.
+        // Uploads.sendFile(convId, clientId, name, mime, file, docMeta) { outcome ->
         if (captionPayload == null) {
             Uploads.sendFile(convId, clientId, name, mime, file, docMeta) { outcome ->
                 outcome.onSuccess { runCatching { KpSounds.sent(ctx) } }
@@ -3353,9 +3364,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 // under capture guard with no Save / Forward, and the
                                 // player spends the opening once the clip is on screen.
                                 val once = isViewOnce(msg)
+                                val isMe = msg.optString("senderId") == Store.myId()
                                 val arg =
                                     JSONObject(msg.toString()).put("kpTitle", who).put("kpPrivate", privateChat || once)
-                                        .also { if (once) it.put("kpOnce", true) }
+                                        .also { if (once && !isMe) it.put("kpOnce", true) } // .also { if (once) it.put("kpOnce", true) }
                                 nav.navigate("videoplayer/${mediaArg(arg)}")
                             },
                             // Owner round 32 (item 33): documents → the app's own viewer.
@@ -4241,7 +4253,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     } else {
                         null
                     },
-                onShown = if (once) ({ ViewOnce.spend(m.optString("id")) }) else null,
+                onShown = if (once && m.optString("senderId") != Store.myId()) ({ ViewOnce.spend(m.optString("id")) }) else null, // onShown = if (once) ({ ViewOnce.spend(m.optString("id")) }) else null,
                 urls = viewerPhotos.map { messageMediaUrl(it) },
                 subtitles = viewerPhotos.map { if (isViewOnce(it)) "View once" else viewerStamp(it.optText("createdAt")) },
                 startIndex = viewerStart,
@@ -5302,7 +5314,8 @@ internal fun quoteText(m: JSONObject): String {
 /** The picture behind a photo message — mediaUrl, an inline data URL while
  *  pending, or the file key as an /api/files path. */
 internal fun photoUrlOf(m: JSONObject): String? =
-    m.optText("mediaUrl").takeIf { it.isNotBlank() }
+    m.optText("kpLocalUrl").takeIf { it.isNotBlank() }
+        ?: m.optText("mediaUrl").takeIf { it.isNotBlank() }
         ?: m.optText("fileKey").takeIf { it.isNotBlank() }?.let { key ->
             if (key.startsWith("data:") || key.startsWith("http") || key.startsWith("/")) key
             else "/api/files/$key"
@@ -5974,8 +5987,8 @@ private fun MessageRow(
                     // enforced AFTER it, as a required size, so a short
                     // bubble really is wider than the stamp under it.
                     // r60 (owner: "short massage bubble size to ami kom korchilam maybe 78/79 but receive short massage er size kom hoini eitaw set koro"):
-                    // compact 78.dp / 79.dp minimum width applies to both sent and received short messages.
-                    .then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = if (!mine) 78.dp else 79.dp)) // .then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = 79.dp))
+                    // compact 52.dp minimum width applies to received short messages (and 70.dp for sent).
+                    .then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = if (!mine) 52.dp else 70.dp)) // .then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = 79.dp))
                     // Owner round 10: the same soft 3D lift the call buttons
                     // have — bubbles float on the wallpaper now.
                     // Owner round 32 (item 8): an emoji-only message has NO
@@ -6872,6 +6885,19 @@ private fun ViewOnceRow(
     val video = fileLooksVideo(m)
     // The recipient can open it; the sender never can.
     val openable = !mine && !pendingEcho
+    // r60 (owner: "keo njje view once send korle nije jeno view korte pare"):
+    // sender can also open/preview their sent view-once media until recipient vanishes it.
+    val canOpen = !pendingEcho
+    val oncePulse = rememberInfiniteTransition(label = "oncePulse")
+    val pulseScale by oncePulse.animateFloat(
+        initialValue = 0.92f,
+        targetValue = 1.08f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "onceScale",
+    )
     var replyDrag by remember { mutableStateOf(0f) }
     val replyOffset by animateFloatAsState(replyDrag, spring(stiffness = 1400f), label = "oncereplydrag")
     val replyThreshold = with(LocalDensity.current) { 36.dp.toPx() }
@@ -7003,7 +7029,7 @@ private fun ViewOnceRow(
                             when {
                                 pendingEcho -> {}
                                 selectedIds.isNotEmpty() -> onToggleSelect(m)
-                                openable -> if (video) onOpenVideo(m) else onOpenImage(m)
+                                canOpen -> if (video) onOpenVideo(m) else onOpenImage(m) // openable -> if (video) onOpenVideo(m) else onOpenImage(m)
                                 else -> {}
                             }
                         },
@@ -7082,42 +7108,22 @@ private fun ViewOnceRow(
                     }
                 }
                 // Center circular dark badge holding the view once mark
-                // r60 (owner: "View once er icons ta border er middle a nai ota thik koro"):
-                // center alignment and CenteredOnceIcon perfectly centered within card border.
+                // r60 (owner: "majher view once icon ta boro hobe aro ... animate korbe view hobar age"):
+                // larger centered badge with smooth breathing pulse animation before viewed.
                 // ViewOnceOneIcon(56.dp)
                 Box(
                     Modifier
                         .align(Alignment.Center)
-                        .size(52.dp)
+                        .graphicsLayer {
+                            scaleX = pulseScale
+                            scaleY = pulseScale
+                        }
+                        .size(62.dp)
                         .clip(CircleShape)
                         .background(Color(0x66000000)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CenteredOnceIcon(40.dp)
-                }
-                // Top-left capsule pill: ⟳ 1
-                Row(
-                    Modifier
-                        .align(Alignment.TopStart)
-                        .padding(10.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0x66000000))
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        Icons.Filled.Refresh,
-                        contentDescription = "View once",
-                        tint = Color.White,
-                        modifier = Modifier.size(13.dp),
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        "1",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
+                    CenteredOnceIcon(48.dp)
                 }
                 if (pendingEcho) {
                     // An upload in flight: the determinate ring under the mark.
@@ -7135,23 +7141,24 @@ private fun ViewOnceRow(
                         }
                     }
                 }
-                // Bottom-right capsule pill: timestamp + tick
+                // Bottom-right timestamp + tick
+                // r60 (owner: "time ta aro choto koro dim background remove koro"):
+                // clean compact timestamp without dim background box, single line.
                 Row(
                     Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(10.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0x66000000))
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                        .padding(end = 8.dp, bottom = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
                         msgStamp(m.optString("createdAt")),
-                        fontSize = 11.sp,
-                        color = Color.White,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                        color = Color.White.copy(alpha = 0.9f),
                     )
                     if (mine) {
-                        Spacer(Modifier.width(4.dp))
+                        Spacer(Modifier.width(3.dp))
                         TickIcon(m, pendingEcho, otherReadAt)
                     }
                 }
