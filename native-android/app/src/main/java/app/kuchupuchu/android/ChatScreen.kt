@@ -4427,7 +4427,7 @@ private fun Composer(
                             closeKeyboard()
                             onAttach()
                         },
-                        Modifier.size(32.dp),
+                        Modifier.size(32.dp).fxAttachAnchor(),
                     ) {
                         Icon(Icons.Filled.AttachFile, "Attach", tint = accent, modifier = Modifier.size(20.dp))
                     }
@@ -4479,6 +4479,7 @@ private fun Composer(
             Box(
                 Modifier
                     .size(42.dp)
+                    .fxMicAnchor()
                     .pressScale(sendInteraction)
                     // Owner round 10: the send/mic circles carry the same 3D
                     // lift as the header call buttons now.
@@ -4504,7 +4505,7 @@ private fun Composer(
                 )
             }
         } else {
-            Box {
+            Box(Modifier.fxMicAnchor()) {
                 HoldMicButton(
                     recording = recording,
                     enabled = micEnabled,
@@ -5968,7 +5969,14 @@ private fun MessageRow(
                     .animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f))
                     .combinedClickable(
                         onClick = {
-                            if (selectedIds.isNotEmpty() && !pendingEcho) onToggleSelect(m)
+                            if (selectedIds.isNotEmpty() && !pendingEcho) {
+                                onToggleSelect(m)
+                            } else if (!pendingEcho && longBody && !typing && msgExpanded) {
+                                // r57 (owner: "see more a click korle expand hobe massage body te click korle collapse hobe"):
+                                // clicking message body collapses an expanded long message with smooth spring animation.
+                                msgExpanded = false
+                                runCatching { haptics.tap() }
+                            }
                         },
                         onLongClick = {
                             if (!pendingEcho) {
@@ -5987,6 +5995,8 @@ private fun MessageRow(
                     // except FILE rows (items 45 / 34), whose second line
                     // already leaves the stamp its corner.
                     .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (voiceRow) 0.dp else if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp)
+                    .then(if (voiceRow && mine) Modifier.fxVoiceLaunch(fxFresh) else Modifier)
+                    .then(if (fileRow && mine) Modifier.fxAttachJump(fxFresh) else Modifier)
                     .then(if (voiceRow) Modifier.fxSonicRipple(fxLanded, chatAccent(theme)) else Modifier)
                     .then(if (fileRow) Modifier.fxCardSheen(fxLanded) else Modifier)
                     // v172 (owner: "light effect ta just message a hobe
@@ -6630,6 +6640,7 @@ private fun VideoMessageRow(
                 .clip(RoundedCornerShape(12.dp))
                 .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
                 .background(Color(0xFF0B1220))
+                .then(if (mine && pendingEcho) Modifier.fxAttachJump(m.optString("id")) else Modifier)
                 .border(1.dp, if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444), RoundedCornerShape(12.dp))
                 .pointerInput(m.optString("id")) {
                     detectHorizontalDragGestures(
@@ -7178,6 +7189,7 @@ private fun ImageMessageRow(
                 .shadow(2.dp, RoundedCornerShape(12.dp))
                 .clip(RoundedCornerShape(12.dp))
                 .fxShutterFlash(m.optString("id"))
+                .then(if (mine && pendingEcho) Modifier.fxAttachJump(m.optString("id")) else Modifier)
                 // Owner round 8/16: thin photo border — gray-BLUE on dark-blue,
                 // gray-BLACK on cream, so the frame matches the app theme.
                 .border(

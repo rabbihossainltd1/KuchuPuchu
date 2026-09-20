@@ -29,11 +29,21 @@ import kotlinx.coroutines.flow.first
  */
 object FlightAnchors {
     @Volatile var composerBounds: Rect? = null
+    @Volatile var micBounds: Rect? = null
+    @Volatile var attachBounds: Rect? = null
 }
 
 /** Put this on the composer pill (the rounded input bar that holds the typed text). */
 fun Modifier.fxComposerAnchor(): Modifier =
     onGloballyPositioned { FlightAnchors.composerBounds = it.boundsInWindow() }
+
+/** Put this on the mic/voice button so voice notes lift off the exact mic button. */
+fun Modifier.fxMicAnchor(): Modifier =
+    onGloballyPositioned { FlightAnchors.micBounds = it.boundsInWindow() }
+
+/** Put this on the attach button/panel so photos, videos, and documents jump out from the attach anchor. */
+fun Modifier.fxAttachAnchor(): Modifier =
+    onGloballyPositioned { FlightAnchors.attachBounds = it.boundsInWindow() }
 
 private val FlightEase = CubicBezierEasing(0.65f, 0f, 0.35f, 1f)
 
@@ -99,12 +109,9 @@ fun Modifier.fxFlyIn(
         // start point (the pill itself does not move during the flight).
         val s = snapshotFlow { seat }.filterNotNull().first()
         fired = true
-        // r54 (owner: "halka left theke jump kore message position a jai"):
-        // the rise is STRAIGHT VERTICAL - the bubble keeps its own seat's x
-        // and lifts from the composer bar's height. Rounds 46-49 all rejected
-        // sideways flights; aligning the start to the pill's edges always
-        // left a horizontal slide for narrow bubbles.
-        val startY = pill.top + (pill.height - s.height) / 2f
+        // r57 (owner: "massage text er start point hobe massage composer pill er upor theke niche theke na"):
+        // the text bubble lifts off from directly on TOP of the composer pill, never from below the screen.
+        val startY = pill.top - s.height
         startAbs = Offset(s.left, startY)
         progress.snapTo(0f)
         progress.animateTo(1f, androidx.compose.animation.core.tween((durMs * scale).toInt(), easing = FlightEase))
