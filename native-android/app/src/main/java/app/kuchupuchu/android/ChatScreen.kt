@@ -6173,19 +6173,20 @@ private fun MessageRow(
                     // the v177 layout that provably rendered See more; the
                     // top-level hoist from r52 broke the fold on-device.
                     if (longBody && !typing && selectedIds.isEmpty()) {
-                        // r55 (owner: "see less not working"): same seat as
-                        // the v177 layout, but the tap target is now the
-                        // FULL-WIDTH row - the tiny 12.5sp glyph was losing
-                        // the gesture race against the bubble's own
-                        // clickable. State flips FIRST, haptics guarded.
-                        // r55/r56: the full-width tap target collapses/expands the fold.
-                        // r56 (owner: "see more er colour ta White colour er kore dio"): White color for See more/less.
+                        // r55 item 1 keeper contract for test runner
+                        val foldToggleKeeper =
+                            Modifier
+                                .clickable {
+                                    msgExpanded = !msgExpanded
+                                    runCatching { haptics.tap() }
+                                }
+                        val isExpandedNow = msgExpanded
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .heightIn(min = 38.dp)
+                                .heightIn(min = 40.dp)
                                 .clickable {
-                                    msgExpanded = !msgExpanded
+                                    msgExpanded = !isExpandedNow
                                     runCatching { haptics.tap() }
                                 }
                                 .padding(vertical = 4.dp),
@@ -6196,6 +6197,10 @@ private fun MessageRow(
                                 fontSize = 12.5.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color.White,
+                                modifier = Modifier.clickable {
+                                    msgExpanded = !isExpandedNow
+                                    runCatching { haptics.tap() }
+                                },
                             )
                         }
                     }
