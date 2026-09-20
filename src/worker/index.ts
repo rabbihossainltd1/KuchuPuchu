@@ -5343,6 +5343,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const phone = normalizePhone(body.phone);
     const sim = parseSimResult(body.sim);
     const deviceId = parseDeviceId(body.deviceId);
+    // M1: per-phone global cap - a botnet rotating IPs still shares one
+    // budget per targeted number.
+    await rateLimitGlobal(db, `gppv:${phone}`, 20);
     const deviceName =
       String(body.deviceName || "")
         .trim()
@@ -5705,11 +5708,17 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     rateLimit(`rlookup:${clientIp(request)}`, 10, 5);
     await rateLimitGlobal(db, `grlookup:${clientIp(request)}`, 20);
     const phone = normalizePhone(body.phone);
+    await rateLimitGlobal(db, `gprlookup:${phone}`, 10);
     const user = await one<{ id: string }>(
       db,
       "SELECT id FROM users WHERE phone_e164 = ? AND auth_status = 'ACTIVE'",
       phone,
     );
+    // M1: every existence probe leaves a trail (who/when, number masked).
+    await audit(db, "RECOVERY_LOOKUP", user?.id ?? null, null, {
+      phone: maskPhone(phone),
+      exists: !!user,
+    });
     return json({ exists: !!user });
   }
 
@@ -5728,7 +5737,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (google.sub !== user.google_subject) {
       // Any Gmail is not enough — only the previously bound subject (§22).
       await audit(db, "RECOVERY_DENIED", user.id, null, { phone: maskPhone(phone) });
-      fail(401, "This Google account isn't linked to that number.", "GOOGLE_MISMATCH");
+      // M1 (audit 2026-09-21): identical answer to "no such account" above -
+      // distinct codes let any Google account sort numbers into registered /
+      // unregistered. The precise reason stays in the RECOVERY_DENIED row.
+      fail(404, "No recoverable account was found for that number.", "NO_RECOVERY_TARGET");
     }
     const requestId = id();
     const expiresAt = new Date(Date.now() + RECOVERY_REQUEST_TTL_MS).toISOString();

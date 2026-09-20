@@ -325,7 +325,11 @@ const bind = (k, phone, idToken, deviceId, displayName) =>
     idToken: fakeIdToken("g-ATTACKER", "attacker@evil.com"),
     deviceId: "dev-x",
   });
-  check("wrong google subject → 401", start.status === 401, String(start.status));
+  check(
+    "M1: wrong google subject → 404 NO_RECOVERY_TARGET (identical to unknown number)",
+    start.status === 404 && start.json?.error?.code === "NO_RECOVERY_TARGET",
+    `${start.status} ${start.json?.error?.code}`,
+  );
 }
 
 // ---- 12. one Google subject maps to one account ----
