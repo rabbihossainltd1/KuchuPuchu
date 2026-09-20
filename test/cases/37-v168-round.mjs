@@ -255,6 +255,13 @@ check(
 );
 /* r56 — the owner's round 56 */
 check(
+  "r56 item 3: stage zoom pointerInput uses Unit key so first pinch attempt zooms freely without cancelling mid-gesture",
+  edit.includes(
+    ".pointerInput(Unit) {\n                                    detectTransformGestures {",
+  ) &&
+    edit.includes(".pointerInput(Unit) {\n                                    detectTapGestures("),
+);
+check(
   "r56 item 2: live typing/voice indicator clears on send/message arrival, pings voice on record start, deletes typing in batch on send",
   src.includes('db.prepare("DELETE FROM typing WHERE conv_id = ? AND user_id = ?")') &&
     src.includes('rawKind === "clear"') &&
