@@ -8274,6 +8274,8 @@ private fun FileBubble(
             // r49 (owner: "voice timer ta play icon er niche thakbe"):
             // the duration line hangs centred UNDER the play button.
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                val secs = m.optJSONObject("meta")?.optInt("seconds") ?: 0
+                val vFrac = UploadProgress.fracs[m.optString("clientId")]
                 Box(
                 Modifier
                     .size(28.dp)
@@ -8288,13 +8290,7 @@ private fun FileBubble(
                 contentAlignment = Alignment.Center,
             ) {
                 when {
-                    loading || (pendingEcho && vFrac == null) -> CircularProgressIndicator(
-                        color = ink,
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    pendingEcho && vFrac != null -> CircularProgressIndicator(
-                        progress = { vFrac },
+                    loading || pendingEcho -> CircularProgressIndicator(
                         color = ink,
                         strokeWidth = 2.dp,
                         modifier = Modifier.size(16.dp),
@@ -8313,8 +8309,6 @@ private fun FileBubble(
                     )
                 }
                 }
-                val secs = m.optJSONObject("meta")?.optInt("seconds") ?: 0
-                val vFrac = UploadProgress.fracs[m.optString("clientId")]
                 // r62 (owner: "screenshot ta dekho upper ta sent hoye geche original shape a ache. nicher voice ta dekho sending er somoy barti left side a roye geche ota not fixed"):
                 // voice bubble keeps exact original shape during sending by displaying duration line (not wide "Sending · 89%" text that bloated column and created extra left space).
                 Text(
