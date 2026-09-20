@@ -701,7 +701,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                     otherTypingAt = System.currentTimeMillis()
                 } else {
                     otherTypingAt = 0L
-                    typingLeaseActive = false
                 }
                 otherTypingKind = parsed.typingKind
                 if (typingStale) otherTypingKind = null
@@ -907,7 +906,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                         // r56 item 2: new message arrived -> clear typing indicator immediately
                         otherTypingAt = 0L
                         otherTypingKind = null
-                        typingLeaseActive = false
                         // FAST PAINT: the WS "message" frame carries the FULL
                         // message object (msgFrom), so we drop the bubble into
                         // the thread instantly instead of waiting a GET round
@@ -1093,7 +1091,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                         if (atStr.isBlank() || kStr == "clear" || kStr == "none") {
                             otherTypingAt = 0L
                             otherTypingKind = null
-                            typingLeaseActive = false
                         } else {
                             otherTypingAt = System.currentTimeMillis()
                             otherTypingKind = kStr.takeIf { it.isNotBlank() }
