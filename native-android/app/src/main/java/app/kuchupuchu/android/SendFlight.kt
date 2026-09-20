@@ -137,8 +137,12 @@ fun Modifier.fxFlyIn(
                 val ctrlY = min(p0.y, p2.y) - 48f * density
                 val pos = bezier(p0, Offset(0f, ctrlY), p2, v)
                 val lift = sin(v * PI.toFloat()) * 8f * density
-                translationX = 0f
-                translationY = pos.y - lift
+                // r58 (owner: "massage documents ekhon right side theke asbe ... receive animation left theke"):
+                // Sent items slide smoothly from the right, received items from the left.
+                // Chat history scrolling remains static with gentle fade; old vertical flight removed.
+                val sideOffset = (if (isSent) 64f else -64f) * density * (1f - v)
+                translationX = if (active) sideOffset else 0f // translationX = 0f
+                translationY = 0f
                 alpha = if (v < 0.06f) v / 0.06f else 1f
             }
         }

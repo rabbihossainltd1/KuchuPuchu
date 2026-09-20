@@ -73,6 +73,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Mood
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Videocam
@@ -1018,6 +1019,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                                                 liveMsg.optString("kind") == "TEXT")
                                     // Owner round 33 (item 11b): a live arrival rises in.
                                     bornKeys.add(liveMsg.optString("clientId").ifBlank { liveMsg.optString("id") })
+                                    LiveArrivals.markLive(liveMsg.optString("clientId").ifBlank { liveMsg.optString("id") })
+                                    LiveArrivals.markLive(liveMsg.optString("id"))
                                     msgs.add(liveMsg)
                                     // Our own optimistic bubble from a previous send
                                     // that the server just confirmed.
@@ -1332,6 +1335,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         replyTo?.optString("id")?.takeIf { it.isNotBlank() }?.let { payload.put("replyTo", it) }
         replyTo = null
         bornKeys.add(clientId)
+        LiveArrivals.markLive(clientId)
         pending.add(
             JSONObject()
                 .put("id", clientId)
@@ -1506,6 +1510,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             return if (o.length() > 0) o else null
         }
         bornKeys.add(clientId)
+        LiveArrivals.markLive(clientId)
         // v166: a measured photo arrives with its box — the ratio cache (what
         // the bubble actually reads) and the row's own mediaW/mediaH (what the
         // receiver reads) both get it before the row is painted.
@@ -1699,6 +1704,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             VideoThumbs.writeMeta(file.absolutePath, facts.first.toFloat(), facts.second.toFloat(), facts.third)
         }
         bornKeys.add(clientId)
+        LiveArrivals.markLive(clientId)
         pending.add(
             JSONObject()
                 .put("id", clientId)
@@ -1796,6 +1802,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             JSONObject().put("voice", true).put("seconds", seconds).put("clientId", clientId)
                 .also { if (waveform.isNotEmpty()) it.put("waveform", JSONArray(waveform)) }
         bornKeys.add(clientId)
+        LiveArrivals.markLive(clientId)
         pending.add(
             JSONObject()
                 .put("id", clientId)
@@ -2727,6 +2734,24 @@ fun ChatScreen(nav: NavController, convId: String) {
     // rides the keyboard open itself; a bubble that lands WHILE the board
     // is up gets parked above the bar here. A reader scrolled up into
     // history is never yanked (near-tail gate).
+    // r58 (owner: "arekta rules massage latest ta kokhono manually scroll kore jeno dekhte na hoi kono item kono massages"):
+    // Automatically scroll to the latest message whenever a new item is appended (sent or received),
+    // without interrupting older history paging at the top.
+    val currentTailId = remember(msgs.size, pending.size) {
+        pending.lastOrNull()?.optString("clientId").orEmpty().ifBlank {
+            pending.lastOrNull()?.optString("id").orEmpty().ifBlank {
+                msgs.lastOrNull()?.optString("id").orEmpty()
+            }
+        }
+    }
+    LaunchedEffect(currentTailId) {
+        if (currentTailId.isNotBlank() && didInitialScroll) {
+            val total = msgs.size + pending.size
+            if (total > 0) {
+                runCatching { listState.scrollToItem(total - 1) }
+            }
+        }
+    }
     LaunchedEffect(msgs.size, pending.size) {
         if (glidePx > 1 && !listState.isScrollInProgress) {
             val info = listState.layoutInfo
@@ -5699,13 +5724,13 @@ private fun MessageRow(
     // animation; a replay is what the owner saw as "vanish, then again").
     val fxFresh =
         remember {
-            // r50 (owner: "old chat scrolling korle sending animation hoi
-            // ... remove hobe"): the flight is for LIVE arrivals only - a
-            // row whose createdAt is already old (history, loadOlder, a
-            // reopen) never flies; it gets the soft fade below instead.
+            // r50 / r58 (owner: "history scrolling er somoy o animation keno hocche eita"):
+            // the slide animation is for LIVE arrivals only - history, loadOlder, or reopen
+            // never slides; it gets the soft fade instead.
             val liveBorn =
-                runCatching { java.time.Instant.parse(m.optString("createdAt")).toEpochMilli() }
-                    .getOrDefault(0L) > System.currentTimeMillis() - 8_000L
+                (pendingEcho || LiveArrivals.isLive(m.optString("clientId")) || LiveArrivals.isLive(m.optString("id"))) &&
+                (runCatching { java.time.Instant.parse(m.optString("createdAt")).toEpochMilli() }
+                    .getOrDefault(0L) > System.currentTimeMillis() - 8_000L)
             liveBorn && FxArrivals.mark(m.optString("id")) != null && m.optString("senderId") != "kp_ai_bot"
         } && fxScaleOf(ctx) > 0f
     // Owner round 15: the night theme's other-bubble is dark in BOTH app
@@ -5995,10 +6020,8 @@ private fun MessageRow(
                     // except FILE rows (items 45 / 34), whose second line
                     // already leaves the stamp its corner.
                     .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (voiceRow) 0.dp else if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp)
-                    .then(if (voiceRow && mine) Modifier.fxVoiceLaunch(fxFresh) else Modifier)
-                    .then(if (fileRow && mine) Modifier.fxAttachJump(fxFresh) else Modifier)
-                    .then(if (voiceRow) Modifier.fxSonicRipple(fxLanded, chatAccent(theme)) else Modifier)
-                    .then(if (fileRow) Modifier.fxCardSheen(fxLanded) else Modifier)
+                    // r58: live sent messages animate from right, received from left; history stays quiet
+                    .fxSideSlide(active = fxFresh, isSent = mine)
                     // v172 (owner: "light effect ta just message a hobe
                     // full chat a na"): the landing squash + shine + ripple
                     // ride the BUBBLE only.
@@ -6640,7 +6663,6 @@ private fun VideoMessageRow(
                 .clip(RoundedCornerShape(12.dp))
                 .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
                 .background(Color(0xFF0B1220))
-                .then(if (mine && pendingEcho) Modifier.fxAttachJump(m.optString("id")) else Modifier)
                 .border(1.dp, if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444), RoundedCornerShape(12.dp))
                 .pointerInput(m.optString("id")) {
                     detectHorizontalDragGestures(
@@ -6750,8 +6772,7 @@ private fun VideoMessageRow(
                         Modifier
                             .size(38.dp)
                             .clip(CircleShape)
-                            .background(Color(0x99000000))
-                            .fxPlayheadPing(m.optString("id")),
+                            .background(Color(0x99000000)),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(Icons.Filled.PlayArrow, "Play video", tint = Color.White, modifier = Modifier.size(26.dp))
@@ -6855,10 +6876,10 @@ private fun ViewOnceRow(
     // file-URI echoes never carry remote pixels — tile, not photo.
     val url = photoUrlOf(m)
     val photoUrl =
-        if (!video && !pendingEcho && url != null && !url.startsWith("data:") && !url.startsWith("file://")) url
+        if (!video && url != null) url
         else null
-    var ratio by remember(photoUrl) {
-        mutableStateOf(ImageRatios.get(photoUrl).takeIf { it > 0f } ?: 0f)
+    var ratio by remember(photoUrl, m.optInt("mediaW"), m.optInt("mediaH")) {
+        mutableStateOf(ImageRatios.get(photoUrl).takeIf { it > 0f } ?: MediaBox.payloadRatio(m).takeIf { it > 0f } ?: 0f)
     }
     // v163 (owner: "hardcoded thumbnail … fake"): a view-once VIDEO used to be
     // a fixed 16:9 dark tile with a mark on it, whatever the clip's shape. It
@@ -6906,12 +6927,8 @@ private fun ViewOnceRow(
         }
     }
     val upFrac = UploadProgress.fracs[m.optString("clientId")]
-    // v165 (owner: "eitar size kom koro ar sending er somoy original ratio
-    // rakho"): the tile is smaller, and its box is the media's OWN shape even
-    // while the send is still in flight. A pending view-once photo has no
-    // pixels to measure yet, but the message already carries the box the
-    // sender measured (mediaW / mediaH), so the tile no longer sits in a
-    // fixed 180 x 220 seat and then snaps when the row lands.
+    // r58 (owner: "original thumbnail original ratio te sending sent hole same thakbe all time"):
+    // original media ratio dynamically kept from pending echo all the way through sent confirmation.
     val boxRatio =
         when {
             video -> videoRatio
@@ -6944,7 +6961,7 @@ private fun ViewOnceRow(
                     .background(Color(0xFF1B1E26))
                     .border(
                         1.dp,
-                        if (KpThemeMode.darkBlue) Color(0x668091AC) else Color(0x66444444),
+                        Color(0xFF3B82F6),
                         bubbleShape,
                     )
                     .pointerInput(m.optString("id")) {
@@ -6992,7 +7009,7 @@ private fun ViewOnceRow(
                 if (photoUrl != null) {
                     val imageRequest = remember(photoUrl) {
                         coil.request.ImageRequest.Builder(ctx)
-                            .data(if (photoUrl.startsWith("http")) photoUrl else Api.BASE + photoUrl)
+                            .data(if (photoUrl.startsWith("http")) photoUrl else if (photoUrl.startsWith("data:") || photoUrl.startsWith("file://")) photoUrl else Api.BASE + photoUrl)
                             .transformations(ViewOnceBlur)
                             .crossfade(false)
                             .size(720)
@@ -7002,7 +7019,7 @@ private fun ViewOnceRow(
                         model = imageRequest,
                         contentDescription = "Photo",
                         modifier = Modifier.fillMaxSize(),
-                        contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                         onSuccess = { state ->
                             val d = state.result.drawable
                             if (d.intrinsicWidth > 0 && d.intrinsicHeight > 0 && ratio <= 0f) {
@@ -7011,7 +7028,7 @@ private fun ViewOnceRow(
                         },
                     )
                     // Dimmer so the white mark never drowns in a bright photo.
-                    Box(Modifier.matchParentSize().background(Color(0x40000000)))
+                    Box(Modifier.matchParentSize().background(Color(0x30000000)))
                 }
                 if (video) {
                     // v163: the clip's own frame at its own ratio instead of
@@ -7037,8 +7054,56 @@ private fun ViewOnceRow(
                         Box(Modifier.matchParentSize().background(Color(0x40000000)))
                     }
                 }
-                Box(Modifier.fxPadlockSnap(m.optString("id"))) {
+                // Frosted crystalline noise speckles overlay matching the owner reference screenshot
+                androidx.compose.foundation.Canvas(Modifier.matchParentSize()) {
+                    val w = size.width
+                    val h = size.height
+                    if (w > 0f && h > 0f) {
+                        val seed = m.optString("id").hashCode().toLong()
+                        val rng = java.util.Random(seed)
+                        val count = ((w * h) / 160f).toInt().coerceIn(120, 380)
+                        for (i in 0 until count) {
+                            val x = rng.nextFloat() * w
+                            val y = rng.nextFloat() * h
+                            val r = 0.75f + rng.nextFloat() * 1.5f
+                            val a = 0.25f + rng.nextFloat() * 0.55f
+                            drawCircle(androidx.compose.ui.graphics.Color.White.copy(alpha = a), radius = r, center = androidx.compose.ui.geometry.Offset(x, y))
+                        }
+                    }
+                }
+                // Center circular dark badge holding the view once mark
+                Box(
+                    Modifier
+                        .size(68.dp)
+                        .clip(CircleShape)
+                        .background(Color(0x66000000)),
+                    contentAlignment = Alignment.Center,
+                ) {
                     ViewOnceOneIcon(56.dp)
+                }
+                // Top-left capsule pill: ⟳ 1
+                Row(
+                    Modifier
+                        .align(Alignment.TopStart)
+                        .padding(10.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0x66000000))
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Filled.Refresh,
+                        contentDescription = "View once",
+                        tint = Color.White,
+                        modifier = Modifier.size(13.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        "1",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
                 }
                 if (pendingEcho) {
                     // An upload in flight: the determinate ring under the mark.
@@ -7056,29 +7121,23 @@ private fun ViewOnceRow(
                         }
                     }
                 }
-                // scrim so the stamp never drowns in a bright photo
-                Box(
-                    Modifier
-                        .matchParentSize()
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(Color.Transparent, Color.Transparent, Color(0x66000000)),
-                            ),
-                        ),
-                )
+                // Bottom-right capsule pill: timestamp + tick
                 Row(
                     Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                        .padding(10.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0x66000000))
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
                         msgStamp(m.optString("createdAt")),
-                        fontSize = 10.sp,
+                        fontSize = 11.sp,
                         color = Color.White,
                     )
                     if (mine) {
-                        Spacer(Modifier.width(3.dp))
+                        Spacer(Modifier.width(4.dp))
                         TickIcon(m, pendingEcho, otherReadAt)
                     }
                 }
@@ -7188,8 +7247,6 @@ private fun ImageMessageRow(
                 // thin border.
                 .shadow(2.dp, RoundedCornerShape(12.dp))
                 .clip(RoundedCornerShape(12.dp))
-                .fxShutterFlash(m.optString("id"))
-                .then(if (mine && pendingEcho) Modifier.fxAttachJump(m.optString("id")) else Modifier)
                 // Owner round 8/16: thin photo border — gray-BLUE on dark-blue,
                 // gray-BLACK on cream, so the frame matches the app theme.
                 .border(
