@@ -1694,17 +1694,24 @@ private fun MediaEditItemScreen(
                                 // pointerInput key MUST be Unit, not (stageZoom > 1f). Keying on (stageZoom > 1f)
                                 // cancelled the coroutine mid-gesture as soon as zoom crossed 1.0f on the first pinch!
                                 .pointerInput(Unit) {
-                                    detectTransformGestures { _, pan, zoom, _ ->
+                                    detectTransformGestures { centroid, pan, zoom, _ ->
+                                        val oldZ = stageZoom
                                         val z = (stageZoom * zoom).coerceIn(1f, 4f)
+                                        val k = if (oldZ > 0f) z / oldZ else 1f
+                                        val center = Offset(size.width / 2f, size.height / 2f)
+                                        val newPan = pan + stagePan * k + (center - centroid) * (k - 1f)
                                         stageZoom = z
                                         val maxX = (z - 1f) * size.width / 2f
                                         val maxY = (z - 1f) * size.height / 2f
                                         stagePan =
-                                            Offset(
-                                                (stagePan.x + pan.x).coerceIn(-maxX, maxX),
-                                                (stagePan.y + pan.y).coerceIn(-maxY, maxY),
-                                            )
-                                        if (z <= 1f) stagePan = Offset.Zero
+                                            if (z <= 1f) {
+                                                Offset.Zero
+                                            } else {
+                                                Offset(
+                                                    newPan.x.coerceIn(-maxX, maxX),
+                                                    newPan.y.coerceIn(-maxY, maxY),
+                                                )
+                                            }
                                     }
                                 }
                                 .pointerInput(Unit) {
