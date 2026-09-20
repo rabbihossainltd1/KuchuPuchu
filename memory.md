@@ -77,3 +77,12 @@
 - Prettier clean.
 - Secret scan passed.
 - Android validation passed.
+
+## Audit 2026-09-21 (Arena agent, read-only — no push/deploy)
+- Scope: full self-audit at HEAD 8a9b631 (v194): security, UI (static), performance, bugs. Full list: `AUDIT-2026-09-21.md`; project map: `PROJECT_UNDERSTANDING.md`.
+- Gates re-run locally, all green: 37/37 tests (1611 assertions), tsc, prettier, secret-scan, validate-android, ktlint. HEAD CI #35538569060 success.
+- HIGH: (1) AI down in prod — HF credits exhausted 09-17 (error_log 2-4/day → 186-317/day, `hf-chat 402` + `gemini 503`); (2) logged-out takeover via self-attested SIM on no-live-device path (`index.ts:5388`, no 2nd factor); (3) view-once media fetchable without spend (`index.ts:9163`, honest-client only).
+- MEDIUM: enumeration oracles; per-isolate rate limits; no per-user storage quota + unattached uploads never swept; debug.keystore committed (needs owner call); v194 on TWO commits (8a9b631+1e0e252, updater won't offer 2nd); latency self-probe 100% failing (lat.count=0); ~1s chat poll cost.
+- LOW/INFO: CORS *, DEBUG_KEY in query, unused timingSafeEqualHex, public TURN fallback, no delete time-limit (confirm intentional), stale debug/errors refs, commented code in ChatScreen, 4 APK assets on v194, red-main CI pattern, index-keyed photo grid, no pinning, 16ms FX loops.
+- UI verdict: Round 62 + 1e0e252 diffs reviewed line-by-line, no static glitch; real visual check impossible here (no Android build/emulator in sandbox) — needs owner device / CI APK.
+- Live: /api/health 200, releases/latest v194, error_log 1050 rows (7d). Origin ahead by 1e0e252 (ChatScreen-only) — local tree intentionally kept at 8a9b631 for stable audit line numbers.
