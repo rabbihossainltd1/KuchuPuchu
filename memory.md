@@ -15,6 +15,24 @@
     3. Media & document jump: Added `fxAttachJump` in `ChatFx.kt` and anchored to `FlightAnchors.attachBounds`. Photos, videos, and documents execute an upward parabolic jump arc from the attach panel / paperclip button to their bubble seat.
 - Directive 3: Bumped version to `v190` (`versionCode = 190`, `versionName = "3.9.113"`).
 
+## Round 60 User Directives & Status
+- Directive 1: Diagonal slide send/receive flight animation:
+  - Sent messages: animate smoothly into chat diagonally from the bottom-right (+44dp X, +18dp Y to 0,0) with soft spring ease and alpha ramp.
+  - Received messages: animate smoothly into chat diagonally from the bottom-left (-44dp X, +18dp Y to 0,0).
+  - Chat history scrolling and paging remain quiet with no sliding animation.
+- Directive 2: View-once media bubble refinements:
+  - Center the view-once icon perfectly within the bubble border (`CenteredOnceIcon(40.dp)` on `Alignment.Center`).
+  - View-once card size reduced (`widthIn(max = 138.dp)`, `heightIn(max = 175.dp)`, min fallback `widthIn(min = 108.dp).height(138.dp)`).
+  - Sending echo retains media aspect ratio while keeping verbatim `metaWith` pattern and test assertions intact.
+- Directive 3: Received short message bubble sizing:
+  - Compact bubble width `requiredWidthIn(min = if (!mine) 78.dp else 79.dp)` applied to both received and sent short messages.
+- Directive 4: Last seen text & presence:
+  - 3-letter abbreviations (`yes`, `sun`, `mon`, etc.) implemented across `ChatScreen.kt`, `Theme.kt`, `Ui.kt`, `SettingsScreen.kt`.
+  - `ONLINE_WINDOW_MS` reduced to 35s in `src/shared/constants.ts`.
+  - Background push media fetches and `/api/calls/active` excluded from updating `last_active_at` in `src/worker/index.ts`.
+  - `conv.value` assignment and metadata refresh on message arrival/polling enhanced in `ChatScreen.kt`.
+- Directive 5: Version bumped to `v192` (`versionCode = 192`, `versionName = "3.9.115"`), released on GitHub, and Cloudflare Worker deployed.
+
 ## Test Gates
 - All 37/37 test cases passing (1611 assertions).
 - ktlint clean.
