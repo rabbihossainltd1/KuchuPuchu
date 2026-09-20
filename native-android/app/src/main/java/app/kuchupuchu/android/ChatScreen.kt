@@ -5811,6 +5811,33 @@ private fun MessageRow(
                     bottomStart = if (mine) 16.dp else 5.dp,
                     bottomEnd = if (mine) 5.dp else 16.dp,
                 )
+            // r56 (owner: "see less a click korle collapse hoi na"): fold state
+            // and probe lines hoisted above the bubble Box so both the bubble tap
+            // and the See less row can collapse an expanded message smoothly.
+            val mid = m.optString("clientId").ifBlank { m.optString("id") }
+            var bodyLines by remember(mid) { mutableStateOf(0) }
+            var msgExpanded by remember(mid) { mutableStateOf(false) }
+            val typing = revealChars != null && revealChars < m.optText("body").length
+            val foldProbe = rememberTextMeasurer()
+            val foldWidth = with(LocalDensity.current) { (bubbleMax - 18.dp).roundToPx() }
+            val foldStyle = remember { TextStyle(fontSize = 14.5.sp, lineHeight = 19.sp) }
+            val foldBody = m.optText("body")
+            val probeLines =
+                remember(foldBody, foldWidth) {
+                    runCatching {
+                        foldProbe.measure(
+                            foldBody,
+                            foldStyle,
+                            constraints = Constraints(maxWidth = foldWidth.coerceAtLeast(1)),
+                        ).lineCount
+                    }.getOrDefault(0)
+                }
+            val longBody = bodyLines > BODY_COLLAPSE_LINES || probeLines > BODY_COLLAPSE_LINES
+            val capped = !msgExpanded && !typing && longBody
+            val countLines = { r: TextLayoutResult, report: (TextLayoutResult) -> Unit ->
+                report(r)
+                if (r.lineCount > bodyLines) bodyLines = r.lineCount
+            }
             Box(
                 Modifier
                     .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
@@ -5887,13 +5914,17 @@ private fun MessageRow(
                         },
                     )
                     // r55: a smooth expand / collapse when the fold flips.
-                    .animateContentSize()
+                    // r56 (owner: "smooth expand collapse animation"): spring damping ratio + stiffness tuned for buttery fold animation.
+                    .animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f))
                     .combinedClickable(
-                        // r55 (owner: "see less not working"): the EXPANDED
-                        // body itself collapses on tap - a big target that no
-                        // gesture race can eat (selection mode still wins).
+                        // r55/r56 (owner: "see less a click korle collapse hoi na"): the EXPANDED
+                        // body itself collapses on tap - a big target that no gesture race can eat.
                         onClick = {
                             if (selectedIds.isNotEmpty() && !pendingEcho) onToggleSelect(m)
+                            else if (!pendingEcho && longBody && !typing && msgExpanded) {
+                                msgExpanded = false
+                                runCatching { haptics.tap() }
+                            }
                         },
                         onLongClick = {
                             if (!pendingEcho) {
@@ -5992,52 +6023,8 @@ private fun MessageRow(
                         Text(senderName, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = GoldDeep)
                     }
                     // Owner round 34 (item 19): long bodies collapse to ten
-                    // lines with a See more / See less toggle under the
-                    // bubble. The count is measured unbounded first (a capped
-                    // measure could only ever report ten), so a long message
-                    // shows full for a frame, then folds. Typing AI replies
-                    // stay unbounded until the reveal finishes.
-                    val mid = m.optString("id")
-                    var bodyLines by remember(mid) { mutableStateOf(0) }
-                    var msgExpanded by remember(mid) { mutableStateOf(false) }
-                    val typing = revealChars != null && revealChars < m.optText("body").length
-                    // v166 (owner: "onek boro text massage hole shob ekbare
-                    // dekhabe na 10 line dekhai niche see more option thakbe"):
-                    // the fold is decided from a measurement taken WHILE
-                    // COMPOSING, at the widest line this bubble can hold — not
-                    // from the body's own onTextLayout. That callback can only
-                    // report after the frame has been laid out, so the first
-                    // paint always showed a long body in full and the fold had
-                    // to wait for the recomposition that followed; the count it
-                    // fed could also come out short if the early measure ran
-                    // narrower than the settled bubble. A long body always
-                    // fills the bubble's width, so its count AT max width is
-                    // its real count — the fold is therefore right on frame
-                    // one, with the onTextLayout high-water kept as a second
-                    // witness (never weaker than before).
-                    val foldProbe = rememberTextMeasurer()
-                    val foldWidth = with(LocalDensity.current) { (bubbleMax - 18.dp).roundToPx() }
-                    val foldStyle = remember { TextStyle(fontSize = 14.5.sp, lineHeight = 19.sp) }
-                    val foldBody = m.optText("body")
-                    val probeLines =
-                        remember(foldBody, foldWidth) {
-                            runCatching {
-                                foldProbe.measure(
-                                    foldBody,
-                                    foldStyle,
-                                    constraints = Constraints(maxWidth = foldWidth.coerceAtLeast(1)),
-                                ).lineCount
-                            }.getOrDefault(0)
-                        }
-                    val longBody = bodyLines > BODY_COLLAPSE_LINES || probeLines > BODY_COLLAPSE_LINES
-                    val capped = !msgExpanded && !typing && longBody
-                    // Reports to the stamp holder AND keeps the high-water
-                    // line count (monotonic — a capped re-measure must not
-                    // shrink it back to ten and strand the toggle).
-                    val countLines = { r: TextLayoutResult, report: (TextLayoutResult) -> Unit ->
-                        report(r)
-                        if (r.lineCount > bodyLines) bodyLines = r.lineCount
-                    }
+                    // lines with a See more / See less toggle under the bubble.
+                    // Fold state, probeLines and countLines are hoisted above the Box (r56).
                     when (kind) {
                         "STICKER" -> {
                             val st = m.optString("body")
@@ -6142,6 +6129,8 @@ private fun MessageRow(
                         // FULL-WIDTH row - the tiny 12.5sp glyph was losing
                         // the gesture race against the bubble's own
                         // clickable. State flips FIRST, haptics guarded.
+                        // r55/r56: the full-width tap target collapses/expands the fold.
+                        // r56 (owner: "see more er colour ta White colour er kore dio"): White color for See more/less.
                         Row(
                             Modifier
                                 .fillMaxWidth()
@@ -6155,7 +6144,7 @@ private fun MessageRow(
                                 if (msgExpanded) "See less" else "See more",
                                 fontSize = 12.5.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = chatAccent(theme),
+                                color = Color.White,
                             )
                         }
                     }
