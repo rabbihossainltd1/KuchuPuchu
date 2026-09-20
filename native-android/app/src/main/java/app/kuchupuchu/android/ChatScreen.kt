@@ -6171,6 +6171,8 @@ private fun MessageRow(
                     if (longBody && !typing && selectedIds.isEmpty()) {
                         Row(
                             Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 36.dp)
                                 .clickable {
                                     msgExpanded = !msgExpanded
                                     runCatching { haptics.tap() }

@@ -1,0 +1,1075 @@
+<!doctype html>
+<html lang="bn">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KuchuPuchu 10 Unique Message Send Animations Preview</title>
+    <style>
+      :root {
+        --bg-main: #0b111d;
+        --card-bg: #141c2e;
+        --bubble-mine: #1d58d8;
+        --bubble-mine-grad: linear-gradient(135deg, #2563eb, #1d4ed8);
+        --bubble-other: #1e293b;
+        --accent-blue: #3b82f6;
+        --accent-gold: #f59e0b;
+        --text-white: #ffffff;
+        --text-muted: #94a3b8;
+        --border-color: #334155;
+        --green-tick: #38bdf8;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      body {
+        background: #060911;
+        color: var(--text-white);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 20px 12px;
+        min-height: 100vh;
+      }
+      header {
+        text-align: center;
+        max-width: 800px;
+        margin-bottom: 24px;
+      }
+      header h1 {
+        font-size: 24px;
+        font-weight: 700;
+        color: #60a5fa;
+        margin-bottom: 6px;
+      }
+      header p {
+        font-size: 14px;
+        color: var(--text-muted);
+      }
+      .container {
+        display: flex;
+        flex-direction: row;
+        gap: 24px;
+        width: 100%;
+        max-width: 1060px;
+        align-items: flex-start;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+
+      /* Phone Mockup */
+      .phone-frame {
+        width: 375px;
+        height: 720px;
+        background: var(--bg-main);
+        border-radius: 40px;
+        border: 8px solid #1e293b;
+        box-shadow:
+          0 25px 60px rgba(0, 0, 0, 0.8),
+          0 0 0 1px rgba(255, 255, 255, 0.08);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        position: relative;
+      }
+      .phone-header {
+        background: #0f172a;
+        padding: 14px 16px 12px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        z-index: 10;
+      }
+      .avatar {
+        width: 38px;
+        height: 38px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #f59e0b, #ef4444);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        font-size: 16px;
+        color: #fff;
+      }
+      .header-info h2 {
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .header-info p {
+        font-size: 11px;
+        color: #10b981;
+      }
+
+      /* Chat stage */
+      .chat-viewport {
+        flex: 1;
+        background: radial-gradient(circle at 50% 30%, #0f172a 0%, #080d1a 100%);
+        padding: 16px 12px;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        gap: 12px;
+        overflow: hidden;
+        position: relative;
+      }
+      .chat-viewport::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        opacity: 0.03;
+        background-image: radial-gradient(#fff 1px, transparent 1px);
+        background-size: 18px 18px;
+        pointer-events: none;
+      }
+
+      /* Chat row styles */
+      .bubble-other {
+        align-self: flex-start;
+        background: var(--bubble-other);
+        padding: 10px 14px;
+        border-radius: 16px 16px 16px 4px;
+        max-width: 78%;
+        font-size: 13.5px;
+        line-height: 1.4;
+        color: #e2e8f0;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+      }
+
+      /* Animated message stage */
+      #flyingStage {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        overflow: hidden;
+        z-index: 20;
+      }
+      .message-target-slot {
+        align-self: flex-end;
+        min-height: 48px;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        width: 100%;
+      }
+
+      /* Composer bar */
+      .composer-bar {
+        background: #0f172a;
+        padding: 10px 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        z-index: 10;
+      }
+      .composer-input {
+        flex: 1;
+        background: #1e293b;
+        border-radius: 20px;
+        padding: 9px 14px;
+        font-size: 13px;
+        color: var(--text-white);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .composer-placeholder {
+        color: var(--text-muted);
+      }
+      .send-btn {
+        width: 38px;
+        height: 38px;
+        border-radius: 50%;
+        background: #2563eb;
+        border: none;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
+        transition: transform 0.1s;
+      }
+      .send-btn:active {
+        transform: scale(0.92);
+      }
+
+      /* Controls Panel */
+      .controls-panel {
+        width: 100%;
+        max-width: 620px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .anim-selector {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 16px;
+        padding: 16px;
+      }
+      .anim-selector h3 {
+        font-size: 15px;
+        margin-bottom: 12px;
+        color: #60a5fa;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .grid-buttons {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+      }
+      .anim-btn {
+        background: #1e293b;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: var(--text-white);
+        padding: 10px 12px;
+        border-radius: 10px;
+        cursor: pointer;
+        font-size: 12.5px;
+        text-align: left;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        transition: all 0.2s ease;
+      }
+      .anim-btn:hover {
+        background: #2d3a54;
+        border-color: #3b82f6;
+      }
+      .anim-btn.active {
+        background: rgba(37, 99, 235, 0.2);
+        border-color: #3b82f6;
+        color: #93c5fd;
+        font-weight: 600;
+      }
+      .anim-details-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 16px;
+        padding: 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .anim-details-card h4 {
+        font-size: 16px;
+        color: #fbbf24;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .anim-desc {
+        font-size: 13.5px;
+        color: #cbd5e1;
+        line-height: 1.6;
+      }
+      .spec-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        background: #0b111d;
+        padding: 12px;
+        border-radius: 10px;
+      }
+      .spec-item {
+        font-size: 12px;
+      }
+      .spec-label {
+        color: var(--text-muted);
+        display: block;
+        margin-bottom: 2px;
+      }
+      .spec-value {
+        color: #38bdf8;
+        font-weight: 600;
+      }
+
+      .action-bar {
+        display: flex;
+        gap: 10px;
+      }
+      .play-trigger {
+        flex: 1;
+        background: linear-gradient(135deg, #2563eb, #1d4ed8);
+        border: none;
+        color: white;
+        font-weight: 600;
+        padding: 14px 20px;
+        border-radius: 12px;
+        cursor: pointer;
+        font-size: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        box-shadow: 0 4px 16px rgba(37, 99, 235, 0.4);
+        transition: transform 0.1s;
+      }
+      .play-trigger:hover {
+        filter: brightness(1.1);
+      }
+      .play-trigger:active {
+        transform: scale(0.98);
+      }
+      .speed-btn {
+        background: #1e293b;
+        border: 1px solid var(--border-color);
+        color: var(--text-white);
+        padding: 0 16px;
+        border-radius: 12px;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      /* ================================================================
+     KEYFRAME ANIMATIONS FOR THE 10 UNIQUE SEND EFFECTS
+     ================================================================ */
+
+      /* 1. TEXT: Paper-plane trajectory + jet stream squash landing */
+      @keyframes send-text-flight {
+        0% {
+          transform: translate(30px, 480px) scale(0.85) rotate(-6deg);
+          opacity: 0.4;
+        }
+        45% {
+          transform: translate(-10px, 220px) scale(1.04) rotate(3deg);
+          opacity: 0.95;
+        }
+        85% {
+          transform: translate(0px, 10px) scale(0.96, 1.04) rotate(0deg);
+          opacity: 1;
+        }
+        100% {
+          transform: translate(0px, 0px) scale(1, 1) rotate(0deg);
+          opacity: 1;
+        }
+      }
+
+      /* 2. PHOTO: Polaroid Eject + Shutter Lens Flash */
+      @keyframes send-photo-flight {
+        0% {
+          transform: translate(40px, 460px) scale(0.6) rotateY(25deg) rotateZ(-12deg);
+          opacity: 0;
+          filter: blur(8px);
+        }
+        30% {
+          opacity: 1;
+          filter: blur(0px);
+        }
+        70% {
+          transform: translate(-6px, 60px) scale(1.03) rotateY(-5deg) rotateZ(2deg);
+        }
+        100% {
+          transform: translate(0, 0) scale(1) rotateY(0) rotateZ(0);
+          opacity: 1;
+        }
+      }
+      @keyframes photo-flash {
+        0% {
+          opacity: 0.8;
+        }
+        50% {
+          opacity: 0.3;
+        }
+        100% {
+          opacity: 0;
+        }
+      }
+
+      /* 3. VIDEO: Filmstrip reel unroll + Playhead ping bounce */
+      @keyframes send-video-flight {
+        0% {
+          transform: translate(60px, 480px) scale(0.5, 0.2);
+          opacity: 0;
+        }
+        40% {
+          transform: translate(10px, 240px) scale(1.05, 0.95);
+          opacity: 0.9;
+        }
+        80% {
+          transform: translate(-2px, 15px) scale(0.98, 1.02);
+          opacity: 1;
+        }
+        100% {
+          transform: translate(0, 0) scale(1, 1);
+          opacity: 1;
+        }
+      }
+      @keyframes playhead-pop {
+        0% {
+          transform: scale(0);
+          opacity: 0;
+        }
+        60% {
+          transform: scale(1.3);
+          opacity: 1;
+        }
+        100% {
+          transform: scale(1);
+          opacity: 1;
+        }
+      }
+
+      /* 4. VOICE: Acoustic Wave Pulse + Concentric Sonic Rings */
+      @keyframes send-voice-flight {
+        0% {
+          transform: translate(50px, 490px) scale(0.4);
+          opacity: 0;
+        }
+        50% {
+          transform: translate(-8px, 220px) scale(1.08);
+          opacity: 0.95;
+        }
+        85% {
+          transform: translate(2px, 8px) scale(0.97);
+        }
+        100% {
+          transform: translate(0, 0) scale(1);
+          opacity: 1;
+        }
+      }
+      @keyframes sonic-ripple {
+        0% {
+          transform: scale(0.5);
+          opacity: 0.8;
+        }
+        100% {
+          transform: scale(2.4);
+          opacity: 0;
+        }
+      }
+
+      /* 5. DOCUMENT: Folded Page Slide + Wax Seal Stamp */
+      @keyframes send-doc-flight {
+        0% {
+          transform: translate(20px, 500px) rotateX(40deg) scale(0.7);
+          opacity: 0;
+        }
+        60% {
+          transform: translate(-10px, 100px) rotateX(-8deg) scale(1.02);
+          opacity: 1;
+        }
+        85% {
+          transform: translate(0, -6px) rotateX(0deg) scale(1);
+        }
+        100% {
+          transform: translate(0, 0);
+          opacity: 1;
+        }
+      }
+      @keyframes seal-stamp {
+        0% {
+          transform: scale(2.2);
+          opacity: 0;
+        }
+        60% {
+          transform: scale(0.9);
+          opacity: 1;
+        }
+        100% {
+          transform: scale(1);
+          opacity: 1;
+        }
+      }
+
+      /* 6. STICKER: Elastic 3D Pop + Starburst Particles */
+      @keyframes send-sticker-flight {
+        0% {
+          transform: translate(30px, 480px) scale(0.2) rotate(-35deg);
+          opacity: 0;
+        }
+        50% {
+          transform: translate(-15px, 180px) scale(1.35) rotate(15deg);
+          opacity: 1;
+        }
+        75% {
+          transform: translate(5px, 20px) scale(0.9) rotate(-4deg);
+        }
+        100% {
+          transform: translate(0, 0) scale(1) rotate(0deg);
+          opacity: 1;
+        }
+      }
+
+      /* 7. AUDIO TRACK: Vinyl Disc Eject + Equalizer Dance */
+      @keyframes send-audio-flight {
+        0% {
+          transform: translate(40px, 480px) scale(0.7);
+          opacity: 0;
+        }
+        55% {
+          transform: translate(-5px, 160px) scale(1.04);
+          opacity: 1;
+        }
+        100% {
+          transform: translate(0, 0) scale(1);
+          opacity: 1;
+        }
+      }
+      @keyframes vinyl-spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* 8. CONTACT CARD: Business Card Slide + Avatar Halo Ring */
+      @keyframes send-contact-flight {
+        0% {
+          transform: translate(0, 480px) rotateY(35deg) scale(0.75);
+          opacity: 0;
+        }
+        60% {
+          transform: translate(0, 80px) rotateY(-8deg) scale(1.02);
+          opacity: 1;
+        }
+        100% {
+          transform: translate(0, 0) rotateY(0) scale(1);
+          opacity: 1;
+        }
+      }
+
+      /* 9. LOCATION: Radar Sweep + Pin Drop Impact Bounce */
+      @keyframes send-location-flight {
+        0% {
+          transform: translate(20px, 480px) scale(0.6);
+          opacity: 0;
+        }
+        60% {
+          transform: translate(0, 100px) scale(1.05);
+          opacity: 1;
+        }
+        100% {
+          transform: translate(0, 0) scale(1);
+          opacity: 1;
+        }
+      }
+      @keyframes pin-drop {
+        0% {
+          transform: translateY(-40px) scale(1.4);
+          opacity: 0;
+        }
+        60% {
+          transform: translateY(0px) scale(0.9, 1.2);
+          opacity: 1;
+        }
+        80% {
+          transform: translateY(-8px) scale(1.05);
+        }
+        100% {
+          transform: translateY(0px) scale(1);
+        }
+      }
+
+      /* 10. VIEW-ONCE: Phantom Vapor Dissolve + Shield Lock Clasp */
+      @keyframes send-viewonce-flight {
+        0% {
+          transform: translate(25px, 480px) scale(0.7);
+          opacity: 0;
+          filter: blur(14px) brightness(1.6);
+        }
+        45% {
+          opacity: 0.85;
+          filter: blur(4px) brightness(1.2);
+        }
+        100% {
+          transform: translate(0, 0) scale(1);
+          opacity: 1;
+          filter: blur(0px) brightness(1);
+        }
+      }
+      @keyframes lock-clasp {
+        0% {
+          transform: scale(1.8) rotate(-20deg);
+          opacity: 0;
+        }
+        60% {
+          transform: scale(0.9) rotate(0deg);
+          opacity: 1;
+        }
+        100% {
+          transform: scale(1) rotate(0deg);
+          opacity: 1;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>KuchuPuchu 10 Unique Message Send Animations</h1>
+      <p>
+        ফটো, ভিডিও, ডকুমেন্টস, ভয়েস ও যেকোনো মেসেজের জন্য ১০টি সম্পূর্ণ স্বতন্ত্র সেন্ড অ্যানিমেশন
+        প্রিভিউ
+      </p>
+    </header>
+
+    <div class="container">
+      <!-- Phone Mockup -->
+      <div class="phone-frame">
+        <div class="phone-header">
+          <div class="avatar">R</div>
+          <div class="header-info">
+            <h2>Rifat Hasan</h2>
+            <p>Online</p>
+          </div>
+        </div>
+
+        <div class="chat-viewport">
+          <div class="bubble-other">
+            Kire kobe update dibi? Notun send animation gulo kemon holo dekhaw to!
+          </div>
+
+          <!-- Animation Landing Target -->
+          <div class="message-target-slot" id="targetSlot">
+            <!-- Rendered message bubble lands here -->
+          </div>
+        </div>
+
+        <!-- Active Flying Overlay -->
+        <div id="flyingStage"></div>
+
+        <div class="composer-bar">
+          <div class="composer-input">
+            <span class="composer-placeholder" id="composerText">Type a message...</span>
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#64748B"
+              stroke-width="2"
+            >
+              <path
+                d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
+              />
+            </svg>
+          </div>
+          <button class="send-btn" id="sendBtn" onclick="triggerSend()">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Controls Panel -->
+      <div class="controls-panel">
+        <div class="anim-selector">
+          <h3>
+            <span>১০টি ইউনিক মেসেজ আইটেম নির্বাচন করুন</span>
+            <span id="activeBadge" style="font-size: 12px; color: #f59e0b">#1 Text</span>
+          </h3>
+          <div class="grid-buttons">
+            <button class="anim-btn active" onclick="selectAnim(1)">💬 1. Text Message</button>
+            <button class="anim-btn" onclick="selectAnim(2)">📸 2. Photo / Image</button>
+            <button class="anim-btn" onclick="selectAnim(3)">🎥 3. Video Clip</button>
+            <button class="anim-btn" onclick="selectAnim(4)">🎙️ 4. Voice Note</button>
+            <button class="anim-btn" onclick="selectAnim(5)">📄 5. Document / PDF</button>
+            <button class="anim-btn" onclick="selectAnim(6)">✨ 6. Sticker / Emoji</button>
+            <button class="anim-btn" onclick="selectAnim(7)">🎵 7. Audio / Music</button>
+            <button class="anim-btn" onclick="selectAnim(8)">👤 8. Contact Card</button>
+            <button class="anim-btn" onclick="selectAnim(9)">📍 9. Location Pin</button>
+            <button class="anim-btn" onclick="selectAnim(10)">👁️ 10. View-Once Media</button>
+          </div>
+        </div>
+
+        <div class="anim-details-card">
+          <h4 id="cardTitle">1. Text Message Send Animation</h4>
+          <p class="anim-desc" id="cardDesc">
+            <strong>Paper-Plane Curve & Jet-Stream Squash:</strong> মেসেজটি কম্পোজার বার থেকে
+            সামান্য বাঁকা আর্ক ট্র্যাজেক্টোরি ধরে উপরে উঠে নিজের স্লটে গিয়ে আলতো উল্লম্ব স্কোয়াশ
+            (Squash) হয়ে বসে পড়ে। এটি দ্রুত ও অত্যন্ত স্মুথ।
+          </p>
+          <div class="spec-grid">
+            <div class="spec-item">
+              <span class="spec-label">Duration & Easing:</span>
+              <span class="spec-value" id="specDuration"
+                >650ms · CubicBezier(0.65, 0, 0.35, 1)</span
+              >
+            </div>
+            <div class="spec-item">
+              <span class="spec-label">Physics Reaction:</span>
+              <span class="spec-value" id="specPhysics">Squash sy=0.94, sx=1.05 + Spring(400)</span>
+            </div>
+            <div class="spec-item">
+              <span class="spec-label">Visual Climax:</span>
+              <span class="spec-value" id="specVisual"
+                >Soft glow trail + Single blue tick flip</span
+              >
+            </div>
+            <div class="spec-item">
+              <span class="spec-label">Haptic Feedback:</span>
+              <span class="spec-value" id="specHaptic">Light tap at landing frame</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="action-bar">
+          <button class="play-trigger" onclick="triggerSend()">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+            >
+              <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            </svg>
+            Play Send Animation
+          </button>
+          <button class="speed-btn" id="speedBtn" onclick="toggleSpeed()">Speed: 1x</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const animData = {
+        1: {
+          title: "1. Text Message Send Animation",
+          badge: "#1 Text Message",
+          desc: "<strong>Paper-Plane Curve & Jet-Stream Squash:</strong> টেক্সট বাবলটি কম্পোজার বার থেকে বের হয়ে -4° টিল্ট নিয়ে উপরের দিকে স্মুথ কার্ভে পৌঁছায়। ল্যান্ড করার সময় উল্লম্বভাবে ০.৯৪x স্কোয়াশ হয়ে একটি প্রাকৃতিক রাবার-স্প্রিং বাউন্সে স্থির হয়।",
+          duration: "650ms · CubicBezier(0.65, 0, 0.35, 1)",
+          physics: "Squash sy=0.94, sx=1.05 + Spring(400)",
+          visual: "Subtle blue trail glow + Single tick landing",
+          haptic: "Micro tactile tap on impact",
+          composer: "Ei je shono, kemon acho?",
+          bubbleHtml: `
+      <div style="background: linear-gradient(135deg, #2563EB, #1D4ED8); padding: 10px 14px; border-radius: 16px 16px 4px 16px; color: white; font-size: 13.5px; box-shadow: 0 4px 14px rgba(37,99,235,0.35); max-width: 82%;">
+        Ei je shono, kemon acho?
+        <div style="display:flex; justify-content:flex-end; align-items:center; gap:4px; margin-top:2px; font-size:10.5px; color:#BFDBFE;">
+          7:05 PM <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#60A5FA" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        </div>
+      </div>
+    `,
+          animKey: "send-text-flight",
+        },
+        2: {
+          title: "2. Photo / Image Send Animation",
+          badge: "#2 Photo",
+          desc: "<strong>Polaroid Eject & Shutter Lens Flash:</strong> ছবি পাঠানোর সাথে সাথে যেন ক্যামেরার পোলারয়েড স্লট থেকে ফ্রেশ ফটো বের হয়ে আসছে। ছবির ওপর হালকা একটি হোয়াইট লেন্স-ফ্ল্যাশ পড়ে এবং ৩ডি পার্সপেক্টিভ রোটেট করে শ্যাডো ড্রপ নিয়ে চ্যাটে বসে পড়ে।",
+          duration: "750ms · Spring(damping=0.82, stiffness=380)",
+          physics: "3D Perspective rotateY(15deg) -> 0deg",
+          visual: "Lens flare gleam (400ms) + Shadow expansion",
+          haptic: "Mechanical camera shutter latch pulse",
+          composer: "IMG_2026_09_20.jpg (2.4 MB)",
+          bubbleHtml: `
+      <div style="background: #1E293B; border-radius: 14px; padding: 4px; box-shadow: 0 6px 20px rgba(0,0,0,0.5); width: 220px; position:relative; overflow:hidden;">
+        <div style="height: 140px; border-radius: 10px; background: linear-gradient(135deg, #1E3A8A, #065F46); display:flex; align-items:center; justify-content:center; color:#93C5FD; font-size:13px; font-weight:600; position:relative; overflow:hidden;">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#60A5FA" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          <div class="flash-overlay" style="position:absolute; inset:0; background:white; opacity:0; pointer-events:none;"></div>
+        </div>
+        <div style="display:flex; justify-content:flex-end; align-items:center; gap:4px; padding:4px 6px 2px; font-size:10.5px; color:#94A3B8;">
+          7:05 PM <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38BDF8" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        </div>
+      </div>
+    `,
+          animKey: "send-photo-flight",
+          hasFlash: true,
+        },
+        3: {
+          title: "3. Video Clip Send Animation",
+          badge: "#3 Video Clip",
+          desc: "<strong>Filmstrip Reel Unroll & Playhead Ping:</strong> ভিডিওটি যেন একটি সিনেমাটিক ফিল্ম রিল থেকে আনরোল হয়ে সামনে আসে। চ্যাটে ডক করার মুহূর্তে ঠিক সেন্টারে প্লে বাটনটি ইলাস্টিক স্কেল হয়ে পপ-ইন করে এবং সময়-ব্যাজ উজ্জ্বল হয়ে ওঠে।",
+          duration: "720ms · EaseOutBack (overshoot=1.2)",
+          physics: "ScaleY(0.4 -> 1.05 -> 1.0) Aspect unroll",
+          visual: "Elastic Playhead Ping + Shimmer thumbnail",
+          haptic: "Dual rhythmic vibration (Unroll -> Dock)",
+          composer: "VID_KUCHUPUCHU.mp4 (14 MB)",
+          bubbleHtml: `
+      <div style="background: #1E293B; border-radius: 14px; padding: 4px; box-shadow: 0 6px 20px rgba(0,0,0,0.5); width: 220px; position:relative;">
+        <div style="height: 130px; border-radius: 10px; background: linear-gradient(135deg, #312E81, #581C87); display:flex; align-items:center; justify-content:center; position:relative;">
+          <div class="playhead" style="width:44px; height:44px; border-radius:50%; background:rgba(0,0,0,0.65); display:flex; align-items:center; justify-content:center; border:2px solid #60A5FA;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="#60A5FA"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+          </div>
+          <span style="position:absolute; bottom:6px; left:8px; background:rgba(0,0,0,0.7); font-size:10px; padding:2px 6px; border-radius:4px; color:#FFF;">0:45</span>
+        </div>
+        <div style="display:flex; justify-content:flex-end; align-items:center; gap:4px; padding:4px 6px 2px; font-size:10.5px; color:#94A3B8;">
+          7:05 PM <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38BDF8" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        </div>
+      </div>
+    `,
+          animKey: "send-video-flight",
+          hasPlayhead: true,
+        },
+        4: {
+          title: "4. Voice Note Send Animation",
+          badge: "#4 Voice Note",
+          desc: "<strong>Soundwave Ripple & Concentric Sonic Beam:</strong> মাইক ছেড়ে দেওয়ার পর ভয়েস বাবলটি সাউন্ড-বিমের মতো রিলিজ হয়। তরঙ্গমালাগুলো (Waveform bars) বাম থেকে ডানে ক্রমান্বয়ে জেগে ওঠে এবং ল্যান্ডিং পয়েন্টে গোলাকার সোনিক রিং ছড়িয়ে যায়।",
+          duration: "700ms · EaseInOutQuart",
+          physics: "Staggered wave bar heights (25ms delay each)",
+          visual: "Concentric sonic ripple ring expansion (360°)",
+          haptic: "Smooth rolling haptic gradient",
+          composer: "Voice message (0:18)",
+          bubbleHtml: `
+      <div style="background: linear-gradient(135deg, #1E40AF, #1D4ED8); padding: 10px 14px; border-radius: 20px; color: white; display:flex; align-items:center; gap:10px; width: 230px; box-shadow: 0 4px 14px rgba(30,64,175,0.4); position:relative;">
+        <div style="width:34px; height:34px; border-radius:50%; background:#FFF; display:flex; align-items:center; justify-content:center;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="#1D4ED8"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+        </div>
+        <div style="flex:1; display:flex; align-items:center; gap:3px;">
+          <div style="width:3px; height:10px; background:#93C5FD; border-radius:2px;"></div>
+          <div style="width:3px; height:18px; background:#93C5FD; border-radius:2px;"></div>
+          <div style="width:3px; height:24px; background:#FFF; border-radius:2px;"></div>
+          <div style="width:3px; height:14px; background:#93C5FD; border-radius:2px;"></div>
+          <div style="width:3px; height:20px; background:#FFF; border-radius:2px;"></div>
+          <div style="width:3px; height:8px; background:#93C5FD; border-radius:2px;"></div>
+          <div style="width:3px; height:16px; background:#93C5FD; border-radius:2px;"></div>
+          <div style="width:3px; height:12px; background:#93C5FD; border-radius:2px;"></div>
+        </div>
+        <span style="font-size:11px; color:#BFDBFE;">0:18</span>
+        <div class="sonic-ring" style="position:absolute; left:18px; top:18px; width:20px; height:20px; border-radius:50%; border:2px solid #60A5FA; pointer-events:none; opacity:0;"></div>
+      </div>
+    `,
+          animKey: "send-voice-flight",
+          hasSonic: true,
+        },
+        5: {
+          title: "5. Document / PDF Send Animation",
+          badge: "#5 Document / PDF",
+          desc: "<strong>Document Fold-Drop & Seal Stamp:</strong> ভারী অফিসিয়াল ফাইল বা পিডিএফ একটি থ্রিডি ফোল্ডেড পেপার ইফেক্টে ওপরে উঠে আসে। নিচের সীটে পৌঁছানোর পর সিলমোহরের মতো সলিড বাউন্সে স্ট্যাম্প হয়ে 'PDF' লাল ব্যাজটি লক হয়ে যায়।",
+          duration: "780ms · High Inertia (mass=1.4, stiffness=320)",
+          physics: "3D rotateX(30deg -> 0deg) Heavy mass drop",
+          visual: "Wax seal micro-bounce + Filetype badge lock",
+          haptic: "Heavy solid thud haptic",
+          composer: "Project_Proposal_2026.pdf (4.8 MB)",
+          bubbleHtml: `
+      <div style="background: #1E293B; border: 1px solid #334155; padding: 10px 12px; border-radius: 12px; display:flex; align-items:center; gap:10px; width: 230px; box-shadow: 0 4px 14px rgba(0,0,0,0.4);">
+        <div class="doc-badge" style="width:36px; height:42px; background:#EF4444; border-radius:6px; display:flex; flex-direction:column; align-items:center; justify-content:center; color:white; font-weight:800; font-size:11px; box-shadow: 0 2px 6px rgba(239,68,68,0.4);">
+          PDF
+        </div>
+        <div style="flex:1; overflow:hidden;">
+          <div style="font-size:12.5px; font-weight:600; color:#F8FAFC; white-space:nowrap; text-overflow:ellipsis; overflow:hidden;">Project_Proposal.pdf</div>
+          <div style="font-size:10.5px; color:#94A3B8; margin-top:2px;">4.8 MB · Document</div>
+        </div>
+      </div>
+    `,
+          animKey: "send-doc-flight",
+          hasSeal: true,
+        },
+        6: {
+          title: "6. Sticker / Big Emoji Send Animation",
+          badge: "#6 Sticker / Emoji",
+          desc: "<strong>Elastic 3D Pop & Starburst Halo:</strong> ইমোজি বা স্টিকার কোনো বাবল ছাড়াই সরাসরি রিলিজ হয়। এটি কার্টুনিশ সুপার-ইলাস্টিক স্কেলে (Scale 1.35x) লাফিয়ে উঠে সামান্য টুইস্ট নেয় এবং ল্যান্ড করার সময় স্পার্কল বা কনফেটি কণা ছড়িয়ে দেয়।",
+          duration: "680ms · Elastic Bounce (tension=60, friction=7)",
+          physics: "Squash & Stretch (0.2 -> 1.35 -> 0.9 -> 1.0)",
+          visual: "360° Starburst halo burst + 3D wobble",
+          haptic: "Playful bouncy double-tap",
+          composer: "😍 (Big Heart Eyes Sticker)",
+          bubbleHtml: `
+      <div style="font-size: 64px; text-shadow: 0 8px 24px rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; padding:10px;">
+        ❤️‍🔥
+      </div>
+    `,
+          animKey: "send-sticker-flight",
+        },
+        7: {
+          title: "7. Audio / Music Send Animation",
+          badge: "#7 Audio / Music",
+          desc: "<strong>Vinyl Disc Eject & Equalizer Pulse:</strong> অডিও গান বা মিউজিক ফাইল পাঠানোর সময় ভিনাইল রেকর্ড স্লিভ থেকে স্পিন করে বের হয়ে কার্ভ ফ্লাই করে। ডক হওয়ার পর ছোট ছোট ইকুয়ালাইজার বার নাচানাচি করে মিউজিকের রিদম ফুটিয়ে তোলে।",
+          duration: "740ms · Smooth Glide",
+          physics: "Continuous 360° Disc spin during trajectory",
+          visual: "Vinyl disc reveal + Live equalizing audio bars",
+          haptic: "Rhythmic tempo heartbeat vibration",
+          composer: "Song_Track_Kolkata.mp3 (8.2 MB)",
+          bubbleHtml: `
+      <div style="background: linear-gradient(135deg, #1E1B4B, #312E81); border:1px solid #4338CA; border-radius: 14px; padding: 10px 12px; display:flex; align-items:center; gap:12px; width: 230px;">
+        <div class="vinyl-disc" style="width:40px; height:40px; border-radius:50%; background:radial-gradient(circle, #F59E0B 25%, #18181B 30%, #27272A 70%, #000 100%); display:flex; align-items:center; justify-content:center; border:2px solid #52525B;">
+          <div style="width:8px; height:8px; border-radius:50%; background:#FFF;"></div>
+        </div>
+        <div style="flex:1;">
+          <div style="font-size:12.5px; font-weight:600; color:#E0E7FF;">Ami Banglay Gaan Gai</div>
+          <div style="font-size:10.5px; color:#A5B4FC;">Pratul Mukhopadhyay</div>
+        </div>
+      </div>
+    `,
+          animKey: "send-audio-flight",
+          hasVinyl: true,
+        },
+        8: {
+          title: "8. Contact Card Send Animation",
+          badge: "#8 Contact Card",
+          desc: "<strong>Business Card Slide & Avatar Halo Ring:</strong> ভিজিটিং কার্ডের মতো উল্লম্বভাবে ভেসে উঠে মেটালিক গ্লিটার রিফ্লেকশন সহ ল্যান্ড করে। অবতরণের পর কন্ট্রাক্ট ছবিটির চারপাশে গোল্ডেন রিং গ্লো হয় এবং কল/মেসেজ বাটন স্লট খুলে যায়।",
+          duration: "700ms · CubicBezier(0.4, 0, 0.2, 1)",
+          physics: "Card flip rotationY(35deg -> 0deg)",
+          visual: "Metallic sheen reflection pass across surface",
+          haptic: "Double crisp confirmation click",
+          composer: "Contact: Sahid Hasan (+88017...)",
+          bubbleHtml: `
+      <div style="background: #1E293B; border-radius: 14px; padding: 12px; border:1px solid #334155; width: 220px; box-shadow: 0 4px 14px rgba(0,0,0,0.4);">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+          <div style="width:36px; height:36px; border-radius:50%; background:#F59E0B; display:flex; align-items:center; justify-content:center; font-weight:bold; color:#000;">S</div>
+          <div>
+            <div style="font-size:13px; font-weight:bold; color:#F8FAFC;">Sahid Hasan</div>
+            <div style="font-size:10.5px; color:#94A3B8;">+880 1712-345678</div>
+          </div>
+        </div>
+        <div style="background:#2563EB; border-radius:8px; padding:6px; text-align:center; font-size:11.5px; font-weight:600; color:white;">Message Contact</div>
+      </div>
+    `,
+          animKey: "send-contact-flight",
+        },
+        9: {
+          title: "9. Live Location / Map Pin Send Animation",
+          badge: "#9 Location Pin",
+          desc: "<strong>Radar Ping & Pin Drop Impact:</strong> স্যাটেলাইট ম্যাপ থাম্বনেইলটি একটি রেডিয়াল রাডার সুইপ সহ আকাশে ভাসে। ল্যান্ডিং মুহূর্তে ম্যাপের পিনটি ওপর থেকে উল্কার মতো নিচে নেমে এসে চমৎকার গ্র্যাভিটেশনাল বাউন্সে বিঁধে যায়।",
+          duration: "760ms · Decelerate -> Drop Spring",
+          physics: "Map pin gravitational drop & rebound (2 bounces)",
+          visual: "360° Radar wave sweep + Target focal circle",
+          haptic: "Heavy pin-strike micro vibration",
+          composer: "Live Location: Satkhira, Khulna",
+          bubbleHtml: `
+      <div style="background: #1E293B; border-radius: 14px; overflow:hidden; width: 220px; border:1px solid #334155;">
+        <div style="height:110px; background:linear-gradient(135deg, #064E3B, #0F766E); position:relative; display:flex; align-items:center; justify-content:center;">
+          <div class="map-pin" style="position:relative; z-index:2;">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="#EF4444" stroke="#7F1D1D" stroke-width="1.5"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5" fill="#FFF"/></svg>
+          </div>
+          <span style="position:absolute; bottom:6px; left:8px; background:rgba(0,0,0,0.6); font-size:9.5px; padding:2px 6px; border-radius:4px; color:#A7F3D0;">Satkhira, BD</span>
+        </div>
+      </div>
+    `,
+          animKey: "send-location-flight",
+          hasPin: true,
+        },
+        10: {
+          title: "10. View-Once Media Send Animation",
+          badge: "#10 View-Once Media",
+          desc: "<strong>Phantom Vapor Dissolve & Shield Lock:</strong> ওয়ান-টাইম দেখতে পাওয়া ফটো বা ভিডিও ধোঁয়াশার মতো ব্লারি অস্পষ্ট ভ্যাপোর পার্টিকেল হয়ে উড়ে যায়। পৌঁছানোর সাথে সাথে সেন্টারে সোনালী প্যাডলকটি 'ক্লিক' শব্দে লক হয়ে '1' সংখ্যাটি ফ্ল্যাশ করে।",
+          duration: "760ms · Mystical Ethereal Float",
+          physics: "Blur dissolve (14px -> 0px) + Frosted glass",
+          visual: "Padlock clasp snap + Glowing ring perimeter",
+          haptic: "Mysterious high-frequency shimmer buzz",
+          composer: "Photo · View once ⓿",
+          bubbleHtml: `
+      <div style="background: rgba(30, 41, 59, 0.85); backdrop-filter: blur(10px); border:1px dashed #F59E0B; border-radius: 16px; padding: 12px 16px; display:flex; align-items:center; gap:12px; width: 210px; box-shadow: 0 4px 18px rgba(245,158,11,0.25);">
+        <div class="lock-icon" style="width:36px; height:36px; border-radius:50%; background:rgba(245,158,11,0.2); border:2px solid #F59E0B; display:flex; align-items:center; justify-content:center; color:#F59E0B; font-weight:bold; font-size:14px;">
+          1
+        </div>
+        <div>
+          <div style="font-size:13px; font-weight:600; color:#FDE68A;">View once</div>
+          <div style="font-size:10px; color:#94A3B8;">Photo disappears</div>
+        </div>
+      </div>
+    `,
+          animKey: "send-viewonce-flight",
+          hasLock: true,
+        },
+      };
+
+      let currentAnim = 1;
+      let currentSpeed = 1;
+
+      function selectAnim(idx) {
+        currentAnim = idx;
+        document.querySelectorAll(".anim-btn").forEach((b, i) => {
+          b.classList.toggle("active", i + 1 === idx);
+        });
+        const data = animData[idx];
+        document.getElementById("activeBadge").innerText = data.badge;
+        document.getElementById("cardTitle").innerText = data.title;
+        document.getElementById("cardDesc").innerHTML = data.desc;
+        document.getElementById("specDuration").innerText = data.duration;
+        document.getElementById("specPhysics").innerText = data.physics;
+        document.getElementById("specVisual").innerText = data.visual;
+        document.getElementById("specHaptic").innerText = data.haptic;
+        document.getElementById("composerText").innerText = data.composer;
+
+        triggerSend();
+      }
+
+      function toggleSpeed() {
+        currentSpeed = currentSpeed === 1 ? 0.4 : currentSpeed === 0.4 ? 2 : 1;
+        const label =
+          currentSpeed === 1 ? "1x" : currentSpeed === 0.4 ? "0.4x (Slow-Mo)" : "2x (Fast)";
+        document.getElementById("speedBtn").innerText = `Speed: ${label}`;
+      }
+
+      function triggerSend() {
+        const data = animData[currentAnim];
+        const stage = document.getElementById("flyingStage");
+        const target = document.getElementById("targetSlot");
+
+        // Clear previous target slot
+        target.innerHTML = "";
+        stage.innerHTML = "";
+
+        // Create flying clone
+        const flyer = document.createElement("div");
+        flyer.style.position = "absolute";
+        flyer.style.bottom = "80px";
+        flyer.style.right = "14px";
+        flyer.style.animation = `${data.animKey} ${0.7 / currentSpeed}s cubic-bezier(0.65, 0, 0.35, 1) forwards`;
+        flyer.innerHTML = data.bubbleHtml;
+
+        stage.appendChild(flyer);
+
+        // Trigger sub-animations (flash, playhead, sonic, seal, lock)
+        if (data.hasFlash) {
+          const flash = flyer.querySelector(".flash-overlay");
+          if (flash)
+            flash.style.animation = `photo-flash ${0.4 / currentSpeed}s ease-out 0.2s forwards`;
+        }
+        if (data.hasPlayhead) {
+          const ph = flyer.querySelector(".playhead");
+          if (ph) ph.style.animation = `playhead-pop ${0.4 / currentSpeed}s ease-out 0.45s both`;
+        }
+        if (data.hasSonic) {
+          const sonic = flyer.querySelector(".sonic-ring");
+          if (sonic)
+            sonic.style.animation = `sonic-ripple ${0.6 / currentSpeed}s ease-out 0.4s forwards`;
+        }
+        if (data.hasSeal) {
+          const badge = flyer.querySelector(".doc-badge");
+          if (badge)
+            badge.style.animation = `seal-stamp ${0.35 / currentSpeed}s ease-out 0.5s both`;
+        }
+        if (data.hasVinyl) {
+          const vinyl = flyer.querySelector(".vinyl-disc");
+          if (vinyl) vinyl.style.animation = `vinyl-spin ${0.7 / currentSpeed}s linear`;
+        }
+        if (data.hasPin) {
+          const pin = flyer.querySelector(".map-pin");
+          if (pin) pin.style.animation = `pin-drop ${0.45 / currentSpeed}s ease-out 0.4s both`;
+        }
+        if (data.hasLock) {
+          const lock = flyer.querySelector(".lock-icon");
+          if (lock) lock.style.animation = `lock-clasp ${0.4 / currentSpeed}s ease-out 0.4s both`;
+        }
+
+        // When animation finishes, transfer cleanly to targetSlot
+        setTimeout(
+          () => {
+            stage.innerHTML = "";
+            target.innerHTML = data.bubbleHtml;
+          },
+          700 / currentSpeed + 30,
+        );
+      }
+
+      // Initial auto-play
+      window.onload = () => {
+        selectAnim(1);
+      };
+    </script>
+  </body>
+</html>
