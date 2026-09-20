@@ -27,6 +27,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -819,7 +820,7 @@ private fun rnd(seed: Int, i: Int): Float {
     return ((y xor (y ushr 16)) and 0x7FFFF).toFloat() / 0x80000.toFloat()
 }
 
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawFx(fx: EmojiFx, tMs: Long, seed: Int) {
+private fun DrawScope.drawFx(fx: EmojiFx, tMs: Long, seed: Int) {
     val cx = size.width / 2f
     val cy = size.height / 2f
     val dp = size.height / 56f
