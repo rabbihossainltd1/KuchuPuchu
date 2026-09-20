@@ -192,6 +192,9 @@ fun KpPhotoViewer(
     subtitles: List<String> = emptyList(),
     startIndex: Int = 0,
     onPageChanged: ((Int) -> Unit)? = null,
+    // H3 (audit 2026-09-21): a view-once page is never cached anywhere —
+    // Coil memory + disk caching is disabled for the whole viewer instance.
+    once: Boolean = false,
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -398,6 +401,7 @@ fun KpPhotoViewer(
                             ),
                         ContentScale.Fit,
                         onLoaded = onShown,
+                        noCache = once,
                     )
                 }
             }
@@ -740,6 +744,17 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
                 }.getOrDefault(false)
             }
         state = if (ok) 1 else -1
+    }
+    // H3 (audit 2026-09-21): a view-once clip's downloaded bytes + thumb
+    // sidecars die with the viewing — the cache must not keep a copy of a
+    // message the server has already vanished.
+    DisposableEffect(b64, onceClip) {
+        onDispose {
+            if (onceClip) {
+                runCatching { dest?.delete() }
+                dest?.absolutePath?.let { VideoThumbs.evict(it) }
+            }
+        }
     }
     LaunchedEffect(state) {
         if (onceClip && state == 1) ViewOnce.spend(m?.optString("id").orEmpty())

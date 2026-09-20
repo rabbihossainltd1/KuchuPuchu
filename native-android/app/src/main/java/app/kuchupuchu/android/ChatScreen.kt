@@ -4177,6 +4177,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 url = messageMediaUrl(m),
                 title = who,
                 subtitle = if (once) "View once" else viewerStamp(m.optText("createdAt")),
+                once = once,
                 onClose = { viewerPhotos = emptyList() },
                 onForward =
                     if (privateChat || once) {
@@ -6485,6 +6486,18 @@ internal object VideoThumbs {
     }.getOrNull()
 
     /**
+     * H3 (audit 2026-09-21): drop every trace of a cache entry — the memory
+     * slot plus the .meta / .thumb.jpg sidecars. Used when a view-once clip
+     * leaves the screen: its bytes must not outlive the single viewing.
+     */
+    @Synchronized
+    fun evict(key: String) {
+        lru.remove(key)
+        runCatching { metaFile(key).takeIf { it.exists() }?.delete() }
+        runCatching { thumbFile(key).takeIf { it.exists() }?.delete() }
+    }
+
+    /**
      * v164: hand a slot's frame + meta to another slot — the send-in-flight
      * copy's sidecars go to the cache entry the SENT message will use, so the
      * bubble keeps the clip's own picture (and its ratio) across the echo →
@@ -7462,10 +7475,15 @@ object ViewOnce {
     fun spend(messageId: String) {
         if (messageId.isBlank() || !spent.add(messageId)) return
         scope.launch {
-            val ok = runCatching { Api.post("/api/messages/$messageId/view", JSONObject()) }.isSuccess
-            // A network blip must not leave the opening unreported forever —
-            // let the next viewing report again (the server refuses a repeat
-            // with 410, which is harmless).
+            // H3 (audit 2026-09-21): the fetch itself spends the opening now,
+            // so a 404/410 here means "already gone" — terminal, not a blip.
+            // A real network blip must still report again on next viewing.
+            val terminal = { e: Throwable ->
+                (e as? ApiException)?.status == 404 || (e as? ApiException)?.status == 410
+            }
+            val ok =
+                runCatching { Api.post("/api/messages/$messageId/view", JSONObject()) }
+                    .fold(onSuccess = { true }, onFailure = { terminal(it) })
             if (!ok) spent.remove(messageId)
             withContext(Dispatchers.Main) { ScreenStore.pokeInbox() }
         }

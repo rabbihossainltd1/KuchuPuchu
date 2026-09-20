@@ -6338,9 +6338,8 @@ const convBetween = (db, a, b) =>
         ) &&
         chat.includes("object ViewOnce {") &&
         chat.includes("if (messageId.isBlank() || !spent.add(messageId)) return") &&
-        chat.includes(
-          'runCatching { Api.post("/api/messages/$messageId/view", JSONObject()) }.isSuccess',
-        ) &&
+        chat.includes('runCatching { Api.post("/api/messages/$messageId/view", JSONObject()) }') &&
+        chat.includes(".fold(onSuccess = { true }, onFailure = { terminal(it) })") &&
         chat.includes("if (!ok) spent.remove(messageId)") &&
         chat.includes('onShown = if (once) ({ ViewOnce.spend(m.optString("id")) }) else null,') &&
         chat.includes("canSave = !privateChat && !once,") &&

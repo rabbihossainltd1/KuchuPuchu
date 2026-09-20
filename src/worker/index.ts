@@ -9164,6 +9164,65 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const row = await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", msgMediaMatch[1]!);
     if (!row || !row.media) fail(404, "Media not found.");
     await requireMember(db, row.conv_id, uid);
+    // H3 (audit 2026-09-21): a view-once opening is spent by the fetch
+    // itself. Fetch-free + spend-on-/view let a modified client pull the
+    // bytes any number of times and never report the opening. The sender's
+    // own preview (r61) still streams free; only a non-sender spends. Row
+    // first (conditional - a lost race is 410), bytes stream straight from
+    // the open R2 handle, the object is collected after the response
+    // completes, and every open chat gets the same VANISHED frame POST
+    // /view has always sent (plus the sender's list poke).
+    const onceMeta = parseJson<Record<string, unknown>>(row.meta_json, {});
+    if (onceMeta.viewOnce === true && row.sender_id !== uid) {
+      let object = null;
+      if (!row.media.startsWith("data:")) {
+        if (!env.MEDIA) fail(501, "File storage is not configured yet.");
+        object = await env.MEDIA.get(row.media);
+        if (!object) {
+          // Bytes already gone but the row survived (a partial failure or a
+          // hand-deleted object): converge the state and 404. No broadcast -
+          // the row simply disappears on every client's next poll.
+          await run(db, "DELETE FROM messages WHERE id = ?", row.id);
+          await syncPreviewAfterDelete(db, row);
+          fail(404, "Media not found.");
+        }
+      }
+      const cleared = await run(
+        db,
+        "DELETE FROM messages WHERE id = ? AND kind != 'DELETED'",
+        row.id,
+      );
+      if (!cleared) fail(410, "This was already opened.", "VIEWED");
+      await syncPreviewAfterDelete(db, row);
+      ctx.waitUntil(
+        afterMessageChanged(env, db, row.conv_id, {
+          id: row.id,
+          senderId: row.sender_id,
+          kind: "VANISHED",
+        }),
+      );
+      ctx.waitUntil(
+        broadcastRoomEvent(env, `user:${row.sender_id}`, {
+          type: "conv",
+          conversationId: row.conv_id,
+        }),
+      );
+      if (!object) return dataUrlResponse(row.media, "media");
+      ctx.waitUntil(collectOrphanedMedia(env, db, [row.media]).then(() => undefined));
+      const stored = safeMediaType(object.httpMetadata?.contentType);
+      const type =
+        stored === "application/octet-stream"
+          ? row.kind === "VIDEO"
+            ? "video/mp4"
+            : "image/jpeg"
+          : stored;
+      const headers = new Headers();
+      headers.set("content-type", type);
+      headers.set("x-content-type-options", "nosniff");
+      headers.set("content-disposition", 'attachment; filename="media"');
+      headers.set("cache-control", "no-store");
+      return new Response(object.body, { headers });
+    }
     return storedMediaResponse(env, row.media, row.kind === "VIDEO" ? "video/mp4" : "image/jpeg");
   }
 

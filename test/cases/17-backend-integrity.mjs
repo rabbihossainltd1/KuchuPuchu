@@ -1995,14 +1995,13 @@ async function main() {
       await h.call("GET", `/api/conversations/${conv.id}/messages`, undefined, A.token)
     ).json.items;
     check(
-      "r34-16a: an inline IMAGE sent view-once behaves the same — mediaUrl until the opening, then the media route is 404 and the row is gone from the thread",
+      "r34-16a + H3: an inline IMAGE sent view-once — the media fetch itself spends the opening (200 + row gone), so POST /view after it is 404 and the thread omits the row",
       inline.status === 201 &&
         im?.viewOnce === true &&
         typeof im?.mediaUrl === "string" &&
         im?.mediaW === undefined &&
         inlineBefore.status === 200 &&
-        inlineOpen.status === 200 &&
-        inlineOpen.json.vanished === true &&
+        inlineOpen.status === 404 &&
         inlineAfter.status === 404 &&
         !(inlinePage ?? []).some((x) => x.id === im?.id),
       JSON.stringify({

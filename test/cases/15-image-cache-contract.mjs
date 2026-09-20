@@ -96,8 +96,8 @@ const dirLines = main
   .split("\n")
   .filter((l) => l.includes(".directory(") && !l.trim().startsWith("//"));
 check(
-  "Coil's disk cache points at filesDir",
-  dirLines.some((l) => l.includes('filesDir.resolve("kp-image-cache")')),
+  "Coil's disk cache points at filesDir (v2 — v1 may hold view-once bytes)",
+  dirLines.some((l) => l.includes('filesDir.resolve("kp-image-cache-v2")')),
   dirLines.join(" | "),
 );
 check(

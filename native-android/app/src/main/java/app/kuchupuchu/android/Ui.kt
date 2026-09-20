@@ -70,6 +70,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import coil.compose.AsyncImage
+import coil.request.CachePolicy
 import coil.request.ImageRequest
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -560,6 +561,10 @@ fun KpNetImage(
     // (decoded / fetched) — the view-once viewer spends the opening only then,
     // never on a load that failed.
     onLoaded: (() -> Unit)? = null,
+    // H3 (audit 2026-09-21): view-once bytes must never land in Coil's
+    // memory/disk cache — the opening is single-use and the bytes are gone
+    // server-side the moment they are served.
+    noCache: Boolean = false,
 ) {
     if (url.isNullOrBlank()) return
     if (url.startsWith("data:")) {
@@ -575,7 +580,13 @@ fun KpNetImage(
     AsyncImage(
         // Bounded decode: the fullscreen viewer used to decode a 12MP photo
         // whole (~48MB spike) — tap a photo in a heavy chat and the app died.
-        model = ImageRequest.Builder(ctx).data(full).crossfade(true).size(1200).build(),
+        model =
+            ImageRequest.Builder(ctx).data(full).crossfade(true).size(1200).apply {
+                if (noCache) {
+                    memoryCachePolicy(CachePolicy.DISABLED)
+                    diskCachePolicy(CachePolicy.DISABLED)
+                }
+            }.build(),
         contentDescription = contentDescription,
         modifier = modifier,
         contentScale = contentScale,

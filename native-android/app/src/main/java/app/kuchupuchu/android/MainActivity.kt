@@ -106,7 +106,7 @@ class MainActivity : ComponentActivity() {
                         // "cached" photos re-downloaded after a background kill —
                         // the chat-photo half of the owner's report. We cap it below
                         // and evict ourselves instead of leaving it to the OS.
-                        .directory(filesDir.resolve("kp-image-cache"))
+                        .directory(filesDir.resolve("kp-image-cache-v2"))
                         .maxSizeBytes(256L * 1024 * 1024)
                         .build()
                 }
@@ -126,6 +126,13 @@ class MainActivity : ComponentActivity() {
             runCatching {
                 val stale = cacheDir.resolve("kp-image-cache")
                 if (stale.exists()) stale.deleteRecursively()
+            }
+            // H3 (audit 2026-09-21): the v1 disk cache may hold view-once
+            // bytes (single-use since this release) — drop the whole legacy
+            // directory once; the v2 cache above starts clean.
+            runCatching {
+                val legacy = filesDir.resolve("kp-image-cache")
+                if (legacy.exists()) legacy.deleteRecursively()
             }
         }.apply {
             isDaemon = true
