@@ -4300,11 +4300,15 @@ const METRIC_SOURCES: {
 /**
  * §52's last uncovered line: "Backend latency".
  *
- * It is measured the only way that is honest *and* free on this plan: the hourly cron
- * fetches its own public `/api/health` (which runs a D1 statement, so the number
- * includes the database round trip, not just cold-start JS) a few times and stores the
- * raw sample count, the sum of milliseconds, and the failure count. `lat.sum_ms /
- * lat.count` is then a mean over those samples, comparable hour to hour and day to day.
+ * The hourly cron calls its own `/api/health` handler in-process a few times and
+ * stores the raw sample count, the sum of milliseconds, and the failure count.
+ * `lat.sum_ms / lat.count` is then a mean over those samples, comparable hour to
+ * hour and day to day. (M6: this used to be a network subrequest to SELF_ORIGIN, but
+ * a cron isolate's self-subrequest failed 100% in production — 72 lat.err a day with
+ * zero samples while the same URL answered 200 to outside traffic — so the egress
+ * leg was the failure, not the backend. In-process measures the worker itself with
+ * no egress to block and no subrequest cost; and note `/api/health` runs no D1
+ * statement, so the number is handler time, not a database round trip.)
  *
  * What this deliberately is not: a percentile of real traffic. That would need a
  * per-request timing written to D1 — one write per request on a worker whose cron
@@ -5068,7 +5072,11 @@ export default {
           metrics = await rollupMetrics(env.DB, mNow);
           // §52's latency line rides the same hourly gate for the same reason: a
           // per-minute probe would be 4 320 requests a day against our own origin.
-          lat = await probeBackendLatency(env.DB, env.SELF_ORIGIN, mNow);
+          // M6: in-process, not egress — the cron subrequest to SELF_ORIGIN failed
+          // 100% (the egress leg, not the backend); handle() measures the worker.
+          lat = await probeBackendLatency(env.DB, env.SELF_ORIGIN, mNow, (url, init) =>
+            handle(new Request(url, { method: "GET", signal: init?.signal }), env, ctx),
+          );
         } catch (mErr) {
           console.error(
             "cron_metrics_error",

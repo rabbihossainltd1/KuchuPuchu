@@ -230,7 +230,8 @@ const plan = (raw, sql, ...bind) =>
 
 // ------------------------------------------------- 3. the shape that caused the outage
 {
-  const cron = src.slice(src.indexOf("async scheduled("), src.indexOf("async scheduled(") + 4000);
+  // M6 grew scheduled() by ~300 chars; the window must still reach the cron_reap log line.
+  const cron = src.slice(src.indexOf("async scheduled("), src.indexOf("async scheduled(") + 4600);
   check(
     "scheduled() has no inline age-based DELETE: cleanup lives behind the marker",
     !/DELETE FROM (error_log|devices|sessions|typing|statuses)/.test(cron),
