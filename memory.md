@@ -11,6 +11,10 @@
     2. Streamlined See more / See less row to a single `.clickable { msgExpanded = !msgExpanded; runCatching { haptics.tap() } }` on the `Row` toggle, with `Text` as a clean child (no nested clickable).
 - Directive 2: Voice indicator compact size: FIXED and verified in v184/v185.
 - Directive 3: Media editor pinch-zoom centered at focal/pinch point: FIXED and verified in v185.
+- Directive 4: In-app update red error: "holds no newer build — try again later"
+  - Root cause: `versionCode` in `native-android/app/build.gradle.kts` was still 185, matching the installed version on the user's phone, causing `archiveCode <= installedVersionCode(ctx)` in `KpUpdate.kt:198` to throw.
+  - Fix: Bumped `versionCode = 187` and `versionName = "3.9.110"` in `build.gradle.kts` and `test/cases/36-v166-round.mjs`.
+- Directive 5: 10 unique message send animations for different items (photo, video, documents, voice, text, sticker, audio, contact, location, view-once) with interactive preview.
 
 ## Test Gates
 - All 37/37 test cases passing (1611 assertions).
