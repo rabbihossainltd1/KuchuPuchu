@@ -198,7 +198,7 @@ fun listStamp(iso: String): String {
                 z.minute,
                 if (z.hour >= 12) "PM" else "AM",
             )
-        z.toLocalDate() == now.toLocalDate().minusDays(1) -> "Yesterday"
+        z.toLocalDate() == now.toLocalDate().minusDays(1) -> "Yes"
         now.toLocalDate().toEpochDay() - z.toLocalDate().toEpochDay() < 7 ->
             z.dayOfWeek.toString().take(3).let { d -> d[0].toString() + d.substring(1).lowercase() }
         else -> "${z.dayOfMonth} ${z.month.toString().take(3).let { m -> m[0] + m.substring(1).lowercase() }}"

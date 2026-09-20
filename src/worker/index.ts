@@ -3432,8 +3432,16 @@ async function requireUser(db: D1Database, request: Request) {
   // Presence used to be written on every authenticated request — including the
   // 800ms chat poll — which turned every read into a D1 write. Only refresh it
   // once the stored value is older than the online window.
+  // r60 (owner: "theke theke offline user keo online dekhai ... real-time na"):
+  // Background media thumbnail fetches (for push notifications) and background call
+  // active-checks do NOT stamp user presence, preventing offline users from false online flips.
+  const reqPath = new URL(request.url).pathname;
+  const isBg =
+    request.headers.get("x-kp-background") === "1" ||
+    reqPath.includes("/media") ||
+    reqPath === "/api/calls/active";
   const now = Date.now();
-  if (now - Date.parse(row.last_active_at) > ONLINE_WINDOW_MS) {
+  if (!isBg && now - Date.parse(row.last_active_at) > ONLINE_WINDOW_MS) {
     const iso = new Date(now).toISOString();
     // Owner round 32 item 4: the same throttled tick stamps the device this
     // session was minted on (last active + where from), one batch round trip.

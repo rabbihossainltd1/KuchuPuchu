@@ -1087,7 +1087,7 @@ fun statusStamp(iso: String): String {
         z.toLocalDate() == now.toLocalDate() ->
             "Today at ${String.format("%d:%02d %s", (z.hour % 12f).toInt().let { if (it == 0) 12 else it }, z.minute, if (z.hour >= 12) "PM" else "AM")}"
         z.toLocalDate() == now.toLocalDate().minusDays(1) ->
-            "Yesterday at ${String.format("%d:%02d %s", (z.hour % 12f).toInt().let { if (it == 0) 12 else it }, z.minute, if (z.hour >= 12) "PM" else "AM")}"
+            "Yes at ${String.format("%d:%02d %s", (z.hour % 12f).toInt().let { if (it == 0) 12 else it }, z.minute, if (z.hour >= 12) "PM" else "AM")}"
         now.toLocalDate().toEpochDay() - z.toLocalDate().toEpochDay() < 7 ->
             // Within a week, show the weekday like the chat list does — this
             // branch used to be a copy of the "else" date format.
@@ -1115,7 +1115,7 @@ fun statusStampShort(iso: String): String {
         String.format("%d:%02d %s", (z.hour % 12f).toInt().let { if (it == 0) 12 else it }, z.minute, if (z.hour >= 12) "PM" else "AM")
     return when {
         z.toLocalDate() == now.toLocalDate() -> clock()
-        z.toLocalDate() == now.toLocalDate().minusDays(1) -> "Yesterday"
+        z.toLocalDate() == now.toLocalDate().minusDays(1) -> "Yes"
         now.toLocalDate().toEpochDay() - z.toLocalDate().toEpochDay() < 7 ->
             z.dayOfWeek.toString().take(3).let { d -> d[0] + d.substring(1).lowercase() }
         else ->

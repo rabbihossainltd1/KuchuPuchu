@@ -392,7 +392,8 @@ fun Modifier.fxPadlockSnap(trigger: Any?): Modifier {
 /**
  * Clean unified send/receive animation (r58):
  * - Live SENT messages (including documents/media/text/voice) animate in from the RIGHT side (+64dp -> 0f).
- * - Live RECEIVED messages animate in from the LEFT side (-64dp -> 0f).
+ * - Live SENT messages animate in from the bottom-right (+44dp X, +18dp Y -> 0f).
+ * - Live RECEIVED messages animate in from the bottom-left (-44dp X, +18dp Y -> 0f).
  * - Chat history (scrolling or loading older): NO side animation, quiet and stable with gentle fade.
  */
 @Composable
@@ -417,11 +418,14 @@ fun Modifier.fxSideSlide(
     return graphicsLayer {
         val v = p.value
         if (v < 1f) {
-            val dist = 64f * density
+            val dist = 44f * density
+            val yDist = 18f * density
             translationX = if (isSent) dist * (1f - v) else -dist * (1f - v)
+            translationY = yDist * (1f - v)
             alpha = v.coerceIn(0f, 1f)
         } else {
             translationX = 0f
+            translationY = 0f
             alpha = 1f
         }
     }

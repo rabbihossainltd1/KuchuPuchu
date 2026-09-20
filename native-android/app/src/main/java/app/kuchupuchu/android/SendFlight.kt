@@ -139,10 +139,13 @@ fun Modifier.fxFlyIn(
                 val lift = sin(v * PI.toFloat()) * 8f * density
                 // r58 (owner: "massage documents ekhon right side theke asbe ... receive animation left theke"):
                 // Sent items slide smoothly from the right, received items from the left.
+                // r60 (owner: "right thekei asbe but halk niche right theke asbe ... receiver er jonno halka left er niche theke"):
+                // Sent messages glide in diagonally from bottom-right (+X, +Y); received glide in from bottom-left (-X, +Y).
                 // Chat history scrolling remains static with gentle fade; old vertical flight removed.
-                val sideOffset = (if (isSent) 64f else -64f) * density * (1f - v)
+                val sideOffset = (if (isSent) 44f else -44f) * density * (1f - v)
+                val bottomOffset = 18f * density * (1f - v)
                 translationX = if (active) sideOffset else 0f // translationX = 0f
-                translationY = 0f
+                translationY = if (active) bottomOffset else 0f
                 alpha = if (v < 0.06f) v / 0.06f else 1f
             }
         }

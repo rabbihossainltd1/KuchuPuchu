@@ -586,17 +586,14 @@ fun ChatScreen(nav: NavController, convId: String) {
     fun refreshMeta() {
         scope.launch {
             runCatching {
-                val data = withContext(Dispatchers.IO) { Api.get("/api/conversations/$convId") }
+                val data = withContext(Dispatchers.IO) { Api.get("/api/conversations/$convId", force = true) }
                 val c = data.optJSONObject("conversation")
                 if (c != null) {
                     if (muteInFlight) {
                         val localMuted = conv.value?.optBoolean("muted") == true
                         c.put("muted", localMuted)
                     }
-                    // Skip the state write when nothing changed: assigning a
-                    // fresh JSONObject on every poll re-composed the header
-                    // (and everything reading conv) 60+ times a minute.
-                    if (conv.value != c) conv.value = c
+                    conv.value = c
                     ScreenStore.setConvDetail(convId, c)
                     c.arr("members").objects().forEach { m ->
                         val u = m.optJSONObject("user")
@@ -908,6 +905,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         // r56 item 2: new message arrived -> clear typing indicator immediately
                         otherTypingAt = 0L
                         otherTypingKind = null
+                        refreshMeta()
                         // FAST PAINT: the WS "message" frame carries the FULL
                         // message object (msgFrom), so we drop the bubble into
                         // the thread instantly instead of waiting a GET round
@@ -1113,8 +1111,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                 lastForeground = fg
                 if (!fg) continue
                 val onScreen = Store.route == "chat/$convId"
-                if (justReturned && onScreen) refreshMessages(forceNetwork = true)
-                else if (onScreen) {
+                if (justReturned && onScreen) {
+                    refreshMessages(forceNetwork = true)
+                    refreshMeta()
+                } else if (onScreen) {
                     // Owner round 6: socket down used to mean messages up to
                     // 10s late ("realtime update late"). Two changes: the
                     // fallback poll runs every 3s, and the socket gets an
@@ -1133,6 +1133,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     if (now - lastFallbackRefresh >= (if (down) 3_000L else 8_000L)) {
                         lastFallbackRefresh = now
                         refreshMessages(forceNetwork = true)
+                        refreshMeta()
                     }
                     if (now - lastRejoin >= 10_000) {
                         lastRejoin = now
@@ -2003,7 +2004,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             val album = if (photos >= 2) newAlbumId() else null
             batch.forEach { edited ->
                 when (val m = edited.media) {
-                    is EditedMedia.Photo -> sendImage(m.dataUrl, album, edited.viewOnce, caption = edited.caption)
+                    is EditedMedia.Photo -> sendImage(m.dataUrl, album, edited.viewOnce, caption = edited.caption, w = m.w, h = m.h)
                     is EditedMedia.Video -> sendFile("video.mp4", m.mime, m.file, viewOnce = edited.viewOnce, caption = edited.caption, w = m.w, h = m.h, durMs = m.durMs)
                     is EditedMedia.Untouched ->
                         if (m.isVideo) handleDocumentPicked(m.uri, viewOnce = edited.viewOnce, caption = edited.caption)
@@ -2359,7 +2360,8 @@ fun ChatScreen(nav: NavController, convId: String) {
     val avatarUrl = if (isGroup) c?.optIso("avatarUrl") else c?.optJSONObject("other")?.optIso("avatarUrl")
     // The ref is what makes the header paint without re-fetching: pass it too.
     val avatarRef = if (isGroup) c?.optIso("avatarRef") else c?.optJSONObject("other")?.optIso("avatarRef")
-    val online = !isGroup && c?.optJSONObject("other")?.optBoolean("online") == true
+    val otherTyping = System.currentTimeMillis() - otherTypingAt < 4_000L && otherTypingKind != null
+    val online = !isGroup && (otherTyping || c?.optJSONObject("other")?.optBoolean("online") == true)
     // Official notification account: one-way (owner rule) — no composer.
     val noReply = !isGroup && otherUserId == "kp_official_bot"
     // Owner round 31 item 21: a private profile's chat (theirs, or mine when
@@ -4823,7 +4825,7 @@ internal object ImageRatios {
     }
 }
 
-/** Just the time — "3:17 am" today, "yesterday 11:10 pm", then "12 Aug" —
+/** Just the time — "3:17 am" today, "yes 11:10 pm", "sun 3:15 pm", then "12 aug" —
  *  always in Bangladesh Standard Time (owner rule). */
 private fun otherLastSeen(iso: String?): String {
     if (iso.isNullOrBlank()) return " "
@@ -4835,7 +4837,9 @@ private fun otherLastSeen(iso: String?): String {
     val time = "$hh:%02d $ampm".format(z.minute)
     return when {
         z.toLocalDate() == now.toLocalDate() -> time
-        z.toLocalDate() == now.toLocalDate().minusDays(1) -> "yesterday $time"
+        z.toLocalDate() == now.toLocalDate().minusDays(1) -> "yes $time"
+        now.toLocalDate().toEpochDay() - z.toLocalDate().toEpochDay() < 7 ->
+            "${z.dayOfWeek.toString().take(3).lowercase()} $time"
         else -> "${z.dayOfMonth} ${z.month.toString().take(3).lowercase()}"
     }
 }
@@ -5969,7 +5973,9 @@ private fun MessageRow(
                     // incoming minimum - the 104 dp floor is therefore
                     // enforced AFTER it, as a required size, so a short
                     // bubble really is wider than the stamp under it.
-                    .then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = 79.dp))
+                    // r60 (owner: "short massage bubble size to ami kom korchilam maybe 78/79 but receive short massage er size kom hoini eitaw set koro"):
+                    // compact 78.dp / 79.dp minimum width applies to both sent and received short messages.
+                    .then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = if (!mine) 78.dp else 79.dp)) // .then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = 79.dp))
                     // Owner round 10: the same soft 3D lift the call buttons
                     // have — bubbles float on the wallpaper now.
                     // Owner round 32 (item 8): an emoji-only message has NO
@@ -6946,14 +6952,18 @@ private fun ViewOnceRow(
                 Modifier
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
                     .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
-                    .widthIn(max = 168.dp)
+                    // r60 (owner: "view once media er size kom koro"):
+                    // v165: .widthIn(max = 168.dp) .widthIn(min = 132.dp)
+                    // Modifier.heightIn(max = 220.dp).aspectRatio(boxRatio)
+                    .widthIn(max = 138.dp)
                     .then(
                         if (boxRatio > 0f) {
-                            Modifier.heightIn(max = 220.dp).aspectRatio(boxRatio)
+                            // v165: .heightIn(max = 220.dp)
+                            Modifier.heightIn(max = 175.dp).aspectRatio(boxRatio)
                         } else {
                             Modifier
-                                .widthIn(min = 132.dp)
-                                .height(168.dp)
+                                .widthIn(min = 108.dp)
+                                .height(138.dp)
                         },
                     )
                     .shadow(2.dp, bubbleShape)
@@ -7072,14 +7082,18 @@ private fun ViewOnceRow(
                     }
                 }
                 // Center circular dark badge holding the view once mark
+                // r60 (owner: "View once er icons ta border er middle a nai ota thik koro"):
+                // center alignment and CenteredOnceIcon perfectly centered within card border.
+                // ViewOnceOneIcon(56.dp)
                 Box(
                     Modifier
-                        .size(68.dp)
+                        .align(Alignment.Center)
+                        .size(52.dp)
                         .clip(CircleShape)
                         .background(Color(0x66000000)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    ViewOnceOneIcon(56.dp)
+                    CenteredOnceIcon(40.dp)
                 }
                 // Top-left capsule pill: ⟳ 1
                 Row(

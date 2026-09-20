@@ -826,7 +826,7 @@ private fun deviceSeen(iso: String): String {
     val time = "$hh:%02d %s".format(z.minute, if (z.hour < 12) "am" else "pm")
     return when {
         z.toLocalDate() == now.toLocalDate() -> time
-        z.toLocalDate() == now.toLocalDate().minusDays(1) -> "yesterday"
+        z.toLocalDate() == now.toLocalDate().minusDays(1) -> "yes"
         else -> "${z.dayOfMonth} ${z.month.toString().take(3).lowercase()}"
     }
 }

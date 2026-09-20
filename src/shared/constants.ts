@@ -154,7 +154,7 @@ export const DEFAULT_MATCH_WEIGHTS = {
   mic: 4,
 } as const;
 
-export const ONLINE_WINDOW_MS = 90 * 1000;
+export const ONLINE_WINDOW_MS = 35 * 1000;
 export const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 /** Phone auth: how long a new-device login approval stays claimable (§17). */
 export const LOGIN_REQUEST_TTL_MS = 5 * 60 * 1000;
