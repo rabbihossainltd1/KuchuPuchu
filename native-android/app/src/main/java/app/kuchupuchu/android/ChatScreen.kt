@@ -6011,8 +6011,7 @@ private fun MessageRow(
                     )
                     // r55: a smooth expand / collapse when the fold flips.
                     // r56 (owner: "smooth expand collapse animation"): spring damping ratio + stiffness tuned for buttery fold animation.
-                    // r62 (owner: "voice massage er animation er somoy original body na hoye fake animation hocche ... original rakho"):
-                    // animateContentSize only on collapsible text bodies; voice notes keep exact original body dimensions with no resize.
+                    // r62: animateContentSize only on collapsible text bodies; voice notes keep exact original body dimensions with no resize.
                     .then(if (textLike && longBody) Modifier.animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f)) else Modifier)
                     .combinedClickable(
                         onClick = {
@@ -6043,7 +6042,7 @@ private fun MessageRow(
                     // already leaves the stamp its corner.
                     .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (voiceRow) 0.dp else if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp)
                     // r58: live sent messages animate from right, received from left; history stays quiet
-                    // r62 (owner: "left side a extra space dekha jacche original rakho"): voice notes fly via fxFlyIn directly with original body; no duplicate box translation.
+                    // r62: voice notes fly via fxFlyIn directly with original body; no duplicate box translation.
                     .then(if (voiceRow) Modifier else Modifier.fxSideSlide(active = fxFresh, isSent = mine))
                     // v172 (owner: "light effect ta just message a hobe
                     // full chat a na"): the landing squash + shine + ripple
@@ -6892,15 +6891,17 @@ private fun ViewOnceRow(
     // r60 (owner: "keo njje view once send korle nije jeno view korte pare"):
     // sender can also open/preview their sent view-once media until recipient vanishes it.
     val canOpen = !pendingEcho
-    val onceAnim = rememberInfiniteTransition(label = "onceRing")
-    val ringRotation by onceAnim.animateFloat(
+    // r62 (owner: "majher icon ta animate remove koro background a je sundor blur er sathe . . . Galaxy effect ache ogula chokmok chokmok korbe eita rakho"):
+    // galaxy twinkle animation for background star speckles
+    val galaxyAnim = rememberInfiniteTransition(label = "galaxyTwinkle")
+    val sparkleTime by galaxyAnim.animateFloat(
         initialValue = 0f,
-        targetValue = 360f,
+        targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(3600, easing = LinearEasing),
+            animation = tween(2400, easing = LinearEasing),
             repeatMode = RepeatMode.Restart,
         ),
-        label = "onceRingRot",
+        label = "sparkleT",
     )
     var replyDrag by remember { mutableStateOf(0f) }
     val replyOffset by animateFloatAsState(replyDrag, spring(stiffness = 1400f), label = "oncereplydrag")
@@ -7095,6 +7096,7 @@ private fun ViewOnceRow(
                     }
                 }
                 // Frosted crystalline noise speckles overlay matching the owner reference screenshot
+                // r62 (owner: "Galaxy effect ache ogula chokmok chokmok korbe"): twinkling stars / sparkling galaxy
                 androidx.compose.foundation.Canvas(Modifier.matchParentSize()) {
                     val w = size.width
                     val h = size.height
@@ -7105,13 +7107,20 @@ private fun ViewOnceRow(
                         for (i in 0 until count) {
                             val x = rng.nextFloat() * w
                             val y = rng.nextFloat() * h
-                            val r = 0.75f + rng.nextFloat() * 1.5f
-                            val a = 0.25f + rng.nextFloat() * 0.55f
+                            val baseR = 0.75f + rng.nextFloat() * 1.5f
+                            val baseA = 0.25f + rng.nextFloat() * 0.55f
+                            val phase = (i * 0.6180339887f) % 1f
+                            val t = (sparkleTime + phase) % 1f
+                            val twinkle = kotlin.math.sin(t * 2f * Math.PI.toFloat()) * 0.5f + 0.5f
+                            val a = (baseA * (0.35f + 0.65f * twinkle)).coerceIn(0.08f, 1f)
+                            val r = baseR * (0.85f + 0.35f * twinkle)
                             drawCircle(androidx.compose.ui.graphics.Color.White.copy(alpha = a), radius = r, center = androidx.compose.ui.geometry.Offset(x, y))
                         }
                     }
                 }
-                // Center view-once mark (r62: dim background circle removed, zoom pulse removed, only icon ring animates)
+                // Center circular view once mark
+                // r62 (owner: "majher icon ta animate remove koro ... dim background remove koro"):
+                // dim background circle removed, icon animation removed (static crisp mark), galaxy sparkles behind.
                 // ViewOnceOneIcon(56.dp)
                 Box(
                     Modifier
@@ -7119,7 +7128,7 @@ private fun ViewOnceRow(
                         .size(52.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CenteredOnceIcon(50.dp, ringRotation = ringRotation)
+                    CenteredOnceIcon(48.dp)
                 }
                 if (pendingEcho) {
                     // An upload in flight: the determinate ring under the mark.
@@ -8279,7 +8288,13 @@ private fun FileBubble(
                 contentAlignment = Alignment.Center,
             ) {
                 when {
-                    loading -> CircularProgressIndicator(
+                    loading || (pendingEcho && vFrac == null) -> CircularProgressIndicator(
+                        color = ink,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    pendingEcho && vFrac != null -> CircularProgressIndicator(
+                        progress = { vFrac },
                         color = ink,
                         strokeWidth = 2.dp,
                         modifier = Modifier.size(16.dp),
@@ -8300,9 +8315,10 @@ private fun FileBubble(
                 }
                 val secs = m.optJSONObject("meta")?.optInt("seconds") ?: 0
                 val vFrac = UploadProgress.fracs[m.optString("clientId")]
+                // r62 (owner: "screenshot ta dekho upper ta sent hoye geche original shape a ache. nicher voice ta dekho sending er somoy barti left side a roye geche ota not fixed"):
+                // voice bubble keeps exact original shape during sending by displaying duration line (not wide "Sending · 89%" text that bloated column and created extra left space).
                 Text(
                     when {
-                        vFrac != null -> "Sending · ${(vFrac * 100).toInt()}%"
                         // While it plays (or the finger scrubs), the line
                         // counts the elapsed seconds.
                         (active || scrubAt != null) && secs > 0 -> {
@@ -8310,7 +8326,7 @@ private fun FileBubble(
                             "%d:%02d".format(at / 60, at % 60)
                         }
                         secs > 0 -> "%d:%02d".format(secs / 60, secs % 60)
-                        pendingEcho -> "Sending…"
+                        pendingEcho -> "0:00"
                         else -> FilesUtil.displaySize(m.optInt("fileSize"))
                     },
                     fontSize = 10.sp,
@@ -8331,8 +8347,7 @@ private fun FileBubble(
                     progress = progress,
                     played = ink,
                     rest = faint,
-                    // r62 (owner: "voice massage er animation er somoy original body na hoye fake animation hocche ... original rakho"):
-                    // original full waveform rendered immediately without fake grow animation.
+                    // r62: full waveform rendered immediately without fake grow animation
                     grow = false, // grow = fxGrow,
                     modifier = Modifier.width(150.dp).height(22.dp),
                     onSeek = { frac ->
