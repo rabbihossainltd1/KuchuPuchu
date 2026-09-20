@@ -260,6 +260,123 @@ fun Modifier.fxShineRipple(trigger: Any?, tint: Color = Color.White): Modifier {
     }
 }
 
+/* ------------------------------------------- unique item send animations */
+
+/** Photo / Image shutter flash: soft white lens gleam sweeps across the media on send/arrival. */
+@Composable
+fun Modifier.fxShutterFlash(trigger: Any?): Modifier {
+    val scale = fxAnimatorScale()
+    val alpha = remember(trigger) { Animatable(if (trigger != null && scale > 0f) 0.65f else 0f) }
+    LaunchedEffect(trigger) {
+        if (trigger != null && scale > 0f) {
+            alpha.animateTo(0f, tween(360, easing = FastOutSlowInEasing))
+        }
+    }
+    return drawWithContent {
+        drawContent()
+        val a = alpha.value
+        if (a > 0.01f) {
+            drawRect(Color.White.copy(alpha = a))
+        }
+    }
+}
+
+/** Voice note acoustic ripple: concentric soundwave ring pulses from the playhead on send/arrival. */
+@Composable
+fun Modifier.fxSonicRipple(trigger: Any?, tint: Color = Color(0xFF60A5FA)): Modifier {
+    val scale = fxAnimatorScale()
+    var clock by remember(trigger) { mutableStateOf(-1L) }
+    LaunchedEffect(trigger) {
+        if (trigger != null && scale > 0f) {
+            clock = 0L
+            val t0 = android.os.SystemClock.uptimeMillis()
+            while (android.os.SystemClock.uptimeMillis() - t0 < 650L) {
+                clock = android.os.SystemClock.uptimeMillis() - t0
+                kotlinx.coroutines.delay(16)
+            }
+            clock = -1L
+        }
+    }
+    return drawBehind {
+        val el = clock
+        if (el in 0L..650L) {
+            val p = (el / 650f).coerceIn(0f, 1f)
+            val r = size.height * 0.4f + p * size.width * 0.45f
+            drawCircle(
+                color = tint.copy(alpha = 0.3f * (1f - p)),
+                radius = r,
+                center = Offset(size.height * 0.6f, size.height / 2f),
+                style = Stroke(width = 2.dp.toPx() * (1f - p * 0.5f)),
+            )
+        }
+    }
+}
+
+/** Video playhead ping: center play icon pops with an elastic bounce on send/arrival. */
+@Composable
+fun Modifier.fxPlayheadPing(trigger: Any?): Modifier {
+    val scale = fxAnimatorScale()
+    val s = remember(trigger) { Animatable(if (trigger != null && scale > 0f) 0.4f else 1f) }
+    LaunchedEffect(trigger) {
+        if (trigger != null && scale > 0f) {
+            s.animateTo(1f, androidx.compose.animation.core.spring(dampingRatio = 0.6f, stiffness = 420f))
+        }
+    }
+    return graphicsLayer {
+        scaleX = s.value
+        scaleY = s.value
+    }
+}
+
+/** Document / Contact card sheen: diagonal metallic reflection streak across the card. */
+@Composable
+fun Modifier.fxCardSheen(trigger: Any?): Modifier {
+    val scale = fxAnimatorScale()
+    var clock by remember(trigger) { mutableStateOf(-1L) }
+    LaunchedEffect(trigger) {
+        if (trigger != null && scale > 0f) {
+            clock = 0L
+            val t0 = android.os.SystemClock.uptimeMillis()
+            while (android.os.SystemClock.uptimeMillis() - t0 < 550L) {
+                clock = android.os.SystemClock.uptimeMillis() - t0
+                kotlinx.coroutines.delay(16)
+            }
+            clock = -1L
+        }
+    }
+    return drawWithContent {
+        drawContent()
+        val el = clock
+        if (el in 0L..550L) {
+            val p = (el / 550f).coerceIn(0f, 1f)
+            val w = size.width
+            val x = -w + 2f * w * p
+            drawRect(
+                brush = Brush.linearGradient(
+                    listOf(Color.Transparent, Color.White.copy(alpha = 0.28f), Color.Transparent),
+                    start = Offset(x, 0f),
+                    end = Offset(x + w * 0.35f, size.height),
+                ),
+            )
+        }
+    }
+}
+
+/** View-once media lock snap: padlock rotation and settle on send/arrival. */
+@Composable
+fun Modifier.fxPadlockSnap(trigger: Any?): Modifier {
+    val scale = fxAnimatorScale()
+    val rot = remember(trigger) { Animatable(if (trigger != null && scale > 0f) -22f else 0f) }
+    LaunchedEffect(trigger) {
+        if (trigger != null && scale > 0f) {
+            rot.animateTo(0f, androidx.compose.animation.core.spring(dampingRatio = 0.58f, stiffness = 480f))
+        }
+    }
+    return graphicsLayer {
+        rotationZ = rot.value
+    }
+}
+
 /* ------------------------------------------------------ letter-by-letter */
 
 /**

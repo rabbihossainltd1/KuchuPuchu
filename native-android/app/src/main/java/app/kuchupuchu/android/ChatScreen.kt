@@ -38,6 +38,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.horizontalDrag
@@ -5986,6 +5987,8 @@ private fun MessageRow(
                     // except FILE rows (items 45 / 34), whose second line
                     // already leaves the stamp its corner.
                     .padding(start = 10.dp, top = 4.dp, end = 8.dp, bottom = if (voiceRow) 0.dp else if (fileRow) 4.dp else if (textLike) 0.dp else 15.dp)
+                    .then(if (voiceRow) Modifier.fxSonicRipple(fxLanded, chatAccent(theme)) else Modifier)
+                    .then(if (fileRow) Modifier.fxCardSheen(fxLanded) else Modifier)
                     // v172 (owner: "light effect ta just message a hobe
                     // full chat a na"): the landing squash + shine + ripple
                     // ride the BUBBLE only.
@@ -6172,7 +6175,13 @@ private fun MessageRow(
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .heightIn(min = 36.dp)
+                                .heightIn(min = 40.dp)
+                                .pointerInput(Unit) {
+                                    detectTapGestures {
+                                        msgExpanded = !msgExpanded
+                                        runCatching { haptics.tap() }
+                                    }
+                                }
                                 .clickable {
                                     msgExpanded = !msgExpanded
                                     runCatching { haptics.tap() }
@@ -6185,6 +6194,12 @@ private fun MessageRow(
                                 fontSize = 12.5.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color.White,
+                                modifier = Modifier.pointerInput(Unit) {
+                                    detectTapGestures {
+                                        msgExpanded = !msgExpanded
+                                        runCatching { haptics.tap() }
+                                    }
+                                },
                             )
                         }
                     }
@@ -6724,7 +6739,8 @@ private fun VideoMessageRow(
                         Modifier
                             .size(38.dp)
                             .clip(CircleShape)
-                            .background(Color(0x99000000)),
+                            .background(Color(0x99000000))
+                            .fxPlayheadPing(m.optString("id")),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(Icons.Filled.PlayArrow, "Play video", tint = Color.White, modifier = Modifier.size(26.dp))
@@ -7010,7 +7026,9 @@ private fun ViewOnceRow(
                         Box(Modifier.matchParentSize().background(Color(0x40000000)))
                     }
                 }
-                ViewOnceOneIcon(56.dp)
+                Box(Modifier.fxPadlockSnap(m.optString("id"))) {
+                    ViewOnceOneIcon(56.dp)
+                }
                 if (pendingEcho) {
                     // An upload in flight: the determinate ring under the mark.
                     Box(Modifier.matchParentSize().padding(bottom = 14.dp), contentAlignment = Alignment.BottomCenter) {
@@ -7159,6 +7177,7 @@ private fun ImageMessageRow(
                 // thin border.
                 .shadow(2.dp, RoundedCornerShape(12.dp))
                 .clip(RoundedCornerShape(12.dp))
+                .fxShutterFlash(m.optString("id"))
                 // Owner round 8/16: thin photo border — gray-BLUE on dark-blue,
                 // gray-BLACK on cream, so the frame matches the app theme.
                 .border(
