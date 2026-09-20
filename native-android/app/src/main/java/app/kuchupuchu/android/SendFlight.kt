@@ -104,7 +104,7 @@ fun Modifier.fxFlyIn(
             return@LaunchedEffect
         }
         val pill = FlightAnchors.composerBounds
-        if (pill == null && false) {
+        if (pill != null && false) {
             val s = snapshotFlow { seat }.filterNotNull().first()
             val startY = pill.top - s.height
             startAbs = Offset(s.left, startY)
