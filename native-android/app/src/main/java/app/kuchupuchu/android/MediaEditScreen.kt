@@ -1628,6 +1628,11 @@ private fun MediaEditItemScreen(
                                 var mode = 0
                                 while (true) {
                                     val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                    // r56 item 3: if more than 1 finger is down (pinch) or already zoomed,
+                                    // stand down immediately so stage detectTransformGestures gets all touches unconsumed!
+                                    if (ev.changes.count { it.pressed } > 1 || stageZoom > 1f) {
+                                        mode = -1
+                                    }
                                     val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
                                     if (!ch.pressed) break
                                     val dx = ch.position.x - ch.previousPosition.x
