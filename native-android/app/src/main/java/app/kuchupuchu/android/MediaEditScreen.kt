@@ -1681,7 +1681,10 @@ private fun MediaEditItemScreen(
                             Modifier
                         } else {
                             Modifier
-                                .pointerInput(stageZoom > 1f) {
+                                // r56 (owner item 3: "first attempt a halka zoom hoi second attempt free zoom hoi"):
+                                // pointerInput key MUST be Unit, not (stageZoom > 1f). Keying on (stageZoom > 1f)
+                                // cancelled the coroutine mid-gesture as soon as zoom crossed 1.0f on the first pinch!
+                                .pointerInput(Unit) {
                                     detectTransformGestures { _, pan, zoom, _ ->
                                         val z = (stageZoom * zoom).coerceIn(1f, 4f)
                                         stageZoom = z
@@ -1695,7 +1698,7 @@ private fun MediaEditItemScreen(
                                         if (z <= 1f) stagePan = Offset.Zero
                                     }
                                 }
-                                .pointerInput(stageZoom > 1f) {
+                                .pointerInput(Unit) {
                                     detectTapGestures(
                                         onDoubleTap = { tap ->
                                             if (stageZoom > 1f) {
