@@ -414,8 +414,8 @@ fun Modifier.fxVoiceLaunch(trigger: Any?): Modifier {
             val mic = FlightAnchors.micBounds
             val s = seat
             if (mic != null && s != null) {
-                val startX = mic.centerX - s.centerX
-                val startY = mic.centerY - s.centerY
+                val startX = (mic.left + mic.width / 2f) - (s.left + s.width / 2f)
+                val startY = (mic.top + mic.height / 2f) - (s.top + s.height / 2f)
                 val arc = sin(v * PI.toFloat()) * 24f * density
                 translationX = startX * (1f - v)
                 translationY = startY * (1f - v) - arc
@@ -459,8 +459,8 @@ fun Modifier.fxAttachJump(trigger: Any?): Modifier {
             val att = FlightAnchors.attachBounds ?: FlightAnchors.composerBounds
             val s = seat
             if (att != null && s != null) {
-                val startX = att.centerX - s.centerX
-                val startY = att.centerY - s.centerY
+                val startX = (att.left + att.width / 2f) - (s.left + s.width / 2f)
+                val startY = (att.top + att.height / 2f) - (s.top + s.height / 2f)
                 val jumpArc = sin(v * PI.toFloat()) * 38f * density
                 translationX = startX * (1f - v)
                 translationY = startY * (1f - v) - jumpArc
