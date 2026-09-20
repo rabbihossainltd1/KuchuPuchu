@@ -8024,17 +8024,19 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       readRow && !receiptsHidden && Number(readRow.unreadMembers || 0) === 0 ? readRow.r : null;
     // Typing indicator: the OTHER members' freshest ping, if any. The client
     // treats it as typing while it is younger than ~6s.
-    const typingRow = await one<{ at: string; kind: string | null }>(
+    const typingRow = await one<{ user_id: string; at: string; kind: string | null }>(
       db,
-      "SELECT at, kind FROM typing WHERE conv_id = ? AND user_id != ? ORDER BY at DESC LIMIT 1",
+      "SELECT user_id, at, kind FROM typing WHERE conv_id = ? AND user_id != ? ORDER BY at DESC LIMIT 1",
       convId,
       uid,
     );
-    // r56 item 2: stale typing check — if the other user already sent a message at/after typingRow.at, it is stale
-    const lastOtherMsg = rows.find((r) => r.sender_id && r.sender_id !== uid);
+    // r56 item 2: stale typing check — if the typing user already sent a message strictly after typingRow.at, it is stale
     const typingIsStale =
       !typingRow ||
-      (lastOtherMsg && Date.parse(lastOtherMsg.created_at) >= Date.parse(typingRow.at));
+      rows.some(
+        (r) =>
+          r.sender_id === typingRow.user_id && Date.parse(r.created_at) > Date.parse(typingRow.at),
+      );
     const typingAt =
       !typingIsStale && typingRow && Date.now() - Date.parse(typingRow.at) < 6_000
         ? typingRow.at
