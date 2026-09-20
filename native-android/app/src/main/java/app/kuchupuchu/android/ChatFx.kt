@@ -25,13 +25,9 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.boundsInWindow
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
@@ -108,6 +104,17 @@ object FxArrivals {
     fun markSeen(id: String) {
         if (id.isNotEmpty()) seen[id] = android.os.SystemClock.uptimeMillis()
     }
+}
+
+/** r58: Track only messages born LIVE during this session so history scrolling never triggers animations. */
+object LiveArrivals {
+    private val liveIds = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    fun markLive(id: String) {
+        if (id.isNotBlank()) liveIds.add(id)
+    }
+
+    fun isLive(id: String): Boolean = id.isNotBlank() && liveIds.contains(id)
 }
 
 /** Pop entry for the multi-glyph emoji cluster and the document tile. */
@@ -382,94 +389,41 @@ fun Modifier.fxPadlockSnap(trigger: Any?): Modifier {
 }
 
 /**
- * Voice note send flight (r57): starts small at the voice button (mic),
- * expands smoothly from small to full original bubble size, and glides
- * from the voice button directly into its seat in the chat stream.
+ * Clean unified send/receive animation (r58):
+ * - Live SENT messages (including documents/media/text/voice) animate in from the RIGHT side (+64dp -> 0f).
+ * - Live RECEIVED messages animate in from the LEFT side (-64dp -> 0f).
+ * - Chat history (scrolling or loading older): NO side animation, quiet and stable with gentle fade.
  */
 @Composable
-fun Modifier.fxVoiceLaunch(trigger: Any?): Modifier {
+fun Modifier.fxSideSlide(
+    active: Boolean,
+    isSent: Boolean,
+    durMs: Int = 300,
+): Modifier {
     val scale = fxAnimatorScale()
     val density = LocalDensity.current.density
-    val p = remember(trigger) { Animatable(if (trigger != null && scale > 0f) 0f else 1f) }
-    var seat by remember(trigger) { mutableStateOf<Rect?>(null) }
-    var launched by remember(trigger) { mutableStateOf(false) }
+    val p = remember(active) { Animatable(if (active && scale > 0f) 0f else 1f) }
 
-    LaunchedEffect(trigger) {
-        if (trigger != null && scale > 0f) {
-            val mic = FlightAnchors.micBounds
-            if (mic != null) {
-                launched = true
-                p.snapTo(0f)
-                p.animateTo(1f, tween(520, easing = FastOutSlowInEasing))
-            }
+    LaunchedEffect(active) {
+        if (active && scale > 0f) {
+            p.snapTo(0f)
+            p.animateTo(1f, tween(durMs, easing = FastOutSlowInEasing))
+        } else {
+            p.snapTo(1f)
         }
     }
 
-    return this
-        .onGloballyPositioned { if (trigger != null) seat = it.boundsInWindow() }
-        .graphicsLayer {
-            if (trigger == null || scale <= 0f || !launched) return@graphicsLayer
-            val v = p.value
-            if (v >= 1f) return@graphicsLayer
-            val mic = FlightAnchors.micBounds
-            val s = seat
-            if (mic != null && s != null) {
-                val startX = (mic.left + mic.width / 2f) - (s.left + s.width / 2f)
-                val startY = (mic.top + mic.height / 2f) - (s.top + s.height / 2f)
-                val arc = sin(v * PI.toFloat()) * 24f * density
-                translationX = startX * (1f - v)
-                translationY = startY * (1f - v) - arc
-                val sVal = 0.28f + 0.72f * v
-                scaleX = sVal
-                scaleY = sVal
-                alpha = if (v < 0.08f) v / 0.08f else 1f
-            }
-        }
-}
-
-/**
- * Media & Document send flight (r57): jumps out with an upward arc from the
- * attach panel / paperclip anchor right into its chat seat position.
- */
-@Composable
-fun Modifier.fxAttachJump(trigger: Any?): Modifier {
-    val scale = fxAnimatorScale()
-    val density = LocalDensity.current.density
-    val p = remember(trigger) { Animatable(if (trigger != null && scale > 0f) 0f else 1f) }
-    var seat by remember(trigger) { mutableStateOf<Rect?>(null) }
-    var jumped by remember(trigger) { mutableStateOf(false) }
-
-    LaunchedEffect(trigger) {
-        if (trigger != null && scale > 0f) {
-            val att = FlightAnchors.attachBounds ?: FlightAnchors.composerBounds
-            if (att != null) {
-                jumped = true
-                p.snapTo(0f)
-                p.animateTo(1f, tween(540, easing = FastOutSlowInEasing))
-            }
+    return graphicsLayer {
+        val v = p.value
+        if (v < 1f) {
+            val dist = 64f * density
+            translationX = if (isSent) dist * (1f - v) else -dist * (1f - v)
+            alpha = v.coerceIn(0f, 1f)
+        } else {
+            translationX = 0f
+            alpha = 1f
         }
     }
-
-    return this
-        .onGloballyPositioned { if (trigger != null) seat = it.boundsInWindow() }
-        .graphicsLayer {
-            if (trigger == null || scale <= 0f || !jumped) return@graphicsLayer
-            val v = p.value
-            if (v >= 1f) return@graphicsLayer
-            val att = FlightAnchors.attachBounds ?: FlightAnchors.composerBounds
-            val s = seat
-            if (att != null && s != null) {
-                val startX = (att.left + att.width / 2f) - (s.left + s.width / 2f)
-                val startY = (att.top + att.height / 2f) - (s.top + s.height / 2f)
-                val jumpArc = sin(v * PI.toFloat()) * 38f * density
-                translationX = startX * (1f - v)
-                translationY = startY * (1f - v) - jumpArc
-                val sVal = 0.35f + 0.65f * v
-                scaleX = sVal
-                scaleY = sVal
-                alpha = if (v < 0.08f) v / 0.08f else 1f
-            }
-        }
 }
 
 /* ------------------------------------------------------ letter-by-letter */
