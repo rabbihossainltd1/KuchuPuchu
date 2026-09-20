@@ -5966,14 +5966,8 @@ private fun MessageRow(
                     // r56 (owner: "smooth expand collapse animation"): spring damping ratio + stiffness tuned for buttery fold animation.
                     .animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f))
                     .combinedClickable(
-                        // r55/r56 (owner: "see less a click korle collapse hoi na"): the EXPANDED
-                        // body itself collapses on tap - a big target that no gesture race can eat.
                         onClick = {
                             if (selectedIds.isNotEmpty() && !pendingEcho) onToggleSelect(m)
-                            else if (!pendingEcho && longBody && !typing && msgExpanded) {
-                                msgExpanded = false
-                                runCatching { haptics.tap() }
-                            }
                         },
                         onLongClick = {
                             if (!pendingEcho) {
@@ -6172,21 +6166,13 @@ private fun MessageRow(
                     // and the fold state are BACK in the bubble, byte-for-byte
                     // the v177 layout that provably rendered See more; the
                     // top-level hoist from r52 broke the fold on-device.
+                    // r56 (owner: "exact see more ar see less a click korle expand collapse work hoi massage body te na"):
+                    // only clicking the exact See more / See less toggle expands/collapses the message, never the message body.
                     if (longBody && !typing && selectedIds.isEmpty()) {
-                        // r55 item 1 keeper contract for test runner
-                        val foldToggleKeeper =
+                        Row(
                             Modifier
                                 .clickable {
                                     msgExpanded = !msgExpanded
-                                    runCatching { haptics.tap() }
-                                }
-                        val isExpandedNow = msgExpanded
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 40.dp)
-                                .clickable {
-                                    msgExpanded = !isExpandedNow
                                     runCatching { haptics.tap() }
                                 }
                                 .padding(vertical = 4.dp),
@@ -6197,10 +6183,6 @@ private fun MessageRow(
                                 fontSize = 12.5.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color.White,
-                                modifier = Modifier.clickable {
-                                    msgExpanded = !isExpandedNow
-                                    runCatching { haptics.tap() }
-                                },
                             )
                         }
                     }

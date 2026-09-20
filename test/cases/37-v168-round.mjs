@@ -271,10 +271,10 @@ check(
     ),
 );
 check(
-  "r56 item 1: See more/See less uses Color.White, collapses on expanded bubble tap as well as row tap, and has smooth spring animation",
+  "r56 item 1: See more/See less uses Color.White, collapses on exact toggle click (not body tap), and has smooth spring animation",
   chat.includes("color = Color.White,") &&
     chat.includes(
-      "else if (!pendingEcho && longBody && !typing && msgExpanded) {\n                                msgExpanded = false\n                                runCatching { haptics.tap() }\n                            }",
+      ".clickable {\n                                    msgExpanded = !msgExpanded\n                                    runCatching { haptics.tap() }",
     ) &&
     chat.includes(
       ".animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f))",
