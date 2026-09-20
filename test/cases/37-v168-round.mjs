@@ -233,7 +233,7 @@ check(
     ) &&
     chat.includes("var donor: JSONObject? = null") &&
     chat.includes('r54 (owner: "see more ekhono removed ache")') &&
-    chat.includes("color = chatAccent(theme),") &&
+    chat.includes("color = Color.White,") &&
     chat.includes("(pinned && nearBottom && !listState.isScrollInProgress)"),
 );
 check(
@@ -250,8 +250,19 @@ check(
   chat.includes(
     ".clickable {\n                                    msgExpanded = !msgExpanded\n                                    runCatching { haptics.tap() }",
   ) &&
-    chat.includes(".animateContentSize()") &&
-    chat.includes(".animateContentSize()\n                    .combinedClickable("),
+    chat.includes(".animateContentSize(") &&
+    chat.includes(".combinedClickable("),
+);
+/* r56 — the owner's round 56 */
+check(
+  "r56 item 1: See more/See less uses Color.White, collapses on expanded bubble tap as well as row tap, and has smooth spring animation",
+  chat.includes("color = Color.White,") &&
+    chat.includes(
+      "else if (!pendingEcho && longBody && !typing && msgExpanded) {\n                                msgExpanded = false\n                                runCatching { haptics.tap() }\n                            }",
+    ) &&
+    chat.includes(
+      ".animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f))",
+    ),
 );
 check(
   "r55 item 3: the flight seat stays live for the WHOLE flight (gate is !done, set only after animateTo) - the stale-seat freeze that made v179/v180 fly invisible is gone",
