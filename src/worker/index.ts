@@ -8346,9 +8346,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // is opaque client text, pinned to the `alb_` shape and a short length.
     const album = albumId(kind, imageData ?? fileKey, String(body.fileType || ""), incomingMeta);
     // Owner round 32 (item 17): a view-once photo / video. It never joins an
-    // album (one tap = one opening) and publishes no dimensions (the client
-    // measures the ratio at runtime) — the bubble blurs the pixels past
-    // recognition, so nothing about the picture leaks before the opening.
+    // album (one tap = one opening). E3f: it PUBLISHES its dimensions — the
+    // bubble blurs the pixels past recognition, so two numbers leak nothing,
+    // and stripping them laid every server copy of the row out at the fake
+    // placeholder box until the thumb decoded (~1 s of wrong ratio after send).
     const viewOnce = viewOnceFlag(
       kind,
       imageData ?? fileKey,
@@ -8371,7 +8372,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             ...voiceWaveform(incomingMeta),
           }
         : {}),
-      ...(Object.keys(dims).length && !viewOnce ? dims : {}),
+      ...(Object.keys(dims).length ? dims : {}),
       ...(album && !viewOnce ? { album } : {}),
       ...(viewOnce ? { viewOnce: true } : {}),
       ...(await statusQuote(db, kind, incomingMeta)),

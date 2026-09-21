@@ -1743,12 +1743,13 @@ async function main() {
       A.token,
     );
     check(
-      "r32-17: meta.viewOnce is stored only on a photo / video message — the row publishes viewOnce:true, no album, no dimensions; the chat-list preview reads 'Photo · View once'; a document / text with the flag stays an ordinary message",
+      "r32-17 + E3f: meta.viewOnce is stored only on a photo / video message — the row publishes viewOnce:true, no album, WITH dimensions (two numbers leak nothing past the blur); the chat-list preview reads 'Photo · View once'; a document / text with the flag stays an ordinary message",
       sent.status === 201 &&
         m?.viewOnce === true &&
         m?.hasImage === true &&
         m?.fileKey === photoKey &&
-        m?.mediaW === undefined &&
+        m?.mediaW === 1200 &&
+        m?.mediaH === 900 &&
         m?.meta?.album === undefined &&
         m?.viewedAt === undefined &&
         listRow?.lastMessage === "Photo · View once" &&
@@ -1995,11 +1996,12 @@ async function main() {
       await h.call("GET", `/api/conversations/${conv.id}/messages`, undefined, A.token)
     ).json.items;
     check(
-      "r34-16a + H3: an inline IMAGE sent view-once — the media fetch itself spends the opening (200 + row gone), so POST /view after it is 404 and the thread omits the row",
+      "r34-16a + H3 + E3f: an inline IMAGE sent view-once — the media fetch itself spends the opening (200 + row gone), so POST /view after it is 404 and the thread omits the row; the row carries its dims (no 1 s fake ratio)",
       inline.status === 201 &&
         im?.viewOnce === true &&
         typeof im?.mediaUrl === "string" &&
-        im?.mediaW === undefined &&
+        im?.mediaW === 640 &&
+        im?.mediaH === 480 &&
         inlineBefore.status === 200 &&
         inlineOpen.status === 404 &&
         inlineAfter.status === 404 &&

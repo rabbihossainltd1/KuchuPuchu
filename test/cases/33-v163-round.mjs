@@ -270,8 +270,10 @@ async function mk() {
     a.token,
   );
   check(
-    "v163: …while a VIEW-ONCE clip still publishes no dimensions (nothing about the picture leaks before the opening), even when the sender sent them",
-    !once.json.message?.mediaW && once.json.message?.meta?.viewOnce === true,
+    "v163 + E3f: …while a VIEW-ONCE clip publishes the dimensions the sender sent (shape from frame one — the pixels stay blurred past recognition), with the viewOnce flag set",
+    once.json.message?.mediaW === 1080 &&
+      once.json.message?.mediaH === 1920 &&
+      once.json.message?.meta?.viewOnce === true,
     JSON.stringify({ w: once.json.message?.mediaW, meta: once.json.message?.meta }),
   );
 

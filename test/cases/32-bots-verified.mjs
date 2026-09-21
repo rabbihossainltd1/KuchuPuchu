@@ -6210,14 +6210,14 @@ const convBetween = (db, a, b) =>
       src.indexOf("  const statusMatch = path.match("),
     );
     check(
-      "r32-17: worker — viewOnceFlag admits the flag only on an IMAGE / image-or-video FILE that is not a document or voice note; a view-once row stores no album and no dims; the preview reads 'Photo · View once' / 'Video · View once'; the push carries no kp_media for it; the gallery skips it; msgFrom hides fileKey / mediaUrl / hasImage once spent and publishes viewOnce / viewedAt / viewedBy; the page marker folds viewedAt in",
+      "r32-17: worker — viewOnceFlag admits the flag only on an IMAGE / image-or-video FILE that is not a document or voice note; a view-once row stores no album but DOES store dims (E3f — no 1 s fake ratio); the preview reads 'Photo · View once' / 'Video · View once'; the push carries no kp_media for it; the gallery skips it; msgFrom hides fileKey / mediaUrl / hasImage once spent and publishes viewOnce / viewedAt / viewedBy; the page marker folds viewedAt in",
       src.includes("function viewOnceFlag(") &&
         src.includes("if (meta.viewOnce !== true || !hasMedia) return false;") &&
         src.includes("if (meta.document === true || meta.voice === true) return false;") &&
         src.includes(
           '(kind === "FILE" && (fileType.startsWith("image/") || fileType.startsWith("video/")))',
         ) &&
-        src.includes("...(Object.keys(dims).length && !viewOnce ? dims : {}),") &&
+        src.includes("...(Object.keys(dims).length ? dims : {}),") &&
         src.includes("...(album && !viewOnce ? { album } : {}),") &&
         src.includes("...(viewOnce ? { viewOnce: true } : {}),") &&
         src.includes('const once = meta.viewOnce === true ? " · View once" : "";') &&
@@ -6229,6 +6229,12 @@ const convBetween = (db, a, b) =>
         src.includes("viewOnce: meta.viewOnce === true ? true : undefined,") &&
         src.includes("viewedAt: spent ? meta.viewedAt : undefined,") &&
         src.includes("items.map((m) => [m.id, m.body, m.edited, m.deliveredAt, m.viewedAt]),"),
+    );
+    check(
+      "E3f: a view-once send keeps its true ratio end to end — the worker stores the sender's dims on once-rows (no !viewOnce strip), the photo payload carries w/h under the once flag, and the live file payload carries the measured box (clipMeta preferred over the bare flag)",
+      !src.includes("Object.keys(dims).length && !viewOnce") &&
+        chat.includes('if (w > 0 && h > 0) o.put("w", w).put("h", h)') &&
+        chat.includes("if (clipMeta.length() > 0) clipMeta else docMeta"),
     );
     check(
       "r34-16a: worker — POST /api/messages/:id/view: member only, 400 NOT_VIEW_ONCE on an ordinary message, 403 OWN_MESSAGE for the sender; the opening DELETES the row (conditional — a race loser is 410 VIEWED, later taps 404), the object is collected before the answer, syncPreviewAfterDelete recomputes preview + unread, the room gets the VANISHED frame and the sender's list a conv poke; a recipient re-posting someone else's view-once key is 403 VIEW_ONCE",
@@ -6251,7 +6257,7 @@ const convBetween = (db, a, b) =>
         src.includes('"SELECT sender_id, meta_json FROM messages WHERE media = ? LIMIT 8",'),
     );
     check(
-      "r32-17: app — once rides PER ITEM (round 36 killed the panel ① toggle): a once item sends with meta.viewOnce and no album, the rest share the album; sendImage / sendFile / readAndSendImage / handleDocumentPicked carry the flag; the pending echo is marked viewOnce so it draws as the card",
+      "r32-17: app — once rides PER ITEM (round 36 killed the panel ① toggle): a once item sends with meta.viewOnce + dims (E3f) and no album, the rest share the album; sendImage / sendFile / readAndSendImage / handleDocumentPicked carry the flag; the pending echo is marked viewOnce so it draws as the card",
       attach.includes("val once: Boolean = false,") &&
         chat.includes("if (item.once) {") &&
         chat.includes(
@@ -6264,7 +6270,7 @@ const convBetween = (db, a, b) =>
           'fun sendImage(\n        dataUrl: String,\n        album: String? = null,\n        viewOnce: Boolean = false,\n        sendAt: java.time.Instant? = null,\n        caption: String = "",\n        w: Int = 0,\n        h: Int = 0,\n    ) {',
         ) &&
         chat.includes(
-          'if (viewOnce) {\n                o.put("viewOnce", true)\n                return o\n            }',
+          'if (viewOnce) {\n                o.put("viewOnce", true)\n                if (w > 0 && h > 0) o.put("w", w).put("h", h)\n                return o\n            }',
         ) &&
         chat.includes('.also { row -> if (viewOnce) row.put("viewOnce", true) }') &&
         chat.includes(

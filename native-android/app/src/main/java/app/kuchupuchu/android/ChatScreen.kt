@@ -1513,8 +1513,21 @@ fun ChatScreen(nav: NavController, convId: String) {
                             .put("body", caption)
                             .put("clientId", "c_${java.util.UUID.randomUUID()}")
                             .put("sendAt", sendAt.toString())
+                    // E3f: scheduled posts skip the outbox, so no stamper adds the
+                    // box — measure the bytes here or the fired row fakes its
+                    // ratio until the thumb decodes, like live sends used to.
+                    val schedBounds =
+                        runCatching {
+                            val opts =
+                                android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                            android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, opts)
+                            opts.outWidth to opts.outHeight
+                        }.getOrNull()
                     val meta = JSONObject()
                     if (viewOnce) meta.put("viewOnce", true) else if (album != null) meta.put("album", album)
+                    if (schedBounds != null && schedBounds.first > 0 && schedBounds.second > 0) {
+                        meta.put("w", schedBounds.first).put("h", schedBounds.second)
+                    }
                     if (meta.length() > 0) payload.put("meta", meta)
                     val res = withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
                     res.optJSONObject("scheduled")?.let { row ->
@@ -1533,11 +1546,13 @@ fun ChatScreen(nav: NavController, convId: String) {
         // Owner round 31 (item 29): photos picked together share one album id
         // (meta.album) — the list folds them into a single grouped bubble.
         // Owner round 32 (item 17): a view-once photo carries meta.viewOnce
-        // instead — no album, no dimensions (the bubble is a card, not a preview).
+        // instead — no album. E3f: WITH dimensions — the server stores them
+        // (mediaW/mediaH) so the sent row keeps the true ratio from frame one.
         fun metaWith(w: Int, h: Int): JSONObject? {
             val o = JSONObject()
             if (viewOnce) {
                 o.put("viewOnce", true)
+                if (w > 0 && h > 0) o.put("w", w).put("h", h)
                 return o
             }
             if (w > 0 && h > 0) o.put("w", w).put("h", h)
@@ -1682,9 +1697,19 @@ fun ChatScreen(nav: NavController, convId: String) {
                             .put("body", caption)
                             .put("clientId", "c_${java.util.UUID.randomUUID()}")
                             .put("sendAt", sendAt.toString())
+                    // E3f: scheduled posts skip the outbox stamper — carry the box
+                    // here (the caller's facts, else one measure on IO) or the
+                    // fired row fakes its ratio until the thumb decodes.
+                    val schedBox =
+                        if (w > 0 && h > 0) w to h
+                        else withContext(Dispatchers.IO) { MediaBox.measure(mime, file) }
+                    val schedMeta = JSONObject()
+                    if (schedBox != null && schedBox.first > 0 && schedBox.second > 0) {
+                        schedMeta.put("w", schedBox.first).put("h", schedBox.second)
+                    }
                     when {
                         asDocument -> payload.put("meta", JSONObject().put("document", true))
-                        viewOnce -> payload.put("meta", JSONObject().put("viewOnce", true))
+                        viewOnce -> payload.put("meta", schedMeta.put("viewOnce", true))
                     }
                     val res = withContext(Dispatchers.IO) { Api.post("/api/conversations/$convId/messages", payload) }
                     res.optJSONObject("scheduled")?.let { row ->
@@ -1795,8 +1820,11 @@ fun ChatScreen(nav: NavController, convId: String) {
             }
         // The outcome callback is the same on both arms — only the body differs.
         // Uploads.sendFile(convId, clientId, name, mime, file, docMeta) { outcome ->
+        // E3f: the payload carries the measured box (clipMeta already merged
+        // docMeta's keys in) — same as the captioned arm below — instead of
+        // the bare flag, so the server row has mediaW/mediaH from frame one.
         if (captionPayload == null) {
-            Uploads.sendFile(convId, clientId, name, mime, file, docMeta) { outcome ->
+            Uploads.sendFile(convId, clientId, name, mime, file, if (clipMeta.length() > 0) clipMeta else docMeta) { outcome ->
                 outcome.onSuccess { runCatching { KpSounds.sent(ctx) } }
                 if (!alive.get()) return@sendFile false
                 outcome.onSuccess { row -> paintSent(row) }
