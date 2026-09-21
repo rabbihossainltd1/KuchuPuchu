@@ -594,8 +594,11 @@ const convBetween = (db, a, b) =>
   );
   check("timestamp parsing memoized (scroll perf)", chat.includes("stampCache"));
   check(
-    "round 14: 3s poll when socket down + 8s half-open safety net + 10s rejoin",
-    chat.includes("3_000L else 8_000L") &&
+    "round 14 + M7: 3s poll when socket down, 8s net when active, 30s idle backoff + 10s rejoin",
+    chat.includes("if (down) 3_000L else upCadence") &&
+      chat.includes("30_000L else 8_000L") &&
+      chat.includes("120_000L") &&
+      chat.includes("lastFrameAt") &&
       chat.includes("KpSocket.joinChat(convId)") &&
       chat.includes("lastRejoin") &&
       chat.includes("chatLive(convId)"),

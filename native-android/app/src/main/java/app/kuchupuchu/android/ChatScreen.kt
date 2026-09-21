@@ -877,7 +877,22 @@ fun ChatScreen(nav: NavController, convId: String) {
     // remains is one dropped broadcast inside an open, healthy chat.
     LaunchedEffect(convId) {
         KpSocket.joinChat(convId)
+        var lastForeground = Store.foreground
+        var lastFallbackRefresh = 0L
+        var lastRejoin = 0L
+        // M7: last same-conversation socket frame, the idle signal for the
+        // safety-net backoff below. Any frame proves the socket delivers, so
+        // the net timer restarts with it (it also used to fire redundantly
+        // right after a frame the fast-paint already handled).
+        var lastFrameAt = 0L
         val removeListener = KpSocket.onEvent { ev ->
+            // M7: any frame for this conversation restarts the safety-net
+            // timer (a delivering socket needs no net) and marks activity.
+            if (ev.optString("conversationId") == convId) {
+                val at = System.currentTimeMillis()
+                lastFrameAt = at
+                lastFallbackRefresh = at
+            }
             when (ev.optString("type")) {
                 // (Re)connected: one catch-up sync covers anything missed.
                 "hello" -> refreshMessages(forceNetwork = true)
@@ -1100,9 +1115,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                     }
             }
         }
-        var lastForeground = Store.foreground
-        var lastFallbackRefresh = 0L
-        var lastRejoin = 0L
         try {
             while (true) {
                 delay(1_000)
@@ -1130,7 +1142,14 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // safety net; it is near-free when nothing changed.
                     val now = System.currentTimeMillis()
                     val down = !KpSocket.chatLive(convId)
-                    if (now - lastFallbackRefresh >= (if (down) 3_000L else 8_000L)) {
+                    // M7 (audit): adaptive backoff when idle. An active chat
+                    // keeps the r14 8s net exactly; with no socket frame and
+                    // no in-flight send for 2 minutes the net backs off to
+                    // 30s. Worst case for an idle chat that goes
+                    // half-open-asymmetric is a 30s-late first bubble instead
+                    // of 8s; any frame, send or typing snaps it back to 8s.
+                    val upCadence = if (now - lastFrameAt > 120_000L && pending.isEmpty()) 30_000L else 8_000L
+                    if (now - lastFallbackRefresh >= (if (down) 3_000L else upCadence)) {
                         lastFallbackRefresh = now
                         refreshMessages(forceNetwork = true)
                         refreshMeta()
