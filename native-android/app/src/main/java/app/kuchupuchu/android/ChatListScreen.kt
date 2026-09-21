@@ -1445,21 +1445,8 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
                 val newestAt = conv.optString("lastMessageAt").ifBlank { lastMsg?.optString("createdAt").orEmpty() }
                 val newestDeleted = lastMsg != null && lastMsg.optString("createdAt") == newestAt && lastMsg.optString("kind") == "DELETED"
                 if (newestSender.isNotBlank() && newestSender == Store.myId() && !newestDeleted && newestAt.isNotBlank()) {
-                    val otherMember = conv.optJSONArray("members")?.objects()?.firstOrNull {
-                        it.optJSONObject("user")?.optString("id") != Store.myId()
-                    }
-                    val otherRead = otherMember?.optString("lastReadAt") ?: ""
-                    val otherUser = otherMember?.optJSONObject("user")
-                    val otherActiveAt = otherUser?.optString("lastActiveAt") ?: ""
-                    val otherOnline = otherUser?.optBoolean("online") == true
-                    // N4: delivered only counts if the other side was actually
-                    // reachable after the message — otherwise an offline contact
-                    // that was bulk-marked via poll would still show ✓✓.
-                    val deliveredRaw = conv.optString("lastMessageDeliveredAt").isNotBlank()
-                    val delivered =
-                        deliveredRaw && (otherOnline || otherActiveAt >= newestAt || (otherRead.isNotBlank() && otherRead >= newestAt) || isGroup)
-                    ListTicks(read = otherRead.isNotBlank() && otherRead >= newestAt, delivered = delivered)
-                    Spacer(Modifier.width(4.dp))
+                // N4: ticks removed from chat list per owner request — no ✓/✓✓ in the list.
+                    Spacer(Modifier.width(0.dp))
                 }
                 // v166 (owner: "time colour ta ekhono white cream colour er blue
                 // na"): in the day theme this row's time was the warm cream-grey

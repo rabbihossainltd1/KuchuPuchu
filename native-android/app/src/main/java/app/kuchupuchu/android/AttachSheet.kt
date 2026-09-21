@@ -436,7 +436,6 @@ fun AttachPanel(
         Modifier
             .fillMaxWidth()
             .height(panelH)
-            .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
             .background(Cream)
             .pointerInput("panelSwipeDown") {
                 var total = 0f
@@ -571,8 +570,8 @@ fun AttachPanel(
         if (!fullscreen) {
             rows.forEach { row ->
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
+                    Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 1.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
                 ) {
                     row.forEach { a -> AttachTile(a.icon, a.tint, a.label, a.onClick) }
                 }
@@ -825,8 +824,6 @@ fun AttachPanel(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Card)
                     .barDragDetect()
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -835,7 +832,7 @@ fun AttachPanel(
                 // ①'s own seat — glyphs shrink along (14.dp).
                 Box(
                     Modifier
-                        .size(34.dp)
+                        .size(28.dp)
                         .clip(CircleShape)
                         .background(ChipIdle)
                         .clickable {
@@ -851,8 +848,8 @@ fun AttachPanel(
                     Modifier
                         .barDragDetect()
                         .weight(1f)
-                        .height(36.dp)
-                        .clip(RoundedCornerShape(18.dp))
+                        .height(28.dp)
+                        .clip(RoundedCornerShape(14.dp))
                         .background(ChipIdle)
                         .padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -879,7 +876,7 @@ fun AttachPanel(
                 // sits on a filled 30.dp blue disc (a 1.dp halo all round).
                 Box(
                     Modifier
-                        .size(34.dp)
+                        .size(28.dp)
                         .clickable {
                             haptics.toggle(!allOnce)
                             val v = !allOnce
@@ -887,8 +884,8 @@ fun AttachPanel(
                         },
                     contentAlignment = Alignment.Center,
                 ) {
-                    if (allOnce) Box(Modifier.size(36.dp).clip(CircleShape).background(ActionBlue))
-                    CenteredOnceIcon(32.dp, tint = if (allOnce) Color.White else Muted)
+                    if (allOnce) Box(Modifier.size(30.dp).clip(CircleShape).background(ActionBlue))
+                    CenteredOnceIcon(28.dp, tint = if (allOnce) Color.White else Muted)
                 }
                 Spacer(Modifier.size(8.dp))
                 // Owner round 40 (item 5): the badge used to live INSIDE the
@@ -1192,17 +1189,16 @@ private fun formatDuration(ms: Long): String {
 
 @Composable
 private fun AttachTile(icon: ImageVector, tint: Color, label: String, onClick: () -> Unit) {
-    // N6: proper gap + bigger glyph — the seat grows a touch, the glyph grows more, and the row breathes.
     Box(
         Modifier
-            .size(40.dp)
+            .size(32.dp)
             .clip(CircleShape)
-            .border(1.dp, if (KpThemeMode.darkBlue) Color(0x22FFFFFF) else Color(0x14000000), CircleShape)
-            .background(if (KpThemeMode.darkBlue) Color(0x1E2A44) else Card)
+            .border(1.dp, Color(0x1F1C1917), CircleShape)
+            .background(Card)
             .clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(26.dp))
+        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp))
     }
 }
 
