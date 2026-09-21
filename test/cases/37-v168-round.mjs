@@ -170,7 +170,7 @@ check(
 /* 7 — the owner's animation pack (ChatAnimationsComplete): receive side */
 const fx7 = kt("ChatFx.kt");
 check(
-  "v169 item 7 (r44) + N3b: the receive animation pack is in - a shared Compose-only ChatFx.kt (emoji registry with entry/idle/fx, slot open, letter-by-letter reveal, de-blur media reveal, landing squash, shine + ripple) that respects the animator duration scale; message rows render emoji through EmojiGlyphRow (faces with animated insides); arrivals are marked synchronously at the row's FIRST composition (FxArrivals) so nothing ever lands-then-replays, history composes before the screen arms, and the AI bot's rows never animate here",
+  "v169 item 7 (r44) + N3b: the receive animation pack is in - a shared Compose-only ChatFx.kt (emoji registry with entry/idle/fx, slot open, letter-by-letter reveal, de-blur media reveal, landing squash, shine + ripple) that respects the animator duration scale; message rows render emoji through EmojiGlyphRow (hash-assigned 3D glyph fx, tap-to-replay on both sides); arrivals are marked synchronously at the row's FIRST composition (FxArrivals) so nothing ever lands-then-replays, history composes before the screen arms, and the AI bot's rows never animate here",
   fx7.includes("object EmojiAnimationRegistry") &&
     fx7.includes('"\ud83d\ude02" to EmojiAnim("shake-in", "shake", EmojiFx.TEARS)') &&
     fx7.includes("object FxArrivals") &&
@@ -193,9 +193,9 @@ check(
     chat.includes("if (msgs.isNotEmpty()) FxArrivals.armed = true") &&
     chat.includes(".fxSlotOpen(fxFresh)") &&
     chat.includes("fxLetterSpans(full, fxFresh)") &&
-    chat.includes('EmojiGlyphRow(m.optText("body").trim(), 44f, fxFresh)') &&
-    chat.includes('EmojiGlyphRow(m.optText("body").trim(), 34f, fxFresh)') &&
-    chat.includes("EmojiGlyphRow(st, 56f, fxFresh)") &&
+    chat.includes('EmojiGlyphRow(m.optText("body").trim(), 44f, fxFresh, m.optString("id"))') &&
+    chat.includes('EmojiGlyphRow(m.optText("body").trim(), 34f, fxFresh, m.optString("id"))') &&
+    chat.includes('EmojiGlyphRow(st, 56f, fxFresh, m.optString("id"))') &&
     chat.includes(".fxBlurIn(fxFresh)") &&
     chat.includes("grow = fxGrow,") &&
     chat.includes(".fxPopIn(fxGrow)") &&

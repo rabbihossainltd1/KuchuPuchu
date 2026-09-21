@@ -18,7 +18,7 @@ const lines = [];
 const check = (name, cond, detail) =>
   lines.push(`  ${cond ? "OK     " : "BROKEN "}  ${name}${detail ? `  -> ${detail}` : ""}`);
 
-async function mk(withDo) {
+async function mk(withDo, pokeSent = 0) {
   const worker = await freshWorker();
   const db = makeD1();
   const broadcasts = [];
@@ -29,7 +29,7 @@ async function mk(withDo) {
       get: (id) => ({
         fetch: async (url, init) => {
           broadcasts.push({ room: id.name, url: String(url), body: JSON.parse(init.body) });
-          return new Response(JSON.stringify({ ok: true, sent: 1 }), { status: 200 });
+          return new Response(JSON.stringify({ ok: true, sent: pokeSent }), { status: 200 });
         },
       }),
     };
@@ -252,8 +252,9 @@ async function mk(withDo) {
 }
 
 // ---- r32-28: the recipient coming back online IS delivery ------------------
-// A message sent while the recipient was offline (no device token → no FCM
-// accept → delivered_at NULL) used to stay on ONE tick until the recipient
+// A message sent while the recipient was offline (no live socket →
+// delivered_at NULL — FCM accept alone never marks, N4) used to stay on ONE
+// tick until the recipient
 // opened that exact chat. Now the recipient's chat-list poll (the first
 // request of a returning app) and its /ws/user connect stamp everything
 // waiting for it and tell the sender at once.
@@ -372,6 +373,88 @@ async function mk(withDo) {
   );
 }
 
+// ---- N4: FCM accepting the push is NOT a delivery ---------------------------
+// The send path used to stamp delivered_at whenever FCM 200-accepted the
+// push — an offline phone still showed the sender a double-tick. Only a
+// live socket frame (the poke's sent count > 0) marks delivered now; the
+// reconnect/fetch paths still backstop everyone else (r32-28 above).
+{
+  const k = await mk(true, 1); // recipient's socket is up
+  const a = await k.reg("n4a@x.com", "n4a");
+  const b = await k.reg("n4b@x.com", "n4b");
+  const ab = (await k.call("POST", "/api/conversations", { userId: b.user.id }, a.token)).json
+    .conversation.id;
+  const m = (
+    await k.call("POST", `/api/conversations/${ab}/messages`, { body: "live hello" }, a.token)
+  ).json.message.id;
+  const at = k.db._db.prepare("SELECT delivered_at FROM messages WHERE id = ?").get(m).delivered_at;
+  check(
+    "N4: a live recipient's row is stamped delivered the moment the socket frame lands (no poll needed)",
+    !!at,
+    String(at),
+  );
+}
+{
+  const k = await mk(true, 0); // recipient offline: FCM may accept, socket is down
+  const a = await k.reg("n4c@x.com", "n4c");
+  const b = await k.reg("n4d@x.com", "n4d");
+  const ab = (await k.call("POST", "/api/conversations", { userId: b.user.id }, a.token)).json
+    .conversation.id;
+  const m = (
+    await k.call("POST", `/api/conversations/${ab}/messages`, { body: "offline hello" }, a.token)
+  ).json.message.id;
+  const at = k.db._db.prepare("SELECT delivered_at FROM messages WHERE id = ?").get(m).delivered_at;
+  check(
+    "N4: an offline recipient's row stays undelivered at send time (no fake double-tick)",
+    at === null,
+    String(at),
+  );
+}
+
+// ---- N3r: tap-to-replay an emoji row for everyone watching -------------------
+// A tap on an emoji row replays its 3 s dance on BOTH sides: the tapper's
+// app POSTs /fx and the server fans one emoji_fx frame to the room. A
+// tap-happy thumb is dampened (one fan-out per message per 3 s); strangers
+// cannot replay rows they cannot read.
+{
+  const k = await mk(true, 1);
+  const a = await k.reg("n3ra@x.com", "n3ra");
+  const b = await k.reg("n3rb@x.com", "n3rb");
+  const ab = (await k.call("POST", "/api/conversations", { userId: b.user.id }, a.token)).json
+    .conversation.id;
+  const m = (await k.call("POST", `/api/conversations/${ab}/messages`, { body: "😂" }, a.token))
+    .json.message.id;
+  k.broadcasts.length = 0;
+  const r1 = await k.call("POST", `/api/messages/${m}/fx`, {}, b.token);
+  check(
+    "N3r: a tap replays (200 + replay:true)",
+    r1.status === 200 && r1.json.replay === true,
+    `${r1.status} ${JSON.stringify(r1.json)}`,
+  );
+  check(
+    "N3r: the room gets ONE emoji_fx frame carrying the conversation + message id",
+    k.broadcasts.filter((x) => x.room === ab && x.body.type === "emoji_fx").length === 1 &&
+      k.broadcasts.some(
+        (x) =>
+          x.room === ab &&
+          x.body.type === "emoji_fx" &&
+          x.body.conversationId === ab &&
+          x.body.mid === m,
+      ),
+    JSON.stringify(k.broadcasts.map((x) => ({ room: x.room, body: x.body }))),
+  );
+  const r2 = await k.call("POST", `/api/messages/${m}/fx`, {}, a.token);
+  check(
+    "N3r: a second tap inside 3 s is dampened (no storm)",
+    r2.status === 200 && r2.json.replay === false && r2.json.dampened === true,
+    JSON.stringify(r2.json),
+  );
+  const o = await k.reg("n3rc@x.com", "n3rc");
+  const r3 = await k.call("POST", `/api/messages/${m}/fx`, {}, o.token);
+  check("N3r: a non-member cannot replay (403)", r3.status === 403, String(r3.status));
+}
+
 console.log(lines.join("\n"));
+
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`\n--- ${lines.length - broken} ok / ${broken} broken ---`);

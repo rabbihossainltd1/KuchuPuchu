@@ -2435,6 +2435,10 @@ function mediaHeaders(contentType: string, disposition: string) {
  */
 const rateBuckets = new Map<string, { tokens: number; stamp: number }>();
 
+// N3r: per-message tap-to-replay damper — the last emoji_fx fan-out per
+// message id, so a tap-happy thumb cannot storm the room's sockets.
+const fxLastAt = new Map<string, number>();
+
 function rateLimit(key: string, capacity: number, refillPerMinute: number) {
   const now = Date.now();
   const bucket = rateBuckets.get(key) ?? { tokens: capacity, stamp: now };
@@ -8586,7 +8590,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       // From the phone this reads exactly as "background e message push ashe
       // na": FCM accepts and 200s what the worker fires, so nothing looks
       // wrong server-side, but the sends themselves were racing teardown.
-      const ok = await pushToUser(
+      await pushToUser(
         env,
         db,
         memberId.user_id,
@@ -8603,7 +8607,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         },
         recipientAlert(memberId, preview, me.display_name, live),
       );
-      if (ok) {
+      // N4: FCM accepting the push is NOT a delivery — the tray card
+      // proves nothing about the app receiving the row, so an offline
+      // recipient used to show the sender a fake double-tick. Only a live
+      // socket frame (live > 0) marks delivered here; everyone else is
+      // marked by the reconnect/fetch paths when the row actually lands.
+      if (live > 0) {
         await run(
           db,
           "UPDATE messages SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL",
@@ -9350,6 +9359,33 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       }),
     );
     return json({ ok: true, vanished: true });
+  }
+
+  // N3r: tap-to-replay an emoji row's animation for everyone watching the
+  // chat. Dampened to one fan-out per message per 3 s (a tap-happy thumb
+  // must not storm the room); the animation itself is client-side.
+  const msgFxMatch = path.match(/^\/api\/messages\/([^/]+)\/fx$/);
+  if (msgFxMatch && method === "POST") {
+    rateLimit(`fx:${uid}`, 30, 20);
+    const row = await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", msgFxMatch[1]!);
+    if (!row || row.kind === "DELETED") fail(404, "Message not found.");
+    await requireMember(db, row.conv_id, uid);
+    if (row.kind !== "TEXT" && row.kind !== "STICKER")
+      fail(400, "Only emoji rows replay.", "NOT_EMOJI");
+    const now = Date.now();
+    if (now - (fxLastAt.get(row.id) ?? 0) < 3000)
+      return json({ ok: true, replay: false, dampened: true });
+    fxLastAt.set(row.id, now);
+    if (fxLastAt.size > 5000) fxLastAt.clear();
+    ctx.waitUntil(
+      broadcastRoomEvent(env, row.conv_id, {
+        type: "emoji_fx",
+        conversationId: row.conv_id,
+        mid: row.id,
+        at: nowIso(),
+      }),
+    );
+    return json({ ok: true, replay: true });
   }
 
   const statusMatch = path.match(/^\/api\/statuses\/([^/]+)$/);

@@ -699,28 +699,35 @@ private fun CallAction(
         Box(
             Modifier
                 .size(64.dp)
-                .shadow(6.dp, CircleShape)
+                // N1r: an inactive button is truly bare — no fill, no
+                // shadow, no ring. (N1 only dropped the 1dp border, but the
+                // translucent disc underneath still read as a faint circle.)
+                .then(if (danger || active) Modifier.shadow(6.dp, CircleShape) else Modifier)
                 .clip(CircleShape)
-                .background(
-                    when {
-                        danger -> Brush.verticalGradient(
-                            listOf(
-                                androidx.compose.ui.graphics.lerp(Red, Color.White, 0.25f),
-                                Red,
-                                androidx.compose.ui.graphics.lerp(Red, Color.Black, 0.22f),
-                            ),
+                .then(
+                    if (danger || active) {
+                        Modifier.background(
+                            when {
+                                danger -> Brush.verticalGradient(
+                                    listOf(
+                                        androidx.compose.ui.graphics.lerp(Red, Color.White, 0.25f),
+                                        Red,
+                                        androidx.compose.ui.graphics.lerp(Red, Color.Black, 0.22f),
+                                    ),
+                                )
+                                else -> Brush.verticalGradient(
+                                    listOf(
+                                        androidx.compose.ui.graphics.lerp(ActionBlue, Color.White, 0.3f),
+                                        ActionBlue,
+                                        androidx.compose.ui.graphics.lerp(ActionBlue, Color.Black, 0.2f),
+                                    ),
+                                )
+                            },
                         )
-                        active -> Brush.verticalGradient(
-                            listOf(
-                                androidx.compose.ui.graphics.lerp(ActionBlue, Color.White, 0.3f),
-                                ActionBlue,
-                                androidx.compose.ui.graphics.lerp(ActionBlue, Color.Black, 0.2f),
-                            ),
-                        )
-                        else -> Brush.verticalGradient(listOf(Color(0x42FFFFFF), Color(0x1AFFFFFF)))
+                    } else {
+                        Modifier
                     },
                 )
-                // N1: no faint ring — the fill + shadow carry the circle.
                 .clickable(enabled = enabled) { haptics.tap(); onClick() },
             contentAlignment = Alignment.Center,
         ) {
@@ -1404,28 +1411,33 @@ private fun StripAction(
     Box(
         Modifier
             .size(46.dp)
-            .shadow(5.dp, CircleShape)
+            // N1r: inactive strip buttons are bare icons too (same faint disc).
+            .then(if (danger || active) Modifier.shadow(5.dp, CircleShape) else Modifier)
             .clip(CircleShape)
-            .background(
-                when {
-                    danger -> Brush.verticalGradient(
-                        listOf(
-                            androidx.compose.ui.graphics.lerp(Red, Color.White, 0.28f),
-                            Red,
-                            androidx.compose.ui.graphics.lerp(Red, Color.Black, 0.2f),
-                        ),
+            .then(
+                if (danger || active) {
+                    Modifier.background(
+                        when {
+                            danger -> Brush.verticalGradient(
+                                listOf(
+                                    androidx.compose.ui.graphics.lerp(Red, Color.White, 0.28f),
+                                    Red,
+                                    androidx.compose.ui.graphics.lerp(Red, Color.Black, 0.2f),
+                                ),
+                            )
+                            else -> Brush.verticalGradient(
+                                listOf(
+                                    androidx.compose.ui.graphics.lerp(ActionBlue, Color.White, 0.3f),
+                                    ActionBlue,
+                                    androidx.compose.ui.graphics.lerp(ActionBlue, Color.Black, 0.2f),
+                                ),
+                            )
+                        },
                     )
-                    active -> Brush.verticalGradient(
-                        listOf(
-                            androidx.compose.ui.graphics.lerp(ActionBlue, Color.White, 0.3f),
-                            ActionBlue,
-                            androidx.compose.ui.graphics.lerp(ActionBlue, Color.Black, 0.2f),
-                        ),
-                    )
-                    else -> Brush.verticalGradient(listOf(Color(0x3DFFFFFF), Color(0x14FFFFFF)))
+                } else {
+                    Modifier
                 },
             )
-            // N1: no faint ring — the fill + shadow carry the circle.
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,

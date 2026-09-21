@@ -1085,6 +1085,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                             }
                         }
                     }
+                // N3r: the other side tapped an emoji row — it replays HERE
+                // too (the row consumes its own id exactly once).
+                "emoji_fx" ->
+                    if (ev.optString("conversationId") == convId) {
+                        ev.optString("mid").takeIf { it.isNotBlank() }?.let { emojiFxReplays.add(it) }
+                    }
                 // GROUPS are the exception: blue ticks mean EVERY member has
                 // read (the server's MIN()/all-read rule). One member's read
                 // frame must not flip them, so a group resyncs instead.
@@ -6206,7 +6212,7 @@ private fun MessageRow(
                         "STICKER" -> {
                             val st = m.optString("body")
                             if (EmojiRepo.isCustomId(st)) CustomEmojiOrFallback(st)
-                            else EmojiGlyphRow(st, 56f, fxFresh)
+                            else EmojiGlyphRow(st, 56f, fxFresh, m.optString("id"))
                         }
                         "FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend, fxGrow = fxFresh)
                         // Owner round 33 (item 5): the stamp is placed by
@@ -6226,11 +6232,11 @@ private fun MessageRow(
                             // v169: no wrapper - the stamp rides under the
                             // bubble (outside) for every kind now.
                             if (emojiOnly == 1) {
-                                EmojiGlyphRow(m.optText("body").trim(), 44f, fxFresh)
+                                EmojiGlyphRow(m.optText("body").trim(), 44f, fxFresh, m.optString("id"))
                             } else {
-                                // N3b: each glyph draws itself (curated faces
-                                // animate their insides, the rest stay plain).
-                                EmojiGlyphRow(m.optText("body").trim(), 34f, fxFresh)
+                                // N3r: every glyph dances its own 3D move for
+                                // 3 s (arrival / tap / the other side's tap).
+                                EmojiGlyphRow(m.optText("body").trim(), 34f, fxFresh, m.optString("id"))
                             }
                         } else {
                             val full = m.optText("body")
@@ -7180,11 +7186,20 @@ private fun ViewOnceRow(
                         val rng = java.util.Random(seed)
                         val count = ((w * h) / 160f).toInt().coerceIn(120, 380)
                         for (i in 0 until count) {
-                            val x = rng.nextFloat() * w
-                            val y = rng.nextFloat() * h
+                            val x0 = rng.nextFloat() * w
+                            val y0 = rng.nextFloat() * h
                             val baseR = 0.75f + rng.nextFloat() * 1.5f
                             val baseA = 0.25f + rng.nextFloat() * 0.55f
                             val phase = (i * 0.6180339887f) % 1f
+                            // N5: the stars SCURRY — each orbits a small loop
+                            // (2-4 turns per twinkle cycle, so the loop stays
+                            // seamless) while it twinkles. The center mark
+                            // stays static.
+                            val orbits = 2 + (i % 3)
+                            val ang = (sparkleTime * orbits + phase) * 2f * Math.PI.toFloat()
+                            val amp = 3f + baseR * 4f
+                            val x = x0 + kotlin.math.cos(ang) * amp
+                            val y = y0 + kotlin.math.sin(ang) * amp * 0.7f
                             val t = (sparkleTime + phase) % 1f
                             val twinkle = kotlin.math.sin(t * 2f * Math.PI.toFloat()) * 0.5f + 0.5f
                             val a = (baseA * (0.35f + 0.65f * twinkle)).coerceIn(0.08f, 1f)
