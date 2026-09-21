@@ -431,6 +431,45 @@ fun Modifier.fxSideSlide(
     }
 }
 
+/**
+ * E7: the old-history entrance — a soft one-shot unfurl (fade + 14dp rise,
+ * 260ms), UNIQUE to loadOlder rows and deliberately unlike the live slide
+ * (directional), fly (700ms travel) and pop. It overrides the standing
+ * "history stays quiet" rule (r45 item 1 / r50 / r58 / ChatScreen:6074) by
+ * explicit owner ask — flicker-proof by construction: the key is consumed
+ * on first composition (no replay, like bornKeys), GPU-only (no relayout),
+ * and reduced-motion gated like every other fx here.
+ */
+@Composable
+fun Modifier.fxHistoryUnfurl(
+    active: Boolean,
+    durMs: Int = 260,
+): Modifier {
+    val scale = fxAnimatorScale()
+    val density = LocalDensity.current.density
+    val p = remember(active) { Animatable(if (active && scale > 0f) 0f else 1f) }
+
+    LaunchedEffect(active) {
+        if (active && scale > 0f) {
+            p.snapTo(0f)
+            p.animateTo(1f, tween(durMs, easing = FastOutSlowInEasing))
+        } else {
+            p.snapTo(1f)
+        }
+    }
+
+    return graphicsLayer {
+        val v = p.value
+        if (v < 1f) {
+            translationY = 14f * density * (1f - v)
+            alpha = v.coerceIn(0f, 1f)
+        } else {
+            translationY = 0f
+            alpha = 1f
+        }
+    }
+}
+
 /* ------------------------------------------------------ letter-by-letter */
 
 /**

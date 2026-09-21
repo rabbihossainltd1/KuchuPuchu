@@ -255,6 +255,8 @@ fun ChatScreen(nav: NavController, convId: String) {
     // (my sends, live arrivals) rise into the list; rows painted from the
     // store or a page fetch stay still. Keyed by clientId-or-id, one shot.
     val bornKeys = remember { HashSet<String>() }
+    // E7: loadOlder rows unfurl once (overrides the history-quiet rule).
+    val historyFxKeys = remember { HashSet<String>() }
     // r48: the open-landing pin survives the first refreshes (a notify
     // click used to land at the newest, then the authoritative page swap
     // left the viewport mid-thread - "scroll kore dekhte hoi").
@@ -1229,6 +1231,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                 val fi = listState.firstVisibleItemIndex
                 val fo = listState.firstVisibleItemScrollOffset
                 olderIds.addAll(freshOld.map { it.optString("id") })
+                // E7: the fresh page's rows unfurl on first composition.
+                historyFxKeys.addAll(freshOld.map { it.optString("id") })
                 ScreenStore.setMsgs(convId, freshOld + msgs.toList())
                 paintFromStore()
                 // The list grew at the TOP by N rows; without this the viewport
@@ -3317,6 +3321,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // pass never reads it as new.
                     val rowKey = m.optString("clientId").ifBlank { m.optString("id") }
                     bornKeys.remove(rowKey)
+                    // E7: consume the history-unfurl key the same way (one shot, no replay).
+                    historyFxKeys.remove(rowKey)
                     val vanishing = albumPhotos(m).any { it.optString("id") in vanishingIds }
                     // Owner round 33 (item 17): the jumped-to row flashes once.
                     val flashing = flashId.isNotBlank() && albumPhotos(m).any { it.optString("id") == flashId }
@@ -3335,6 +3341,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                         Modifier
                             .fillMaxWidth()
                             .animateItem(fadeInSpec = null, fadeOutSpec = null)
+                            // E7: loadOlder rows unfurl once (live rows use MessageRow fx instead).
+                            .fxHistoryUnfurl(rowKey in historyFxKeys)
                     ) {
                         DeleteRowShell(
                             m = m,
@@ -3473,9 +3481,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // later pass.
                     val rowKey = m.optString("clientId").ifBlank { m.optString("id") }
                     bornKeys.remove(rowKey)
+                    // E7: consume the history-unfurl key the same way (one shot, no replay).
+                    historyFxKeys.remove(rowKey)
                     Box(
                         Modifier
                             .fillMaxWidth()
+                            // E7: loadOlder rows unfurl once (live rows use MessageRow fx instead).
+                            .fxHistoryUnfurl(rowKey in historyFxKeys)
                     ) {
                         MessageRow(
                             m,

@@ -9406,6 +9406,17 @@ const convBetween = (db, a, b) =>
           cs.includes("gateFocus.clearFocus(force = true)"),
       );
     }
+    {
+      const fx = kt("ChatFx.kt");
+      check(
+        "E7: old-history rows get a unique one-shot unfurl (fade + rise, not the live slide/fly/pop) — keyed per loadOlder page, consumed on first compose, reduced-motion gated",
+        fx.includes("fun Modifier.fxHistoryUnfurl(") &&
+          fx.includes("translationY = 14f * density * (1f - v)") &&
+          chat.includes('historyFxKeys.addAll(freshOld.map { it.optString("id") })') &&
+          (chat.match(/historyFxKeys\.remove\(rowKey\)/g) || []).length === 2 &&
+          (chat.match(/\.fxHistoryUnfurl\(rowKey in historyFxKeys\)/g) || []).length === 2,
+      );
+    }
     check(
       "r34-7: typing dots follow the chat theme — TypingBubble takes the dot color, the row passes chatAccent(chatTheme), no fixed amber in the indicator",
       chat.includes("private fun TypingBubble(dot: Color) {") &&
