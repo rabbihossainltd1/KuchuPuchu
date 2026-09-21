@@ -9473,17 +9473,16 @@ const convBetween = (db, a, b) =>
     {
       const at = kt("AttachSheet.kt");
       check(
-        "N6: compact attach tiles — a 32 dp seat with a 22 dp glyph and no label row (talkback still announces the action)",
-        at.includes("contentDescription = label, tint = tint, modifier = Modifier.size(22.dp)") &&
-          at.includes(".size(32.dp)") &&
-          !at.includes("Text(label, fontSize = 10.sp"),
+        "N6: attach tiles — v195 original — 38 dp seat with 17 dp glyph and label row (Camera/Gallery etc)",
+        at.includes(".size(38.dp)") &&
+          at.includes("Modifier.size(17.dp)") &&
+          at.includes("Text(label, fontSize = 10.sp"),
       );
       check(
-        "N6: swiping the collapsed panel handle down puts the sheet away — a Deselect / Not now stop when media is selected, straight away when empty",
-        at.includes("if (fullscreen) setFullscreen(false)") &&
-          at.includes("else requestDismiss()") &&
-          at.includes('confirmLabel = "Deselect"') &&
-          at.includes('cancelLabel = "Not now"'),
+        "N6: v195 attach panel — swipe down on handle only folds (no Deselect/Not now dismiss)",
+        !at.includes("requestDismiss()") &&
+          !at.includes('confirmLabel = "Deselect"') &&
+          at.includes("else if (dragTotal.value > 70f) setFullscreen(false)"),
       );
     }
     check(

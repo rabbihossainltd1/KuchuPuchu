@@ -165,13 +165,6 @@ fun AttachPanel(
     var pool by remember { mutableStateOf(listOf<MediaItem>()) }
     LaunchedEffect(pool) { if (pool.isNotEmpty()) onPool(pool) }
     var fullscreen by remember { mutableStateOf(false) }
-    // N6: swipe-down on the collapsed panel closes the sheet — with a
-    // Deselect / Not now stop when media is selected (r45-5 still holds:
-    // any actual close forgets the ticks via onDismiss).
-    var showConfirm by remember { mutableStateOf(false) }
-    fun requestDismiss() {
-        if (sel.isNotEmpty()) showConfirm = true else onDismiss()
-    }
     var foldersOpen by remember { mutableStateOf(false) }
     var folder by remember { mutableStateOf<String?>(null) }
     // Owner round 39 (item 6): the HD default for the next taps while
@@ -455,13 +448,7 @@ fun AttachPanel(
                         onDragStart = { isDragging = true },
                         onDragEnd = {
                             if (dragTotal.value < -70f) setFullscreen(true)
-                            // N6: swiping the handle down on the collapsed
-                            // panel puts the sheet away (fullscreen still
-                            // just folds back to the half panel).
-                            else if (dragTotal.value > 70f) {
-                                if (fullscreen) setFullscreen(false)
-                                else requestDismiss()
-                            }
+                            else if (dragTotal.value > 70f) setFullscreen(false)
                             dragTotal.value = 0f
                             isDragging = false
                         },
@@ -481,22 +468,6 @@ fun AttachPanel(
                     .size(width = 40.dp, height = 4.dp)
                     .clip(RoundedCornerShape(2.dp))
                     .background(Color(0x59FFFFFF)),
-            )
-        }
-
-        // N6: the selected-media stop — Deselect puts the sheet away
-        // (r45-5 forgets the ticks), Not now stays on the panel.
-        if (showConfirm) {
-            KpConfirmSheet(
-                title = "Discard selection?",
-                text = if (sel.size == 1) "1 item selected." else "${sel.size} items selected.",
-                confirmLabel = "Deselect",
-                cancelLabel = "Not now",
-                onConfirm = {
-                    showConfirm = false
-                    onDismiss()
-                },
-                onDismiss = { showConfirm = false },
             )
         }
 
@@ -1168,18 +1139,25 @@ private fun formatDuration(ms: Long): String {
 
 @Composable
 private fun AttachTile(icon: ImageVector, tint: Color, label: String, onClick: () -> Unit) {
-    // N6: compact tiles — a smaller seat, a bigger glyph, no label row
-    // (talkback still announces the action via the content description).
-    Box(
-        Modifier
-            .size(32.dp)
-            .clip(CircleShape)
-            .border(1.dp, Color(0x1F1C1917), CircleShape)
-            .background(Card)
-            .clickable { onClick() },
-        contentAlignment = Alignment.Center,
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clip(RoundedCornerShape(14.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 4.dp, vertical = 2.dp),
     ) {
-        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp))
+        Box(
+            Modifier
+                .size(38.dp)
+                .clip(CircleShape)
+                .border(1.dp, Color(0x1F1C1917), CircleShape)
+                .background(Card),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(17.dp))
+        }
+        Spacer(Modifier.height(2.dp))
+        Text(label, fontSize = 10.sp, color = Ink, fontWeight = FontWeight.Medium)
     }
 }
 
