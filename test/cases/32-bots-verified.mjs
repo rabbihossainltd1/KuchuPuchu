@@ -7441,6 +7441,14 @@ const convBetween = (db, a, b) =>
         chat.includes("msgExpanded = !msgExpanded"),
     );
     check(
+      "E1: the See more / See less toggle has exactly ONE tap handler (the triple stack double-toggled exact-text taps into a no-op) and the fold keeps its spring animation",
+      chat.includes(
+        "animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f))",
+      ) &&
+        (chat.match(/msgExpanded = !msgExpanded/g) || []).length === 1 &&
+        chat.includes('if (msgExpanded) "See less" else "See more"'),
+    );
+    check(
       "v169: chat — bodies render PLAIN (no KpStamped); the fold's countLines still hears every body Text via a no-op report; ONE stamp Row under the bubble serves every kind in the single wallpaper ink",
       (textBranch.match(/KpStamped\(/g) || []).length === 0 &&
         (textBranch.match(/countLines\(it, \{ _ -> \}\)/g) || []).length === 4 &&

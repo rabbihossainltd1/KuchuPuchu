@@ -248,7 +248,7 @@ check(
 check(
   "r55 item 1: See less works both ways - the fold toggle collapses an expanded long body, the bubble animates its size change (animateContentSize before combinedClickable), and the state write happens before the haptic",
   chat.includes(
-    ".clickable {\n                                    msgExpanded = !msgExpanded\n                                    runCatching { haptics.tap() }",
+    ".pointerInput(Unit) {\n                                    detectTapGestures {\n                                        msgExpanded = !msgExpanded\n                                        runCatching { haptics.tap() }",
   ) &&
     chat.includes(".animateContentSize(") &&
     chat.includes(".combinedClickable("),
@@ -274,7 +274,7 @@ check(
   "r56 item 1: See more/See less uses Color.White, collapses on exact toggle click (not body tap), and has smooth spring animation",
   chat.includes("color = Color.White,") &&
     chat.includes(
-      ".clickable {\n                                    msgExpanded = !msgExpanded\n                                    runCatching { haptics.tap() }",
+      ".pointerInput(Unit) {\n                                    detectTapGestures {\n                                        msgExpanded = !msgExpanded\n                                        runCatching { haptics.tap() }",
     ) &&
     chat.includes(
       ".animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f))",

@@ -6247,6 +6247,11 @@ private fun MessageRow(
                     // r56 (owner: "exact see more ar see less a click korle expand collapse work hoi massage body te na"):
                     // only clicking the exact See more / See less toggle expands/collapses the message, never the message body.
                     if (longBody && !typing && selectedIds.isEmpty()) {
+                        // E1: exactly ONE tap handler (the row's). The triple
+                        // stack (row pointerInput + row clickable + text
+                        // pointerInput) fired twice on exact-text taps and the
+                        // double toggle collapsed nothing — taps anywhere on
+                        // the row, text included, now toggle exactly once.
                         Row(
                             Modifier
                                 .fillMaxWidth()
@@ -6257,10 +6262,6 @@ private fun MessageRow(
                                         runCatching { haptics.tap() }
                                     }
                                 }
-                                .clickable {
-                                    msgExpanded = !msgExpanded
-                                    runCatching { haptics.tap() }
-                                }
                                 .padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -6269,12 +6270,6 @@ private fun MessageRow(
                                 fontSize = 12.5.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color.White,
-                                modifier = Modifier.pointerInput(Unit) {
-                                    detectTapGestures {
-                                        msgExpanded = !msgExpanded
-                                        runCatching { haptics.tap() }
-                                    }
-                                },
                             )
                         }
                     }
