@@ -8939,7 +8939,8 @@ private fun TypingBubble(dot: Color) {
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 3.dp),
+            // E2: the typing dots sit 4dp lower (top 7dp, was symmetric 3dp).
+            .padding(top = 7.dp, bottom = 3.dp),
         horizontalArrangement = Arrangement.Start,
     ) {
         Box(
@@ -8990,7 +8991,8 @@ private fun RecordingBubble(mic: Color) {
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 3.dp),
+            // E2: the voice mic sits 4dp lower with the typing dots (top 7dp).
+            .padding(top = 7.dp, bottom = 3.dp),
         horizontalArrangement = Arrangement.Start,
     ) {
         // r56 item 2 (owner: "voice indicator ta choto compact koro"): compact badge with tight padding & 15dp icon

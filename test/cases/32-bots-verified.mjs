@@ -9373,6 +9373,10 @@ const convBetween = (db, a, b) =>
         chat.includes(".background(dot.copy(alpha = 0.35f + 0.65f * lift))") &&
         !chat.includes("GoldDeep.copy(alpha = 0.35f"),
     );
+    check(
+      "E2: typing + voice indicators sit 4dp lower — both indicator rows carry top 7dp / bottom 3dp instead of symmetric vertical 3dp",
+      (chat.match(/\.padding\(top = 7\.dp, bottom = 3\.dp\)/g) || []).length === 2,
+    );
     {
       const ss = kt("SettingsScreen.kt");
       check(
