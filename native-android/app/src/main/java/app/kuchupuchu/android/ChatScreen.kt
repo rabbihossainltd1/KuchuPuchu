@@ -6206,7 +6206,7 @@ private fun MessageRow(
                         "STICKER" -> {
                             val st = m.optString("body")
                             if (EmojiRepo.isCustomId(st)) CustomEmojiOrFallback(st)
-                            else Text(st, fontSize = 56.sp)
+                            else EmojiGlyphRow(st, 56f, fxFresh)
                         }
                         "FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend, fxGrow = fxFresh)
                         // Owner round 33 (item 5): the stamp is placed by
@@ -6226,19 +6226,11 @@ private fun MessageRow(
                             // v169: no wrapper - the stamp rides under the
                             // bubble (outside) for every kind now.
                             if (emojiOnly == 1) {
-                                AnimatedEmoji(m.optText("body").trim(), 44f, fxFresh)
+                                EmojiGlyphRow(m.optText("body").trim(), 44f, fxFresh)
                             } else {
-                            Box(Modifier.fxPopIn(fxFresh)) {
-                            Text(
-                                    m.optText("body").trim(),
-                                    fontSize = if (emojiOnly == 1) 44.sp else 34.sp,
-                                    lineHeight = if (emojiOnly == 1) 52.sp else 40.sp,
-                                    modifier = Modifier.padding(start = 2.dp, end = 2.dp),
-                                maxLines = if (capped) BODY_COLLAPSE_LINES else Int.MAX_VALUE,
-                                overflow = if (capped) TextOverflow.Ellipsis else TextOverflow.Clip,
-                                onTextLayout = { countLines(it, { _ -> }) },
-                            )
-                            }
+                                // N3b: each glyph draws itself (curated faces
+                                // animate their insides, the rest stay plain).
+                                EmojiGlyphRow(m.optText("body").trim(), 34f, fxFresh)
                             }
                         } else {
                             val full = m.optText("body")

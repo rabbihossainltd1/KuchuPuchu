@@ -2783,13 +2783,14 @@ const convBetween = (db, a, b) =>
   // r31-12: sticker/emoji panel in theme tokens (no fixed brown/gold, no white
   // text on cream); emoji-only texts render big with the stamp underneath.
   check(
-    "r31-12: StickerPanel uses Card/Ink/Muted/ActionBlue tokens only; emoji-only (1–3) TEXT bubbles render 44/34sp with the stamp in the bottom band",
+    "r31-12 + N3b: StickerPanel uses Card/Ink/Muted/ActionBlue tokens only; emoji-only (1–3) TEXT bubbles render 44/34 glyph rows with the stamp in the bottom band",
     !/0x[0-9A-F]{2}1C1917/.test(kt("StickerSheet.kt")) &&
       !kt("StickerSheet.kt").includes("GoldDeep") &&
       !kt("StickerSheet.kt").includes("color = Color.White") &&
       kt("StickerSheet.kt").includes("if (sel) ActionBlueDeep else Muted") &&
       kt("ChatScreen.kt").includes("internal fun emojiOnlyCount(body: String): Int") &&
-      kt("ChatScreen.kt").includes("fontSize = if (emojiOnly == 1) 44.sp else 34.sp") &&
+      kt("ChatScreen.kt").includes('EmojiGlyphRow(m.optText("body").trim(), 44f, fxFresh)') &&
+      kt("ChatScreen.kt").includes('EmojiGlyphRow(m.optText("body").trim(), 34f, fxFresh)') &&
       kt("ChatScreen.kt").includes(
         'Icon(Icons.Filled.Mood, "Stickers", tint = accent, modifier = Modifier.size(20.dp))',
       ),
@@ -5070,6 +5071,7 @@ const convBetween = (db, a, b) =>
   // Items 15 + 16: no "edited" marker anywhere; "Unsend" wording is gone —
   // the action is "Delete for everyone" (sheet row + selection bar).
   const chat1516 = kt("ChatScreen.kt");
+  const emo = kt("EmojiAnim.kt");
   check(
     "r32-15: no 'edited' / '(edited)' label on any bubble; the emoji-only rule no longer keys on the edited flag",
     !chat1516.includes("(edited)") &&
@@ -5131,7 +5133,7 @@ const convBetween = (db, a, b) =>
   // minimum); the stamp sits in the band under the glyph in the wallpaper's
   // ink, and the ticks follow that ink so they never vanish on a light theme.
   check(
-    "r32-8 + N3a: emoji-only TEXT (+ STICKER now) → transparent bubble (no shadow, transparent fill, min width 0), glyph keeps end room for the stamp/ticks, stamp + ticks use the wallpaper ink",
+    "r32-8 + N3a + N3b: emoji-only TEXT (+ STICKER now) → transparent bubble (no shadow, transparent fill, min width 0), glyph row keeps the 2dp side room for the stamp/ticks, stamp + ticks use the wallpaper ink",
     chat1516.includes(".then(if (noBubble) Modifier else Modifier.shadow(2.dp, bubbleShape))") &&
       chat1516.includes(
         "noBubble -> Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))",
@@ -5147,7 +5149,7 @@ const convBetween = (db, a, b) =>
       ) &&
       // r33-5: the fixed 30 dp end room is gone — the stamp gets its own
       // measured row under the glyph (KpStamped below = true).
-      chat1516.includes("modifier = Modifier.padding(start = 2.dp, end = 2.dp),") &&
+      emo.includes(".padding(start = 2.dp, end = 2.dp)") &&
       !chat1516.includes("end = if (mine) 30.dp else 10.dp") &&
       chat1516.includes("color = stampInk,") &&
       chat1516.includes(
@@ -7427,7 +7429,7 @@ const convBetween = (db, a, b) =>
       chat.indexOf("// Owner round 16: reaction chips under the bubble."),
     );
     check(
-      "r34-19: bodies longer than ten lines fold behind a See more / See less toggle (v166: the count is measured WHILE COMPOSING at the bubble's own width, so the fold is right on the first frame; the onTextLayout high-water count stays as the second witness; typing replies exempt)",
+      "r34-19 + N3b: bodies longer than ten lines fold (3 capped Texts — emoji is a glyph row now, never folds) behind a See more / See less toggle (v166: the count is measured WHILE COMPOSING at the bubble's own width, so the fold is right on the first frame; the onTextLayout high-water count stays as the second witness; typing replies exempt)",
       chat.includes("private const val BODY_COLLAPSE_LINES = 10") &&
         chat.includes("var bodyLines by remember(mid) { mutableStateOf(0) }") &&
         chat.includes("var msgExpanded by remember(mid) { mutableStateOf(false) }") &&
@@ -7441,7 +7443,7 @@ const convBetween = (db, a, b) =>
           "val countLines = { r: TextLayoutResult, report: (TextLayoutResult) -> Unit ->",
         ) &&
         (chat.match(/maxLines = if \(capped\) BODY_COLLAPSE_LINES else Int\.MAX_VALUE,/g) || [])
-          .length === 4 &&
+          .length === 3 &&
         chat.includes("if (longBody && !typing && selectedIds.isEmpty()) {") &&
         chat.includes('"See less"') &&
         chat.includes('"See more"') &&
@@ -7456,9 +7458,9 @@ const convBetween = (db, a, b) =>
         chat.includes('if (msgExpanded) "See less" else "See more"'),
     );
     check(
-      "v169: chat — bodies render PLAIN (no KpStamped); the fold's countLines still hears every body Text via a no-op report; ONE stamp Row under the bubble serves every kind in the single wallpaper ink",
+      "v169 + N3b: chat — bodies render PLAIN (no KpStamped); the fold's countLines still hears every foldable body Text (3 — the multi-emoji Text is a glyph row now, and ≤24-char emoji bodies never fold); ONE stamp Row under the bubble serves every kind in the single wallpaper ink",
       (textBranch.match(/KpStamped\(/g) || []).length === 0 &&
-        (textBranch.match(/countLines\(it, \{ _ -> \}\)/g) || []).length === 4 &&
+        (textBranch.match(/countLines\(it, \{ _ -> \}\)/g) || []).length === 3 &&
         !textBranch.includes("val reserve =") &&
         textBranch.includes('val full = m.optText("body")\n') &&
         chat.includes("private fun BubbleStamp(") &&
@@ -9211,6 +9213,7 @@ const convBetween = (db, a, b) =>
   {
     const ui = kt("Ui.kt");
     const chat = kt("ChatScreen.kt");
+    const emo = kt("EmojiAnim.kt");
     const cl = kt("ChatListScreen.kt");
     const app = kt("KpApp.kt");
     check(
@@ -9460,6 +9463,23 @@ const convBetween = (db, a, b) =>
           "noBubble -> Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))",
         ) &&
         chat.includes('if (kind == "STICKER") 1 else emojiOnly, stampInk'),
+    );
+    check(
+      "N3b: ten emoji draw themselves with animated insides — joy, roll, grin, smile, heart, cry, wow, angry, flat, sleep — routed for single, multi and sticker rows, frozen under reduced motion, and no whole-glyph transform anywhere in the painter",
+      emo.includes('"😂" to FaceKind.JOY') &&
+        emo.includes('"🤣" to FaceKind.ROLL') &&
+        emo.includes('"😃" to FaceKind.GRIN') &&
+        emo.includes('"😊" to FaceKind.SMILE') &&
+        emo.includes('"😍" to FaceKind.HEART') &&
+        emo.includes('"😢" to FaceKind.CRY') &&
+        emo.includes('"😮" to FaceKind.WOW') &&
+        emo.includes('"😡" to FaceKind.ANGRY') &&
+        emo.includes('"😑" to FaceKind.FLAT') &&
+        emo.includes('"😴" to FaceKind.SLEEP') &&
+        emo.includes("fun EmojiGlyphRow(") &&
+        emo.includes("fxAnimatorScale() <= 0f") &&
+        !emo.includes("graphicsLayer") &&
+        (chat.match(/EmojiGlyphRow\(/g) || []).length === 3,
     );
     check(
       "r34-7: typing dots follow the chat theme — TypingBubble takes the dot color, the row passes chatAccent(chatTheme), no fixed amber in the indicator",

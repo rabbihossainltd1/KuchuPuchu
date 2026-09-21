@@ -299,7 +299,7 @@ check(
 
 /* 11 — new#5: ten lines, then See more */
 check(
-  "v166 new#5: a long body folds at 10 lines — the count comes from a TextMeasurer pass made while composing at the bubble's own width (foldProbe / probeLines / longBody) with the onTextLayout high-water count as the second witness, typing replies exempt, and the See more / See less toggle is untouched",
+  "v166 new#5 + N3b: a long body folds at 10 lines (3 capped Texts — the emoji Text is a glyph row now and never folds) — the count comes from a TextMeasurer pass made while composing at the bubble's own width (foldProbe / probeLines / longBody) with the onTextLayout high-water count as the second witness, typing replies exempt, and the See more / See less toggle is untouched",
   chat.includes("private const val BODY_COLLAPSE_LINES = 10") &&
     chat.includes("val foldProbe = rememberTextMeasurer()") &&
     chat.includes(
@@ -314,7 +314,7 @@ check(
     chat.includes('"See less"') &&
     chat.includes('"See more"') &&
     (chat.match(/maxLines = if \(capped\) BODY_COLLAPSE_LINES else Int\.MAX_VALUE,/g) || [])
-      .length === 4,
+      .length === 3,
 );
 
 /* 12 — new#6: the update animation */
