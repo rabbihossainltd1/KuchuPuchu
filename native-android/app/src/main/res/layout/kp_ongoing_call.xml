@@ -3,6 +3,7 @@
      owner's ROM), a RED border around Hang up and WHITE label. The card
      itself still paints the system background — no custom fill. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/kp_ongoing_root"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -61,7 +62,7 @@
             android:layout_height="17dp"
             android:layout_gravity="center_vertical"
             android:src="@drawable/kp_ic_call_end"
-            android:tint="#FFFFFF"
+            app:tint="#FFFFFF"
             android:contentDescription="@null" />
 
         <TextView
