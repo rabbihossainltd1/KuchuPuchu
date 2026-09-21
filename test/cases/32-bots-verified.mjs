@@ -8607,6 +8607,23 @@ const convBetween = (db, a, b) =>
         chat.includes("padForIme = if (!showAttach && !showStickers) imeGlideDp else 0.dp,"),
     );
   }
+  // v200 item 3: GIF tab has 100+ offline GIFs (Noto 512.gif + Lottie preview)
+  {
+    const sticker = kt("StickerSheet.kt");
+    const gifRepo = kt("GifRepo.kt");
+    check(
+      "v200 item 3: GIF picker — 100+ GIFs offline-first (assets/gifs/[codepoint].gif + assets/noto-emoji Lottie), grid shows Lottie preview, tap sends as STICKER",
+      gifRepo.includes("object GifRepo") &&
+        gifRepo.includes("val gifs: List<GifItem>") &&
+        (gifRepo.match(/GifItem\(/g) || []).length >= 100 &&
+        sticker.includes("GifRepo.gifs") &&
+        sticker.includes("LottieCompositionSpec.Asset") &&
+        sticker.includes("LottieAnimation") &&
+        sticker.includes("GridCells.Fixed(4)") &&
+        !sticker.includes("GIFs coming soon"),
+    );
+  }
+  // Item 14: a person in the phone book must never show
   // Item 14: a person in the phone book must never show "Add contact".
   {
     const pb = kt("PhoneBook.kt");

@@ -48,6 +48,10 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.airbnb.lottie.compose.LottieAnimation
+import com.airbnb.lottie.compose.LottieCompositionSpec
+import com.airbnb.lottie.compose.LottieConstants
+import com.airbnb.lottie.compose.rememberLottieComposition
 
 /**
  * Sticker panel — INLINE above the chat input bar (WhatsApp-style): search,
@@ -283,13 +287,56 @@ fun StickerPanel(
                 }
             }
         } else {
-            Box(
-                Modifier
+            // v200 item 3: 100+ GIFs offline-first — Noto animated emojis (512.gif in assets/gifs/)
+            // Preview via Lottie (lighter than GIF, same animation) — tap sends as STICKER (big emoji with Noto anim)
+            val gifList = remember { GifRepo.gifs }
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(4),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                modifier = Modifier
                     .fillMaxWidth()
                     .height(152.dp),
-                contentAlignment = Alignment.Center,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Text("GIFs coming soon", color = Muted, fontSize = 13.sp)
+                items(gifList.size) { idx ->
+                    val item = gifList[idx]
+                    val interaction = remember { MutableInteractionSource() }
+                    val pressed by interaction.collectIsPressedAsState()
+                    // Lottie preview from bundled noto-emoji JSON (same animation as GIF)
+                    val composition by rememberLottieComposition(
+                        LottieCompositionSpec.Asset(GifRepo.lottieAssetPath(item.codepoint))
+                    )
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (pressed) ChipIdle else Color.Transparent)
+                            .clickable(interactionSource = interaction, indication = null) {
+                                haptics.confirm()
+                                saveStickerRecent(item.emoji)
+                                onSend(item.emoji)
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (composition != null) {
+                            LottieAnimation(
+                                composition = composition,
+                                iterations = LottieConstants.IterateForever,
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .scale(if (pressed) 1.2f else 1f),
+                            )
+                        } else {
+                            Text(
+                                item.emoji,
+                                fontSize = 22.sp,
+                                modifier = Modifier.scale(if (pressed) 1.2f else 1f),
+                            )
+                        }
+                    }
+                }
             }
         }
 
