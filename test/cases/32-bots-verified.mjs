@@ -9511,7 +9511,7 @@ const convBetween = (db, a, b) =>
         ) &&
         chat.includes('if (kind == "STICKER") 1 else emojiOnly, stampInk'),
     );
-        check(
+    check(
       "N3r: v200 Noto — single emoji uses bundled Noto Lottie (assets/noto-emoji/*.json), one-shot on send then static, tap replays here AND on other side via emoji_fx frame, offline-first",
       emo.includes("fun emojiToCodepoint") &&
         emo.includes("fun NotoAnimatedEmoji") &&

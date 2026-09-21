@@ -211,7 +211,6 @@ check(
     chat.includes(".fxProgressLine(fxGrow, docInk)"),
 );
 
-
 /* 7b - r52: the Claude pack's measured send flight (SendFlight.kt) */
 const fx8 = kt("SendFlight.kt");
 check(
