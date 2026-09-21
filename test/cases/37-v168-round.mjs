@@ -167,12 +167,16 @@ check(
     chat.includes("modifier = Modifier.size(16.dp),"),
 );
 
-/* 7 — the owner's animation pack (ChatAnimationsComplete): receive side */
+/* 7 — the owner's animation pack (now Noto per v200 item 2) */
 const fx7 = kt("ChatFx.kt");
+const emo = kt("EmojiAnim.kt");
 check(
-  "v169 item 7 (r44) + N3b: the receive animation pack is in - a shared Compose-only ChatFx.kt (emoji registry with entry/idle/fx, slot open, letter-by-letter reveal, de-blur media reveal, landing squash, shine + ripple) that respects the animator duration scale; message rows render emoji through EmojiGlyphRow (hash-assigned 3D glyph fx, tap-to-replay on both sides); arrivals are marked synchronously at the row's FIRST composition (FxArrivals) so nothing ever lands-then-replays, history composes before the screen arms, and the AI bot's rows never animate here",
-  fx7.includes("object EmojiAnimationRegistry") &&
-    fx7.includes('"\ud83d\ude02" to EmojiAnim("shake-in", "shake", EmojiFx.TEARS)') &&
+  "v200 item 2 (Noto): ChatFx keeps slot/letter/blur/landing/shine/pop/progress + FxArrivals, but old custom emoji registry is gone (now Noto Lottie). EmojiAnim.kt hosts NotoAnimatedEmoji + emojiToCodepoint + Lottie asset",
+  !fx7.includes("object EmojiAnimationRegistry") &&
+    !fx7.includes("enum class EmojiFx") &&
+    !fx7.includes("data class EmojiAnim(") &&
+    !fx7.includes("fun AnimatedEmoji") &&
+    fx7.includes("Noto animated emoji") &&
     fx7.includes("object FxArrivals") &&
     fx7.includes("fun Modifier.fxSlotOpen") &&
     fx7.includes("fun fxLetterSpans") &&
@@ -184,7 +188,12 @@ check(
     fx7.includes("fun Modifier.fxBlurIn") &&
     fx7.includes("fun Modifier.fxPopIn") &&
     fx7.includes("fun Modifier.fxProgressLine") &&
-    fx7.includes("fun AnimatedEmoji") &&
+    emo.includes("fun emojiToCodepoint") &&
+    emo.includes("fun NotoAnimatedEmoji") &&
+    emo.includes("rememberLottieComposition") &&
+    emo.includes("LottieCompositionSpec.Asset") &&
+    emo.includes("noto-emoji") &&
+    emo.includes("emojiFxReplays") &&
     chat.includes("val fxFresh =") &&
     chat.includes(
       'liveBorn && FxArrivals.mark(m.optString("id")) != null && m.optString("senderId") != "kp_ai_bot"',
@@ -201,6 +210,7 @@ check(
     chat.includes(".fxPopIn(fxGrow)") &&
     chat.includes(".fxProgressLine(fxGrow, docInk)"),
 );
+
 
 /* 7b - r52: the Claude pack's measured send flight (SendFlight.kt) */
 const fx8 = kt("SendFlight.kt");

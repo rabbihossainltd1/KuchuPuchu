@@ -1,14 +1,23 @@
 package app.kuchupuchu.android
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
+/**
+ * Item 2 — Noto animated emoji (owner: https://googlefonts.github.io/noto-emoji-animation/)
+ *
+ * - 881 Lottie assets bundled in assets/noto-emoji/[codepoint].json (68M) — offline-first.
+ * - Single-emoji messages: animation plays ONCE on send/receive, then stays normal (static glyph).
+ * - Tap replays the animation locally AND via POST /api/messages/{id}/fx to replay on the other side.
+ * - Multi-emoji rows (1-3 emojis): each glyph animates independently, phase-shifted by idx.
+ * - Fallback: if asset missing or Lottie fails, show normal Text emoji.
+ *
+ * Old custom 3D palette (FX_PATTERNS, dub, tri, etc.) removed per owner.
+ */
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -20,123 +29,32 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.GraphicsLayerScope
-import androidx.compose.foundation.layout.Box
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.airbnb.lottie.compose.LottieAnimation
+import com.airbnb.lottie.compose.LottieCompositionSpec
+import com.airbnb.lottie.compose.rememberLottieAnimatable
+import com.airbnb.lottie.compose.rememberLottieComposition
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.math.PI
-import kotlin.math.abs
-import kotlin.math.cos
-import kotlin.math.floor
-import kotlin.math.max
-import kotlin.math.sin
 
-/**
- * N3r: the WHOLE emoji animates — the real system glyph, never a redrawn
- * face. Every glyph gets a deterministic 3D move from the palette below
- * (hash-assigned, so each of the 300+ keyboard emojis dances its own way
- * and siblings never move in lockstep).
- *
- * A glyph plays for 3 seconds, then rests: on a live arrival, on tap, or
- * when the other side taps (the server's emoji_fx frame lands in
- * emojiFxReplays and the row consumes its own id exactly once). Reduced
- * motion (animator scale 0) never plays.
- */
+/** Shared replay bus — tap on one side fans out via server's emoji_fx frame. */
 internal val emojiFxReplays = SnapshotStateList<String>()
 
-private const val FX_PLAY_MS = 3000L
-
-private const val TAU = 2f * PI.toFloat()
-
-private fun frac(x: Float): Float = x - floor(x)
-
-/** 0 at the loop ends, 1 mid-loop. */
-private fun tri(p: Float): Float = 1f - abs(2f * frac(p) - 1f)
-
-/** Lub-dub: a strong thump plus its smaller echo. */
-private fun dub(p: Float): Float {
-    val q = frac(p)
-    val a = max(0f, sin(q * TAU))
-    val b = max(0f, sin((q - 0.16f) * TAU))
-    return (a * a * 0.75f + b * b * 0.45f).coerceIn(0f, 1f)
+/** Convert an emoji cluster (e.g. "👍🏽" or "❤️") to Noto codepoint filename: "1f44d_1f3fd" */
+internal fun emojiToCodepoint(emoji: String): String {
+    if (emoji.isEmpty()) return ""
+    val cps = mutableListOf<String>()
+    var i = 0
+    while (i < emoji.length) {
+        val cp = emoji.codePointAt(i)
+        // Noto uses lower-case hex without leading zeros
+        cps.add(Integer.toHexString(cp).lowercase())
+        i += Character.charCount(cp)
+    }
+    return cps.joinToString("_")
 }
-
-private data class FxPattern(
-    /** How many move cycles fit one 1600 ms loop. */
-    val cycles: Float,
-    val move: GraphicsLayerScope.(ph: Float, density: Float) -> Unit,
-)
-
-/** The 3D palette: spins, nods, hops, floats — every move loops seamlessly. */
-private val FX_PATTERNS =
-    listOf(
-        // Coin spin: a full Y turn per loop.
-        FxPattern(1f) { ph, _ -> rotationY = ph * 360f },
-        // Nod: forward-back on X.
-        FxPattern(2f) { ph, _ -> rotationX = sin(TAU * ph) * 22f },
-        // Swing: side-to-side on Y.
-        FxPattern(2f) { ph, _ -> rotationY = sin(TAU * ph) * 38f },
-        // Hop: a little jump with a forward lean.
-        FxPattern(3f) { ph, density ->
-            val h = abs(sin(TAU * ph))
-            translationY = -h * 14f * density
-            rotationX = -h * 10f
-        },
-        // Wobble: X plus a double-speed Y.
-        FxPattern(2f) { ph, _ ->
-            rotationX = sin(TAU * ph) * 18f
-            rotationY = sin(TAU * ph * 2f) * 18f
-        },
-        // Drift: a gentle sideways sway with a nod (replaces Thump scale).
-        FxPattern(2f) { ph, density ->
-            translationX = sin(TAU * ph) * 8f * density
-            rotationX = sin(TAU * ph) * 10f
-            rotationY = sin(TAU * ph * 2f) * 14f
-        },
-        // Tilt-spin: leaning back while turning around.
-        FxPattern(1f) { ph, _ ->
-            rotationX = 22f
-            rotationY = ph * 360f
-        },
-        // Rocker: a slow deep nod.
-        FxPattern(1f) { ph, _ -> rotationX = sin(TAU * ph) * 30f },
-        // Peek: turns away and comes back.
-        FxPattern(1f) { ph, _ -> rotationY = tri(ph) * 75f },
-        // Float: hovers up and down, tilting with the drift.
-        FxPattern(1f) { ph, density ->
-            translationY = sin(TAU * ph) * 10f * density
-            rotationX = sin(TAU * ph) * 10f
-            rotationY = cos(TAU * ph) * 10f
-        },
-        // Lean: a tipsy sideways tilt.
-        FxPattern(2f) { ph, _ ->
-            rotationZ = sin(TAU * ph) * 10f
-            rotationY = sin(TAU * ph) * 24f
-        },
-        // Sway: a lateral drift with a lean (replaces Pulse-3D scale).
-        FxPattern(2f) { ph, density ->
-            translationX = sin(TAU * ph) * 6f * density
-            rotationZ = sin(TAU * ph) * 8f
-            rotationY = sin(TAU * ph) * 16f
-        },
-        // Roll: a full forward flip per loop.
-        FxPattern(1f) { ph, _ -> rotationX = ph * 360f },
-        // Shimmy: a Z twist with a bob (replaces Heartbeat-side scale).
-        FxPattern(2f) { ph, density ->
-            rotationZ = sin(TAU * ph) * 12f
-            rotationY = sin(TAU * ph) * 10f
-            translationY = abs(sin(TAU * ph * 2f)) * -4f * density
-        },
-    )
-
-private fun fxPatternOf(ch: String): FxPattern = FX_PATTERNS[abs(ch.hashCode()) % FX_PATTERNS.size]
 
 /** Splits a body into emoji clusters (bases keep their joiners / modifiers). */
 internal fun splitEmojiClusters(body: String): List<String> {
@@ -171,9 +89,61 @@ internal fun splitEmojiClusters(body: String): List<String> {
 }
 
 /**
- * One emoji-only row: every glyph dances its own 3D move for 3 seconds —
- * on a live arrival ([active]), on tap, or when the other side taps (the
- * row's [mid] lands in [emojiFxReplays]). History rows rest until tapped.
+ * One Noto Lottie emoji that plays once per [replayKey] increment, then shows static Text.
+ * If the asset doesn't exist (e.g. ©/®) or Lottie fails, falls back to Text immediately.
+ */
+@Composable
+internal fun NotoAnimatedEmoji(
+    emoji: String,
+    sizeSp: Float,
+    replayKey: Int,
+    modifier: Modifier = Modifier,
+) {
+    val codepoint = remember(emoji) { emojiToCodepoint(emoji) }
+    val assetPath = remember(codepoint) { "noto-emoji/$codepoint.json" }
+
+    // Lottie composition from assets — offline-first, no network.
+    val composition by rememberLottieComposition(
+        LottieCompositionSpec.Asset(assetPath)
+    )
+    val animatable = rememberLottieAnimatable()
+    var isPlaying by remember(emoji) { mutableStateOf(false) }
+
+    // When replayKey changes (or first composition with active), play once.
+    LaunchedEffect(composition, replayKey) {
+        if (composition != null) {
+            isPlaying = true
+            // One-shot: iterations=1
+            animatable.animate(
+                composition = composition,
+                iterations = 1,
+                initialProgress = 0f,
+            )
+            isPlaying = false
+        }
+    }
+
+    if (composition != null && isPlaying) {
+        LottieAnimation(
+            composition = composition,
+            progress = { animatable.progress },
+            modifier = modifier.size(sizeSp.dp),
+        )
+    } else {
+        // Static fallback — normal emoji after animation, or when asset missing.
+        // If composition exists but not playing, we show the static glyph (not frozen Lottie)
+        // per owner: "ekbar animation Hobe tarpor normal thakbe"
+        Text(
+            text = emoji,
+            fontSize = sizeSp.sp,
+            modifier = modifier,
+        )
+    }
+}
+
+/**
+ * One emoji-only row: each glyph uses Noto Lottie, plays once on arrival,
+ * then rests. Tap replays here + on the other side via /fx.
  */
 @Composable
 internal fun EmojiGlyphRow(
@@ -185,15 +155,16 @@ internal fun EmojiGlyphRow(
     Row(
         Modifier.fxPopIn(active).padding(start = 2.dp, end = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         splitEmojiClusters(body).forEachIndexed { i, ch ->
-            EmojiFxGlyph(ch, sizeSp, active, mid, i)
+            NotoEmojiGlyph(ch, sizeSp, active, mid, i)
         }
     }
 }
 
 @Composable
-private fun EmojiFxGlyph(
+private fun NotoEmojiGlyph(
     ch: String,
     sizeSp: Float,
     active: Boolean,
@@ -202,15 +173,18 @@ private fun EmojiFxGlyph(
 ) {
     val scope = rememberCoroutineScope()
     val haptics = rememberHaptics()
-    val anim = fxAnimatorScale() > 0f
-    var playing by remember(mid, ch) { mutableStateOf(active && anim) }
-    var playId by remember(mid, ch) { mutableStateOf(0) }
+    val animScale = fxAnimatorScale()
+    var replayKey by remember(mid, ch) { mutableStateOf(if (active && animScale > 0f) 1 else 0) }
+    var lastTapMs by remember { mutableStateOf(0L) }
+
     fun replay(local: Boolean) {
-        if (!anim) return
-        playing = true
-        playId++
-        // A local tap replays on the OTHER side too: the server fans the
-        // frame out and it lands in emojiFxReplays on every watcher.
+        if (animScale <= 0f) return
+        // Debounce 300ms to avoid spam
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastTapMs < 300) return
+        lastTapMs = now
+        replayKey++
+
         if (local && mid.isNotBlank() && !mid.startsWith("c_")) {
             scope.launch {
                 runCatching {
@@ -219,65 +193,36 @@ private fun EmojiFxGlyph(
             }
         }
     }
-    // The other side tapped this very row: play it here too. Consumed, so
-    // the replay fires exactly once per frame.
-    if (mid.isNotBlank() && emojiFxReplays.remove(mid)) replay(local = false)
-    // Three seconds of dance, then the rest pose — never frozen mid-move.
-    LaunchedEffect(playId) {
-        if (playing) {
-            delay(FX_PLAY_MS)
-            playing = false
+
+    // Remote tap: other side tapped this row
+    if (mid.isNotBlank() && emojiFxReplays.contains(mid)) {
+        // Consume once
+        if (emojiFxReplays.remove(mid)) {
+            replay(local = false)
         }
     }
-    val tap = Modifier.clickable { haptics.tap(); replay(local = true) }
-    if (playing) FxMovingGlyph(ch, sizeSp, idx, tap)
-    else Text(ch, fontSize = sizeSp.sp, modifier = tap)
-}
 
-@Composable
-private fun FxMovingGlyph(
-    ch: String,
-    sizeSp: Float,
-    idx: Int,
-    tap: Modifier,
-) {
-    val density = LocalDensity.current.density
-    val trans = rememberInfiniteTransition(label = "fx")
-    val loop by trans.animateFloat(0f, 1f, infiniteRepeatable(tween(1600, easing = LinearEasing)), label = "loop")
-    val pattern = fxPatternOf(ch)
-    // Siblings run phase-shifted: a row of laughers never laughs in lockstep.
-    val ph = frac(loop * pattern.cycles + idx * 0.31f)
-    // Real 3D: the glyph extrudes — a darker offset copy behind the main one.
-    // The offset itself animates with the same 3D phase, so inner highlights
-    // (eyes, tears, hearts) appear to have depth and parallax, not just the
-    // whole glyph rotating. Original colors stay, only depth is added.
+    // Stagger multi-emoji rows so they don't all pop at once
+    LaunchedEffect(active) {
+        if (active && idx > 0) {
+            kotlinx.coroutines.delay((idx * 120).toLong())
+            if (replayKey == 0 && animScale > 0f) replayKey = 1
+        }
+    }
+
+    val tap = Modifier.clickable {
+        haptics.tap()
+        replay(local = true)
+    }
+
     Box(
         modifier = tap,
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            ch,
-            fontSize = sizeSp.sp,
-            color = Color.Black.copy(alpha = 0.22f),
-            modifier =
-                Modifier.graphicsLayer {
-                    cameraDistance = 8f * density
-                    pattern.move(this, ph, density)
-                    translationX += 1.8f * density
-                    translationY += 1.8f * density
-                    // Slight scale down for the extrusion so the front glyph overhangs.
-                    scaleX = 0.98f
-                    scaleY = 0.98f
-                },
-        )
-        Text(
-            ch,
-            fontSize = sizeSp.sp,
-            modifier =
-                Modifier.graphicsLayer {
-                    cameraDistance = 8f * density
-                    pattern.move(this, ph, density)
-                },
+        NotoAnimatedEmoji(
+            emoji = ch,
+            sizeSp = sizeSp,
+            replayKey = replayKey,
         )
     }
 }

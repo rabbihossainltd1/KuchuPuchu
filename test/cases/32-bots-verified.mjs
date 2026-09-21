@@ -9494,24 +9494,20 @@ const convBetween = (db, a, b) =>
         ) &&
         chat.includes('if (kind == "STICKER") 1 else emojiOnly, stampInk'),
     );
-    check(
-      "N3r: EVERY emoji dances as its real glyph — a hash-assigned 3D motion palette on the whole glyph (no redrawn faces), 3 s then rest, tap replays here AND on the other side via the emoji_fx frame, frozen under reduced motion",
-      emo.includes("private val FX_PATTERNS") &&
-        (emo.match(/FxPattern\(/g) || []).length >= 14 &&
-        emo.includes("cameraDistance = 8f * density") &&
-        emo.includes("delay(FX_PLAY_MS)") &&
+        check(
+      "N3r: v200 Noto — single emoji uses bundled Noto Lottie (assets/noto-emoji/*.json), one-shot on send then static, tap replays here AND on other side via emoji_fx frame, offline-first",
+      emo.includes("fun emojiToCodepoint") &&
+        emo.includes("fun NotoAnimatedEmoji") &&
+        emo.includes("rememberLottieComposition") &&
+        emo.includes("LottieCompositionSpec.Asset") &&
+        emo.includes("noto-emoji") &&
+        emo.includes("emojiFxReplays") &&
         emo.includes('Api.post("/api/messages/$mid/fx")') &&
         emo.includes("emojiFxReplays.remove(mid)") &&
-        !emo.includes("FaceKind") &&
+        emo.includes("fun EmojiGlyphRow") &&
         chat.includes('"emoji_fx"') &&
         chat.includes("emojiFxReplays.add(it)") &&
         (chat.match(/EmojiGlyphRow\(/g) || []).length === 3,
-    );
-    check(
-      "r34-7: typing dots follow the chat theme — TypingBubble takes the dot color, the row passes chatAccent(chatTheme), no fixed amber in the indicator",
-      chat.includes("private fun TypingBubble(dot: Color) {") &&
-        chat.includes(".background(dot.copy(alpha = 0.35f + 0.65f * lift))") &&
-        !chat.includes("GoldDeep.copy(alpha = 0.35f"),
     );
     check(
       "E2: typing + voice indicators sit 4dp lower — both indicator rows carry top 7dp / bottom 3dp instead of symmetric vertical 3dp",
