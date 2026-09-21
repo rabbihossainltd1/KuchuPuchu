@@ -1,6 +1,7 @@
 package app.kuchupuchu.android
 
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -133,18 +134,18 @@ internal fun EmojiGlyphRow(
 @Composable
 internal fun AnimatedFace(
     kind: FaceKind,
-    size: Dp,
+    faceSize: Dp,
     phase: Float = 0f,
 ) {
     if (fxAnimatorScale() <= 0f) {
-        Canvas(Modifier.size(size)) { drawFace(kind, 0.25f, 0.55f, 0.3f, phase, size.toPx()) }
+        Canvas(Modifier.size(faceSize)) { drawFace(kind, 0.25f, 0.55f, 0.3f, phase, toPx(faceSize)) }
         return
     }
     val trans = rememberInfiniteTransition(label = "face")
     val beat by trans.animateFloat(0f, 1f, infiniteRepeatable(tween(640, easing = LinearEasing)), label = "beat")
     val flow by trans.animateFloat(0f, 1f, infiniteRepeatable(tween(2200, easing = LinearEasing)), label = "flow")
     val slow by trans.animateFloat(0f, 1f, infiniteRepeatable(tween(3600, easing = LinearEasing)), label = "slow")
-    Canvas(Modifier.size(size)) { drawFace(kind, beat, flow, slow, phase, size.toPx()) }
+    Canvas(Modifier.size(faceSize)) { drawFace(kind, beat, flow, slow, phase, toPx(faceSize)) }
 }
 
 private fun DrawScope.drawFace(
