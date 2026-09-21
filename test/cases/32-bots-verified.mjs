@@ -2789,8 +2789,12 @@ const convBetween = (db, a, b) =>
       !kt("StickerSheet.kt").includes("color = Color.White") &&
       kt("StickerSheet.kt").includes("if (sel) ActionBlueDeep else Muted") &&
       kt("ChatScreen.kt").includes("internal fun emojiOnlyCount(body: String): Int") &&
-      kt("ChatScreen.kt").includes('EmojiGlyphRow(m.optText("body").trim(), 44f, fxFresh, m.optString("id"))') &&
-      kt("ChatScreen.kt").includes('EmojiGlyphRow(m.optText("body").trim(), 34f, fxFresh, m.optString("id"))') &&
+      kt("ChatScreen.kt").includes(
+        'EmojiGlyphRow(m.optText("body").trim(), 44f, fxFresh, m.optString("id"))',
+      ) &&
+      kt("ChatScreen.kt").includes(
+        'EmojiGlyphRow(m.optText("body").trim(), 34f, fxFresh, m.optString("id"))',
+      ) &&
       kt("ChatScreen.kt").includes(
         'Icon(Icons.Filled.Mood, "Stickers", tint = accent, modifier = Modifier.size(20.dp))',
       ),

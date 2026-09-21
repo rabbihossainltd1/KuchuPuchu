@@ -253,7 +253,7 @@ private fun FxMovingGlyph(
         modifier =
             tap.graphicsLayer {
                 cameraDistance = 8f * density
-                pattern.move(ph, density)
+                pattern.move(this, ph, density)
             },
     )
 }
