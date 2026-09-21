@@ -9379,6 +9379,24 @@ const convBetween = (db, a, b) =>
           chat.includes('clipMeta.put("seconds"'),
       );
     }
+    {
+      const e2ee = kt("E2eeCall.kt");
+      const eng = kt("CallEngine.kt");
+      const cs = kt("CallScreens.kt");
+      check(
+        "E4: calls-only E2EE verify with zero added latency — stable DTLS identity on both pc configs, order-independent safety codes from both fingerprints, TOFU store with change warning, lock row on voice+video, and no network in the verify path",
+        (eng.match(/certificate = E2eeCall\.identity\(app\)/g) || []).length === 2 &&
+          e2ee.includes("fun fingerprint(sdp: String?): String?") &&
+          e2ee.includes("if (fpA <= fpB) fpA to fpB else fpB to fpA") &&
+          e2ee.includes('chunked(4).joinToString(" ")') &&
+          e2ee.includes("fun checkPeer(ctx: Context, peerId: String, fp: String): Boolean") &&
+          e2ee.includes("fun trustPeer(ctx: Context, peerId: String, fp: String)") &&
+          !e2ee.includes("Api.") &&
+          eng.includes("val e2eeCode: String = ") &&
+          eng.includes("fun trustE2eePeer()") &&
+          (cs.match(/E2eeCodeRow\(call/g) || []).length === 2,
+      );
+    }
     check(
       "r34-7: typing dots follow the chat theme — TypingBubble takes the dot color, the row passes chatAccent(chatTheme), no fixed amber in the indicator",
       chat.includes("private fun TypingBubble(dot: Color) {") &&

@@ -76,6 +76,10 @@ data class CallUi(
     val group: Boolean = false,
     val starterName: String = "",
     val participants: List<JSONObject> = emptyList(),
+    /** E4: safety code of this call's DTLS media ("" until an ACTIVE 1:1 call measures it). */
+    val e2eeCode: String = "",
+    /** E4: the peer's media fingerprint differs from the stored one — verify aloud! */
+    val e2eeChanged: Boolean = false,
 ) {
     /** Members currently on the call (excluding nobody — the caller filters itself). */
     val joined: List<JSONObject> get() = participants.filter { it.optString("state") == "JOINED" }
@@ -457,6 +461,18 @@ class CallEngine(private val app: Application) {
      * wiring the mirror at each of the ~11 sites it was previously needed at is how such
      * a lag is born. Never throws — a mirror failure must not end a working call.
      */
+    private var e2eeRemoteFp = ""
+
+    /** E4: the user compared codes aloud and accepts the peer's new fingerprint. */
+    fun trustE2eePeer() {
+        val cur = active ?: return
+        val fp = e2eeRemoteFp
+        if (cur.otherId.isNotBlank() && fp.isNotBlank()) {
+            E2eeCall.trustPeer(app, cur.otherId, fp)
+            active = cur.copy(e2eeChanged = false)
+        }
+    }
+
     private fun publishChange() {
         onChange?.invoke(active)
         runCatching { KpTelecom.syncNow(app) }
@@ -503,6 +519,9 @@ class CallEngine(private val app: Application) {
 
     init {
         instance = this
+        // E4: mint the stable DTLS identity off the main thread, so the
+        // first call's setup never pays the keygen.
+        scope.launch(Dispatchers.IO) { runCatching { E2eeCall.identity(app) } }
         // The router owns the audio stack; when it moves the call by itself
         // (headset plugged in mid-call, SCO just finished opening, the chosen
         // device disappeared) the button has to follow immediately.
@@ -870,6 +889,27 @@ class CallEngine(private val app: Application) {
         } else {
             active = ui
         }
+        // E4 (calls-only E2EE verify, zero added call latency): once ACTIVE
+        // on a 1:1 call, derive the safety code from both DTLS fingerprints
+        // and TOFU-check the peer's. Pure local work — string parse, one
+        // SHA-256, one prefs read — no network, no media-path touch.
+        val peerConn = pc
+        if (status == "ACTIVE" && !isGroup && peerConn != null && !ui.id.startsWith("pending")) {
+            runCatching {
+                val cur = active ?: return@runCatching
+                if (cur.id != ui.id) return@runCatching
+                val localFp = E2eeCall.fingerprint(peerConn.localDescription?.description)
+                val remoteFp = E2eeCall.fingerprint(peerConn.remoteDescription?.description)
+                if (localFp != null && remoteFp != null) {
+                    e2eeRemoteFp = remoteFp
+                    val code = E2eeCall.safetyCode(localFp, remoteFp)
+                    val changed = E2eeCall.checkPeer(app, cur.otherId, remoteFp)
+                    if (cur.e2eeCode != code || cur.e2eeChanged != changed) {
+                        active = cur.copy(e2eeCode = code, e2eeChanged = changed)
+                    }
+                }
+            }
+        }
         // The other side's live media flags ride the same row — the safety net
         // for a `media` frame that arrived while this process was asleep.
         next.optJSONObject("media")?.optJSONObject(ui.otherId)?.let { m ->
@@ -1199,6 +1239,8 @@ class CallEngine(private val app: Application) {
         val rtc =
             PeerConnection.RTCConfiguration(iceServers()).apply {
                 sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
+                // E4: stable DTLS identity so our fingerprint survives across calls.
+                certificate = E2eeCall.identity(app)
                 continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
                 iceCandidatePoolSize = 1
                 tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.ENABLED
@@ -2332,6 +2374,8 @@ class CallEngine(private val app: Application) {
         val rtc =
             PeerConnection.RTCConfiguration(iceServers()).apply {
                 sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
+                // E4: stable DTLS identity so our fingerprint survives across calls.
+                certificate = E2eeCall.identity(app)
                 continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
                 iceCandidatePoolSize = 2
                 // UDP is blocked by plenty of VPNs / office & hotel Wi-Fi while

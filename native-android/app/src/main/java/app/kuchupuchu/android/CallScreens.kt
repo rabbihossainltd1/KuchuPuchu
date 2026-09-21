@@ -528,6 +528,11 @@ fun VoiceCallScreen(call: CallUi) {
                 color = Color(0xB3FFFFFF),
                 fontSize = 15.sp,
             )
+            // E4: safety-code lock line (1:1 ACTIVE calls only).
+            if (!call.group && call.e2eeCode.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
+                E2eeCodeRow(call)
+            }
             if (call.group) {
                 Spacer(Modifier.height(16.dp))
                 ParticipantRow(call)
@@ -881,6 +886,8 @@ fun InCallVideoScreen(call: CallUi) {
                     color = Color(0xB3FFFFFF),
                     fontSize = 12.sp,
                 )
+                // E4: compact safety-code lock line (1:1 ACTIVE calls only).
+                if (!call.group && call.e2eeCode.isNotBlank()) E2eeCodeRow(call, compact = true)
             }
         }
 
