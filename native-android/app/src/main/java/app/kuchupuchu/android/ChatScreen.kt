@@ -5915,6 +5915,8 @@ private fun MessageRow(
             // The bubble now stretches with the screen (82% of it, floored at
             // the old 280 and capped at 420 for tablets) so the right side
             // uses as much room as there actually is.
+            // E8: 70% now (was 82%), floor 240 (was 280), cap 420 kept —
+            // every message item fits in seven tenths of the screen.
             // v166 (owner: "ekhon chat er massage bubble and content full right
             // side a chole jai eita halka short koro jeno full jaiga na nei 5px
             // kom hobe"): 5dp comes off whatever the screen gave the bubble, so
@@ -5922,8 +5924,8 @@ private fun MessageRow(
             // floor for a narrow screen is untouched).
             val bubbleMax =
                 maxOf(
-                    280.dp,
-                    minOf(420.dp, (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp * 0.82f).dp) - 5.dp,
+                    240.dp,
+                    minOf(420.dp, (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp * 0.70f).dp) - 5.dp,
                 )
             // Owner round 31: emoji-only texts (1–3) render big, stamp underneath.
             // Owner round 32 (item 15): no "edited" marker anywhere — an edited
@@ -7608,6 +7610,8 @@ private fun AlbumMessageRow(
     val shape = RoundedCornerShape(12.dp)
     val gap = 2.dp
     val albumWidth = 208.dp // Owner round 33 (item 18): narrower, like the single photo
+    // E8: no message item exceeds 70% of the screen, albums included.
+    val albumW = minOf(albumWidth, (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp * 0.70f).dp)
     fun longPress() {
         if (!pendingEcho) {
             haptics.tap()
@@ -7633,7 +7637,7 @@ private fun AlbumMessageRow(
                 Modifier
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
                     .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
-                    .width(albumWidth)
+                    .width(albumW)
                     .shadow(2.dp, shape)
                     .clip(shape)
                     .border(
@@ -7673,7 +7677,7 @@ private fun AlbumMessageRow(
                         }
                     }
                     photos.size == 3 -> Row(
-                        Modifier.height((albumWidth - gap) * 2 / 3),
+                        Modifier.height((albumW - gap) * 2 / 3),
                         horizontalArrangement = Arrangement.spacedBy(gap),
                     ) {
                         AlbumTile(photos[0], tileModifier(Modifier.weight(2f).fillMaxHeight()) { onOpenImage(photos[0]) }, isPending = pendingEcho)
@@ -9099,10 +9103,10 @@ private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
         Modifier.fillMaxWidth().padding(vertical = 3.dp),
         horizontalArrangement = Arrangement.Start,
     ) {
-        // Owner round 6: card widened to 92% of the screen and the photo is
-        // now SQUARE — the picture renders far bigger than a normal bubble.
+        // Owner round 6: the photo is SQUARE. E8: the card caps at 70% like
+        // every other message item (was 92%).
         val cardMax =
-            maxOf(300.dp, minOf(440.dp, (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp * 0.92f).dp))
+            maxOf(240.dp, minOf(420.dp, (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp * 0.70f).dp))
         Column(
             Modifier
                 .width(cardMax)

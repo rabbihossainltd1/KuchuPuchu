@@ -291,10 +291,10 @@ check(
 
 /* 10 — new#4: 5 px of air on the right */
 check(
-  "v166 new#4: the bubble's ceiling is 5 dp smaller than the screen gives it (82 % / 280–420 dp minus 5), so no bubble runs flush into the right edge",
+  "v166 new#4 + E8: the bubble's ceiling is 5 dp smaller than the screen gives it (70 % / 240–420 dp minus 5), so no bubble runs flush into the right edge",
   chat.includes(
-    "minOf(420.dp, (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp * 0.82f).dp) - 5.dp,",
-  ) && chat.includes("maxOf(\n                    280.dp,"),
+    "minOf(420.dp, (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp * 0.70f).dp) - 5.dp,",
+  ) && chat.includes("maxOf(\n                    240.dp,"),
 );
 
 /* 11 — new#5: ten lines, then See more */

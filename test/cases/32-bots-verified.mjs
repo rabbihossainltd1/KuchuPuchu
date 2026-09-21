@@ -585,8 +585,10 @@ const convBetween = (db, a, b) =>
 
   // ---- Owner round 6 (2026-09-04) ----
   check(
-    "owner card photo bigger: 92% width card + square photo",
-    chat.includes("0.92f") && chat.includes(".aspectRatio(1f)"),
+    "owner card photo bigger: 70% width card (E8) + square photo",
+    chat.includes(
+      "minOf(420.dp, (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp * 0.70f).dp)",
+    ) && chat.includes(".aspectRatio(1f)"),
   );
   check(
     "stamp can never wrap to its own line (inline machinery retired r12)",
@@ -9417,6 +9419,13 @@ const convBetween = (db, a, b) =>
           (chat.match(/\.fxHistoryUnfurl\(rowKey in historyFxKeys\)/g) || []).length === 2,
       );
     }
+    check(
+      "E8: every message item fits in 70% of the screen — text bubbles, the owner card and albums all cap at 0.70 of the width",
+      (chat.match(/screenWidthDp \* 0\.70f/g) || []).length === 3 &&
+        !chat.includes("0.82f") &&
+        !chat.includes("0.92f") &&
+        chat.includes("val albumW = minOf(albumWidth,"),
+    );
     check(
       "r34-7: typing dots follow the chat theme — TypingBubble takes the dot color, the row passes chatAccent(chatTheme), no fixed amber in the indicator",
       chat.includes("private fun TypingBubble(dot: Color) {") &&
