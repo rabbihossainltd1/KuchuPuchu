@@ -9397,6 +9397,15 @@ const convBetween = (db, a, b) =>
           (cs.match(/E2eeCodeRow\(call/g) || []).length === 2,
       );
     }
+    {
+      const cs = kt("CallScreens.kt");
+      check(
+        "E6: the keyboard closes when the call screen arrives — CallGate hides the IME and force-clears focus once per call id",
+        cs.includes("LaunchedEffect(call.id) {") &&
+          cs.includes("gateKeyboard?.hide()") &&
+          cs.includes("gateFocus.clearFocus(force = true)"),
+      );
+    }
     check(
       "r34-7: typing dots follow the chat theme — TypingBubble takes the dot color, the row passes chatAccent(chatTheme), no fixed amber in the indicator",
       chat.includes("private fun TypingBubble(dot: Color) {") &&

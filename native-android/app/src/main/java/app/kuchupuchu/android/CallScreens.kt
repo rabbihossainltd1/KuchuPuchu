@@ -1,6 +1,8 @@
 package app.kuchupuchu.android
 
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
 import android.view.WindowManager
@@ -105,6 +107,16 @@ fun CallGate() {
     val engine = CallEngine.instance ?: return
     val call = engine.active ?: return
     if (engine.minimized) return
+    // E6: the call overlay floats above everything — a composer being
+    // typed in below keeps IME focus, so the keyboard would park over
+    // the call UI. Hide it and force-clear focus the moment the call
+    // screen arrives (once per call id).
+    val gateKeyboard = LocalSoftwareKeyboardController.current
+    val gateFocus = LocalFocusManager.current
+    LaunchedEffect(call.id) {
+        gateKeyboard?.hide()
+        gateFocus.clearFocus(force = true)
+    }
     androidx.activity.compose.BackHandler {
         // Owner round 22 (reverses the r18/r19 lock): system back MINIMIZES
         // the call into the ongoing notification — "ager moto call a thakleo
