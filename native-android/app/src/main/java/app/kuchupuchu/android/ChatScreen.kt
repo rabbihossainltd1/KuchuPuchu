@@ -3331,7 +3331,9 @@ fun ChatScreen(nav: NavController, convId: String) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.Bottom,
+                // N2: a slight breath between rows — bubbles used to sit
+                // flush on the previous row's stamp line.
+                verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.Bottom),
                 contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
             ) {
                 items(

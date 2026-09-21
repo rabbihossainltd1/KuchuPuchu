@@ -720,7 +720,7 @@ private fun CallAction(
                         else -> Brush.verticalGradient(listOf(Color(0x42FFFFFF), Color(0x1AFFFFFF)))
                     },
                 )
-                .border(1.dp, Color.White.copy(alpha = 0.33f), CircleShape)
+                // N1: no faint ring — the fill + shadow carry the circle.
                 .clickable(enabled = enabled) { haptics.tap(); onClick() },
             contentAlignment = Alignment.Center,
         ) {
@@ -1378,7 +1378,7 @@ private fun CallCircle(
                     ),
                 ),
             )
-            .border(1.dp, Color.White.copy(alpha = 0.35f), CircleShape)
+            // N1: no faint ring — the fill + shadow carry the circle.
             .clickable {
                 haptics.confirm()
                 onClick()
@@ -1425,7 +1425,7 @@ private fun StripAction(
                     else -> Brush.verticalGradient(listOf(Color(0x3DFFFFFF), Color(0x14FFFFFF)))
                 },
             )
-            .border(1.dp, Color.White.copy(alpha = 0.3f), CircleShape)
+            // N1: no faint ring — the fill + shadow carry the circle.
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,

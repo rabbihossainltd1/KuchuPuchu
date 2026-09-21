@@ -9404,6 +9404,19 @@ const convBetween = (db, a, b) =>
           eng.includes("fun trustE2eePeer()") &&
           (cs.match(/E2eeCodeRow\(call/g) || []).length === 2,
       );
+      check(
+        "E4f: the safety code stays hidden until tapped — the lock line reads plain 'End-to-end encrypted', a tap swaps the code in for 3 s, a second tap opens the verify sheet (the code-changed warning still opens it at once)",
+        e2ee.includes('if (codeVisible) call.e2eeCode else "End-to-end encrypted"') &&
+          e2ee.includes("delay(3_000)") &&
+          e2ee.includes("if (warn || codeVisible) showSheet = true else codeVisible = true") &&
+          !e2ee.includes("End-to-end encrypted · ${call.e2eeCode}"),
+      );
+      check(
+        "N1: no faint white ring on the call buttons — CallAction, CallCircle and the video strip carry the circle with fill + shadow only",
+        !cs.includes("Color.White.copy(alpha = 0.33f), CircleShape") &&
+          !cs.includes("Color.White.copy(alpha = 0.35f), CircleShape") &&
+          !cs.includes("Color.White.copy(alpha = 0.3f), CircleShape"),
+      );
     }
     {
       const cs = kt("CallScreens.kt");
@@ -9431,6 +9444,10 @@ const convBetween = (db, a, b) =>
         !chat.includes("0.82f") &&
         !chat.includes("0.92f") &&
         chat.includes("val albumW = minOf(albumWidth,"),
+    );
+    check(
+      "N2: rows breathe — the message list spaces items 3 dp apart while staying bottom-anchored, so no bubble sits flush on the stamp line above",
+      chat.includes("verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.Bottom),"),
     );
     check(
       "r34-7: typing dots follow the chat theme — TypingBubble takes the dot color, the row passes chatAccent(chatTheme), no fixed amber in the indicator",

@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,6 +28,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import org.webrtc.RtcCertificatePem
 
 /**
@@ -122,14 +124,27 @@ internal object E2eeCall {
 /**
  * E4: the lock line under the call status — tap for the verify sheet. Groups
  * and pre-ACTIVE calls have no code and show nothing (never claim it).
+ * E4f: the code stays HIDDEN — the line reads plain "End-to-end encrypted"
+ * until tapped. A tap swaps the code in for 3 s (then it hides itself); a tap
+ * while the code shows opens the verify sheet (the ceremony stays one tap
+ * away). The code-changed warning still opens the sheet at once.
  */
 @Composable
 internal fun E2eeCodeRow(call: CallUi, compact: Boolean = false) {
     if (call.group || call.e2eeCode.isBlank()) return
     var showSheet by remember(call.id) { mutableStateOf(false) }
+    var codeVisible by remember(call.id) { mutableStateOf(false) }
     val warn = call.e2eeChanged
+    LaunchedEffect(codeVisible, call.id) {
+        if (codeVisible) {
+            delay(3_000)
+            codeVisible = false
+        }
+    }
     Row(
-        Modifier.clickable { showSheet = true },
+        Modifier.clickable {
+            if (warn || codeVisible) showSheet = true else codeVisible = true
+        },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
@@ -140,7 +155,7 @@ internal fun E2eeCodeRow(call: CallUi, compact: Boolean = false) {
         )
         Spacer(Modifier.width(4.dp))
         Text(
-            if (warn) "Security code changed — tap to verify" else "End-to-end encrypted · ${call.e2eeCode}",
+            if (warn) "Security code changed — tap to verify" else if (codeVisible) call.e2eeCode else "End-to-end encrypted",
             color = if (warn) Red else Color(0xB3FFFFFF),
             fontSize = if (compact) 11.sp else 12.5.sp,
             fontWeight = if (warn) FontWeight.SemiBold else FontWeight.Normal,
