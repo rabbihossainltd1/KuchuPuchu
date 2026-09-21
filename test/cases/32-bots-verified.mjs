@@ -854,7 +854,9 @@ const convBetween = (db, a, b) =>
   check(
     "v169: timestamp + ticks ride OUTSIDE the bubble - one row under it on every kind (end for mine, start for theirs); nothing is pinned inside the bubble any more",
     chat.includes("horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,") &&
-      chat.includes("BubbleStamp(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk)") &&
+      chat.includes(
+        'BubbleStamp(m, mine, pendingEcho, otherReadAt, if (kind == "STICKER") 1 else emojiOnly, stampInk)',
+      ) &&
       !chat.includes("Modifier.align(Alignment.BottomEnd).padding(end = 2.dp, bottom = 1.dp),") &&
       !chat.includes("appendInlineContent"),
   );
@@ -5129,12 +5131,10 @@ const convBetween = (db, a, b) =>
   // minimum); the stamp sits in the band under the glyph in the wallpaper's
   // ink, and the ticks follow that ink so they never vanish on a light theme.
   check(
-    "r32-8: emoji-only TEXT → transparent bubble (no shadow, transparent fill, min width 0), glyph keeps end room for the stamp/ticks, stamp + ticks use the wallpaper ink",
-    chat1516.includes(
-      ".then(if (emojiOnly > 0) Modifier else Modifier.shadow(2.dp, bubbleShape))",
-    ) &&
+    "r32-8 + N3a: emoji-only TEXT (+ STICKER now) → transparent bubble (no shadow, transparent fill, min width 0), glyph keeps end room for the stamp/ticks, stamp + ticks use the wallpaper ink",
+    chat1516.includes(".then(if (noBubble) Modifier else Modifier.shadow(2.dp, bubbleShape))") &&
       chat1516.includes(
-        "emojiOnly > 0 -> Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))",
+        "noBubble -> Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))",
       ) &&
       // v170: the floor is now 96 dp - wide enough for the stamp under it.
       chat1516.includes(".widthIn(max = bubbleMax)") &&
@@ -7462,8 +7462,11 @@ const convBetween = (db, a, b) =>
         !textBranch.includes("val reserve =") &&
         textBranch.includes('val full = m.optText("body")\n') &&
         chat.includes("private fun BubbleStamp(") &&
-        (chat.match(/BubbleStamp\(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk\)/g) || [])
-          .length === 1 &&
+        (
+          chat.match(
+            /BubbleStamp\(m, mine, pendingEcho, otherReadAt, if \(kind == "STICKER"\) 1 else emojiOnly, stampInk\)/g,
+          ) || []
+        ).length === 1 &&
         !chat.includes("val mineStampInk =") &&
         chat.includes("color = stampInk,") &&
         // v166's mode-aware blue survives as the single stamp ink
@@ -9448,6 +9451,15 @@ const convBetween = (db, a, b) =>
     check(
       "N2: rows breathe — the message list spaces items 3 dp apart while staying bottom-anchored, so no bubble sits flush on the stamp line above",
       chat.includes("verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.Bottom),"),
+    );
+    check(
+      "N3a: sticker-emoji messages float on the wallpaper like text emoji-only — no min width, no lift, no fill, wallpaper-ink ticks, both sides",
+      chat.includes('val noBubble = emojiOnly > 0 || kind == "STICKER"') &&
+        chat.includes("if (noBubble) Modifier else Modifier.shadow(2.dp, bubbleShape)") &&
+        chat.includes(
+          "noBubble -> Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))",
+        ) &&
+        chat.includes('if (kind == "STICKER") 1 else emojiOnly, stampInk'),
     );
     check(
       "r34-7: typing dots follow the chat theme — TypingBubble takes the dot color, the row passes chatAccent(chatTheme), no fixed amber in the indicator",

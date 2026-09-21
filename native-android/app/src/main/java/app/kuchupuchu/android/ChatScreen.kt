@@ -5961,6 +5961,8 @@ private fun MessageRow(
             // Owner round 32 (item 15): no "edited" marker anywhere — an edited
             // text is just the text (so an emoji-only edit stays emoji-only too).
             val emojiOnly = if (kind == "TEXT") emojiOnlyCount(m.optText("body")) else 0
+            // N3a: stickers are emoji too — no bubble behind them either, both sides.
+            val noBubble = emojiOnly > 0 || kind == "STICKER"
             // Owner round 32 (items 45 / 34): a voice note's duration line —
             // and a document row's size line — share ONE line with the stamp,
             // so FILE bubbles keep no bottom band (photos / videos never get here).
@@ -6063,17 +6065,17 @@ private fun MessageRow(
                     // bubble really is wider than the stamp under it.
                     // r60 (owner: "short massage bubble size to ami kom korchilam maybe 78/79 but receive short massage er size kom hoini eitaw set koro"):
                     // compact 52.dp minimum width applies to received short messages (and 70.dp for sent).
-                    .then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = if (!mine) 52.dp else 70.dp)) // .then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = 79.dp))
+                    .then(if (noBubble) Modifier else Modifier.requiredWidthIn(min = if (!mine) 52.dp else 70.dp)) // .then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = 79.dp))
                     // Owner round 10: the same soft 3D lift the call buttons
                     // have — bubbles float on the wallpaper now.
                     // Owner round 32 (item 8): an emoji-only message has NO
                     // bubble at all — no lift, no fill — the glyph sits on the
                     // wallpaper with its stamp under it.
-                    .then(if (emojiOnly > 0) Modifier else Modifier.shadow(2.dp, bubbleShape))
+                    .then(if (noBubble) Modifier else Modifier.shadow(2.dp, bubbleShape))
                     .clip(bubbleShape)
                     .background(
                         when {
-                            emojiOnly > 0 -> Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
+                            noBubble -> Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
                             // Deleted tombstones sit in a flat, greyed bubble.
                             m.optString("kind") == "DELETED" ->
                                 Brush.linearGradient(listOf(Color(0xFFB9B3A9), Color(0xFFB9B3A9)))
@@ -6341,7 +6343,7 @@ private fun MessageRow(
                 horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                BubbleStamp(m, mine, pendingEcho, otherReadAt, emojiOnly, stampInk)
+                BubbleStamp(m, mine, pendingEcho, otherReadAt, if (kind == "STICKER") 1 else emojiOnly, stampInk)
             }
             // Owner round 16: reaction chips under the bubble.
             MessageReactions(m)
