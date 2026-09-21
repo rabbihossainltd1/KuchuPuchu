@@ -42,6 +42,22 @@ internal object VideoFacts {
         }
     }
 
+    /** E3: duration of an audio file (mp3/m4a sent as media), or 0. [probe]
+     *  answers null without a video track, so audio needs its own one-field
+     *  probe — the echo and the sent row then carry the same seconds. */
+    fun probeAudioMs(f: File): Long {
+        if (!f.exists()) return 0L
+        val r = MediaMetadataRetriever()
+        return try {
+            r.setDataSource(f.absolutePath)
+            r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+        } catch (_: Exception) {
+            0L
+        } finally {
+            runCatching { r.release() }
+        }
+    }
+
     /** The first sync frame as a small JPEG (at most [maxW] wide), rotated to
      *  the way the clip plays — what the receiver draws before any download. */
     fun poster(f: File, maxW: Int = 480, quality: Int = 80): ByteArray? {

@@ -1715,17 +1715,27 @@ fun ChatScreen(nav: NavController, convId: String) {
         // (the editor knows its bake); otherwise the clip is measured right
         // here, off the main thread, before the row is built.
         val isClip = mime.startsWith("video/") || VIDEO_NAME_EXT.any { file.name.lowercase().endsWith(it) }
+        // E3: an audio file sent as media (a forwarded mp3) is measured for
+        // duration like a clip is for w/h — the echo and the row then agree.
+        val lname = file.name.lowercase()
+        val isAudio = !isClip && (mime.startsWith("audio") || lname.endsWith(".mp3") || lname.endsWith(".m4a"))
         val facts =
             if (w > 0 && h > 0 && (durMs > 0L || !isClip)) {
                 Triple(w, h, durMs)
             } else if (isClip && !asDocument) {
                 withContext(Dispatchers.IO) { VideoFacts.probe(file) ?: Triple(0, 0, 0L) }
+            } else if (isAudio && !asDocument) {
+                Triple(0, 0, withContext(Dispatchers.IO) { VideoFacts.probeAudioMs(file) })
             } else {
                 Triple(0, 0, 0L)
             }
         val clipMeta = JSONObject()
         if (facts.first > 0 && facts.second > 0) clipMeta.put("w", facts.first).put("h", facts.second)
         if (facts.third > 0L) clipMeta.put("durMs", facts.third)
+        // E3: the voice branch reads whole seconds for its duration line —
+        // audio carries them, clips keep durMs only.
+        if (isAudio && !asDocument && facts.third > 0L)
+            clipMeta.put("seconds", (facts.third / 1000L).toInt().coerceAtLeast(1))
         docMeta?.keys()?.forEach { k -> clipMeta.put(k, docMeta.get(k)) }
         // The bubble reads its ratio/duration from the persistent sidecar of
         // the file it is drawing — write that now, so the FIRST frame of the
@@ -8269,7 +8279,12 @@ private fun FileBubble(
         // recorded before that get a stable pattern from their id.
         val paused = player.pausedId == id
         val active = playing || paused
-        val bars = remember(id) { voiceWaveOf(m).ifEmpty { VoiceWaveform.pseudo(id) } }
+        // E3: fallback bars seed from the clientId the echo and the sent
+        // row share — an audio file without a waveform keeps the same bars
+        // across the swap (the server id differs, so seeding from it redrew
+        // the wave on every send).
+        val barSeed = m.optString("clientId").ifBlank { id }
+        val bars = remember(barSeed) { voiceWaveOf(m).ifEmpty { VoiceWaveform.pseudo(barSeed) } }
         // Owner round 33 (item 1): while the finger scrubs the bars, the
         // painted fraction (and the time line) follow the finger, not the
         // player; the seek lands on release.
@@ -8776,7 +8791,9 @@ private fun TickIcon(
 ) {
     val grey = if (onWallpaper) ink else Color(0xB3FFFFFF)
     if (pendingEcho) {
-        Icon(Icons.Filled.Schedule, "Sending", tint = grey, modifier = Modifier.size(12.dp))
+        // E3: the sending tick is the same 13dp as sent/delivered/seen —
+        // the stamp must not shift when the echo swaps for the row.
+        Icon(Icons.Filled.Schedule, "Sending", tint = grey, modifier = Modifier.size(13.dp))
         return
     }
     val seen = isReadByOther(otherReadAt, m.optString("createdAt"))

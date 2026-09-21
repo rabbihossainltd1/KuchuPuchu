@@ -3893,9 +3893,8 @@ const convBetween = (db, a, b) =>
         "r31-27: app — the bubble draws the bars on a Canvas (played part in the chat accent / white, rest faint), a tap on the bars seeks, the time line counts up while playing; the 'Voice message' label is gone; bars ride in meta.waveform on send, retry and forward",
         chat.includes("internal fun VoiceWave(") &&
           chat.includes("internal fun voiceWaveOf(m: JSONObject): List<Int> {") &&
-          chat.includes(
-            "val bars = remember(id) { voiceWaveOf(m).ifEmpty { VoiceWaveform.pseudo(id) } }",
-          ) &&
+          chat.includes("VoiceWaveform.pseudo(barSeed)") &&
+          chat.includes('m.optString("clientId").ifBlank { id }') &&
           chat.includes("color = if (x <= playedUntil) played else rest,") &&
           chat.includes("cap = StrokeCap.Round,") &&
           // r33-1: the tap seek reads the rememberUpdatedState holder (`seek`).
@@ -9367,6 +9366,19 @@ const convBetween = (db, a, b) =>
         ) &&
         !chat.includes("viewerPhotos = listOf(msg)"),
     );
+    {
+      const vf = kt("VideoFacts.kt");
+      check(
+        "E3: sending and sent are identical — the sending tick is 13dp like the rest, fallback wave bars seed from the shared clientId, and audio-as-media carries probed seconds in echo and row",
+        chat.includes(
+          'Icon(Icons.Filled.Schedule, "Sending", tint = grey, modifier = Modifier.size(13.dp))',
+        ) &&
+          chat.includes("VoiceWaveform.pseudo(barSeed)") &&
+          vf.includes("fun probeAudioMs(f: File): Long") &&
+          chat.includes("VideoFacts.probeAudioMs(file)") &&
+          chat.includes('clipMeta.put("seconds"'),
+      );
+    }
     check(
       "r34-7: typing dots follow the chat theme — TypingBubble takes the dot color, the row passes chatAccent(chatTheme), no fixed amber in the indicator",
       chat.includes("private fun TypingBubble(dot: Color) {") &&
