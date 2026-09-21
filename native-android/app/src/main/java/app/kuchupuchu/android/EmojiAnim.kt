@@ -20,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.GraphicsLayerScope
+import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -244,13 +245,37 @@ private fun FxMovingGlyph(
     val pattern = fxPatternOf(ch)
     // Siblings run phase-shifted: a row of laughers never laughs in lockstep.
     val ph = frac(loop * pattern.cycles + idx * 0.31f)
-    Text(
-        ch,
-        fontSize = sizeSp.sp,
-        modifier =
-            tap.graphicsLayer {
-                cameraDistance = 8f * density
-                pattern.move(this, ph, density)
-            },
-    )
+    // Real 3D: the glyph extrudes — a darker offset copy behind the main one.
+    // The offset itself animates with the same 3D phase, so inner highlights
+    // (eyes, tears, hearts) appear to have depth and parallax, not just the
+    // whole glyph rotating. Original colors stay, only depth is added.
+    Box(
+        modifier = tap,
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            ch,
+            fontSize = sizeSp.sp,
+            color = Color.Black.copy(alpha = 0.22f),
+            modifier =
+                Modifier.graphicsLayer {
+                    cameraDistance = 8f * density
+                    pattern.move(this, ph, density)
+                    translationX += 1.8f * density
+                    translationY += 1.8f * density
+                    // Slight scale down for the extrusion so the front glyph overhangs.
+                    scaleX = 0.98f
+                    scaleY = 0.98f
+                },
+        )
+        Text(
+            ch,
+            fontSize = sizeSp.sp,
+            modifier =
+                Modifier.graphicsLayer {
+                    cameraDistance = 8f * density
+                    pattern.move(this, ph, density)
+                },
+        )
+    }
 }

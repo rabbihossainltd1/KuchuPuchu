@@ -84,8 +84,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -434,8 +433,29 @@ fun AttachPanel(
         Modifier
             .fillMaxWidth()
             .height(panelH)
-            .nestedScroll(gridScroll)
+            .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
             .background(Cream)
+            .pointerInput("panelSwipeDown") {
+                var total = 0f
+                awaitEachGesture {
+                    val down = awaitFirstDown(pass = PointerEventPass.Initial)
+                    var drag: PointerInputChange?
+                    do {
+                        val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+                        drag = event.changes.firstOrNull()
+                        val amount = drag?.let { it.positionChange().y } ?: 0f
+                        if (amount != 0f) {
+                            drag?.consume()
+                            total += amount
+                        }
+                    } while (drag != null && event.changes.any { it.pressed })
+                    if (total > 70f && !fullscreen) {
+                        requestDismiss()
+                    }
+                    total = 0f
+                }
+            }
+            .nestedScroll(gridScroll)
             // Owner round 40 (item 3): the caption field's keyboard must
             // push the selection bar up instead of burying it — the grid
             // (weight) yields the space.
@@ -548,7 +568,7 @@ fun AttachPanel(
         if (!fullscreen) {
             rows.forEach { row ->
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                    Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
                 ) {
                     row.forEach { a -> AttachTile(a.icon, a.tint, a.label, a.onClick) }
@@ -802,9 +822,8 @@ fun AttachPanel(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    // Owner round 43 (item 3): the bar drags like the header
-                    // — down past 70 folds to the collapsed half panel.
-                    // N7: a touch taller and no black bar behind it.
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Card)
                     .barDragDetect()
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
