@@ -91,12 +91,11 @@ private val FX_PATTERNS =
             rotationX = sin(TAU * ph) * 18f
             rotationY = sin(TAU * ph * 2f) * 18f
         },
-        // Thump: a heartbeat scale with a nod.
-        FxPattern(2f) { ph, _ ->
-            val d = dub(ph)
-            scaleX = 1f + 0.16f * d
-            scaleY = 1f + 0.16f * d
-            rotationX = 6f * d
+        // Drift: a gentle sideways sway with a nod (replaces Thump scale).
+        FxPattern(2f) { ph, density ->
+            translationX = sin(TAU * ph) * 8f * density
+            rotationX = sin(TAU * ph) * 10f
+            rotationY = sin(TAU * ph * 2f) * 14f
         },
         // Tilt-spin: leaning back while turning around.
         FxPattern(1f) { ph, _ ->
@@ -118,21 +117,19 @@ private val FX_PATTERNS =
             rotationZ = sin(TAU * ph) * 10f
             rotationY = sin(TAU * ph) * 24f
         },
-        // Pulse-3D: breathes while swaying.
-        FxPattern(2f) { ph, _ ->
-            val s = sin(TAU * ph)
-            scaleX = 1f + 0.10f * s
-            scaleY = 1f + 0.10f * s
-            rotationY = s * 16f
+        // Sway: a lateral drift with a lean (replaces Pulse-3D scale).
+        FxPattern(2f) { ph, density ->
+            translationX = sin(TAU * ph) * 6f * density
+            rotationZ = sin(TAU * ph) * 8f
+            rotationY = sin(TAU * ph) * 16f
         },
         // Roll: a full forward flip per loop.
         FxPattern(1f) { ph, _ -> rotationX = ph * 360f },
-        // Heartbeat-side: a small sway with a double thump.
-        FxPattern(2f) { ph, _ ->
-            rotationY = sin(TAU * ph) * 12f
-            val s = 1f + 0.14f * dub(ph)
-            scaleX = s
-            scaleY = s
+        // Shimmy: a Z twist with a bob (replaces Heartbeat-side scale).
+        FxPattern(2f) { ph, density ->
+            rotationZ = sin(TAU * ph) * 12f
+            rotationY = sin(TAU * ph) * 10f
+            translationY = abs(sin(TAU * ph * 2f)) * -4f * density
         },
     )
 

@@ -4802,7 +4802,6 @@ private fun HeaderCallBtn(onClick: () -> Unit, icon: @Composable () -> Unit) {
         Modifier
             .padding(horizontal = 3.dp)
             .size(38.dp)
-            .shadow(4.dp, CircleShape)
             .clip(CircleShape)
             .background(circleButtonFill())
             .border(1.dp, CircleButtonEdge, CircleShape)
@@ -5823,8 +5822,11 @@ private fun MessageRow(
             // r50 / r58 (owner: "history scrolling er somoy o animation keno hocche eita"):
             // the slide animation is for LIVE arrivals only - history, loadOlder, or reopen
             // never slides; it gets the soft fade instead.
+            // N3: own recent messages also animate on send (the pendingEcho marks LiveArrivals,
+            // but the final server row arrives via REST fetch, not WS, so LiveArrivals would be
+            // false without this; the 8s window still prevents history from animating).
             val liveBorn =
-                (pendingEcho || LiveArrivals.isLive(m.optString("clientId")) || LiveArrivals.isLive(m.optString("id"))) &&
+                (pendingEcho || mine || LiveArrivals.isLive(m.optString("clientId")) || LiveArrivals.isLive(m.optString("id"))) &&
                 (runCatching { java.time.Instant.parse(m.optString("createdAt")).toEpochMilli() }
                     .getOrDefault(0L) > System.currentTimeMillis() - 8_000L)
             liveBorn && FxArrivals.mark(m.optString("id")) != null && m.optString("senderId") != "kp_ai_bot"
@@ -6979,7 +6981,7 @@ private fun ViewOnceRow(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(2400, easing = LinearEasing),
+            animation = tween(5200, easing = LinearEasing),
             repeatMode = RepeatMode.Restart,
         ),
         label = "sparkleT",
@@ -7195,11 +7197,12 @@ private fun ViewOnceRow(
                             // (2-4 turns per twinkle cycle, so the loop stays
                             // seamless) while it twinkles. The center mark
                             // stays static.
-                            val orbits = 2 + (i % 3)
-                            val ang = (sparkleTime * orbits + phase) * 2f * Math.PI.toFloat()
-                            val amp = 3f + baseR * 4f
-                            val x = x0 + kotlin.math.cos(ang) * amp
-                            val y = y0 + kotlin.math.sin(ang) * amp * 0.7f
+                            val orbits = 1
+                            val drift = (i * 0.37f) % 1f
+                            val ang = (sparkleTime + phase + drift) * 2f * Math.PI.toFloat()
+                            val amp = 2f + baseR * 2.8f + (i % 5) * 0.6f
+                            val x = x0 + kotlin.math.cos(ang) * amp + kotlin.math.sin(sparkleTime * 0.7f + phase * 6.28f) * 2.5f
+                            val y = y0 + kotlin.math.sin(ang) * amp * 0.55f + kotlin.math.cos(sparkleTime * 0.6f + drift * 6.28f) * 2.2f
                             val t = (sparkleTime + phase) % 1f
                             val twinkle = kotlin.math.sin(t * 2f * Math.PI.toFloat()) * 0.5f + 0.5f
                             val a = (baseA * (0.35f + 0.65f * twinkle)).coerceIn(0.08f, 1f)

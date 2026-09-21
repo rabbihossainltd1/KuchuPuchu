@@ -1449,8 +1449,7 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
                         it.optJSONObject("user")?.optString("id") != Store.myId()
                     }?.optString("lastReadAt") ?: ""
                     val delivered =
-                        conv.optString("lastMessageDeliveredAt").isNotBlank() ||
-                            (lastMsg != null && lastMsg.optString("createdAt") == newestAt && lastMsg.optString("deliveredAt").isNotBlank())
+                        conv.optString("lastMessageDeliveredAt").isNotBlank()
                     ListTicks(read = otherRead.isNotBlank() && otherRead >= newestAt, delivered = delivered)
                     Spacer(Modifier.width(4.dp))
                 }

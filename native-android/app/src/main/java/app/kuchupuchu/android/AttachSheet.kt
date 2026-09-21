@@ -548,8 +548,8 @@ fun AttachPanel(
         if (!fullscreen) {
             rows.forEach { row ->
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 1.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
                 ) {
                     row.forEach { a -> AttachTile(a.icon, a.tint, a.label, a.onClick) }
                 }
@@ -793,25 +793,27 @@ fun AttachPanel(
                 }
             }
         }
+        // N7: the bar stays visible whenever something is selected — not just fullscreen.
         // Owner round 39 (item 6): the selection bar — pencil (the last
         // ticked photo opens in the editor), one caption for the batch (it
         // rides the first photo, WhatsApp-exact), the ① batch toggle and
         // Send with its count badge (hold = send later, as before).
-        if (fullscreen && sel.isNotEmpty()) {
+        if (sel.isNotEmpty()) {
             Row(
                 Modifier
                     .fillMaxWidth()
                     // Owner round 43 (item 3): the bar drags like the header
                     // — down past 70 folds to the collapsed half panel.
+                    // N7: a touch taller and no black bar behind it.
                     .barDragDetect()
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Owner round 41 (item 3): every bar control is 28.dp, the
                 // ①'s own seat — glyphs shrink along (14.dp).
                 Box(
                     Modifier
-                        .size(28.dp)
+                        .size(34.dp)
                         .clip(CircleShape)
                         .background(ChipIdle)
                         .clickable {
@@ -827,8 +829,8 @@ fun AttachPanel(
                     Modifier
                         .barDragDetect()
                         .weight(1f)
-                        .height(28.dp)
-                        .clip(RoundedCornerShape(14.dp))
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(18.dp))
                         .background(ChipIdle)
                         .padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -855,7 +857,7 @@ fun AttachPanel(
                 // sits on a filled 30.dp blue disc (a 1.dp halo all round).
                 Box(
                     Modifier
-                        .size(28.dp)
+                        .size(34.dp)
                         .clickable {
                             haptics.toggle(!allOnce)
                             val v = !allOnce
@@ -863,8 +865,8 @@ fun AttachPanel(
                         },
                     contentAlignment = Alignment.Center,
                 ) {
-                    if (allOnce) Box(Modifier.size(30.dp).clip(CircleShape).background(ActionBlue))
-                    CenteredOnceIcon(28.dp, tint = if (allOnce) Color.White else Muted)
+                    if (allOnce) Box(Modifier.size(36.dp).clip(CircleShape).background(ActionBlue))
+                    CenteredOnceIcon(32.dp, tint = if (allOnce) Color.White else Muted)
                 }
                 Spacer(Modifier.size(8.dp))
                 // Owner round 40 (item 5): the badge used to live INSIDE the
@@ -873,12 +875,12 @@ fun AttachPanel(
                 // the unclipped rim. Round 41 (item 3): the circle is 28.dp
                 // now, the badge 15.dp along with it.
                 Box(
-                    Modifier.size(28.dp),
+                    Modifier.size(34.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Box(
                         Modifier
-                            .size(28.dp)
+                            .size(34.dp)
                             .clip(CircleShape)
                             .background(ActionBlue)
                             .combinedClickable(
@@ -896,7 +898,7 @@ fun AttachPanel(
                             Icons.AutoMirrored.Filled.Send,
                             contentDescription = "Send",
                             tint = ActionBlueInk,
-                            modifier = Modifier.size(14.dp),
+                            modifier = Modifier.size(16.dp),
                         )
                     }
                     Box(
@@ -1168,18 +1170,17 @@ private fun formatDuration(ms: Long): String {
 
 @Composable
 private fun AttachTile(icon: ImageVector, tint: Color, label: String, onClick: () -> Unit) {
-    // N6: compact tiles — a smaller seat, a bigger glyph, no label row
-    // (talkback still announces the action via the content description).
+    // N6: proper gap + bigger glyph — the seat grows a touch, the glyph grows more, and the row breathes.
     Box(
         Modifier
-            .size(32.dp)
+            .size(40.dp)
             .clip(CircleShape)
-            .border(1.dp, Color(0x1F1C1917), CircleShape)
-            .background(Card)
+            .border(1.dp, if (KpThemeMode.darkBlue) Color(0x22FFFFFF) else Color(0x14000000), CircleShape)
+            .background(if (KpThemeMode.darkBlue) Color(0x1E2A44) else Card)
             .clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp))
+        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(26.dp))
     }
 }
 

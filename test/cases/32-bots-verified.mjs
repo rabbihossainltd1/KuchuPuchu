@@ -5036,13 +5036,13 @@ const convBetween = (db, a, b) =>
       ),
   );
   check(
-    "r32-28: app — list row ticks have the delivered (two grey) step and read the newest message's sender / delivery stamp from the list payload (cached page only as a fallback)",
+    "r32-28: app — list row ticks have the delivered (two grey) step and read the newest message's sender / delivery stamp from the list payload",
     chatList32.includes("private fun ListTicks(read: Boolean, delivered: Boolean = read) {") &&
       chatList32.includes("if (read || delivered) {") &&
       chatList32.includes(
         'val newestSender = conv.optString("lastMessageSenderId").ifBlank { lastMsg?.optString("senderId").orEmpty() }',
       ) &&
-      chatList32.includes('conv.optString("lastMessageDeliveredAt").isNotBlank() ||') &&
+      chatList32.includes('conv.optString("lastMessageDeliveredAt").isNotBlank()') &&
       chatList32.includes(
         "ListTicks(read = otherRead.isNotBlank() && otherRead >= newestAt, delivered = delivered)",
       ),
@@ -6646,11 +6646,11 @@ const convBetween = (db, a, b) =>
         attach.includes('.pointerInput("foldcheck")') &&
         attach.includes('"barDrag"') &&
         attach.includes("barDragDetect") &&
-        attach.includes("if (fullscreen && sel.isNotEmpty()) {") &&
+        attach.includes("if (sel.isNotEmpty()) {") &&
         attach.includes("sel.lastOrNull()?.let(onEdit)") &&
         attach.includes("sel[0] = sel[0].copy(caption = t.take(1000))") &&
         // Owner round 40 (item 4): the ring is centered + shrunk (layout-only).
-        attach.includes("CenteredOnceIcon(28.dp, tint = if (allOnce) Color.White else Muted)") &&
+        attach.includes("CenteredOnceIcon(32.dp, tint = if (allOnce) Color.White else Muted)") &&
         attach.includes("sel.replaceAll { it.copy(once = v) }") &&
         attach.includes("onScheduleBatch()") &&
         attach.includes("onSendBatch()") &&
@@ -6664,9 +6664,9 @@ const convBetween = (db, a, b) =>
         // Owner round 41 (item 3): the whole bar is 28.dp (badge 15).
         attach.includes(".offset(x = 2.dp, y = (-2).dp)") &&
         attach.includes(
-          "if (allOnce) Box(Modifier.size(30.dp).clip(CircleShape).background(ActionBlue))",
+          "if (allOnce) Box(Modifier.size(36.dp).clip(CircleShape).background(ActionBlue))",
         ) &&
-        attach.includes(".height(28.dp)") &&
+        attach.includes(".height(36.dp)") &&
         // Owner round 41 (item 4): the HD pill carries no border.
         !attach.includes(".border(1.dp, if (hdOn)") &&
         // Owner round 40 (item 3): the keyboard pushes the bar up.
@@ -9422,10 +9422,11 @@ const convBetween = (db, a, b) =>
           !e2ee.includes("End-to-end encrypted · ${call.e2eeCode}"),
       );
       check(
-        "N1: no faint white ring on the call buttons — CallAction, CallCircle and the video strip carry the circle with fill + shadow only",
-        !cs.includes("Color.White.copy(alpha = 0.33f), CircleShape") &&
-          !cs.includes("Color.White.copy(alpha = 0.35f), CircleShape") &&
-          !cs.includes("Color.White.copy(alpha = 0.3f), CircleShape"),
+        "N1: inactive call buttons keep a clean thin ring only — no translucent disc, no extra offset circle underneath",
+        cs.includes("Color.White.copy(alpha = 0.24f), CircleShape") &&
+          cs.includes("Color.White.copy(alpha = 0.22f), CircleShape") &&
+          !cs.includes("Color(0x42FFFFFF)") &&
+          !cs.includes("Color(0x3DFFFFFF)"),
       );
     }
     {
@@ -9470,15 +9471,18 @@ const convBetween = (db, a, b) =>
       chat.includes("verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.Bottom),"),
     );
     check(
-      "N5: the view-once galaxy scurries — each star orbits a small seamless loop while it twinkles (the center mark stays static)",
-      chat.includes("val orbits = 2 + (i % 3)") && chat.includes("kotlin.math.cos(ang) * amp"),
+      "N5: the view-once galaxy scurries — each star drifts on a slow random path while it twinkles (the center mark stays static)",
+      chat.includes("val orbits = 1") &&
+        chat.includes("kotlin.math.cos(ang) * amp") &&
+        chat.includes("tween(5200"),
     );
     {
       const at = kt("AttachSheet.kt");
       check(
-        "N6: compact attach tiles — a 32 dp seat with a 22 dp glyph and no label row (talkback still announces the action)",
-        at.includes("contentDescription = label, tint = tint, modifier = Modifier.size(22.dp)") &&
-          at.includes(".size(32.dp)") &&
+        "N6: attach tiles breathe — a 40 dp seat with a 26 dp glyph, proper gaps and centered rows (talkback still announces the action)",
+        at.includes("contentDescription = label, tint = tint, modifier = Modifier.size(26.dp)") &&
+          at.includes(".size(40.dp)") &&
+          at.includes("Arrangement.spacedBy(14.dp") &&
           !at.includes("Text(label, fontSize = 10.sp"),
       );
       check(

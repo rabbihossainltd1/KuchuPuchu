@@ -725,7 +725,7 @@ private fun CallAction(
                             },
                         )
                     } else {
-                        Modifier
+                        Modifier.border(1.dp, Color.White.copy(alpha = 0.24f), CircleShape)
                     },
                 )
                 .clickable(enabled = enabled) { haptics.tap(); onClick() },
@@ -1435,7 +1435,7 @@ private fun StripAction(
                         },
                     )
                 } else {
-                    Modifier
+                    Modifier.border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape)
                 },
             )
             .clickable(
