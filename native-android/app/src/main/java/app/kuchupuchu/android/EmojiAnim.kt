@@ -139,14 +139,14 @@ internal fun AnimatedFace(
     phase: Float = 0f,
 ) {
     if (fxAnimatorScale() <= 0f) {
-        Canvas(Modifier.size(faceSize)) { drawFace(kind, 0.25f, 0.55f, 0.3f, phase, toPx(faceSize)) }
+        Canvas(Modifier.size(faceSize)) { drawFace(kind, 0.25f, 0.55f, 0.3f, phase, faceSize.toPx()) }
         return
     }
     val trans = rememberInfiniteTransition(label = "face")
     val beat by trans.animateFloat(0f, 1f, infiniteRepeatable(tween(640, easing = LinearEasing)), label = "beat")
     val flow by trans.animateFloat(0f, 1f, infiniteRepeatable(tween(2200, easing = LinearEasing)), label = "flow")
     val slow by trans.animateFloat(0f, 1f, infiniteRepeatable(tween(3600, easing = LinearEasing)), label = "slow")
-    Canvas(Modifier.size(faceSize)) { drawFace(kind, beat, flow, slow, phase, toPx(faceSize)) }
+    Canvas(Modifier.size(faceSize)) { drawFace(kind, beat, flow, slow, phase, faceSize.toPx()) }
 }
 
 private fun DrawScope.drawFace(
