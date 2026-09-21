@@ -6640,7 +6640,7 @@ const convBetween = (db, a, b) =>
         attach.includes('.pointerInput("foldcheck")') &&
         attach.includes('"barDrag"') &&
         attach.includes("barDragDetect") &&
-        attach.includes("if (sel.isNotEmpty()) {") &&
+        attach.includes("if (fullscreen && sel.isNotEmpty()) {") &&
         attach.includes("sel.lastOrNull()?.let(onEdit)") &&
         attach.includes("sel[0] = sel[0].copy(caption = t.take(1000))") &&
         // Owner round 40 (item 4): the ring is centered + shrunk (layout-only).

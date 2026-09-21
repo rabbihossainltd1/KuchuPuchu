@@ -85,8 +85,6 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.PointerInputChange
-import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
@@ -436,28 +434,8 @@ fun AttachPanel(
         Modifier
             .fillMaxWidth()
             .height(panelH)
-            .background(Cream)
-            .pointerInput("panelSwipeDown") {
-                var total = 0f
-                awaitEachGesture {
-                    val down = awaitFirstDown(pass = PointerEventPass.Initial)
-                    var drag: PointerInputChange?
-                    do {
-                        val event = awaitPointerEvent(pass = PointerEventPass.Initial)
-                        drag = event.changes.firstOrNull()
-                        val amount = drag?.let { it.positionChange().y } ?: 0f
-                        if (amount != 0f) {
-                            drag?.consume()
-                            total += amount
-                        }
-                    } while (drag != null && event.changes.any { it.pressed })
-                    if (total > 70f && !fullscreen) {
-                        requestDismiss()
-                    }
-                    total = 0f
-                }
-            }
             .nestedScroll(gridScroll)
+            .background(Cream)
             // Owner round 40 (item 3): the caption field's keyboard must
             // push the selection bar up instead of burying it — the grid
             // (weight) yields the space.
@@ -815,17 +793,18 @@ fun AttachPanel(
                 }
             }
         }
-        // N7: the bar stays visible whenever something is selected — not just fullscreen.
         // Owner round 39 (item 6): the selection bar — pencil (the last
         // ticked photo opens in the editor), one caption for the batch (it
         // rides the first photo, WhatsApp-exact), the ① batch toggle and
         // Send with its count badge (hold = send later, as before).
-        if (sel.isNotEmpty()) {
+        if (fullscreen && sel.isNotEmpty()) {
             Row(
                 Modifier
                     .fillMaxWidth()
+                    // Owner round 43 (item 3): the bar drags like the header
+                    // — down past 70 folds to the collapsed half panel.
                     .barDragDetect()
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Owner round 41 (item 3): every bar control is 28.dp, the
@@ -894,12 +873,12 @@ fun AttachPanel(
                 // the unclipped rim. Round 41 (item 3): the circle is 28.dp
                 // now, the badge 15.dp along with it.
                 Box(
-                    Modifier.size(34.dp),
+                    Modifier.size(28.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Box(
                         Modifier
-                            .size(34.dp)
+                            .size(28.dp)
                             .clip(CircleShape)
                             .background(ActionBlue)
                             .combinedClickable(
@@ -917,7 +896,7 @@ fun AttachPanel(
                             Icons.AutoMirrored.Filled.Send,
                             contentDescription = "Send",
                             tint = ActionBlueInk,
-                            modifier = Modifier.size(16.dp),
+                            modifier = Modifier.size(14.dp),
                         )
                     }
                     Box(
@@ -1189,6 +1168,8 @@ private fun formatDuration(ms: Long): String {
 
 @Composable
 private fun AttachTile(icon: ImageVector, tint: Color, label: String, onClick: () -> Unit) {
+    // N6: compact tiles — a smaller seat, a bigger glyph, no label row
+    // (talkback still announces the action via the content description).
     Box(
         Modifier
             .size(32.dp)
