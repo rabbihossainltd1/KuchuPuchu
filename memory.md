@@ -135,3 +135,25 @@
 - r63-4 (attach panel selection bar floating transparent with bigger controls) done, commit `d21d079`, app-only.
   - Root cause: AttachSheet.kt only showed the media selection bar when fullscreen was true (`if (fullscreen && sel.isNotEmpty())`), so in the half-panel the bar was hidden. Controls were tiny (28dp seat, 14dp icons) and the bar did not float with a transparent background. Half-panel tapping a media item forced setFullscreen(true), abruptly yanking the view.
   - Fix: AttachSheet.kt selection bar now appears on `if (sel.isNotEmpty())` for both half and full panel. Selection bar background set to Color.Transparent. Controls enlarged: Send button 44dp / icon 22dp / badge 18dp; Caption bar 40dp / text 15sp; View-once 38dp / icon 36dp; Edit 38dp / icon 20dp. MediaCell onToggle in half-panel no longer forces setFullscreen(true). test32 updated with r63-4 lock. Gates: 41/41 (1672 assertions).
+
+## Round 63 Follow-up (owner feedback on v211: items 2 & 3 rework; v212 / 3.9.135)
+- Item 1 (emoji panel): Confirmed fixed by owner.
+- Item 2 (composer pill background & border):
+  - Root cause: previous session changed Composer pill background to Transparent without an explicit border (pill shape vanished), and CoinWallpaper was only drawn inside the LazyColumn Box, leaving a flat solid background behind Composer.
+  - Fix: Root Box in ChatScreen now hosts CoinWallpaper across the entire screen so coins wallpaper extends seamlessly behind composer, voice recording strip, and attach panel. Composer pill Column given explicit 1.dp border (`Line.copy(alpha = 0.55f)`) with transparent background, keeping the pill boundary clearly defined over the chat wallpaper.
+- Item 3 (attach panel floating transparent selection bar, keyboard IME glide, and half-panel stability):
+  - Root cause:
+    1) AttachPanel Column had `.background(Cream)`, rendering a solid navy panel instead of transparent.
+    2) When media was selected in half panel, `ChatScreen.kt` had `else if (!showAttach || (attachSel.isEmpty() && !attachFs))`, abruptly hiding Composer and causing chat messages to drop 1 line.
+    3) Tapping "Add a caption..." opened the keyboard, but fixed `collapsedH` height and unresolving `WindowInsets.ime` left the caption bar trapped below the keyboard.
+    4) View once icon was small (36dp seat, drawn ring only ~19dp).
+    5) Selection bar sat below the grid in a vertical Column rather than floating over it.
+  - Fix:
+    1) AttachPanel Column background set to `Color.Transparent`.
+    2) Grid fills `Box(Modifier.weight(1f))` and media thumbnails scroll directly underneath the floating bar (with bottom padding when selected).
+    3) Selection bar floats over the grid (`align(Alignment.BottomCenter)`).
+    4) Caption bar and Edit button styled with translucent dark rounded pills and 1.dp border for readability over photos.
+    5) View once toggle enlarged to 44dp seat with 44dp CenteredOnceIcon (prominent and bold, matching Send button).
+    6) Keyboard IME handling: `rememberImeGlidePx()` tracks IME height; `targetH` expands to `expandedH` when keyboard opens; selection bar padded by `imeGlideDp`, gliding smoothly above the keyboard when caption bar is focused.
+    7) ChatScreen Composer condition changed to `else if (!showAttach || !attachFs)`: message bar stays visible in half panel when media is selected, preventing the 1-line chat drop.
+- Version bumped to 212 (`3.9.135`). Gates: 41/41 (1672 assertions).

@@ -2841,13 +2841,20 @@ fun ChatScreen(nav: NavController, convId: String) {
             }
         }
     }
-    Column(
+    // r63: root Box paints CoinWallpaper across the entire screen so transparent
+    // composer pill, voice recording bar, and attach panel show coins wallpaper behind them
+    Box(
         Modifier
             .fillMaxSize()
-            .background(chatWallpaper(chatTheme))
-            .statusBarsPadding()
-            .navigationBarsPadding(),
+            .background(chatWallpaper(chatTheme)),
     ) {
+        CoinWallpaper()
+        Column(
+            Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding(),
+        ) {
         /* ---------------- top bar (or selection bar) ---------------- */
         if (selected.isNotEmpty()) {
             // WhatsApp reference: back arrow, count, then the action icons.
@@ -4049,10 +4056,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                 maxLines = 1,
                 modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
             )
-        // Owner round 41 (item 2): the composer stays while the attach
-        // panel is freshly open — it hides only once the user ticked a
-        // photo or swiped the panel up (r40 hid it from the first tap).
-        } else if (!showAttach || (attachSel.isEmpty() && !attachFs)) {
+        // r63-4: composer stays visible in half panel even when media is selected
+        // (prevents abrupt message bar disappearance and avoids messages dropping 1 line)
+        } else if (!showAttach || !attachFs) {
         Composer(
             input = input,
             replyFocusNonce = replyFocusNonce,
@@ -4404,6 +4410,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             )
         }
     }
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -4525,8 +4532,9 @@ private fun Composer(
                     .weight(1f)
                     .heightIn(min = 38.dp)
                     // r63-3 (owner: "composer pill ba massage bar er background ta remove korte parini... background transparent hok"):
-                    // composer pill and voice recording bar transparent so chat wallpaper shines through
+                    // composer pill and voice recording bar transparent so chat wallpaper shines through; border preserved
                     .clip(RoundedCornerShape(22.dp))
+                    .border(1.dp, Line.copy(alpha = 0.55f), RoundedCornerShape(22.dp))
                     .background(Color.Transparent)
                     .padding(horizontal = 2.dp, vertical = 1.dp),
             ) {
@@ -5311,7 +5319,7 @@ private fun LoginApprovalMessage(m: JSONObject) {
  * listener stays behind the round-13 isAlive guard, and the critical
  * spring tracks the close's frame stream while gliding the open's jump.
  */
-private fun rememberImeGlidePx(): Int {
+internal fun rememberImeGlidePx(): Int {
     val view = LocalView.current
     var targetPx by remember { mutableStateOf(0f) }
     DisposableEffect(view) {

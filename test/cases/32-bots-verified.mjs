@@ -1018,7 +1018,8 @@ const convBetween = (db, a, b) =>
   );
   check(
     "keyboard glide: ONE shared spring on the composer pad AND the thread RIDES it — a per-frame delta scroll at bottom (r45b's padding version buried the latest row and opened a scrollable void past the end; padding is constant again) — open glides like close, no 250 ms teleport",
-    chat.includes("private fun rememberImeGlidePx(): Int") &&
+    (chat.includes("internal fun rememberImeGlidePx(): Int") ||
+      chat.includes("private fun rememberImeGlidePx(): Int")) &&
       !chat.includes("snapshotFlow { kpIme") &&
       !chat.includes("KpImeAutoScroll") &&
       chat.includes("LaunchedEffect(glidePx) {") &&
@@ -6663,8 +6664,9 @@ const convBetween = (db, a, b) =>
           attach.includes("if (fullscreen && sel.isNotEmpty()) {")) &&
         attach.includes("sel.lastOrNull()?.let(onEdit)") &&
         attach.includes("sel[0] = sel[0].copy(caption = t.take(1000))") &&
-        // Owner round 40 (item 4); r63-4: 36dp (or 28dp).
-        (attach.includes("CenteredOnceIcon(36.dp, tint = if (allOnce) Color.White else Muted)") ||
+        // Owner round 40 (item 4); r63-4: 36dp (or 28dp); r63-item3: 44dp.
+        (attach.includes("CenteredOnceIcon(44.dp") ||
+          attach.includes("CenteredOnceIcon(36.dp, tint = if (allOnce) Color.White else Muted)") ||
           attach.includes("CenteredOnceIcon(28.dp, tint = if (allOnce) Color.White else Muted)")) &&
         attach.includes("sel.replaceAll { it.copy(once = v) }") &&
         attach.includes("onScheduleBatch()") &&
@@ -6679,8 +6681,11 @@ const convBetween = (db, a, b) =>
         // Owner round 41 (item 3): the whole bar is 28.dp (badge 15); r63-4: bigger.
         attach.includes(".offset(x = 2.dp, y = (-2).dp)") &&
         (attach.includes(
-          "if (allOnce) Box(Modifier.size(38.dp).clip(CircleShape).background(ActionBlue))",
+          "if (allOnce) Box(Modifier.size(44.dp).clip(CircleShape).background(ActionBlue))",
         ) ||
+          attach.includes(
+            "if (allOnce) Box(Modifier.size(38.dp).clip(CircleShape).background(ActionBlue))",
+          ) ||
           attach.includes(
             "if (allOnce) Box(Modifier.size(30.dp).clip(CircleShape).background(ActionBlue))",
           )) &&
@@ -6693,8 +6698,9 @@ const convBetween = (db, a, b) =>
         !attach.includes("previewUri") &&
         !attach.includes('"${sel.size} selected"') &&
         !attach.includes("the composer's mic IS the\n                // send button") &&
-        // Owner round 41 (item 2): the composer stays until a tick / swipe-up.
-        chat.includes("} else if (!showAttach || (attachSel.isEmpty() && !attachFs)) {") &&
+        // Owner round 41 (item 2); r63-item3: composer stays in half panel even with selection.
+        (chat.includes("} else if (!showAttach || !attachFs) {") ||
+          chat.includes("} else if (!showAttach || (attachSel.isEmpty() && !attachFs)) {")) &&
         chat.includes("onFullscreenChange = { attachFs = it }") &&
         attach.includes("onFullscreenChange(value)") &&
         // the composer's circle is the MIC while a gallery pick is active
@@ -9958,9 +9964,10 @@ const convBetween = (db, a, b) =>
   {
     const attach = kt("AttachSheet.kt");
     check(
-      "r63-4: attach panel selection bar shows on sel.isNotEmpty with bigger controls (caption 40dp, view once 36dp, send 44dp) and transparent background",
+      "r63-4: attach panel selection bar shows on sel.isNotEmpty with bigger controls (caption 40dp, view once 44dp/36dp, send 44dp) and transparent background",
       attach.includes("if (sel.isNotEmpty()) {") &&
-        attach.includes("CenteredOnceIcon(36.dp, tint = if (allOnce) Color.White else Muted)") &&
+        (attach.includes("CenteredOnceIcon(44.dp") ||
+          attach.includes("CenteredOnceIcon(36.dp, tint = if (allOnce) Color.White else Muted)")) &&
         attach.includes(".height(40.dp)") &&
         attach.includes(".size(44.dp)"),
     );

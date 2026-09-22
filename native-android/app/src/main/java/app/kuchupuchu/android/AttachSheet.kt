@@ -196,10 +196,12 @@ fun AttachPanel(
     // release -> settle transition gets an actual animation.
     var isDragging by remember { mutableStateOf(false) }
 
+    val imeGlidePx = rememberImeGlidePx()
+    val imeGlideDp = with(LocalDensity.current) { imeGlidePx.toDp() }
     val screenH = LocalConfiguration.current.screenHeightDp.dp
     val collapsedH = screenH * 0.40f
     val expandedH = screenH - 132.dp
-    val targetH = if (fullscreen) expandedH else collapsedH
+    val targetH = if (fullscreen || imeGlidePx > 10) expandedH else collapsedH
     val settledH by animateDpAsState(targetH, tween(220), label = "attachPanelH")
     val density = androidx.compose.ui.platform.LocalDensity.current
     val panelH =
@@ -428,7 +430,7 @@ fun AttachPanel(
             .fillMaxWidth()
             .height(panelH)
             .nestedScroll(gridScroll)
-            .background(Cream)
+            .background(Color.Transparent)
             // Owner round 40 (item 3): the caption field's keyboard must
             // push the selection bar up instead of burying it — the grid
             // (weight) yields the space.
@@ -670,229 +672,250 @@ fun AttachPanel(
                     .padding(vertical = 14.dp)
                     .align(Alignment.CenterHorizontally),
             )
-        } else if (!fullscreen) {
-            // Owner round 40 (item 1): the collapsed recents GRID under the
-            // tiles (owner verdict on the round-39 strip: only a few photos
-            // + a sideways swipe). Tiles + a vertical grid, scrolled down —
-            // a tap ticks the photo AND opens the fullscreen picker on it.
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(4),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentPadding = PaddingValues(horizontal = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                items(shown, key = { it.uri.toString() }) { item ->
-                    val pos = selIndex[item.uri] ?: -1
-                    MediaCell(
-                        item,
-                        ctx,
-                        selected = pos >= 0,
-                        selectIndex = if (pos >= 0) pos + 1 else 0,
-                        onToggle = {
-                            haptics.tap()
-                            if (pos >= 0) sel.removeAll { it.uri == item.uri } else sel.add(item.copy(hd = hdOn))
-                        },
-                    )
-                }
-            }
         } else {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(4),
-                state = gridState,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    // Owner round 45 (item 2): device-proof fold — watch the
-                    // touch stream in the INITIAL pass, BEFORE the grid's
-                    // scrollable claims it. A downward pull at the top edge
-                    // folds the panel even on a ROM whose nested-scroll pipe
-                    // sleeps through this overscroll entirely.
-                    .pointerInput("foldcheck") {
-                        awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                            var total = 0f
-                            var mode = 0 // 0 watching, 1 folding, -1 grid's own drag
-                            while (true) {
-                                val ev = awaitPointerEvent(PointerEventPass.Initial)
-                                val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
-                                if (!ch.pressed) break
-                                val dy = ch.position.y - ch.previousPosition.y
-                                if (mode == 0) {
-                                    total += dy
-                                    if (total > 12f) {
-                                        mode = if (gridState.canScrollBackward) -1 else 1
-                                    } else if (total < -12f) {
-                                        mode = -1
-                                    }
-                                } else if (mode == 1) {
-                                    total += dy
-                                    if (total > 56f) {
-                                        haptics.tap()
-                                        setFullscreen(false)
-                                        break
-                                    }
-                                    ch.consume()
-                                } else {
-                                    break
-                                }
-                            }
-                        }
-                    },
-                contentPadding = PaddingValues(horizontal = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                items(shown, key = { it.uri.toString() }) { item ->
-                    val pos = selIndex[item.uri] ?: -1
-                    MediaCell(
-                        item,
-                        ctx,
-                        selected = pos >= 0,
-                        selectIndex = if (pos >= 0) pos + 1 else 0,
-                        onToggle = {
-                            haptics.tap()
-                            // Owner round 39 (item 6): every tap ticks in
-                            // the grid — numbered badge, no preview, no
-                            // editor detour. The pencil below edits.
-                            if (pos >= 0) sel.removeAll { it.uri == item.uri } else sel.add(item.copy(hd = hdOn))
-                        },
-                    )
-                }
-            }
-        }
-        // Owner round 39 (item 6): the selection bar — pencil (the last
-        // ticked photo opens in the editor), one caption for the batch (it
-        // rides the first photo, WhatsApp-exact), the ① batch toggle and
-        // Send with its count badge (hold = send later, as before).
-        // r63-4: floating transparent selection bar for both half and full panel with bigger controls
-        if (sel.isNotEmpty()) {
-            Row(
+            // r63-4: grid fills the box and media scrolls underneath the floating transparent selection bar
+            Box(
                 Modifier
                     .fillMaxWidth()
-                    // Owner round 43 (item 3): the bar drags like the header
-                    // — down past 70 folds to the collapsed half panel.
-                    .barDragDetect()
-                    .background(Color.Transparent)
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .weight(1f),
             ) {
-                // Edit (pencil) button — r63-4: bigger 38.dp seat, 20.dp glyph
-                Box(
-                    Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(ChipIdle)
-                        .clickable {
-                            haptics.tap()
-                            sel.lastOrNull()?.let(onEdit)
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Filled.Edit, "Edit", tint = Ink, modifier = Modifier.size(20.dp))
-                }
-                Spacer(Modifier.size(8.dp))
-                // Caption bar — r63-4: bigger height 40.dp, text 15.sp, rounded 20.dp
-                Row(
-                    Modifier
-                        .barDragDetect()
-                        .weight(1f)
-                        .height(40.dp)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(ChipIdle)
-                        .padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    val cap = sel[0].caption
-                    BasicTextField(
-                        value = cap,
-                        onValueChange = { t -> sel[0] = sel[0].copy(caption = t.take(1000)) },
-                        singleLine = true,
-                        textStyle = TextStyle(color = Ink, fontSize = 15.sp),
-                        cursorBrush = SolidColor(Ink),
-                        modifier = Modifier.weight(1f),
-                        decorationBox = { inner ->
-                            Box {
-                                if (cap.isEmpty()) Text("Add a caption...", color = Muted, fontSize = 15.sp)
-                                inner()
-                            }
-                        },
-                    )
-                }
-                Spacer(Modifier.size(8.dp))
-                val allOnce = sel.all { it.once }
-                // View-once toggle — r63-4: bigger 38.dp seat, icon 36.dp
-                Box(
-                    Modifier
-                        .size(38.dp)
-                        .clickable {
-                            haptics.toggle(!allOnce)
-                            val v = !allOnce
-                            sel.replaceAll { it.copy(once = v) }
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (allOnce) Box(Modifier.size(38.dp).clip(CircleShape).background(ActionBlue))
-                    CenteredOnceIcon(36.dp, tint = if (allOnce) Color.White else Muted)
-                }
-                Spacer(Modifier.size(8.dp))
-                // Send button with count badge — r63-4: bigger circle 44.dp, icon 22.dp, badge 18.dp
-                Box(
-                    Modifier.size(46.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Box(
-                        Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(ActionBlue)
-                            .combinedClickable(
-                                onLongClick = {
+                if (!fullscreen) {
+                    // Owner round 40 (item 1): the collapsed recents GRID under the
+                    // tiles (owner verdict on the round-39 strip: only a few photos
+                    // + a sideways swipe). Tiles + a vertical grid, scrolled down —
+                    // a tap ticks the photo AND opens the fullscreen picker on it.
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(4),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            start = 2.dp,
+                            end = 2.dp,
+                            top = 2.dp,
+                            bottom = if (sel.isNotEmpty()) (68.dp + imeGlideDp) else 4.dp,
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        items(shown, key = { it.uri.toString() }) { item ->
+                            val pos = selIndex[item.uri] ?: -1
+                            MediaCell(
+                                item,
+                                ctx,
+                                selected = pos >= 0,
+                                selectIndex = if (pos >= 0) pos + 1 else 0,
+                                onToggle = {
                                     haptics.tap()
-                                    onScheduleBatch()
+                                    if (pos >= 0) sel.removeAll { it.uri == item.uri } else sel.add(item.copy(hd = hdOn))
                                 },
-                            ) {
-                                haptics.tap()
-                                onSendBatch()
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Send,
-                            contentDescription = "Send",
-                            tint = ActionBlueInk,
-                            modifier = Modifier.size(22.dp),
-                        )
+                            )
+                        }
                     }
-                    Box(
-                        Modifier
-                            .align(Alignment.TopEnd)
-                            .offset(x = 2.dp, y = (-2).dp)
-                            .size(18.dp)
-                            .clip(CircleShape)
-                            .background(ActionBlue)
-                            .border(1.dp, Color.White, CircleShape),
-                        contentAlignment = Alignment.Center,
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(4),
+                        state = gridState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            // Owner round 45 (item 2): device-proof fold — watch the
+                            // touch stream in the INITIAL pass, BEFORE the grid's
+                            // scrollable claims it. A downward pull at the top edge
+                            // folds the panel even on a ROM whose nested-scroll pipe
+                            // sleeps through this overscroll entirely.
+                            .pointerInput("foldcheck") {
+                                awaitEachGesture {
+                                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                    var total = 0f
+                                    var mode = 0 // 0 watching, 1 folding, -1 grid's own drag
+                                    while (true) {
+                                        val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                        val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                        if (!ch.pressed) break
+                                        val dy = ch.position.y - ch.previousPosition.y
+                                        if (mode == 0) {
+                                            total += dy
+                                            if (total > 12f) {
+                                                mode = if (gridState.canScrollBackward) -1 else 1
+                                            } else if (total < -12f) {
+                                                mode = -1
+                                            }
+                                        } else if (mode == 1) {
+                                            total += dy
+                                            if (total > 56f) {
+                                                haptics.tap()
+                                                setFullscreen(false)
+                                                break
+                                            }
+                                            ch.consume()
+                                        } else {
+                                            break
+                                        }
+                                    }
+                                }
+                            },
+                        contentPadding = PaddingValues(
+                            start = 2.dp,
+                            end = 2.dp,
+                            top = 2.dp,
+                            bottom = if (sel.isNotEmpty()) (68.dp + imeGlideDp) else 4.dp,
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
-                        Text(
-                            "${sel.size}",
-                            color = ActionBlueInk,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center,
-                            style =
-                                TextStyle(
-                                    platformStyle = PlatformTextStyle(includeFontPadding = false),
-                                    lineHeightStyle =
-                                        LineHeightStyle(
-                                            LineHeightStyle.Alignment.Center,
-                                            LineHeightStyle.Trim.Both,
+                        items(shown, key = { it.uri.toString() }) { item ->
+                            val pos = selIndex[item.uri] ?: -1
+                            MediaCell(
+                                item,
+                                ctx,
+                                selected = pos >= 0,
+                                selectIndex = if (pos >= 0) pos + 1 else 0,
+                                onToggle = {
+                                    haptics.tap()
+                                    // Owner round 39 (item 6): every tap ticks in
+                                    // the grid — numbered badge, no preview, no
+                                    // editor detour. The pencil below edits.
+                                    if (pos >= 0) sel.removeAll { it.uri == item.uri } else sel.add(item.copy(hd = hdOn))
+                                },
+                            )
+                        }
+                    }
+                }
+
+                // Owner round 39 (item 6): the selection bar — pencil (the last
+                // ticked photo opens in the editor), one caption for the batch (it
+                // rides the first photo, WhatsApp-exact), the ① batch toggle and
+                // Send with its count badge (hold = send later, as before).
+                // r63-4: floating transparent selection bar for both half and full panel with bigger controls
+                if (sel.isNotEmpty()) {
+                    Row(
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            // Owner round 43 (item 3): the bar drags like the header
+                            // — down past 70 folds to the collapsed half panel.
+                            .barDragDetect()
+                            .padding(bottom = imeGlideDp)
+                            .background(Color.Transparent)
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        // Edit (pencil) button — r63-4: bigger 40.dp seat, 20.dp glyph
+                        Box(
+                            Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .border(1.dp, Color(0x44FFFFFF), CircleShape)
+                                .background(Color(0x99000000))
+                                .clickable {
+                                    haptics.tap()
+                                    sel.lastOrNull()?.let(onEdit)
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Filled.Edit, "Edit", tint = Color.White, modifier = Modifier.size(20.dp))
+                        }
+                        Spacer(Modifier.size(8.dp))
+                        // Caption bar — r63-4: bigger height 40.dp, text 15.sp, rounded 20.dp
+                        Row(
+                            Modifier
+                                .barDragDetect()
+                                .weight(1f)
+                                .height(40.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .border(1.dp, Color(0x44FFFFFF), RoundedCornerShape(20.dp))
+                                .background(Color(0x99000000))
+                                .padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            val cap = sel[0].caption
+                            BasicTextField(
+                                value = cap,
+                                onValueChange = { t -> sel[0] = sel[0].copy(caption = t.take(1000)) },
+                                singleLine = true,
+                                textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
+                                cursorBrush = SolidColor(Color.White),
+                                modifier = Modifier.weight(1f),
+                                decorationBox = { inner ->
+                                    Box {
+                                        if (cap.isEmpty()) Text("Add a caption...", color = Color(0xB3FFFFFF), fontSize = 15.sp)
+                                        inner()
+                                    }
+                                },
+                            )
+                        }
+                        Spacer(Modifier.size(8.dp))
+                        val allOnce = sel.all { it.once }
+                        // View-once toggle — r63-4: enlarged 44.dp seat, icon 44.dp
+                        Box(
+                            Modifier
+                                .size(44.dp)
+                                .clickable {
+                                    haptics.toggle(!allOnce)
+                                    val v = !allOnce
+                                    sel.replaceAll { it.copy(once = v) }
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (allOnce) Box(Modifier.size(44.dp).clip(CircleShape).background(ActionBlue))
+                            CenteredOnceIcon(44.dp, tint = Color.White)
+                        }
+                        Spacer(Modifier.size(8.dp))
+                        // Send button with count badge — r63-4: bigger circle 44.dp, icon 22.dp, badge 18.dp
+                        Box(
+                            Modifier.size(46.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Box(
+                                Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(ActionBlue)
+                                    .combinedClickable(
+                                        onLongClick = {
+                                            haptics.tap()
+                                            onScheduleBatch()
+                                        },
+                                    ) {
+                                        haptics.tap()
+                                        onSendBatch()
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = "Send",
+                                    tint = ActionBlueInk,
+                                    modifier = Modifier.size(22.dp),
+                                )
+                            }
+                            Box(
+                                Modifier
+                                    .align(Alignment.TopEnd)
+                                    .offset(x = 2.dp, y = (-2).dp)
+                                    .size(18.dp)
+                                    .clip(CircleShape)
+                                    .background(ActionBlue)
+                                    .border(1.dp, Color.White, CircleShape),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    "${sel.size}",
+                                    color = ActionBlueInk,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center,
+                                    style =
+                                        TextStyle(
+                                            platformStyle = PlatformTextStyle(includeFontPadding = false),
+                                            lineHeightStyle =
+                                                LineHeightStyle(
+                                                    LineHeightStyle.Alignment.Center,
+                                                    LineHeightStyle.Trim.Both,
+                                                ),
                                         ),
-                                ),
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                        }
                     }
                 }
             }
