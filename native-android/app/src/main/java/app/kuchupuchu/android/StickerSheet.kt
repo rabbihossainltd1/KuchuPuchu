@@ -397,12 +397,9 @@ private fun PanelEmoji(emoji: String, pressed: Boolean) {
             showAnim = true
         }
     }
-    val spec = remember(codepoint, isBundled, showAnim) {
-        if (showAnim) {
-            if (isBundled) LottieCompositionSpec.Asset("noto-emoji/$codepoint.json")
-            else if (!codepoint.isNullOrEmpty()) LottieCompositionSpec.Url("https://fonts.gstatic.com/s/e/notoemoji/latest/$codepoint/lottie.json")
-            else null
-        } else null
+    val spec = remember(codepoint, isBundled) {
+        if (isBundled) LottieCompositionSpec.Asset("noto-emoji/$codepoint.json")
+        else LottieCompositionSpec.Url("https://fonts.gstatic.com/s/e/notoemoji/latest/$codepoint/lottie.json")
     }
     val composition by rememberLottieComposition(spec)
     Box(
