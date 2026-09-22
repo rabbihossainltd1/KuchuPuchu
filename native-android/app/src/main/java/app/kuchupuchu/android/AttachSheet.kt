@@ -89,6 +89,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -196,14 +197,14 @@ fun AttachPanel(
     // release -> settle transition gets an actual animation.
     var isDragging by remember { mutableStateOf(false) }
 
+    val density = androidx.compose.ui.platform.LocalDensity.current
     val imeGlidePx = rememberImeGlidePx()
-    val imeGlideDp = with(LocalDensity.current) { imeGlidePx.toDp() }
+    val imeGlideDp = with(density) { imeGlidePx.toDp() }
     val screenH = LocalConfiguration.current.screenHeightDp.dp
     val collapsedH = screenH * 0.40f
     val expandedH = screenH - 132.dp
     val targetH = if (fullscreen || imeGlidePx > 10) expandedH else collapsedH
     val settledH by animateDpAsState(targetH, tween(220), label = "attachPanelH")
-    val density = androidx.compose.ui.platform.LocalDensity.current
     val panelH =
         if (isDragging) {
             with(density) {
