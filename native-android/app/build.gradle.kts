@@ -68,8 +68,8 @@ android {
         applicationId = "app.kuchupuchu.android"
         minSdk = 24
         targetSdk = 35
-        versionCode = 204
-        versionName = "3.9.127"
+        versionCode = 205
+        versionName = "3.9.128"
     }
     signingConfigs {
         getByName("debug") {
@@ -195,6 +195,7 @@ dependencies {
     implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("io.coil-kt:coil-gif:2.7.0")
     implementation("com.airbnb.android:lottie-compose:6.6.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     // §50's "unit tests" rung: plain JVM tests over the queue's retry clock and the

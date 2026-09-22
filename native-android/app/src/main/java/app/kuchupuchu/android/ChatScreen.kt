@@ -5828,11 +5828,11 @@ private fun MessageRow(
             // r50 / r58 (owner: "history scrolling er somoy o animation keno hocche eita"):
             // the slide animation is for LIVE arrivals only - history, loadOlder, or reopen
             // never slides; it gets the soft fade instead.
-            // N3: own recent messages also animate on send (the pendingEcho marks LiveArrivals,
-            // but the final server row arrives via REST fetch, not WS, so LiveArrivals would be
-            // false without this; the 8s window still prevents history from animating).
+            // v205: owner wants emoji animate AFTER sent, not during sending (pendingEcho).
+            // So pendingEcho excluded - only final server row animates (mine true, within 8s).
+            // N3 history still prevented by 8s window.
             val liveBorn =
-                (pendingEcho || mine || LiveArrivals.isLive(m.optString("clientId")) || LiveArrivals.isLive(m.optString("id"))) &&
+                (!pendingEcho && (mine || LiveArrivals.isLive(m.optString("clientId")) || LiveArrivals.isLive(m.optString("id")))) &&
                 (runCatching { java.time.Instant.parse(m.optString("createdAt")).toEpochMilli() }
                     .getOrDefault(0L) > System.currentTimeMillis() - 8_000L)
             liveBorn && FxArrivals.mark(m.optString("id")) != null && m.optString("senderId") != "kp_ai_bot"

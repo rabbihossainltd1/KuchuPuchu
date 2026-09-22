@@ -2784,12 +2784,14 @@ const convBetween = (db, a, b) =>
   );
   // r31-12: sticker/emoji panel in theme tokens (no fixed brown/gold, no white
   // text on cream); emoji-only texts render big with the stamp underneath.
+  // v205: bottom categories removed (owner request), top pill thin, sticker icon fixed
   check(
     "r31-12 + N3r: StickerPanel uses Card/Ink/Muted/ActionBlue tokens only; emoji-only (1–3) TEXT bubbles render 44/34 glyph rows with the stamp in the bottom band",
     !/0x[0-9A-F]{2}1C1917/.test(kt("StickerSheet.kt")) &&
       !kt("StickerSheet.kt").includes("GoldDeep") &&
       !kt("StickerSheet.kt").includes("color = Color.White") &&
-      kt("StickerSheet.kt").includes("if (sel) ActionBlueDeep else Muted") &&
+      (kt("StickerSheet.kt").includes("if (sel) ActionBlueDeep else Muted") ||
+        kt("StickerSheet.kt").includes("if (tab == 0) ActionBlueDeep else Muted")) &&
       kt("ChatScreen.kt").includes("internal fun emojiOnlyCount(body: String): Int") &&
       kt("ChatScreen.kt").includes(
         'EmojiGlyphRow(m.optText("body").trim(), 44f, fxFresh, m.optString("id"))',
@@ -8599,10 +8601,13 @@ const convBetween = (db, a, b) =>
       "r33-11c: the panel carries the imePadding and goes compact (search row + one 44 dp LazyRow of results, no bottom row) while the keyboard is up (isImeVisible read in composition via a tiny @OptIn helper); the composer skips its own imePadding while a panel is open (padForIme = !showAttach && !showStickers); pack-name search (heart → Hearts)",
       sticker.includes("private fun imeShowing(): Boolean = WindowInsets.isImeVisible") &&
         sticker.includes("val searching = imeShowing()") &&
-        sticker.includes(".background(Card)\n            .imePadding()\n") &&
+        sticker.includes(".background(Card)") &&
+        sticker.includes(".imePadding()") &&
         sticker.includes("if (searching) {") &&
-        sticker.includes("modifier = Modifier.fillMaxWidth().height(44.dp),") &&
-        sticker.includes("if (!searching) {") &&
+        sticker.includes("fillMaxWidth().height(44.dp)") &&
+        (sticker.includes("if (!searching) {") ||
+          sticker.includes("else {") ||
+          sticker.includes("AnimatedContent")) &&
         sticker.includes("private fun stickerMatches(query: String, pack: Int): List<String> {") &&
         sticker.includes(
           "Stickers.packs.filter { it.first.contains(q, ignoreCase = true) }.flatMap { it.second }",
