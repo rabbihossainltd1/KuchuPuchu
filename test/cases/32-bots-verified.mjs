@@ -1718,13 +1718,13 @@ const convBetween = (db, a, b) =>
       settings.includes("fun EditFieldScaffold("),
   );
   check(
-    "15: AI replies fail over per-model (12s HF cap) + both APKs per CI run (r22)",
+    "15: AI replies fail over per-model (12s HF cap) + release APK only per CI run (2026-09-22 storage limit)",
     src.includes("perCallMs = 12_000") &&
       readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8").includes(
-        "assembleDebug",
-      ) &&
-      readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8").includes(
         "assembleRelease",
+      ) &&
+      !readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8").includes(
+        "assembleDebug",
       ),
   );
   const engine23 = readFileSync(

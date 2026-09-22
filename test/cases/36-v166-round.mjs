@@ -90,8 +90,8 @@ const pkg = readFileSync(
 
 /* the round's own bookkeeping */
 check(
-  "v200: versionCode 200 / versionName 3.9.123",
-  /versionCode\s*=\s*200/.test(pkg) && /versionName\s*=\s*"3\.9\.123"/.test(pkg),
+  "v201: versionCode 201 / versionName 3.9.124",
+  /versionCode\s*=\s*201/.test(pkg) && /versionName\s*=\s*"3\.9\.124"/.test(pkg),
 );
 
 /* 1 — fb#2: the clip bake can no longer look frozen or vanish */

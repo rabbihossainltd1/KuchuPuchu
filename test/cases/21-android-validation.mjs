@@ -210,11 +210,12 @@ const has = (finds, name) => finds.some((f) => f.check === name);
   const ci = (await import("node:fs")).readFileSync(".github/workflows/ci.yml", "utf8");
   check("CI actually runs the android validator", ci.includes("npm run validate:android"));
   check("CI actually runs the pinned style gate", ci.includes("./scripts/ktlint-check.sh"));
-  // Owner round 15 follow-up: the owner's single CI artifact is the DEBUG
-  // apk; the release/signing machinery is intentionally out of CI now.
+  // Owner 2026-09-22: from now only RELEASE apk (storage limit) — old 79 releases + 628 artifacts deleted.
   check(
-    "CI builds debug + release variants (owner r22: both APKs)",
-    ci.includes("assembleDebug assembleRelease") && ci.includes("apk/release/app-release.apk"),
+    "CI builds release variant only (owner 2026-09-22: release only to save storage)",
+    ci.includes("assembleRelease") &&
+      !ci.includes("assembleDebug") &&
+      ci.includes("apk/release/app-release.apk"),
   );
   const sh = (await import("node:fs")).readFileSync("scripts/ktlint-check.sh", "utf8");
   check(

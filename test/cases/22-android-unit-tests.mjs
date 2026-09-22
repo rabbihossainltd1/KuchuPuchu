@@ -33,8 +33,9 @@ const ciFlat = ci.replace(/\s+/g, " ");
     ci.indexOf("Unit tests + Android lint") < ci.indexOf("Build APK"),
   );
   check(
-    "round 15/r22: CI builds debug AND release APKs (owner pick: both)",
-    ci.includes("assembleDebug assembleRelease") &&
+    "round 15/r22 + 2026-09-22: CI builds release APK only (owner: storage limit, release only)",
+    ci.includes("assembleRelease") &&
+      !ci.includes("assembleDebug") &&
       ci.includes("kuchupuchu-apk") &&
       ci.includes("app-release.apk"),
   );
