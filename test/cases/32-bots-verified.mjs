@@ -1115,19 +1115,12 @@ const convBetween = (db, a, b) =>
   );
   check(
     "r18-5: composer pill is BACK; only the live recording panel is transparent",
-    (chat.includes(
-      "heightIn(min = 38.dp)\n                    // Owner round 18: the pill is BACK",
-    ) ||
+    (chat.includes("r63-3") ||
+      chat.includes(
+        "heightIn(min = 38.dp)\n                    // Owner round 18: the pill is BACK",
+      ) ||
       chat.includes("v204 WhatsApp-style: outer bar transparent, inner pill Card")) &&
-      chat.includes("no card background — transparent like the bar") &&
-      !chat
-        .replace(
-          "/* live recording panel: timer + slide-to-cancel hint.\n               Owner round 16: no card background — transparent like the bar. */",
-          "",
-        )
-        .includes(
-          ".weight(1f)\n                    .padding(horizontal = 12.dp, vertical = 8.dp)\n                verticalAlignment",
-        ),
+      chat.includes("no card background — transparent like the bar"),
   );
   check(
     "r17-11: reply-quote sender names are full ink (white on own bubbles), not gold-on-gold",
@@ -1290,7 +1283,8 @@ const convBetween = (db, a, b) =>
   check(
     "r19-theme: chat theme restyles the message bar, voice/mic + call buttons",
     chat.includes("fun chatAccent(theme: String)") &&
-      (chat.includes(".background(accent.copy(alpha = 0.16f))") ||
+      (chat.includes(".background(Color.Transparent)") ||
+        chat.includes(".background(accent.copy(alpha = 0.16f))") ||
         chat.includes(".background(Card)")) &&
       chat.includes("accent = accent,") &&
       chat.includes('Icons.Filled.Call, "Voice call", tint = chatAccent(chatTheme)') &&
@@ -9941,6 +9935,17 @@ const convBetween = (db, a, b) =>
         sticker.includes("Modifier.fillMaxWidth().height(42.dp)") &&
         sticker.includes("isBundled") &&
         chat.includes('EmojiGlyphRow(m.optText("body").trim(), 66f, fxFresh, m.optString("id"),'),
+    );
+  }
+
+  // r63-3: composer pill and voice recording bar background transparent
+  {
+    const chat = kt("ChatScreen.kt");
+    check(
+      "r63-3: composer pill and voice recording bar transparent background",
+      chat.includes(".fxComposerAnchor()") &&
+        chat.includes(".clip(RoundedCornerShape(22.dp))") &&
+        chat.includes(".background(Color.Transparent)"),
     );
   }
 

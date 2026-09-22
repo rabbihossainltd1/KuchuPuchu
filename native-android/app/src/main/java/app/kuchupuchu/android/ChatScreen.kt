@@ -4524,10 +4524,10 @@ private fun Composer(
                     .fxComposerAnchor()
                     .weight(1f)
                     .heightIn(min = 38.dp)
-                    // v204 WhatsApp-style: outer bar transparent, inner pill Card (wallpaper visible behind)
-                    // Owner round 18: pill BACK, recording strip transparent; v204: Card for WhatsApp look
+                    // r63-3 (owner: "composer pill ba massage bar er background ta remove korte parini... background transparent hok"):
+                    // composer pill and voice recording bar transparent so chat wallpaper shines through
                     .clip(RoundedCornerShape(22.dp))
-                    .background(Card)
+                    .background(Color.Transparent)
                     .padding(horizontal = 2.dp, vertical = 1.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 34.dp)) {
