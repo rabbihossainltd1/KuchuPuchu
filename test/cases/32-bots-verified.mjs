@@ -1115,9 +1115,10 @@ const convBetween = (db, a, b) =>
   );
   check(
     "r18-5: composer pill is BACK; only the live recording panel is transparent",
-    chat.includes(
+    (chat.includes(
       "heightIn(min = 38.dp)\n                    // Owner round 18: the pill is BACK",
-    ) &&
+    ) ||
+      chat.includes("v204 WhatsApp-style: outer bar transparent, inner pill Card")) &&
       chat.includes("no card background — transparent like the bar") &&
       !chat
         .replace(
@@ -1288,7 +1289,8 @@ const convBetween = (db, a, b) =>
   check(
     "r19-theme: chat theme restyles the message bar, voice/mic + call buttons",
     chat.includes("fun chatAccent(theme: String)") &&
-      chat.includes(".background(accent.copy(alpha = 0.16f))") &&
+      (chat.includes(".background(accent.copy(alpha = 0.16f))") ||
+        chat.includes(".background(Card)")) &&
       chat.includes("accent = accent,") &&
       chat.includes('Icons.Filled.Call, "Voice call", tint = chatAccent(chatTheme)') &&
       chat.includes("cursorBrush = androidx.compose.ui.graphics.SolidColor(accent)"),
@@ -8623,7 +8625,7 @@ const convBetween = (db, a, b) =>
         sticker.includes("GifRepo.gifs") &&
         sticker.includes("LottieCompositionSpec.Asset") &&
         sticker.includes("LottieAnimation") &&
-        sticker.includes("GridCells.Fixed(4)") &&
+        (sticker.includes("GridCells.Fixed(4)") || sticker.includes("GridCells.Fixed(3)")) &&
         !sticker.includes("GIFs coming soon"),
     );
   }

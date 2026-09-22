@@ -2,6 +2,7 @@ package app.kuchupuchu.android
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -28,15 +29,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Backspace
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Mood
 import androidx.compose.material.icons.filled.Pets
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SportsSoccer
-import androidx.compose.material.icons.filled.Flight
-import androidx.compose.material.icons.filled.Lightbulb
-import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -52,6 +51,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -63,34 +63,30 @@ import com.airbnb.lottie.compose.LottieConstants
 import com.airbnb.lottie.compose.rememberLottieComposition
 
 /**
- * WhatsApp-style emoji panel — v203
- * - Top bar: search icon | [emoji | GIF | sticker] pill | backspace icon
- * - Content: Recents header + Smileys & People header, 8-column grid
- * - Bottom bar: category icons (clock, smiley, heart, paw, food, ball, etc) instead of text chips
- * - GIF tab middle, sticker tab right, positions match WhatsApp reference
- * - Composer outer transparent (handled in ChatScreen.kt)
+ * v204 compact WhatsApp-style emoji panel
+ * - Outer 220dp height (not 300dp), minimal padding, no big titles
+ * - Top bar: search | [emoji|GIF|sticker] pill middle | backspace
+ * - Emoji click inserts into message bar (onInsert), panel stays open, no auto-close
+ * - Swipe left/right switches tabs
+ * - Bottom categories: 6 icons compact 32dp, maps correctly to packs, click scrolls to category
+ * - Sticker tab: no "Stickers" title, no instructions, just 4-col grid compact
  */
 @Composable
 fun StickerPanel(
     onDismiss: () -> Unit,
     onSend: (String) -> Unit,
+    onInsert: ((String) -> Unit)? = null,
 ) {
     val haptics = rememberHaptics()
     val ctx = LocalContext.current
     var tab by remember { mutableStateOf(0) } // 0 emoji, 1 GIF, 2 sticker
     var query by remember { mutableStateOf("") }
-    var isSearchActive by remember { mutableStateOf(false) }
-    var selectedCategory by remember { mutableStateOf(0) } // 0 recents, 1 smileys, 2 hearts, 3 animals, 4 food, 5 fun
+    var selectedCategory by remember { mutableStateOf(0) }
     var recents by remember { mutableStateOf(listOf<String>()) }
     val searchFocus = remember { FocusRequester() }
 
     LaunchedEffect(Unit) {
         recents = loadStickerRecents()
-    }
-    LaunchedEffect(isSearchActive) {
-        if (isSearchActive) {
-            try { searchFocus.requestFocus() } catch (_: Exception) {}
-        }
     }
 
     val searching = imeShowing()
@@ -100,179 +96,139 @@ fun StickerPanel(
             .fillMaxWidth()
             .background(Card)
             .imePadding()
-            .padding(top = 6.dp, bottom = 2.dp),
+            .padding(top = 4.dp, bottom = 2.dp)
+            .pointerInput(tab) {
+                var drag = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { drag = 0f },
+                    onHorizontalDrag = { _, amount -> drag += amount },
+                    onDragEnd = {
+                        if (drag < -80) {
+                            // swipe left -> next tab
+                            tab = (tab + 1) % 3
+                            haptics.tap()
+                        } else if (drag > 80) {
+                            tab = if (tab - 1 < 0) 2 else tab - 1
+                            haptics.tap()
+                        }
+                    },
+                )
+            },
     ) {
-        // ---- TOP BAR: WhatsApp style ----
+        // ---- COMPACT TOP BAR ----
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 6.dp),
+                .padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (isSearchActive) {
-                // Search mode: back + text field + clear
+            Icon(
+                Icons.Filled.Search,
+                contentDescription = "Search",
+                tint = Muted,
+                modifier = Modifier
+                    .size(20.dp)
+                    .clickable {
+                        haptics.tap()
+                        try { searchFocus.requestFocus() } catch (_: Exception) {}
+                    },
+            )
+            Spacer(Modifier.width(8.dp))
+            Row(
+                Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(ChipIdle)
+                    .padding(2.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Box(
                     Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(ChipIdle)
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.Search, "Search", tint = Muted, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        BasicTextField(
-                            value = query,
-                            onValueChange = { query = it },
-                            singleLine = true,
-                            textStyle = TextStyle(color = Ink, fontSize = 14.sp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .focusRequester(searchFocus),
-                            decorationBox = { inner ->
-                                Box {
-                                    if (query.isEmpty()) Text("Search emoji", color = Muted.copy(alpha = 0.7f), fontSize = 14.sp)
-                                    inner()
-                                }
-                            },
-                        )
-                        if (query.isNotEmpty()) {
-                            Icon(
-                                Icons.Filled.Backspace,
-                                "Clear",
-                                tint = Muted,
-                                modifier = Modifier
-                                    .size(18.dp)
-                                    .clickable { query = "" },
-                            )
-                        }
-                    }
-                }
-                Spacer(Modifier.width(8.dp))
-                Box(
-                    Modifier
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .clickable {
-                            isSearchActive = false
-                            query = ""
-                        },
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(if (tab == 0) ChipSelected else Color.Transparent)
+                        .clickable { haptics.tap(); tab = 0 }
+                        .padding(vertical = 5.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("✕", color = Muted, fontSize = 16.sp)
+                    Icon(Icons.Filled.Mood, "Emoji", tint = if (tab == 0) ActionBlueDeep else Muted, modifier = Modifier.size(18.dp))
                 }
-            } else {
-                // Normal mode: search icon | centered pill tabs | delete icon
-                Icon(
-                    Icons.Filled.Search,
-                    contentDescription = "Search",
-                    tint = Muted,
-                    modifier = Modifier
-                        .size(22.dp)
-                        .clickable {
-                            haptics.tap()
-                            isSearchActive = true
-                        },
-                )
-                Spacer(Modifier.width(12.dp))
-                // Center pill: emoji | GIF | sticker - matches WhatsApp reference
-                Row(
+                Box(
                     Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(ChipIdle)
-                        .padding(2.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically,
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(if (tab == 1) ChipSelected else Color.Transparent)
+                        .clickable { haptics.tap(); tab = 1 }
+                        .padding(vertical = 5.dp),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    // Emoji tab
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(if (tab == 0) ChipSelected else Color.Transparent)
-                            .clickable {
-                                haptics.tap()
-                                tab = 0
-                            }
-                            .padding(vertical = 6.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            Icons.Filled.Mood,
-                            "Emoji",
-                            tint = if (tab == 0) ActionBlueDeep else Muted,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                    // GIF tab - middle position like WhatsApp
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(if (tab == 1) ChipSelected else Color.Transparent)
-                            .clickable {
-                                haptics.tap()
-                                tab = 1
-                            }
-                            .padding(vertical = 6.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            "GIF",
-                            color = if (tab == 1) ActionBlueDeep else Muted,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                    // Sticker tab - right position like WhatsApp
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(if (tab == 2) ChipSelected else Color.Transparent)
-                            .clickable {
-                                haptics.tap()
-                                tab = 2
-                            }
-                            .padding(vertical = 6.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        // Sticker icon: square with folded corner mimic
-                        Text(
-                            "▭",
-                            color = if (tab == 2) ActionBlueDeep else Muted,
-                            fontSize = 18.sp,
-                        )
-                    }
+                    Text("GIF", color = if (tab == 1) ActionBlueDeep else Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
-                Spacer(Modifier.width(12.dp))
-                Icon(
-                    Icons.Filled.Backspace,
-                    contentDescription = "Delete",
-                    tint = Muted,
-                    modifier = Modifier
-                        .size(22.dp)
-                        .clickable {
-                            haptics.tap()
-                            if (query.isNotEmpty()) {
-                                query = query.dropLast(1)
-                            } else if (isSearchActive) {
-                                isSearchActive = false
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(if (tab == 2) ChipSelected else Color.Transparent)
+                        .clickable { haptics.tap(); tab = 2 }
+                        .padding(vertical = 5.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("▭", color = if (tab == 2) ActionBlueDeep else Muted, fontSize = 14.sp)
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            Icon(
+                Icons.Filled.Backspace,
+                contentDescription = "Delete",
+                tint = Muted,
+                modifier = Modifier
+                    .size(20.dp)
+                    .clickable {
+                        haptics.tap()
+                        if (query.isNotEmpty()) query = query.dropLast(1)
+                    },
+            )
+        }
+
+        // compact search field when query active (optional, no extra height)
+        if (query.isNotBlank()) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(ChipIdle)
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    BasicTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        singleLine = true,
+                        textStyle = TextStyle(color = Ink, fontSize = 13.sp),
+                        modifier = Modifier.weight(1f).focusRequester(searchFocus),
+                        decorationBox = { inner ->
+                            Box {
+                                if (query.isEmpty()) Text("Search emoji", color = Muted.copy(alpha = 0.7f), fontSize = 13.sp)
+                                inner()
                             }
                         },
-                )
+                    )
+                    if (query.isNotEmpty()) {
+                        Text("✕", color = Muted, fontSize = 12.sp, modifier = Modifier.clickable { query = "" }.padding(start = 6.dp))
+                    }
+                }
             }
         }
 
         val matches = stickerMatches(query, selectedCategory.coerceAtLeast(1) - 1)
 
         if (searching) {
-            // Compact strip when keyboard visible — search row + one 44 dp LazyRow, no bottom row (r33-11c)
             val strip = if (query.isBlank()) (recents + matches).distinct() else matches
             LazyRow(
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
                 modifier = Modifier.fillMaxWidth().height(44.dp),
             ) {
                 items(strip.size) { i ->
@@ -281,59 +237,50 @@ fun StickerPanel(
                     val pressed by interaction.collectIsPressedAsState()
                     Box(
                         Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(12.dp))
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
                             .background(if (pressed) ChipIdle else Color.Transparent)
                             .clickable(interactionSource = interaction, indication = null) {
-                                haptics.confirm()
+                                haptics.tap()
                                 saveStickerRecent(sticker)
-                                onSend(sticker)
+                                if (onInsert != null) onInsert(sticker) else onSend(sticker)
                             },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(sticker, fontSize = 22.sp, modifier = Modifier.scale(if (pressed) 1.25f else 1f))
+                        Text(sticker, fontSize = 20.sp, modifier = Modifier.scale(if (pressed) 1.2f else 1f))
                     }
                 }
             }
         } else if (tab == 0) {
-            // ---- EMOJI TAB: WhatsApp style 8-column grid with headers ----
-            if (isSearchActive && query.isNotBlank()) {
-                // Search results 8-col
+            if (query.isNotBlank()) {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(8),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                    modifier = Modifier.fillMaxWidth().height(280.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                    modifier = Modifier.fillMaxWidth().height(220.dp),
+                    horizontalArrangement = Arrangement.spacedBy(1.dp),
+                    verticalArrangement = Arrangement.spacedBy(1.dp),
                 ) {
                     items(matches.distinct()) { sticker ->
                         val interaction = remember { MutableInteractionSource() }
                         val pressed by interaction.collectIsPressedAsState()
                         Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .height(42.dp)
-                                .clip(RoundedCornerShape(8.dp))
+                            Modifier.fillMaxWidth().height(36.dp)
+                                .clip(RoundedCornerShape(6.dp))
                                 .background(if (pressed) ChipIdle else Color.Transparent)
                                 .clickable(interactionSource = interaction, indication = null) {
-                                    haptics.confirm()
+                                    haptics.tap()
                                     saveStickerRecent(sticker)
-                                    onSend(sticker)
+                                    if (onInsert != null) onInsert(sticker) else onSend(sticker)
                                 },
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text(sticker, fontSize = 24.sp, modifier = Modifier.scale(if (pressed) 1.25f else 1f))
+                            Text(sticker, fontSize = 20.sp, modifier = Modifier.scale(if (pressed) 1.2f else 1f))
                         }
                     }
                 }
             } else if (selectedCategory == 0) {
-                // Recents + all categories like WhatsApp when clock selected
                 val allSections = mutableListOf<Pair<String, List<String>>>()
                 if (recents.isNotEmpty()) allSections.add("Recents" to recents.take(16))
-                // Map packs to WhatsApp titles
-                val titles = listOf("Smileys & People", "Animals & Nature", "Food & Drink", "Activity", "Travel & Places")
-                // Our packs: 0 Smileys, 1 Hearts, 2 Animals, 3 Food, 4 Fun
-                // For WhatsApp look, we show Smileys as Smileys & People, then others
                 allSections.add("Smileys & People" to Stickers.packs[0].second)
                 allSections.add("Animals & Nature" to Stickers.packs[2].second)
                 allSections.add("Food & Drink" to Stickers.packs[3].second)
@@ -342,94 +289,76 @@ fun StickerPanel(
 
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(8),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                    modifier = Modifier.fillMaxWidth().height(300.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                    modifier = Modifier.fillMaxWidth().height(220.dp),
+                    horizontalArrangement = Arrangement.spacedBy(1.dp),
+                    verticalArrangement = Arrangement.spacedBy(1.dp),
                 ) {
                     allSections.forEach { (title, emojis) ->
                         item(span = { GridItemSpan(8) }) {
-                            Text(
-                                title,
-                                color = Muted,
-                                fontSize = 12.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
-                            )
+                            Text(title, color = Muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp))
                         }
                         items(emojis.distinct()) { sticker ->
                             val interaction = remember { MutableInteractionSource() }
                             val pressed by interaction.collectIsPressedAsState()
                             Box(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .height(42.dp)
-                                    .clip(RoundedCornerShape(8.dp))
+                                Modifier.fillMaxWidth().height(36.dp)
+                                    .clip(RoundedCornerShape(6.dp))
                                     .background(if (pressed) ChipIdle else Color.Transparent)
                                     .clickable(interactionSource = interaction, indication = null) {
-                                        haptics.confirm()
+                                        haptics.tap()
                                         saveStickerRecent(sticker)
-                                        onSend(sticker)
+                                        if (onInsert != null) onInsert(sticker) else onSend(sticker)
                                     },
                                 contentAlignment = Alignment.Center,
                             ) {
-                                Text(sticker, fontSize = 24.sp, modifier = Modifier.scale(if (pressed) 1.25f else 1f))
+                                Text(sticker, fontSize = 20.sp, modifier = Modifier.scale(if (pressed) 1.2f else 1f))
                             }
                         }
                     }
                 }
             } else {
-                // Single category selected via bottom bar
                 val packIndex = (selectedCategory - 1).coerceIn(0, Stickers.packs.size - 1)
                 val pack = Stickers.packs[packIndex]
                 val titleMap = listOf("Smileys & People", "Symbols", "Animals & Nature", "Food & Drink", "Activity")
                 val displayTitle = titleMap.getOrElse(packIndex) { pack.first }
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(8),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                    modifier = Modifier.fillMaxWidth().height(300.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                    modifier = Modifier.fillMaxWidth().height(220.dp),
+                    horizontalArrangement = Arrangement.spacedBy(1.dp),
+                    verticalArrangement = Arrangement.spacedBy(1.dp),
                 ) {
                     item(span = { GridItemSpan(8) }) {
-                        Text(
-                            displayTitle,
-                            color = Muted,
-                            fontSize = 12.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
-                        )
+                        Text(displayTitle, color = Muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp))
                     }
                     items(pack.second.distinct()) { sticker ->
                         val interaction = remember { MutableInteractionSource() }
                         val pressed by interaction.collectIsPressedAsState()
                         Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .height(42.dp)
-                                .clip(RoundedCornerShape(8.dp))
+                            Modifier.fillMaxWidth().height(36.dp)
+                                .clip(RoundedCornerShape(6.dp))
                                 .background(if (pressed) ChipIdle else Color.Transparent)
                                 .clickable(interactionSource = interaction, indication = null) {
-                                    haptics.confirm()
+                                    haptics.tap()
                                     saveStickerRecent(sticker)
-                                    onSend(sticker)
+                                    if (onInsert != null) onInsert(sticker) else onSend(sticker)
                                 },
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text(sticker, fontSize = 24.sp, modifier = Modifier.scale(if (pressed) 1.25f else 1f))
+                            Text(sticker, fontSize = 20.sp, modifier = Modifier.scale(if (pressed) 1.2f else 1f))
                         }
                     }
                 }
             }
         } else if (tab == 1) {
-            // ---- GIF TAB: middle position like WhatsApp ----
             val gifList = remember { GifRepo.gifs }
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                modifier = Modifier.fillMaxWidth().height(300.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                modifier = Modifier.fillMaxWidth().height(220.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 items(gifList.size) { idx ->
                     val item = gifList[idx]
@@ -442,100 +371,72 @@ fun StickerPanel(
                     }
                     val composition by rememberLottieComposition(spec)
                     Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .height(70.dp)
-                            .clip(RoundedCornerShape(12.dp))
+                        Modifier.fillMaxWidth().height(60.dp)
+                            .clip(RoundedCornerShape(8.dp))
                             .background(if (pressed) ChipIdle else Color(0xFF1A1A1A))
                             .clickable(interactionSource = interaction, indication = null) {
-                                haptics.confirm()
+                                haptics.tap()
                                 saveStickerRecent(item.emoji)
-                                onSend(item.emoji)
+                                if (onInsert != null) onInsert(item.emoji) else onSend(item.emoji)
                             },
                         contentAlignment = Alignment.Center,
                     ) {
                         if (composition != null) {
-                            LottieAnimation(
-                                composition = composition,
-                                iterations = LottieConstants.IterateForever,
-                                modifier = Modifier.size(48.dp).scale(if (pressed) 1.2f else 1f),
-                            )
+                            LottieAnimation(composition = composition, iterations = LottieConstants.IterateForever, modifier = Modifier.size(40.dp).scale(if (pressed) 1.15f else 1f))
                         } else {
-                            Text(item.emoji, fontSize = 28.sp, modifier = Modifier.scale(if (pressed) 1.2f else 1f))
+                            Text(item.emoji, fontSize = 24.sp, modifier = Modifier.scale(if (pressed) 1.15f else 1f))
                         }
                     }
                 }
             }
         } else {
-            // ---- STICKER TAB: right position like WhatsApp ----
-            Column(
-                Modifier.fillMaxWidth().height(300.dp).padding(16.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
+            // Sticker tab compact - no titles, just 4-col grid
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(4),
+                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                modifier = Modifier.fillMaxWidth().height(220.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Text("Stickers", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(8.dp))
-                Text("Send emojis as stickers", color = Muted, fontSize = 13.sp)
-                Spacer(Modifier.height(16.dp))
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(4),
-                    contentPadding = PaddingValues(4.dp),
-                    modifier = Modifier.fillMaxWidth().height(200.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    val stickerEmojis = Stickers.packs.flatMap { it.second }.take(20)
-                    items(stickerEmojis.distinct()) { sticker ->
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .height(56.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(ChipIdle)
-                                .clickable {
-                                    haptics.confirm()
-                                    saveStickerRecent(sticker)
-                                    onSend(sticker)
-                                },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(sticker, fontSize = 28.sp)
-                        }
+                val stickerEmojis = Stickers.packs.flatMap { it.second }.take(32)
+                items(stickerEmojis.distinct()) { sticker ->
+                    val interaction = remember { MutableInteractionSource() }
+                    val pressed by interaction.collectIsPressedAsState()
+                    Box(
+                        Modifier.fillMaxWidth().height(52.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (pressed) ChipSelected else ChipIdle)
+                            .clickable(interactionSource = interaction, indication = null) {
+                                haptics.tap()
+                                saveStickerRecent(sticker)
+                                if (onInsert != null) onInsert(sticker) else onSend(sticker)
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(sticker, fontSize = 26.sp, modifier = Modifier.scale(if (pressed) 1.2f else 1f))
                     }
                 }
             }
         }
 
         if (!searching) {
-            // ---- BOTTOM CATEGORY BAR: WhatsApp style icon bar, no text chips — hidden when keyboard up
             Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp, vertical = 4.dp)
-                    .background(Color.Transparent),
+                Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp).background(Color.Transparent),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                // Category icons matching WhatsApp reference bottom bar
                 val categories = listOf(
                     Triple(0, Icons.Filled.Schedule, "Recents"),
                     Triple(1, Icons.Filled.Mood, "Smileys"),
-                    Triple(2, Icons.Filled.Pets, "Animals"),
-                    Triple(3, Icons.Filled.Restaurant, "Food"),
-                    Triple(4, Icons.Filled.SportsSoccer, "Activity"),
-                    Triple(5, Icons.Filled.Flight, "Travel"),
-                    Triple(6, Icons.Filled.Lightbulb, "Objects"),
-                    Triple(7, Icons.Filled.Flag, "Flags"),
+                    Triple(2, Icons.Filled.Favorite, "Hearts"),
+                    Triple(3, Icons.Filled.Pets, "Animals"),
+                    Triple(4, Icons.Filled.Restaurant, "Food"),
+                    Triple(5, Icons.Filled.SportsSoccer, "Fun"),
                 )
-                // Show first 6 + scroll for rest? WhatsApp shows 9 with scroll. We'll show 6 main + 2 extra in row
-                // For our 5 packs + recents, map 0..5
-                val visibleCats = categories.take(8)
-                visibleCats.forEach { (idx, icon, desc) ->
+                categories.forEach { (idx, icon, desc) ->
                     val sel = selectedCategory == idx && tab == 0
                     Box(
-                        Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
+                        Modifier.size(32.dp).clip(CircleShape)
                             .background(if (sel) ChipSelected else Color.Transparent)
                             .clickable {
                                 haptics.tap()
@@ -544,12 +445,7 @@ fun StickerPanel(
                             },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(
-                            icon,
-                            contentDescription = desc,
-                            tint = if (sel) ActionBlueDeep else Muted,
-                            modifier = Modifier.size(if (sel) 22.dp else 20.dp),
-                        )
+                        Icon(icon, contentDescription = desc, tint = if (sel) ActionBlueDeep else Muted, modifier = Modifier.size(if (sel) 20.dp else 18.dp))
                     }
                 }
             }

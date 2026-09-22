@@ -4180,9 +4180,15 @@ fun ChatScreen(nav: NavController, convId: String) {
             Box(Modifier.popUp()) {
             StickerPanel(
                 onDismiss = { showStickers = false },
-                onSend = {
-                    showStickers = false
-                    sendText(it, "STICKER")
+                onSend = { emoji ->
+                    // v204: emoji click inserts into composer, panel stays open (WhatsApp behavior)
+                    // No auto-close, no direct send — user can edit then send
+                    input += emoji
+                    Drafts.set(convId, input)
+                },
+                onInsert = { emoji ->
+                    input += emoji
+                    Drafts.set(convId, input)
                 },
             )
             }
@@ -4484,11 +4490,10 @@ private fun Composer(
                     .fxComposerAnchor()
                     .weight(1f)
                     .heightIn(min = 38.dp)
-                    // Owner round 18: the pill is BACK — only the recording
-                    // strip is transparent (that was the ask). Owner round 19:
-                    // the pill takes the chat theme's accent tint.
-                    .clip(RoundedCornerShape(19.dp))
-                    .background(accent.copy(alpha = 0.16f))
+                    // v204 WhatsApp-style: outer bar transparent, inner pill Card (wallpaper visible behind)
+                    // Owner round 18: pill BACK, recording strip transparent; v204: Card for WhatsApp look
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(Card)
                     .padding(horizontal = 2.dp, vertical = 1.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 34.dp)) {
