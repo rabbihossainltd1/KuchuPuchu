@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
@@ -62,8 +63,10 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -383,32 +386,45 @@ fun StickerPanel(
 
 @Composable
 private fun PanelEmoji(emoji: String, pressed: Boolean) {
-    // v210: panel emojis bigger + size fixed - Box 28dp fixed so no shrink during animate, Text 24sp Lottie 26dp
-    // 1s delay to avoid lag, visible only after delay
-    var showAnim by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-    androidx.compose.runtime.LaunchedEffect(emoji) {
-        kotlinx.coroutines.delay(1000)
-        showAnim = true
-    }
+    // r63-1: panel emoji bigger real shape (34dp in 42dp cell, no side clipping, no zoom shrink)
+    // Instant load for 51 bundled smileys from APK assets; 300ms settle delay for remote to keep scroll smooth
     val codepoint = remember(emoji) { emojiToCodepoint(emoji) }
     val isBundled = remember(codepoint) { NotoBundled.isBundled(codepoint) }
-    val spec = remember(codepoint, isBundled) {
-        if (isBundled) LottieCompositionSpec.Asset("noto-emoji/$codepoint.json")
-        else LottieCompositionSpec.Url("https://fonts.gstatic.com/s/e/notoemoji/latest/$codepoint/lottie.json")
+    var showAnim by remember(emoji) { mutableStateOf(isBundled) }
+    LaunchedEffect(emoji) {
+        if (!isBundled) {
+            kotlinx.coroutines.delay(300)
+            showAnim = true
+        }
+    }
+    val spec = remember(codepoint, isBundled, showAnim) {
+        if (showAnim) {
+            if (isBundled) LottieCompositionSpec.Asset("noto-emoji/$codepoint.json")
+            else if (!codepoint.isNullOrEmpty()) LottieCompositionSpec.Url("https://fonts.gstatic.com/s/e/notoemoji/latest/$codepoint/lottie.json")
+            else null
+        } else null
     }
     val composition by rememberLottieComposition(spec)
     Box(
-        modifier = Modifier.size(28.dp).scale(if (pressed) 1.2f else 1f),
-        contentAlignment = Alignment.Center
+        modifier = Modifier.size(34.dp),
+        contentAlignment = Alignment.Center,
     ) {
         if (showAnim && composition != null) {
             LottieAnimation(
                 composition = composition,
                 iterations = LottieConstants.IterateForever,
-                modifier = Modifier.size(26.dp)
+                modifier = Modifier.fillMaxSize(),
             )
         } else {
-            Text(emoji, fontSize = 24.sp)
+            Text(
+                emoji,
+                fontSize = 26.sp,
+                textAlign = TextAlign.Center,
+                style = TextStyle(
+                    platformStyle = PlatformTextStyle(includeFontPadding = false),
+                    lineHeight = 34.sp,
+                ),
+            )
         }
     }
 }
@@ -429,8 +445,8 @@ private fun EmojiGridWithSections(query: String, recents: List<String>, selected
                 val interaction = remember { MutableInteractionSource() }
                 val pressed by interaction.collectIsPressedAsState()
                 Box(
-                    Modifier.fillMaxWidth().height(36.dp)
-                        .clip(RoundedCornerShape(6.dp))
+                    Modifier.fillMaxWidth().height(42.dp)
+                        .clip(RoundedCornerShape(8.dp))
                         .background(if (pressed) ChipIdle else Color.Transparent)
                         .clickable(interactionSource = interaction, indication = null) {
                             haptics.tap()
@@ -472,8 +488,8 @@ private fun EmojiGridWithSections(query: String, recents: List<String>, selected
                     val interaction = remember { MutableInteractionSource() }
                     val pressed by interaction.collectIsPressedAsState()
                     Box(
-                        Modifier.fillMaxWidth().height(36.dp)
-                            .clip(RoundedCornerShape(6.dp))
+                        Modifier.fillMaxWidth().height(42.dp)
+                            .clip(RoundedCornerShape(8.dp))
                             .background(if (pressed) ChipIdle else Color.Transparent)
                             .clickable(interactionSource = interaction, indication = null) {
                                 haptics.tap()

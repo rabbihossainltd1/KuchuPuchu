@@ -6276,7 +6276,7 @@ private fun MessageRow(
                             // bubble (outside) for every kind now.
                             // v206: single only animates, long-press shows actions
                             if (emojiOnly == 1) {
-                                EmojiGlyphRow(m.optText("body").trim(), 52f, fxFresh, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m) } })
+                                EmojiGlyphRow(m.optText("body").trim(), 66f, fxFresh, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m) } })
                             } else {
                                 // N3r: every glyph dances its own 3D move for
                                 // 3 s (arrival / tap / the other side's tap).

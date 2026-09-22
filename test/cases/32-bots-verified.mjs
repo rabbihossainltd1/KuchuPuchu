@@ -2797,8 +2797,14 @@ const convBetween = (db, a, b) =>
         kt("StickerSheet.kt").includes("Widgets")) &&
       kt("ChatScreen.kt").includes("internal fun emojiOnlyCount(body: String): Int") &&
       (kt("ChatScreen.kt").includes(
-        'EmojiGlyphRow(m.optText("body").trim(), 52f, fxFresh, m.optString("id"))',
+        'EmojiGlyphRow(m.optText("body").trim(), 66f, fxFresh, m.optString("id"))',
       ) ||
+        kt("ChatScreen.kt").includes(
+          'EmojiGlyphRow(m.optText("body").trim(), 66f, fxFresh, m.optString("id"),',
+        ) ||
+        kt("ChatScreen.kt").includes(
+          'EmojiGlyphRow(m.optText("body").trim(), 52f, fxFresh, m.optString("id"))',
+        ) ||
         kt("ChatScreen.kt").includes(
           'EmojiGlyphRow(m.optText("body").trim(), 44f, fxFresh, m.optString("id"))',
         ) ||
@@ -9922,6 +9928,19 @@ const convBetween = (db, a, b) =>
         c: outsider.r.status,
         ok: afterAll.r.status,
       }),
+    );
+  }
+
+  // r63-1: emoji panel bigger fixed size (34dp in 42dp cell) without zoom/clip, single emoji in chat 66f
+  {
+    const sticker = kt("StickerSheet.kt");
+    const chat = kt("ChatScreen.kt");
+    check(
+      "r63-1: panel emoji bigger (34dp in 42dp cell) with matched text/lottie size, instant bundled load, single chat emoji 66f",
+      sticker.includes("Modifier.size(34.dp)") &&
+        sticker.includes("Modifier.fillMaxWidth().height(42.dp)") &&
+        sticker.includes("isBundled") &&
+        chat.includes('EmojiGlyphRow(m.optText("body").trim(), 66f, fxFresh, m.optString("id"),'),
     );
   }
 
