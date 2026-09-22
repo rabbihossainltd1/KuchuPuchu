@@ -1,21 +1,20 @@
 package app.kuchupuchu.android
 
 /**
- * Item 2 — Noto animated emoji (owner: https://googlefonts.github.io/noto-emoji-animation/)
- *
- * - 881 Lottie assets bundled in assets/noto-emoji/[codepoint].json (68M) — offline-first.
- * - Single-emoji messages: animation plays ONCE on send/receive, then stays normal (static glyph).
- * - Tap replays the animation locally AND via POST /api/messages/{id}/fx to replay on the other side.
- * - Multi-emoji rows (1-3 emojis): each glyph animates independently, phase-shifted by idx.
- * - Fallback: if asset missing or Lottie fails, show normal Text emoji.
- *
- * Old custom 3D palette (FX_PATTERNS, dub, tri, etc.) removed per owner.
+ * Item 2 + 3 hybrid (2026-09-22):
+ * - Only 50 most-used Lottie assets bundled (2.7M) — Smileys pack, offline for common emojis.
+ * - Rest 831+ load from Google CDN (fonts.gstatic.com) on demand, cached by Lottie.
+ * - GIFs folder deleted (104M) — GIF tab now uses same Lottie system (release apk 140M -> ~40M).
+ * - Size fix: static and animated states use SAME Box size (sizeSp.dp), no jump.
+ *   When not playing, show frozen Lottie at progress=1f (same size) instead of Text with different metrics.
+ *   Fallback to Text only if composition fails.
  */
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
@@ -39,24 +38,34 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Shared replay bus — tap on one side fans out via server's emoji_fx frame. */
 internal val emojiFxReplays = SnapshotStateList<String>()
 
-/** Convert an emoji cluster (e.g. "👍🏽" or "❤️") to Noto codepoint filename: "1f44d_1f3fd" */
+/** Top 50 bundled codepoints — Smileys pack (2.7M total). */
+internal object NotoBundled {
+    val set = setOf(
+        "1f600", "1f603", "1f604", "1f601", "1f606", "1f605", "1f923", "1f602",
+        "1f642", "1f643", "1f609", "1f60a", "1f607", "1f970", "1f60d", "1f929",
+        "1f618", "1f617", "1f61a", "1f619", "1f60b", "1f61b", "1f61c", "1f92a",
+        "1f928", "1f9d0", "1f913", "1f60e", "1f973", "1f60f", "1f612", "1f61e",
+        "1f614", "1f61f", "1f615", "1f641", "1f623", "1f616", "1f62b", "1f629",
+        "1f97a", "1f622", "1f62d", "1f624", "1f620", "1f621", "1f92c", "1f92f",
+        "1f633", "1f975",
+    )
+    fun isBundled(codepoint: String): Boolean = set.contains(codepoint)
+}
+
 internal fun emojiToCodepoint(emoji: String): String {
     if (emoji.isEmpty()) return ""
     val cps = mutableListOf<String>()
     var i = 0
     while (i < emoji.length) {
         val cp = emoji.codePointAt(i)
-        // Noto uses lower-case hex without leading zeros
         cps.add(Integer.toHexString(cp).lowercase())
         i += Character.charCount(cp)
     }
     return cps.joinToString("_")
 }
 
-/** Splits a body into emoji clusters (bases keep their joiners / modifiers). */
 internal fun splitEmojiClusters(body: String): List<String> {
     val t = body.trim()
     if (t.isEmpty()) return emptyList()
@@ -89,8 +98,10 @@ internal fun splitEmojiClusters(body: String): List<String> {
 }
 
 /**
- * One Noto Lottie emoji that plays once per [replayKey] increment, then shows static Text.
- * If the asset doesn't exist (e.g. ©/®) or Lottie fails, falls back to Text immediately.
+ * Hybrid Noto Lottie emoji — fixed size Box to prevent jump.
+ * - Bundled (50): Asset
+ * - Remote (rest): Url from Google CDN (cached)
+ * - Static: frozen Lottie at progress=1f (same size) — no Text size mismatch.
  */
 @Composable
 internal fun NotoAnimatedEmoji(
@@ -100,20 +111,24 @@ internal fun NotoAnimatedEmoji(
     modifier: Modifier = Modifier,
 ) {
     val codepoint = remember(emoji) { emojiToCodepoint(emoji) }
-    val assetPath = remember(codepoint) { "noto-emoji/$codepoint.json" }
+    val isBundled = remember(codepoint) { NotoBundled.isBundled(codepoint) }
 
-    // Lottie composition from assets — offline-first, no network.
-    val composition by rememberLottieComposition(
-        LottieCompositionSpec.Asset(assetPath)
-    )
+    val spec = remember(codepoint, isBundled) {
+        if (isBundled) {
+            LottieCompositionSpec.Asset("noto-emoji/$codepoint.json")
+        } else {
+            // Server-side: Google CDN (same as we downloaded from) — on-demand, cached
+            LottieCompositionSpec.Url("https://fonts.gstatic.com/s/e/notoemoji/latest/$codepoint/lottie.json")
+        }
+    }
+
+    val composition by rememberLottieComposition(spec)
     val animatable = rememberLottieAnimatable()
     var isPlaying by remember(emoji) { mutableStateOf(false) }
 
-    // When replayKey changes (or first composition with active), play once.
     LaunchedEffect(composition, replayKey) {
-        if (composition != null) {
+        if (composition != null && replayKey > 0) {
             isPlaying = true
-            // One-shot: iterations=1
             animatable.animate(
                 composition = composition,
                 iterations = 1,
@@ -123,28 +138,38 @@ internal fun NotoAnimatedEmoji(
         }
     }
 
-    if (composition != null && isPlaying) {
-        LottieAnimation(
-            composition = composition,
-            progress = { animatable.progress },
-            modifier = modifier.size(sizeSp.dp),
-        )
-    } else {
-        // Static fallback — normal emoji after animation, or when asset missing.
-        // If composition exists but not playing, we show the static glyph (not frozen Lottie)
-        // per owner: "ekbar animation Hobe tarpor normal thakbe"
-        Text(
-            text = emoji,
-            fontSize = sizeSp.sp,
-            modifier = modifier,
-        )
+    // Fixed size container — prevents jump between Text and Lottie, and between playing/static Lottie
+    Box(
+        modifier = modifier.size(sizeSp.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (composition != null) {
+            if (isPlaying) {
+                LottieAnimation(
+                    composition = composition,
+                    progress = { animatable.progress },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                // Frozen at end frame (or start if never played) — same size as animated
+                // For never-played (replayKey==0), show last frame as static normal
+                LottieAnimation(
+                    composition = composition,
+                    progress = { 1f },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        } else {
+            // Fallback only when Lottie fails (network offline + not bundled, or ©/®)
+            Text(
+                text = emoji,
+                fontSize = sizeSp.sp,
+                modifier = Modifier.align(Alignment.Center),
+            )
+        }
     }
 }
 
-/**
- * One emoji-only row: each glyph uses Noto Lottie, plays once on arrival,
- * then rests. Tap replays here + on the other side via /fx.
- */
 @Composable
 internal fun EmojiGlyphRow(
     body: String,
@@ -179,7 +204,6 @@ private fun NotoEmojiGlyph(
 
     fun replay(local: Boolean) {
         if (animScale <= 0f) return
-        // Debounce 300ms to avoid spam
         val now = android.os.SystemClock.uptimeMillis()
         if (now - lastTapMs < 300) return
         lastTapMs = now
@@ -194,15 +218,12 @@ private fun NotoEmojiGlyph(
         }
     }
 
-    // Remote tap: other side tapped this row
     if (mid.isNotBlank() && emojiFxReplays.contains(mid)) {
-        // Consume once
         if (emojiFxReplays.remove(mid)) {
             replay(local = false)
         }
     }
 
-    // Stagger multi-emoji rows so they don't all pop at once
     LaunchedEffect(active) {
         if (active && idx > 0) {
             kotlinx.coroutines.delay((idx * 120).toLong())

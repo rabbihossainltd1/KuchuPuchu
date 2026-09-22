@@ -287,8 +287,8 @@ fun StickerPanel(
                 }
             }
         } else {
-            // v200 item 3: 100+ GIFs offline-first — Noto animated emojis (512.gif in assets/gifs/)
-            // Preview via Lottie (lighter than GIF, same animation) — tap sends as STICKER (big emoji with Noto anim)
+            // v201 hybrid: 50 bundled (2.7M) + rest remote CDN, no gifs folder (was 104M)
+            // GIF tab shows 100+ Lottie, same size, no jump — fixed Box size
             val gifList = remember { GifRepo.gifs }
             LazyVerticalGrid(
                 columns = GridCells.Fixed(4),
@@ -303,10 +303,12 @@ fun StickerPanel(
                     val item = gifList[idx]
                     val interaction = remember { MutableInteractionSource() }
                     val pressed by interaction.collectIsPressedAsState()
-                    // Lottie preview from bundled noto-emoji JSON (same animation as GIF)
-                    val composition by rememberLottieComposition(
-                        LottieCompositionSpec.Asset(GifRepo.lottieAssetPath(item.codepoint))
-                    )
+                    val isBundled = remember(item.codepoint) { NotoBundled.isBundled(item.codepoint) }
+                    val spec = remember(item.codepoint, isBundled) {
+                        if (isBundled) LottieCompositionSpec.Asset(GifRepo.lottieAssetPath(item.codepoint))
+                        else LottieCompositionSpec.Url(GifRepo.lottieUrl(item.codepoint))
+                    }
+                    val composition by rememberLottieComposition(spec)
                     Box(
                         Modifier
                             .fillMaxWidth()
