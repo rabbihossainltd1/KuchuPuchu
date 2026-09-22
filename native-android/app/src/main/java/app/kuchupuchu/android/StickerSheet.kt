@@ -383,8 +383,8 @@ fun StickerPanel(
 
 @Composable
 private fun PanelEmoji(emoji: String, pressed: Boolean) {
-    // v209: panel emojis animate but lag optimized - only visible after 1s delay, so scrolling stays smooth
-    // User sees static Text first, after 1s Lottie starts; fast scroll disposes before delay, no lag
+    // v210: panel emojis bigger + size fixed - Box 28dp fixed so no shrink during animate, Text 24sp Lottie 26dp
+    // 1s delay to avoid lag, visible only after delay
     var showAnim by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     androidx.compose.runtime.LaunchedEffect(emoji) {
         kotlinx.coroutines.delay(1000)
@@ -397,14 +397,19 @@ private fun PanelEmoji(emoji: String, pressed: Boolean) {
         else LottieCompositionSpec.Url("https://fonts.gstatic.com/s/e/notoemoji/latest/$codepoint/lottie.json")
     }
     val composition by rememberLottieComposition(spec)
-    if (showAnim && composition != null) {
-        LottieAnimation(
-            composition = composition,
-            iterations = LottieConstants.IterateForever,
-            modifier = Modifier.size(22.dp).scale(if (pressed) 1.2f else 1f)
-        )
-    } else {
-        Text(emoji, fontSize = 20.sp, modifier = Modifier.scale(if (pressed) 1.2f else 1f))
+    Box(
+        modifier = Modifier.size(28.dp).scale(if (pressed) 1.2f else 1f),
+        contentAlignment = Alignment.Center
+    ) {
+        if (showAnim && composition != null) {
+            LottieAnimation(
+                composition = composition,
+                iterations = LottieConstants.IterateForever,
+                modifier = Modifier.size(26.dp)
+            )
+        } else {
+            Text(emoji, fontSize = 24.sp)
+        }
     }
 }
 

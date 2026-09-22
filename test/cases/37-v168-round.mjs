@@ -203,10 +203,12 @@ check(
     chat.includes("if (msgs.isNotEmpty()) FxArrivals.armed = true") &&
     chat.includes(".fxSlotOpen(fxFresh)") &&
     chat.includes("fxLetterSpans(full, fxFresh)") &&
-    (chat.includes('EmojiGlyphRow(m.optText("body").trim(), 44f, fxFresh, m.optString("id"))') ||
-      chat.includes('EmojiGlyphRow(m.optText("body").trim(), 44f, fxFresh, m.optString("id"),')) &&
-    (chat.includes('EmojiGlyphRow(m.optText("body").trim(), 34f, fxFresh, m.optString("id"))') ||
-      chat.includes('EmojiGlyphRow(m.optText("body").trim(), 34f, fxFresh, m.optString("id"),')) &&
+    (chat.includes('EmojiGlyphRow(m.optText("body").trim(), 52f, fxFresh, m.optString("id"))') ||
+      chat.includes('EmojiGlyphRow(m.optText("body").trim(), 44f, fxFresh, m.optString("id"))') ||
+      chat.includes('EmojiGlyphRow(m.optText("body").trim(), 52f, fxFresh, m.optString("id"),')) &&
+    (chat.includes('EmojiGlyphRow(m.optText("body").trim(), 40f, fxFresh, m.optString("id"))') ||
+      chat.includes('EmojiGlyphRow(m.optText("body").trim(), 34f, fxFresh, m.optString("id"))') ||
+      chat.includes('EmojiGlyphRow(m.optText("body").trim(), 40f, fxFresh, m.optString("id"),')) &&
     (chat.includes('EmojiGlyphRow(st, 56f, fxFresh, m.optString("id"))') ||
       chat.includes('EmojiGlyphRow(st, 56f, fxFresh, m.optString("id"),')) &&
     chat.includes(".fxBlurIn(fxFresh)") &&

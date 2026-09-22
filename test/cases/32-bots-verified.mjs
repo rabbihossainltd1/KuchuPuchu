@@ -2797,16 +2797,22 @@ const convBetween = (db, a, b) =>
         kt("StickerSheet.kt").includes("Widgets")) &&
       kt("ChatScreen.kt").includes("internal fun emojiOnlyCount(body: String): Int") &&
       (kt("ChatScreen.kt").includes(
-        'EmojiGlyphRow(m.optText("body").trim(), 44f, fxFresh, m.optString("id"))',
+        'EmojiGlyphRow(m.optText("body").trim(), 52f, fxFresh, m.optString("id"))',
       ) ||
         kt("ChatScreen.kt").includes(
-          'EmojiGlyphRow(m.optText("body").trim(), 44f, fxFresh, m.optString("id"),',
+          'EmojiGlyphRow(m.optText("body").trim(), 44f, fxFresh, m.optString("id"))',
+        ) ||
+        kt("ChatScreen.kt").includes(
+          'EmojiGlyphRow(m.optText("body").trim(), 52f, fxFresh, m.optString("id"),',
         )) &&
       (kt("ChatScreen.kt").includes(
-        'EmojiGlyphRow(m.optText("body").trim(), 34f, fxFresh, m.optString("id"))',
+        'EmojiGlyphRow(m.optText("body").trim(), 40f, fxFresh, m.optString("id"))',
       ) ||
         kt("ChatScreen.kt").includes(
-          'EmojiGlyphRow(m.optText("body").trim(), 34f, fxFresh, m.optString("id"),',
+          'EmojiGlyphRow(m.optText("body").trim(), 34f, fxFresh, m.optString("id"))',
+        ) ||
+        kt("ChatScreen.kt").includes(
+          'EmojiGlyphRow(m.optText("body").trim(), 40f, fxFresh, m.optString("id"),',
         )) &&
       kt("ChatScreen.kt").includes(
         'Icon(Icons.Filled.Mood, "Stickers", tint = accent, modifier = Modifier.size(20.dp))',
