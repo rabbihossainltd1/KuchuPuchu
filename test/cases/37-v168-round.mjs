@@ -195,9 +195,10 @@ check(
     emo.includes("noto-emoji") &&
     emo.includes("emojiFxReplays") &&
     chat.includes("val fxFresh =") &&
-    chat.includes(
+    (chat.includes(
       'liveBorn && FxArrivals.mark(m.optString("id")) != null && m.optString("senderId") != "kp_ai_bot"',
-    ) &&
+    ) ||
+      chat.includes('if (m.optString("senderId") == "kp_ai_bot") false')) &&
     chat.includes("FxArrivals.armed = false") &&
     chat.includes("if (msgs.isNotEmpty()) FxArrivals.armed = true") &&
     chat.includes(".fxSlotOpen(fxFresh)") &&

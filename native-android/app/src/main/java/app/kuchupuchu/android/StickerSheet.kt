@@ -382,6 +382,27 @@ fun StickerPanel(
 }
 
 @Composable
+private fun PanelEmoji(emoji: String, pressed: Boolean) {
+    // v207: panel emojis loop animate always
+    val codepoint = remember(emoji) { emojiToCodepoint(emoji) }
+    val isBundled = remember(codepoint) { NotoBundled.isBundled(codepoint) }
+    val spec = remember(codepoint, isBundled) {
+        if (isBundled) LottieCompositionSpec.Asset("noto-emoji/$codepoint.json")
+        else LottieCompositionSpec.Url("https://fonts.gstatic.com/s/e/notoemoji/latest/$codepoint/lottie.json")
+    }
+    val composition by rememberLottieComposition(spec)
+    if (composition != null) {
+        LottieAnimation(
+            composition = composition,
+            iterations = LottieConstants.IterateForever,
+            modifier = Modifier.size(22.dp).scale(if (pressed) 1.2f else 1f)
+        )
+    } else {
+        Text(emoji, fontSize = 20.sp, modifier = Modifier.scale(if (pressed) 1.2f else 1f))
+    }
+}
+
+@Composable
 private fun EmojiGridWithSections(query: String, recents: List<String>, selectedCategory: Int, onInsert: ((String) -> Unit)?, onSend: (String) -> Unit) {
     val haptics = rememberHaptics()
     if (query.isNotBlank()) {
@@ -407,7 +428,7 @@ private fun EmojiGridWithSections(query: String, recents: List<String>, selected
                         },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(sticker, fontSize = 20.sp, modifier = Modifier.scale(if (pressed) 1.2f else 1f))
+                    PanelEmoji(emoji = sticker, pressed = pressed)
                 }
             }
         }
@@ -447,11 +468,12 @@ private fun EmojiGridWithSections(query: String, recents: List<String>, selected
                                 haptics.tap()
                                 saveStickerRecent(sticker)
                                 // v206: emoji inserts into bar, not direct send
+                                // v207: panel emojis loop animate always
                                 if (onInsert != null) onInsert(sticker) else onSend(sticker)
                             },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(sticker, fontSize = 20.sp, modifier = Modifier.scale(if (pressed) 1.2f else 1f))
+                        PanelEmoji(emoji = sticker, pressed = pressed)
                     }
                 }
             }

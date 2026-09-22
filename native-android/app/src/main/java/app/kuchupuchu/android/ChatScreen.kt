@@ -4181,10 +4181,27 @@ fun ChatScreen(nav: NavController, convId: String) {
             StickerPanel(
                 onDismiss = { showStickers = false },
                 onSend = { content ->
-                    // v206: sticker/gif direct send, emoji inserts via onInsert
-                    // GIF URLs are real Tenor GIFs, send as TEXT (link preview will show GIF)
+                    // v206: sticker direct send, GIF direct send as image file (not link)
+                    // v207: GIF URLs download and send as image/gif file so bubble shows GIF directly
                     if (content.startsWith("http")) {
-                        sendText(content, "TEXT")
+                        // Real Tenor GIF - download and send as file
+                        scope.launch {
+                            try {
+                                val client = okhttp3.OkHttpClient.Builder()
+                                    .callTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                                    .build()
+                                val req = okhttp3.Request.Builder().url(content).build()
+                                val resp = withContext(kotlinx.coroutines.Dispatchers.IO) { client.newCall(req).execute() }
+                                if (!resp.isSuccessful) throw Exception("HTTP ${resp.code}")
+                                val bytes = resp.body?.bytes() ?: throw Exception("Empty")
+                                val file = java.io.File(ctx.cacheDir, "gif_${System.currentTimeMillis()}.gif")
+                                file.writeBytes(bytes)
+                                sendFile(file.name, "image/gif", file)
+                            } catch (e: Exception) {
+                                // Fallback to text link if download fails
+                                sendText(content, "TEXT")
+                            }
+                        }
                     } else {
                         sendText(content, "STICKER")
                     }
@@ -5846,13 +5863,14 @@ private fun MessageRow(
             // the slide animation is for LIVE arrivals only - history, loadOlder, or reopen
             // never slides; it gets the soft fade instead.
             // v205: owner wants emoji animate AFTER sent, not during sending (pendingEcho).
-            // So pendingEcho excluded - only final server row animates (mine true, within 8s).
-            // N3 history still prevented by 8s window.
-            val liveBorn =
-                (!pendingEcho && (mine || LiveArrivals.isLive(m.optString("clientId")) || LiveArrivals.isLive(m.optString("id")))) &&
-                (runCatching { java.time.Instant.parse(m.optString("createdAt")).toEpochMilli() }
-                    .getOrDefault(0L) > System.currentTimeMillis() - 8_000L)
-            liveBorn && FxArrivals.mark(m.optString("id")) != null && m.optString("senderId") != "kp_ai_bot"
+            // v207: own messages always animate within 8s (no FxArrivals gate) so sent emoji animates
+            val isRecent = runCatching { java.time.Instant.parse(m.optString("createdAt")).toEpochMilli() }
+                .getOrDefault(0L) > System.currentTimeMillis() - 8_000L
+            val liveBorn = !pendingEcho && (mine || LiveArrivals.isLive(m.optString("clientId")) || LiveArrivals.isLive(m.optString("id"))) && isRecent
+            if (!liveBorn) false
+            else if (m.optString("senderId") == "kp_ai_bot") false
+            else if (mine) true // v207: own recent always animates after sent
+            else FxArrivals.mark(m.optString("id")) != null
         } && fxScaleOf(ctx) > 0f
     // Owner round 15: the night theme's other-bubble is dark in BOTH app
     // themes — its text needs a light ink or it vanishes in light mode.
@@ -7339,7 +7357,7 @@ private fun fileLooksImage(m: JSONObject): Boolean {
     val type = m.optString("fileType")
     if (type.startsWith("image")) return true
     val name = m.optString("fileName").lowercase()
-    return name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png") || name.endsWith(".webp")
+    return name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png") || name.endsWith(".webp") || name.endsWith(".gif")
 }
 
 /**
