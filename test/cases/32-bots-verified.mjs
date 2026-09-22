@@ -6659,11 +6659,13 @@ const convBetween = (db, a, b) =>
         attach.includes('.pointerInput("foldcheck")') &&
         attach.includes('"barDrag"') &&
         attach.includes("barDragDetect") &&
-        attach.includes("if (fullscreen && sel.isNotEmpty()) {") &&
+        (attach.includes("if (sel.isNotEmpty()) {") ||
+          attach.includes("if (fullscreen && sel.isNotEmpty()) {")) &&
         attach.includes("sel.lastOrNull()?.let(onEdit)") &&
         attach.includes("sel[0] = sel[0].copy(caption = t.take(1000))") &&
-        // Owner round 40 (item 4): the ring is centered + shrunk (layout-only).
-        attach.includes("CenteredOnceIcon(28.dp, tint = if (allOnce) Color.White else Muted)") &&
+        // Owner round 40 (item 4); r63-4: 36dp (or 28dp).
+        (attach.includes("CenteredOnceIcon(36.dp, tint = if (allOnce) Color.White else Muted)") ||
+          attach.includes("CenteredOnceIcon(28.dp, tint = if (allOnce) Color.White else Muted)")) &&
         attach.includes("sel.replaceAll { it.copy(once = v) }") &&
         attach.includes("onScheduleBatch()") &&
         attach.includes("onSendBatch()") &&
@@ -6674,12 +6676,15 @@ const convBetween = (db, a, b) =>
         attach.includes("PlatformTextStyle(includeFontPadding = false)") &&
         attach.includes("LineHeightStyle.Trim.Both") &&
         attach.includes(".border(1.dp, Color.White, CircleShape)") &&
-        // Owner round 41 (item 3): the whole bar is 28.dp (badge 15).
+        // Owner round 41 (item 3): the whole bar is 28.dp (badge 15); r63-4: bigger.
         attach.includes(".offset(x = 2.dp, y = (-2).dp)") &&
-        attach.includes(
-          "if (allOnce) Box(Modifier.size(30.dp).clip(CircleShape).background(ActionBlue))",
-        ) &&
-        attach.includes(".height(28.dp)") &&
+        (attach.includes(
+          "if (allOnce) Box(Modifier.size(38.dp).clip(CircleShape).background(ActionBlue))",
+        ) ||
+          attach.includes(
+            "if (allOnce) Box(Modifier.size(30.dp).clip(CircleShape).background(ActionBlue))",
+          )) &&
+        (attach.includes(".height(40.dp)") || attach.includes(".height(28.dp)")) &&
         // Owner round 41 (item 4): the HD pill carries no border.
         !attach.includes(".border(1.dp, if (hdOn)") &&
         // Owner round 40 (item 3): the keyboard pushes the bar up.
@@ -9946,6 +9951,18 @@ const convBetween = (db, a, b) =>
       chat.includes(".fxComposerAnchor()") &&
         chat.includes(".clip(RoundedCornerShape(22.dp))") &&
         chat.includes(".background(Color.Transparent)"),
+    );
+  }
+
+  // r63-4: attach panel media select floating transparent bar with bigger controls (half + fullscreen)
+  {
+    const attach = kt("AttachSheet.kt");
+    check(
+      "r63-4: attach panel selection bar shows on sel.isNotEmpty with bigger controls (caption 40dp, view once 36dp, send 44dp) and transparent background",
+      attach.includes("if (sel.isNotEmpty()) {") &&
+        attach.includes("CenteredOnceIcon(36.dp, tint = if (allOnce) Color.White else Muted)") &&
+        attach.includes(".height(40.dp)") &&
+        attach.includes(".size(44.dp)"),
     );
   }
 

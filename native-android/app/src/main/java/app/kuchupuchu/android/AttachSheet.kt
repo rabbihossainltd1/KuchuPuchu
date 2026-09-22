@@ -694,7 +694,6 @@ fun AttachPanel(
                         onToggle = {
                             haptics.tap()
                             if (pos >= 0) sel.removeAll { it.uri == item.uri } else sel.add(item.copy(hd = hdOn))
-                            setFullscreen(true)
                         },
                     )
                 }
@@ -768,21 +767,22 @@ fun AttachPanel(
         // ticked photo opens in the editor), one caption for the batch (it
         // rides the first photo, WhatsApp-exact), the ① batch toggle and
         // Send with its count badge (hold = send later, as before).
-        if (fullscreen && sel.isNotEmpty()) {
+        // r63-4: floating transparent selection bar for both half and full panel with bigger controls
+        if (sel.isNotEmpty()) {
             Row(
                 Modifier
                     .fillMaxWidth()
                     // Owner round 43 (item 3): the bar drags like the header
                     // — down past 70 folds to the collapsed half panel.
                     .barDragDetect()
+                    .background(Color.Transparent)
                     .padding(horizontal = 10.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Owner round 41 (item 3): every bar control is 28.dp, the
-                // ①'s own seat — glyphs shrink along (14.dp).
+                // Edit (pencil) button — r63-4: bigger 38.dp seat, 20.dp glyph
                 Box(
                     Modifier
-                        .size(28.dp)
+                        .size(38.dp)
                         .clip(CircleShape)
                         .background(ChipIdle)
                         .clickable {
@@ -791,15 +791,16 @@ fun AttachPanel(
                         },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Filled.Edit, "Edit", tint = Ink, modifier = Modifier.size(14.dp))
+                    Icon(Icons.Filled.Edit, "Edit", tint = Ink, modifier = Modifier.size(20.dp))
                 }
                 Spacer(Modifier.size(8.dp))
+                // Caption bar — r63-4: bigger height 40.dp, text 15.sp, rounded 20.dp
                 Row(
                     Modifier
                         .barDragDetect()
                         .weight(1f)
-                        .height(28.dp)
-                        .clip(RoundedCornerShape(14.dp))
+                        .height(40.dp)
+                        .clip(RoundedCornerShape(20.dp))
                         .background(ChipIdle)
                         .padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -809,12 +810,12 @@ fun AttachPanel(
                         value = cap,
                         onValueChange = { t -> sel[0] = sel[0].copy(caption = t.take(1000)) },
                         singleLine = true,
-                        textStyle = TextStyle(color = Ink, fontSize = 14.sp),
+                        textStyle = TextStyle(color = Ink, fontSize = 15.sp),
                         cursorBrush = SolidColor(Ink),
                         modifier = Modifier.weight(1f),
                         decorationBox = { inner ->
                             Box {
-                                if (cap.isEmpty()) Text("Add a caption...", color = Muted, fontSize = 14.sp)
+                                if (cap.isEmpty()) Text("Add a caption...", color = Muted, fontSize = 15.sp)
                                 inner()
                             }
                         },
@@ -822,11 +823,10 @@ fun AttachPanel(
                 }
                 Spacer(Modifier.size(8.dp))
                 val allOnce = sel.all { it.once }
-                // Owner round 41 (item 3): the ① seat is 28.dp; armed it
-                // sits on a filled 30.dp blue disc (a 1.dp halo all round).
+                // View-once toggle — r63-4: bigger 38.dp seat, icon 36.dp
                 Box(
                     Modifier
-                        .size(28.dp)
+                        .size(38.dp)
                         .clickable {
                             haptics.toggle(!allOnce)
                             val v = !allOnce
@@ -834,22 +834,18 @@ fun AttachPanel(
                         },
                     contentAlignment = Alignment.Center,
                 ) {
-                    if (allOnce) Box(Modifier.size(30.dp).clip(CircleShape).background(ActionBlue))
-                    CenteredOnceIcon(28.dp, tint = if (allOnce) Color.White else Muted)
+                    if (allOnce) Box(Modifier.size(38.dp).clip(CircleShape).background(ActionBlue))
+                    CenteredOnceIcon(36.dp, tint = if (allOnce) Color.White else Muted)
                 }
                 Spacer(Modifier.size(8.dp))
-                // Owner round 40 (item 5): the badge used to live INSIDE the
-                // clipped send circle, so the clip ate its top-right half.
-                // The circle keeps its own clip; the badge is a sibling on
-                // the unclipped rim. Round 41 (item 3): the circle is 28.dp
-                // now, the badge 15.dp along with it.
+                // Send button with count badge — r63-4: bigger circle 44.dp, icon 22.dp, badge 18.dp
                 Box(
-                    Modifier.size(28.dp),
+                    Modifier.size(46.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Box(
                         Modifier
-                            .size(28.dp)
+                            .size(44.dp)
                             .clip(CircleShape)
                             .background(ActionBlue)
                             .combinedClickable(
@@ -867,31 +863,23 @@ fun AttachPanel(
                             Icons.AutoMirrored.Filled.Send,
                             contentDescription = "Send",
                             tint = ActionBlueInk,
-                            modifier = Modifier.size(14.dp),
+                            modifier = Modifier.size(22.dp),
                         )
                     }
                     Box(
                         Modifier
                             .align(Alignment.TopEnd)
                             .offset(x = 2.dp, y = (-2).dp)
-                            .size(15.dp)
+                            .size(18.dp)
                             .clip(CircleShape)
-                            // Owner round 41 (item 5): blue badge, white
-                            // number (WhatsApp) — Ink follows the theme, so
-                            // the old white badge went unreadable in dark.
                             .background(ActionBlue)
                             .border(1.dp, Color.White, CircleShape),
                         contentAlignment = Alignment.Center,
                     ) {
-                        // Owner round 43 (item 2): the digit sank to the badge's
-                        // bottom rim on device (r42 centered the width — wrong
-                        // axis). Android's font padding lives INSIDE the centered
-                        // line box and shoves the glyph down; strip it and trim
-                        // the line height so the digit itself centers.
                         Text(
                             "${sel.size}",
                             color = ActionBlueInk,
-                            fontSize = 9.sp,
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             textAlign = TextAlign.Center,
                             style =
