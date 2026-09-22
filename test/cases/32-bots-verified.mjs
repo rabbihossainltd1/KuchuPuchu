@@ -8582,7 +8582,10 @@ const convBetween = (db, a, b) =>
       "r33-11c: tabs are 🙂 and GIF only — the ⬜ sticker-art and KP custom-emoji tabs (and the KP grid, EmojiRepo reads, Image/asImageBitmap) are gone from the panel; existing KP emoji messages still render through ChatScreen's CustomEmojiOrFallback",
       // v203: WhatsApp-style 3 tabs (emoji | GIF | sticker) with GIF middle — KP and ⬜ still gone, no EmojiRepo grid, no Image import
       (sticker.includes('listOf("🙂", "GIF").forEachIndexed { i, label ->') ||
-        (sticker.includes('"GIF"') && sticker.includes("tab == 0") && sticker.includes("tab == 1") && sticker.includes("tab == 2"))) &&
+        (sticker.includes('"GIF"') &&
+          sticker.includes("tab == 0") &&
+          sticker.includes("tab == 1") &&
+          sticker.includes("tab == 2"))) &&
         !sticker.includes('"KP"') &&
         !sticker.includes('"⬜"') &&
         !sticker.includes("tab == 3") &&
