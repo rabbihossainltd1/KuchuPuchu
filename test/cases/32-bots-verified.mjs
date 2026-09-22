@@ -8573,18 +8573,19 @@ const convBetween = (db, a, b) =>
         !viewer.includes("onLongPress = {"),
     );
   }
-  // Item 11c: sticker panel — emoji + GIF tabs only; the search keyboard lifts
-  // the panel (compact strip), never the message bar.
+  // Item 11c: sticker panel — v203 WhatsApp-style: emoji | GIF | sticker (GIF middle), no KP custom tabs
+  // The search keyboard lifts the panel (compact strip), never the message bar.
   {
     const sticker = kt("StickerSheet.kt");
     const chat = kt("ChatScreen.kt");
     check(
       "r33-11c: tabs are 🙂 and GIF only — the ⬜ sticker-art and KP custom-emoji tabs (and the KP grid, EmojiRepo reads, Image/asImageBitmap) are gone from the panel; existing KP emoji messages still render through ChatScreen's CustomEmojiOrFallback",
-      sticker.includes('listOf("🙂", "GIF").forEachIndexed { i, label ->') &&
+      // v203: WhatsApp-style 3 tabs (emoji | GIF | sticker) with GIF middle — KP and ⬜ still gone, no EmojiRepo grid, no Image import
+      (sticker.includes('listOf("🙂", "GIF").forEachIndexed { i, label ->') ||
+        (sticker.includes('"GIF"') && sticker.includes("tab == 0") && sticker.includes("tab == 1") && sticker.includes("tab == 2"))) &&
         !sticker.includes('"KP"') &&
         !sticker.includes('"⬜"') &&
         !sticker.includes("tab == 3") &&
-        !sticker.includes("tab == 2") &&
         !sticker.includes("EmojiRepo") &&
         !sticker.includes("import androidx.compose.foundation.Image\n") &&
         chat.includes("if (EmojiRepo.isCustomId(st)) CustomEmojiOrFallback(st)"),

@@ -270,8 +270,8 @@ fun StickerPanel(
 
         val matches = stickerMatches(query, selectedCategory.coerceAtLeast(1) - 1)
 
-        if (searching && isSearchActive) {
-            // Compact strip when keyboard visible during search
+        if (searching) {
+            // Compact strip when keyboard visible — search row + one 44 dp LazyRow, no bottom row (r33-11c)
             val strip = if (query.isBlank()) (recents + matches).distinct() else matches
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
@@ -509,8 +509,8 @@ fun StickerPanel(
             }
         }
 
-        if (!searching || !isSearchActive) {
-            // ---- BOTTOM CATEGORY BAR: WhatsApp style icon bar, no text chips ----
+        if (!searching) {
+            // ---- BOTTOM CATEGORY BAR: WhatsApp style icon bar, no text chips — hidden when keyboard up
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -539,7 +539,7 @@ fun StickerPanel(
                         Modifier
                             .size(36.dp)
                             .clip(CircleShape)
-                            .background(if (sel) Color(0x33FFFFFF) else Color.Transparent)
+                            .background(if (sel) ChipSelected else Color.Transparent)
                             .clickable {
                                 haptics.tap()
                                 if (tab != 0) tab = 0
@@ -550,7 +550,7 @@ fun StickerPanel(
                         Icon(
                             icon,
                             contentDescription = desc,
-                            tint = if (sel) Color.White else Muted,
+                            tint = if (sel) ActionBlueDeep else Muted,
                             modifier = Modifier.size(if (sel) 22.dp else 20.dp),
                         )
                     }
