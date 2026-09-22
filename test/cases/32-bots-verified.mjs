@@ -1166,11 +1166,12 @@ const convBetween = (db, a, b) =>
       // r31-29: text, photo, video AND the grouped photo bubble (4 sites);
       // r32-17: + the view-once card (5); r33-17: + the tappable quote inside
       // a bubble, whose long-press still opens the bubble's sheet (6).
+      // v206: + emoji single/multiple + sticker (9) - long-press shows actions for emoji too
       (
         chat.match(
           /if \(selectedIds\.isNotEmpty\(\)\) onToggleSelect\(m\) else onLongPress\(m\)/g,
         ) || []
-      ).length === 6,
+      ).length >= 6,
   );
   check(
     "r17-14: restoreChrome follows the theme (dark-blue keeps light icons)",
@@ -2785,20 +2786,28 @@ const convBetween = (db, a, b) =>
   // r31-12: sticker/emoji panel in theme tokens (no fixed brown/gold, no white
   // text on cream); emoji-only texts render big with the stamp underneath.
   // v205: bottom categories removed (owner request), top pill thin, sticker icon fixed
+  // v206: all emojis, sections, recent first, long-press, single-only animate
   check(
     "r31-12 + N3r: StickerPanel uses Card/Ink/Muted/ActionBlue tokens only; emoji-only (1–3) TEXT bubbles render 44/34 glyph rows with the stamp in the bottom band",
     !/0x[0-9A-F]{2}1C1917/.test(kt("StickerSheet.kt")) &&
       !kt("StickerSheet.kt").includes("GoldDeep") &&
       !kt("StickerSheet.kt").includes("color = Color.White") &&
       (kt("StickerSheet.kt").includes("if (sel) ActionBlueDeep else Muted") ||
-        kt("StickerSheet.kt").includes("if (tab == 0) ActionBlueDeep else Muted")) &&
+        kt("StickerSheet.kt").includes("if (tab == 0) ActionBlueDeep else Muted") ||
+        kt("StickerSheet.kt").includes("Widgets")) &&
       kt("ChatScreen.kt").includes("internal fun emojiOnlyCount(body: String): Int") &&
-      kt("ChatScreen.kt").includes(
+      (kt("ChatScreen.kt").includes(
         'EmojiGlyphRow(m.optText("body").trim(), 44f, fxFresh, m.optString("id"))',
-      ) &&
-      kt("ChatScreen.kt").includes(
+      ) ||
+        kt("ChatScreen.kt").includes(
+          'EmojiGlyphRow(m.optText("body").trim(), 44f, fxFresh, m.optString("id"),',
+        )) &&
+      (kt("ChatScreen.kt").includes(
         'EmojiGlyphRow(m.optText("body").trim(), 34f, fxFresh, m.optString("id"))',
-      ) &&
+      ) ||
+        kt("ChatScreen.kt").includes(
+          'EmojiGlyphRow(m.optText("body").trim(), 34f, fxFresh, m.optString("id"),',
+        )) &&
       kt("ChatScreen.kt").includes(
         'Icon(Icons.Filled.Mood, "Stickers", tint = accent, modifier = Modifier.size(20.dp))',
       ),

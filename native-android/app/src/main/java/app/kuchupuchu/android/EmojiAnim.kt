@@ -1,16 +1,16 @@
 package app.kuchupuchu.android
 
 /**
- * Item 2 + 3 hybrid (2026-09-22):
- * - Only 50 most-used Lottie assets bundled (2.7M) — Smileys pack, offline for common emojis.
- * - Rest 831+ load from Google CDN (fonts.gstatic.com) on demand, cached by Lottie.
- * - GIFs folder deleted (104M) — GIF tab now uses same Lottie system (release apk 140M -> ~40M).
- * - Size fix: static and animated states use SAME Box size (sizeSp.dp), no jump.
- *   When not playing, show frozen Lottie at progress=1f (same size) instead of Text with different metrics.
- *   Fallback to Text only if composition fails.
+ * v206 - owner feedback:
+ * - Animate only single emoji (not multiple)
+ * - Long-press shows message actions (delete/forward)
+ * - First category recent, all emojis, section headers
+ * - Sticker icon fix, search working, Tenor real GIFs
+ * - Emoji insert, sticker/gif direct send
  */
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -99,9 +99,6 @@ internal fun splitEmojiClusters(body: String): List<String> {
 
 /**
  * Hybrid Noto Lottie emoji — fixed size Box to prevent jump.
- * - Bundled (50): Asset
- * - Remote (rest): Url from Google CDN (cached)
- * - Static: frozen Lottie at progress=1f (same size) — no Text size mismatch.
  */
 @Composable
 internal fun NotoAnimatedEmoji(
@@ -117,7 +114,6 @@ internal fun NotoAnimatedEmoji(
         if (isBundled) {
             LottieCompositionSpec.Asset("noto-emoji/$codepoint.json")
         } else {
-            // Server-side: Google CDN (same as we downloaded from) — on-demand, cached
             LottieCompositionSpec.Url("https://fonts.gstatic.com/s/e/notoemoji/latest/$codepoint/lottie.json")
         }
     }
@@ -138,7 +134,6 @@ internal fun NotoAnimatedEmoji(
         }
     }
 
-    // Fixed size container — prevents jump between Text and Lottie, and between playing/static Lottie
     Box(
         modifier = modifier.size(sizeSp.dp),
         contentAlignment = Alignment.Center,
@@ -151,8 +146,6 @@ internal fun NotoAnimatedEmoji(
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
-                // Frozen at end frame (or start if never played) — same size as animated
-                // For never-played (replayKey==0), show last frame as static normal
                 LottieAnimation(
                     composition = composition,
                     progress = { 1f },
@@ -160,7 +153,6 @@ internal fun NotoAnimatedEmoji(
                 )
             }
         } else {
-            // Fallback only when Lottie fails (network offline + not bundled, or ©/®)
             Text(
                 text = emoji,
                 fontSize = sizeSp.sp,
@@ -176,18 +168,24 @@ internal fun EmojiGlyphRow(
     sizeSp: Float,
     active: Boolean,
     mid: String,
+    onLongPress: (() -> Unit)? = null,
 ) {
+    val clusters = remember(body) { splitEmojiClusters(body) }
+    val isSingle = clusters.size == 1
+    // v206: animate only single emoji, not multiple
+    val shouldAnimate = isSingle
     Row(
-        Modifier.fxPopIn(active).padding(start = 2.dp, end = 2.dp),
+        Modifier.fxPopIn(active && shouldAnimate).padding(start = 2.dp, end = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        splitEmojiClusters(body).forEachIndexed { i, ch ->
-            NotoEmojiGlyph(ch, sizeSp, active, mid, i)
+        clusters.forEachIndexed { i, ch ->
+            NotoEmojiGlyph(ch, sizeSp, active && shouldAnimate, mid, i, isSingle, onLongPress)
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun NotoEmojiGlyph(
     ch: String,
@@ -195,14 +193,17 @@ private fun NotoEmojiGlyph(
     active: Boolean,
     mid: String,
     idx: Int,
+    isSingle: Boolean,
+    onLongPress: (() -> Unit)?,
 ) {
     val scope = rememberCoroutineScope()
     val haptics = rememberHaptics()
     val animScale = fxAnimatorScale()
-    var replayKey by remember(mid, ch) { mutableStateOf(if (active && animScale > 0f) 1 else 0) }
+    var replayKey by remember(mid, ch) { mutableStateOf(if (active && animScale > 0f && isSingle) 1 else 0) }
     var lastTapMs by remember { mutableStateOf(0L) }
 
     fun replay(local: Boolean) {
+        if (!isSingle) return
         if (animScale <= 0f) return
         val now = android.os.SystemClock.uptimeMillis()
         if (now - lastTapMs < 300) return
@@ -225,19 +226,23 @@ private fun NotoEmojiGlyph(
     }
 
     LaunchedEffect(active) {
-        if (active && idx > 0) {
+        if (active && isSingle && idx > 0) {
             kotlinx.coroutines.delay((idx * 120).toLong())
             if (replayKey == 0 && animScale > 0f) replayKey = 1
         }
     }
 
-    val tap = Modifier.clickable {
-        haptics.tap()
-        replay(local = true)
-    }
-
     Box(
-        modifier = tap,
+        modifier = Modifier.combinedClickable(
+            onClick = {
+                haptics.tap()
+                if (isSingle) replay(local = true)
+            },
+            onLongClick = {
+                haptics.tap()
+                onLongPress?.invoke()
+            },
+        ),
         contentAlignment = Alignment.Center,
     ) {
         NotoAnimatedEmoji(

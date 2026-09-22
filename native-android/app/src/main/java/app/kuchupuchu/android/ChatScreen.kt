@@ -4180,15 +4180,32 @@ fun ChatScreen(nav: NavController, convId: String) {
             Box(Modifier.popUp()) {
             StickerPanel(
                 onDismiss = { showStickers = false },
-                onSend = { emoji ->
-                    // v204: emoji click inserts into composer, panel stays open (WhatsApp behavior)
-                    // No auto-close, no direct send — user can edit then send
+                onSend = { content ->
+                    // v206: sticker/gif direct send, emoji inserts via onInsert
+                    // GIF URLs are real Tenor GIFs, send as TEXT (link preview will show GIF)
+                    if (content.startsWith("http")) {
+                        sendText(content, "TEXT")
+                    } else {
+                        sendText(content, "STICKER")
+                    }
+                },
+                onInsert = { emoji ->
+                    // v206: emoji inserts into composer, panel stays open
                     input += emoji
                     Drafts.set(convId, input)
                 },
-                onInsert = { emoji ->
-                    input += emoji
-                    Drafts.set(convId, input)
+                onBackspace = {
+                    // v206: cross button removes last char/emoji from composer
+                    if (input.isNotEmpty()) {
+                        try {
+                            val last = input.codePointBefore(input.length)
+                            val cc = Character.charCount(last)
+                            input = input.substring(0, input.length - cc)
+                        } catch (_: Exception) {
+                            input = input.dropLast(1)
+                        }
+                        Drafts.set(convId, input)
+                    }
                 },
             )
             }
@@ -6220,7 +6237,7 @@ private fun MessageRow(
                         "STICKER" -> {
                             val st = m.optString("body")
                             if (EmojiRepo.isCustomId(st)) CustomEmojiOrFallback(st)
-                            else EmojiGlyphRow(st, 56f, fxFresh, m.optString("id"))
+                            else EmojiGlyphRow(st, 56f, fxFresh, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m) } })
                         }
                         "FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend, fxGrow = fxFresh)
                         // Owner round 33 (item 5): the stamp is placed by
@@ -6239,12 +6256,14 @@ private fun MessageRow(
                             // it (never over it) — now on a measured row.
                             // v169: no wrapper - the stamp rides under the
                             // bubble (outside) for every kind now.
+                            // v206: single only animates, long-press shows actions
                             if (emojiOnly == 1) {
-                                EmojiGlyphRow(m.optText("body").trim(), 44f, fxFresh, m.optString("id"))
+                                EmojiGlyphRow(m.optText("body").trim(), 44f, fxFresh, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m) } })
                             } else {
                                 // N3r: every glyph dances its own 3D move for
                                 // 3 s (arrival / tap / the other side's tap).
-                                EmojiGlyphRow(m.optText("body").trim(), 34f, fxFresh, m.optString("id"))
+                                // v206: multiple emojis don't animate, but long-press still works
+                                EmojiGlyphRow(m.optText("body").trim(), 34f, fxFresh, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m) } })
                             }
                         } else {
                             val full = m.optText("body")

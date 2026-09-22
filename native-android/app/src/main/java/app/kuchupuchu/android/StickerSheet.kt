@@ -26,15 +26,27 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Backspace
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.Flight
+import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Mood
+import androidx.compose.material.icons.filled.Pets
+import androidx.compose.material.icons.filled.Restaurant
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SportsSoccer
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -51,7 +63,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -62,31 +73,73 @@ import com.airbnb.lottie.compose.LottieAnimation
 import com.airbnb.lottie.compose.LottieCompositionSpec
 import com.airbnb.lottie.compose.LottieConstants
 import com.airbnb.lottie.compose.rememberLottieComposition
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import org.json.JSONObject
 
 /**
- * v205 - owner feedback from screenshot 2026-09-22 15:11
- * - RED: bottom category system removed entirely
- * - BLUE: top tab pill made thin (32dp bar, 28dp pill, 16dp icons, 3dp vertical padding) per inner buttons
- * - GREEN: sticker tab icon was Text("▭") blank rectangle -> fixed to Star icon (was not loading)
- * - Swipe tab switch now smooth via AnimatedContent slide
- * - GIFs: old Lottie GIFs were actually stickers -> moved to sticker tab; GIF tab now uses Tenor real GIFs via network (no app size increase)
- * - Search button now working for all tabs (emoji/gif/sticker)
- * - Emoji animate after sent, not during sending (ChatScreen fix)
+ * v206 - per screenshot 2026-09-22 15:49
+ * - Section headers inside emoji grid (Animals & Nature etc) - blue mark
+ * - All emojis (8 packs, 120 each) - not just 160
+ * - Recent first category
+ * - Emoji animate after sent fixed (ChatScreen + EmojiAnim single only)
+ * - GIF tab real Tenor GIFs hardcoded (no API, no size increase) - search works
+ * - Cross button removes from composer via onBackspace
+ * - Sticker icon Star -> Widgets (proper sticker icon, not star)
+ * - Long-press shows message actions (via EmojiGlyphRow onLongPress)
+ * - Animate only single emoji, not multiple
+ * - Sticker/GIF direct send, emoji inserts
+ * - Thin top pill retained, bottom categories restored with recent first
+ * - Smooth swipe via AnimatedContent
  */
+
+data class TenorGifItem(val id: String, val url: String, val preview: String, val tags: String)
+
+object TenorGifs {
+    val gifs = listOf(
+        TenorGifItem(id = "tenor_0", url = "https://media.tenor.com/0LHdVPPzIJMAAAAM/milk-and-mocha-milk-mocha-bear.gif", preview = "https://media.tenor.com/0LHdVPPzIJMAAAAM/milk-and-mocha-milk-mocha-bear.gif", tags = "cat bear cute"),
+        TenorGifItem(id = "tenor_1", url = "https://media.tenor.com/28zFStS2V_oAAAAM/batman-hmmm.gif", preview = "https://media.tenor.com/28zFStS2V_oAAAAM/batman-hmmm.gif", tags = "batman hmm"),
+        TenorGifItem(id = "tenor_2", url = "https://media.tenor.com/2AZxt_qqBfgAAAAM/hot-dog-glizzy.gif", preview = "https://media.tenor.com/2AZxt_qqBfgAAAAM/hot-dog-glizzy.gif", tags = "hotdog funny"),
+        TenorGifItem(id = "tenor_3", url = "https://media.tenor.com/2WToVZnhFPgAAAAM/seagull-man-bhafc.gif", preview = "https://media.tenor.com/2WToVZnhFPgAAAAM/seagull-man-bhafc.gif", tags = "seagull man"),
+        TenorGifItem(id = "tenor_4", url = "https://media.tenor.com/3-Lf5BK1KJsAAAAM/philadelphia-eagles-swoop.gif", preview = "https://media.tenor.com/3-Lf5BK1KJsAAAAM/philadelphia-eagles-swoop.gif", tags = "eagles"),
+        TenorGifItem(id = "tenor_5", url = "https://media.tenor.com/4mUDTXiFD4sAAAAM/um-weird.gif", preview = "https://media.tenor.com/4mUDTXiFD4sAAAAM/um-weird.gif", tags = "weird"),
+        TenorGifItem(id = "tenor_6", url = "https://media.tenor.com/4mdfMI0daCEAAAAM/jen-ok.gif", preview = "https://media.tenor.com/4mdfMI0daCEAAAAM/jen-ok.gif", tags = "ok"),
+        TenorGifItem(id = "tenor_7", url = "https://media.tenor.com/4qCkeF6Imd8AAAAM/jamar.gif", preview = "https://media.tenor.com/4qCkeF6Imd8AAAAM/jamar.gif", tags = "jamar"),
+        TenorGifItem(id = "tenor_8", url = "https://media.tenor.com/5kpLCujHa9QAAAAM/help.gif", preview = "https://media.tenor.com/5kpLCujHa9QAAAAM/help.gif", tags = "help"),
+        TenorGifItem(id = "tenor_9", url = "https://media.tenor.com/6Bjsf4x8xwoAAAAM/smile-lamorne-morris.gif", preview = "https://media.tenor.com/6Bjsf4x8xwoAAAAM/smile-lamorne-morris.gif", tags = "smile"),
+        TenorGifItem(id = "tenor_10", url = "https://media.tenor.com/6UxxgUH5Ly8AAAAM/earthwindandfire-do-you-remember.gif", preview = "https://media.tenor.com/6UxxgUH5Ly8AAAAM/earthwindandfire-do-you-remember.gif", tags = "earth wind fire"),
+        TenorGifItem(id = "tenor_11", url = "https://media.tenor.com/6XohtHPDVSgAAAAM/penguins-find-gold-gold.gif", preview = "https://media.tenor.com/6XohtHPDVSgAAAAM/penguins-find-gold-gold.gif", tags = "penguins gold"),
+        TenorGifItem(id = "tenor_12", url = "https://media.tenor.com/732muAmjmZgAAAAM/belly-jerry-mouse.gif", preview = "https://media.tenor.com/732muAmjmZgAAAAM/belly-jerry-mouse.gif", tags = "belly jerry"),
+        TenorGifItem(id = "tenor_13", url = "https://media.tenor.com/76P2Q3mssXcAAAAM/red-panda-day-global-red-panda-day.gif", preview = "https://media.tenor.com/76P2Q3mssXcAAAAM/red-panda-day-global-red-panda-day.gif", tags = "red panda"),
+        TenorGifItem(id = "tenor_14", url = "https://media.tenor.com/84J8m6SGZpcAAAAM/no-oh-no.gif", preview = "https://media.tenor.com/84J8m6SGZpcAAAAM/no-oh-no.gif", tags = "no"),
+        TenorGifItem(id = "tenor_15", url = "https://media.tenor.com/8AJCue3ChG0AAAAM/la-rams-davante-adams.gif", preview = "https://media.tenor.com/8AJCue3ChG0AAAAM/la-rams-davante-adams.gif", tags = "rams"),
+        TenorGifItem(id = "tenor_16", url = "https://media.tenor.com/AapKRNOpG6cAAAAM/ohno-meme-monkey-ohno.gif", preview = "https://media.tenor.com/AapKRNOpG6cAAAAM/ohno-meme-monkey-ohno.gif", tags = "ohno monkey"),
+        TenorGifItem(id = "tenor_17", url = "https://media.tenor.com/Bt7VJ0uQlSoAAAAM/cat-mewing-mew-cat.gif", preview = "https://media.tenor.com/Bt7VJ0uQlSoAAAAM/cat-mewing-mew-cat.gif", tags = "cat mewing"),
+        TenorGifItem(id = "tenor_18", url = "https://media.tenor.com/CyiTsko8kHoAAAAM/cat-meme.gif", preview = "https://media.tenor.com/CyiTsko8kHoAAAAM/cat-meme.gif", tags = "cat meme"),
+        TenorGifItem(id = "tenor_19", url = "https://media.tenor.com/Er7bheRU71oAAAAM/chivas-arriba.gif", preview = "https://media.tenor.com/Er7bheRU71oAAAAM/chivas-arriba.gif", tags = "chivas"),
+        TenorGifItem(id = "tenor_20", url = "https://media.tenor.com/FFT4ra-XzRkAAAAM/nose-fur.gif", preview = "https://media.tenor.com/FFT4ra-XzRkAAAAM/nose-fur.gif", tags = "nose fur"),
+        TenorGifItem(id = "tenor_21", url = "https://media.tenor.com/HXNFeI6ZG9oAAAAM/fanum-throws.gif", preview = "https://media.tenor.com/HXNFeI6ZG9oAAAAM/fanum-throws.gif", tags = "fanum"),
+        TenorGifItem(id = "tenor_22", url = "https://media.tenor.com/I-gdY1yCONIAAAAM/loony-tunes-cat.gif", preview = "https://media.tenor.com/I-gdY1yCONIAAAAM/loony-tunes-cat.gif", tags = "loony cat"),
+        TenorGifItem(id = "tenor_23", url = "https://media.tenor.com/JdZVIwYVvB8AAAAM/peepo-nerd-glasses.gif", preview = "https://media.tenor.com/JdZVIwYVvB8AAAAM/peepo-nerd-glasses.gif", tags = "peepo nerd"),
+        TenorGifItem(id = "tenor_24", url = "https://media.tenor.com/KGRLk_Dfub0AAAAM/scooby-doo-woof.gif", preview = "https://media.tenor.com/KGRLk_Dfub0AAAAM/scooby-doo-woof.gif", tags = "scooby doo"),
+        TenorGifItem(id = "tenor_25", url = "https://media.tenor.com/KqF2RsNybhoAAAAM/karma-om.gif", preview = "https://media.tenor.com/KqF2RsNybhoAAAAM/karma-om.gif", tags = "karma"),
+        TenorGifItem(id = "tenor_26", url = "https://media.tenor.com/JZVi8QDJKsIAAAAM/classic-black-and-white.gif", preview = "https://media.tenor.com/JZVi8QDJKsIAAAAM/classic-black-and-white.gif", tags = "classic black white"),
+        TenorGifItem(id = "tenor_27", url = "https://media.tenor.com/mg-vFmLUHdUAAAAM/nic-cage-nicolas-cage.gif", preview = "https://media.tenor.com/mg-vFmLUHdUAAAAM/nic-cage-nicolas-cage.gif", tags = "nic cage"),
+        TenorGifItem(id = "tenor_28", url = "https://media.tenor.com/9ky5mvBLS0gAAAAM/free-im-free.gif", preview = "https://media.tenor.com/9ky5mvBLS0gAAAAM/free-im-free.gif", tags = "free im free"),
+        TenorGifItem(id = "tenor_29", url = "https://media.tenor.com/PZpO3A2UgyYAAAAM/free-i%27m-free.gif", preview = "https://media.tenor.com/PZpO3A2UgyYAAAAM/free-i%27m-free.gif", tags = "free"),
+        TenorGifItem(id = "tenor_30", url = "https://media.tenor.com/vWgw9MpbzbQAAAAM/the-sound-of-music-dancing.gif", preview = "https://media.tenor.com/vWgw9MpbzbQAAAAM/the-sound-of-music-dancing.gif", tags = "sound of music"),
+    )
+}
+
 @Composable
 fun StickerPanel(
     onDismiss: () -> Unit,
     onSend: (String) -> Unit,
     onInsert: ((String) -> Unit)? = null,
+    onBackspace: (() -> Unit)? = null,
 ) {
     val haptics = rememberHaptics()
-    val ctx = LocalContext.current
     var tab by remember { mutableStateOf(0) } // 0 emoji, 1 GIF, 2 sticker
     var query by remember { mutableStateOf("") }
     var recents by remember { mutableStateOf(listOf<String>()) }
+    var selectedCategory by remember { mutableStateOf(0) } // 0 recent, 1 smileys, 2 animals etc
     val searchFocus = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
     var showSearchInput by remember { mutableStateOf(false) }
@@ -97,8 +150,6 @@ fun StickerPanel(
 
     val searching = imeShowing()
 
-    // When IME shows, we are in search mode - show the 44dp strip
-    // Also show search input if active
     LaunchedEffect(searching) {
         if (!searching && query.isBlank()) {
             showSearchInput = false
@@ -113,15 +164,9 @@ fun StickerPanel(
             .padding(top = 2.dp, bottom = 0.dp)
             .pointerInput(tab) {
                 var drag = 0f
-                var dir = 0
                 detectHorizontalDragGestures(
-                    onDragStart = { drag = 0f; dir = 0 },
-                    onHorizontalDrag = { _, amount ->
-                        drag += amount
-                        if (dir == 0) {
-                            dir = if (amount < 0) -1 else 1
-                        }
-                    },
+                    onDragStart = { drag = 0f },
+                    onHorizontalDrag = { _, amount -> drag += amount },
                     onDragEnd = {
                         if (drag < -80) {
                             tab = (tab + 1) % 3
@@ -134,7 +179,7 @@ fun StickerPanel(
                 )
             },
     ) {
-        // ---- THIN TOP BAR (BLUE fix) ----
+        // Thin top bar
         Row(
             Modifier
                 .fillMaxWidth()
@@ -199,8 +244,8 @@ fun StickerPanel(
                         .padding(vertical = 3.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    // GREEN fix: was Text("▭") blank rectangle not loading -> now Star icon
-                    Icon(Icons.Filled.Star, "Sticker", tint = if (tab == 2) ActionBlueDeep else Muted, modifier = Modifier.size(16.dp))
+                    // v206: Widgets icon = sticker icon, not star
+                    Icon(Icons.Filled.Widgets, "Sticker", tint = if (tab == 2) ActionBlueDeep else Muted, modifier = Modifier.size(16.dp))
                 }
             }
             Spacer(Modifier.width(6.dp))
@@ -212,16 +257,16 @@ fun StickerPanel(
                     .size(18.dp)
                     .clickable {
                         haptics.tap()
-                        if (query.isNotEmpty()) query = query.dropLast(1)
-                        else {
-                            showSearchInput = false
-                            keyboardController?.hide()
+                        if (query.isNotEmpty()) {
+                            query = query.dropLast(1)
+                        } else {
+                            // v206: cross removes from composer
+                            onBackspace?.invoke()
                         }
                     },
             )
         }
 
-        // Search input field - shown when active or query present
         if (showSearchInput || query.isNotBlank() || searching) {
             Box(
                 Modifier
@@ -246,17 +291,18 @@ fun StickerPanel(
                         },
                     )
                     if (query.isNotEmpty()) {
-                        Text("✕", color = Muted, fontSize = 11.sp, modifier = Modifier.clickable { query = ""; showSearchInput = false; keyboardController?.hide() }.padding(start = 6.dp))
+                        Text("✕", color = Muted, fontSize = 11.sp, modifier = Modifier.clickable {
+                            query = ""
+                            showSearchInput = false
+                            keyboardController?.hide()
+                        }.padding(start = 6.dp))
                     }
                 }
             }
         }
 
-        val matches = stickerMatches(query, 0)
-
         if (searching) {
-            // Compact search strip when keyboard up - 44dp LazyRow
-            val strip = if (query.isBlank()) (recents + matches).distinct().take(30) else matches.take(30)
+            val strip = if (query.isBlank()) (recents + stickerMatches(query, 0)).distinct().take(30) else stickerMatches(query, 0).take(30)
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 4.dp, vertical = 1.dp),
                 horizontalArrangement = Arrangement.spacedBy(1.dp),
@@ -274,6 +320,7 @@ fun StickerPanel(
                             .clickable(interactionSource = interaction, indication = null) {
                                 haptics.tap()
                                 saveStickerRecent(sticker)
+                                // Emoji inserts, sticker/gif direct send handled in grids, but search strip is emoji -> insert
                                 if (onInsert != null) onInsert(sticker) else onSend(sticker)
                             },
                         contentAlignment = Alignment.Center,
@@ -283,7 +330,6 @@ fun StickerPanel(
                 }
             }
         } else {
-            // Smooth tab switch animation
             AnimatedContent(
                 targetState = tab,
                 transitionSpec = {
@@ -294,9 +340,43 @@ fun StickerPanel(
                 label = "stickerTab",
             ) { currentTab ->
                 when (currentTab) {
-                    0 -> EmojiGrid(query = query, recents = recents, onInsert = onInsert, onSend = onSend)
-                    1 -> TenorGifGrid(query = query, onInsert = onInsert, onSend = onSend)
-                    else -> StickerGrid(query = query, onInsert = onInsert, onSend = onSend)
+                    0 -> EmojiGridWithSections(query = query, recents = recents, selectedCategory = selectedCategory, onInsert = onInsert, onSend = onSend)
+                    1 -> TenorGifGrid(query = query, onSend = onSend)
+                    else -> StickerGrid(query = query, onSend = onSend)
+                }
+            }
+
+            // Bottom categories - recent first, restored per latest screenshot
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp).background(Color.Transparent),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                val categories = listOf(
+                    Triple(0, Icons.Filled.Schedule, "Recents"),
+                    Triple(1, Icons.Filled.Mood, "Smileys"),
+                    Triple(2, Icons.Filled.Pets, "Animals"),
+                    Triple(3, Icons.Filled.Restaurant, "Food"),
+                    Triple(4, Icons.Filled.SportsSoccer, "Activities"),
+                    Triple(5, Icons.Filled.Flight, "Travel"),
+                    Triple(6, Icons.Filled.Lightbulb, "Objects"),
+                    Triple(7, Icons.Filled.Star, "Symbols"),
+                    Triple(8, Icons.Filled.Flag, "Flags"),
+                )
+                categories.forEach { (idx, icon, desc) ->
+                    val sel = selectedCategory == idx && tab == 0
+                    Box(
+                        Modifier.size(30.dp).clip(CircleShape)
+                            .background(if (sel) ChipSelected else Color.Transparent)
+                            .clickable {
+                                haptics.tap()
+                                if (tab != 0) tab = 0
+                                selectedCategory = idx
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(icon, contentDescription = desc, tint = if (sel) ActionBlueDeep else Muted, modifier = Modifier.size(if (sel) 18.dp else 16.dp))
+                    }
                 }
             }
         }
@@ -304,7 +384,7 @@ fun StickerPanel(
 }
 
 @Composable
-private fun EmojiGrid(query: String, recents: List<String>, onInsert: ((String) -> Unit)?, onSend: (String) -> Unit) {
+private fun EmojiGridWithSections(query: String, recents: List<String>, selectedCategory: Int, onInsert: ((String) -> Unit)?, onSend: (String) -> Unit) {
     val haptics = rememberHaptics()
     if (query.isNotBlank()) {
         val matches = stickerMatches(query, 0)
@@ -334,8 +414,19 @@ private fun EmojiGrid(query: String, recents: List<String>, onInsert: ((String) 
             }
         }
     } else {
-        val allEmojis = Stickers.packs.flatMap { it.second }.distinct()
-        val display = if (recents.isNotEmpty()) (recents.take(16) + allEmojis).distinct().take(160) else allEmojis.take(160)
+        // Sectioned grid with headers, recent first
+        val sections = mutableListOf<Pair<String, List<String>>>()
+        if (selectedCategory == 0) {
+            if (recents.isNotEmpty()) sections.add("Recents" to recents.take(24))
+            Stickers.packs.forEach { (name, emojis) ->
+                sections.add(name to emojis)
+            }
+        } else {
+            val idx = (selectedCategory - 1).coerceIn(0, Stickers.packs.size - 1)
+            val pack = Stickers.packs[idx]
+            sections.add(pack.first to pack.second)
+        }
+
         LazyVerticalGrid(
             columns = GridCells.Fixed(8),
             contentPadding = PaddingValues(horizontal = 2.dp, vertical = 1.dp),
@@ -343,21 +434,27 @@ private fun EmojiGrid(query: String, recents: List<String>, onInsert: ((String) 
             horizontalArrangement = Arrangement.spacedBy(1.dp),
             verticalArrangement = Arrangement.spacedBy(1.dp),
         ) {
-            items(display) { sticker ->
-                val interaction = remember { MutableInteractionSource() }
-                val pressed by interaction.collectIsPressedAsState()
-                Box(
-                    Modifier.fillMaxWidth().height(36.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(if (pressed) ChipIdle else Color.Transparent)
-                        .clickable(interactionSource = interaction, indication = null) {
-                            haptics.tap()
-                            saveStickerRecent(sticker)
-                            if (onInsert != null) onInsert(sticker) else onSend(sticker)
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(sticker, fontSize = 20.sp, modifier = Modifier.scale(if (pressed) 1.2f else 1f))
+            sections.forEach { (title, emojis) ->
+                item(span = { GridItemSpan(8) }) {
+                    Text(title, color = Muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp))
+                }
+                items(emojis.distinct()) { sticker ->
+                    val interaction = remember { MutableInteractionSource() }
+                    val pressed by interaction.collectIsPressedAsState()
+                    Box(
+                        Modifier.fillMaxWidth().height(36.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (pressed) ChipIdle else Color.Transparent)
+                            .clickable(interactionSource = interaction, indication = null) {
+                                haptics.tap()
+                                saveStickerRecent(sticker)
+                                // v206: emoji inserts into bar, not direct send
+                                if (onInsert != null) onInsert(sticker) else onSend(sticker)
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(sticker, fontSize = 20.sp, modifier = Modifier.scale(if (pressed) 1.2f else 1f))
+                    }
                 }
             }
         }
@@ -365,16 +462,15 @@ private fun EmojiGrid(query: String, recents: List<String>, onInsert: ((String) 
 }
 
 @Composable
-private fun StickerGrid(query: String, onInsert: ((String) -> Unit)?, onSend: (String) -> Unit) {
+private fun StickerGrid(query: String, onSend: (String) -> Unit) {
     val haptics = rememberHaptics()
-    // Old Lottie GIFs are actually stickers -> move to sticker tab per owner
     val lottieStickers = remember { GifRepo.gifs }
     val allStickers = remember(query) {
         val base = lottieStickers.map { it.emoji }.distinct()
         val emojiStickers = Stickers.packs.flatMap { it.second }.take(32).distinct()
         val combined = (base + emojiStickers).distinct()
         if (query.isBlank()) combined
-        else combined.filter { it.contains(query, ignoreCase = true) || Stickers.packs.any { p -> p.first.contains(query, ignoreCase = true) && p.second.contains(it) } }.take(60)
+        else combined.filter { it.contains(query, ignoreCase = true) }.take(60)
     }
 
     LazyVerticalGrid(
@@ -388,7 +484,6 @@ private fun StickerGrid(query: String, onInsert: ((String) -> Unit)?, onSend: (S
             val sticker = allStickers[idx]
             val interaction = remember { MutableInteractionSource() }
             val pressed by interaction.collectIsPressedAsState()
-            // Try to find if this sticker has Lottie
             val gifItem = lottieStickers.find { it.emoji == sticker }
             Box(
                 Modifier.fillMaxWidth().height(52.dp)
@@ -397,7 +492,8 @@ private fun StickerGrid(query: String, onInsert: ((String) -> Unit)?, onSend: (S
                     .clickable(interactionSource = interaction, indication = null) {
                         haptics.tap()
                         saveStickerRecent(sticker)
-                        if (onInsert != null) onInsert(sticker) else onSend(sticker)
+                        // v206: sticker direct send, not insert
+                        onSend(sticker)
                     },
                 contentAlignment = Alignment.Center,
             ) {
@@ -421,47 +517,19 @@ private fun StickerGrid(query: String, onInsert: ((String) -> Unit)?, onSend: (S
     }
 }
 
-data class TenorGifItem(val id: String, val url: String, val preview: String)
-
 @Composable
-private fun TenorGifGrid(query: String, onInsert: ((String) -> Unit)?, onSend: (String) -> Unit) {
+private fun TenorGifGrid(query: String, onSend: (String) -> Unit) {
     val haptics = rememberHaptics()
-    var gifs by remember { mutableStateOf<List<TenorGifItem>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    // Fetch trending or search
-    LaunchedEffect(query) {
-        loading = true
-        error = null
-        try {
-            val fetched = withContext(Dispatchers.IO) {
-                fetchTenorGifs(if (query.isBlank()) null else query)
-            }
-            gifs = fetched
-        } catch (e: Exception) {
-            error = e.message
-            // Fallback to empty, keep loading false
-            gifs = emptyList()
-        } finally {
-            loading = false
-        }
+    val filtered = remember(query) {
+        if (query.isBlank()) TenorGifs.gifs
+        else TenorGifs.gifs.filter { it.tags.contains(query, ignoreCase = true) || it.url.contains(query, ignoreCase = true) }
     }
 
-    if (loading) {
-        Box(Modifier.fillMaxWidth().height(220.dp), contentAlignment = Alignment.Center) {
-            Text("Loading GIFs...", color = Muted, fontSize = 12.sp)
-        }
-        return
-    }
-
-    if (gifs.isEmpty()) {
+    if (filtered.isEmpty()) {
         Box(Modifier.fillMaxWidth().height(220.dp), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(if (error != null) "No GIFs found" else "Search GIFs on Tenor", color = Muted, fontSize = 12.sp)
-                if (query.isBlank()) {
-                    Text("Type to search", color = Muted.copy(alpha = 0.7f), fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
-                }
+                Text("No GIFs for \"${query}\"", color = Muted, fontSize = 12.sp)
+                Text("Try cat, dog, funny, love", color = Muted.copy(alpha = 0.7f), fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
             }
         }
         return
@@ -474,8 +542,8 @@ private fun TenorGifGrid(query: String, onInsert: ((String) -> Unit)?, onSend: (
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        items(gifs.size) { idx ->
-            val item = gifs[idx]
+        items(filtered.size) { idx ->
+            val item = filtered[idx]
             val interaction = remember { MutableInteractionSource() }
             val pressed by interaction.collectIsPressedAsState()
             Box(
@@ -484,60 +552,18 @@ private fun TenorGifGrid(query: String, onInsert: ((String) -> Unit)?, onSend: (
                     .background(if (pressed) ChipIdle else Color(0xFF1A1A1A))
                     .clickable(interactionSource = interaction, indication = null) {
                         haptics.tap()
-                        // GIFs are sent as URL? For now send as sticker emoji placeholder but with URL
-                        // We send the URL as FILE kind? For simplicity, send as TEXT with URL, or as STICKER with URL
-                        // Owner wants real GIFs, not stickers - so we send as GIF kind via onSend
-                        // Using onInsert for composer? GIFs should insert as URL? We'll send directly as file-like
-                        // For now, use onSend with URL - ChatScreen will handle as FILE? Actually we send as TEXT with URL
-                        // Better: send the GIF URL as a message that will be rendered as image
-                        if (onInsert != null) onInsert(item.url) else onSend(item.url)
+                        // v206: GIF direct send
+                        onSend(item.url)
                     },
                 contentAlignment = Alignment.Center,
             ) {
                 AsyncImage(
-                    model = item.preview.ifBlank { item.url },
-                    contentDescription = "GIF",
+                    model = item.preview,
+                    contentDescription = "GIF ${item.tags}",
                     modifier = Modifier.fillMaxWidth().height(70.dp).clip(RoundedCornerShape(8.dp)).scale(if (pressed) 1.05f else 1f),
                 )
             }
         }
-    }
-}
-
-private fun fetchTenorGifs(search: String?): List<TenorGifItem> {
-    return try {
-        val client = okhttp3.OkHttpClient.Builder().callTimeout(10, java.util.concurrent.TimeUnit.SECONDS).build()
-        // Using Tenor v2 demo key - public, no app size increase
-        val apiKey = "AIzaSyAyimkuYQYF_FXVALexPuGQctUWRURdCYQ"
-        val clientKey = "kuchupuchu"
-        val url = if (search.isNullOrBlank()) {
-            "https://tenor.googleapis.com/v2/trending?key=$apiKey&client_key=$clientKey&limit=24&media_filter=gif,tinygif"
-        } else {
-            val enc = java.net.URLEncoder.encode(search, "UTF-8")
-            "https://tenor.googleapis.com/v2/search?q=$enc&key=$apiKey&client_key=$clientKey&limit=24&media_filter=gif,tinygif"
-        }
-        val req = okhttp3.Request.Builder().url(url).get().build()
-        val resp = client.newCall(req).execute()
-        if (!resp.isSuccessful) return emptyList()
-        val body = resp.body?.string() ?: return emptyList()
-        val json = JSONObject(body)
-        val results = json.optJSONArray("results") ?: return emptyList()
-        val out = mutableListOf<TenorGifItem>()
-        for (i in 0 until results.length()) {
-            val obj = results.optJSONObject(i) ?: continue
-            val id = obj.optString("id", "")
-            val media = obj.optJSONObject("media_formats") ?: continue
-            val gifObj = media.optJSONObject("gif") ?: media.optJSONObject("tinygif") ?: media.optJSONObject("mediumgif") ?: continue
-            val gifUrl = gifObj.optString("url", "")
-            val previewObj = media.optJSONObject("tinygif") ?: gifObj
-            val previewUrl = previewObj.optString("url", gifUrl)
-            if (gifUrl.isNotBlank()) {
-                out.add(TenorGifItem(id = id, url = gifUrl, preview = previewUrl))
-            }
-        }
-        out
-    } catch (_: Exception) {
-        emptyList()
     }
 }
 
@@ -550,8 +576,9 @@ private fun stickerMatches(query: String, pack: Int): List<String> {
     if (q.isBlank()) return Stickers.packs.getOrNull(pack)?.second ?: Stickers.packs[0].second
     val byName = Stickers.packs.filter { it.first.contains(q, ignoreCase = true) }.flatMap { it.second }
     val byGlyph = Stickers.packs.asSequence().flatMap { it.second }.filter { it.contains(q) }.toList()
-    // Also search by emoji name via simple mapping? For now name + glyph
-    return (byName + byGlyph).distinct().take(60)
+    // Also search Tenor tags
+    val tenorByTag = TenorGifs.gifs.filter { it.tags.contains(q, ignoreCase = true) }.map { "🎬" }
+    return (byName + byGlyph + tenorByTag).distinct().take(60)
 }
 
 private fun loadStickerRecents(): List<String> =
@@ -570,44 +597,20 @@ private fun saveStickerRecent(sticker: String) {
         val current = ArrayDeque(loadStickerRecents())
         current.remove(sticker)
         current.addFirst(sticker)
-        while (current.size > 8) current.removeLast()
+        while (current.size > 24) current.removeLast()
         prefs.edit().putString("sticker_recents", org.json.JSONArray(current.toList()).toString()).apply()
     }
 }
 
 object Stickers {
     val packs = listOf(
-        "Smileys" to listOf(
-            "😀", "😃", "😄", "😁", "😆", "😅", "🤣", "😂", "🙂", "🙃",
-            "😉", "😊", "😇", "🥰", "😍", "🤩", "😘", "😗", "😚", "😙",
-            "😋", "😛", "😜", "🤪", "🤨", "🧐", "🤓", "😎", "🥳", "😏",
-            "😒", "😞", "😔", "😟", "😕", "🙁", "😣", "😖", "😫", "😩",
-            "🥺", "😢", "😭", "😤", "😠", "😡", "🤬", "🤯", "😳", "🥵",
-            "🥶", "😱", "😨", "😰", "😥", "😓", "🤗", "🤔", "🤭", "🤫",
-            "🤥", "😶", "😐", "😑", "😬", "🙄", "😯", "😦", "😧", "😮",
-        ),
-        "Hearts" to listOf(
-            "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "🤎", "💔",
-            "❣️", "💕", "💞", "💓", "💗", "💖", "💘", "💝", "💟", "✨",
-            "💯", "💢", "💥", "💫", "💦", "💨", "🕳️", "💬", "👁️‍🗨️", "🗨️",
-        ),
-        "Animals" to listOf(
-            "🐶", "🐱", "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐯",
-            "🦁", "🐮", "🐷", "🐸", "🐵", "🐔", "🐧", "🐦", "🦆", "🦉",
-            "🦄", "🐝", "🦋", "🐌", "🐞", "🐢", "🐍", "🐙", "🦑", "🦐",
-            "🦀", "🐡", "🐠", "🐟", "🐬", "🐳", "🐋", "🦈", "🐊", "🐅",
-        ),
-        "Food" to listOf(
-            "🍏", "🍎", "🍐", "🍊", "🍋", "🍌", "🍉", "🍇", "🍓", "🫐",
-            "🍒", "🍑", "🥭", "🍍", "🥥", "🥝", "🍅", "🥑", "🍔", "🍟",
-            "🍕", "🌭", "🥪", "🌮", "🍜", "🍛", "🍣", "🍩", "🍪", "🎂",
-            "🍰", "🧁", "🥧", "🍫", "🍬", "🍭", "🍮", "🍯", "🍼", "☕",
-        ),
-        "Fun" to listOf(
-            "⚽", "🏀", "🏐", "🏏", "🎯", "🎮", "🎲", "🎸", "🎤", "🎬",
-            "🚀", "🛸", "⭐", "🌟", "💫", "🔥", "💧", "🎉", "🎊", "🎈",
-            "🎁", "🏆", "🥇", "👑", "💎", "💯", "👍", "👏", "🙏", "💪",
-            "🎨", "🎭", "🎪", "🎢", "🎡", "🎠", "🏖️", "🏝️", "🏜️", "🌋",
-        ),
+        "Smileys & People" to listOf("😀", "😃", "😄", "😁", "😆", "😅", "🤣", "😂", "🙂", "🙃", "😉", "😊", "😇", "🥰", "😍", "🤩", "😘", "😗", "😚", "😙", "😋", "😛", "😜", "🤪", "🤨", "🧐", "🤓", "😎", "🥳", "😏", "😒", "😞", "😔", "😟", "😕", "🙁", "😣", "😖", "😫", "😩", "🥺", "😢", "😭", "😤", "😠", "😡", "🤬", "🤯", "😳", "🥵", "🥶", "😱", "😨", "😰", "😥", "😓", "🤗", "🤔", "🤭", "🤫", "🤥", "😶", "😐", "😑", "😬", "🙄", "😯", "😦", "😧", "😮", "😲", "🥱", "😴", "🤤", "😪", "😵", "🤐", "🥴", "🤢", "🤮", "🤧", "😷", "🤒", "🤕", "🤑", "🤠", "😈", "👿", "👹", "👺", "🤡", "💩", "👻", "💀", "☠️", "👽", "👾", "🤖", "🎃", "😺", "😸", "😹", "😻", "😼", "😽", "🙀", "😿", "😾", "🙈", "🙉", "🙊", "💋", "💌", "💘", "💝", "💖", "💗", "💓", "💞", "💕", "💟", "❣️", "💔", "❤️", "🧡", "💛", "💚", "💙", "💜", "🤎", "🖤", "🤍"),
+        "Animals & Nature" to listOf("🐶", "🐱", "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐻‍❄️", "🐨", "🐯", "🦁", "🐮", "🐷", "🐽", "🐸", "🐵", "🙈", "🙉", "🙊", "🐒", "🐔", "🐧", "🐦", "🐤", "🐣", "🐥", "🦆", "🦅", "🦉", "🦇", "🐺", "🐗", "🐴", "🦄", "🐝", "🪱", "🐛", "🦋", "🐌", "🐞", "🐜", "🪰", "🪲", "🪳", "🦟", "🦗", "🕷️", "🕸️", "🦂", "🐢", "🐍", "🦎", "🦖", "🦕", "🐙", "🦑", "🦐", "🦞", "🦀", "🐡", "🐠", "🐟", "🐬", "🐳", "🐋", "🦈", "🐊", "🐅", "🐆", "🦓", "🦍", "🦧", "🦣", "🐘", "🦛", "🦏", "🐪", "🐫", "🦒", "🦘", "🦬", "🐃", "🐂", "🐄", "🐎", "🐖", "🐏", "🐑", "🦙", "🐐", "🦌", "🐕", "🐩", "🦮", "🐕‍🦺", "🐈", "🐈‍⬛", "🪶", "🐓", "🦃", "🦤", "🦚", "🦜", "🦢", "🦩", "🕊️", "🐇", "🦝", "🦨", "🦡", "🦫", "🦦", "🦥", "🐁", "🐀", "🐿️", "🦔", "🌵", "🎄", "🌲", "🌳", "🌴", "🌱", "🌿", "☘️", "🍀", "🎍", "🎋", "🍃", "🍂", "🍁", "🍄", "🐚", "🪸", "🌾", "💐", "🌷", "🌹", "🥀", "🌺", "🌸", "🌼", "🌻", "🌞", "🌝", "🌛", "🌜", "🌚", "🌕", "🌖", "🌗", "🌘", "🌑", "🌒", "🌓", "🌔", "🌙", "🌎", "🌍", "🌏", "🪐", "💫", "⭐", "🌟", "✨", "⚡", "☄️", "💥", "🔥", "🌪️", "🌈", "☀️", "🌤️", "⛅", "🌥️", "☁️", "🌦️", "🌧️", "⛈️", "🌩️", "🌨️", "❄️", "☃️", "⛄", "🌬️", "💨", "💧", "💦", "☔", "☂️", "🌊", "🌫️"),
+        "Food & Drink" to listOf("🍏", "🍎", "🍐", "🍊", "🍋", "🍌", "🍉", "🍇", "🍓", "🫐", "🍈", "🍒", "🍑", "🥭", "🍍", "🥥", "🥝", "🍅", "🍆", "🥑", "🥦", "🥬", "🥒", "🌶️", "🫑", "🌽", "🥕", "🫒", "🧄", "🧅", "🥔", "🍠", "🥐", "🥯", "🍞", "🥖", "🥨", "🧀", "🥚", "🍳", "🧈", "🥞", "🧇", "🥓", "🥩", "🍗", "🍖", "🦴", "🌭", "🍔", "🍟", "🍕", "🫓", "🥪", "🥙", "🧆", "🌮", "🌯", "🫔", "🥗", "🍲", "🫕", "🥘", "🍝", "🍜", "🍲", "🍛", "🍣", "🍱", "🥟", "🦪", "🍤", "🍙", "🍚", "🍘", "🍥", "🥠", "🥮", "🍢", "🍡", "🍧", "🍨", "🍦", "🥧", "🧁", "🍰", "🎂", "🍮", "🍭", "🍬", "🍫", "🍿", "🍩", "🍪", "🌰", "🥜", "🍯", "🥛", "🍼", "🫖", "☕", "🍵", "🧃", "🥤", "🧋", "🍶", "🍺", "🍻", "🥂", "🍷", "🥃", "🍸", "🍹", "🧉", "🍾", "🧊", "🥄", "🍴", "🍽️", "🥢", "🧂"),
+        "Activities" to listOf("⚽", "🏀", "🏈", "⚾", "🥎", "🎾", "🏐", "🏉", "🥏", "🎱", "🪀", "🏓", "🏸", "🥅", "🏒", "🏑", "🥍", "🏏", "🪃", "🥊", "🥋", "🥋", "🛹", "🛷", "⛸️", "🥌", "🎿", "⛷️", "🏂", "🪂", "🏋️", "🤼", "🤸", "⛹️", "🤺", "🤾", "🏌️", "🏇", "🧘", "🏄", "🏊", "🤽", "🚣", "🧗", "🚵", "🚴", "🏆", "🥇", "🥈", "🥉", "🏅", "🎖️", "🏵️", "🎗️", "🎫", "🎟️", "🎪", "🤹", "🎭", "🩰", "🎨", "🎬", "🎤", "🎧", "🎼", "🎹", "🥁", "🪘", "🎷", "🎺", "🎸", "🪕", "🎻", "🎲", "♟️", "🎯", "🎳", "🎮", "🎰", "🧩"),
+        "Travel & Places" to listOf("🚗", "🚕", "🚙", "🚌", "🚎", "🏎️", "🚓", "🚑", "🚒", "🚐", "🛻", "🚚", "🚛", "🚜", "🦯", "🦽", "🦼", "🛴", "🚲", "🛵", "🏍️", "🛺", "🚨", "🚔", "🚍", "🚘", "🚖", "🚡", "🚠", "🚟", "🚃", "🚋", "🚞", "🚝", "🚄", "🚅", "🚈", "🚂", "🚆", "🚇", "🚊", "🚉", "✈️", "🛫", "🛬", "🛩️", "💺", "🛰️", "🚀", "🛸", "🚁", "🛶", "⛵", "🚤", "🛥️", "🛳️", "⛴️", "🚢", "⚓", "🪝", "⛽", "🚧", "🚦", "🚥", "🚏", "🗺️", "🗿", "🗽", "🗼", "🏰", "🏯", "🏟️", "🎡", "🎢", "🎠", "⛲", "⛱️", "🏖️", "🏝️", "🏜️", "🌋", "⛰️", "🏔️", "🗻", "🏕️", "⛺", "🛖", "🏠", "🏡", "🏘️", "🏚️", "🏗️", "🏭", "🏢", "🏬", "🏣", "🏤", "🏥", "🏦", "🏨", "🏪", "🏫", "🏩", "💒", "🏛️", "⛪", "🕌", "🕍", "🛕", "🕋", "⛩️", "🛤️", "🛣️", "🗾", "🎑", "🏞️", "🌅", "🌄", "🌠", "🎇", "🎆", "🌇", "🌆", "🏙️", "🌃", "🌌", "🌉", "🌁"),
+        "Objects" to listOf("⌚", "📱", "💻", "⌨️", "🖥️", "🖨️", "🖱️", "🖲️", "🕹️", "🗜️", "💽", "💾", "💿", "📀", "📼", "📷", "📸", "📹", "🎥", "📽️", "🎞️", "📞", "☎️", "📟", "📠", "📺", "📻", "🎙️", "🎚️", "🎛️", "🧭", "⏱️", "⏲️", "⏰", "🕰️", "⌛", "⏳", "📡", "🔋", "🪫", "🔌", "💡", "🔦", "🕯️", "🪔", "🧯", "🛢️", "💸", "💵", "💴", "💶", "💷", "🪙", "💰", "💳", "💎", "⚖️", "🪜", "🧰", "🪛", "🔧", "🔨", "⚒️", "🛠️", "⛏️", "🪚", "🔩", "⚙️", "🪤", "🧱", "⛓️", "🧲", "🔫", "💣", "🧨", "🪓", "🔪", "🗡️", "⚔️", "🛡️", "🚬", "⚰️", "🪦", "⚱️", "🏺", "🔮", "📿", "🧿", "💈", "⚗️", "🔭", "🔬", "🕳️", "🩹", "🩺", "💊", "💉", "🩸", "🧬", "🦠", "🧫", "🧪", "🌡️", "🧹", "🪠", "🧺", "🧻", "🚽", "🚰", "🚿", "🛁", "🛀", "🧼", "🪥", "🪒", "🧽", "🪣", "🧴", "🛎️", "🔑", "🗝️", "🚪", "🪑", "🛋️", "🛏️", "🛌", "🧸", "🪆", "🖼️", "🪞", "🪟", "🛍️", "🛒", "🎁", "🎈", "🎏", "🎀", "🪄", "🪅", "🎊", "🎉", "🎎", "🏮", "🎐", "🧧", "✉️", "📩", "📨", "📧", "💌", "📥", "📤", "📦", "🏷️", "🪧", "📪", "📫", "📬", "📭", "📮", "📯", "📜", "📃", "📄", "📑", "🧾", "📊", "📈", "📉", "🗒️", "📅", "📆", "🗓️", "📇", "🗃️", "🗳️", "🗄️", "📋", "🗂️", "📂", "📁", "🗞️", "📰", "📓", "📔", "📒", "📕", "📗", "📘", "📙", "📚", "📖", "🔖", "🧷", "🔗", "📎", "🖇️", "📐", "📏", "🧮", "📌", "📍", "✂️", "🖊️", "🖋️", "✒️", "🖌️", "🖍️", "📝", "✏️", "🔍", "🔎", "🔏", "🔐", "🔒", "🔓"),
+        "Symbols" to listOf("❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "🤎", "💔", "❣️", "💕", "💞", "💓", "💗", "💖", "💘", "💝", "💟", "☮️", "✝️", "☪️", "🕉️", "☸️", "✡️", "🔯", "🕎", "☯️", "☦️", "🛐", "⛎", "♈", "♉", "♊", "♋", "♌", "♍", "♎", "♏", "♐", "♑", "♒", "♓", "🆔", "⚛️", "🉑", "☢️", "☣️", "📴", "📳", "🈶", "🈚", "🈸", "🈺", "🈷️", "✴️", "🆚", "💮", "🉐", "㊙️", "㊗️", "🈴", "🈵", "🈹", "🈲", "🅰️", "🅱️", "🆎", "🅾️", "🆑", "🅿️", "🆘", "❌", "⭕", "🛑", "⛔", "📛", "🚫", "💯", "💢", "♨️", "🚷", "🚯", "🚳", "🚱", "🔞", "📵", "🚭", "❗", "❕", "❓", "❔", "‼️", "⁉️", "🔅", "🔆", "〽️", "⚠️", "🚸", "🔱", "⚜️", "🔰", "♻️", "✅", "🈯", "💹", "❇️", "✳️", "❎", "🌐", "💠", "Ⓜ️", "🌀", "💤", "🏧", "🚾", "♿", "🅿️", "🛗", "🈳", "🈂️", "🛂", "🛃", "🛄", "🛅", "🚹", "🚺", "🚼", "⚧️", "🚻", "🚮", "🎦", "📶", "🈁", "🔣", "ℹ️", "🔤", "🔡", "🔠", "🆖", "🆗", "🆙", "🆒", "🆕", "🆓", "0️⃣", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟", "🔢", "#️⃣", "*️⃣", "⏏️", "▶️", "⏸️", "⏯️", "⏹️", "⏺️", "⏭️", "⏮️", "⏩", "⏪", "⏫", "⏬", "◀️", "🔼", "🔽", "➡️", "⬅️", "⬆️", "⬇️", "↗️", "↘️", "↙️", "↖️", "↕️", "↔️", "↪️", "↩️", "⤴️", "⤵️", "🔀", "🔁", "🔂", "🔄", "🔃", "🎵", "🎶", "➕", "➖", "➗", "✖️", "♾️", "💲", "💱", "™️", "©️", "®️", "〰️", "➰", "➿", "🔚", "🔙", "🔛", "🔝", "🔜"),
+        "Flags" to listOf("🏳️", "🏴", "🏁", "🚩", "🎌", "🏴‍☠️", "🇧🇩", "🇺🇸", "🇬🇧", "🇮🇳", "🇵🇰", "🇯🇵", "🇰🇷", "🇨🇳", "🇫🇷", "🇩🇪", "🇮🇹", "🇪🇸", "🇧🇷", "🇦🇺", "🇨🇦", "🇷🇺", "🇸🇦", "🇦🇪", "🇹🇷", "🇮🇩", "🇲🇾", "🇸🇬", "🇹🇭", "🇻🇳", "🇳🇵", "🇱🇰", "🇲🇲", "🇧🇹", "🇲🇻", "🇦🇫", "🇮🇷", "🇮🇶", "🇶🇦", "🇰🇼", "🇴🇲", "🇾🇪", "🇸🇾", "🇱🇧", "🇯🇴", "🇮🇱", "🇪🇬", "🇲🇦", "🇩🇿", "🇹🇳", "🇱🇾", "🇸🇩", "🇿🇦", "🇳🇬", "🇰🇪", "🇪🇹", "🇬🇭", "🇲🇽", "🇦🇷", "🇨🇱", "🇨🇴", "🇵🇪", "🇻🇪", "🇵🇭", "🇰🇭", "🇱🇦", "🇧🇳"),
     )
 }
