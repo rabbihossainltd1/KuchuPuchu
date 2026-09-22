@@ -304,10 +304,8 @@ check(
 check(
   "r55 item 4: the ringing avatar no longer zooms - PulseRing and its scale import are gone, IncomingCallScreen shows the plain CallAvatar",
   !calls.includes("PulseRing") &&
-    calls.includes("CallAvatar(call, 108.dp)") &&
-    // v208: scale import now used for press animation (call buttons highlight), not PulseRing
-    calls.includes("CallAvatar(call, 108.dp)") &&
-    !calls.includes("PulseRing"),
+    !calls.includes("import androidx.compose.ui.draw.scale") &&
+    calls.includes("CallAvatar(call, 108.dp)"),
 );
 check(
   "r55 item 5: the media editor stage pinch-zooms (1x-4x) + pans + double-taps, gated off while pen/crop/overlay own the screen, browse swipe stands down while zoomed",

@@ -5335,7 +5335,7 @@ const convBetween = (db, a, b) =>
         login.includes(
           'withStyle(SpanStyle(color = ActionBlueDeep, fontWeight = FontWeight.ExtraBold)) { append("Puchu") }',
         ) &&
-        !/Gold|GoldDeep|GoldSoft/.test(login) &&
+        !/\bGold\b|GoldDeep|GoldSoft/.test(login) &&
         st.includes(
           ".border(1.dp, if (selected) ActionBlue else Line, RoundedCornerShape(16.dp))",
         ) &&
@@ -5345,11 +5345,8 @@ const convBetween = (db, a, b) =>
           ".clip(CircleShape)\n                            .background(ActionBlue)\n                            .padding(horizontal = 6.dp),",
         ) &&
         !cl.includes("AmberInk") &&
-        // v208: call active buttons now highlight (white alpha) not blue, with press scale animation
-        (calls.includes("Color.White.copy(alpha = if (pressed) 0.28f else 0.18f)") ||
-          calls.includes("background(Color.White.copy(alpha =")) &&
-        calls.includes("animateFloatAsState(if (pressed)") &&
-        !/Gold/.test(calls),
+        (calls.match(/lerp\(ActionBlue, Color\.White, 0\.3f\)/g) || []).length === 2 &&
+        !/\bGold\b/.test(calls),
     );
   }
   // Item 46: the full-screen photo viewer and the video player carry a ⋮ whose
@@ -9457,11 +9454,10 @@ const convBetween = (db, a, b) =>
       );
       check(
         "N1: inactive call buttons keep a clean thin ring only — no translucent disc, no extra offset circle underneath",
-        (cs.includes("Color.White.copy(alpha = 0.24f), CircleShape") || cs.includes("0.24f")) &&
-          (cs.includes("Color.White.copy(alpha = 0.22f), CircleShape") || cs.includes("0.22f")) &&
+        cs.includes("Color.White.copy(alpha = 0.24f), CircleShape") &&
+          cs.includes("Color.White.copy(alpha = 0.22f), CircleShape") &&
           !cs.includes("Color(0x42FFFFFF)") &&
-          !cs.includes("Color(0x3DFFFFFF)") &&
-          cs.includes("animateFloatAsState(if (pressed)"),
+          !cs.includes("Color(0x3DFFFFFF)"),
       );
     }
     {

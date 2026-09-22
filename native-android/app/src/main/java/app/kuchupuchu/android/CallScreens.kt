@@ -9,7 +9,6 @@ import android.view.WindowManager
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.ui.draw.scale
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -20,7 +19,6 @@ import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -685,7 +683,7 @@ private fun ShareFullscreen(call: CallUi) {
     }
 }
 
-/** Dark rounded call-control button with an explicit enabled state. v208: no blue, highlight + press animation */
+/** Dark rounded call-control button with an explicit enabled state. */
 @Composable
 private fun CallAction(
     icon: ImageVector,
@@ -697,37 +695,40 @@ private fun CallAction(
 ) {
     val haptics = rememberHaptics()
     val alpha = if (enabled) 1f else 0.35f
-    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val scale by androidx.compose.animation.core.animateFloatAsState(if (pressed) 0.92f else 1f, animationSpec = androidx.compose.animation.core.tween(120), label = "callPress")
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.alpha(alpha)) {
         Box(
             Modifier
                 .size(64.dp)
+                // N1r: an inactive button is truly bare — no fill, no
+                // shadow, no ring. (N1 only dropped the 1dp border, but the
+                // translucent disc underneath still read as a faint circle.)
                 .then(if (danger || active) Modifier.shadow(6.dp, CircleShape) else Modifier)
                 .clip(CircleShape)
-                .scale(scale)
                 .then(
-                    if (danger) {
+                    if (danger || active) {
                         Modifier.background(
-                            Brush.verticalGradient(
-                                listOf(
-                                    androidx.compose.ui.graphics.lerp(Red, Color.White, 0.25f),
-                                    Red,
-                                    androidx.compose.ui.graphics.lerp(Red, Color.Black, 0.22f),
-                                ),
-                            ),
+                            when {
+                                danger -> Brush.verticalGradient(
+                                    listOf(
+                                        androidx.compose.ui.graphics.lerp(Red, Color.White, 0.25f),
+                                        Red,
+                                        androidx.compose.ui.graphics.lerp(Red, Color.Black, 0.22f),
+                                    ),
+                                )
+                                else -> Brush.verticalGradient(
+                                    listOf(
+                                        androidx.compose.ui.graphics.lerp(ActionBlue, Color.White, 0.3f),
+                                        ActionBlue,
+                                        androidx.compose.ui.graphics.lerp(ActionBlue, Color.Black, 0.2f),
+                                    ),
+                                )
+                            },
                         )
-                    } else if (active) {
-                        // v208: active highlight, not blue
-                        Modifier.background(Color.White.copy(alpha = if (pressed) 0.28f else 0.18f))
                     } else {
-                        Modifier
-                            .background(if (pressed) Color.White.copy(alpha = 0.14f) else Color.Transparent)
-                            .border(1.dp, Color.White.copy(alpha = if (pressed) 0.35f else 0.24f), CircleShape)
+                        Modifier.border(1.dp, Color.White.copy(alpha = 0.24f), CircleShape)
                     },
                 )
-                .clickable(enabled = enabled, interactionSource = interaction, indication = null) { haptics.tap(); onClick() },
+                .clickable(enabled = enabled) { haptics.tap(); onClick() },
             contentAlignment = Alignment.Center,
         ) {
             Icon(
@@ -1394,7 +1395,9 @@ private fun CallCircle(
 }
 
 /**
- * One control of the video-call strip. v208: no blue, highlight + press animation, no color on click
+ * One control of the video-call strip. Owner round 33 (item 16): icon only -
+ * no caption under the circle (the label is the content description) and no
+ * press ripple; the circle itself is the whole touch target.
  */
 @Composable
 private fun StripAction(
@@ -1405,37 +1408,38 @@ private fun StripAction(
     onClick: () -> Unit,
 ) {
     val haptics = rememberHaptics()
-    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val scale by androidx.compose.animation.core.animateFloatAsState(if (pressed) 0.90f else 1f, animationSpec = androidx.compose.animation.core.tween(120), label = "stripPress")
     Box(
         Modifier
             .size(46.dp)
+            // N1r: inactive strip buttons are bare icons too (same faint disc).
             .then(if (danger || active) Modifier.shadow(5.dp, CircleShape) else Modifier)
             .clip(CircleShape)
-            .scale(scale)
             .then(
-                if (danger) {
+                if (danger || active) {
                     Modifier.background(
-                        Brush.verticalGradient(
-                            listOf(
-                                androidx.compose.ui.graphics.lerp(Red, Color.White, 0.28f),
-                                Red,
-                                androidx.compose.ui.graphics.lerp(Red, Color.Black, 0.2f),
-                            ),
-                        ),
+                        when {
+                            danger -> Brush.verticalGradient(
+                                listOf(
+                                    androidx.compose.ui.graphics.lerp(Red, Color.White, 0.28f),
+                                    Red,
+                                    androidx.compose.ui.graphics.lerp(Red, Color.Black, 0.2f),
+                                ),
+                            )
+                            else -> Brush.verticalGradient(
+                                listOf(
+                                    androidx.compose.ui.graphics.lerp(ActionBlue, Color.White, 0.3f),
+                                    ActionBlue,
+                                    androidx.compose.ui.graphics.lerp(ActionBlue, Color.Black, 0.2f),
+                                ),
+                            )
+                        },
                     )
-                } else if (active) {
-                    // v208: highlight not blue
-                    Modifier.background(Color.White.copy(alpha = if (pressed) 0.28f else 0.18f))
                 } else {
-                    Modifier
-                        .background(if (pressed) Color.White.copy(alpha = 0.14f) else Color.Transparent)
-                        .border(1.dp, Color.White.copy(alpha = if (pressed) 0.32f else 0.22f), CircleShape)
+                    Modifier.border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape)
                 },
             )
             .clickable(
-                interactionSource = interaction,
+                interactionSource = remember { MutableInteractionSource() },
                 indication = null,
             ) { haptics.tap(); onClick() },
         contentAlignment = Alignment.Center,

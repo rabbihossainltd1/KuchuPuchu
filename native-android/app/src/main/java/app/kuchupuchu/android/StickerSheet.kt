@@ -383,9 +383,29 @@ fun StickerPanel(
 
 @Composable
 private fun PanelEmoji(emoji: String, pressed: Boolean) {
-    // v208: panel emojis static to avoid lag - Text only, no loop Lottie (chat messages animate, panel stays light)
-    // Previously loop caused laggy feel with 120+ Lotties
-    Text(emoji, fontSize = 20.sp, modifier = Modifier.scale(if (pressed) 1.2f else 1f))
+    // v209: panel emojis animate but lag optimized - only visible after 1s delay, so scrolling stays smooth
+    // User sees static Text first, after 1s Lottie starts; fast scroll disposes before delay, no lag
+    var showAnim by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(emoji) {
+        kotlinx.coroutines.delay(1000)
+        showAnim = true
+    }
+    val codepoint = remember(emoji) { emojiToCodepoint(emoji) }
+    val isBundled = remember(codepoint) { NotoBundled.isBundled(codepoint) }
+    val spec = remember(codepoint, isBundled) {
+        if (isBundled) LottieCompositionSpec.Asset("noto-emoji/$codepoint.json")
+        else LottieCompositionSpec.Url("https://fonts.gstatic.com/s/e/notoemoji/latest/$codepoint/lottie.json")
+    }
+    val composition by rememberLottieComposition(spec)
+    if (showAnim && composition != null) {
+        LottieAnimation(
+            composition = composition,
+            iterations = LottieConstants.IterateForever,
+            modifier = Modifier.size(22.dp).scale(if (pressed) 1.2f else 1f)
+        )
+    } else {
+        Text(emoji, fontSize = 20.sp, modifier = Modifier.scale(if (pressed) 1.2f else 1f))
+    }
 }
 
 @Composable
