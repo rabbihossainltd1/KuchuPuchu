@@ -4459,9 +4459,8 @@ private fun Composer(
     Row(
         Modifier
             .fillMaxWidth()
-            // Owner round 15: the bar itself is TRANSPARENT — the themed
-            // wallpaper (which spans the whole screen) shows through; only
-            // the input pill and the send button keep their own surfaces.
+            // v203 WhatsApp-style: outer bar TRANSPARENT — wallpaper shows through, no solid background behind pill
+            .background(Color.Transparent)
             .padding(bottom = padForIme)
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -4483,11 +4482,9 @@ private fun Composer(
                     .fxComposerAnchor()
                     .weight(1f)
                     .heightIn(min = 38.dp)
-                    // Owner round 18: the pill is BACK — only the recording
-                    // strip is transparent (that was the ask). Owner round 19:
-                    // the pill takes the chat theme's accent tint.
-                    .clip(RoundedCornerShape(19.dp))
-                    .background(accent.copy(alpha = 0.16f))
+                    // v203 WhatsApp-style: inner pill keeps surface (Card dark), outer bar transparent like WhatsApp reference
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(Card)
                     .padding(horizontal = 2.dp, vertical = 1.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 34.dp)) {
