@@ -5296,7 +5296,7 @@ const convBetween = (db, a, b) =>
     const st = kt("SettingsScreen.kt");
     const cl = kt("ChatListScreen.kt");
     const calls = kt("CallScreens.kt");
-        check(
+    check(
       "r32-13: dark-blue leaks fixed — received file/voice controls (chat accent), AI history clock + View, select-mode Forward/Edit, login wait ring + wordmark, theme swatch border, unread badge, call active buttons, owner card email/website",
       chat.includes(
         ".background(if (mine) Color(0x33FFFFFF) else chatAccent(theme).copy(alpha = 0.18f)),",
@@ -5346,7 +5346,8 @@ const convBetween = (db, a, b) =>
         ) &&
         !cl.includes("AmberInk") &&
         // v208: call active buttons now highlight (white alpha) not blue, with press scale animation
-        (calls.includes("Color.White.copy(alpha = if (pressed) 0.28f else 0.18f)") || calls.includes("background(Color.White.copy(alpha =")) &&
+        (calls.includes("Color.White.copy(alpha = if (pressed) 0.28f else 0.18f)") ||
+          calls.includes("background(Color.White.copy(alpha =")) &&
         calls.includes("animateFloatAsState(if (pressed)") &&
         !/Gold/.test(calls),
     );
