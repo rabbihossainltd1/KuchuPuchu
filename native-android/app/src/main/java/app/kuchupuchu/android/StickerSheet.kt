@@ -383,23 +383,9 @@ fun StickerPanel(
 
 @Composable
 private fun PanelEmoji(emoji: String, pressed: Boolean) {
-    // v207: panel emojis loop animate always
-    val codepoint = remember(emoji) { emojiToCodepoint(emoji) }
-    val isBundled = remember(codepoint) { NotoBundled.isBundled(codepoint) }
-    val spec = remember(codepoint, isBundled) {
-        if (isBundled) LottieCompositionSpec.Asset("noto-emoji/$codepoint.json")
-        else LottieCompositionSpec.Url("https://fonts.gstatic.com/s/e/notoemoji/latest/$codepoint/lottie.json")
-    }
-    val composition by rememberLottieComposition(spec)
-    if (composition != null) {
-        LottieAnimation(
-            composition = composition,
-            iterations = LottieConstants.IterateForever,
-            modifier = Modifier.size(22.dp).scale(if (pressed) 1.2f else 1f)
-        )
-    } else {
-        Text(emoji, fontSize = 20.sp, modifier = Modifier.scale(if (pressed) 1.2f else 1f))
-    }
+    // v208: panel emojis static to avoid lag - Text only, no loop Lottie (chat messages animate, panel stays light)
+    // Previously loop caused laggy feel with 120+ Lotties
+    Text(emoji, fontSize = 20.sp, modifier = Modifier.scale(if (pressed) 1.2f else 1f))
 }
 
 @Composable

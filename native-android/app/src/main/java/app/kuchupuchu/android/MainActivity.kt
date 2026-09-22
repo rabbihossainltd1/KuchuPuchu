@@ -10,6 +10,8 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import coil.Coil
 import coil.ImageLoader
+import coil.decode.GifDecoder
+import coil.decode.ImageDecoderDecoder
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 
@@ -87,6 +89,15 @@ class MainActivity : ComponentActivity() {
         Coil.setImageLoader(
             ImageLoader.Builder(applicationContext)
                 .okHttpClient { Api.http }
+                .components {
+                    // v207: GIF support - real Tenor GIFs need to animate in chat bubbles
+                    // ImageDecoder for API 28+, GifDecoder for older
+                    if (android.os.Build.VERSION.SDK_INT >= 28) {
+                        add(ImageDecoderDecoder.Factory())
+                    } else {
+                        add(GifDecoder.Factory())
+                    }
+                }
                 // Keep typical chat-photo working sets resident. The default
                 // cache evicted earlier bubbles after one fullscreen image.
                 .memoryCache {

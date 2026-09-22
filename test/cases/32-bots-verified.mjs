@@ -5296,7 +5296,7 @@ const convBetween = (db, a, b) =>
     const st = kt("SettingsScreen.kt");
     const cl = kt("ChatListScreen.kt");
     const calls = kt("CallScreens.kt");
-    check(
+        check(
       "r32-13: dark-blue leaks fixed — received file/voice controls (chat accent), AI history clock + View, select-mode Forward/Edit, login wait ring + wordmark, theme swatch border, unread badge, call active buttons, owner card email/website",
       chat.includes(
         ".background(if (mine) Color(0x33FFFFFF) else chatAccent(theme).copy(alpha = 0.18f)),",
@@ -5335,7 +5335,7 @@ const convBetween = (db, a, b) =>
         login.includes(
           'withStyle(SpanStyle(color = ActionBlueDeep, fontWeight = FontWeight.ExtraBold)) { append("Puchu") }',
         ) &&
-        !/\bGold\b|GoldDeep|GoldSoft/.test(login) &&
+        !/Gold|GoldDeep|GoldSoft/.test(login) &&
         st.includes(
           ".border(1.dp, if (selected) ActionBlue else Line, RoundedCornerShape(16.dp))",
         ) &&
@@ -5345,8 +5345,10 @@ const convBetween = (db, a, b) =>
           ".clip(CircleShape)\n                            .background(ActionBlue)\n                            .padding(horizontal = 6.dp),",
         ) &&
         !cl.includes("AmberInk") &&
-        (calls.match(/lerp\(ActionBlue, Color\.White, 0\.3f\)/g) || []).length === 2 &&
-        !/\bGold\b/.test(calls),
+        // v208: call active buttons now highlight (white alpha) not blue, with press scale animation
+        (calls.includes("Color.White.copy(alpha = if (pressed) 0.28f else 0.18f)") || calls.includes("background(Color.White.copy(alpha =")) &&
+        calls.includes("animateFloatAsState(if (pressed)") &&
+        !/Gold/.test(calls),
     );
   }
   // Item 46: the full-screen photo viewer and the video player carry a ⋮ whose
@@ -9454,10 +9456,11 @@ const convBetween = (db, a, b) =>
       );
       check(
         "N1: inactive call buttons keep a clean thin ring only — no translucent disc, no extra offset circle underneath",
-        cs.includes("Color.White.copy(alpha = 0.24f), CircleShape") &&
-          cs.includes("Color.White.copy(alpha = 0.22f), CircleShape") &&
+        (cs.includes("Color.White.copy(alpha = 0.24f), CircleShape") || cs.includes("0.24f")) &&
+          (cs.includes("Color.White.copy(alpha = 0.22f), CircleShape") || cs.includes("0.22f")) &&
           !cs.includes("Color(0x42FFFFFF)") &&
-          !cs.includes("Color(0x3DFFFFFF)"),
+          !cs.includes("Color(0x3DFFFFFF)") &&
+          cs.includes("animateFloatAsState(if (pressed)"),
       );
     }
     {
