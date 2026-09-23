@@ -1,8 +1,8 @@
 package app.kuchupuchu.android
 
 import org.junit.Assert.assertArrayEquals
-import org.junit.Assert.assertArrayNotEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -32,14 +32,15 @@ class E2eeMsgTest {
 
         val env = E2eeMsg.sealWith(aPriv, bPub, "hello খুচুখু 🚀")
         assertNotNull(env)
-        assertTrue(env!!.startsWith("KP1."))
-        assertNotEquals("hello খুচুখু 🚀", env) // the envelope is NOT the plaintext
-        assertEquals("hello খুচুখু 🚀", E2eeMsg.openWith(bPriv, aPub, env))
+        val sealed = env!!
+        assertTrue(sealed.startsWith("KP1."))
+        assertNotEquals("hello খুচুখু 🚀", sealed) // the envelope is NOT the plaintext
+        assertEquals("hello খুচুখু 🚀", E2eeMsg.openWith(bPriv, aPub, sealed))
 
         // B seals back the same way — same algorithm, fresh nonce each time.
         val back = E2eeMsg.sealWith(bPriv, aPub, "proti uttor")
         assertEquals("proti uttor", E2eeMsg.openWith(aPriv, bPub, back))
-        assertNotEquals(env, back) // even the same plaintext seals differently
+        assertNotEquals(sealed, back) // even the same plaintext seals differently
     }
 
     @Test
@@ -93,7 +94,7 @@ class E2eeMsgTest {
         val k2 = E2eeMsg.hkdfSha256(ikm, "kp-msg-e2ee-v1")
         assertArrayEquals(k1, k2)
         assertEquals(32, k1.size)
-        assertArrayNotEquals(k1, E2eeMsg.hkdfSha256(ikm, "other-info"))
+        assertFalse(java.util.Arrays.equals(k1, E2eeMsg.hkdfSha256(ikm, "other-info")))
         assertEquals(16, E2eeMsg.hkdfSha256(ikm, "x", 16).size)
     }
 

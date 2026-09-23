@@ -10132,32 +10132,40 @@ const convBetween = (db, a, b) =>
       "r64-e2ee: app — JCA-only crypto core (P-256 ECDH + HKDF + AES-GCM, KP1. envelope), a stable per-install identity with TOFU check/trust, once-per-process key publication, unseal at every row entry (page / older page / socket frame / paint / outbox echo), seal on every outbound body (text, scheduled, captions, edits, per-target forward re-seal), the header lock row with 3s code reveal + verify sheet, and the key riding the chat-list snapshot",
       e2.includes('const val PREFIX = "KP1."') &&
         e2.includes("fun newKeyPair(): KeyPair") &&
-        e2.includes("ECGenParameterSpec(\"secp256r1\")") &&
-        e2.includes("KeyAgreement.getInstance(\"ECDH\")") &&
+        e2.includes('ECGenParameterSpec("secp256r1")') &&
+        e2.includes('KeyAgreement.getInstance("ECDH")') &&
         e2.includes("fun hkdfSha256(ikm: ByteArray, info: String, length: Int = 32): ByteArray") &&
-        e2.includes("Cipher.getInstance(\"AES/GCM/NoPadding\")") &&
+        e2.includes('Cipher.getInstance("AES/GCM/NoPadding")') &&
         e2.includes("fun sealWith(privB64: String, peerPubB64: String, plain: String): String?") &&
-        e2.includes("fun openWith(privB64: String, peerPubB64: String, envelope: String): String?") &&
+        e2.includes(
+          "fun openWith(privB64: String, peerPubB64: String, envelope: String): String?",
+        ) &&
         e2.includes("fun identity(ctx: Context): Pair<String, String>") &&
         e2.includes("fun checkPeer(ctx: Context, peerId: String, pub: String): Boolean") &&
         e2.includes("fun trustPeer(ctx: Context, peerId: String, pub: String)") &&
         e2.includes("suspend fun ensureOnce(ctx: Context)") &&
         e2.includes("fun unsealRow(ctx: Context, m: JSONObject, peerPub: String): JSONObject") &&
         e2.includes("fun sealGlobal(plain: String, peerPub: String): String?") &&
-        e2.includes("internal fun E2eeMsgCodeRow(ctx: Context, peerId: String, peerPub: String, peerName: String)") &&
-        e2.includes('if (warn) "Security code changed — tap to verify" else if (codeVisible) code else "End-to-end encrypted"') &&
+        e2.includes(
+          "internal fun E2eeMsgCodeRow(ctx: Context, peerId: String, peerPub: String, peerName: String)",
+        ) &&
+        e2.includes(
+          'if (warn) "Security code changed — tap to verify" else if (codeVisible) code else "End-to-end encrypted"',
+        ) &&
         e2.includes('KpSheet(onDismiss = onClose, title = "End-to-end encrypted")') &&
-        chat.includes('val e2eePeerKey: String = conv.value?.let { c ->') &&
+        chat.includes("val e2eePeerKey: String = conv.value?.let { c ->") &&
         chat.includes("fun sealOut(plain: String): String") &&
-        chat.includes("if (kind == \"TEXT\") sealOut(body) else body") &&
+        chat.includes('if (kind == "TEXT") sealOut(body) else body') &&
         chat.includes('.put("body", sealOut(body))') &&
         chat.includes(".map { unseal(it) }") &&
         chat.includes("val liveMsg = unseal(rawMsg)") &&
         chat.includes("pending.add(unseal(row))") &&
         chat.includes("E2eeMsgCodeRow(ctx, otherId, e2eePeerKey, rawTitle)") &&
         chat.includes("E2eeMsg.ensureOnce(ctx)") &&
-        chat.includes("E2eeMsg.sealGlobal(m.optText(\"body\"), tKey)") &&
-        chat.includes('.put("e2eePublicKey", row.optJSONObject("other")?.optText("e2eePublicKey").orEmpty())')
+        chat.includes('E2eeMsg.sealGlobal(m.optText("body"), tKey)') &&
+        chat.includes(
+          '.put("e2eePublicKey", row.optJSONObject("other")?.optText("e2eePublicKey").orEmpty())',
+        ),
     );
   }
 }
