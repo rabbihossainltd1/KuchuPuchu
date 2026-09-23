@@ -5050,14 +5050,10 @@ const convBetween = (db, a, b) =>
     "r32-28: list payload carries lastMessageSenderId / lastMessageDeliveredAt (one correlated newest-row seek per chat, no GROUP BY scan), both in the freshness marker with the members' lastReadAt; the single-chat detail carries the same",
     src.includes("lastMessageSenderId: conv.last_message_sender_id ?? null,") &&
       src.includes("lastMessageDeliveredAt: conv.last_message_delivered_at ?? null,") &&
-      src.includes(
-        "SELECT rowid FROM messages WHERE conv_id = j.value ORDER BY created_at DESC LIMIT 1",
-      ) &&
+      src.includes("AND created_at = json_extract(j.value, '$.at') AND kind != 'DELETED'") &&
       !src.includes("MAX(created_at) AS created_at") &&
       src.includes("c.lastMessageDeliveredAt,") &&
-      src.includes(
-        "SELECT sender_id, delivered_at FROM messages WHERE conv_id = ? ORDER BY created_at DESC LIMIT 1",
-      ),
+      src.includes("ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1"),
   );
   check(
     "r32-28: app — list no longer shows ticks (owner: chat list theke tick remove)",
@@ -7561,7 +7557,8 @@ const convBetween = (db, a, b) =>
         fp.includes("val fileLike = !t.contains(\"://\") && !t.contains('\\n')") &&
         !fp.includes('"🎬 Video"') &&
         !fp.includes('"📄 Document"') &&
-        cl.includes('val preview = friendlyPreview(conv.optText("lastMessage"))') &&
+        cl.includes('friendlyPreview(conv.optText("lastMessage"))') &&
+        cl.includes("ChatPreviewText.seen(") &&
         cl.includes(
           'KpNotify.message(ctx, name, friendlyPreview(c.optString("lastMessage")), id)',
         ) &&
@@ -10042,6 +10039,177 @@ const convBetween = (db, a, b) =>
     }
   }
 
+  // r66-3: private previews are opened only on the phone. The worker carries
+  // the envelope and bounded unread metadata, never a decrypted copy.
+  {
+    const k = await mk();
+    const a = await k.reg("previewa@x.com", "previewa");
+    const b = await k.reg("previewb@x.com", "previewb");
+    const outsider = await k.reg("previewc@x.com", "previewc");
+    const made = await k.call("POST", "/api/conversations", { userId: b.user.id }, a.token);
+    const cid = made.json.conversation.id;
+    const envelope = "KP1." + Buffer.from("opaque preview carrier").toString("base64");
+    const sent = await k.call(
+      "POST",
+      `/api/conversations/${cid}/messages`,
+      { kind: "TEXT", body: envelope, clientId: "preview-sealed" },
+      a.token,
+    );
+    const getList = (token = a.token, marker = "") =>
+      k.call("GET", "/api/conversations" + (marker ? `?marker=${marker}` : ""), undefined, token);
+    const getRow = async (token = a.token) =>
+      (await getList(token)).json.items?.find((c) => c.id === cid);
+    const seen = await getRow();
+    const unread = await getRow(b.token);
+    check(
+      "r66-3: authenticated list carries an intact encrypted preview, seen/unread remain per-viewer, and no plaintext preview is stored on the server",
+      seen?.lastMessagePreview?.body === envelope &&
+        seen?.unread === 0 &&
+        unread?.unread === 1 &&
+        unread?.unreadPreviewKind === "message" &&
+        k.db._db.prepare("SELECT body FROM messages WHERE id = ?").get(sent.json.message.id)
+          ?.body === envelope &&
+        k.db._db.prepare("SELECT last_message FROM conversations WHERE id = ?").get(cid)
+          ?.last_message === "🔒",
+    );
+    const detail = await k.call("GET", `/api/conversations/${cid}`, undefined, a.token);
+    const denied = await k.call("GET", `/api/conversations/${cid}`, undefined, outsider.token);
+    check(
+      "r66-3: realtime detail carries the same encrypted preview and a non-member cannot read it",
+      detail.json.conversation?.lastMessagePreview?.body === envelope &&
+        denied.status === 403 &&
+        !(await getList(outsider.token)).json.items?.some((c) => c.id === cid),
+    );
+    await getList();
+    const stable = await getList();
+    const editedEnvelope = "KP1." + Buffer.from("updated opaque preview").toString("base64");
+    await k.call(
+      "PATCH",
+      `/api/messages/${sent.json.message.id}`,
+      { body: editedEnvelope },
+      a.token,
+    );
+    const edited = await getList(a.token, stable.json.marker);
+    check(
+      "r66-3: editing ciphertext moves the list marker even though stored last_message is the same lock",
+      !edited.json.unchanged &&
+        edited.json.items?.find((c) => c.id === cid)?.lastMessagePreview?.body === editedEnvelope,
+    );
+
+    const base = Date.now() - 60_000;
+    function seed(entries, count = entries.length) {
+      k.db._db.prepare("DELETE FROM messages WHERE conv_id = ?").run(cid);
+      entries.forEach((e, i) =>
+        k.db._db
+          .prepare(
+            "INSERT INTO messages (id, conv_id, sender_id, kind, body, meta_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          )
+          .run(
+            `pv_${i}`,
+            cid,
+            e.sender || b.user.id,
+            e.kind || "TEXT",
+            e.body || "",
+            JSON.stringify(e.meta || {}),
+            new Date(base + i * 10).toISOString(),
+          ),
+      );
+      k.db._db
+        .prepare(
+          "UPDATE members SET unread = ?, last_read_at = ? WHERE conv_id = ? AND user_id = ?",
+        )
+        .run(count, new Date(base - 1000).toISOString(), cid, a.user.id);
+      k.db._db
+        .prepare(
+          "UPDATE conversations SET last_message = ?, last_message_at = ?, hidden_json = '{}' WHERE id = ?",
+        )
+        .run(
+          "Message",
+          new Date(base + entries.findLastIndex((e) => e.kind !== "DELETED") * 10).toISOString(),
+          cid,
+        );
+    }
+    for (const [kind, meta, category] of [
+      ["TEXT", {}, "message"],
+      ["IMAGE", {}, "photo"],
+      ["VIDEO", {}, "video"],
+      ["FILE", { voice: true, type: "audio/mp4" }, "voice"],
+      ["FILE", { document: true, type: "application/pdf" }, "document"],
+      ["FILE", { type: "video/mp4" }, "video"],
+      ["STICKER", {}, "sticker"],
+    ]) {
+      seed([
+        { kind, meta },
+        { kind, meta },
+      ]);
+      const row = await getRow();
+      check(
+        `r66-3: two unread ${category} items have an accurate category and count`,
+        row?.unread === 2 &&
+          row?.unreadPreviewKind === category &&
+          row?.lastMessagePreview?.category === category,
+      );
+    }
+    seed([{ kind: "IMAGE" }, { kind: "TEXT", body: "mixed" }]);
+    check(
+      "r66-3: a mixed unread batch is counted as messages, not falsely called all photos",
+      (await getRow())?.unreadPreviewKind === "message",
+    );
+    seed([{ kind: "IMAGE" }, { kind: "TEXT", body: "my reply", sender: a.user.id }], 1);
+    check(
+      "r66-3: own newest message does not change the type of an older unread incoming photo",
+      (await getRow())?.unreadPreviewKind === "photo",
+    );
+    seed([{ kind: "IMAGE", body: "never expose once caption", meta: { viewOnce: true } }]);
+    const once = await getRow();
+    check(
+      "r66-3: view-once preview exposes no caption, media key or thumbnail",
+      once?.lastMessagePreview?.body === null &&
+        once?.lastMessagePreview?.viewOnce === true &&
+        !JSON.stringify(once?.lastMessagePreview).includes("never expose once caption"),
+    );
+    seed(
+      [
+        { kind: "TEXT", body: "previous" },
+        { kind: "DELETED", body: "deleted secret" },
+      ],
+      1,
+    );
+    check(
+      "r66-3: deleted newest row cannot become the content preview",
+      (await getRow())?.lastMessagePreview?.body === "previous",
+    );
+    const max = k.db._db
+      .prepare("SELECT MAX(rowid) AS n FROM messages WHERE conv_id = ?")
+      .get(cid).n;
+    k.db._db
+      .prepare("UPDATE conversations SET hidden_json = ? WHERE id = ?")
+      .run(
+        JSON.stringify({ [a.user.id]: { row: max, at: new Date(base + 1000).toISOString() } }),
+        cid,
+      );
+    const cut = await k.call("GET", `/api/conversations/${cid}`, undefined, a.token);
+    check(
+      "r66-3: delete-chat watermark prevents old encrypted/content previews resurfacing",
+      cut.json.conversation?.lastMessagePreview === null,
+    );
+    seed(
+      Array.from({ length: 100 }, () => ({ kind: "IMAGE" })),
+      100,
+    );
+    const large = await getRow();
+    check(
+      "r66-3: a large unread backlog keeps its exact count with a safe generic category, not a history scan",
+      large?.unread === 100 && large?.unreadPreviewKind === "message" && src.includes("LIMIT 32"),
+    );
+    await k.call("POST", `/api/conversations/${cid}/read`, {}, a.token);
+    const read = await getRow();
+    check(
+      "r66-3: reading the chat clears the unread summary and retains the latest preview",
+      read?.unread === 0 && read?.lastMessagePreview?.category === "photo",
+    );
+  }
+
   // r63-1: emoji panel bigger fixed size (34dp in 42dp cell) without zoom/clip, single emoji in chat 66f
   {
     const sticker = kt("StickerSheet.kt");
@@ -10144,6 +10312,21 @@ const convBetween = (db, a, b) =>
         chat66.includes("!attachPanelBounds[0].contains(down.position + chatRootOrigin[0])") &&
         chat66.includes("onReply = { requestAttachExit {") &&
         !chat66.includes("if (showAttach) attachSel.clear()"),
+    );
+  }
+
+  {
+    const cl66 = kt("ChatListScreen.kt");
+    const ss66 = kt("ScreenStore.kt");
+    check(
+      "r66-3: chat list formats unread count/type without content and decrypts seen previews locally off Main; fingerprints include envelope and peer key",
+      cl66.includes("ChatPreviewText.unread(") &&
+        cl66.includes("ChatPreviewText.seen(") &&
+        cl66.includes("withContext(Dispatchers.Default)") &&
+        cl66.includes("E2eeMsg.open(ctx, wireBody, peerKey)") &&
+        ss66.includes('append(c.optJSONObject("lastMessagePreview"))') &&
+        ss66.includes('append(other?.optText("e2eePublicKey"))') &&
+        ss66.includes('row.remove("lastMessagePreview")'),
     );
   }
 

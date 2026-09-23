@@ -1276,9 +1276,23 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
     // Owner round 31: a group row shows the group picture (own cache token).
     val avatarUrl = if (isGroup) conv.optIso("avatarUrl") else other?.optIso("avatarUrl")
     val avatarRef = if (isGroup) conv.optIso("avatarRef") else other?.optIso("avatarRef")
-    val preview = friendlyPreview(conv.optText("lastMessage"))
     val stamp = listStamp(conv.optString("lastMessageAt"))
     val unread = conv.optInt("unread", 0)
+    // r66: unread previews are count/type only; seen text opens locally.
+    // No extra request and no plaintext preview sent back to the worker.
+    val ctx = LocalContext.current
+    val source = conv.optJSONObject("lastMessagePreview")
+    val wireBody = source?.optText("body").orEmpty()
+    val peerKey = other?.optText("e2eePublicKey").orEmpty()
+    var decoded by remember(id, wireBody, peerKey) { mutableStateOf<String?>(null) }
+    LaunchedEffect(id, wireBody, peerKey, unread) {
+        if (unread <= 0 && E2eeMsg.isEnvelope(wireBody)) {
+            decoded = withContext(Dispatchers.Default) { E2eeMsg.open(ctx, wireBody, peerKey) }
+        }
+    }
+    val plain = if (E2eeMsg.isEnvelope(wireBody)) decoded else wireBody.takeIf { source != null }
+    val preview = if (unread > 0) ChatPreviewText.unread(unread, conv.optText("unreadPreviewKind"))
+        else ChatPreviewText.seen(plain, source?.optText("category").orEmpty(), friendlyPreview(conv.optText("lastMessage")))
     val muted = conv.optBoolean("muted")
     val online = !isGroup && other?.optBoolean("online") == true
     // Owner round 26: a contact with a live status wears the status

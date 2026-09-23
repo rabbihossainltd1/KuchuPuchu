@@ -7046,24 +7046,28 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // ORDER BY … LIMIT 1). NOT a GROUP BY/MAX() over the chats' messages: that
     // walks every row of every chat on every poll — the read pattern that
     // burned 11M row reads and hit D1's cap on 2026-09-01.
+    // r66: seek the recorded preview timestamp exactly; an empty/reset chat
+    // must not scan a history of deleted rows or resurrect its old content.
     if (ids.length) {
-      for (const r of await all<{
-        conv_id: string;
-        sender_id: string | null;
-        delivered_at: string | null;
-      }>(
+      for (const r of await all<ConvPreviewRow>(
         db,
-        `SELECT m.conv_id, m.sender_id, m.delivered_at
+        `SELECT ${CONV_PREVIEW_COLS}, ${UNREAD_PREVIEW_SAMPLE} AS unread_sample
            FROM json_each(?) j
            JOIN messages m ON m.rowid = (
-             SELECT rowid FROM messages WHERE conv_id = j.value ORDER BY created_at DESC LIMIT 1
-           )`,
-        JSON.stringify(ids),
+             SELECT rowid FROM messages
+             WHERE conv_id = json_extract(j.value, '$.id')
+               AND created_at = json_extract(j.value, '$.at') AND kind != 'DELETED'
+             ORDER BY rowid DESC LIMIT 1
+           )
+           JOIN members viewer_member ON viewer_member.conv_id = m.conv_id AND viewer_member.user_id = ?`,
+        JSON.stringify(ids.map((id) => ({ id, at: convs.get(id)?.last_message_at ?? null }))),
+        uid,
       )) {
         const c = convs.get(r.conv_id);
         if (c) {
           c.last_message_sender_id = r.sender_id;
           c.last_message_delivered_at = r.delivered_at;
+          c.preview_row = r;
         }
       }
     }
@@ -7116,6 +7120,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           c.id,
           c.lastMessageAt,
           c.lastMessage,
+          // r66: an edited ciphertext must refresh even when its safe stored
+          // preview is unchanged. Only phones decrypt this carrier.
+          c.lastMessagePreview,
+          c.unreadPreviewKind,
           // r32-28: a delivery / read stamp on the newest message changes the
           // row's tick, so it must move the marker too.
           c.lastMessageDeliveredAt,
@@ -10870,6 +10878,8 @@ type ConvRow = {
    *  the list route, not a column) — the list row's own-message tick. */
   last_message_delivered_at?: string | null;
   last_message_sender_id?: string | null;
+  /** r66: per-request opaque preview; not a database column. */
+  preview_row?: ConvPreviewRow | null;
   disappear_seconds: number | null;
   theme: string | null;
   hidden_json?: string | null;
@@ -10937,6 +10947,96 @@ type ConvMemberRow = {
 const CONV_COLS =
   "id, kind, title, owner_id, created_at, last_message_at, last_message, disappear_seconds, theme, hidden_json, avatar_url, avatar_version, request_from, private_group";
 const MEMBER_COLS = "conv_id, user_id, role, muted, unread, last_read_at, hidden, hidden_key";
+
+/** r66: preview uses the existing newest-row query, never one fetch per chat. */
+type ConvPreviewRow = Pick<
+  MsgRow,
+  "id" | "conv_id" | "sender_id" | "kind" | "body" | "meta_json" | "created_at" | "delivered_at"
+> & {
+  msg_row: number;
+  unread_sample: string | null;
+};
+const CONV_PREVIEW_COLS =
+  "m.id, m.rowid AS msg_row, m.conv_id, m.sender_id, m.delivered_at, m.kind, m.body, m.meta_json, m.created_at";
+// Only unread chats sample metadata, at most the newest 32 rows. Never walk
+// an entire history to label a backlog: incomplete/mixed samples say messages.
+// Both list and realtime detail use this in their ALREADY-existing statement.
+const UNREAD_PREVIEW_SAMPLE = `CASE WHEN viewer_member.unread BETWEEN 1 AND 32 THEN (
+  SELECT json_group_array(json_object('kind', recent.kind, 'meta_json', recent.meta_json))
+  FROM (
+    SELECT kind, meta_json, sender_id, created_at FROM messages
+    WHERE conv_id = m.conv_id ORDER BY created_at DESC, rowid DESC LIMIT 32
+  ) recent
+  WHERE recent.sender_id != viewer_member.user_id AND recent.kind != 'DELETED'
+    AND (viewer_member.last_read_at IS NULL OR recent.created_at > viewer_member.last_read_at)
+) ELSE NULL END`;
+
+function previewCategory(row: Pick<MsgRow, "kind" | "meta_json">): string {
+  const meta = parseJson<Record<string, unknown>>(row.meta_json, {});
+  if (row.kind === "IMAGE") return "photo";
+  if (row.kind === "VIDEO") return "video";
+  if (row.kind === "AUDIO") return "voice";
+  if (row.kind === "STICKER") return "sticker";
+  if (row.kind === "CONTACT") return "contact";
+  if (row.kind === "LOCATION") return "location";
+  if (row.kind === "CALL") return "call";
+  if (row.kind === "FILE") {
+    if (meta.voice === true) return "voice";
+    if (meta.document !== true) {
+      const mime = String(meta.type || "");
+      if (mime.startsWith("image/")) return "photo";
+      if (mime.startsWith("video/")) return "video";
+      if (mime.startsWith("audio/")) return "voice";
+    }
+    return "document";
+  }
+  return "message";
+}
+
+function unreadPreviewKind(conv: ConvRow, unread: number): string {
+  if (unread <= 0 || unread > 32) return "message";
+  const sample = parseJson<Array<Pick<MsgRow, "kind" | "meta_json">>>(
+    conv.preview_row?.unread_sample,
+    [],
+  );
+  if (!Array.isArray(sample) || sample.length !== unread) return "message";
+  const kinds = new Set(sample.map(previewCategory));
+  return kinds.size === 1 ? [...kinds][0]! : "message";
+}
+
+function conversationPreview(conv: ConvRow, uid: string) {
+  const row = conv.preview_row;
+  if (!row || row.kind === "DELETED") return null;
+  const cut =
+    conv.kind === "SOLO" ? watermarkFor(parseJson<HiddenMap>(conv.hidden_json, {}), uid) : null;
+  if (
+    cut &&
+    (cut.row >= 0 ? row.msg_row <= cut.row : Date.parse(row.created_at) < Date.parse(cut.at))
+  )
+    return null;
+  if (
+    Number(conv.disappear_seconds) > 0 &&
+    Date.parse(row.created_at) + Number(conv.disappear_seconds) * 1000 <= Date.now()
+  )
+    return null;
+  const meta = parseJson<Record<string, unknown>>(row.meta_json, {});
+  if (viewOnceSpent(meta)) return null;
+  const once = meta.viewOnce === true;
+  return {
+    id: row.id,
+    kind: row.kind,
+    category: previewCategory(row),
+    createdAt: row.created_at,
+    // An intact envelope can be opened locally. View-once never exposes a
+    // caption or file pointer here, even to the sender.
+    body: once
+      ? null
+      : row.body?.startsWith(E2EE_PREFIX)
+        ? row.body
+        : (row.body || "").slice(0, 120),
+    viewOnce: once,
+  };
+}
 
 /** Placeholder list for an IN(...) clause. */
 const inSql = (n: number) => Array.from({ length: n }, () => "?").join(",");
@@ -11364,6 +11464,8 @@ function buildConvDetail(
     createdAt: conv.created_at,
     lastMessageAt: conv.last_message_at,
     lastMessage: conv.last_message,
+    lastMessagePreview: conversationPreview(conv, uid),
+    unreadPreviewKind: unreadPreviewKind(conv, unread),
     // Owner round 32 (item 38): a 1:1 chat a stranger opened. `requestFrom`
     // is the opener; the OTHER member sees the Accept / Block prompt
     // (`requestPending` is that member's flag), the opener a "request sent"
@@ -11425,13 +11527,20 @@ async function conversationDetail(db: D1Database, convId: string, uid: string) {
   // Owner round 32 (item 28): the single-chat detail is what the list merges
   // in on a poke — it must carry the same newest-message stamp as the list
   // route, or the merge would blank the row's tick.
-  const newest = await one<{ sender_id: string | null; delivered_at: string | null }>(
+  const newest = await one<ConvPreviewRow>(
     db,
-    "SELECT sender_id, delivered_at FROM messages WHERE conv_id = ? ORDER BY created_at DESC LIMIT 1",
+    `SELECT ${CONV_PREVIEW_COLS}, ${UNREAD_PREVIEW_SAMPLE} AS unread_sample
+       FROM messages m
+       JOIN members viewer_member ON viewer_member.conv_id = m.conv_id AND viewer_member.user_id = ?
+       WHERE m.conv_id = ? AND m.created_at = ? AND m.kind != 'DELETED'
+       ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1`,
+    uid,
     convId,
+    conv.last_message_at,
   );
   conv.last_message_sender_id = newest?.sender_id ?? null;
   conv.last_message_delivered_at = newest?.delivered_at ?? null;
+  conv.preview_row = newest;
   // Owner round 34 (item 15): the wall flags for this 1:1 chat — one
   // blocks lookup, both directions — plus whether this side already
   // spent its one Request Unblock for the current block.

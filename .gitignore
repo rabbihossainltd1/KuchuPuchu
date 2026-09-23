@@ -26,3 +26,5 @@ local.properties
 ci-watch.log
 .ci-seen
 scripts/.gh-token
+
+.scratch/

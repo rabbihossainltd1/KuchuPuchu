@@ -404,6 +404,11 @@ object ScreenStore {
         if (i < 0) return
         var row = JSONObject(convs[i].toString())
         row = row.put("unread", row.optInt("unread", 0) + 1)
+        // r66: this push is newer than the cached envelope/type summary.
+        // Use a generic count until the authenticated detail refresh lands;
+        // never attribute the OLD preview's media type to the new message.
+        row.remove("lastMessagePreview")
+        row.remove("unreadPreviewKind")
         if (!preview.isNullOrBlank()) {
             val fmt = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
             fmt.timeZone = java.util.TimeZone.getTimeZone("UTC")
@@ -635,6 +640,9 @@ object ScreenStore {
             append(c.optString("id")).append('|')
             append(c.optString("title")).append('|')
             append(c.optString("lastMessage")).append('|')
+            append(c.optJSONObject("lastMessagePreview")).append('|')
+            append(c.optText("unreadPreviewKind")).append('|')
+            append(other?.optText("e2eePublicKey")).append('|')
             append(c.optString("lastMessageAt")).append('|')
             append(c.optInt("unread")).append('|')
             append(c.optBoolean("muted")).append('|')
