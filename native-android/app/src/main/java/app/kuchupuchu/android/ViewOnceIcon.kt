@@ -101,15 +101,23 @@ internal fun CenteredOnceIcon(iconSize: Dp, tint: Color = Color.White) {
 }
 
 @Composable
-internal fun CenteredOnceIcon(iconSize: Dp, tint: Color = Color.White, ringRotation: Float = 0f) {
+internal fun CenteredOnceIcon(iconSize: Dp, tint: Color = Color.White, ringRotation: Float = 0f, fillBounds: Boolean = false) {
     val px = with(LocalDensity.current) { iconSize.toPx() }
     Box(
         Modifier
             .size(iconSize)
             .graphicsLayer {
-                scaleX = 0.85f
-                scaleY = 0.85f
-                translationX = px * 0.0799f
+                if (fillBounds) {
+                    // r66: the source ink is 70.95% of its SVG viewBox.
+                    // Fill this seat without clipping or altering other uses.
+                    scaleX = 1.40f
+                    scaleY = 1.40f
+                    translationX = px * 0.1316f
+                } else {
+                    scaleX = 0.85f
+                    scaleY = 0.85f
+                    translationX = px * 0.0799f
+                }
             },
         contentAlignment = Alignment.Center,
     ) {

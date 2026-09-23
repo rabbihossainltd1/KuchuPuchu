@@ -125,6 +125,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -398,6 +399,22 @@ fun ChatScreen(nav: NavController, convId: String) {
     // mic turns into SEND while the panel has picks (WhatsApp behaviour) —
     // the panel itself no longer carries its own send button.
     val attachSel = remember { mutableStateListOf<MediaItem>() }
+    // r66: outside actions cannot silently discard or abandon selected media.
+    val attachExit = remember { AttachmentExitGate() }
+    var showDeselect by remember { mutableStateOf(false) }
+    val chatKeyboard = LocalSoftwareKeyboardController.current
+    val chatFocus = LocalFocusManager.current
+    fun requestAttachExit(action: () -> Unit) {
+        if (!attachExit.request(showAttach && attachSel.isNotEmpty(), action)) {
+            chatKeyboard?.hide()
+            chatFocus.clearFocus(force = true)
+            showDeselect = true
+        }
+    }
+    val attachPanelBounds = remember { arrayOf(androidx.compose.ui.geometry.Rect.Zero) }
+    val chatRootOrigin = remember { arrayOf(androidx.compose.ui.geometry.Offset.Zero) }
+    val protectOutsideAttach by rememberUpdatedState(showAttach && attachSel.isNotEmpty())
+    val requestOutsideAttach by rememberUpdatedState({ requestAttachExit { } })
     // Owner round 45 (item 7): the panel reports its loaded recents; the
     // lone-pick pencil stages them for the editor's browse mode.
     var attachPool by remember { mutableStateOf(listOf<MediaItem>()) }
@@ -412,8 +429,7 @@ fun ChatScreen(nav: NavController, convId: String) {
     // the four origin rectangles, the onGloballyPositioned reporters that fed
     // them, the per-row hide/target/landing state: they were hints for a
     // flight that no longer happens, not code with another job.
-    // Owner round 45 (item 5): r44-3's deselect confirm is retired — every
-    // close clears the ticks (back/swipe both mean "get me out").
+    // r66 supersedes r45: Back/outside asks first; Cancel keeps all picks.
     // Owner round 32 (item 17): the attach panel's "view once" switch — armed
     // for one batch, reset once it goes out.
     // System back during selection CLEARS the selection (WhatsApp) — it must
@@ -2906,6 +2922,23 @@ fun ChatScreen(nav: NavController, convId: String) {
     Box(
         Modifier
             .fillMaxSize()
+            .onGloballyPositioned { chatRootOrigin[0] = it.boundsInWindow().topLeft }
+            .pointerInput("attachment-exit") {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    if (protectOutsideAttach && !attachPanelBounds[0].contains(down.position + chatRootOrigin[0])) {
+                        // Treat selected attachments like a modal context: an
+                        // outside tap/swipe cannot also play media, reply,
+                        // scroll, record, call or navigate underneath the sheet.
+                        down.consume()
+                        do {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            event.changes.forEach { it.consume() }
+                        } while (event.changes.any { it.pressed })
+                        requestOutsideAttach()
+                    }
+                }
+            }
             .background(chatWallpaper(chatTheme)),
     ) {
         CoinWallpaper()
@@ -2983,11 +3016,11 @@ fun ChatScreen(nav: NavController, convId: String) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(
-                onClick = {
+                onClick = { requestAttachExit {
                     Store.route = ""
                     player.stop()
                     nav.popBackStack()
-                },
+                } },
                 // Material3's IconButton defaults to a 48dp touch target;
                 // three/four of these sitting in one Row (back arrow, call,
                 // video, more) was inflating the whole header's height well
@@ -3000,11 +3033,11 @@ fun ChatScreen(nav: NavController, convId: String) {
             }
             val otherId = c?.optJSONObject("other")?.optString("id") ?: ""
             Row(
-                Modifier.weight(1f).clickable {
+                Modifier.weight(1f).clickable { requestAttachExit {
                     // Owner round 31: a group header opens the group profile.
                     if (isGroup) nav.navigate("group/$convId")
                     else if (otherId.isNotBlank()) nav.navigate("profile/$otherId")
-                },
+                } },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
             KpAvatar(title, avatarUrl, 36.dp, avatarRef = avatarRef) // Owner round 25: choto header avatar
@@ -3049,35 +3082,35 @@ fun ChatScreen(nav: NavController, convId: String) {
             // Owner round 32 (items 5b/5c): a GROUP gets voice + video call
             // buttons — the whole group rings.
             if (isGroup && c != null) {
-                HeaderCallBtn(onClick = {
+                HeaderCallBtn(onClick = { requestAttachExit {
                     gateMicCamera(video = false) {
                         CallEngine.instance?.startGroupCall(convId, "AUDIO", title, avatarRef ?: "")
                     }
-                }) {
+                } }) {
                     Icon(Icons.Filled.Call, "Group voice call", tint = chatAccent(chatTheme), modifier = Modifier.size(19.dp))
                 }
-                HeaderCallBtn(onClick = {
+                HeaderCallBtn(onClick = { requestAttachExit {
                     gateMicCamera(video = true) {
                         CallEngine.instance?.startGroupCall(convId, "VIDEO", title, avatarRef ?: "")
                     }
-                }) {
+                } }) {
                     Icon(Icons.Filled.Videocam, "Group video call", tint = chatAccent(chatTheme), modifier = Modifier.size(21.dp))
                 }
             }
             if (!isGroup && c != null && !botChat && !requestOpen && !blockWall) {
                 if (otherId.isNotBlank()) {
-                    HeaderCallBtn(onClick = {
+                    HeaderCallBtn(onClick = { requestAttachExit {
                         gateMicCamera(video = false) {
                             CallEngine.instance?.startCall(otherId, "AUDIO", title, avatarUrl ?: "")
                         }
-                    }) {
+                    } }) {
                         Icon(Icons.Filled.Call, "Voice call", tint = chatAccent(chatTheme), modifier = Modifier.size(19.dp))
                     }
-                    HeaderCallBtn(onClick = {
+                    HeaderCallBtn(onClick = { requestAttachExit {
                         gateMicCamera(video = true) {
                             CallEngine.instance?.startCall(otherId, "VIDEO", title, avatarUrl ?: "")
                         }
-                    }) {
+                    } }) {
                         Icon(Icons.Filled.Videocam, "Video call", tint = chatAccent(chatTheme), modifier = Modifier.size(21.dp))
                     }
                 }
@@ -3087,7 +3120,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             // popup in the app; a GROUP gets its own list — Add Members /
             // Group Media / Theme / Search / Mute-Unmute / Leave Group.
             if (otherUserId != "kp_official_bot") {
-                IconButton(onClick = { haptics.tap(); menuOpen = true }, modifier = Modifier.size(36.dp)) {
+                IconButton(onClick = { requestAttachExit { haptics.tap(); menuOpen = true } }, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.Filled.MoreVert, "More", tint = Ink, modifier = Modifier.size(22.dp))
                 }
             }
@@ -3533,7 +3566,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 nav.navigate("docviewer/${mediaArg(arg)}")
                             },
                             revealChars = if (m.optString("id") == aiRevealId) aiRevealChars else null,
-                            onReply = { haptics.tap(); replyTo = it; replyFocusNonce++ },
+                            onReply = { requestAttachExit { haptics.tap(); replyTo = it; replyFocusNonce++ } },
                             onLongPress = { msg ->
                                 // Owner round 31: the action sheet (reactions on
                                 // top). In multi-select mode a long-press just
@@ -3848,9 +3881,11 @@ fun ChatScreen(nav: NavController, convId: String) {
                 }
                 KpSheetRow(Icons.AutoMirrored.Filled.Reply, "Reply") {
                     close()
-                    haptics.tap()
-                    replyTo = m
-                    replyFocusNonce++
+                    requestAttachExit {
+                        haptics.tap()
+                        replyTo = m
+                        replyFocusNonce++
+                    }
                 }
                 if (isText) {
                     KpSheetRow(Icons.Filled.ContentCopy, "Copy") {
@@ -4146,7 +4181,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         Composer(
             input = input,
             replyFocusNonce = replyFocusNonce,
-            onInput = { v ->
+            onInput = { v -> requestAttachExit {
                 input = v
                 Drafts.set(convId, v)
                 // Typing means the user wants the keyboard, not the panel.
@@ -4167,31 +4202,34 @@ fun ChatScreen(nav: NavController, convId: String) {
                         }
                     }
                 }
-            },
-            onInputTap = {
+            } },
+            onInputTap = { requestAttachExit {
                 if (showAttach || showStickers) {
                     showAttach = false
                     showStickers = false
                 }
-            },
+            } },
             onAttach = { haptics.tap(); showStickers = false; showAttach = true },
-            onSticker = { haptics.tap(); showAttach = false; showStickers = true },
-            onSend = {
+            onSticker = { requestAttachExit { haptics.tap(); showAttach = false; showStickers = true } },
+            onSend = { requestAttachExit {
                 haptics.confirm()
                 showAttach = false
                 showStickers = false
                 sendText(input)
                 input = ""
-            },
+            } },
             // Owner round 32 (item 18): hold Send → pick a time.
-            onScheduleSend = { haptics.tap(); showSchedule = true },
+            onScheduleSend = { requestAttachExit { haptics.tap(); showSchedule = true } },
             recording = recording,
             recMs = recMs,
             onStartRecord = {
-                haptics.tap()
-                showAttach = false
-                showStickers = false
-                startRecording()
+                if (showAttach && attachSel.isNotEmpty()) requestAttachExit { }
+                else {
+                    haptics.tap()
+                    showAttach = false
+                    showStickers = false
+                    startRecording()
+                }
             },
             // Owner round 31 (item 17): the AI hears voice notes now (the
             // worker feeds the clip to Gemini), so the mic works here too.
@@ -4218,7 +4256,7 @@ fun ChatScreen(nav: NavController, convId: String) {
            user taps/swipes the handle up ---------------- */
         if (showAttach) {
             // Owner round 33 (item 11b): the panel pops up from the bar.
-            Box(Modifier.popUp()) {
+            Box(Modifier.popUp().onGloballyPositioned { attachPanelBounds[0] = it.boundsInWindow() }) {
             AttachPanel(
                 sel = attachSel,
                 onSendBatch = {
@@ -4318,11 +4356,30 @@ fun ChatScreen(nav: NavController, convId: String) {
             }
         }
         androidx.activity.compose.BackHandler(enabled = showAttach || showStickers) {
-            // Owner round 45 (item 5): back is a real leave — the ticks die
-            // with the panel, so a reopen starts clean.
-            if (showAttach) attachSel.clear()
-            showAttach = false
-            showStickers = false
+            requestAttachExit {
+                showAttach = false
+                attachFs = false
+                showStickers = false
+            }
+        }
+        if (showDeselect) {
+            KpConfirmSheet(
+                title = "Deselect media?",
+                confirmLabel = "Deselect",
+                cancelLabel = "Cancel",
+                onConfirm = {
+                    showDeselect = false
+                    attachExit.confirm {
+                        attachSel.clear()
+                        showAttach = false
+                        attachFs = false
+                    }
+                },
+                onDismiss = {
+                    attachExit.cancel()
+                    showDeselect = false
+                },
+            )
         }
         if (showDisappear) DisappearDialog(
             current = conv.value?.optInt("disappearSeconds", 0) ?: 0,

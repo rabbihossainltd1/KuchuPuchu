@@ -1049,7 +1049,9 @@ const convBetween = (db, a, b) =>
   );
   check(
     "swipe a bubble right to quote-reply",
-    chat.includes("onReply = { haptics.tap(); replyTo = it; replyFocusNonce++ }") &&
+    chat.includes(
+      "onReply = { requestAttachExit { haptics.tap(); replyTo = it; replyFocusNonce++ } }",
+    ) &&
       chat.includes('payload.put("replyTo", it)') &&
       chat.includes("quoteFor = { rid ->"),
   );
@@ -6469,7 +6471,9 @@ const convBetween = (db, a, b) =>
     check(
       "r32-18: app — the send circle is combinedClickable: tap sends, HOLD (text typed only) opens the 'Send later' sheet — quick picks (In 1 hour / Tonight 9 PM / Tomorrow 8 AM / Tomorrow 6 PM) then 'Pick date & time' with day chips + hour / minute steppers + AM / PM, a Schedule button; the pick POSTs the text with sendAt (reply kept) and clears the composer; a refusal returns the text",
       chat.includes("onScheduleSend: () -> Unit = {},") &&
-        chat.includes("onScheduleSend = { haptics.tap(); showSchedule = true },") &&
+        chat.includes(
+          "onScheduleSend = { requestAttachExit { haptics.tap(); showSchedule = true } },",
+        ) &&
         chat.includes(
           ".combinedClickable(\n                        interactionSource = sendInteraction,\n                        indication = null,\n                        onLongClick = if (input.isNotBlank()) onScheduleSend else null,\n                    ) {",
         ) &&
@@ -6684,23 +6688,11 @@ const convBetween = (db, a, b) =>
         attach.includes(".border(1.dp, Color.White, CircleShape)") &&
         // Owner round 41 (item 3): the whole bar is 28.dp (badge 15); r63-4: bigger.
         attach.includes(".offset(x = 2.dp, y = (-2).dp)") &&
-        // r65 (owner): the tapped state is a blue border ring the button's
-        // exact size (48dp), not a filled disc.
-        (attach.includes(
-          "if (allOnce) Box(Modifier.size(48.dp).clip(CircleShape).border(2.dp, ActionBlue, CircleShape))",
-        ) ||
-          attach.includes(
-            "if (allOnce) Box(Modifier.size(44.dp).clip(CircleShape).background(ActionBlue))",
-          ) ||
-          attach.includes(
-            "if (allOnce) Box(Modifier.size(38.dp).clip(CircleShape).background(ActionBlue))",
-          ) ||
-          attach.includes(
-            "if (allOnce) Box(Modifier.size(30.dp).clip(CircleShape).background(ActionBlue))",
-          )) &&
-        (attach.includes(".height(44.dp)") ||
-          attach.includes(".height(40.dp)") ||
-          attach.includes(".height(28.dp)")) &&
+        // r66: the full-size glyph is blue when active, no second ring.
+        attach.includes(
+          "CenteredOnceIcon(48.dp, tint = if (allOnce) ActionBlue else Color.White, fillBounds = true)",
+        ) &&
+        attach.includes(".height(52.dp)") &&
         // Owner round 41 (item 4): the HD pill carries no border.
         !attach.includes(".border(1.dp, if (hdOn)") &&
         // Owner round 40 (item 3): the keyboard pushes the bar up.
@@ -6879,12 +6871,12 @@ const convBetween = (db, a, b) =>
         (chat.match(/\.put\("body", caption\)/g) || []).length === 2 &&
         chat.includes('MediaCaption(m.optText("body"), mine, theme)') &&
         chat.includes("MediaCaption(albumCaption, mine, theme)") &&
-        // Owner round 45 (item 5): every close forgets the ticks — the
-        // r44-3 confirm sheet is retired, back swipes the selection too.
-        !chat.includes("showDeselect") &&
-        !chat.includes('title = "Deselect media?"') &&
+        // r66 supersedes r45: only confirmed outside exits discard the batch;
+        // the panel-owned picker completion still clears its consumed picks.
+        chat.includes("showDeselect") &&
+        chat.includes('title = "Deselect media?"') &&
         chat.includes("onDismiss = {\n                    attachSel.clear()") &&
-        chat.includes("if (showAttach) attachSel.clear()") &&
+        chat.includes("attachExit.confirm {") &&
         // Owner round 44 (item 6): the caption is its own bubble now.
         // Owner round 45 (item 6): compact — 7x3 padding, 12.sp, no shadow.
         chat.includes("private fun MediaCaption(body: String, mine: Boolean, theme: String)") &&
@@ -6967,7 +6959,7 @@ const convBetween = (db, a, b) =>
         chat.includes("IconButton(onClick = { haptics.heavy(); deleteForMe() })") &&
         chat.includes("IconButton(onClick = { haptics.tap(); forwarding = true })") &&
         chat.includes(
-          "IconButton(onClick = { haptics.tap(); menuOpen = true }, modifier = Modifier.size(36.dp))",
+          "IconButton(onClick = { requestAttachExit { haptics.tap(); menuOpen = true } }, modifier = Modifier.size(36.dp))",
         ) &&
         chat.includes("LaunchedEffect(error) { if (error.isNotBlank()) haptics.reject() }") &&
         chat.includes(".clickable { haptics.tap(); dayOff = d }") &&
@@ -9604,7 +9596,8 @@ const convBetween = (db, a, b) =>
     }
     check(
       "r33-11b: chat — the attach and sticker panels pop up (Box(Modifier.popUp())); a cancelled recording bumps voiceBinNonce, the composer swaps the strip for VoiceBinDrop (lid open → note drops → lid shut, 520 ms) before the pill returns",
-      (chat.match(/Box\(Modifier\.popUp\(\)\) \{/g) || []).length === 2 &&
+      (chat.match(/Box\(Modifier\.popUp\(\)/g) || []).length === 2 &&
+        chat.includes("attachPanelBounds[0] = it.boundsInWindow()") &&
         chat.includes("var voiceBinNonce by remember { mutableStateOf(0) }") &&
         chat.includes(
           "            VoiceNote.cancel()\n            // Owner round 33 (item 11b): the strip plays the bin drop.\n            voiceBinNonce++",
@@ -10077,14 +10070,14 @@ const convBetween = (db, a, b) =>
   {
     const attach = kt("AttachSheet.kt");
     check(
-      "r65: attach panel selection bar — edit / caption / view-once each sit on a 20% dim black ground (0x33000000), the caption bar is the longer 44dp pill, view once is the bigger 48dp seat whose tapped state is a blue BORDER ring the exact size of the button, send stays 44dp",
+      "r66: selection controls use 50% dim black; the longer caption pill contains the borderless, blue-on 48dp view-once glyph; send stays 44dp",
       attach.includes("if (sel.isNotEmpty()) {") &&
-        attach.includes("CenteredOnceIcon(48.dp, tint = Color.White)") &&
         attach.includes(
-          "if (allOnce) Box(Modifier.size(48.dp).clip(CircleShape).border(2.dp, ActionBlue, CircleShape))",
+          "CenteredOnceIcon(48.dp, tint = if (allOnce) ActionBlue else Color.White, fillBounds = true)",
         ) &&
-        attach.includes(".height(44.dp)") &&
-        attach.includes(".background(Color(0x33000000))") &&
+        !attach.includes(".border(2.dp, ActionBlue, CircleShape)") &&
+        attach.includes(".height(52.dp)") &&
+        attach.includes(".background(Color(0x80000000))") &&
         attach.includes(".size(44.dp)"),
     );
   }
@@ -10120,6 +10113,37 @@ const convBetween = (db, a, b) =>
         chat66.includes("val e2eePeerKey by remember {") &&
         chat66.includes("LaunchedEffect(e2eePeerKey)") &&
         chat66.includes('.put("conversationId", convId)'),
+    );
+  }
+
+  {
+    const attach66 = kt("AttachSheet.kt");
+    const chat66 = kt("ChatScreen.kt");
+    const caption66 = attach66.slice(
+      attach66.indexOf("// r66: one long caption pill"),
+      attach66.indexOf("// Send button with count badge"),
+    );
+    check(
+      "r66-2: 50% dim-black controls, one longer caption boundary enclosing a full-size blue-on view-once glyph, no separate view-once border or panel-height change",
+      (attach66.match(/background\(Color\(0x80000000\)\)/g) || []).length === 2 &&
+        caption66.includes("BasicTextField(") &&
+        caption66.includes(
+          "CenteredOnceIcon(48.dp, tint = if (allOnce) ActionBlue else Color.White, fillBounds = true)",
+        ) &&
+        !caption66.includes("border(2.dp, ActionBlue") &&
+        attach66.includes("val collapsedH = screenH * 0.40f"),
+    );
+    check(
+      "r66-2: Back, reply and outside gestures request Deselect/Cancel before leaving; Initial-pass barrier protects every outside touch and the hoisted batch is only discarded on confirmation",
+      chat66.includes("AttachmentExitGate()") &&
+        chat66.includes('title = "Deselect media?"') &&
+        chat66.includes('confirmLabel = "Deselect"') &&
+        chat66.includes("attachExit.confirm {") &&
+        chat66.includes("attachExit.cancel()") &&
+        chat66.includes("PointerEventPass.Initial") &&
+        chat66.includes("!attachPanelBounds[0].contains(down.position + chatRootOrigin[0])") &&
+        chat66.includes("onReply = { requestAttachExit {") &&
+        !chat66.includes("if (showAttach) attachSel.clear()"),
     );
   }
 

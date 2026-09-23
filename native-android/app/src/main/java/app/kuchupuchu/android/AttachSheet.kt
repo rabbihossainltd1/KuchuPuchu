@@ -90,6 +90,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -800,13 +803,13 @@ fun AttachPanel(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         // Edit (pencil) button — r63-4: 40.dp seat, 20.dp glyph;
-                        // r65 (owner): 20% dim black ground (no bare transparent).
+                        // r66 (owner): 50% dim black ground.
                         Box(
                             Modifier
                                 .size(40.dp)
                                 .clip(CircleShape)
                                 .border(1.dp, Color(0x44FFFFFF), CircleShape)
-                                .background(Color(0x33000000))
+                                .background(Color(0x80000000))
                                 .clickable {
                                     haptics.tap()
                                     sel.lastOrNull()?.let(onEdit)
@@ -816,17 +819,17 @@ fun AttachPanel(
                             Icon(Icons.Filled.Edit, "Edit", tint = Color.White, modifier = Modifier.size(20.dp))
                         }
                         Spacer(Modifier.size(8.dp))
-                        // Caption bar — r63-4: rounded 20.dp; r65 (owner): a touch
-                        // longer (44.dp, in line with the buttons) on 20% dim black.
+                        // r66: one long caption pill contains the view-once
+                        // control. The icon changes color, not a second border.
                         Row(
                             Modifier
                                 .barDragDetect()
                                 .weight(1f)
-                                .height(44.dp)
-                                .clip(RoundedCornerShape(22.dp))
-                                .border(1.dp, Color(0x44FFFFFF), RoundedCornerShape(22.dp))
-                                .background(Color(0x33000000))
-                                .padding(horizontal = 12.dp),
+                                .height(52.dp)
+                                .clip(RoundedCornerShape(26.dp))
+                                .border(1.dp, Color(0x44FFFFFF), RoundedCornerShape(26.dp))
+                                .background(Color(0x80000000))
+                                .padding(start = 12.dp, end = 2.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             val cap = sel[0].caption
@@ -844,26 +847,24 @@ fun AttachPanel(
                                     }
                                 },
                             )
-                        }
-                        Spacer(Modifier.size(8.dp))
-                        val allOnce = sel.all { it.once }
-                        // View-once toggle — r65 (owner): bigger 48.dp seat with its
-                        // own 20% dim black ground; tapped = a blue BORDER ring the
-                        // exact size of the button (not a filled disc).
-                        Box(
-                            Modifier
-                                .size(48.dp)
-                                .clip(CircleShape)
-                                .background(Color(0x33000000))
-                                .clickable {
-                                    haptics.toggle(!allOnce)
-                                    val v = !allOnce
-                                    sel.replaceAll { it.copy(once = v) }
-                                },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (allOnce) Box(Modifier.size(48.dp).clip(CircleShape).border(2.dp, ActionBlue, CircleShape))
-                            CenteredOnceIcon(48.dp, tint = Color.White)
+                            Spacer(Modifier.size(6.dp))
+                            val allOnce = sel.all { it.once }
+                            Box(
+                                Modifier
+                                    .size(48.dp)
+                                    .semantics {
+                                        contentDescription = "View once"
+                                        selected = allOnce
+                                    }
+                                    .clickable {
+                                        haptics.toggle(!allOnce)
+                                        val v = !allOnce
+                                        sel.replaceAll { it.copy(once = v) }
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                CenteredOnceIcon(48.dp, tint = if (allOnce) ActionBlue else Color.White, fillBounds = true)
+                            }
                         }
                         Spacer(Modifier.size(8.dp))
                         // Send button with count badge — r63-4: bigger circle 44.dp, icon 22.dp, badge 18.dp
