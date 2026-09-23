@@ -412,10 +412,12 @@ async function mk(withDo, pokeSent = 0) {
 }
 
 // ---- N3r: tap-to-replay an emoji row for everyone watching -------------------
-// A tap on an emoji row replays its 3 s dance on BOTH sides: the tapper's
-// app POSTs /fx and the server fans one emoji_fx frame to the room. A
-// tap-happy thumb is dampened (one fan-out per message per 3 s); strangers
-// cannot replay rows they cannot read.
+// A tap on an emoji row replays its dance on BOTH sides: the tapper's app POSTs
+// /fx and the server fans one emoji_fx frame to the room. r67-4 (owner: "tap tap
+// bar korle ... opponent o same dekhbe same to same"): EVERY tap fans out — the
+// old 3 s per-row dampener showed the far phone one single pass while the tapping
+// phone stuttered. Storm protection is the per-user token bucket, not a per-row
+// damper. Strangers cannot replay rows they cannot read.
 {
   const k = await mk(true, 1);
   const a = await k.reg("n3ra@x.com", "n3ra");
@@ -432,7 +434,7 @@ async function mk(withDo, pokeSent = 0) {
     `${r1.status} ${JSON.stringify(r1.json)}`,
   );
   check(
-    "N3r: the room gets ONE emoji_fx frame carrying the conversation + message id",
+    "N3r: the first tap fans ONE emoji_fx frame carrying the conversation + message id",
     k.broadcasts.filter((x) => x.room === ab && x.body.type === "emoji_fx").length === 1 &&
       k.broadcasts.some(
         (x) =>
@@ -445,9 +447,11 @@ async function mk(withDo, pokeSent = 0) {
   );
   const r2 = await k.call("POST", `/api/messages/${m}/fx`, {}, a.token);
   check(
-    "N3r: a second tap inside 3 s is dampened (no storm)",
-    r2.status === 200 && r2.json.replay === false && r2.json.dampened === true,
-    JSON.stringify(r2.json),
+    "N3r (r67-4): a second tap fans out AGAIN — the far side mirrors every tap, not one pass",
+    r2.status === 200 &&
+      r2.json.replay === true &&
+      k.broadcasts.filter((x) => x.room === ab && x.body.type === "emoji_fx").length === 2,
+    `${r2.status} ${JSON.stringify(r2.json)} ${JSON.stringify(k.broadcasts.map((x) => x.body.type))}`,
   );
   const o = await k.reg("n3rc@x.com", "n3rc");
   const r3 = await k.call("POST", `/api/messages/${m}/fx`, {}, o.token);

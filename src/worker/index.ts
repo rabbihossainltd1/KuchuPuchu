@@ -2451,10 +2451,6 @@ function mediaHeaders(contentType: string, disposition: string) {
  */
 const rateBuckets = new Map<string, { tokens: number; stamp: number }>();
 
-// N3r: per-message tap-to-replay damper — the last emoji_fx fan-out per
-// message id, so a tap-happy thumb cannot storm the room's sockets.
-const fxLastAt = new Map<string, number>();
-
 function rateLimit(key: string, capacity: number, refillPerMinute: number) {
   const now = Date.now();
   const bucket = rateBuckets.get(key) ?? { tokens: capacity, stamp: now };
@@ -9421,17 +9417,21 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   // must not storm the room); the animation itself is client-side.
   const msgFxMatch = path.match(/^\/api\/messages\/([^/]+)\/fx$/);
   if (msgFxMatch && method === "POST") {
-    rateLimit(`fx:${uid}`, 30, 20);
+    // r67-4 (owner: "tap tap bar korle ... ekhon full animation complete hole
+    // abar hoi rapid tap korleo ... opponent o same dekhbe same to same"): the
+    // old 3 s per-row dampener meant a tap-tap-tap thumb fanned out ONCE — the
+    // far phone saw a single pass while the tapping phone stuttered. Every tap
+    // now fans out, so both phones run the same taps. The storm protection is
+    // the per-user token bucket (80 taps of burst, 180/min refill = 3 taps a
+    // second sustained), which bounds what one account can broadcast without
+    // ever swallowing a human thumb.
+    rateLimit(`fx:${uid}`, 80, 180);
     const row = await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", msgFxMatch[1]!);
     if (!row || row.kind === "DELETED") fail(404, "Message not found.");
     await requireMember(db, row.conv_id, uid);
     if (row.kind !== "TEXT" && row.kind !== "STICKER")
       fail(400, "Only emoji rows replay.", "NOT_EMOJI");
     const now = Date.now();
-    if (now - (fxLastAt.get(row.id) ?? 0) < 3000)
-      return json({ ok: true, replay: false, dampened: true });
-    fxLastAt.set(row.id, now);
-    if (fxLastAt.size > 5000) fxLastAt.clear();
     ctx.waitUntil(
       broadcastRoomEvent(env, row.conv_id, {
         type: "emoji_fx",

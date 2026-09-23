@@ -114,6 +114,34 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+/* ---------------- 4. reactions: both phones, every tap ---------------- */
+{
+  const emo = main("EmojiAnim.kt");
+  const feel = main("Feel.kt");
+  const worker = read("src/worker/index.ts");
+  check(
+    "r67-4: a rapid tap is no longer swallowed — the local 300 ms gate is gone",
+    !emo.includes("lastTapMs") && emo.includes("replayKey++"),
+  );
+  check(
+    "r67-4: BOTH sides buzz — the tap and the replay that arrives from the other phone",
+    emo.includes("fun replay(local: Boolean)") &&
+      emo.includes("haptics.reaction()") &&
+      emo.includes("if (isSingle) replay(local = true) else haptics.tap()"),
+  );
+  check(
+    "r67-4: that buzz has its own vocabulary (CONFIRM on 30+, virtual key below)",
+    feel.includes("fun reaction()") &&
+      feel.includes("performHapticFeedback(HapticFeedbackConstants.CONFIRM)"),
+  );
+  check(
+    "r67-4: the worker no longer dampens a repeated tap — every tap fans out to the room",
+    !worker.includes("fxLastAt") &&
+      !worker.includes("dampened: true") &&
+      worker.includes("rateLimit(`fx:${uid}`, 80, 180)"),
+  );
+}
+
 /* ---------------- 6. message tones at half volume ---------------- */
 {
   const feel = main("Feel.kt");

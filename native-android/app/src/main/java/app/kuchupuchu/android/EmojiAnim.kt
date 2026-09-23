@@ -200,14 +200,32 @@ private fun NotoEmojiGlyph(
     val haptics = rememberHaptics()
     val animScale = fxAnimatorScale()
     var replayKey by remember(mid, ch) { mutableStateOf(if (active && animScale > 0f && isSingle) 1 else 0) }
-    var lastTapMs by remember { mutableStateOf(0L) }
 
+    /**
+     * r67-4 (owner: "emojis a tap korle animates eita aro enchance koro ami tap
+     * korle jeno haptic feedback hobe opponent er o haptic feedback hobe. ar tap
+     * tap bar korle ... ekhon full animation complete hole abar hoi rapid tap
+     * korleo").
+     *
+     * Two changes, and both sides get them identically:
+     *  - EVERY tap restarts the dance immediately (replayKey bump throws the
+     *    running pass away and starts at progress 0). The old 300 ms gate
+     *    swallowed a rapid second tap completely, and the running animation had
+     *    to finish before a replay could be seen — so a tap-tap-tap thumb saw
+     *    one slow pass instead of a stutter.
+     *  - BOTH sides buzz: the tap, and the replay that arrives from the other
+     *    phone carry the same [Haptics.reaction] — the finger learns the same
+     *    thing on both phones.
+     *
+     * The local tap still posts /fx so the far side replays the same way. It is
+     * sent on EVERY tap (no client-side throttle): a throttle here would make
+     * the two phones diverge precisely when the owner taps fastest. The worker
+     * owns the storm protection (per-user rate limit).
+     */
     fun replay(local: Boolean) {
         if (!isSingle) return
         if (animScale <= 0f) return
-        val now = android.os.SystemClock.uptimeMillis()
-        if (now - lastTapMs < 300) return
-        lastTapMs = now
+        haptics.reaction()
         replayKey++
 
         if (local && mid.isNotBlank() && !mid.startsWith("c_")) {
@@ -235,8 +253,9 @@ private fun NotoEmojiGlyph(
     Box(
         modifier = Modifier.combinedClickable(
             onClick = {
-                haptics.tap()
-                if (isSingle) replay(local = true)
+                // r67-4: replay() owns the buzz now (haptics.reaction()) — the
+                // tap and the replay from the other phone must feel the same.
+                if (isSingle) replay(local = true) else haptics.tap()
             },
             onLongClick = {
                 haptics.tap()

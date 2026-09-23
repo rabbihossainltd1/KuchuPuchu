@@ -258,6 +258,23 @@ class Haptics(private val view: View?) {
             v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
         }
     }
+
+    /**
+     * r67-4 (owner: "ami tap korle jeno haptic feedback hobe opponent er o
+     * haptic feedback hobe"): an emoji reaction happened — tapped HERE, or
+     * replayed on this phone because the other side tapped it. One vocabulary
+     * for both, so the two phones feel identical. CONFIRM (API 30+) is a
+     * firmer, damped tick than KEYBOARD_TAP — this is a "it landed" event, not
+     * a keyboard click — with a virtual-key click as the older-API stand-in.
+     */
+    fun reaction() {
+        val v = view ?: return
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            v.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+        } else {
+            v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+        }
+    }
 }
 
 @Composable
