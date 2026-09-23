@@ -448,17 +448,39 @@ class KpPushService : FirebaseMessagingService() {
         // poke, so we keep the unread badge accurate and play the tone (sound
         // only, no card). Background stays on the rich card path below.
         if (Store.foreground) {
+            // r67-2: a sealed body is opened the moment it lands, so the list
+            // row can carry the real text — but the foreground path never
+            // spends a request on it (the open chat fetches the thread itself):
+            // only the envelope that rode the push is worth opening here.
+            val fgPlan = PushSeal.plan(data["kp_e2ee"], data["kp_env"], data["body"])
+            val fgPlain = if (fgPlan.envelope != null) PushSeal.open(this, convoId, mid, fgPlan) else null
             // Badge jumps instantly; the next list refresh confirms the same number.
-            ScreenStore.bumpUnread(convoId, data["body"])
+            // r67-2: the preview handed to the list is the opened text or a neutral
+            // label — with the chat open the row repaints from the thread itself.
+            ScreenStore.bumpUnread(convoId, PushSeal.cardText(fgPlan, fgPlain, data["body"]))
             // Owner round 10: his "in app massage" sound plays only when the
             // user is inside the app but NOT on this chat's screen — the open
             // chat itself stays silent (the bubble arriving is the feedback).
             if (!muted && !inChat) runCatching { KpSounds.inApp(this) }
             return
         }
+        // r67-2: open the sealed body BEFORE the card is built — the phone has
+        // the keys, the server never does. A short message rides the push
+        // itself (kp_env); a long one costs one bounded fetch of the page it is
+        // on, which is the same page the open chat fetches. A payload that
+        // cannot be opened keeps the worker's label (never ciphertext).
+        // The token is already loaded by onMessageReceived. openBounded caps the
+        // one fetch it may make (a short message needs none) so the card is
+        // always posted inside the push handler's own time budget.
+        val plan = PushSeal.plan(data["kp_e2ee"], data["kp_env"], data["body"])
+        val opened =
+            if (plan.sealed) PushSeal.openBounded(this, convoId, mid, plan, 3_500L) else null
+        // r67-2: the opened plaintext, else a neutral label — a sealed body is
+        // never printed (neither ciphertext nor a bare lock icon).
+        val cardText = PushSeal.cardText(plan, opened, data["body"])
         // Background (process alive): message card WITH Reply / Like / Mark-as-read.
         // Badge jumps instantly; the next list refresh confirms the same number.
-        ScreenStore.bumpUnread(convoId, data["body"])
+        ScreenStore.bumpUnread(convoId, cardText)
         // Owner round 32 (item 35): a photo message's push names the picture
         // (kp_media, an authorized API path); the card shows the photo itself
         // instead of "photo.jpg". The fetch is bounded (FCM gives this handler
@@ -478,7 +500,11 @@ class KpPushService : FirebaseMessagingService() {
             data["fromName"] ?: data["from"] ?: "KuchuPuchu",
             // Owner round 33 (item 12): the card reads Photo / Voice message /
             // Video / Document like the list row, never a file name.
-            friendlyPreview(data["body"] ?: "New message"),
+            // r67-2 (owner: "massage notification a age jemon shob dekha jeto
+            // reply deoa jeto ekhono same hobe") — [cardText] is the OPENED
+            // plaintext for a sealed 1:1 message; Reply still rides below it and
+            // still seals on the way out (Api.request → E2eeMsg.prepareOutgoing).
+            friendlyPreview(cardText),
             convoId,
             muted = muted,
             mid = mid,

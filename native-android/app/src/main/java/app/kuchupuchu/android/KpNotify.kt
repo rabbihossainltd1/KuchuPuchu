@@ -294,6 +294,13 @@ object KpNotify {
                                 .bigLargeIcon(null as android.graphics.Bitmap?)
                                 .setSummaryText(body),
                         )
+                    } else {
+                        // r67-2 (owner: "notification a age jemon shob dekha jeto"):
+                        // with the envelope opened on arrival the card's body is real
+                        // text again, and a message longer than one collapsed line has
+                        // to be readable in full from the shade — the system's own
+                        // expansion shows the whole body, not an ellipsis.
+                        setStyle(NotificationCompat.BigTextStyle().bigText(body))
                     }
                 }
                 // The official notification account is one-way (owner rule):

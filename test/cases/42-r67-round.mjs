@@ -65,6 +65,66 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+/* ---------------- 2. the card decrypts on arrival ---------------- */
+{
+  const worker = read("src/worker/index.ts");
+  const seal = main("PushSeal.kt");
+  const push = main("KpPush.kt");
+  check(
+    "r67-2: the worker MARKS a sealed push and rides the envelope when it fits the FCM budget",
+    worker.includes('...(sealedBody ? { kp_e2ee: "1" } : {})') &&
+      worker.includes("...(sealedBody && sealedBody.length <= E2EE_PUSH_ENV_MAX") &&
+      worker.includes("const E2EE_PUSH_ENV_MAX = 3_000;"),
+  );
+  check(
+    "r67-2: …and a long envelope is left out rather than truncated",
+    worker.includes("const sealedBody = text.startsWith(E2EE_PREFIX) ? text : null;"),
+  );
+  check(
+    "r67-2: the system-drawn fallback card never inks the lock as if it were the message",
+    worker.includes('body: preview === E2EE_PREVIEW ? "New message" : preview.slice(0, 120),') &&
+      worker.includes('const E2EE_PREVIEW = "\\uD83D\\uDD12";'),
+  );
+  check(
+    "r67-2: the phone opens the envelope on arrival — push-borne first, one bounded fetch otherwise",
+    seal.includes("fun plan(kpE2ee: String?, kpEnv: String?, body: String?): Plan") &&
+      seal.includes(
+        "fun openBounded(ctx: Context, convoId: String, mid: String?, plan: Plan, budgetMs: Long): String?",
+      ) &&
+      seal.includes("if (plan.envelope != null) return open(ctx, convoId, mid, plan)"),
+  );
+  check(
+    "r67-2: the row is fetched from its own conversation's newest page (the page the chat already loads)",
+    seal.includes('runCatching { Api.get("/api/conversations/$convoId/messages") }.getOrNull()'),
+  );
+  check(
+    "r67-2: the handler always posts a card inside the push budget",
+    push.includes("PushSeal.openBounded(this, convoId, mid, plan, 3_500L)"),
+  );
+  check(
+    "r67-2: a long message is readable in full from the shade (BigTextStyle, picture case untouched)",
+    main("KpNotify.kt").includes("NotificationCompat.BigTextStyle().bigText(body)") &&
+      main("KpNotify.kt").includes("NotificationCompat.BigPictureStyle()"),
+  );
+  check(
+    "r67-2: ciphertext and the bare lock can never become the card's text",
+    seal.includes(
+      'if (plan.sealed && (raw == LOCK || E2eeMsg.isEnvelope(raw))) return "New message"',
+    ) && push.includes('PushSeal.cardText(plan, opened, data["body"])'),
+  );
+  check(
+    "r67-2: the foreground badge preview goes through the same judgement (list, not the shade)",
+    push.includes(
+      'ScreenStore.bumpUnread(convoId, PushSeal.cardText(fgPlan, fgPlain, data["body"]))',
+    ),
+  );
+  check(
+    "r67-2: a keyless phone costs no request at all — the key is resolved once, up front",
+    seal.includes("val peer = peerKey(ctx, convoId)") &&
+      seal.includes("if (peer.isBlank()) return null"),
+  );
+}
+
 /* ---------------- 3. one message = one flight ---------------- */
 {
   const chat = main("ChatScreen.kt");

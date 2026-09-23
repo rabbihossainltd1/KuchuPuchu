@@ -7567,7 +7567,10 @@ const convBetween = (db, a, b) =>
         cl.includes(
           'KpNotify.message(ctx, name, friendlyPreview(c.optString("lastMessage")), id)',
         ) &&
-        kt("KpPush.kt").includes('friendlyPreview(data["body"] ?: "New message"),') &&
+        // r67-2: the card's text comes from the seal path (opened plaintext,
+        // else a neutral label) and still passes through friendlyPreview.
+        kt("KpPush.kt").includes('PushSeal.cardText(plan, opened, data["body"])') &&
+        kt("KpPush.kt").includes("friendlyPreview(cardText),") &&
         (kt("SearchScreen.kt").match(/friendlyPreview\(/g) || []).length === 2,
     );
   }
@@ -10480,7 +10483,9 @@ const convBetween = (db, a, b) =>
         src.includes("const text = checkedMessageBody(rawBody);") &&
         src.includes("const text = checkedMessageBody(rawEdit);") &&
         src.includes("const e2ee = !!row.body && row.body.startsWith(E2EE_PREFIX);") &&
-        src.includes('return e2ee ? "\uD83D\uDD12" : (row.body || "Message").slice(0, 120);') &&
+        src.includes('const E2EE_PREVIEW = "\\uD83D\\uDD12";') &&
+        // r67-2: the same lock, now named once and reused by the push fallback.
+        src.includes('return e2ee ? E2EE_PREVIEW : (row.body || "Message").slice(0, 120);') &&
         src.includes("(c.other as Record<string, unknown>).e2eePublicKey ?? null,") &&
         // the worker never learns to open an envelope — no crypto in the file
         !src.includes("createCipheriv") &&

@@ -642,11 +642,21 @@ const AI_BOT_ID = "kp_ai_bot";
 // E2EE (owner round 64): the marker prefix of an end-to-end encrypted
 // message body. The worker stores and forwards the envelope OPAQUE — it
 // never decrypts and never holds a private key; only the two phones can.
+/** The chat-list / push preview of a sealed body (owner round 64). */
+const E2EE_PREVIEW = "\uD83D\uDD12";
 const E2EE_PREFIX = "KP1.";
 // r66: a UTF-16 character can require THREE UTF-8 bytes (e.g. Bengali).
 // KP1 carries a 12-byte nonce and 16-byte GCM tag, then base64. Cutting any
 // ciphertext byte destroys authentication, so oversized envelopes are refused.
 const E2EE_BODY_MAX = E2EE_PREFIX.length + 4 * Math.ceil((3 * MESSAGE_MAX_LENGTH + 28) / 3);
+/**
+ * r67-2: the largest sealed body that rides the PUSH itself. An FCM data
+ * message is capped at 4096 bytes for the whole payload, so the envelope gets
+ * a conservative slice of that; anything longer is left out and the phone
+ * fetches the row instead (never a truncated envelope — a cut ciphertext
+ * cannot be opened, which is exactly the bug the UTF-8 round fixed).
+ */
+const E2EE_PUSH_ENV_MAX = 3_000;
 function checkedMessageBody(raw: string): string {
   if (raw.startsWith(E2EE_PREFIX)) {
     if (raw.length > E2EE_BODY_MAX) fail(400, "Encrypted message is too long.", "MESSAGE_TOO_LONG");
@@ -3630,7 +3640,10 @@ function recipientAlert(
 ): { title: string; body: string; channel: string } | undefined {
   const sysCard = () => ({
     title: fromName || "KuchuPuchu",
-    body: preview.slice(0, 120),
+    // r67-2: the system draws this card without our process, so nothing can be
+    // decrypted here — never ink the lock as if it were the message. The app's
+    // own (data-only) card carries the opened text instead.
+    body: preview === E2EE_PREVIEW ? "New message" : preview.slice(0, 120),
     channel: "kp_messages_v2",
   });
   const goneQuiet = () => {
@@ -8437,6 +8450,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // the upload's file name ("photo.jpg") because this branch only knew the
     // inline-data path.
     const storedKind = imageData ? "IMAGE" : fileKey ? "FILE" : kind;
+    // r67-2: the sealed 1:1 body, if this row is one (previewOf already knows).
+    const sealedBody = text.startsWith(E2EE_PREFIX) ? text : null;
     const preview = previewOf({
       id: mid,
       conv_id: convId,
@@ -8652,6 +8667,15 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           kp_chat: convId,
           muted: memberId.muted === 1 ? "1" : "0",
           ...(pictureUrl ? { kp_media: pictureUrl } : {}),
+          // r67-2 (owner: "massage phone a asha matroi decrypt hoye jabe"): a
+          // sealed 1:1 body is opaque to the server, so the phone must open it
+          // the moment the push lands. kp_e2ee says "this is sealed — open it,
+          // don't print it", and kp_env carries the envelope itself when it
+          // fits the FCM data budget (a data message is capped at 4 KB); a
+          // longer message skips kp_env and the app fetches its own row, which
+          // is what keeps this from ever truncating ciphertext.
+          ...(sealedBody ? { kp_e2ee: "1" } : {}),
+          ...(sealedBody && sealedBody.length <= E2EE_PUSH_ENV_MAX ? { kp_env: sealedBody } : {}),
         },
         recipientAlert(memberId, preview, me.display_name, live),
       );
@@ -11286,7 +11310,7 @@ function previewOf(row: MsgRow): string {
     case "CALL":
       return row.body || "Call";
     default:
-      return e2ee ? "🔒" : (row.body || "Message").slice(0, 120);
+      return e2ee ? E2EE_PREVIEW : (row.body || "Message").slice(0, 120);
   }
 }
 
