@@ -101,6 +101,9 @@ fun KpApp() {
                 }
                 ScreenStore.pokeProfile()
                 ScreenStore.pokeInbox()
+                // r66: a newly published peer key can release queued sends
+                // right now, even after the retry clock had backed off.
+                Outbox.kick(0, force = true)
                 return@onEvent
             }
             // Owner fix 3/5: global chat-list realtime — every conv poke

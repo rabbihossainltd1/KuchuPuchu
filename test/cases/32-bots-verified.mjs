@@ -10330,6 +10330,19 @@ const convBetween = (db, a, b) =>
     );
   }
 
+  {
+    const appRetry = kt("KpApp.kt");
+    const profileRetry = appRetry.slice(
+      appRetry.indexOf('if (ev.optString("type") == "profile")'),
+      appRetry.indexOf("// Owner fix 3/5: global chat-list realtime"),
+    );
+    check(
+      "r66-1 follow-up: a peer's new public key invalidates stale metadata and wakes deferred encrypted messages immediately, without restarting or reopening the chat",
+      profileRetry.includes('Cache.bustAll("/api/conversations")') &&
+        profileRetry.includes("Outbox.kick(0, force = true)"),
+    );
+  }
+
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
   // a touch on blank list space closes it (main and archive lists; r33-6
   // retired the hidden list).
