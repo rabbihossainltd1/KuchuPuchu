@@ -122,6 +122,6 @@ class E2eeMsgTest {
         assertNotNull(E2eeMsg.parsePriv(priv))
         assertArrayEquals(kp.public.encoded, E2eeMsg.parsePub(pub)!!.encoded)
         assertNull(E2eeMsg.parsePub("not::base64::keys"))
-        assertNull(E2eeMsg.parsePriv(priv)) // a private key is not a public one
+        assertNull(E2eeMsg.parsePub(priv)) // a private key is not a public one
     }
 }
