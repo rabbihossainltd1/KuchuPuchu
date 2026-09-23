@@ -166,12 +166,26 @@ object KpSounds {
         }
     }
 
+    /**
+     * r67 (owner: "massage send sent in chat receive sounds gular volume 50%
+     * kom hobe"): the four MESSAGE tones are mixed at half of what they were.
+     * The reaction / call / status tones keep their own levels — the owner
+     * named exactly these four. One constant, so a future level change is one
+     * edit instead of four scattered numbers:
+     *   send    0.60 -> 0.30
+     *   sent    0.70 -> 0.35
+     *   inApp   0.70 -> 0.35
+     *   receive 0.55 -> 0.275
+     */
+    private const val MSG_VOLUME_TRIM = 0.5f
+
     /** The tap/send sound (owner round 11: BOTH sounds live — this on the
      *  tap, [sent] when the server actually accepts the message). */
     fun send(ctx: Context) {
         runCatching {
             ensure(ctx)
-            pool?.play(tapSendId, 0.6f, 0.6f, 1, 0, 1f)
+            val v = 0.6f * MSG_VOLUME_TRIM
+            pool?.play(tapSendId, v, v, 1, 0, 1f)
         }
     }
 
@@ -179,7 +193,8 @@ object KpSounds {
     fun sent(ctx: Context) {
         runCatching {
             ensure(ctx)
-            pool?.play(sentId, 0.7f, 0.7f, 1, 0, 1f)
+            val v = 0.7f * MSG_VOLUME_TRIM
+            pool?.play(sentId, v, v, 1, 0, 1f)
         }
     }
 
@@ -187,14 +202,16 @@ object KpSounds {
     fun inApp(ctx: Context) {
         runCatching {
             ensure(ctx)
-            pool?.play(inAppId, 0.7f, 0.7f, 1, 0, 1f)
+            val v = 0.7f * MSG_VOLUME_TRIM
+            pool?.play(inAppId, v, v, 1, 0, 1f)
         }
     }
 
     fun receive(ctx: Context) {
         runCatching {
             ensure(ctx)
-            pool?.play(receiveId, 0.55f, 0.55f, 1, 0, 1f)
+            val v = 0.55f * MSG_VOLUME_TRIM
+            pool?.play(receiveId, v, v, 1, 0, 1f)
         }
     }
 }
