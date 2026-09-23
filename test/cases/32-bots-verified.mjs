@@ -9977,8 +9977,8 @@ const convBetween = (db, a, b) =>
           prev: convRow()?.last_message,
         }),
       );
-      // Headroom: a full 4000-char plaintext seals to a 5340-char envelope —
-      // it must land whole; only past the envelope cap does the cut happen.
+      // ASCII headroom stays compatible; r66 refuses an oversized envelope
+      // rather than destroying its GCM tag by truncation.
       const bigEnv = "KP1." + Buffer.from("x".repeat(4000)).toString("base64");
       const big = await send({ kind: "TEXT", body: bigEnv, clientId: "e2ee_2" });
       const bigStored = k.db._db
@@ -9986,23 +9986,114 @@ const convBetween = (db, a, b) =>
         .get("e2ee_2")?.body;
       const over = await send({
         kind: "TEXT",
-        body: "KP1." + "y".repeat(9000),
+        body: "KP1." + "y".repeat(17000),
         clientId: "e2ee_3",
       });
       const overStored = k.db._db
         .prepare("SELECT body FROM messages WHERE client_id = ?")
         .get("e2ee_3")?.body;
       check(
-        "r64-e2ee: a full-length message's envelope (5.3k chars) lands whole, and only a genuinely oversize envelope is cut — at the 8000-char envelope cap",
+        "r66-e2ee: a full-length ASCII envelope lands whole; genuinely oversized encrypted bodies are refused, never cut",
         big.r.status === 201 &&
           bigStored === bigEnv &&
-          over.r.status === 201 &&
-          overStored === "KP1." + "y".repeat(8000 - 4),
+          over.r.status === 400 &&
+          overStored === undefined,
         JSON.stringify({
           big: [big.r.status, bigStored?.length],
           over: [over.r.status, overStored?.length],
         }),
       );
+      // r66 final edge-case audit: 4000 Bengali characters are 12000 UTF-8
+      // bytes, not 4000. Exercise a REAL AES-GCM envelope through the handler.
+      {
+        const { randomBytes, createCipheriv, createDecipheriv } = await import("node:crypto");
+        const aesKey = randomBytes(32);
+        const nonce = randomBytes(12);
+        const plain = "\u0985".repeat(4000);
+        const cipher = createCipheriv("aes-256-gcm", aesKey, nonce);
+        const bytes = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
+        const envelope =
+          "KP1." + Buffer.concat([nonce, bytes, cipher.getAuthTag()]).toString("base64");
+        function opens(value) {
+          try {
+            const raw = Buffer.from(String(value).slice(4), "base64");
+            const dec = createDecipheriv("aes-256-gcm", aesKey, raw.subarray(0, 12));
+            dec.setAuthTag(raw.subarray(-16));
+            return (
+              Buffer.concat([dec.update(raw.subarray(12, -16)), dec.final()]).toString("utf8") ===
+              plain
+            );
+          } catch {
+            return false;
+          }
+        }
+        const posted = await send({ kind: "TEXT", body: envelope, clientId: "e2ee-bn" });
+        const saved = k.db._db
+          .prepare("SELECT body FROM messages WHERE client_id = ?")
+          .get("e2ee-bn")?.body;
+        check(
+          "r66-1 Unicode: a 4000-character Bengali message stays authenticated/decryptable after POST (16044-char envelope)",
+          envelope.length === 16044 &&
+            posted.r.status === 201 &&
+            saved === envelope &&
+            opens(saved),
+          JSON.stringify({ input: envelope.length, stored: saved?.length, decrypts: opens(saved) }),
+        );
+        const editedBn = await k.call(
+          "PATCH",
+          `/api/messages/${posted.r.json.message?.id}`,
+          { body: envelope },
+          a.token,
+        );
+        check(
+          "r66-1 Unicode: editing never truncates the encrypted envelope",
+          editedBn.status === 200 && opens(editedBn.json.message?.body),
+        );
+        const scheduled = await k.call(
+          "POST",
+          `/api/conversations/${cid}/messages`,
+          {
+            kind: "TEXT",
+            body: envelope,
+            clientId: "e2ee-bn-later",
+            sendAt: new Date(Date.now() + 120000).toISOString(),
+          },
+          a.token,
+        );
+        const scheduledRaw = k.db._db
+          .prepare("SELECT body_json FROM scheduled_messages WHERE id = ?")
+          .get(scheduled.json.scheduled?.id)?.body_json;
+        check(
+          "r66-1 Unicode: scheduled encrypted payload stays intact for replay",
+          scheduled.status === 202 && opens(JSON.parse(scheduledRaw || "{}").body),
+        );
+        const tooLong = "KP1." + "A".repeat(17000);
+        const rejected = await send({ kind: "TEXT", body: tooLong, clientId: "e2ee-too-long" });
+        const rejectedEdit = await k.call(
+          "PATCH",
+          `/api/messages/${posted.r.json.message?.id}`,
+          { body: tooLong },
+          a.token,
+        );
+        const rejectedSchedule = await k.call(
+          "POST",
+          `/api/conversations/${cid}/messages`,
+          { kind: "TEXT", body: tooLong, sendAt: new Date(Date.now() + 120000).toISOString() },
+          a.token,
+        );
+        const stillSaved = k.db._db
+          .prepare("SELECT body FROM messages WHERE client_id = ?")
+          .get("e2ee-bn")?.body;
+        check(
+          "r66-1 Unicode: oversize encrypted send/edit/schedule are refused atomically instead of storing corrupt ciphertext",
+          rejected.r.status === 400 &&
+            rejectedEdit.status === 400 &&
+            rejectedSchedule.status === 400 &&
+            opens(stillSaved) &&
+            !k.db._db.prepare("SELECT id FROM messages WHERE client_id = ?").get("e2ee-too-long"),
+        );
+      }
+
       // The plaintext cap is untouched for open messages.
       const plainOver = await send({ kind: "TEXT", body: "z".repeat(4500), clientId: "e2ee_4" });
       const plainStored = k.db._db
@@ -10371,16 +10462,16 @@ const convBetween = (db, a, b) =>
   {
     const src = readFileSync(new URL("../../src/worker/index.ts", import.meta.url), "utf8");
     check(
-      "r64-e2ee: worker — KP1. prefix + 8000-char envelope headroom on the send AND edit paths, the e2ee_public_key column migration, the key in every user shape (userFrom) + PATCH /api/me shape check, the lock preview for sealed rows, and the key in the list freshness marker",
+      "r64-e2ee: worker — KP1. prefix + full UTF-8 envelope headroom on the send AND edit paths, the e2ee_public_key column migration, the key in every user shape (userFrom) + PATCH /api/me shape check, the lock preview for sealed rows, and the key in the list freshness marker",
       src.includes('const E2EE_PREFIX = "KP1.";') &&
-        src.includes("const E2EE_BODY_MAX = 8000;") &&
+        src.includes("3 * MESSAGE_MAX_LENGTH + 28") &&
         src.includes("`ALTER TABLE users ADD COLUMN e2ee_public_key TEXT`") &&
         src.includes("e2eePublicKey: row.e2ee_public_key ?? null,") &&
         src.includes(
           'if (key && !/^[A-Za-z0-9+/=]{16,512}$/.test(key)) fail(400, "Bad key.", "BAD_E2EE_KEY");',
         ) &&
-        src.includes("rawBody.startsWith(E2EE_PREFIX) ? E2EE_BODY_MAX : MESSAGE_MAX_LENGTH") &&
-        src.includes("rawEdit.startsWith(E2EE_PREFIX) ? E2EE_BODY_MAX : MESSAGE_MAX_LENGTH") &&
+        src.includes("const text = checkedMessageBody(rawBody);") &&
+        src.includes("const text = checkedMessageBody(rawEdit);") &&
         src.includes("const e2ee = !!row.body && row.body.startsWith(E2EE_PREFIX);") &&
         src.includes('return e2ee ? "\uD83D\uDD12" : (row.body || "Message").slice(0, 120);') &&
         src.includes("(c.other as Record<string, unknown>).e2eePublicKey ?? null,") &&

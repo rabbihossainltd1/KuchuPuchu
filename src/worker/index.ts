@@ -643,10 +643,17 @@ const AI_BOT_ID = "kp_ai_bot";
 // message body. The worker stores and forwards the envelope OPAQUE — it
 // never decrypts and never holds a private key; only the two phones can.
 const E2EE_PREFIX = "KP1.";
-// An envelope is the base64 ciphertext (≈4/3 of the plaintext) plus a 12-byte
-// nonce, so a full 4000-char message seals to ≈7.2k chars — the plaintext cap
-// would cut it mid-envelope. Envelopes get this headroom; nothing else does.
-const E2EE_BODY_MAX = 8000;
+// r66: a UTF-16 character can require THREE UTF-8 bytes (e.g. Bengali).
+// KP1 carries a 12-byte nonce and 16-byte GCM tag, then base64. Cutting any
+// ciphertext byte destroys authentication, so oversized envelopes are refused.
+const E2EE_BODY_MAX = E2EE_PREFIX.length + 4 * Math.ceil((3 * MESSAGE_MAX_LENGTH + 28) / 3);
+function checkedMessageBody(raw: string): string {
+  if (raw.startsWith(E2EE_PREFIX)) {
+    if (raw.length > E2EE_BODY_MAX) fail(400, "Encrypted message is too long.", "MESSAGE_TOO_LONG");
+    return raw;
+  }
+  return raw.slice(0, MESSAGE_MAX_LENGTH);
+}
 
 async function ensureAiBot(db: D1Database): Promise<string> {
   const existing = await one<{ id: string }>(db, "SELECT id FROM users WHERE id = ?", AI_BOT_ID);
@@ -8274,6 +8281,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       const when = scheduleTime(body.sendAt);
       if (!when) fail(400, "Pick a time within the next 30 days.", "BAD_SEND_AT");
       const { sendAt, ...payload } = body;
+      // Validate encrypted length NOW, not after parking a corrupt payload.
+      const scheduledBody = String(payload.body || "");
+      if (scheduledBody.startsWith(E2EE_PREFIX)) checkedMessageBody(scheduledBody);
       if (!String(payload.body || "").trim() && !payload.imageData && !payload.fileKey)
         fail(400, "Write a message.");
       const sid = id();
@@ -8305,10 +8315,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // E2EE (owner round 64): a sealed envelope (KP1. + base64) stretches past
     // the plaintext cap, so only envelopes get the wider headroom.
     const rawBody = String(body.body || "").trim();
-    const text = rawBody.slice(
-      0,
-      rawBody.startsWith(E2EE_PREFIX) ? E2EE_BODY_MAX : MESSAGE_MAX_LENGTH,
-    );
+    const text = checkedMessageBody(rawBody);
     // Whitelisted on purpose: SYSTEM and CALL bubbles are written by the server
     // only. Accepting an arbitrary client kind let anyone forge "Alice paid 500
     // coins" notices and fake call-log entries in someone else's chat.
@@ -8748,10 +8755,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     // E2EE (owner round 64): an edited sealed message is re-sealed on the
     // phone and comes back as an envelope — same headroom as the send path.
     const rawEdit = String(body.body ?? "");
-    const text = rawEdit.slice(
-      0,
-      rawEdit.startsWith(E2EE_PREFIX) ? E2EE_BODY_MAX : MESSAGE_MAX_LENGTH,
-    );
+    const text = checkedMessageBody(rawEdit);
     if (!text.trim()) fail(400, "Message can't be empty.");
     const meta = parseJson<Record<string, unknown>>(msg.meta_json, {});
     meta.edited = true;

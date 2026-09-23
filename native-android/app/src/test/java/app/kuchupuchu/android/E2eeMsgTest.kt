@@ -88,6 +88,16 @@ class E2eeMsgTest {
     }
 
     @Test
+    fun `full-length Bengali is 16044 envelope characters and round-trips`() {
+        val a = E2eeMsg.newKeyPair()
+        val b = E2eeMsg.newKeyPair()
+        val plain = "\u0985".repeat(4000)
+        val envelope = E2eeMsg.sealWith(E2eeMsg.privB64(a.private), E2eeMsg.pubB64(b.public), plain)!!
+        assertEquals(16044, envelope.length)
+        assertEquals(plain, E2eeMsg.openWith(E2eeMsg.privB64(b.private), E2eeMsg.pubB64(a.public), envelope))
+    }
+
+    @Test
     fun `hkdf is deterministic and sized`() {
         val ikm = "input-key-material".toByteArray()
         val k1 = E2eeMsg.hkdfSha256(ikm, "kp-msg-e2ee-v1")
