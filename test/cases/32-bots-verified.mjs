@@ -2796,10 +2796,10 @@ const convBetween = (db, a, b) =>
         kt("StickerSheet.kt").includes("Widgets")) &&
       kt("ChatScreen.kt").includes("internal fun emojiOnlyCount(body: String): Int") &&
       (kt("ChatScreen.kt").includes(
-        'EmojiGlyphRow(m.optText("body").trim(), 66f, fxFresh, m.optString("id"))',
+        'EmojiGlyphRow(m.optText("body").trim(), 66f, fxEmoji, m.optString("id"))',
       ) ||
         kt("ChatScreen.kt").includes(
-          'EmojiGlyphRow(m.optText("body").trim(), 66f, fxFresh, m.optString("id"),',
+          'EmojiGlyphRow(m.optText("body").trim(), 66f, fxEmoji, m.optString("id"),',
         ) ||
         kt("ChatScreen.kt").includes(
           'EmojiGlyphRow(m.optText("body").trim(), 52f, fxFresh, m.optString("id"))',
@@ -2811,13 +2811,13 @@ const convBetween = (db, a, b) =>
           'EmojiGlyphRow(m.optText("body").trim(), 52f, fxFresh, m.optString("id"),',
         )) &&
       (kt("ChatScreen.kt").includes(
-        'EmojiGlyphRow(m.optText("body").trim(), 40f, fxFresh, m.optString("id"))',
+        'EmojiGlyphRow(m.optText("body").trim(), 40f, fxEmoji, m.optString("id"))',
       ) ||
         kt("ChatScreen.kt").includes(
           'EmojiGlyphRow(m.optText("body").trim(), 34f, fxFresh, m.optString("id"))',
         ) ||
         kt("ChatScreen.kt").includes(
-          'EmojiGlyphRow(m.optText("body").trim(), 40f, fxFresh, m.optString("id"),',
+          'EmojiGlyphRow(m.optText("body").trim(), 40f, fxEmoji, m.optString("id"),',
         )) &&
       kt("ChatScreen.kt").includes(
         'Icon(Icons.Filled.Mood, "Stickers", tint = accent, modifier = Modifier.size(20.dp))',
@@ -10315,7 +10315,7 @@ const convBetween = (db, a, b) =>
       sticker.includes("Modifier.size(34.dp)") &&
         sticker.includes("Modifier.fillMaxWidth().height(42.dp)") &&
         sticker.includes("isBundled") &&
-        chat.includes('EmojiGlyphRow(m.optText("body").trim(), 66f, fxFresh, m.optString("id"),'),
+        chat.includes('EmojiGlyphRow(m.optText("body").trim(), 66f, fxEmoji, m.optString("id"),'),
     );
   }
 

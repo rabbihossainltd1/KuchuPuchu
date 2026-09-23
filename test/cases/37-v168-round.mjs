@@ -195,23 +195,35 @@ check(
     emo.includes("noto-emoji") &&
     emo.includes("emojiFxReplays") &&
     chat.includes("val fxFresh =") &&
-    (chat.includes(
-      'liveBorn && FxArrivals.mark(m.optString("id")) != null && m.optString("senderId") != "kp_ai_bot"',
-    ) ||
+    // r67-3: the arrival stamp is still taken ONCE, at first composition, and
+    // the AI bot still never animates here. What changed is that the FLIGHT is
+    // claimed once per stable key (FxFlights) instead of being re-decided per
+    // composition, so the sending echo and the row that replaces it are one
+    // animation; the emoji glyph keeps its own live-birth predicate (fxEmoji).
+    fx7.includes("object FxFlights") &&
+    fx7.includes("fun claim(key: String): Boolean") &&
+    chat.includes("val fxFresh = remember { fxBorn && FxFlights.claim(fxKey) }") &&
+    (chat.includes('m.optString("senderId") == "kp_ai_bot" -> false') ||
       chat.includes('if (m.optString("senderId") == "kp_ai_bot") false')) &&
     chat.includes("FxArrivals.armed = false") &&
     chat.includes("if (msgs.isNotEmpty()) FxArrivals.armed = true") &&
     chat.includes(".fxSlotOpen(fxFresh)") &&
     chat.includes("fxLetterSpans(full, fxFresh)") &&
-    (chat.includes('EmojiGlyphRow(m.optText("body").trim(), 66f, fxFresh, m.optString("id"))') ||
+    (chat.includes('EmojiGlyphRow(m.optText("body").trim(), 66f, fxEmoji, m.optString("id"))') ||
+      chat.includes('EmojiGlyphRow(m.optText("body").trim(), 66f, fxEmoji, m.optString("id"),') ||
+      chat.includes('EmojiGlyphRow(m.optText("body").trim(), 66f, fxFresh, m.optString("id"))') ||
       chat.includes('EmojiGlyphRow(m.optText("body").trim(), 66f, fxFresh, m.optString("id"),') ||
       chat.includes('EmojiGlyphRow(m.optText("body").trim(), 52f, fxFresh, m.optString("id"))') ||
       chat.includes('EmojiGlyphRow(m.optText("body").trim(), 44f, fxFresh, m.optString("id"))') ||
       chat.includes('EmojiGlyphRow(m.optText("body").trim(), 52f, fxFresh, m.optString("id"),')) &&
-    (chat.includes('EmojiGlyphRow(m.optText("body").trim(), 40f, fxFresh, m.optString("id"))') ||
+    (chat.includes('EmojiGlyphRow(m.optText("body").trim(), 40f, fxEmoji, m.optString("id"))') ||
+      chat.includes('EmojiGlyphRow(m.optText("body").trim(), 40f, fxEmoji, m.optString("id"),') ||
+      chat.includes('EmojiGlyphRow(m.optText("body").trim(), 40f, fxFresh, m.optString("id"))') ||
       chat.includes('EmojiGlyphRow(m.optText("body").trim(), 34f, fxFresh, m.optString("id"))') ||
       chat.includes('EmojiGlyphRow(m.optText("body").trim(), 40f, fxFresh, m.optString("id"),')) &&
-    (chat.includes('EmojiGlyphRow(st, 56f, fxFresh, m.optString("id"))') ||
+    (chat.includes('EmojiGlyphRow(st, 56f, fxEmoji, m.optString("id"))') ||
+      chat.includes('EmojiGlyphRow(st, 56f, fxEmoji, m.optString("id"),') ||
+      chat.includes('EmojiGlyphRow(st, 56f, fxFresh, m.optString("id"))') ||
       chat.includes('EmojiGlyphRow(st, 56f, fxFresh, m.optString("id"),')) &&
     chat.includes(".fxBlurIn(fxFresh)") &&
     chat.includes("grow = fxGrow,") &&

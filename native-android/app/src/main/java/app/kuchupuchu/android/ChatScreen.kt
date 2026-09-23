@@ -3628,6 +3628,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                         },
                     ),
                     key = { it.optString("clientId").ifBlank { it.optString("id") } },
+                    // r67-3: the same content type as the thread block, so the
+                    // echo and the row that replaces it are the same kind of
+                    // item to the list (see FxFlights: one flight per message).
+                    contentType = { it.optString("kind") },
                 ) { m ->
                     Column {
                         if (e2eeOn && visibleMsgs.isEmpty() && !hasMoreOlder && m.optString("id") == pending.firstOrNull()?.optString("id")) {
@@ -6008,25 +6012,42 @@ private fun MessageRow(
     val kind = m.optString("kind")
     // Owner round 21: event sounds (reply swipe) play from the row itself.
     val ctx = LocalContext.current
-    // r44: the arrival stamp is decided ONCE, at this row's FIRST
-    // composition - the animation rides frame one, never a replay. The AI
-    // bot's committed rows never animate here (the live chaser is their
-    // animation; a replay is what the owner saw as "vanish, then again").
-    val fxFresh =
+    // r67-3 (owner: "massage send hole agei chat a place hoye abar animate hoye
+    // right side er niche theke ashe ... send sending sent shob sync hobe alada
+    // na"): ONE message = ONE animation, and it IS the arrival.
+    //
+    // The old shape gave the SENDING echo no animation at all and let the row
+    // that replaced it fly afterwards, so a send sat in the chat first and then
+    // re-flew from the bottom-right. Two separate things now:
+    //   [fxBorn]  "this row was born live in this session" - the predicate the
+    //             emoji glyph uses (v205: the glyph plays AFTER sent, never
+    //             during the sending echo).
+    //   [fxFresh] the FLIGHT - claimed exactly once for the row's STABLE key
+    //             (clientId, else the server id). The pending echo and the
+    //             painted server row share that key, so the row flies in at
+    //             birth (still sending) and the swap only takes the seat.
+    val fxKey = m.optString("clientId").ifBlank { m.optString("id") }
+    val fxBorn =
         remember {
             // r50 / r58 (owner: "history scrolling er somoy o animation keno hocche eita"):
-            // the slide animation is for LIVE arrivals only - history, loadOlder, or reopen
-            // never slides; it gets the soft fade instead.
-            // v205: owner wants emoji animate AFTER sent, not during sending (pendingEcho).
-            // v207: own messages always animate within 8s (no FxArrivals gate) so sent emoji animates
+            // the flight is for LIVE arrivals only - history, loadOlder, or reopen
+            // never fly; they get the soft fade instead.
             val isRecent = runCatching { java.time.Instant.parse(m.optString("createdAt")).toEpochMilli() }
                 .getOrDefault(0L) > System.currentTimeMillis() - 8_000L
-            val liveBorn = !pendingEcho && (mine || LiveArrivals.isLive(m.optString("clientId")) || LiveArrivals.isLive(m.optString("id"))) && isRecent
-            if (!liveBorn) false
-            else if (m.optString("senderId") == "kp_ai_bot") false
-            else if (mine) true // v207: own recent always animates after sent
-            else FxArrivals.mark(m.optString("id")) != null
-        } && fxScaleOf(ctx) > 0f
+            val live = LiveArrivals.isLive(fxKey) || LiveArrivals.isLive(m.optString("clientId")) || LiveArrivals.isLive(m.optString("id"))
+            when {
+                !isRecent -> false
+                m.optString("senderId") == "kp_ai_bot" -> false
+                mine -> live
+                else -> live || FxArrivals.mark(m.optString("id")) != null
+            }
+        }
+    val fxFresh = remember { fxBorn && FxFlights.claim(fxKey) } && fxScaleOf(ctx) > 0f
+    // v205 + v207 (unchanged by r67-3): the emoji glyph animates when the row
+    // is a live birth AND is no longer a sending echo - so the emoji plays at
+    // the moment the message becomes sent, while the flight above belongs to
+    // the arrival and never replays.
+    val fxEmoji = fxBorn && !pendingEcho && fxScaleOf(ctx) > 0f
     // Owner round 15: the night theme's other-bubble is dark in BOTH app
     // themes — its text needs a light ink or it vanishes in light mode.
     // Owner round 20: the DARK-BLUE default chat has dark bubbles on both
@@ -6410,7 +6431,7 @@ private fun MessageRow(
                         "STICKER" -> {
                             val st = m.optString("body")
                             if (EmojiRepo.isCustomId(st)) CustomEmojiOrFallback(st)
-                            else EmojiGlyphRow(st, 56f, fxFresh, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m) } })
+                            else EmojiGlyphRow(st, 56f, fxEmoji, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m) } })
                         }
                         "FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend, fxGrow = fxFresh)
                         // Owner round 33 (item 5): the stamp is placed by
@@ -6431,12 +6452,12 @@ private fun MessageRow(
                             // bubble (outside) for every kind now.
                             // v206: single only animates, long-press shows actions
                             if (emojiOnly == 1) {
-                                EmojiGlyphRow(m.optText("body").trim(), 66f, fxFresh, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m) } })
+                                EmojiGlyphRow(m.optText("body").trim(), 66f, fxEmoji, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m) } })
                             } else {
                                 // N3r: every glyph dances its own 3D move for
                                 // 3 s (arrival / tap / the other side's tap).
                                 // v206: multiple emojis don't animate, but long-press still works
-                                EmojiGlyphRow(m.optText("body").trim(), 40f, fxFresh, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m) } })
+                                EmojiGlyphRow(m.optText("body").trim(), 40f, fxEmoji, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m) } })
                             }
                         } else {
                             val full = m.optText("body")

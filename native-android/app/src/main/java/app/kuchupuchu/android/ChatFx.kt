@@ -116,6 +116,46 @@ object LiveArrivals {
     fun isLive(id: String): Boolean = id.isNotBlank() && liveIds.contains(id)
 }
 
+/**
+ * r67-3 (owner: "massage send hole agei chat a place hoye abar animate hoye
+ * right side er niche theke ashe taile to animation er moja tai haray jabe so
+ * all items ... jeno agei place na hoi chat a animation hoyei massage asbe
+ * send sending sent shob sync Hobe alada na").
+ *
+ * ONE message = ONE flight. A row is composed twice in its life: first as the
+ * optimistic echo that is still SENDING, then as the row the server accepted —
+ * a different LazyColumn item (the echo lives in the pending block, the
+ * accepted row in the thread block), so its composition is rebuilt and a
+ * plain `remember` cannot tell them apart. Both compositions carry the same
+ * stable key (the row's clientId, else its server id), so the claim below is
+ * what makes them the same flight: the echo claims it ON THE FRAME IT IS BORN
+ * and flies in from the bottom-right; the swap finds it taken and simply takes
+ * the seat, with no second animation and no visible jump between the three
+ * states (sending → sent, received rows alike).
+ *
+ * The claim is not released on purpose: history scrolling, loadOlder, a chat
+ * re-open and the echo→sent swap must all find it gone. The map is bounded, so
+ * a long session cannot grow it without limit.
+ */
+object FxFlights {
+    private val claimed =
+        java.util.Collections.synchronizedMap(
+            object : java.util.LinkedHashMap<String, Boolean>(64, 0.75f, false) {
+                override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?): Boolean = size > 800
+            },
+        )
+
+    /** True exactly once per key. A blank key (no clientId and no id) never flies. */
+    fun claim(key: String): Boolean {
+        if (key.isBlank()) return false
+        synchronized(claimed) {
+            if (claimed.containsKey(key)) return false
+            claimed[key] = true
+            return true
+        }
+    }
+}
+
 /** Pop entry for the multi-glyph emoji cluster and the document tile. */
 @Composable
 fun Modifier.fxPopIn(active: Boolean): Modifier {

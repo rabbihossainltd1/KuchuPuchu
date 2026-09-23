@@ -65,6 +65,55 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+/* ---------------- 3. one message = one flight ---------------- */
+{
+  const chat = main("ChatScreen.kt");
+  const fx = main("ChatFx.kt");
+  check(
+    "r67-3: the flight is claimed once per STABLE key (clientId, else the server id)",
+    fx.includes("object FxFlights") &&
+      fx.includes("fun claim(key: String): Boolean") &&
+      fx.includes("if (claimed.containsKey(key)) return false") &&
+      chat.includes('val fxKey = m.optString("clientId").ifBlank { m.optString("id") }'),
+  );
+  check(
+    "r67-3: that claim IS the arrival animation (no per-composition re-decision)",
+    chat.includes("val fxFresh = remember { fxBorn && FxFlights.claim(fxKey) }"),
+  );
+  check(
+    "r67-3: the SENDING echo is eligible now — the old `!pendingEcho` exclusion is gone from the birth predicate",
+    !chat.includes("val liveBorn = !pendingEcho &&") &&
+      chat.includes("val fxBorn =") &&
+      chat.includes(
+        'mine -> live\n                else -> live || FxArrivals.mark(m.optString("id")) != null',
+      ),
+  );
+  check(
+    "r67-3: v205/v207 survive — the emoji glyph plays on a live birth that is no longer a sending echo",
+    chat.includes("val fxEmoji = fxBorn && !pendingEcho && fxScaleOf(ctx) > 0f") &&
+      (
+        chat.match(
+          /EmojiGlyphRow\((?:st, 56f|m\.optText\("body"\)\.trim\(\), (?:40|66)f), fxEmoji,/g,
+        ) || []
+      ).length === 3,
+  );
+  check(
+    "r67-3: the echo block and the thread block are the same kind of item (same key + content type)",
+    chat.includes(
+      'contentType = { it.optString("kind") },\n                ) { m ->\n                    Column {',
+    ) &&
+      (
+        chat.match(
+          /key = \{ it\.optString\("clientId"\)\.ifBlank \{ it\.optString\("id"\) \} \},/g,
+        ) || []
+      ).length >= 2,
+  );
+  check(
+    "r67-3: the swap still pre-marks the server id, so the painted row takes the seat silently",
+    chat.includes("FxArrivals.markSeen(id)"),
+  );
+}
+
 /* ---------------- 6. message tones at half volume ---------------- */
 {
   const feel = main("Feel.kt");
