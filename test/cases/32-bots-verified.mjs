@@ -10392,8 +10392,8 @@ const convBetween = (db, a, b) =>
       attach66.indexOf("// Send button with count badge"),
     );
     check(
-      "r66-2: 50% dim-black controls, one longer caption boundary enclosing a full-size blue-on view-once glyph, no separate view-once border or panel-height change",
-      (attach66.match(/background\(Color\(0x80000000\)\)/g) || []).length === 2 &&
+      "r66-2: 50% dim-black controls (r67-5: all four — pen, pill, view-once seat, send seat), one longer caption boundary enclosing a full-size blue-on view-once glyph, no separate view-once border or panel-height change",
+      (attach66.match(/Color\(0x80000000\)/g) || []).length === 4 &&
         caption66.includes("BasicTextField(") &&
         // r67-1: same glyph, pinned into the 40 dp pill (seat = barH - 8).
         caption66.includes(

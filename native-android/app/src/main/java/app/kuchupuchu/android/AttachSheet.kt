@@ -861,6 +861,12 @@ fun AttachPanel(
                             Box(
                                 Modifier
                                     .size(barH - 8.dp)
+                                    // r67-5 (owner: "attach panel a niche
+                                    // caption send view once eshober background a
+                                    // 50% background add koro") — the once seat
+                                    // carries its own 50% dim ground, the same
+                                    // one the pill around it and the pen use.
+                                    .background(Color(0x80000000), CircleShape)
                                     .semantics {
                                         contentDescription = "View once"
                                         selected = allOnce
@@ -884,7 +890,14 @@ fun AttachPanel(
                         // glyph and a 16 dp badge, so it lines up with the pill
                         // and the pen instead of standing taller than both.
                         Box(
-                            Modifier.size(barH + 4.dp),
+                            // r67-5: the send seat carries the same 50% dim ground
+                            // as the pill, the pen and the once seat. Drawn as a
+                            // SHAPE (background(color, shape)), not clip(): the count
+                            // badge deliberately overhangs this box and a clip would
+                            // slice it.
+                            Modifier
+                                .size(barH + 4.dp)
+                                .background(Color(0x80000000), CircleShape),
                             contentAlignment = Alignment.Center,
                         ) {
                             Box(

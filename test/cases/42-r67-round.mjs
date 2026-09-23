@@ -51,7 +51,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
   check(
     "r67-1: the send circle is the same height as the pen and the pill",
-    attach.includes("Modifier.size(barH + 4.dp)") && attach.includes(".size(barH)\n"),
+    // r67-5 moved the seat onto its own modifier line (it now carries the
+    // 50% ground), so the pin reads the size alone.
+    attach.includes(".size(barH + 4.dp)") && attach.includes(".size(barH)\n"),
   );
   check(
     "r67-1: the slimmer bar's glyph and badge came down with it (20 dp / 16 dp)",
@@ -62,6 +64,28 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     "r67-1: the 50% ground stays on the pill and the pen",
     (attach.match(/Color\(0x80000000\)/g) || []).length >= 2,
+  );
+}
+
+/* ---------------- 5. the whole bar sits on the 50% ground ---------------- */
+{
+  const attach = main("AttachSheet.kt");
+  check(
+    "r67-5: the view-once seat carries its own 50% ground (it was bare inside the pill)",
+    attach.includes(".size(barH - 8.dp)\n                                    // r67-5") &&
+      attach.includes(
+        ".background(Color(0x80000000), CircleShape)\n                                    .semantics {",
+      ),
+  );
+  check(
+    "r67-5: the send seat carries it too — as a SHAPE, so the overhanging count badge is not clipped",
+    attach.includes(
+      ".size(barH + 4.dp)\n                                .background(Color(0x80000000), CircleShape),",
+    ) && !attach.includes(".size(barH + 4.dp)\n                                .clip(CircleShape)"),
+  );
+  check(
+    "r67-5: all four controls now carry it (pen, pill, once seat, send seat)",
+    (attach.match(/Color\(0x80000000\)/g) || []).length === 4,
   );
 }
 
