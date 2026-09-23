@@ -802,6 +802,15 @@ fun AttachPanel(
                             .padding(horizontal = 10.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        // r67-1 (owner: "caption bar ta onek beshi mota hoye
+                        // geche eita chikon koro sather ar baki buttons gula
+                        // eitar sathe sync rekho"): ONE height for the whole
+                        // bar. It was 40 / 52 / 46 — the pill stood 12 dp
+                        // prouder than the buttons beside it. Everything in
+                        // this row is [barH] now, and the view-once glyph is
+                        // pinned INSIDE the pill (barH - 8) so it can never
+                        // push the pill back up again.
+                        val barH = 40.dp
                         // Edit (pencil) button — r63-4: 40.dp seat, 20.dp glyph;
                         // r66 (owner): 50% dim black ground.
                         Box(
@@ -825,9 +834,9 @@ fun AttachPanel(
                             Modifier
                                 .barDragDetect()
                                 .weight(1f)
-                                .height(52.dp)
-                                .clip(RoundedCornerShape(26.dp))
-                                .border(1.dp, Color(0x44FFFFFF), RoundedCornerShape(26.dp))
+                                .height(barH)
+                                .clip(RoundedCornerShape(barH / 2))
+                                .border(1.dp, Color(0x44FFFFFF), RoundedCornerShape(barH / 2))
                                 .background(Color(0x80000000))
                                 .padding(start = 12.dp, end = 2.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -851,7 +860,7 @@ fun AttachPanel(
                             val allOnce = sel.all { it.once }
                             Box(
                                 Modifier
-                                    .size(48.dp)
+                                    .size(barH - 8.dp)
                                     .semantics {
                                         contentDescription = "View once"
                                         selected = allOnce
@@ -863,18 +872,24 @@ fun AttachPanel(
                                     },
                                 contentAlignment = Alignment.Center,
                             ) {
-                                CenteredOnceIcon(48.dp, tint = if (allOnce) ActionBlue else Color.White, fillBounds = true)
+                                // r67-1: the seat is [barH] - 8 dp (32 dp) so the
+                                // glyph never sets the pill's height again; the
+                                // fillBounds scale (r66) still fills that seat.
+                                CenteredOnceIcon(barH - 8.dp, tint = if (allOnce) ActionBlue else Color.White, fillBounds = true)
                             }
                         }
                         Spacer(Modifier.size(8.dp))
                         // Send button with count badge — r63-4: bigger circle 44.dp, icon 22.dp, badge 18.dp
+                        // r67-1: the circle IS the bar's height now with a 20 dp
+                        // glyph and a 16 dp badge, so it lines up with the pill
+                        // and the pen instead of standing taller than both.
                         Box(
-                            Modifier.size(46.dp),
+                            Modifier.size(barH + 4.dp),
                             contentAlignment = Alignment.Center,
                         ) {
                             Box(
                                 Modifier
-                                    .size(44.dp)
+                                    .size(barH)
                                     .clip(CircleShape)
                                     .background(ActionBlue)
                                     .combinedClickable(
@@ -892,14 +907,14 @@ fun AttachPanel(
                                     Icons.AutoMirrored.Filled.Send,
                                     contentDescription = "Send",
                                     tint = ActionBlueInk,
-                                    modifier = Modifier.size(22.dp),
+                                    modifier = Modifier.size(20.dp),
                                 )
                             }
                             Box(
                                 Modifier
                                     .align(Alignment.TopEnd)
                                     .offset(x = 2.dp, y = (-2).dp)
-                                    .size(18.dp)
+                                    .size(16.dp)
                                     .clip(CircleShape)
                                     .background(ActionBlue)
                                     .border(1.dp, Color.White, CircleShape),
@@ -908,7 +923,7 @@ fun AttachPanel(
                                 Text(
                                     "${sel.size}",
                                     color = ActionBlueInk,
-                                    fontSize = 10.sp,
+                                    fontSize = 9.sp,
                                     fontWeight = FontWeight.Bold,
                                     textAlign = TextAlign.Center,
                                     style =

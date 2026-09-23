@@ -6668,7 +6668,9 @@ const convBetween = (db, a, b) =>
         attach.includes("sel[0] = sel[0].copy(caption = t.take(1000))") &&
         // Owner round 40 (item 4); r63-4: 36dp (or 28dp); r63-item3: 44dp;
         // r65 (owner): bigger 48dp seat.
-        (attach.includes("CenteredOnceIcon(48.dp") ||
+        // r67-1: the seat is barH - 8 dp (32 dp) now that the bar is 40 dp.
+        (attach.includes("CenteredOnceIcon(barH - 8.dp") ||
+          attach.includes("CenteredOnceIcon(48.dp") ||
           attach.includes("CenteredOnceIcon(44.dp") ||
           attach.includes("CenteredOnceIcon(36.dp, tint = if (allOnce) Color.White else Muted)") ||
           attach.includes("CenteredOnceIcon(28.dp, tint = if (allOnce) Color.White else Muted)")) &&
@@ -6684,11 +6686,14 @@ const convBetween = (db, a, b) =>
         attach.includes(".border(1.dp, Color.White, CircleShape)") &&
         // Owner round 41 (item 3): the whole bar is 28.dp (badge 15); r63-4: bigger.
         attach.includes(".offset(x = 2.dp, y = (-2).dp)") &&
-        // r66: the full-size glyph is blue when active, no second ring.
+        // r66: the glyph is blue when active, no second ring. r67-1 (owner:
+        // "caption bar ta onek beshi mota hoye geche eita chikon koro sather
+        // ar baki buttons gula eitar sathe sync rekho"): the pill is the bar's
+        // height (40 dp) and the seat is pinned 8 dp inside it (32 dp).
         attach.includes(
-          "CenteredOnceIcon(48.dp, tint = if (allOnce) ActionBlue else Color.White, fillBounds = true)",
+          "CenteredOnceIcon(barH - 8.dp, tint = if (allOnce) ActionBlue else Color.White, fillBounds = true)",
         ) &&
-        attach.includes(".height(52.dp)") &&
+        attach.includes(".height(barH)") &&
         // Owner round 41 (item 4): the HD pill carries no border.
         !attach.includes(".border(1.dp, if (hdOn)") &&
         // Owner round 40 (item 3): the keyboard pushes the bar up.
@@ -10329,15 +10334,16 @@ const convBetween = (db, a, b) =>
   {
     const attach = kt("AttachSheet.kt");
     check(
-      "r66: selection controls use 50% dim black; the longer caption pill contains the borderless, blue-on 48dp view-once glyph; send stays 44dp",
+      "r66: selection controls use 50% dim black; the longer caption pill contains the borderless, blue-on view-once glyph; r67-1: the bar is ONE height (40 dp) — the pill, the pen and the send circle all read barH, and the glyph's seat sits 8 dp inside",
       attach.includes("if (sel.isNotEmpty()) {") &&
         attach.includes(
-          "CenteredOnceIcon(48.dp, tint = if (allOnce) ActionBlue else Color.White, fillBounds = true)",
+          "CenteredOnceIcon(barH - 8.dp, tint = if (allOnce) ActionBlue else Color.White, fillBounds = true)",
         ) &&
         !attach.includes(".border(2.dp, ActionBlue, CircleShape)") &&
-        attach.includes(".height(52.dp)") &&
+        attach.includes(".height(barH)") &&
+        attach.includes("val barH = 40.dp") &&
         attach.includes(".background(Color(0x80000000))") &&
-        attach.includes(".size(44.dp)"),
+        attach.includes(".size(barH)"),
     );
   }
 
@@ -10386,8 +10392,9 @@ const convBetween = (db, a, b) =>
       "r66-2: 50% dim-black controls, one longer caption boundary enclosing a full-size blue-on view-once glyph, no separate view-once border or panel-height change",
       (attach66.match(/background\(Color\(0x80000000\)\)/g) || []).length === 2 &&
         caption66.includes("BasicTextField(") &&
+        // r67-1: same glyph, pinned into the 40 dp pill (seat = barH - 8).
         caption66.includes(
-          "CenteredOnceIcon(48.dp, tint = if (allOnce) ActionBlue else Color.White, fillBounds = true)",
+          "CenteredOnceIcon(barH - 8.dp, tint = if (allOnce) ActionBlue else Color.White, fillBounds = true)",
         ) &&
         !caption66.includes("border(2.dp, ActionBlue") &&
         attach66.includes("val collapsedH = screenH * 0.40f"),

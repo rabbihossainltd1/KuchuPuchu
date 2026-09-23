@@ -35,6 +35,36 @@ const ANDROID = "native-android/app/src/main/java/app/kuchupuchu/android";
 const read = (p) => readFileSync(p, "utf8");
 const main = (f) => read(`${ANDROID}/${f}`);
 
+/* ---------------- 1. one slim bar, everything in sync ---------------- */
+{
+  const attach = main("AttachSheet.kt");
+  check("r67-1: the selection bar has ONE height constant", attach.includes("val barH = 40.dp"));
+  check(
+    "r67-1: the caption pill is that height (it was 52 dp) and its radius follows it",
+    attach.includes(".height(barH)") &&
+      attach.includes("RoundedCornerShape(barH / 2)") &&
+      !attach.includes(".height(52.dp)"),
+  );
+  check(
+    "r67-1: the view-once seat is pinned INSIDE the pill (barH - 8) so it cannot set the height",
+    attach.includes(".size(barH - 8.dp)") && attach.includes("CenteredOnceIcon(barH - 8.dp,"),
+  );
+  check(
+    "r67-1: the send circle is the same height as the pen and the pill",
+    attach.includes("Modifier.size(barH + 4.dp)") && attach.includes(".size(barH)\n"),
+  );
+  check(
+    "r67-1: the slimmer bar's glyph and badge came down with it (20 dp / 16 dp)",
+    attach.includes(
+      'contentDescription = "Send",\n                                    tint = ActionBlueInk,\n                                    modifier = Modifier.size(20.dp),',
+    ) && attach.includes(".size(16.dp)"),
+  );
+  check(
+    "r67-1: the 50% ground stays on the pill and the pen",
+    (attach.match(/Color\(0x80000000\)/g) || []).length >= 2,
+  );
+}
+
 /* ---------------- 6. message tones at half volume ---------------- */
 {
   const feel = main("Feel.kt");
