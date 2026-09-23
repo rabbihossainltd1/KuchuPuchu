@@ -1028,7 +1028,11 @@ const convBetween = (db, a, b) =>
       // at the viewport floor) — index counts lie with zero-size items.
       chat.includes("tail.offset + tail.size <= info.viewportEndOffset + 24") &&
       chat.includes("padForIme = if (!showAttach && !showStickers) imeGlideDp else 0.dp,") &&
-      chat.includes("top = 6.dp, bottom = 6.dp),") &&
+      // r65: the E2EE pill at the start of the thread reserves its row (34dp),
+      // a plain chat keeps the 6dp.
+      chat.includes(
+        "top = if (e2eeOn && (msgs.isNotEmpty() || pending.isNotEmpty())) 34.dp else 6.dp,",
+      ) &&
       !chat.includes("bottom = 6.dp + imeGlideDp") &&
       // Owner round 44: open glides like close. Owner round 45 (item 3):
       // a critical spring — frame streams are tracked live, single jumps
@@ -6664,8 +6668,10 @@ const convBetween = (db, a, b) =>
           attach.includes("if (fullscreen && sel.isNotEmpty()) {")) &&
         attach.includes("sel.lastOrNull()?.let(onEdit)") &&
         attach.includes("sel[0] = sel[0].copy(caption = t.take(1000))") &&
-        // Owner round 40 (item 4); r63-4: 36dp (or 28dp); r63-item3: 44dp.
-        (attach.includes("CenteredOnceIcon(44.dp") ||
+        // Owner round 40 (item 4); r63-4: 36dp (or 28dp); r63-item3: 44dp;
+        // r65 (owner): bigger 48dp seat.
+        (attach.includes("CenteredOnceIcon(48.dp") ||
+          attach.includes("CenteredOnceIcon(44.dp") ||
           attach.includes("CenteredOnceIcon(36.dp, tint = if (allOnce) Color.White else Muted)") ||
           attach.includes("CenteredOnceIcon(28.dp, tint = if (allOnce) Color.White else Muted)")) &&
         attach.includes("sel.replaceAll { it.copy(once = v) }") &&
@@ -6680,16 +6686,23 @@ const convBetween = (db, a, b) =>
         attach.includes(".border(1.dp, Color.White, CircleShape)") &&
         // Owner round 41 (item 3): the whole bar is 28.dp (badge 15); r63-4: bigger.
         attach.includes(".offset(x = 2.dp, y = (-2).dp)") &&
+        // r65 (owner): the tapped state is a blue border ring the button's
+        // exact size (48dp), not a filled disc.
         (attach.includes(
-          "if (allOnce) Box(Modifier.size(44.dp).clip(CircleShape).background(ActionBlue))",
+          "if (allOnce) Box(Modifier.size(48.dp).clip(CircleShape).border(2.dp, ActionBlue, CircleShape))",
         ) ||
+          attach.includes(
+            "if (allOnce) Box(Modifier.size(44.dp).clip(CircleShape).background(ActionBlue))",
+          ) ||
           attach.includes(
             "if (allOnce) Box(Modifier.size(38.dp).clip(CircleShape).background(ActionBlue))",
           ) ||
           attach.includes(
             "if (allOnce) Box(Modifier.size(30.dp).clip(CircleShape).background(ActionBlue))",
           )) &&
-        (attach.includes(".height(40.dp)") || attach.includes(".height(28.dp)")) &&
+        (attach.includes(".height(44.dp)") ||
+          attach.includes(".height(40.dp)") ||
+          attach.includes(".height(28.dp)")) &&
         // Owner round 41 (item 4): the HD pill carries no border.
         !attach.includes(".border(1.dp, if (hdOn)") &&
         // Owner round 40 (item 3): the keyboard pushes the bar up.
@@ -10066,11 +10079,14 @@ const convBetween = (db, a, b) =>
   {
     const attach = kt("AttachSheet.kt");
     check(
-      "r63-4: attach panel selection bar shows on sel.isNotEmpty with bigger controls (caption 40dp, view once 44dp/36dp, send 44dp) and transparent background",
+      "r65: attach panel selection bar — edit / caption / view-once each sit on a 20% dim black ground (0x33000000), the caption bar is the longer 44dp pill, view once is the bigger 48dp seat whose tapped state is a blue BORDER ring the exact size of the button, send stays 44dp",
       attach.includes("if (sel.isNotEmpty()) {") &&
-        (attach.includes("CenteredOnceIcon(44.dp") ||
-          attach.includes("CenteredOnceIcon(36.dp, tint = if (allOnce) Color.White else Muted)")) &&
-        attach.includes(".height(40.dp)") &&
+        attach.includes("CenteredOnceIcon(48.dp, tint = Color.White)") &&
+        attach.includes(
+          "if (allOnce) Box(Modifier.size(48.dp).clip(CircleShape).border(2.dp, ActionBlue, CircleShape))",
+        ) &&
+        attach.includes(".height(44.dp)") &&
+        attach.includes(".background(Color(0x33000000))") &&
         attach.includes(".size(44.dp)"),
     );
   }
@@ -10124,12 +10140,15 @@ const convBetween = (db, a, b) =>
 
   // r64-e2ee: end-to-end encrypted messages (app half) — the phone does the
   // cryptography: P-256 ECDH + HKDF-SHA256 + AES-256-GCM, sealed on send,
-  // opened at row entry, with the call's verify ceremony in the header.
+  // opened at row entry, with the call's verify ceremony. r65 (owner): the
+  // line's home is the start of the thread (middle) + the empty-state
+  // middle + under the profile username — the header row is gone.
   {
     const e2 = kt("E2eeMsg.kt");
     const chat = kt("ChatScreen.kt");
+    const profile = kt("ProfileScreen.kt");
     check(
-      "r64-e2ee: app — JCA-only crypto core (P-256 ECDH + HKDF + AES-GCM, KP1. envelope), a stable per-install identity with TOFU check/trust, once-per-process key publication, unseal at every row entry (page / older page / socket frame / paint / outbox echo), seal on every outbound body (text, scheduled, captions, edits, per-target forward re-seal), the header lock row with 3s code reveal + verify sheet, and the key riding the chat-list snapshot",
+      "r64-e2ee: app — JCA-only crypto core (P-256 ECDH + HKDF + AES-GCM, KP1. envelope), a stable per-install identity with TOFU check/trust, once-per-process key publication, unseal at every row entry (page / older page / socket frame / paint / outbox echo), seal on every outbound body (text, scheduled, captions, edits, per-target forward re-seal), the E2EE line with 3s code reveal + verify sheet at the thread start / empty chat / profile (r65, header row removed, the 'Say hi' hint gone), and the key riding the chat-list snapshot",
       e2.includes('const val PREFIX = "KP1."') &&
         e2.includes("fun newKeyPair(): KeyPair") &&
         e2.includes('ECGenParameterSpec("secp256r1")') &&
@@ -10160,7 +10179,13 @@ const convBetween = (db, a, b) =>
         chat.includes(".map { unseal(it) }") &&
         chat.includes("val liveMsg = unseal(rawMsg)") &&
         chat.includes("pending.add(unseal(row))") &&
-        chat.includes("E2eeMsgCodeRow(ctx, otherId, e2eePeerKey, rawTitle)") &&
+        // r65 (owner): the line's two homes — the thread start (middle) + the
+        // empty chat (middle) — and the profile under the username. The header
+        // row and the old "Say hi…" hint are gone.
+        chat.includes("E2eeMsgCodeRow(ctx, e2eePeerId, e2eePeerKey, rawTitle)") &&
+        !chat.includes("Say hi, send a sticker or a photo") &&
+        profile.includes("E2eeMsgCodeRow(") &&
+        profile.includes('u.optText("e2eePublicKey").orEmpty()') &&
         chat.includes("E2eeMsg.ensureOnce(ctx)") &&
         chat.includes('E2eeMsg.sealGlobal(m.optText("body"), tKey)') &&
         chat.includes(

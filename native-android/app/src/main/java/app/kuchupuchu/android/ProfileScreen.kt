@@ -477,6 +477,17 @@ fun ProfileScreen(nav: NavController, userId: String) {
             }
             val uname = u.optText("username")
             if (uname.isNotBlank()) Text("@$uname", fontSize = 13.5.sp, color = Muted)
+            // r65 (owner): the E2EE line under the username in the profile —
+            // the same verify ceremony as the call (tap → code → sheet).
+            // Keyless accounts (bots, AI) carry no key and show nothing.
+            if (!isMe) {
+                E2eeMsgCodeRow(
+                    ctx,
+                    userId,
+                    u.optText("e2eePublicKey").orEmpty(),
+                    u.optText("displayName").ifBlank { "them" },
+                )
+            }
             // Owner round 31 (item 9): the number the server lets me see — a
             // Public number (or Contacts-only when we are contacts). The screen
             // simply never rendered it before; the worker was already right.

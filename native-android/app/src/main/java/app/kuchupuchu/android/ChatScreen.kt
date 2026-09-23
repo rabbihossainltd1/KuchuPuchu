@@ -2444,6 +2444,11 @@ fun ChatScreen(nav: NavController, convId: String) {
     // System accounts: full name in the header (no call buttons there, so
     // space is never a problem) and no call/block actions anywhere.
     val botChat = !isGroup && isKpBot(otherUserId)
+    // r65 (owner): E2EE for this chat. The line's home: the START of the
+    // thread (middle) and under the username in the profile — the header
+    // row the first pass added is gone (owner: "okhan theke remove koro").
+    val e2eeOn = !isGroup && !botChat && e2eePeerKey.isNotBlank()
+    val e2eePeerId = c?.optJSONObject("other")?.optString("id") ?: ""
     // Owner round 32 (item 38): a 1:1 chat a stranger opened from username
     // search is a message REQUEST until accepted. `requestPending` = this
     // side has to answer (Accept / Block prompt in place of the composer);
@@ -3022,12 +3027,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                     overflow = TextOverflow.Ellipsis,
                     color = if (online) Green else Muted,
                 )
-                // r64 E2EE: the message twin of the call's lock row — solo
-                // chats with a peer key only (groups / bots / AI never
-                // claim it).
-                if (!isGroup && !botChat && e2eePeerKey.isNotBlank()) {
-                    E2eeMsgCodeRow(ctx, otherId, e2eePeerKey, rawTitle)
-                }
             }
             }
             // Owner round 32 (items 5b/5c): a GROUP gets voice + video call
@@ -3360,16 +3359,30 @@ fun ChatScreen(nav: NavController, convId: String) {
                     },
                 )
             }
+            // r65 (owner): the E2EE line at the START of the chat — one
+            // centered row above the thread. Its space is reserved by the
+            // list's top padding, so it never covers a bubble; the search
+            // bar (zIndex 6) still floats over it.
+            if (e2eeOn && (msgs.isNotEmpty() || pending.isNotEmpty())) {
+                Box(Modifier.align(Alignment.TopCenter).padding(top = 4.dp).zIndex(4f)) {
+                    E2eeMsgCodeRow(ctx, e2eePeerId, e2eePeerKey, rawTitle)
+                }
+            }
             // Owner round 16: the skeleton AND "No messages yet" painted at
             // the same time — the empty state only makes sense once the first
             // page has actually landed.
             if (msgs.isEmpty() && pending.isEmpty() && !initialLoad) {
                 Box(Modifier.align(Alignment.Center)) {
-                    EmptyState(
-                        icon = Icons.Filled.Mood,
-                        title = "No messages yet",
-                        note = "Say hi, send a sticker or a photo",
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        // r65 (owner): the "Say hi…" hint is gone — the E2EE
+                        // line takes its place, in the middle of a fresh chat.
+                        EmptyState(
+                            icon = Icons.Filled.Mood,
+                            title = "No messages yet",
+                            note = "",
+                        )
+                        if (e2eeOn) E2eeMsgCodeRow(ctx, e2eePeerId, e2eePeerKey, rawTitle)
+                    }
                 }
             }
             if (visibleMsgs.isEmpty() && pending.isEmpty() && initialLoad) {
@@ -3391,7 +3404,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // N2: a slight breath between rows — bubbles used to sit
                 // flush on the previous row's stamp line.
                 verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.Bottom),
-                contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
+                // r65: the E2EE pill at the start of the thread reserves its row.
+                contentPadding = PaddingValues(
+                    start = 10.dp,
+                    end = 10.dp,
+                    top = if (e2eeOn && (msgs.isNotEmpty() || pending.isNotEmpty())) 34.dp else 6.dp,
+                    bottom = 6.dp,
+                ),
             ) {
                 items(
                     groupedMsgs,
