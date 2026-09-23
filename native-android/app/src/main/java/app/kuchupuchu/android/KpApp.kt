@@ -72,6 +72,19 @@ fun KpApp() {
     // socket is alive, so the push-only path was silent for online users.
     // Process-level: registered once, never removed.
     val appCtx = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    // r66: every signed-in install publishes before opening ANY chat. A
+    // temporary offline start retries, rather than disabling E2EE all session.
+    LaunchedEffect(authed, Store.myId()) {
+        if (authed) {
+            var waitMs = 2_000L
+            while (!E2eeMsg.ensureOnce(appCtx)) {
+                kotlinx.coroutines.delay(waitMs)
+                waitMs = (waitMs * 2).coerceAtMost(30_000L)
+            }
+            ScreenStore.pokeProfile()
+            Outbox.kick(0, force = true)
+        }
+    }
     LaunchedEffect(Unit) {
         KpSocket.onEvent { ev ->
             // Owner round 31 (item 18): a peer changed name / username / about

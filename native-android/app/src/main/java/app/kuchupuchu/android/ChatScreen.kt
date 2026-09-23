@@ -215,14 +215,22 @@ fun ChatScreen(nav: NavController, convId: String) {
     // r64 E2EE: the peer's public key for THIS chat ("" = open chat —
     // groups, the official account, the AI, any keyless account). The detail
     // fetch and the list-row snapshot both carry the key, so it tracks the
-    // conv state. Sealing is a no-op when the key is blank — that IS the
-    // group/bot fallback.
-    val e2eePeerKey: String = conv.value?.let { c ->
-        if (c.optBoolean("isGroup")) "" else c.optJSONObject("other")?.optText("e2eePublicKey").orEmpty()
-    } ?: ""
+    // conv state. A local blank-key payload is held by the transport guard;
+    // only real groups/bots may transmit it without message encryption.
+    // Long-lived socket/poll callbacks must read current state, not the
+    // blank key captured before the first metadata request completed.
+    val e2eePeerKey by remember {
+        androidx.compose.runtime.derivedStateOf {
+            conv.value?.let { c ->
+                if (c.optBoolean("isGroup")) "" else c.optJSONObject("other")?.optText("e2eePublicKey").orEmpty()
+            }.orEmpty()
+        }
+    }
     fun sealOut(plain: String): String {
         if (plain.isBlank() || e2eePeerKey.isBlank()) return plain
-        return E2eeMsg.seal(ctx, plain, e2eePeerKey) ?: plain
+        // Local fast path only; Api.request's guard seals/defer-retries any
+        // plaintext payload before it can reach the network.
+        return runCatching { E2eeMsg.seal(ctx, plain, e2eePeerKey) }.getOrNull() ?: plain
     }
     fun unseal(m: JSONObject): JSONObject = E2eeMsg.unsealRow(ctx, m, e2eePeerKey)
     val msgs = remember { mutableStateListOf<JSONObject>() }
@@ -807,6 +815,14 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
+    // r66: metadata can arrive after rows. Re-open preserved envelopes when
+    // the peer key appears/changes, without waiting for another message.
+    LaunchedEffect(e2eePeerKey) {
+        ScreenStore.setMsgs(convId, ScreenStore.msgsOf(convId).map { unseal(it) })
+        paintFromStore()
+        for (i in pending.indices) pending[i] = unseal(pending[i])
+    }
+
     /* instant paint + first refresh */
     LaunchedEffect(convId) {
         KpCrash.mark("chat-open")
@@ -1298,10 +1314,10 @@ fun ChatScreen(nav: NavController, convId: String) {
     // Owner round 33 (item 4): the POST's own response row is painted straight
     // away — the same merge the socket's "message" frame does — instead of a
     // marker GET round trip after every send.
-    fun paintSent(row: JSONObject) {
+    fun paintSent(rawRow: JSONObject) {
+        val row = unseal(rawRow)
         // r64 E2EE: the POST answer carries the sealed body — open it so the
         // painted row reads plaintext like the optimistic bubble did.
-        unseal(row)
         val id = row.optString("id")
         val cid = row.optString("clientId")
         // v171 (owner r45 item 6: "sent hole 1 second er jonno hide hoye
@@ -2447,7 +2463,8 @@ fun ChatScreen(nav: NavController, convId: String) {
     // r65 (owner): E2EE for this chat. The line's home: the START of the
     // thread (middle) and under the username in the profile — the header
     // row the first pass added is gone (owner: "okhan theke remove koro").
-    val e2eeOn = !isGroup && !botChat && e2eePeerKey.isNotBlank()
+    val e2eeKeyReady = remember(e2eePeerKey) { E2eeMsg.parsePub(e2eePeerKey) != null }
+    val e2eeOn = !isGroup && !botChat && e2eeKeyReady
     val e2eePeerId = c?.optJSONObject("other")?.optString("id") ?: ""
     // Owner round 32 (item 38): a 1:1 chat a stranger opened from username
     // search is a message REQUEST until accepted. `requestPending` = this
@@ -3359,15 +3376,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                     },
                 )
             }
-            // r65 (owner): the E2EE line at the START of the chat — one
-            // centered row above the thread. Its space is reserved by the
-            // list's top padding, so it never covers a bubble; the search
-            // bar (zIndex 6) still floats over it.
-            if (e2eeOn && (msgs.isNotEmpty() || pending.isNotEmpty())) {
-                Box(Modifier.align(Alignment.TopCenter).padding(top = 4.dp).zIndex(4f)) {
-                    E2eeMsgCodeRow(ctx, e2eePeerId, e2eePeerKey, rawTitle)
-                }
-            }
             // Owner round 16: the skeleton AND "No messages yet" painted at
             // the same time — the empty state only makes sense once the first
             // page has actually landed.
@@ -3404,11 +3412,11 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // N2: a slight breath between rows — bubbles used to sit
                 // flush on the previous row's stamp line.
                 verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.Bottom),
-                // r65: the E2EE pill at the start of the thread reserves its row.
+                // r66: security notice is content, not a pinned overlay.
                 contentPadding = PaddingValues(
                     start = 10.dp,
                     end = 10.dp,
-                    top = if (e2eeOn && (msgs.isNotEmpty() || pending.isNotEmpty())) 34.dp else 6.dp,
+                    top = 6.dp,
                     bottom = 6.dp,
                 ),
             ) {
@@ -3437,6 +3445,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                         tween(if (flashing) 180 else 700),
                         label = "quoteflash",
                     )
+                    Column(Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null)) {
+                        if (e2eeOn && !hasMoreOlder && m === groupedMsgs.firstOrNull()) {
+                            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.Center) {
+                                E2eeMsgCodeRow(ctx, e2eePeerId, e2eePeerKey, rawTitle)
+                            }
+                        }
                     // Owner round 35 (item 1): when a row leaves, the
                     // survivors glide into its place instead of jumping.
                     // Owner round 45 (item 1): keep the delete glide but
@@ -3446,7 +3460,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                     Box(
                         Modifier
                             .fillMaxWidth()
-                            .animateItem(fadeInSpec = null, fadeOutSpec = null)
                             // E7: loadOlder rows unfurl once (live rows use MessageRow fx instead).
                             .fxHistoryUnfurl(rowKey in historyFxKeys)
                     ) {
@@ -3572,6 +3585,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     }
                         if (flashAlpha > 0.004f) Box(Modifier.matchParentSize().background(chatAccent(chatTheme).copy(alpha = flashAlpha)))
                     }
+                    }
                 }
                 items(
                     foldAlbums(
@@ -3582,6 +3596,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                     ),
                     key = { it.optString("clientId").ifBlank { it.optString("id") } },
                 ) { m ->
+                    Column {
+                        if (e2eeOn && visibleMsgs.isEmpty() && !hasMoreOlder && m.optString("id") == pending.firstOrNull()?.optString("id")) {
+                            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.Center) {
+                                E2eeMsgCodeRow(ctx, e2eePeerId, e2eePeerKey, rawTitle)
+                            }
+                        }
                     // Owner round 45: no pop-in anywhere — but the key is
                     // still consumed here so it can never linger for a
                     // later pass.
@@ -3610,6 +3630,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         )
                     }
                 }
+                    }
                 // Owner round 4: one pretty bouncing-dots bubble whenever
                 // EITHER side is typing — the AI composing, or the other
                 // person's typing lease (the header used to carry this).
@@ -4460,7 +4481,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             withContext(Dispatchers.IO) {
                                 // r64 E2EE: the edited plaintext is re-sealed for the peer
                                 // (in a plaintext chat sealOut is a no-op).
-                                Api.patch("/api/messages/$id", JSONObject().put("body", sealOut(newText)))
+                                Api.patch("/api/messages/$id", JSONObject().put("body", sealOut(newText)).put("conversationId", convId))
                             }
                         }
                         refreshMessages()

@@ -80,8 +80,7 @@ internal object E2eeMsg {
     @Volatile
     private var identityCache: Pair<String, String>? = null
 
-    @Volatile
-    private var ensured = false
+    private val publication = E2eePublicationGate()
 
     // ---------- pure core (JVM-testable, no Android) ----------
 
@@ -174,6 +173,7 @@ internal object E2eeMsg {
      * so our public key (and every peer's safety code) is stable across chats
      * and sessions, and peers can TOFU-check it.
      */
+    @Synchronized
     fun identity(ctx: Context): Pair<String, String> {
         val cached = identityCache
         if (cached != null) return cached
@@ -204,25 +204,27 @@ internal object E2eeMsg {
 
     /**
      * Seal with the process-cached identity — the forward path runs off a
-     * composable (no Context); null until the first chat open cached it, in
-     * which case the caption goes plaintext (never a ciphertext to the wrong
-     * key).
+     * composable (no Context); null until app entry cached it. The transport
+     * guard seals any remaining local plaintext before transmission.
      */
     fun sealGlobal(plain: String, peerPub: String): String? =
         if (plain.isBlank() || peerPub.isBlank()) null else
             identityCache?.let { sealWith(it.first, peerPub, plain) }
 
     /**
-     * Open the row's sealed body IN PLACE. The envelope only ever exists in
-     * the payload and on the wire — the rows the UI paints are opened. A row
+     * Open a row without destroying its envelope. A copy is returned only
+     * when the displayed body changes; cached envelopes can be retried. A row
      * we cannot open (our key lost on a reinstall, the peer's new device)
      * becomes a bare lock, never ciphertext.
      */
     fun unsealRow(ctx: Context, m: JSONObject, peerPub: String): JSONObject {
-        val b = m.optString("body")
-        if (!isEnvelope(b) || peerPub.isBlank()) return m
-        m.put("body", open(ctx, b, peerPub) ?: LOCK)
-        return m
+        // Keep the wire envelope locally so a late peer-key refresh can retry.
+        // Never expose ciphertext, and never destroy the only decryptable copy.
+        val b = m.optText("kpEnvelope").ifBlank { m.optText("body") }
+        if (!isEnvelope(b)) return m
+        val plain = open(ctx, b, peerPub) ?: LOCK
+        if (m.optText("body") == plain && m.optText("kpEnvelope") == b) return m
+        return JSONObject(m.toString()).put("body", plain).put("kpEnvelope", b)
     }
 
     // ---------- TOFU (separate namespace from the call's DTLS TOFU) ----------
@@ -254,35 +256,75 @@ internal object E2eeMsg {
 
     // ---------- key publication ----------
 
-    /**
-     * Once per process: publish our public key when it changed (a fresh
-     * install / reinstall). A no-op for the common case where the server
-     * already holds it — one GET, no PATCH.
-     */
-    suspend fun ensureOnce(ctx: Context) {
-        if (ensured) return
-        ensured = true
-        val (_, pub) =
-            try {
-                identity(ctx)
-            } catch (_: Exception) {
-                return
+    /** App entry retries failures; success is scoped to the authenticated token. */
+    suspend fun ensureOnce(ctx: Context): Boolean =
+        withContext(Dispatchers.IO) { ensurePublished(ctx) }
+
+    private fun ensurePublished(ctx: Context): Boolean {
+        val session = Api.token.orEmpty()
+        return publication.ensure(session, { Api.token == session }) {
+            val pub = identity(ctx).second
+            // Do not use the offline GET cache as a server acknowledgement.
+            val me = Api.request("/api/me", "GET", null).optJSONObject("user")
+                ?: return@ensure false
+            if (Api.token != session) return@ensure false
+            if (me.optText("e2eePublicKey") != pub) {
+                Api.patch("/api/me", JSONObject().put("e2eePublicKey", pub))
             }
-        // A failed publish is retried on the next process start.
-        try {
-            val me = withContext(Dispatchers.IO) { Api.get("/api/me") }.optJSONObject("user")
-            if (me != null && me.optString("e2eePublicKey") != pub) {
-                withContext(Dispatchers.IO) {
-                    Api.patch("/api/me", JSONObject().put("e2eePublicKey", pub))
-                }
-            }
-        } catch (_: Exception) {
+            true
         }
     }
+
+    /**
+     * The final transport guard covers outbox, schedules, forwards, external
+     * shares, status replies and notification replies. Optimistic local rows
+     * may be plaintext; a personal text/caption may NEVER leave that way.
+     * This runs on the caller's IO thread, never in a composable callback.
+     */
+    fun prepareOutgoing(ctx: Context?, path: String, method: String, body: JSONObject?): JSONObject? {
+        if (body == null || body.optText("body").isBlank()) return body
+        val route = path.removePrefix(Api.BASE).substringBefore('?')
+        val send = method == "POST" && Regex("^/api/conversations/[^/]+/messages$").matches(route)
+        val edit = method == "PATCH" && Regex("^/api/messages/[^/]+$").matches(route)
+        if (!send && !edit) return body
+        if (send && !E2eeSendPolicy.protectsKind(body.optText("kind"))) return body
+        val convId = if (send) route.removePrefix("/api/conversations/").removeSuffix("/messages")
+            else body.optText("conversationId")
+        if (convId.isBlank()) throw ApiException(503, "Waiting for secure chat.")
+        val detailPath = "/api/conversations/$convId"
+        var conv = Cache.peek(detailPath)?.optJSONObject("conversation")
+        fun known(c: JSONObject?): Boolean = c != null && c.has("isGroup") &&
+            (c.optBoolean("isGroup") || c.optJSONObject("other")?.optText("id").orEmpty().isNotBlank())
+        fun personal(c: JSONObject): Boolean = !c.optBoolean("isGroup") &&
+            !isKpBot(c.optJSONObject("other")?.optText("id").orEmpty())
+        fun peerKey(c: JSONObject): String = c.optJSONObject("other")?.optText("e2eePublicKey").orEmpty()
+        if (!known(conv) || (conv != null && personal(conv) && parsePub(peerKey(conv)) == null)) {
+            // A missing/stale key must be re-fetched, never converted to open chat.
+            val data = Api.request(detailPath, "GET", null)
+            Cache.put(detailPath, data)
+            conv = data.optJSONObject("conversation")
+        }
+        val target = conv?.takeIf { known(it) } ?: throw ApiException(503, "Waiting for secure chat.")
+        val isPersonal = personal(target)
+        val key = peerKey(target)
+        val ready = !isPersonal || (ctx != null && parsePub(key) != null && ensurePublished(ctx))
+        val sealed = try {
+            E2eeSendPolicy.protectBody(
+                body.optText("body"), isPersonal, ready,
+            ) { plain -> ctx?.let { seal(it, plain, key) } }
+        } catch (_: Exception) {
+            // Retryable: the existing outbox keeps the message and retries.
+            throw ApiException(503, "Waiting for secure chat.")
+        }
+        return JSONObject(body.toString()).put("body", sealed).also {
+            if (edit) it.remove("conversationId")
+        }
+    }
+
 }
 
 /**
- * r64: the lock line under the chat header — the message twin of the call's
+ * r64/r66: the scrolling thread-start line, also used in the profile; the twin of the call's
  * E2eeCodeRow. The code stays hidden — the line reads plain "End-to-end
  * encrypted" until tapped. A tap swaps the code in for 3 s (then it hides
  * itself); a tap while the code shows opens the verify sheet; the

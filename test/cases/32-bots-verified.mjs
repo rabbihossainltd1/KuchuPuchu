@@ -1028,11 +1028,9 @@ const convBetween = (db, a, b) =>
       // at the viewport floor) — index counts lie with zero-size items.
       chat.includes("tail.offset + tail.size <= info.viewportEndOffset + 24") &&
       chat.includes("padForIme = if (!showAttach && !showStickers) imeGlideDp else 0.dp,") &&
-      // r65: the E2EE pill at the start of the thread reserves its row (34dp),
+      // r66: the security notice lives in the first row, no pinned padding.
       // a plain chat keeps the 6dp.
-      chat.includes(
-        "top = if (e2eeOn && (msgs.isNotEmpty() || pending.isNotEmpty())) 34.dp else 6.dp,",
-      ) &&
+      chat.includes("top = 6.dp,") &&
       !chat.includes("bottom = 6.dp + imeGlideDp") &&
       // Owner round 44: open glides like close. Owner round 45 (item 3):
       // a critical spring — frame streams are tracked live, single jumps
@@ -7236,7 +7234,7 @@ const convBetween = (db, a, b) =>
         sendText33.includes("outcome.onSuccess { row -> paintSent(row) }") &&
         sendText33.includes("Drafts.clear(convId)") &&
         sendText33.indexOf("Outbox.send(") < sendText33.indexOf("Drafts.clear(convId)") &&
-        chat33.includes("fun paintSent(row: JSONObject) {") &&
+        chat33.includes("fun paintSent(rawRow: JSONObject) {") &&
         chat33.includes("ScreenStore.setMsgs(convId, msgs.toList())") &&
         chat33.includes(
           "val alive = remember(convId) { java.util.concurrent.atomic.AtomicBoolean(true) }",
@@ -7396,7 +7394,7 @@ const convBetween = (db, a, b) =>
       ),
     );
     const paintSent = chat.slice(
-      chat.indexOf("fun paintSent(row: JSONObject) {"),
+      chat.indexOf("fun paintSent(rawRow: JSONObject) {"),
       chat.indexOf('fun sendText(body: String, kind: String = "TEXT") {'),
     );
     check(
@@ -10091,6 +10089,40 @@ const convBetween = (db, a, b) =>
     );
   }
 
+  // r66: owner rejects the fixed security overlay and missing personal-chat keys.
+  {
+    const chat66 = kt("ChatScreen.kt");
+    const e266 = kt("E2eeMsg.kt");
+    const api66 = kt("Api.kt");
+    const app66 = kt("KpApp.kt");
+    const thread66 = chat66.slice(
+      chat66.indexOf("            LazyColumn("),
+      chat66.indexOf("// Owner round 4: one pretty bouncing-dots bubble"),
+    );
+    check(
+      "r66-1: the security notice scrolls WITH the first real/pending row, only at the true history start, with no extra lazy index or fixed overlay",
+      !chat66.includes("Box(Modifier.align(Alignment.TopCenter).padding(top = 4.dp).zIndex(4f))") &&
+        thread66.includes("!hasMoreOlder && m === groupedMsgs.firstOrNull()") &&
+        thread66.includes("visibleMsgs.isEmpty() && !hasMoreOlder") &&
+        (thread66.match(/E2eeMsgCodeRow\(ctx, e2eePeerId, e2eePeerKey, rawTitle\)/g) || [])
+          .length === 2 &&
+        !chat66.includes("top = if (e2eeOn") &&
+        chat66.includes("listState.animateScrollToItem(i, -jumpPad)"),
+    );
+    check(
+      "r66-1: publish at authenticated app entry with retries, read the current peer key in long-lived effects, preserve envelopes for late-key decrypt, and guard ALL outgoing message paths before HTTP",
+      app66.includes("while (!E2eeMsg.ensureOnce(appCtx))") &&
+        e266.includes("publication.ensure(session") &&
+        !e266.includes("ensured = true") &&
+        api66.includes("E2eeMsg.prepareOutgoing(appCtx, path, method, body)") &&
+        e266.includes("E2eeSendPolicy.protectBody(") &&
+        e266.includes('m.optText("kpEnvelope")') &&
+        chat66.includes("val e2eePeerKey by remember {") &&
+        chat66.includes("LaunchedEffect(e2eePeerKey)") &&
+        chat66.includes('.put("conversationId", convId)'),
+    );
+  }
+
   // Item 11: one open swipe row at a time — another row's touch, a scroll, or
   // a touch on blank list space closes it (main and archive lists; r33-6
   // retired the hidden list).
@@ -10172,7 +10204,7 @@ const convBetween = (db, a, b) =>
           'if (warn) "Security code changed — tap to verify" else if (codeVisible) code else "End-to-end encrypted"',
         ) &&
         e2.includes('KpSheet(onDismiss = onClose, title = "End-to-end encrypted")') &&
-        chat.includes("val e2eePeerKey: String = conv.value?.let { c ->") &&
+        chat.includes("val e2eePeerKey by remember {") &&
         chat.includes("fun sealOut(plain: String): String") &&
         chat.includes('if (kind == "TEXT") sealOut(body) else body') &&
         chat.includes('.put("body", sealOut(body))') &&

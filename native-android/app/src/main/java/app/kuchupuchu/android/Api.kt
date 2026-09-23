@@ -68,6 +68,7 @@ object Api {
     }
 
     fun saveToken(ctx: Context, value: String?) {
+        appCtx = ctx.applicationContext
         token = value
         ctx.getSharedPreferences("kp", 0).edit().putString(TOKEN_KEY, value).apply()
     }
@@ -407,7 +408,8 @@ object Api {
     fun request(path: String, method: String, body: JSONObject?): JSONObject {
         val url = if (path.startsWith("http")) path else "$BASE$path"
         val builder = Request.Builder().url(url).header("Accept", "application/json")
-        val payload = body?.toString()?.toRequestBody(JSON)
+        val outgoing = E2eeMsg.prepareOutgoing(appCtx, path, method, body)
+        val payload = outgoing?.toString()?.toRequestBody(JSON)
         when (method) {
             "GET" -> builder.get()
             "POST" -> builder.post(payload ?: ByteArray(0).toRequestBody(JSON))
