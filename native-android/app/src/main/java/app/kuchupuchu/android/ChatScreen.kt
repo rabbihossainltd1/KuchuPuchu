@@ -212,6 +212,19 @@ fun ChatScreen(nav: NavController, convId: String) {
     // Paint the header instantly from the last-known detail (or the chat
     // list row) — no "…" flash while the fetch round-trips.
     val conv = remember { mutableStateOf<JSONObject?>(ScreenStore.convDetailOf(convId) ?: convRowSnapshot(convId)) }
+    // r64 E2EE: the peer's public key for THIS chat ("" = open chat —
+    // groups, the official account, the AI, any keyless account). The detail
+    // fetch and the list-row snapshot both carry the key, so it tracks the
+    // conv state. Sealing is a no-op when the key is blank — that IS the
+    // group/bot fallback.
+    val e2eePeerKey: String = conv.value?.let { c ->
+        if (c.optBoolean("isGroup")) "" else c.optJSONObject("other")?.optText("e2eePublicKey").orEmpty()
+    } ?: ""
+    fun sealOut(plain: String): String {
+        if (plain.isBlank() || e2eePeerKey.isBlank()) return plain
+        return E2eeMsg.seal(ctx, plain, e2eePeerKey) ?: plain
+    }
+    fun unseal(m: JSONObject): JSONObject = E2eeMsg.unsealRow(ctx, m, e2eePeerKey)
     val msgs = remember { mutableStateListOf<JSONObject>() }
     // r44 (owner: "age message giye pore animation hoi duplicate vabe"):
     // the queue is GONE - arrival bookkeeping is synchronous (FxArrivals).
@@ -670,7 +683,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                         val data = withContext(Dispatchers.IO) { Api.get(url, force = forceNetwork) }
                         if (data.optBoolean("unchanged")) null
                         else {
-                            val fresh = data.arr("items").objects()
+                            // r64 E2EE: the envelope is opened the moment the page
+                            // lands (on the Default dispatcher, off main) — the
+                            // bubble always paints plaintext, never ciphertext.
+                            val fresh = data.arr("items").objects().map { unseal(it) }
                             MsgPage(
                                 marker = data.optString("marker"),
                                 items = fresh,
@@ -795,6 +811,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     LaunchedEffect(convId) {
         KpCrash.mark("chat-open")
         Store.route = "chat/$convId"
+        // r64 E2EE: once per process — publish our public key when it changed
+        // (fresh install / reinstall), so the peer can seal back to us.
+        scope.launch { E2eeMsg.ensureOnce(ctx) }
         // A new chat is a new history window: paging state must not leak across.
         olderIds.clear()
         olderCursor = null
@@ -809,7 +828,9 @@ fun ChatScreen(nav: NavController, convId: String) {
             msgs.forEach { known.add(it.optString("clientId")); known.add(it.optString("id")) }
             pending.forEach { known.add(it.optString("clientId")) }
             Outbox.pendingFor(convId).forEach { row ->
-                if (row.optString("clientId") !in known) pending.add(row)
+                // r64 E2EE: the queue keeps the sealed payload (it re-posts
+                // it as-is); the painted ECHO reads plaintext.
+                if (row.optString("clientId") !in known) pending.add(unseal(row))
             }
         }
         // §20: the draft comes back with the chat — but only into an empty
@@ -932,7 +953,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                         // self-corrects. NOTE: the room broadcast reaches EVERY
                         // socket in the chat — our own included — so our own
                         // sends (and our reactions/edits) echo back here too.
-                        ev.optJSONObject("message")?.let { liveMsg ->
+                        ev.optJSONObject("message")?.let { rawMsg ->
+                            // r64 E2EE: open the live envelope before anything
+                            // touches the row (fast paint, sounds, scroll).
+                            val liveMsg = unseal(rawMsg)
                             // Owner round 22/28: the in-chat receive sound (his
                             // pack) only for a bubble SOMEONE ELSE sent. The
                             // echo of our own send used to play it on every
@@ -1224,7 +1248,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     null,
                 )
             }
-            val page = data.arr("items").objects()
+            val page = data.arr("items").objects().map { unseal(it) } // r64 E2EE
             val have = msgs.mapTo(HashSet()) { it.optString("id") }
             val freshOld =
                 page.filter {
@@ -1275,6 +1299,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     // away — the same merge the socket's "message" frame does — instead of a
     // marker GET round trip after every send.
     fun paintSent(row: JSONObject) {
+        // r64 E2EE: the POST answer carries the sealed body — open it so the
+        // painted row reads plaintext like the optimistic bubble did.
+        unseal(row)
         val id = row.optString("id")
         val cid = row.optString("clientId")
         // v171 (owner r45 item 6: "sent hole 1 second er jonno hide hoye
@@ -1371,7 +1398,10 @@ fun ChatScreen(nav: NavController, convId: String) {
     fun sendText(body: String, kind: String = "TEXT") {
         if (body.isBlank()) return
         val clientId = "c_${java.util.UUID.randomUUID()}"
-        val payload = JSONObject().put("kind", kind).put("body", body).put("clientId", clientId)
+        // r64 E2EE: the PAYLOAD carries the sealed envelope (TEXT only —
+        // stickers are local ids, never sealed); the pending echo below keeps
+        // the plaintext, so the optimistic bubble reads as typed.
+        val payload = JSONObject().put("kind", kind).put("body", if (kind == "TEXT") sealOut(body) else body).put("clientId", clientId)
         // Owner round 13: attach the quoted message when replying.
         replyTo?.optString("id")?.takeIf { it.isNotBlank() }?.let { payload.put("replyTo", it) }
         replyTo = null
@@ -1443,7 +1473,9 @@ fun ChatScreen(nav: NavController, convId: String) {
         if (body.isBlank()) return
         val clientId = "c_${java.util.UUID.randomUUID()}"
         val payload =
-            JSONObject().put("kind", "TEXT").put("body", body).put("clientId", clientId).put("sendAt", at.toString())
+            // r64 E2EE: the scheduled body is sealed like any other TEXT —
+            // the cron later posts the stored envelope through the same path.
+            JSONObject().put("kind", "TEXT").put("body", sealOut(body)).put("clientId", clientId).put("sendAt", at.toString())
         replyTo?.optString("id")?.takeIf { it.isNotBlank() }?.let { payload.put("replyTo", it) }
         replyTo = null
         scope.launch {
@@ -1516,7 +1548,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                             .put("fileName", "photo.jpg")
                             .put("fileType", "image/jpeg")
                             .put("fileSize", jpeg.size)
-                            .put("body", caption)
+                            // r64 E2EE: the caption is sealed; the media bytes stay token-gated.
+                            .put("body", sealOut(caption))
                             .put("clientId", "c_${java.util.UUID.randomUUID()}")
                             .put("sendAt", sendAt.toString())
                     // E3f: scheduled posts skip the outbox, so no stamper adds the
@@ -1640,7 +1673,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                     .put("fileName", "photo.jpg")
                     .put("fileType", "image/jpeg")
                     .put("fileSize", jpeg.size)
-                    .put("body", caption)
+                    // r64 E2EE: the caption is sealed; the media bytes stay token-gated.
+                    .put("body", sealOut(caption))
                     .put("clientId", clientId)
             metaWith(shotW, shotH)?.let { payload.put("meta", it) }
             Uploads.sendPhoto(ctx, convId, clientId, jpeg, payload) { outcome ->
@@ -1700,7 +1734,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                             .put("fileName", name)
                             .put("fileType", mime)
                             .put("fileSize", file.length())
-                            .put("body", caption)
+                            // r64 E2EE: the caption is sealed; the media bytes stay token-gated.
+                            .put("body", sealOut(caption))
                             .put("clientId", "c_${java.util.UUID.randomUUID()}")
                             .put("sendAt", sendAt.toString())
                     // E3f: scheduled posts skip the outbox stamper — carry the box
@@ -1820,7 +1855,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                     .put("fileName", name)
                     .put("fileType", mime)
                     .put("fileSize", file.length())
-                    .put("body", caption)
+                    // r64 E2EE: the caption is sealed (the queue posts this
+                    // payload as-is, so the seal travels with it).
+                    .put("body", sealOut(caption))
                     .put("clientId", clientId)
                     .also { if (docMeta != null) it.put("meta", if (clipMeta.length() > 0) clipMeta else docMeta) }
             }
@@ -2032,7 +2069,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                         .put("fileName", name)
                         .put("fileType", mime)
                         .put("fileSize", file.length())
-                        .put("body", cap)
+                        // r64 E2EE: the caption is sealed; the media bytes stay token-gated.
+                        .put("body", sealOut(cap))
                         .put("clientId", cid)
                         .put("mediaW", job.row.optInt("mediaW"))
                         .put("mediaH", job.row.optInt("mediaH"))
@@ -2984,6 +3022,12 @@ fun ChatScreen(nav: NavController, convId: String) {
                     overflow = TextOverflow.Ellipsis,
                     color = if (online) Green else Muted,
                 )
+                // r64 E2EE: the message twin of the call's lock row — solo
+                // chats with a peer key only (groups / bots / AI never
+                // claim it).
+                if (!isGroup && !botChat && e2eePeerKey.isNotBlank()) {
+                    E2eeMsgCodeRow(ctx, otherId, e2eePeerKey, rawTitle)
+                }
             }
             }
             // Owner round 32 (items 5b/5c): a GROUP gets voice + video call
@@ -4395,7 +4439,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                     scope.launch {
                         runCatching {
                             withContext(Dispatchers.IO) {
-                                Api.patch("/api/messages/$id", JSONObject().put("body", newText))
+                                // r64 E2EE: the edited plaintext is re-sealed for the peer
+                                // (in a plaintext chat sealOut is a no-op).
+                                Api.patch("/api/messages/$id", JSONObject().put("body", sealOut(newText)))
                             }
                         }
                         refreshMessages()
@@ -5145,6 +5191,10 @@ private fun convRowSnapshot(convId: String): JSONObject? {
         // Owner round 31 item 21: the capture guard must hold from the first
         // frame, not only after the detail fetch.
         .put("privateProfile", row.optJSONObject("other")?.optBoolean("privateProfile") ?: false)
+        // r64 E2EE: the peer's public key rides the snapshot too — instant
+        // paint can seal from the first frame (list rows carry it from the
+        // marker-gated poll).
+        .put("e2eePublicKey", row.optJSONObject("other")?.optText("e2eePublicKey").orEmpty())
     return JSONObject()
         .put("id", convId)
         .put("isGroup", row.optBoolean("isGroup"))
@@ -7508,6 +7558,17 @@ private fun ImageMessageRow(
  */
 internal suspend fun forwardMessageTo(targetConvId: String, m: JSONObject, albumMeta: JSONObject? = null) {
     withContext(Dispatchers.IO) {
+        // r64 E2EE: the source row arrives already opened (ChatScreen unseals
+        // at every entry), so only the TARGET side can change: a keyless
+        // target (group / bot / AI) gets the plaintext caption, a keyed solo
+        // target gets a fresh envelope for ITS pair.
+        val tConv = ScreenStore.convs.firstOrNull { it.optString("id") == targetConvId }
+        val tKey =
+            if (tConv == null || tConv.optBoolean("isGroup")) ""
+            else tConv.optJSONObject("other")?.optText("e2eePublicKey").orEmpty()
+        val bodyOut =
+            if (tKey.isNotBlank()) E2eeMsg.sealGlobal(m.optText("body"), tKey) ?: m.optText("body")
+            else m.optText("body")
         val key = m.optText("fileKey")
         when {
             key.isNotBlank() ->
@@ -7519,7 +7580,7 @@ internal suspend fun forwardMessageTo(targetConvId: String, m: JSONObject, album
                         .put("fileName", m.optText("fileName").ifBlank { "File" })
                         .put("fileType", m.optText("fileType").ifBlank { "application/octet-stream" })
                         .put("fileSize", m.optInt("fileSize"))
-                        .put("body", m.optText("body"))
+                        .put("body", bodyOut) // r64 E2EE
                         // Owner round 31 (item 27): a forwarded voice note
                         // stays a voice note — duration + bars come along.
                         .also { body ->
@@ -7543,7 +7604,7 @@ internal suspend fun forwardMessageTo(targetConvId: String, m: JSONObject, album
                     JSONObject()
                         .put("kind", "IMAGE")
                         .put("imageData", m.optText("mediaUrl"))
-                        .put("body", m.optText("body"))
+                        .put("body", bodyOut) // r64 E2EE
                         .also { body -> albumMeta?.let { body.put("meta", it) } },
                 )
             m.optText("mediaUrl").isNotBlank() -> {
@@ -7559,14 +7620,14 @@ internal suspend fun forwardMessageTo(targetConvId: String, m: JSONObject, album
                         .put("fileName", m.optText("fileName").ifBlank { "photo.jpg" })
                         .put("fileType", "image/jpeg")
                         .put("fileSize", bytes.size)
-                        .put("body", m.optText("body"))
+                        .put("body", bodyOut) // r64 E2EE
                         .also { body -> albumMeta?.let { body.put("meta", it) } },
                 )
             }
             else ->
                 Api.post(
                     "/api/conversations/$targetConvId/messages",
-                    JSONObject().put("kind", "TEXT").put("body", m.optText("body")),
+                    JSONObject().put("kind", "TEXT").put("body", bodyOut), // r64 E2EE
                 )
         }
     }
