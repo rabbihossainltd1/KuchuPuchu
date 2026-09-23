@@ -639,6 +639,15 @@ async function resolveApprovalMessage(db: D1Database, requestId: string, status:
  */
 const AI_BOT_ID = "kp_ai_bot";
 
+// E2EE (owner round 64): the marker prefix of an end-to-end encrypted
+// message body. The worker stores and forwards the envelope OPAQUE — it
+// never decrypts and never holds a private key; only the two phones can.
+const E2EE_PREFIX = "KP1.";
+// An envelope is the base64 ciphertext (≈4/3 of the plaintext) plus a 12-byte
+// nonce, so a full 4000-char message seals to ≈7.2k chars — the plaintext cap
+// would cut it mid-envelope. Envelopes get this headroom; nothing else does.
+const E2EE_BODY_MAX = 8000;
+
 async function ensureAiBot(db: D1Database): Promise<string> {
   const existing = await one<{ id: string }>(db, "SELECT id FROM users WHERE id = ?", AI_BOT_ID);
   if (existing) {
@@ -3160,6 +3169,10 @@ async function ensureSchema(db: D1Database) {
     // badge. A no-op write once applied (or when the account does not
     // exist yet on a fresh database).
     `UPDATE users SET verified = 1 WHERE username = 'tachinahamed' AND (verified IS NULL OR verified = 0)`,
+    // E2EE (owner round 64): the account's public message-encryption key
+    // (P-256 SPKI, base64). Stored and served in user payloads; opaque to the
+    // worker. The private key never leaves the phone.
+    `ALTER TABLE users ADD COLUMN e2ee_public_key TEXT`,
   ];
   const fingerprint = await sha256Hex(
     [...statements, ...migrations, CLIENT_ID_BACKFILL].join("\n"),
@@ -3252,6 +3265,7 @@ type UserRow = {
   priv_status: string | null;
   read_receipts: number | null;
   private_profile: number | null;
+  e2ee_public_key: string | null;
 };
 
 /* ---------------- privacy (owner round 30) ---------------- */
@@ -3377,6 +3391,10 @@ function userFrom(row: UserRow, online = false, light = false, viewer?: Viewer) 
     // header, calls, status, groups and the profile alike. Null = show all
     // the badges the account holds (the pre-round behaviour).
     badge: badgeChoice(row),
+    // E2EE (owner round 64): the account's public message key. Riding every
+    // user shape lets a phone seal to the right key with no extra round trip;
+    // groups and keyless accounts (bots, AI) carry null and stay plaintext.
+    e2eePublicKey: row.e2ee_public_key ?? null,
     // Owner round 31 item 21: peers need to know — a private profile's chat,
     // calls, pictures and videos are screenshot-blocked and not saveable /
     // forwardable on the OTHER phone too.
@@ -6192,6 +6210,15 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       sets.push("badge = ?");
       values.push(choice);
     }
+    // E2EE (owner round 64): the account publishes its public message key.
+    // Shape-checked only (base64, bounded) — the worker treats it as an
+    // opaque string; the phones do the cryptography.
+    if (body.e2eePublicKey !== undefined) {
+      const key = String(body.e2eePublicKey || "").slice(0, 512);
+      if (key && !/^[A-Za-z0-9+/=]{16,512}$/.test(key)) fail(400, "Bad key.", "BAD_E2EE_KEY");
+      sets.push("e2ee_public_key = ?");
+      values.push(key || null);
+    }
     if (sets.length) {
       values.push(uid);
       await run(db, `UPDATE users SET ${sets.join(", ")} WHERE id = ?`, ...values);
@@ -6205,7 +6232,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       body.displayName !== undefined ||
       body.username !== undefined ||
       body.about !== undefined ||
-      body.avatarUrl !== undefined;
+      body.avatarUrl !== undefined ||
+      // E2EE (owner round 64): a key change (reinstall) must reach peers so
+      // their saved copy of the user — and their safety code — refresh.
+      body.e2eePublicKey !== undefined;
     if (identityChanged) ctx.waitUntil(fanOutProfileChange(env, db, uid));
     return json({ user: userSelf(row, true) });
   }
@@ -7106,6 +7136,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
                 // token is what must change here when a contact swaps photos.
                 (c.other as Record<string, unknown>).avatarRef ??
                   (c.other as Record<string, unknown>).avatarUrl,
+                // E2EE (owner round 64): a key change (reinstall) must move
+                // the marker so marker-gated lists re-fetch the new key.
+                (c.other as Record<string, unknown>).e2eePublicKey ?? null,
               ]
             : null,
         ]),
@@ -8261,9 +8294,13 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         202,
       );
     }
-    const text = String(body.body || "")
-      .trim()
-      .slice(0, MESSAGE_MAX_LENGTH);
+    // E2EE (owner round 64): a sealed envelope (KP1. + base64) stretches past
+    // the plaintext cap, so only envelopes get the wider headroom.
+    const rawBody = String(body.body || "").trim();
+    const text = rawBody.slice(
+      0,
+      rawBody.startsWith(E2EE_PREFIX) ? E2EE_BODY_MAX : MESSAGE_MAX_LENGTH,
+    );
     // Whitelisted on purpose: SYSTEM and CALL bubbles are written by the server
     // only. Accepting an arbitrary client kind let anyone forge "Alice paid 500
     // coins" notices and fake call-log entries in someone else's chat.
@@ -8700,7 +8737,13 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (msg.kind !== "TEXT") fail(400, "Only text messages can be edited.");
     if (Date.now() - Date.parse(msg.created_at) > 60_000)
       fail(400, "You can no longer edit this message.");
-    const text = String(body.body ?? "").slice(0, MESSAGE_MAX_LENGTH);
+    // E2EE (owner round 64): an edited sealed message is re-sealed on the
+    // phone and comes back as an envelope — same headroom as the send path.
+    const rawEdit = String(body.body ?? "");
+    const text = rawEdit.slice(
+      0,
+      rawEdit.startsWith(E2EE_PREFIX) ? E2EE_BODY_MAX : MESSAGE_MAX_LENGTH,
+    );
     if (!text.trim()) fail(400, "Message can't be empty.");
     const meta = parseJson<Record<string, unknown>>(msg.meta_json, {});
     meta.edited = true;
@@ -10932,7 +10975,9 @@ async function syncPreviewAfterEdit(db: D1Database, msg: MsgRow, body: string) {
     "UPDATE conversations SET last_message = ? WHERE id = ?",
     // The NEW text — the caller still holds the pre-edit row, so reading
     // `msg.body` here would rewrite the preview with exactly what was there.
-    body.slice(0, 120),
+    // E2EE (owner round 64): a re-sealed body previews as the lock, never a
+    // byte of the envelope.
+    previewOf({ ...msg, body }),
     msg.conv_id,
   );
 }
@@ -11099,6 +11144,9 @@ async function sweepExpiredStatuses(env: Env, db: D1Database): Promise<number> {
 
 /** Chat-list preview text for a stored row — mirrors what the send path writes. */
 function previewOf(row: MsgRow): string {
+  // E2EE (owner round 64): a sealed body is an opaque envelope — the chat
+  // list and the push say the lock, never a byte of ciphertext.
+  const e2ee = !!row.body && row.body.startsWith(E2EE_PREFIX);
   const meta = parseJson<{
     name?: string;
     type?: string;
@@ -11113,11 +11161,11 @@ function previewOf(row: MsgRow): string {
     case "STICKER":
       return "Sticker";
     case "IMAGE":
-      return once ? `Photo${once}` : row.body || "Photo";
+      return once ? `Photo${once}` : e2ee ? "Photo" : row.body || "Photo";
     case "VIDEO":
-      return row.body || "Video";
+      return e2ee ? "Video" : row.body || "Video";
     case "FILE": {
-      if (row.body && !once) return row.body;
+      if (row.body && !once && !e2ee) return row.body;
       if (meta.voice) return "Voice message";
       // Owner round 32 (item 35): media picked as media reads as what it is;
       // only a Document keeps its file name (the bubble draws it as a file row).
@@ -11134,7 +11182,7 @@ function previewOf(row: MsgRow): string {
     case "CALL":
       return row.body || "Call";
     default:
-      return (row.body || "Message").slice(0, 120);
+      return e2ee ? "🔒" : (row.body || "Message").slice(0, 120);
   }
 }
 

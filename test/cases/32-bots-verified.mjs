@@ -9934,6 +9934,103 @@ const convBetween = (db, a, b) =>
         ok: afterAll.r.status,
       }),
     );
+    // ---- E2EE (owner round 64): the message system's sealed envelopes ----
+    {
+      const fakeKeyA = "AAAA" + "a1B2c3D4e5F6g7H8i9J0".repeat(4); // base64-ish, 104 chars
+      const badKey = await k.call("PATCH", "/api/me", { e2eePublicKey: "no::pe::keys" }, a.token);
+      const upA = await k.call("PATCH", "/api/me", { e2eePublicKey: fakeKeyA }, a.token);
+      const meA = await k.call("GET", "/api/me", undefined, a.token);
+      const detailB = await k.call("GET", `/api/conversations/${cid}`, undefined, b.token);
+      const envBody = "KP1." + Buffer.from("hello encrypted world").toString("base64");
+      const sealed = await send({ kind: "TEXT", body: envBody, clientId: "e2ee_1" });
+      const storedBody = k.db._db
+        .prepare("SELECT body FROM messages WHERE client_id = ?")
+        .get("e2ee_1")?.body;
+      check(
+        "r64-e2ee: the account publishes its public key via PATCH /api/me (bad shape refused), the key rides /api/me AND the peer's conversation detail (the phone seals with it), and a sealed envelope stores verbatim while the chat-list preview + push read only the lock — at the SAME four-wave / six-trip send cost",
+        badKey.status === 400 &&
+          badKey.json.error?.code === "BAD_E2EE_KEY" &&
+          upA.status === 200 &&
+          upA.json.user?.e2eePublicKey === fakeKeyA &&
+          meA.json.user?.e2eePublicKey === fakeKeyA &&
+          detailB.json.conversation?.other?.e2eePublicKey === fakeKeyA &&
+          sealed.r.status === 201 &&
+          sealed.r.json.message?.body === envBody &&
+          storedBody === envBody &&
+          convRow()?.last_message === "🔒" &&
+          sealed.waves === 4 &&
+          sealed.trips === 6 &&
+          sealed.concurrent === 3,
+        JSON.stringify({
+          bad: [badKey.status, badKey.json.error?.code],
+          key: upA.json.user?.e2eePublicKey?.slice(0, 8),
+          peerKey: detailB.json.conversation?.other?.e2eePublicKey?.slice(0, 8),
+          s: sealed.r.status,
+          w: sealed.waves,
+          t: sealed.trips,
+          prev: convRow()?.last_message,
+        }),
+      );
+      // Headroom: a full 4000-char plaintext seals to a 5340-char envelope —
+      // it must land whole; only past the envelope cap does the cut happen.
+      const bigEnv = "KP1." + Buffer.from("x".repeat(4000)).toString("base64");
+      const big = await send({ kind: "TEXT", body: bigEnv, clientId: "e2ee_2" });
+      const bigStored = k.db._db
+        .prepare("SELECT body FROM messages WHERE client_id = ?")
+        .get("e2ee_2")?.body;
+      const over = await send({
+        kind: "TEXT",
+        body: "KP1." + "y".repeat(9000),
+        clientId: "e2ee_3",
+      });
+      const overStored = k.db._db
+        .prepare("SELECT body FROM messages WHERE client_id = ?")
+        .get("e2ee_3")?.body;
+      check(
+        "r64-e2ee: a full-length message's envelope (5.3k chars) lands whole, and only a genuinely oversize envelope is cut — at the 8000-char envelope cap",
+        big.r.status === 201 &&
+          bigStored === bigEnv &&
+          over.r.status === 201 &&
+          overStored === "KP1." + "y".repeat(8000 - 4),
+        JSON.stringify({
+          big: [big.r.status, bigStored?.length],
+          over: [over.r.status, overStored?.length],
+        }),
+      );
+      // The plaintext cap is untouched for open messages.
+      const plainOver = await send({ kind: "TEXT", body: "z".repeat(4500), clientId: "e2ee_4" });
+      const plainStored = k.db._db
+        .prepare("SELECT body FROM messages WHERE client_id = ?")
+        .get("e2ee_4")?.body;
+      check(
+        "r64-e2ee: the PLAINTEXT cap is untouched — a 4500-char open message is still cut at 4000",
+        plainStored === "z".repeat(4000),
+        JSON.stringify({ len: plainStored?.length }),
+      );
+      // Edit path: an edited sealed message is re-sealed on the phone. The
+      // edited row is the CONVERSATION'S newest, so the chat-list preview must
+      // follow the new envelope and still read only the lock.
+      const lastEnv = "KP1." + Buffer.from("final sealed").toString("base64");
+      const lastMsg = await send({ kind: "TEXT", body: lastEnv, clientId: "e2ee_5" });
+      const reSealed = "KP1." + Buffer.from("edited plain").toString("base64");
+      const edit = await k.call(
+        "PATCH",
+        `/api/messages/${lastMsg.r.json.message?.id}`,
+        { body: reSealed },
+        a.token,
+      );
+      check(
+        "r64-e2ee: editing the newest sealed message stores the NEW envelope and the chat-list preview stays the lock",
+        edit.status === 200 &&
+          edit.json.message?.body === reSealed &&
+          convRow()?.last_message === "🔒",
+        JSON.stringify({
+          s: edit.status,
+          body: edit.json.message?.body?.slice(0, 12),
+          prev: convRow()?.last_message,
+        }),
+      );
+    }
   }
 
   // r63-1: emoji panel bigger fixed size (34dp in 42dp cell) without zoom/clip, single emoji in chat 66f
@@ -9992,6 +10089,31 @@ const convBetween = (db, a, b) =>
         (cl.match(/CloseSwipeOnScroll\(/g) || []).length === 3 &&
         (cl.match(/swipeFocusList[ ]?[({]/g) || []).length === 4 &&
         cl.includes(".then(swipeFocusTouch(convId))"),
+    );
+  }
+
+  // r64-e2ee: end-to-end encrypted messages (worker half) — the worker is a
+  // faithful CARRIER: it stores and forwards the sealed envelope, serves the
+  // public key, and shows the lock in every surface that used to show text.
+  {
+    const src = readFileSync(new URL("../../src/worker/index.ts", import.meta.url), "utf8");
+    check(
+      "r64-e2ee: worker — KP1. prefix + 8000-char envelope headroom on the send AND edit paths, the e2ee_public_key column migration, the key in every user shape (userFrom) + PATCH /api/me shape check, the lock preview for sealed rows, and the key in the list freshness marker",
+      src.includes('const E2EE_PREFIX = "KP1.";') &&
+        src.includes("const E2EE_BODY_MAX = 8000;") &&
+        src.includes("`ALTER TABLE users ADD COLUMN e2ee_public_key TEXT`") &&
+        src.includes("e2eePublicKey: row.e2ee_public_key ?? null,") &&
+        src.includes(
+          'if (key && !/^[A-Za-z0-9+/=]{16,512}$/.test(key)) fail(400, "Bad key.", "BAD_E2EE_KEY");',
+        ) &&
+        src.includes("rawBody.startsWith(E2EE_PREFIX) ? E2EE_BODY_MAX : MESSAGE_MAX_LENGTH") &&
+        src.includes("rawEdit.startsWith(E2EE_PREFIX) ? E2EE_BODY_MAX : MESSAGE_MAX_LENGTH") &&
+        src.includes("const e2ee = !!row.body && row.body.startsWith(E2EE_PREFIX);") &&
+        src.includes('return e2ee ? "\uD83D\uDD12" : (row.body || "Message").slice(0, 120);') &&
+        src.includes("(c.other as Record<string, unknown>).e2eePublicKey ?? null,") &&
+        // the worker never learns to open an envelope — no crypto in the file
+        !src.includes("createCipheriv") &&
+        !src.includes("createDecipheriv"),
     );
   }
 }
