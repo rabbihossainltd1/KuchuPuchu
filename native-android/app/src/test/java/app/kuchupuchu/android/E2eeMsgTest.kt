@@ -38,7 +38,7 @@ class E2eeMsgTest {
         assertEquals("hello খুচুখু 🚀", E2eeMsg.openWith(bPriv, aPub, sealed))
 
         // B seals back the same way — same algorithm, fresh nonce each time.
-        val back = E2eeMsg.sealWith(bPriv, aPub, "proti uttor")
+        val back = E2eeMsg.sealWith(bPriv, aPub, "proti uttor")!!
         assertEquals("proti uttor", E2eeMsg.openWith(aPriv, bPub, back))
         assertNotEquals(sealed, back) // even the same plaintext seals differently
     }
