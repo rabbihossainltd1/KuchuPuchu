@@ -225,7 +225,7 @@ internal fun EmojiGlyphRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         clusters.forEachIndexed { i, ch ->
-            NotoEmojiGlyph(ch, sizeSp, active && shouldAnimate, mid, i, isSingle, onLongPress)
+            NotoEmojiGlyph(ch, sizeSp, active && shouldAnimate, mid, i, isSingle, onLongPress, onDoubleTap)
         }
     }
 }
@@ -240,6 +240,9 @@ private fun NotoEmojiGlyph(
     idx: Int,
     isSingle: Boolean,
     onLongPress: (() -> Unit)?,
+    // r71-21: handed down from EmojiGlyphRow — a double tap on an emoji-only
+    // bubble drops the heart without deferring the instant replay.
+    onDoubleTap: (() -> Unit)?,
 ) {
     val scope = rememberCoroutineScope()
     val haptics = rememberHaptics()
