@@ -347,6 +347,20 @@ fun ChatScreen(nav: NavController, convId: String) {
             }
         }
     }
+    /**
+     * r71-21 (owner: "kono massage a double tap korle auto reaction Hobe ♥️ ei
+     * emoji ta"): the heart is a REAL reaction, not a local flourish — it goes
+     * through [applyReaction], so the chip appears here instantly, the server
+     * stores it, and the other phone shows and mirrors it exactly like a heart
+     * picked from the sheet. Tapping it twice in a row toggles it off, which is
+     * what the same-emoji rule already does.
+     */
+    fun heartReact(m: JSONObject) {
+        // A sending echo has no id: there is nothing to react to yet.
+        if (m.optString("id").startsWith("c_") || m.optString("id").isBlank()) return
+        applyReaction(m, "❤️")
+    }
+
     // First page still in flight → skeleton bubbles instead of a blank void.
     var initialLoad by remember { mutableStateOf(true) }
     var uploading by remember { mutableStateOf(0) } // >0 = photo/file uploads in flight
@@ -3690,6 +3704,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                             onJumpTo = { jumpTo(it) },
                             askName = rawTitle,
                             onCancelSend = ::cancelSend,
+                            // r71-21: double tap = ❤️ (every row kind).
+                            onDoubleTapHeart = ::heartReact,
                             onUnblockAsk = { msg ->
                                 scope.launch {
                                     val ok = runCatching {
@@ -3772,6 +3788,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                             quoteFor = { rid -> (msgs + pending).firstOrNull { it.optString("id") == rid } },
                             onJumpTo = { jumpTo(it) },
                             onCancelSend = ::cancelSend,
+                            // r71-21: double tap = ❤️ (every row kind).
+                            onDoubleTapHeart = ::heartReact,
                         )
                     }
                 }
@@ -3807,6 +3825,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 otherReadAt,
                                 player,
                                 revealChars = liveReveal.coerceAtMost(aiLiveBody.length),
+                                // r71-21: the streaming AI row hearts on a double tap too.
+                                onDoubleTapHeart = ::heartReact,
                                 theme = chatTheme,
                             )
                         } else if (aiTyping && otherTypingKind == "image") {
@@ -6215,6 +6235,10 @@ private fun MessageRow(
     askName: String = "",
     // v163: the ✕ on a sending bubble.
     onCancelSend: (String) -> Unit = {},
+    // r71-21 (owner: "kono massage a double tap korle auto reaction Hobe ♥️ ei
+    // emoji ta"): a DOUBLE TAP on a bubble drops the heart reaction — a real
+    // reaction (same server route, same chip, mirrored like a picked one).
+    onDoubleTapHeart: (JSONObject) -> Unit = {},
 ) {
     val mine = m.optString("senderId") == myId
     val kind = m.optString("kind")
@@ -6327,7 +6351,7 @@ private fun MessageRow(
     // Owner round 31 (item 29): photos sent together = one grouped bubble.
     if (m.has("kpAlbum")) {
         Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine)) {
-            AlbumMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenAlbum, onReply, onLongPress, theme)
+            AlbumMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenAlbum, onReply, onLongPress, theme, onDoubleTapHeart)
         }
         return
     }
@@ -6337,13 +6361,13 @@ private fun MessageRow(
     // for everyone, so there is no opened state left to render.
     if (isViewOnce(m)) {
         Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine)) {
-            ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)
+            ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme, onDoubleTapHeart)
         }
         return
     }
     if (kind == "IMAGE" || (kind == "FILE" && fileLooksImage(m) && !sentAsDocument(m))) {
         Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine)) {
-            ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme, onCancelSend)
+            ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme, onCancelSend, onDoubleTapHeart)
         }
         return
     }
@@ -6351,7 +6375,7 @@ private fun MessageRow(
     // IN-APP (the system player could never stream these auth-only files).
     if (kind == "FILE" && fileLooksVideo(m) && !sentAsDocument(m)) {
         Box(Modifier.fxSlotOpen(fxFresh).fxBlurIn(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine)) {
-            VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme, onCancelSend)
+            VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme, onCancelSend, onDoubleTapHeart)
         }
         return
     }
@@ -6523,6 +6547,10 @@ private fun MessageRow(
                     // r62: animateContentSize only on collapsible text bodies; voice notes keep exact original body dimensions with no resize.
                     .then(if (textLike && longBody) Modifier.animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f)) else Modifier)
                     .combinedClickable(
+                        // r71-21: double tap = ❤️. combinedClickable holds the
+                        // single tap back until it knows this was not a double
+                        // one, so a heart never also collapses / selects.
+                        onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
                         onClick = {
                             if (selectedIds.isNotEmpty() && !pendingEcho) {
                                 onToggleSelect(m)
@@ -6639,7 +6667,7 @@ private fun MessageRow(
                         "STICKER" -> {
                             val st = m.optString("body")
                             if (EmojiRepo.isCustomId(st)) CustomEmojiOrFallback(st)
-                            else EmojiGlyphRow(st, 56f, fxEmoji, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m) } })
+                            else EmojiGlyphRow(st, 56f, fxEmoji, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m) } }, onDoubleTap = { if (!pendingEcho) onDoubleTapHeart(m) })
                         }
                         "FILE" -> FileBubble(m, mine, player, pendingEcho, onOpenImage, onOpenVideo, theme, onOpenDoc, onToggleSelect, onLongPress, selecting = selectedIds.isNotEmpty(), onCancelSend = onCancelSend, fxGrow = fxFresh)
                         // Owner round 33 (item 5): the stamp is placed by
@@ -6660,12 +6688,12 @@ private fun MessageRow(
                             // bubble (outside) for every kind now.
                             // v206: single only animates, long-press shows actions
                             if (emojiOnly == 1) {
-                                EmojiGlyphRow(m.optText("body").trim(), 66f, fxEmoji, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m) } })
+                                EmojiGlyphRow(m.optText("body").trim(), 66f, fxEmoji, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m) } }, onDoubleTap = { if (!pendingEcho) onDoubleTapHeart(m) })
                             } else {
                                 // N3r: every glyph dances its own 3D move for
                                 // 3 s (arrival / tap / the other side's tap).
                                 // v206: multiple emojis don't animate, but long-press still works
-                                EmojiGlyphRow(m.optText("body").trim(), 40f, fxEmoji, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m) } })
+                                EmojiGlyphRow(m.optText("body").trim(), 40f, fxEmoji, m.optString("id"), onLongPress = { if (!pendingEcho) { if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m) } }, onDoubleTap = { if (!pendingEcho) onDoubleTapHeart(m) })
                             }
                         } else {
                             val full = m.optText("body")
@@ -7058,6 +7086,8 @@ private fun VideoMessageRow(
     onOpen: (JSONObject) -> Unit,
     theme: String,
     onCancelSend: (String) -> Unit = {},
+    // r71-21: a double tap on this bubble drops the heart reaction.
+    onDoubleTapHeart: (JSONObject) -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
@@ -7220,6 +7250,7 @@ private fun VideoMessageRow(
                     )
                 }
                 .combinedClickable(
+                    onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
                     onClick = {
                         if (pendingEcho) return@combinedClickable
                         if (selectedIds.isNotEmpty()) onToggleSelect(m) else onOpen(m)
@@ -7391,6 +7422,8 @@ private fun ViewOnceRow(
     onReply: (JSONObject) -> Unit,
     onLongPress: (JSONObject) -> Unit,
     theme: String,
+    // r71-21: a double tap on this bubble drops the heart reaction.
+    onDoubleTapHeart: (JSONObject) -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val haptics = rememberHaptics()
@@ -7538,6 +7571,7 @@ private fun ViewOnceRow(
                         )
                     }
                     .combinedClickable(
+                        onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
                         onClick = {
                             when {
                                 pendingEcho -> {}
@@ -7760,6 +7794,8 @@ private fun ImageMessageRow(
     onLongPress: (JSONObject) -> Unit = {},
     theme: String,
     onCancelSend: ((String) -> Unit)? = null,
+    // r71-21: a double tap on this bubble drops the heart reaction.
+    onDoubleTapHeart: (JSONObject) -> Unit = {},
 ) {
     val haptics = rememberHaptics()
     // Owner round 21: the photo reply-swipe sound plays from the row.
@@ -7825,6 +7861,7 @@ private fun ImageMessageRow(
                     )
                 }
                 .combinedClickable(
+                    onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
                     onClick = {
                         if (pendingEcho) return@combinedClickable
                         if (selectedIds.isNotEmpty()) onToggleSelect(m) else onOpenImage(m)
@@ -8077,6 +8114,8 @@ private fun AlbumMessageRow(
     onReply: (JSONObject) -> Unit = {},
     onLongPress: (JSONObject) -> Unit = {},
     theme: String,
+    // r71-21: a double tap on this bubble drops the heart reaction.
+    onDoubleTapHeart: (JSONObject) -> Unit = {},
 ) {
     val photos = albumPhotos(m)
     val haptics = rememberHaptics()
@@ -8097,6 +8136,7 @@ private fun AlbumMessageRow(
     }
     fun tileModifier(base: Modifier, onTap: () -> Unit): Modifier =
         base.combinedClickable(
+            onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
             onClick = {
                 if (pendingEcho) return@combinedClickable
                 if (selectedIds.isNotEmpty()) onToggleSelect(m) else onTap()

@@ -41,6 +41,9 @@ import org.json.JSONObject
 
 internal val emojiFxReplays = SnapshotStateList<String>()
 
+/** r71-21: how close two taps have to be to count as the "double tap = ❤️". */
+internal const val DOUBLE_TAP_HEART_MS = 320L
+
 /**
  * r68-4 (owner: "ei haptic ta just tokhoni kaj korbe jokhon 2 ta user e same chat
  * screen a thakbe all time na") / r69-4 (owner, on the first fix: "maybe not
@@ -196,6 +199,9 @@ internal fun EmojiGlyphRow(
     active: Boolean,
     mid: String,
     onLongPress: (() -> Unit)? = null,
+    // r71-21: the second tap of a double tap also drops the heart here — the
+    // bubble kind that already spends a tap on the dance itself.
+    onDoubleTap: (() -> Unit)? = null,
 ) {
     val clusters = remember(body) { splitEmojiClusters(body) }
     val isSingle = clusters.size == 1
@@ -226,6 +232,12 @@ private fun NotoEmojiGlyph(
     val scope = rememberCoroutineScope()
     val haptics = rememberHaptics()
     val animScale = fxAnimatorScale()
+    // r71-21 (owner: "kono massage a double tap korle auto reaction Hobe ♥️"):
+    // on an emoji-only bubble the tap already means "replay the dance", and
+    // r67-4 made that INSTANT on purpose. So the heart is counted HERE, without
+    // deferring anything: a second tap inside [DOUBLE_TAP_HEART_MS] also runs
+    // [onDoubleTap] while the replay it already triggered plays on.
+    val lastTapAt = remember { longArrayOf(0L) }
     var replayKey by remember(mid, ch) { mutableStateOf(if (active && animScale > 0f && isSingle) 1 else 0) }
 
     /**
@@ -288,6 +300,11 @@ private fun NotoEmojiGlyph(
             onClick = {
                 // r67-4: replay() owns the buzz now (haptics.reaction()) — the
                 // tap and the replay from the other phone must feel the same.
+                // r71-21: count the taps first, so a double tap drops the heart
+                // WITHOUT holding the instant replay back.
+                val now = android.os.SystemClock.uptimeMillis()
+                if (onDoubleTap != null && now - lastTapAt[0] in 1..DOUBLE_TAP_HEART_MS) onDoubleTap.invoke()
+                lastTapAt[0] = now
                 if (isSingle) replay(local = true) else haptics.tap()
             },
             onLongClick = {

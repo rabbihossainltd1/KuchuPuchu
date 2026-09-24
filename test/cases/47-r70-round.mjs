@@ -162,6 +162,42 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+/* ------------- 21. double tap a bubble = the ❤️ reaction ------------- */
+{
+  const chat = main("ChatScreen.kt");
+  const emo = main("EmojiAnim.kt");
+  check(
+    "r71-21: `heartReact` is a REAL reaction — it guards a sending echo (no id), then goes through the same `applyReaction` the sheet uses, so the chip, the server row and the other phone all agree",
+    chat.includes("fun heartReact(m: JSONObject) {") &&
+      chat.includes(
+        'if (m.optString("id").startsWith("c_") || m.optString("id").isBlank()) return',
+      ) &&
+      chat.includes('applyReaction(m, "❤️")') &&
+      // exactly one heart call into applyReaction beyond the sheet's own
+      (chat.match(/applyReaction\(m, "❤️"\)/g) || []).length === 1 &&
+      (chat.match(/applyReaction\(it, e\)/g) || []).length === 1,
+  );
+  check(
+    "r71-21: EVERY bubble kind hearts on a double tap — the text/emoji bubble, the image, video, album, view-once and call/status rows all carry `onDoubleClick`, and MessageRow hands them the callback",
+    (chat.match(/onDoubleClick = \{ if \(!pendingEcho\) onDoubleTapHeart\(m\) \}/g) || [])
+      .length === 5 &&
+      chat.includes("onDoubleTapHeart: (JSONObject) -> Unit = {},") &&
+      (chat.match(/onDoubleTapHeart: \(JSONObject\) -> Unit = \{\},/g) || []).length === 5 &&
+      (chat.match(/onDoubleTapHeart = ::heartReact,/g) || []).length === 3,
+  );
+  check(
+    "r71-21: an emoji-only bubble keeps its INSTANT tap (the r67-4 replay is never delayed) and still hearts on the second tap — its own 320 ms counter, no combinedClickable deferral",
+    emo.includes("internal const val DOUBLE_TAP_HEART_MS = 320L") &&
+      emo.includes("val lastTapAt = remember { longArrayOf(0L) }") &&
+      emo.includes(
+        "if (onDoubleTap != null && now - lastTapAt[0] in 1..DOUBLE_TAP_HEART_MS) onDoubleTap.invoke()",
+      ) &&
+      emo.includes("onDoubleTap: (() -> Unit)? = null,") &&
+      (chat.match(/onDoubleTap = \{ if \(!pendingEcho\) onDoubleTapHeart\(m\) \}\)/g) || [])
+        .length === 3,
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`r70-round: ${lines.length - broken} ok / ${broken} broken`);

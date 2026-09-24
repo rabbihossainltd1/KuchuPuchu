@@ -1692,7 +1692,7 @@ const convBetween = (db, a, b) =>
       chat.includes("if (mine) replyThreshold * 1.5f else replyThreshold") &&
       // v163: the row also hands the ✕ (cancel send) down.
       chat.includes(
-        "ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme, onCancelSend)",
+        "ImageMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onReply, onLongPress, theme, onCancelSend, onDoubleTapHeart)",
       ),
   );
   check(
@@ -6352,7 +6352,7 @@ const convBetween = (db, a, b) =>
     check(
       "r34-16a: app — a view-once message renders ViewOnceRow: the photo at its original ratio (ImageRatios-cached) blurred past recognition via ViewOnceBlur, the ViewOnceOneIcon mark in the middle, a dark tile for video / uploads; the recipient opens it (sender's tap does nothing), reply-drag + long-press intact, no 'Opened' state anywhere; the album fold, resend and the media grid never take it",
       chat.includes(
-        "if (isViewOnce(m)) {\n        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine)) {\n            ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme)",
+        "if (isViewOnce(m)) {\n        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine)) {\n            ViewOnceRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme, onDoubleTapHeart)",
       ) &&
         chat.indexOf("if (isViewOnce(m)) {") <
           chat.indexOf(
@@ -7838,7 +7838,7 @@ const convBetween = (db, a, b) =>
       "r33-19: video bubble — VideoMessageRow takes pendingEcho + otherReadAt, reads UploadProgress for its clientId, decodes the pending frame from the local copy (docPath), swaps the play circle for a determinate ring + percentage while sending (indeterminate during the POST), ignores taps on the echo, and draws a scrim with the time and TickIcon (sending / sent / delivered / seen) like a photo; the duration moves to the top-start corner",
       // v163: the row also hands the ✕ (cancel send) down.
       chat.includes(
-        "VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme, onCancelSend)",
+        "VideoMessageRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, onOpenVideo, theme, onCancelSend, onDoubleTapHeart)",
       ) &&
         vid.includes(
           "    pendingEcho: Boolean,\n    otherReadAt: String?,\n    selectedIds: List<String>,",
