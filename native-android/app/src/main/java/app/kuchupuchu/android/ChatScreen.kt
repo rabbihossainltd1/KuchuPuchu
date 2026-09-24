@@ -280,6 +280,13 @@ fun ChatScreen(nav: NavController, convId: String) {
     // jabe"): a LOCKED recording keeps running with the finger off the mic —
     // the strip stays up and the mic seat becomes Send.
     var voiceLocked by remember { mutableStateOf(false) }
+    // r72-19 (owner: "voice a tap lock korle send button hoye jabe tokhono voice
+    // button na"): the mic's first tap can land BEFORE the take exists — on
+    // first use the permission sheet is up and the start itself is async — so a
+    // lock asked for in that window is remembered here and applied the moment
+    // the recorder really starts.
+    var lockPending by remember { mutableStateOf(false) }
+    var recStarting by remember { mutableStateOf(false) }
     var recMs by remember { mutableStateOf(0) }
     var voiceBinNonce by remember { mutableStateOf(0) }
     // Owner round 33 (item 11b): rows that appeared AFTER the chat opened
@@ -2440,13 +2447,20 @@ fun ChatScreen(nav: NavController, convId: String) {
        slide left while holding = cancel ---- */
     fun startRecording() {
         if (VoiceNote.isRecording) return
+        // r72-19: from here until the recorder is live a tap means "lock me",
+        // not "you missed" (see lockRecording).
+        recStarting = true
         // Mic is asked HERE — at the feature — not at app launch (owner rule).
         gateMicCamera(video = false) {
+            recStarting = false
             if (!VoiceNote.isRecording) {
                 if (VoiceNote.start(ctx)) {
                     recMs = 0
                     recording = true
-                    voiceLocked = false
+                    // r72-19: the tap that landed while the sheet was up wins —
+                    // the mic seat is the Send circle from the first frame.
+                    voiceLocked = lockPending
+                    lockPending = false
                     // r56 item 2: ping voice immediately on recording start
                     scope.launch {
                         runCatching {
@@ -2456,6 +2470,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         }
                     }
                 } else {
+                    lockPending = false
                     error = "Mic is not available. Check the mic permission."
                 }
             }
@@ -2470,6 +2485,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         // without a word — it says why instead.
         val wasLocked = voiceLocked
         voiceLocked = false
+        lockPending = false
         // r56 item 2: clear voice indicator immediately when recording finishes or cancels
         scope.launch {
             runCatching {
@@ -2530,7 +2546,13 @@ fun ChatScreen(nav: NavController, convId: String) {
      * until Send. The mic seat is a Send circle from here on.
      */
     fun lockRecording() {
-        if (!recording) return
+        if (!recording) {
+            // r72-19: the tap landed before the take exists (the permission
+            // sheet is still up on first use) — queue the lock, the start
+            // applies it, so the mic seat becomes Send instead of staying a mic.
+            if (recStarting) lockPending = true
+            return
+        }
         voiceLocked = true
         runCatching { haptics.confirm() }
     }
@@ -5224,52 +5246,57 @@ private fun Composer(
         if (!input.isBlank() || selectCount > 0 || locked) {
             val sendInteraction = remember { MutableInteractionSource() }
             val sendPressed by sendInteraction.collectIsPressedAsState()
-            Box(
-                Modifier
-                    .size(42.dp)
-                    .fxMicAnchor()
-                    .pressScale(sendInteraction)
-                    // Owner round 10: the send/mic circles carry the same 3D
-                    // lift as the header call buttons now. r72-16: the lift
-                    // is back, tinted from the theme.
-                    .kpLift(4.dp, CircleShape)
-                    .clip(CircleShape)
-                    .background(accent)
-                    // Owner round 32 (item 18): tap = send, hold = "send
-                    // later" (text only — media goes with its own flow, item 19).
-                    .combinedClickable(
-                        interactionSource = sendInteraction,
-                        indication = null,
-                        // r71-19b: with a note locked, the second tap of a
-                        // double tap is the view-once send. combinedClickable
-                        // already holds onClick for the double-tap window, so
-                        // a plain tap still sends immediately-ish and the
-                        // second tap upgrades it.
-                        onDoubleClick =
+            // r72-19: this seat's double tap is the once-send, and the owner
+            // picked a 0.45 s window for it (the platform's is ~0.3 s) — the
+            // seat runs inside a ViewConfiguration of its own.
+            KpDoubleTapSeat {
+                Box(
+                    Modifier
+                        .size(42.dp)
+                        .fxMicAnchor()
+                        .pressScale(sendInteraction)
+                        // Owner round 10: the send/mic circles carry the same 3D
+                        // lift as the header call buttons now. r72-16: the lift
+                        // is back, tinted from the theme.
+                        .kpLift(4.dp, CircleShape)
+                        .clip(CircleShape)
+                        .background(accent)
+                        // Owner round 32 (item 18): tap = send, hold = "send
+                        // later" (text only — media goes with its own flow, item 19).
+                        .combinedClickable(
+                            interactionSource = sendInteraction,
+                            indication = null,
+                            // r71-19b: with a note locked, the second tap of a
+                            // double tap is the view-once send. combinedClickable
+                            // already holds onClick for the double-tap window, so
+                            // a plain tap still sends immediately-ish and the
+                            // second tap upgrades it.
+                            onDoubleClick =
+                                when {
+                                    // r71-20: text typed + a second tap = view-once.
+                                    input.isNotBlank() -> onSendTextOnce
+                                    locked && selectCount == 0 -> onSendVoiceOnce
+                                    else -> null
+                                },
+                            onLongClick = if (input.isNotBlank()) onScheduleSend else null,
+                        ) {
                             when {
-                                // r71-20: text typed + a second tap = view-once.
-                                input.isNotBlank() -> onSendTextOnce
-                                locked && selectCount == 0 -> onSendVoiceOnce
-                                else -> null
-                            },
-                        onLongClick = if (input.isNotBlank()) onScheduleSend else null,
-                    ) {
-                        when {
-                            input.isNotBlank() -> onSend()
-                            // r71-19: nothing typed, a note is locked and
-                            // waiting — Send closes (and sends) it.
-                            locked -> onSendVoice()
-                            else -> onSendSelection()
-                        }
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "Send",
-                    tint = AmberInk,
-                    modifier = Modifier.size(19.dp).scale(if (sendPressed) 0.9f else 1f),
-                )
+                                input.isNotBlank() -> onSend()
+                                // r71-19: nothing typed, a note is locked and
+                                // waiting — Send closes (and sends) it.
+                                locked -> onSendVoice()
+                                else -> onSendSelection()
+                            }
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "Send",
+                        tint = AmberInk,
+                        modifier = Modifier.size(19.dp).scale(if (sendPressed) 0.9f else 1f),
+                    )
+                }
             }
         } else {
             Box(Modifier.fxMicAnchor()) {
@@ -5391,14 +5418,18 @@ private fun HoldMicButton(
             modifier = Modifier.size(20.dp),
         )
     }
-    // r71-19: the lock target, left of the mic (the finger slides UP, maybe a
-    // little left, to reach it) — hollow while the finger is heading up, filled
-    // once it is there. It is a SIBLING of the mic on purpose: the mic's own
-    // circle clips its children, and the badge rides outside that clip.
+    // r71-19 + r72-19: the lock target, ABOVE the mic (the finger slides up to
+    // reach it) — hollow while the finger is heading up, filled once it is
+    // there.
     if (lockAlpha > 0.01f) {
         Box(
             Modifier
-                .offset { IntOffset(-40.dp.toPx().roundToInt(), 6.dp.toPx().roundToInt()) }
+                // r72-19 (owner: "lock icon ta upore thakbe side a na"): the
+                // goal sits ABOVE the mic now, not to its left. The finger
+                // still travels up to reach it; it is a SIBLING of the mic on
+                // purpose (the mic's circle clips its children, the badge rides
+                // outside that clip).
+                .offset { IntOffset(0, -(34.dp.toPx()).roundToInt()) }
                 .size(30.dp)
                 .alpha(lockAlpha)
                 .clip(CircleShape)

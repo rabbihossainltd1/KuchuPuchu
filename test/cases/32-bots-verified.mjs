@@ -6671,13 +6671,15 @@ const convBetween = (db, a, b) =>
           "onScheduleSend = { requestAttachExit { haptics.tap(); showSchedule = true } },",
         ) &&
         // r71-19b: the seat gained a double tap (a locked note goes once-view).
+        // r72-19: the seat is wrapped in KpDoubleTapSeat (the 0.45 s window),
+        // so its own chain is indented one level deeper.
         chat.includes(
-          ".combinedClickable(\n                        interactionSource = sendInteraction,\n                        indication = null,",
+          ".combinedClickable(\n                            interactionSource = sendInteraction,\n                            indication = null,",
         ) &&
         // r71-20: the branch is a `when` now — text typed upgrades too.
         SEAT_DOUBLE_TAP.test(chat) &&
         chat.includes(
-          "onLongClick = if (input.isNotBlank()) onScheduleSend else null,\n                    ) {",
+          "onLongClick = if (input.isNotBlank()) onScheduleSend else null,\n                        ) {",
         ) &&
         chat.includes(
           "@OptIn(ExperimentalFoundationApi::class)\n@Composable\nprivate fun Composer(",

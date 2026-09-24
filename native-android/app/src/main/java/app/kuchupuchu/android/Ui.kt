@@ -52,6 +52,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -74,6 +75,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import coil.compose.AsyncImage
 import coil.request.CachePolicy
@@ -1211,6 +1214,37 @@ fun Modifier.popUp(): Modifier {
         translationY = (1f - v) * 24.dp.toPx()
     }
 }
+
+/**
+ * r72-19 (owner's Q&A: the double-tap window is 0.45 s — "second tap"): Compose's
+ * `combinedClickable` reads its window from the ViewConfiguration, and the
+ * platform default is ~0.3 s, which the owner called too tight for the
+ * composer's once-send. This hands the seat a ViewConfiguration of its own —
+ * everything else (long-press timing, touch slop) is inherited untouched.
+ */
+@Composable
+fun kpDoubleTapWindow(ms: Long = KP_DOUBLE_TAP_MS): ViewConfiguration {
+    val base = LocalViewConfiguration.current
+    return remember(base, ms) {
+        object : ViewConfiguration by base {
+            override val doubleTapTimeoutMillis: Long get() = ms
+        }
+    }
+}
+
+/**
+ * r72-19: a seat that needs the owner's double-tap window (the composer's Send
+ * circle) wraps its content in this — the whole content scope then sees the
+ * 0.45 s ViewConfiguration, so `combinedClickable`'s own onClick / onDoubleClick
+ * pair already honours it.
+ */
+@Composable
+fun KpDoubleTapSeat(content: @Composable () -> Unit) {
+    CompositionLocalProvider(LocalViewConfiguration provides kpDoubleTapWindow()) { content() }
+}
+
+/** The owner's double-tap window (r72 Q&A): 450 ms, not the platform's ~300. */
+const val KP_DOUBLE_TAP_MS = 450L
 
 /** Scales down slightly while pressed — attach to any clickable's modifier. */
 @Composable

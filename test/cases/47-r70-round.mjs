@@ -287,15 +287,54 @@ const main = (f) => read(`${ANDROID}/${f}`);
     "r71-19: the chat owns the locked state — set by lockRecording (with its confirm buzz), cleared the moment the take starts and the moment it ends, and a locked note that the user then SENDS is never swallowed by the sub-second slip rule in silence",
     chat.includes("var voiceLocked by remember { mutableStateOf(false) }") &&
       chat.includes("fun lockRecording() {") &&
-      chat.includes("if (!recording) return") &&
+      // r72-19: the early return became a QUEUE (the tap can land before the
+      // take exists — the permission sheet on first use).
+      chat.includes("if (recStarting) lockPending = true") &&
       chat.includes("voiceLocked = true") &&
-      (chat.match(/voiceLocked = false/g) || []).length === 2 &&
+      (chat.match(/voiceLocked = false/g) || []).length === 1 &&
+      chat.includes("voiceLocked = lockPending") &&
       chat.includes("val wasLocked = voiceLocked") &&
       chat.includes('if (wasLocked) error = "That voice note is too short."') &&
       chat.includes("locked = voiceLocked,") &&
       chat.includes("onLockRecord = { lockRecording() },") &&
       chat.includes("onSendVoice = { finishRecording(cancelled = false) },") &&
       chat.includes("onCancelVoice = { finishRecording(cancelled = true) },"),
+  );
+  /* ---- the r72 redo of 19 (owner: the lock "thik moto implement hoini") ---- */
+  const app = "native-android/app/src/main/java/app/kuchupuchu/android/";
+  const ui = readFileSync(app + "Ui.kt", "utf8");
+  check(
+    'r72-19: the lock goal sits ABOVE the mic now (owner: "lock icon ta upore thakbe side a na") — still a SIBLING of the mic circle (that circle clips its children) and still hollow → filled as the finger arrives',
+    mic.includes(".offset { IntOffset(0, -(34.dp.toPx()).roundToInt()) }") &&
+      mic.includes("if (lockAlpha > 0.01f) {") &&
+      mic.includes('if (lockArmed) "Release to lock" else "Slide up to lock"'),
+  );
+  check(
+    'r72-19: a tap that lands before the recorder exists is not lost — while the start is in flight the lock is QUEUED and the take comes up LOCKED, so the mic seat is the Send circle from its first frame (owner: "voice a tap lock korle send button hoye jabe tokhono voice button na")',
+    chat.includes("var lockPending by remember { mutableStateOf(false) }") &&
+      chat.includes("var recStarting by remember { mutableStateOf(false) }") &&
+      chat.includes("recStarting = true") &&
+      chat.includes("recStarting = false") &&
+      chat.includes("lockPending = false") &&
+      /gateMicCamera\(video = false\) \{[\s\S]{0,300}?recStarting = false[\s\S]{0,500}?voiceLocked = lockPending[\s\S]{0,120}?lockPending = false/.test(
+        chat,
+      ) &&
+      // and the queue never survives a failed start or an ended take
+      chat.includes(
+        'lockPending = false\n                    error = "Mic is not available. Check the mic permission."',
+      ) &&
+      /val wasLocked = voiceLocked\n        voiceLocked = false\n        lockPending = false/.test(
+        chat,
+      ),
+  );
+  check(
+    "r72-19: the composer's Send seat runs in the owner's 0.45 s double-tap window (the platform's ~0.3 s was too tight for the once-send) — one seat-local ViewConfiguration, everything else inherited",
+    ui.includes("const val KP_DOUBLE_TAP_MS = 450L") &&
+      ui.includes("object : ViewConfiguration by base {") &&
+      ui.includes("override val doubleTapTimeoutMillis: Long get() = ms") &&
+      ui.includes("fun KpDoubleTapSeat(content: @Composable () -> Unit)") &&
+      chat.includes("KpDoubleTapSeat {") &&
+      chat.includes("KpDoubleTapSeat {\n                Box("),
   );
 }
 
