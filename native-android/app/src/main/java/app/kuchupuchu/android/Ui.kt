@@ -989,8 +989,6 @@ internal fun canDeleteForEveryone(convId: String, m: JSONObject?): Boolean {
  * surface — the status ⋮ sheet is the reference. `KpSheet` is that surface;
  * `KpSheetRow` one tappable line; `KpConfirmSheet` the yes/no popup.
  */
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-@Composable
 /**
  * r69 (owner: "mute korte gele 2 ta option asbe call mute massage mute jeta
  * korbe otay mute hobe"): ONE mute chooser for every place a chat can be
@@ -1026,7 +1024,8 @@ internal fun KpMuteChooser(
         }
     }
 }
-
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
 fun KpSheet(
     onDismiss: () -> Unit,
     title: String? = null,

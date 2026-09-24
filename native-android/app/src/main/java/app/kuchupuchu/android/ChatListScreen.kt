@@ -1563,7 +1563,6 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
  * names the long-pressed / first-ticked peer and pre-fills the group picker
  * with all ticked 1:1 peers; "Select" keeps the list in select mode.
  */
-@Composable
 /* ---------------- the chat-delete popup (r68-7, r69) ----------------
    ONE popup and ONE delete for this whole screen. The row's long-press sheet,
    the multi-select bar AND both swipe slots (main list + archive) raise THIS.
@@ -1678,6 +1677,7 @@ internal fun muteAspectsNow(
     }
 }
 
+@Composable
 private fun ChatRowSheet(
     target: JSONObject,
     nav: NavController,
