@@ -14,8 +14,13 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -801,34 +806,46 @@ fun AttachPanel(
                 // rides the first photo, WhatsApp-exact), the ① batch toggle and
                 // Send with its count badge (hold = send later, as before).
                 // r63-4: floating transparent selection bar for both half and full panel with bigger controls
-                if (sel.isNotEmpty()) {
+                // r67-1 (owner: "caption bar ta onek beshi mota hoye
+                // geche eita chikon koro sather ar baki buttons gula
+                // eitar sathe sync rekho"): ONE height for the whole bar. It
+                // was 40 / 52 / 46 — the pill stood 12 dp prouder than the
+                // buttons beside it. Everything in this row is [barH], and the
+                // view-once glyph is pinned INSIDE the pill (barH - 8) so it
+                // can never push the pill back up again.
+                val barH = 40.dp
+                // r68-5 (owner: "individual background shob buttons mile ektai
+                // rounded type background Hobe. ar ei caption bar egula asbar
+                // somoy niche theke upore asbe animate hoye"): the bar is ONE
+                // rounded ground now — every control's own fill is gone — and
+                // it rises from below instead of appearing on a frame boundary.
+                AnimatedVisibility(
+                    visible = sel.isNotEmpty(),
+                    enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                    exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                ) {
                     Row(
                         Modifier
-                            .align(Alignment.BottomCenter)
                             .fillMaxWidth()
                             // Owner round 43 (item 3): the bar drags like the header
                             // — down past 70 folds to the collapsed half panel.
                             .barDragDetect()
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                            // 8 dp of air around the capsule, then the capsule,
+                            // then 8 dp inside it: 76 dp of ink in total, which
+                            // is exactly what both grids reserve below their last
+                            // row (contentPadding) so nothing hides under it.
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                            .background(Color(0x80000000), RoundedCornerShape(barH / 2 + 8.dp))
+                            .padding(horizontal = 8.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        // r67-1 (owner: "caption bar ta onek beshi mota hoye
-                        // geche eita chikon koro sather ar baki buttons gula
-                        // eitar sathe sync rekho"): ONE height for the whole
-                        // bar. It was 40 / 52 / 46 — the pill stood 12 dp
-                        // prouder than the buttons beside it. Everything in
-                        // this row is [barH] now, and the view-once glyph is
-                        // pinned INSIDE the pill (barH - 8) so it can never
-                        // push the pill back up again.
-                        val barH = 40.dp
-                        // Edit (pencil) button — r63-4: 40.dp seat, 20.dp glyph;
-                        // r66 (owner): 50% dim black ground.
+                        // Edit (pencil) button — r63-4: 40.dp seat, 20.dp glyph.
                         Box(
                             Modifier
                                 .size(40.dp)
                                 .clip(CircleShape)
                                 .border(1.dp, Color(0x44FFFFFF), CircleShape)
-                                .background(Color(0x80000000))
                                 .clickable {
                                     haptics.tap()
                                     sel.lastOrNull()?.let(onEdit)
@@ -847,7 +864,6 @@ fun AttachPanel(
                                 .height(barH)
                                 .clip(RoundedCornerShape(barH / 2))
                                 .border(1.dp, Color(0x44FFFFFF), RoundedCornerShape(barH / 2))
-                                .background(Color(0x80000000))
                                 .padding(start = 12.dp, end = 2.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -871,12 +887,10 @@ fun AttachPanel(
                             Box(
                                 Modifier
                                     .size(barH - 8.dp)
-                                    // r67-5 (owner: "attach panel a niche
-                                    // caption send view once eshober background a
-                                    // 50% background add koro") — the once seat
-                                    // carries its own 50% dim ground, the same
-                                    // one the pill around it and the pen use.
-                                    .background(Color(0x80000000), CircleShape)
+                                    // r68-5: no ground of its own any more — the
+                                    // bar's single capsule sits behind all four
+                                    // controls (r67-5's per-seat fill is gone
+                                    // with it).
                                     .semantics {
                                         contentDescription = "View once"
                                         selected = allOnce
@@ -900,14 +914,10 @@ fun AttachPanel(
                         // glyph and a 16 dp badge, so it lines up with the pill
                         // and the pen instead of standing taller than both.
                         Box(
-                            // r67-5: the send seat carries the same 50% dim ground
-                            // as the pill, the pen and the once seat. Drawn as a
-                            // SHAPE (background(color, shape)), not clip(): the count
-                            // badge deliberately overhangs this box and a clip would
-                            // slice it.
-                            Modifier
-                                .size(barH + 4.dp)
-                                .background(Color(0x80000000), CircleShape),
+                            // r68-5: the seat keeps only its slack for the badge
+                            // (which overhangs this box on purpose) — the ground
+                            // behind it is the bar's one capsule.
+                            Modifier.size(barH + 4.dp),
                             contentAlignment = Alignment.Center,
                         ) {
                             Box(

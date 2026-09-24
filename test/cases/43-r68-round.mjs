@@ -81,6 +81,37 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+/* ---------- 5. one rounded ground, entering from below ---------- */
+{
+  const attach = main("AttachSheet.kt");
+  check(
+    "r68-5: ONE rounded ground behind the whole bar (not one fill per control)",
+    attach.includes(".background(Color(0x80000000), RoundedCornerShape(barH / 2 + 8.dp))") &&
+      (attach.match(/Color\(0x80000000\)/g) || []).length === 1,
+  );
+  check(
+    "r68-5: the per-control fills are gone (pen, pill, once seat, send seat)",
+    !attach.includes(".background(Color(0x80000000))\n") &&
+      !attach.includes(".size(barH - 8.dp)\n                                    .background(") &&
+      !attach.includes(".size(barH + 4.dp)\n                                .background("),
+  );
+  check(
+    "r68-5: the bar rises from below and retreats the same way",
+    attach.includes("AnimatedVisibility(\n                    visible = sel.isNotEmpty(),") &&
+      attach.includes("enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),") &&
+      attach.includes("exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),"),
+  );
+  check(
+    "r68-5: the pill's outline and the blue send disc survive the merge",
+    attach.includes(".border(1.dp, Color(0x44FFFFFF), RoundedCornerShape(barH / 2))") &&
+      attach.includes(".background(ActionBlue)"),
+  );
+  check(
+    "r68-5: the bar height constant is still ONE value above the animation",
+    attach.includes("val barH = 40.dp") && attach.includes(".height(barH)"),
+  );
+}
+
 console.log(lines.join("\n"));
 console.log(
   `r68 round: ${lines.filter((l) => l.includes("OK")).length} ok / ${lines.filter((l) => l.includes("BROKEN")).length} broken`,

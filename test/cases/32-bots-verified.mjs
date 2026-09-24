@@ -6662,7 +6662,8 @@ const convBetween = (db, a, b) =>
         attach.includes('.pointerInput("foldcheck")') &&
         attach.includes('"barDrag"') &&
         attach.includes("barDragDetect") &&
-        (attach.includes("if (sel.isNotEmpty()) {") ||
+        // r68-5: the bar's guard is the entrance animation's condition now.
+        (attach.includes("visible = sel.isNotEmpty(),") ||
           attach.includes("if (fullscreen && sel.isNotEmpty()) {")) &&
         attach.includes("sel.lastOrNull()?.let(onEdit)") &&
         attach.includes("sel[0] = sel[0].copy(caption = t.take(1000))") &&
@@ -10343,14 +10344,19 @@ const convBetween = (db, a, b) =>
     const attach = kt("AttachSheet.kt");
     check(
       "r66: selection controls use 50% dim black; the longer caption pill contains the borderless, blue-on view-once glyph; r67-1: the bar is ONE height (40 dp) — the pill, the pen and the send circle all read barH, and the glyph's seat sits 8 dp inside",
-      attach.includes("if (sel.isNotEmpty()) {") &&
+      // r68-5: the bar is wrapped in an AnimatedVisibility (it rises from
+      // below), so the old bare `if (sel.isNotEmpty()) {` guard reads as the
+      // animation's visibility condition.
+      attach.includes("AnimatedVisibility(\n                    visible = sel.isNotEmpty(),") &&
         attach.includes(
           "CenteredOnceIcon(barH - 8.dp, tint = if (allOnce) ActionBlue else Color.White, fillBounds = true)",
         ) &&
         !attach.includes(".border(2.dp, ActionBlue, CircleShape)") &&
         attach.includes(".height(barH)") &&
         attach.includes("val barH = 40.dp") &&
-        attach.includes(".background(Color(0x80000000))") &&
+        // r68-5: the ground is the bar's one capsule (shape form), not a fill
+        // on the pill or the pen.
+        attach.includes(".background(Color(0x80000000), RoundedCornerShape(barH / 2 + 8.dp))") &&
         attach.includes(".size(barH)"),
     );
   }
@@ -10397,8 +10403,8 @@ const convBetween = (db, a, b) =>
       attach66.indexOf("// Send button with count badge"),
     );
     check(
-      "r66-2: 50% dim-black controls (r67-5: all four — pen, pill, view-once seat, send seat), one longer caption boundary enclosing a full-size blue-on view-once glyph, no separate view-once border or panel-height change",
-      (attach66.match(/Color\(0x80000000\)/g) || []).length === 4 &&
+      'r66-2: 50% dim-black controls (r67-5: all four — pen, pill, view-once seat, send seat) — r68-5 (owner: "individual background shob buttons mile ektai rounded type background Hobe") merged them into ONE rounded ground behind the whole bar, so the count is 1 now; the caption boundary still encloses a full-size blue-on view-once glyph, with no separate view-once border or panel-height change',
+      (attach66.match(/Color\(0x80000000\)/g) || []).length === 1 &&
         caption66.includes("BasicTextField(") &&
         // r67-1: same glyph, pinned into the 40 dp pill (seat = barH - 8).
         caption66.includes(

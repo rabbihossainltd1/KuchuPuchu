@@ -51,8 +51,6 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
   check(
     "r67-1: the send circle is the same height as the pen and the pill",
-    // r67-5 moved the seat onto its own modifier line (it now carries the
-    // 50% ground), so the pin reads the size alone.
     attach.includes(".size(barH + 4.dp)") && attach.includes(".size(barH)\n"),
   );
   check(
@@ -62,30 +60,28 @@ const main = (f) => read(`${ANDROID}/${f}`);
     ) && attach.includes(".size(16.dp)"),
   );
   check(
-    "r67-1: the 50% ground stays on the pill and the pen",
-    (attach.match(/Color\(0x80000000\)/g) || []).length >= 2,
+    // r68-5 collapsed the per-control fills into one capsule, so the count is 1.
+    "r67-1/r68-5: the bar still carries the 50% dim (one rounded ground now)",
+    (attach.match(/Color\(0x80000000\)/g) || []).length === 1,
   );
 }
 
-/* ---------------- 5. the whole bar sits on the 50% ground ---------------- */
+/* ------- 5. the 50% ground under the bar (r68-5 merged it into one) ------- */
 {
   const attach = main("AttachSheet.kt");
+  // r67-5's per-seat fills are gone BY DESIGN: r68-5 (owner: "individual
+  // background shob buttons mile ektai rounded type background Hobe")
+  // replaced all four with a single capsule. This guard therefore checks that
+  // the 50% dim still exists exactly ONCE and covers the whole row; the shape
+  // of that merge is pinned in case 43.
   check(
-    "r67-5: the view-once seat carries its own 50% ground (it was bare inside the pill)",
-    attach.includes(".size(barH - 8.dp)\n                                    // r67-5") &&
-      attach.includes(
-        ".background(Color(0x80000000), CircleShape)\n                                    .semantics {",
-      ),
+    "r67-5/r68-5: the 50% dim survives as ONE ground for the whole bar",
+    (attach.match(/Color\(0x80000000\)/g) || []).length === 1 &&
+      attach.includes(".background(Color(0x80000000), RoundedCornerShape(barH / 2 + 8.dp))"),
   );
   check(
-    "r67-5: the send seat carries it too — as a SHAPE, so the overhanging count badge is not clipped",
-    attach.includes(
-      ".size(barH + 4.dp)\n                                .background(Color(0x80000000), CircleShape),",
-    ) && !attach.includes(".size(barH + 4.dp)\n                                .clip(CircleShape)"),
-  );
-  check(
-    "r67-5: all four controls now carry it (pen, pill, once seat, send seat)",
-    (attach.match(/Color\(0x80000000\)/g) || []).length === 4,
+    "r67-5/r68-5: no control keeps a fill of its own",
+    !attach.includes(".background(Color(0x80000000), CircleShape)"),
   );
 }
 
@@ -230,8 +226,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
 {
   const feel = main("Feel.kt");
   check(
-    "r67-6: the four message tones multiply by one trim constant",
-    feel.includes("private const val MSG_VOLUME_TRIM = 0.5f"),
+    // r68-6 (owner: "50% 40% kore daw") moves the constant to 0.4; the r67-6
+    // guarantee — ONE constant, four call sites, nothing else — is unchanged.
+    "r67-6/r68-6: the four message tones multiply by one trim constant",
+    /private const val MSG_VOLUME_TRIM = 0\.[45]f/.test(feel),
   );
   const trimmed = feel.match(/0\.(?:6|7|55)f \* MSG_VOLUME_TRIM/g) || [];
   check(
