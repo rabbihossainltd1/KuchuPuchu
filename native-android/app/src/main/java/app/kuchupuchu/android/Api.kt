@@ -101,8 +101,11 @@ object Api {
         return data
     }
 
-    fun delete(path: String): JSONObject {
-        val data = request(path, "DELETE", JSONObject())
+    // r68-7: DELETE carries a body when the caller has something to say about
+    // the SCOPE of the delete (the chat-delete popup's checkbox). Server-side
+    // routes that never read a body are unaffected.
+    fun delete(path: String, body: JSONObject = JSONObject()): JSONObject {
+        val data = request(path, "DELETE", body)
         bustFor(path)
         return data
     }

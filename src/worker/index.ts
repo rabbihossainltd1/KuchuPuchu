@@ -7176,9 +7176,13 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   const convMatch = path.match(/^\/api\/conversations\/([^/]+)$/);
   if (convMatch && method === "GET") {
     const convId = convMatch[1]!;
-    await requireMember(db, convId, uid);
+    const { conv: detailRow } = await requireMember(db, convId, uid);
     const conv = await conversationDetail(db, convId, uid);
-    return json({ conversation: conv });
+    // r68-7: the list skips a chat this member deleted; this route now says so
+    // too, instead of letting the app's single-conversation merge resurrect it
+    // (the poke that follows a delete lands here).
+    const hiddenByMe = await convHiddenFor(db, detailRow, uid);
+    return json({ conversation: conv, hiddenByMe });
   }
   if (convMatch && method === "PATCH") {
     const convId = convMatch[1]!;
@@ -7343,10 +7347,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       )
     )
       fail(403, "Accept the message request first.", "REQUEST_PENDING");
+    // r68-7: "media, links and docs" reads rows, so a chat cleared for me ALONE
+    // must not show what I deleted. Same watermark test as the history route.
+    const mediaMark = watermarkFor(parseJson<HiddenMap>(mediaConv.hidden_json ?? "{}", {}), uid);
     const rows = await all<MsgRow>(
       db,
-      "SELECT * FROM messages WHERE conv_id = ? ORDER BY created_at DESC LIMIT 400",
+      `SELECT * FROM messages WHERE conv_id = ?${
+        mediaMark ? (mediaMark.row >= 0 ? " AND rowid > ?" : " AND created_at >= ?") : ""
+      } ORDER BY created_at DESC LIMIT 400`,
       convId,
+      ...(mediaMark ? [mediaMark.row >= 0 ? mediaMark.row : mediaMark.at] : []),
     );
     const images: ReturnType<typeof msgFrom>[] = [];
     // Owner round 33 (item 20): videos are shared media too — their own
@@ -7583,20 +7593,37 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (conv.kind === "GROUP") {
       await run(db, "DELETE FROM members WHERE conv_id = ? AND user_id = ?", convId, uid);
       await systemMessage(db, convId, `${me.display_name} left`);
-    } else {
-      // Owner round 13 (2026-09-05): "delete chat" used to only watermark the
-      // history — the rows survived and SEARCH still surfaced the old chat
-      // with its messages. A deleted 1:1 chat is now really deleted: rows
-      // gone, preview cleared, counters reset. The conversation shell stays
-      // so a new message can reopen it; the deleter keeps a watermark at the
-      // pre-delete high-water rowid so the empty shell doesn't pop straight
-      // back into their list (a new message clears it, as always).
-      // TIME watermark, not rowid: the rows are about to be deleted, and a
-      // fresh insert can REUSE a lower rowid than the one we captured —
-      // which would keep the reopened chat invisible to its own deleter.
-      // {row: -1} switches every consumer to the created_at comparison.
-      const hidden = parseJson<HiddenMap>(await hiddenJson(db, convId), {});
-      hidden[uid] = { row: -1, at: nowIso() };
+      return json({ ok: true, forEveryone: false });
+    }
+    // r68-7 (owner: "ekhon theke full chat delete korte gele emon popup asbe
+    // user jodi check box ta tick kore delete kore duijoner thekei chat delete
+    // hoye jabe shob permanently tick na korle just tar kache thekei delete
+    // Hobe je koreche"). The checkbox is the whole decision, and it is made by
+    // the CALLER: `forEveryone` ticked = the rows go and the chat hides for
+    // both members; unticked = only MY copy goes, the other side keeps every
+    // message exactly as it was, and only my watermark moves.
+    const forEveryone = body.forEveryone === true;
+    const hidden = parseJson<HiddenMap>(await hiddenJson(db, convId), {});
+    // TIME watermark, not rowid: the rows are deleted in the ticked case and a
+    // fresh insert can REUSE a lower rowid than the one we captured — which
+    // would keep the reopened chat invisible to its own deleter. {row: -1}
+    // switches every consumer (list, history, search, media) to the
+    // created_at comparison.
+    const at = nowIso();
+    const memberIds = (await membersOf(db, convId)).map((m) => m.user_id);
+    hidden[uid] = { row: -1, at };
+    if (forEveryone) {
+      for (const memberId of memberIds) if (memberId !== uid) hidden[memberId] = { row: -1, at };
+      // Permanently, for both: the rows go (and the objects behind them with
+      // the orphan sweep), the shared preview is cleared and nobody's counter
+      // still counts a message that no longer exists.
+      const mediaKeys = (
+        await all<{ media: string | null }>(
+          db,
+          "SELECT media FROM messages WHERE conv_id = ? AND media IS NOT NULL AND media != ''",
+          convId,
+        )
+      ).map((r) => r.media as string);
       await run(db, "DELETE FROM messages WHERE conv_id = ?", convId);
       await run(
         db,
@@ -7605,8 +7632,42 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         convId,
       );
       await run(db, "UPDATE members SET unread = 0 WHERE conv_id = ?", convId);
+      if (mediaKeys.length)
+        ctx.waitUntil(collectOrphanedMedia(env, db, mediaKeys).then(() => undefined));
+      // The other side may have this chat open: its thread must empty instead
+      // of limping on with rows that are gone (the frame is new — the app's
+      // chat screen refetches on `cleared`), and both lists re-read.
+      ctx.waitUntil(broadcastRoomEvent(env, convId, { type: "cleared", conversationId: convId }));
+      for (const memberId of memberIds) {
+        ctx.waitUntil(
+          broadcastRoomEvent(env, `user:${memberId}`, {
+            type: "conv",
+            conversationId: convId,
+            cleared: 1,
+          }),
+        );
+      }
+    } else {
+      // Mine only. The rows stay (the other side is untouched, and its list
+      // row keeps its preview); my watermark is what hides them from MY
+      // history, list, search and media gallery, and a newer message brings
+      // the chat back with only what arrived after it.
+      await run(
+        db,
+        "UPDATE conversations SET hidden_json = ? WHERE id = ?",
+        JSON.stringify(hidden),
+        convId,
+      );
+      await run(db, "UPDATE members SET unread = 0 WHERE conv_id = ? AND user_id = ?", convId, uid);
+      ctx.waitUntil(
+        broadcastRoomEvent(env, `user:${uid}`, {
+          type: "conv",
+          conversationId: convId,
+          cleared: 1,
+        }),
+      );
     }
-    return json({ ok: true });
+    return json({ ok: true, forEveryone });
   }
 
   // Owner round 7 (2026-09-04, fixed round 8): AI-chat "New chat" /
@@ -10298,15 +10359,28 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       if (!(await blockedBetween(db, uid, row.id)))
         users.push(userFrom(row, onlineNow(row), false, viewFor(searchContacts, row.id, uid)));
     }
-    const msgRows = await all<MsgRow & { title: string | null; kind_c: string }>(
+    const msgRows = await all<
+      MsgRow & { title: string | null; kind_c: string; hidden_json?: string | null }
+    >(
       db,
-      `SELECT m.*, c.title FROM messages m
+      `SELECT m.*, c.title, c.hidden_json FROM messages m
        JOIN members mem ON mem.conv_id = m.conv_id AND mem.user_id = ? AND COALESCE(mem.hidden, 0) = 0
        JOIN conversations c ON c.id = m.conv_id
        WHERE m.kind IN ('TEXT','IMAGE','FILE') AND LOWER(m.body) LIKE ?${ESCAPED_LIKE}
        ORDER BY m.created_at DESC, m.rowid DESC LIMIT 20`,
       uid,
       likeTerm(q),
+    ).then((rows) =>
+      // r68-7: a chat cleared for me alone (unticked checkbox) must not come
+      // back through search — round 13 fixed exactly this leak when deleting a
+      // chat wiped the rows, and the mine-only path keeps them. The watermark
+      // is the caller's own, so only this member's results change.
+      rows.filter((r) => {
+        if (!r.hidden_json) return true;
+        const mark = watermarkFor(parseJson<HiddenMap>(r.hidden_json, {}), uid);
+        if (!mark) return true;
+        return mark.row >= 0 ? true : r.created_at >= mark.at;
+      }),
     );
     // Batched conversation/members/users lookups (the list route's pattern)
     // instead of conversationDetail() — 3 queries — per matched chat.
@@ -10959,6 +11033,37 @@ function watermarkFor(hidden: HiddenMap, uid: string): Watermark | null {
   if (raw === undefined || raw === null) return null;
   if (typeof raw === "number") return raw > 0 ? { row: -1, at: new Date(raw).toISOString() } : null;
   return typeof raw.row === "number" ? raw : null;
+}
+
+/**
+ * r68-7: is this chat deleted FOR THIS MEMBER right now?
+ *
+ * The list route has always known how to answer (and skips such a row), but the
+ * DETAIL route had no idea — and the app merges the one conversation it fetches
+ * back into its list on every `conv` poke, so a just-deleted chat could be put
+ * straight back by the app itself. One rule, both callers; a newer message (or a
+ * later reply) makes the answer false, which is exactly how the chat comes back.
+ */
+async function convHiddenFor(
+  db: D1Database,
+  conv: { id: string; kind: string; hidden_json?: string | null; last_message_at?: string | null },
+  uid: string,
+): Promise<boolean> {
+  if (conv.kind !== "SOLO") return false;
+  const mark = watermarkFor(parseJson<HiddenMap>(conv.hidden_json ?? "{}", {}), uid);
+  if (!mark) return false;
+  if (mark.row >= 0) {
+    const row = await one<{ max_row: number | null }>(
+      db,
+      "SELECT MAX(rowid) AS max_row FROM messages WHERE conv_id = ?",
+      conv.id,
+    );
+    return Number(row?.max_row ?? 0) <= mark.row;
+  }
+  const lastAt = conv.last_message_at ? Date.parse(conv.last_message_at) : 0;
+  // <= would keep a same-millisecond reply hidden (the round-13 data-loss bug);
+  // equal counts as newer.
+  return !lastAt || lastAt < Date.parse(mark.at);
 }
 
 type ConvMemberRow = {

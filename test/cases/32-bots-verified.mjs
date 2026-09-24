@@ -5462,7 +5462,7 @@ const convBetween = (db, a, b) =>
       'KpSheetRow(Icons.Filled.CheckCircle, "Select")',
     ].map((t) => sheet.indexOf(t));
     check(
-      "r32-12: chat-list long-press = tick + sheet [Delete, Mute/Unmute, Pin/Unpin, Create group with $handle, Select]; rounded checks in select mode; '<n> selected' bar with X and ⋮ (reopens the sheet); pinned rows sort first (persisted kp-pinned.json); newgroup?with= pre-picks members",
+      "r32-12 (r68-7): chat-list long-press = tick + sheet [Delete, Mute/Unmute, Pin/Unpin, Create group with $handle, Select] — Delete opens the chat-delete popup ('Delete Chat' + the 'Also delete for {name}' checkbox, which is what the DELETE carries); rounded checks in select mode; '<n> selected' bar with X and ⋮ (reopens the sheet); pinned rows sort first (persisted kp-pinned.json); newgroup?with= pre-picks members",
       cl.includes("internal object ListSelect {") &&
         cl.includes(".combinedClickable(") &&
         cl.includes("onLongClick = {") &&
@@ -5479,13 +5479,21 @@ const convBetween = (db, a, b) =>
           "androidx.activity.compose.BackHandler(enabled = selecting) { ListSelect.clear() }",
         ) &&
         order.every((i, k) => i >= 0 && (k === 0 || i > order[k - 1])) &&
+        // r68-7: Delete / Mute / Pin / Create group / Select — the helper row
+        // sits outside this slice (before the popup it was the same five).
         (sheet.match(/KpSheetRow\(/g) || []).length === 5 &&
         sheet.includes('if (allMuted) "Unmute" else "Mute",') &&
         sheet.includes('KpSheetRow(Icons.Filled.PushPin, if (allPinned) "Unpin" else "Pin")') &&
         sheet.includes('KpSheetRow(Icons.Filled.GroupAdd, "Create group with $handle")') &&
         sheet.includes('nav.navigate("newgroup?with=${peers.joinToString(",")}")') &&
+        sheet.includes('title = "Delete Chat",') &&
+        sheet.includes('if (multi) "Permanently delete these ${ids.size} chats?"') &&
+        sheet.includes('"Permanently delete the chat with $name?"') &&
         sheet.includes(
-          'title = if (ids.size > 1) "Delete ${ids.size} chats?" else "Delete chat?",',
+          'alsoLabel = if (multi) "Also delete for everyone" else "Also delete for $name",',
+        ) &&
+        sheet.includes(
+          'Api.delete("/api/conversations/$id", JSONObject().put("forEveryone", also))',
         ) &&
         cl.includes('.sortedByDescending { if (it.optString("id") in pinned) 1 else 0 }') &&
         store.includes("val pinnedConvIds = mutableStateListOf<String>()") &&
@@ -8062,13 +8070,16 @@ const convBetween = (db, a, b) =>
       chatW38.indexOf("} else if (requestPending) {"),
     );
     check(
-      "r38-1: the block wall is one thin row — way-back + red Delete chat pills side by side (Request Unblock while unspent, Unblock for the blocker), spent walls show only the unavailable line; Delete drops the chat and backs out",
+      "r38-1 (r68-7): the block wall is one thin row — way-back + red Delete chat pills side by side (Request Unblock while unspent, Unblock for the blocker), spent walls show only the unavailable line; Delete opens the chat-delete popup, and the ticked checkbox reaches the DELETE as forEveryone",
       wall38.includes("Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)") &&
         wall38.includes("fun wallPill(") &&
         wall38.includes("else if (red) Red else ActionBlue") &&
         wall38.includes('"Delete chat"') &&
-        wall38.includes("fun deleteWallChat()") &&
-        wall38.includes('Api.delete("/api/conversations/$convId")') &&
+        wall38.includes("fun deleteWallChat(forEveryone: Boolean)") &&
+        wall38.includes('"Delete chat", deleting, true) {') &&
+        wall38.includes("confirmDeleteChat = true") &&
+        wall38.includes('"/api/conversations/$convId",') &&
+        wall38.includes('JSONObject().put("forEveryone", forEveryone),') &&
         wall38.includes("ScreenStore.dropConv(convId)") &&
         wall38.includes("nav.popBackStack()") &&
         wall38.indexOf('"Delete chat"') < wall38.indexOf('"This User Is Unavailable"'),

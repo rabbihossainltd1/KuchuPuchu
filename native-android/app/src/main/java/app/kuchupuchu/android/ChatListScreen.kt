@@ -247,14 +247,20 @@ fun ChatListScreen(nav: NavController) {
                     if (cid.isNotBlank()) {
                         scope.launch {
                             runCatching {
-                                val one =
+                                val detail =
                                     withContext(Dispatchers.IO) {
                                         Api.get("/api/conversations/$cid", true)
-                                    }.optJSONObject("conversation") ?: return@launch
+                                    }
+                                val one = detail.optJSONObject("conversation") ?: return@launch
                                 // The open chat marks itself read; never
                                 // flash a badge for what's on screen.
                                 if (Store.route == "chat/$cid") one.put("unread", 0)
-                                ScreenStore.upsertConv(one)
+                                // r68-7: the server answers `hiddenByMe` for a
+                                // chat THIS member deleted — without this the
+                                // poke that follows a delete re-added the row
+                                // the list had just dropped.
+                                if (detail.optBoolean("hiddenByMe")) ScreenStore.dropConv(cid)
+                                else ScreenStore.upsertConv(one)
                             }
                         }
                     }
@@ -1540,21 +1546,39 @@ private fun ChatRowSheet(
     val canGroup = !target.optBoolean("isGroup") && otherId.isNotBlank() && !isKpBot(otherId)
     var confirmDelete by remember { mutableStateOf(false) }
     if (confirmDelete) {
-        KpConfirmSheet(
-            title = if (ids.size > 1) "Delete ${ids.size} chats?" else "Delete chat?",
-            confirmLabel = "Delete",
-            danger = true,
+        // r68-7 (owner: "ekhon theke full chat delete korte gele emon popup
+        // asbe user jodi check box ta tick kore delete kore duijoner thekei
+        // chat delete hoye jabe shob permanently tick na korle just tar kache
+        // thekei delete Hobe je koreche"): the checkbox is the whole question.
+        // Ticked = the rows go for BOTH members (the worker takes the other
+        // member's watermark too), unticked = only my copy disappears.
+        val multi = ids.size > 1
+        val name = handle.ifBlank { if (multi) "everyone" else "this chat" }
+        KpDeleteDialog(
+            title = "Delete Chat",
+            question =
+                if (multi) "Permanently delete these ${ids.size} chats?"
+                else "Permanently delete the chat with $name?",
+            alsoLabel = if (multi) "Also delete for everyone" else "Also delete for $name",
+            confirmLabel = if (multi) "Delete Chats" else "Delete Chat",
+            avatarName = name,
+            avatarUrl = if (multi) null else other?.optIso("avatarUrl"),
+            avatarRef = if (multi) null else other?.optIso("avatarRef"),
             onDismiss = { confirmDelete = false },
-            onConfirm = {
+            onConfirm = { also ->
                 confirmDelete = false
                 haptics.heavy()
                 ids.forEach { ScreenStore.dropConv(it) }
-                android.widget.Toast.makeText(ctx, if (ids.size > 1) "Chats deleted" else "Chat deleted", android.widget.Toast.LENGTH_SHORT).show()
+                android.widget.Toast.makeText(ctx, if (multi) "Chats deleted" else "Chat deleted", android.widget.Toast.LENGTH_SHORT).show()
                 ListSelect.clear()
                 onChange()
                 scope.launch {
                     for (id in ids) {
-                        runCatching { withContext(Dispatchers.IO) { Api.delete("/api/conversations/$id") } }
+                        runCatching {
+                            withContext(Dispatchers.IO) {
+                                Api.delete("/api/conversations/$id", JSONObject().put("forEveryone", also))
+                            }
+                        }
                     }
                 }
             },

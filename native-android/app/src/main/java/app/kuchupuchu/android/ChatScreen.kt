@@ -305,6 +305,9 @@ fun ChatScreen(nav: NavController, convId: String) {
     // AND raises the quick-emoji bar; "+" opens the full emoji sheet.
     var reactionFor by remember { mutableStateOf<JSONObject?>(null) }
     var showEmojiSheet by remember { mutableStateOf(false) }
+    // r68-7: the chat-delete popup's own state — the thread's ⋮ and the block
+    // wall's Delete chat pill both raise it.
+    var confirmDeleteChat by remember { mutableStateOf(false) }
     // Owner round 31: long-press opens ONE bottom sheet — the reaction emoji
     // row on top, every message action under it. (No floating bar, no
     // system-style icon strip.) Multi-select is the sheet's "Select" action.
@@ -1143,6 +1146,14 @@ fun ChatScreen(nav: NavController, convId: String) {
                     }
                 // N3r: the other side tapped an emoji row — it replays HERE
                 // too (the row consumes its own id exactly once).
+                // r68-7: the other side ticked "Also delete for X" and the whole
+                // chat is gone for both — the open thread must empty instead of
+                // showing rows that no longer exist (the room frame is new; the
+                // list pokes ride the `conv` event).
+                "cleared" ->
+                    if (ev.optString("conversationId") == convId) {
+                        refreshMessages(forceNetwork = true)
+                    }
                 "emoji_fx" ->
                     // r68-4: the far side's buzz is a shared moment, so the
                     // replay is enqueued ONLY while this chat is the screen the
@@ -3943,6 +3954,26 @@ fun ChatScreen(nav: NavController, convId: String) {
             }
         }
 
+        if (confirmDeleteChat) {
+            val otherJ = ScreenStore.convDetailOf(convId)?.optJSONObject("other")
+            val name = deleteOtherLabel(convId)
+            KpDeleteDialog(
+                title = "Delete Chat",
+                question = "Permanently delete the chat with $name?",
+                alsoLabel = "Also delete for $name",
+                confirmLabel = "Delete Chat",
+                avatarName = name,
+                avatarUrl = otherJ?.optIso("avatarUrl"),
+                avatarRef = otherJ?.optIso("avatarRef"),
+                onDismiss = { confirmDeleteChat = false },
+                onConfirm = { also ->
+                    confirmDeleteChat = false
+                    deleteWallChat(also)
+                },
+            )
+        }
+
+
         /* ---------------- composer (doubles as the recording bar) ---------------- */
         // Owner round 32 (item 18): the chat's parked "send later" rows.
         // Owner round 34 (item 17): the chip is TRANSIENT — it flashes for a
@@ -4024,11 +4055,16 @@ fun ChatScreen(nav: NavController, convId: String) {
                     )
                 }
             }
-            fun deleteWallChat() {
+            fun deleteWallChat(forEveryone: Boolean) {
                 deleting = true
                 scope.launch {
                     val gone = runCatching {
-                        withContext(Dispatchers.IO) { Api.delete("/api/conversations/$convId") }
+                        withContext(Dispatchers.IO) {
+                            Api.delete(
+                                "/api/conversations/$convId",
+                                JSONObject().put("forEveryone", forEveryone),
+                            )
+                        }
                     }.getOrNull()?.let { !it.has("error") } == true
                     deleting = false
                     if (gone) {
@@ -4096,7 +4132,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                             }
                         }
                         wallPill(if (deleting) "Deleting…" else "Delete chat", deleting, true) {
-                            deleteWallChat()
+                            confirmDeleteChat = true
                         }
                     }
                 } else {

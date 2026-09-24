@@ -69,16 +69,24 @@ async function mk() {
   const cid = await k.solo(A, B.user.id);
   await k.send(A, cid, "old-1");
   await k.send(A, cid, "old-2");
-  const del = await k.call("DELETE", `/api/conversations/${cid}`, undefined, B.token);
-  check("B can delete the chat", del.status === 200, String(del.status));
+  // r68-7: the popup's checkbox TICKED = the rows go for both members.
+  const del = await k.call("DELETE", `/api/conversations/${cid}`, { forEveryone: true }, B.token);
+  check("B can delete the chat (checkbox ticked)", del.status === 200, String(del.status));
   check(
     "deleted chat is gone from B's list",
     !(await k.list(B)).includes(cid),
     JSON.stringify(await k.list(B)),
   );
-  check("A still sees it", (await k.list(A)).includes(cid));
+  // r68-7 (ticked): owner — "duijoner thekei chat delete hoye jabe shob
+  // permanently". The chat leaves BOTH lists; the old shape left an empty
+  // shell in A's list, which is no longer what a ticked delete means.
   check(
-    "round 13 real-delete: even A's copy of the history is gone",
+    "A loses it too — permanently, on both sides",
+    !(await k.list(A)).includes(cid),
+    JSON.stringify(await k.list(A)),
+  );
+  check(
+    "round 13 real-delete (r68-7, ticked): even A's copy of the history is gone",
     (await k.msgs(A, cid)).length === 0,
     String((await k.msgs(A, cid)).length),
   );
@@ -133,13 +141,65 @@ async function mk() {
   const cid = await k.solo(A, B.user.id);
   await k.send(A, cid, "m1");
   await k.send(B, cid, "m2");
-  await k.call("DELETE", `/api/conversations/${cid}`, undefined, B.token);
+  await k.call("DELETE", `/api/conversations/${cid}`, { forEveryone: true }, B.token);
   await k.send(A, cid, "m3");
   const aMsgs = await k.msgs(A, cid);
   check(
-    "round 13: a 1:1 delete wipes it for both sides; A sees only the post-delete message",
+    "round 13 (r68-7, ticked): a 1:1 delete wipes it for both sides; A sees only the post-delete message",
     aMsgs.length === 1 && aMsgs[0].body === "m3",
     JSON.stringify(aMsgs.map((m) => m.body)),
+  );
+}
+
+// ---- 3b. r68-7: the checkbox LEFT UNTICKED — only my copy goes, the other
+// side keeps every message (owner: "tick na korle just tar kache theke delete
+// hobe je koreche") ----
+{
+  const k = await mk();
+  const A = await k.reg("y2a@x.com", "y2a");
+  const B = await k.reg("y2b@x.com", "y2b");
+  const cid = await k.solo(A, B.user.id);
+  await k.send(A, cid, "m1");
+  await k.send(B, cid, "m2");
+  const del = await k.call("DELETE", `/api/conversations/${cid}`, { forEveryone: false }, B.token);
+  check(
+    "r68-7 (unticked): the answer says so",
+    del.status === 200 && del.json.forEveryone === false,
+    `${del.status} ${JSON.stringify(del.json).slice(0, 60)}`,
+  );
+  check(
+    "r68-7 (unticked): the chat leaves MY list",
+    !(await k.list(B)).includes(cid),
+    JSON.stringify(await k.list(B)),
+  );
+  check(
+    "r68-7 (unticked): my history is cut at the delete",
+    (await k.msgs(B, cid)).length === 0,
+    JSON.stringify((await k.msgs(B, cid)).map((m) => m.body)),
+  );
+  check(
+    "r68-7 (unticked): the OTHER side keeps everything — its list row and its history are untouched",
+    (await k.list(A)).includes(cid) &&
+      JSON.stringify((await k.msgs(A, cid)).map((m) => m.body)) === JSON.stringify(["m1", "m2"]),
+    JSON.stringify({
+      list: (await k.list(A)).includes(cid),
+      msgs: (await k.msgs(A, cid)).map((m) => m.body),
+    }),
+  );
+  await k.send(A, cid, "m3");
+  const bAfter = await k.msgs(B, cid);
+  check(
+    "r68-7 (unticked): a newer message brings the chat back for me with only what is new",
+    (await k.list(B)).includes(cid) && bAfter.length === 1 && bAfter[0].body === "m3",
+    JSON.stringify({ msgs: bAfter.map((m) => m.body), list: (await k.list(B)).includes(cid) }),
+  );
+  // …and the same chat, now deleted with the checkbox TICKED, is permanent
+  // for both — the path the round-13 checks above have always driven.
+  await k.call("DELETE", `/api/conversations/${cid}`, { forEveryone: true }, B.token);
+  check(
+    "r68-7 (ticked): BOTH histories are empty afterwards",
+    (await k.msgs(A, cid)).length === 0 && (await k.msgs(B, cid)).length === 0,
+    JSON.stringify({ a: (await k.msgs(A, cid)).length, b: (await k.msgs(B, cid)).length }),
   );
 }
 

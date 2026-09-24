@@ -170,7 +170,10 @@ async function main() {
     // scroll up silently resurrects the history the user deleted. Asserted from the
     // OTHER member's seat: the sender's own watermark is cleared on purpose when
     // they send (they came back to the chat), so only a non-sender still has one.
-    await h.call("DELETE", `/api/conversations/${cid}`, undefined, B.token);
+    // r68-7: the checkbox ticked (the popup's "Also delete for A") — the cut
+    // has to hold on the OTHER member's seat too, which is what this block
+    // checks one page deeper.
+    await h.call("DELETE", `/api/conversations/${cid}`, { forEveryone: true }, B.token);
     await h.call(
       "POST",
       `/api/conversations/${cid}/messages`,
@@ -203,7 +206,7 @@ async function main() {
     );
     const forA = await h.call("GET", `/api/conversations/${cid}/messages`, undefined, A.token);
     check(
-      "…and round 13 real-delete means even the sender's history is gone (fresh start)",
+      "…and round 13 real-delete (r68-7, ticked) means even the sender's history is gone (fresh start)",
       forA.json.items.length === 1 && forA.json.hasMore === false,
       JSON.stringify({ n: forA.json.items.length, hm: forA.json.hasMore }),
     );

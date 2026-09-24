@@ -1,7 +1,7 @@
 // r68 — the owner's round after the r67 batch (2026-09-24). Eight items; this
-// file covers the four that landed as code in this pass (1, 4, 5, 6) and stays
-// the home for 7/8 (chat delete with the both-sides checkbox, single message
-// delete with the same checkbox popup) when they land.
+// file covers the four that landed as code in this pass (1, 4, 5, 6); 7/8 (the
+// two delete popups) live in 44-r68-delete-popups.mjs, which drives the worker
+// as well as pinning the app.
 //
 // 1. caption bar position: "caption bar open korle sothik position a ashe na
 //    keyboard er upore ashe na onek upore ashe ar half attach screen a to

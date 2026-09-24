@@ -793,6 +793,144 @@ fun KpInputField(
     }
 }
 
+/* ---------------- the delete popup (owner round 68) ---------------- */
+
+/**
+ * r68-7 / r68-8 (owner, with two reference screenshots: "ekhon theke full chat
+ * delete korte gele emon popup asbe user jodi check box ta tick kore delete kore
+ * duijoner thekei chat delete hoye jabe shob permanently tick na korle just tar
+ * kache thekei delete Hobe je koreche" / "ekhon theke delete option just ektai
+ * hobe 2 ta na").
+ *
+ * ONE popup, used by both deletes: a title (the other member's photo beside it
+ * when the caller has one), the question, a checkbox that says whose copy is
+ * affected ("Also delete for <name>"), and Cancel / Delete. Ticked means the
+ * row (or the whole chat) goes for BOTH sides; unticked means only mine.
+ *
+ * It is a centred dialog, not one of the app's bottom sheets, because that is
+ * what the owner's reference shows — and because a destructive question that
+ * carries a TICK deserves to be looked at, not swiped past.
+ */
+@Composable
+fun KpDeleteDialog(
+    title: String,
+    question: String,
+    // null = nothing to offer the other side (an echo that never left this
+    // phone, a group, a bot) — the row is then absent, not disabled.
+    alsoLabel: String?,
+    confirmLabel: String,
+    onDismiss: () -> Unit,
+    onConfirm: (alsoForThem: Boolean) -> Unit,
+    avatarName: String = "",
+    avatarUrl: String? = null,
+    avatarRef: String? = null,
+    // Owner round 68: the checkbox always starts UNTICKED — the safe scope is
+    // the one that cannot take anything away from the other person.
+    alsoDefault: Boolean = false,
+) {
+    val haptics = rememberHaptics()
+    var also by remember { mutableStateOf(alsoDefault) }
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(Card)
+                .padding(horizontal = 20.dp, vertical = 18.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (avatarUrl != null || avatarRef != null) {
+                    KpAvatar(avatarName, avatarUrl, 40.dp, avatarRef = avatarRef)
+                    Spacer(Modifier.width(12.dp))
+                }
+                Text(
+                    title,
+                    color = Ink,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            Text(question, color = Ink, fontSize = 15.sp, lineHeight = 21.sp)
+            if (alsoLabel != null) {
+                Spacer(Modifier.height(14.dp))
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable {
+                            haptics.toggle(!also)
+                            also = !also
+                        }
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier
+                            .size(22.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .border(2.dp, if (also) ActionBlue else Muted, RoundedCornerShape(6.dp))
+                            .background(if (also) ActionBlue else Color.Transparent),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (also) {
+                            Icon(
+                                Icons.Filled.Check,
+                                contentDescription = null,
+                                tint = ActionBlueInk,
+                                modifier = Modifier.size(15.dp),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Text(alsoLabel, color = Ink, fontSize = 15.sp, maxLines = 2)
+                }
+            }
+            Spacer(Modifier.height(18.dp))
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable {
+                            haptics.tap()
+                            onDismiss()
+                        }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                ) {
+                    Text("Cancel", color = ActionBlue, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Spacer(Modifier.width(10.dp))
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable {
+                            haptics.heavy()
+                            onConfirm(also)
+                        }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                ) {
+                    Text(confirmLabel, color = Red, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+}
+
+/** The other member's name for the checkbox label, or "everyone" when unknown. */
+internal fun deleteOtherLabel(convId: String): String {
+    val other =
+        ScreenStore.convDetailOf(convId)?.optJSONObject("other")
+            ?: ScreenStore.convs.firstOrNull { it.optString("id") == convId }?.optJSONObject("other")
+    val name = other?.optText("displayName").orEmpty().ifBlank { other?.optText("username").orEmpty() }
+    return name.ifBlank { "everyone" }
+}
+
 /* ---------------- bottom sheets (owner round 31) ---------------- */
 
 /**
