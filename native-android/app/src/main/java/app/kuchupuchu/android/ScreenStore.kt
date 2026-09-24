@@ -607,6 +607,19 @@ object ScreenStore {
     @Synchronized
     fun convDetailOf(convId: String): JSONObject? = convDetail[convId]
 
+    /**
+     * r68-8: the OPEN chat's conversation id and the other person's name. The
+     * video player and the document viewer are routes — they carry no
+     * conversation — but their Delete popup has to say exactly what the chat's
+     * own popup says ("Also delete for <peer>"), so the chat publishes these
+     * while it is on screen and the routes read them.
+     */
+    @Volatile
+    var activeConvId: String = ""
+
+    @Volatile
+    var activePeerName: String = ""
+
     val statuses = mutableStateListOf<JSONObject>()
 
     /**

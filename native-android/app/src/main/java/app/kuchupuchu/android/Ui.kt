@@ -922,6 +922,15 @@ fun KpDeleteDialog(
     }
 }
 
+/**
+ * r68-8: the label for the chat that is OPEN right now, for the route screens
+ * (video player / document viewer) that have no conversation of their own —
+ * ChatScreen publishes its peer name on composition. Null when no chat is open,
+ * which is also when those screens must not offer the other side at all.
+ */
+internal fun deleteAlsoLabelForActiveChat(): String? =
+    ScreenStore.activePeerName.takeIf { it.isNotBlank() }?.let { "Also delete for $it" }
+
 /** The other member's name for the checkbox label, or "everyone" when unknown. */
 internal fun deleteOtherLabel(convId: String): String {
     val other =
@@ -929,6 +938,26 @@ internal fun deleteOtherLabel(convId: String): String {
             ?: ScreenStore.convs.firstOrNull { it.optString("id") == convId }?.optJSONObject("other")
     val name = other?.optText("displayName").orEmpty().ifBlank { other?.optText("username").orEmpty() }
     return name.ifBlank { "everyone" }
+}
+
+/**
+ * r68-8: may THIS message also go for the other side? Only in a personal chat,
+ * only once the row exists on the server (a sending echo has no id to delete),
+ * and never for the two bot accounts — the group rule stays "your own messages
+ * only", which the server enforces too.
+ */
+internal fun canDeleteForEveryone(convId: String, m: JSONObject?): Boolean {
+    if (m == null || isEchoMsg(m)) return false
+    // Your OWN message was always deletable for everyone, in any chat — the
+    // server's sender rule has not moved.
+    if (m.optString("senderId") == Store.myId()) return true
+    val c =
+        ScreenStore.convDetailOf(convId)
+            ?: ScreenStore.convs.firstOrNull { it.optString("id") == convId }
+            ?: return false
+    if (c.optBoolean("isGroup")) return false
+    val otherId = c.optJSONObject("other")?.optText("id").orEmpty()
+    return otherId.isNotBlank() && !isKpBot(otherId)
 }
 
 /* ---------------- bottom sheets (owner round 31) ---------------- */

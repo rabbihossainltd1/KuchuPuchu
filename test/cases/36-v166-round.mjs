@@ -173,10 +173,11 @@ check(
 
 /* 5 — fb#8: the ⋮ + Delete everywhere, one route back to the chat */
 check(
-  'v166 fb#8: every full-screen surface carries the ⋮ — the photo viewer gates it on any action (save / forward / edit / delete), the player and the document viewer on the message alone — and Delete asks the chat\'s own two questions (KpDeleteSheet: "Delete for everyone" only when the sender owns it and it is not an echo, then "Delete for me", both in Red)',
-  viewer.includes("internal fun KpDeleteSheet(") &&
-    viewer.includes('KpSheetRow(Icons.Filled.DeleteForever, "Delete for everyone", tint = Red)') &&
-    viewer.includes('KpSheetRow(Icons.Filled.Delete, "Delete for me", tint = Red)') &&
+  'v166 fb#8 (r68-8): every full-screen surface carries the ⋮ — the photo viewer gates it on any action (save / forward / edit / delete), the player and the document viewer on the message alone — and Delete asks the chat\'s own ONE question: the shared KpDeleteDialog ("Delete message" + the checkbox line), never a "Delete for me" second row',
+  viewer.includes("internal fun KpDeleteSheet(") === false &&
+    viewer.includes("KpDeleteDialog(") &&
+    viewer.includes("alsoLabel = if (onDeleteForEveryone != null) deleteAlsoLabel else null,") &&
+    viewer.includes("if (also) onDeleteForEveryone?.invoke() else onDeleteForMe?.invoke()") &&
     viewer.includes(
       'internal fun isEchoMsg(m: JSONObject): Boolean = m.optString("id").startsWith("c_")',
     ) &&
@@ -188,21 +189,22 @@ check(
     viewer.includes(
       'Icon(Icons.Filled.MoreVert, "More", tint = Color.White, modifier = Modifier.size(22.dp))',
     ) &&
-    viewer.includes(
-      'val canUnsend = m != null && !isEchoMsg(m) && m.optString("senderId") == Store.myId()',
-    ) &&
+    // r68-8: the gate is the chat's own predicate (in a personal chat the
+    // other side's message may go too) — the routes read the open chat.
+    viewer.includes("val canUnsend = canDeleteForEveryone(ScreenStore.activeConvId, m)") &&
     doc.includes(
       'KpSheetRow(Icons.Filled.Delete, "Delete", tint = Red) { menuOpen = false; confirmDelete = true }',
     ) &&
-    doc.includes("canUnsend = canUnsend,") &&
+    doc.includes("alsoLabel = if (canUnsend) deleteAlsoLabelForActiveChat() else null,") &&
     doc.includes('Icon(Icons.Filled.MoreVert, "More", tint = Ink)') &&
+    chat.includes("deleteAlsoLabel = if (canDeleteForEveryone(convId, m))") &&
     chat.includes(
-      'onDeleteForEveryone =\n                    if (m.optString("senderId") == Store.myId() && !isEchoMsg(m)) {',
+      "onDeleteForEveryone =\n                    if (canDeleteForEveryone(convId, m)) {",
     ),
 );
 
 check(
-  "v166 fb#8 routing: a viewer's Delete names the message (ScreenStore.ViewerDelete + the viewerDelete flow) and the CHAT runs it — the row is found in msgs or pending, an album expands (albumPhotos), and the same unsendSelected / deleteForMe the long-press sheet calls does the work",
+  "v166 fb#8 routing (r68-8): a viewer's Delete names the message (ScreenStore.ViewerDelete + the viewerDelete flow) and the CHAT runs it — the row is found in msgs or pending, an album expands (albumPhotos), and the same deleteChosen the popup feeds does the work (ticked = unsendSelected, else deleteForMe)",
   store.includes("class ViewerDelete(val msgId: String, val everyone: Boolean)") &&
     store.includes(
       "val viewerDelete = kotlinx.coroutines.flow.MutableStateFlow<ViewerDelete?>(null)",
@@ -213,7 +215,10 @@ check(
     chat.includes(
       'val ids = albumPhotos(row).map { it.optString("id") }.filter { it.isNotBlank() }',
     ) &&
-    chat.includes("if (req.everyone && !pendingEchoOf(row)) unsendSelected() else deleteForMe()") &&
+    chat.includes("deleteChosen(req.everyone)") &&
+    chat.includes("if (alsoForThem && onServer.isNotEmpty()) {") &&
+    chat.includes("unsendSelected()") &&
+    chat.includes("deleteForMe()") &&
     viewer.includes("ScreenStore.viewerDelete.value = ScreenStore.ViewerDelete(id, everyone)") &&
     viewer.includes("nav.popBackStack()") &&
     doc.includes("ScreenStore.viewerDelete.value = ScreenStore.ViewerDelete(id, everyone)") &&

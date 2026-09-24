@@ -1,6 +1,4 @@
-// r68 item 7 — the full-chat delete popup (2026-09-24). Item 8 (the single
-// message delete with the same checkbox popup) extends this file in the next
-// commit; this half is what item 7 shipped.
+// r68 items 7 + 8 — the two delete popups (2026-09-24).
 //
 // 7. full-chat delete: "ekhon theke full chat delete korte gele emon popup asbe
 //    user jodi check box ta tick kore delete kore duijoner thekei chat delete
@@ -89,6 +87,99 @@ async function mk() {
 }
 
 const bodies = (rows) => JSON.stringify(rows.map((m) => m.body));
+
+/* -------- 8. a personal chat: the OTHER side's message can go too -------- */
+{
+  const k = await mk();
+  const A = await k.reg("d8a@x.com", "d8a");
+  const B = await k.reg("d8b@x.com", "d8b");
+  const cid = await k.solo(A, B.user.id);
+  const fromB = await k.send(B, cid, "b-old");
+  await k.send(A, cid, "a-old");
+  const del = await k.call("DELETE", `/api/messages/${fromB.message.id}`, undefined, A.token);
+  check(
+    "r68-8: in a 1:1 the RECIPIENT can delete the sender's message for everyone (200)",
+    del.status === 200 && del.json.ok === true,
+    `${del.status} ${JSON.stringify(del.json).slice(0, 60)}`,
+  );
+  check(
+    "r68-8: …and the row is really gone from BOTH histories",
+    bodies(await k.msgs(A, cid)) === JSON.stringify(["a-old"]) &&
+      bodies(await k.msgs(B, cid)) === JSON.stringify(["a-old"]),
+    JSON.stringify({ a: await k.msgs(A, cid), b: await k.msgs(B, cid) }),
+  );
+  check(
+    "r68-8: the chat survives the message delete (only the message goes)",
+    (await k.list(A)).length === 1 && (await k.list(B)).length === 1,
+    JSON.stringify({ a: await k.list(A), b: await k.list(B) }),
+  );
+}
+
+/* -------- 8. the two bot transcripts stay sender-only -------- */
+{
+  const k = await mk();
+  const A = await k.reg("d8c@x.com", "d8c");
+  await k.call("POST", "/api/ai/welcome", {}, A.token);
+  const conv = k.db._db
+    .prepare(
+      `SELECT c.id AS id FROM conversations c
+        JOIN members m ON m.conv_id = c.id AND m.user_id = 'kp_ai_bot'`,
+    )
+    .get();
+  check("r68-8: the AI chat exists for the bot test", !!conv?.id, String(conv?.id));
+  const botMsg = k.db._db
+    .prepare("SELECT id FROM messages WHERE conv_id = ? AND sender_id = 'kp_ai_bot'")
+    .get(conv.id);
+  const refused = await k.call("DELETE", `/api/messages/${botMsg.id}`, undefined, A.token);
+  check(
+    "r68-8: the bot's own message is still nobody else's to delete (403)",
+    refused.status === 403,
+    `${refused.status} ${JSON.stringify(refused.json).slice(0, 60)}`,
+  );
+  const mine = await k.send(A, conv.id, "my own note");
+  const own = await k.call("DELETE", `/api/messages/${mine.message.id}`, undefined, A.token);
+  check(
+    "r68-8: …while the user's OWN message in that same AI chat deletes as always",
+    own.status === 200,
+    String(own.status),
+  );
+}
+
+/* -------- 8. groups keep the old rule: your own messages only -------- */
+{
+  const k = await mk();
+  const A = await k.reg("d8d@x.com", "d8d");
+  const B = await k.reg("d8e@x.com", "d8e");
+  const C = await k.reg("d8f@x.com", "d8f");
+  const g = (
+    await k.call(
+      "POST",
+      "/api/conversations/group",
+      { title: "G8", memberIds: [B.user.id, C.user.id] },
+      A.token,
+    )
+  ).json.conversation.id;
+  const fromA = await k.send(A, g, "a-in-group");
+  const fromB = await k.send(B, g, "b-in-group");
+  const refused = await k.call("DELETE", `/api/messages/${fromA.message.id}`, undefined, B.token);
+  check(
+    "r68-8: in a GROUP the 403 stands — a member cannot delete another member's words",
+    refused.status === 403,
+    `${refused.status} ${JSON.stringify(refused.json).slice(0, 60)}`,
+  );
+  const own = await k.call("DELETE", `/api/messages/${fromB.message.id}`, undefined, B.token);
+  check(
+    "r68-8: …and the member's own message in the group still goes",
+    own.status === 200,
+    String(own.status),
+  );
+  const gLeft = bodies(await k.msgs(C, g));
+  check(
+    "r68-8: only that one row left the group history",
+    gLeft.includes('"a-in-group"') && !gLeft.includes("b-in-group"),
+    gLeft,
+  );
+}
 
 /* -------- 7. unticked: my copy only — list, history, search, media, detail -------- */
 {
@@ -291,6 +382,46 @@ const bodies = (rows) => JSON.stringify(rows.map((m) => m.body));
       ui.includes("haptics.heavy()\n                            onConfirm(also)"),
   );
   check(
+    "r68-8: the checkbox line names the other person (display name, username, else 'everyone') and is dropped when there is nobody to tell",
+    ui.includes("internal fun deleteOtherLabel(convId: String): String {") &&
+      ui.includes('return name.ifBlank { "everyone" }') &&
+      chat.includes(
+        'alsoLabel = if (canAlso) "Also delete for ${deleteOtherLabel(convId)}" else null,',
+      ),
+  );
+  check(
+    "r68-8: who may reach the other side — a personal chat with a peer who is not one of the two bots, never a sending echo, never a group",
+    ui.includes("internal fun canDeleteForEveryone(convId: String, m: JSONObject?): Boolean {") &&
+      ui.includes("if (m == null || isEchoMsg(m)) return false") &&
+      ui.includes('if (m.optString("senderId") == Store.myId()) return true') &&
+      ui.includes('if (c.optBoolean("isGroup")) return false') &&
+      ui.includes("return otherId.isNotBlank() && !isKpBot(otherId)"),
+  );
+  check(
+    "r68-8: the long-press sheet and the multi-select bar each carry ONE Delete (no delete-for-everyone / delete-for-me pair, no 'Unsend')",
+    chat.includes('KpSheetRow(Icons.Filled.Delete, "Delete", tint = Red) {') &&
+      chat.includes("IconButton(onClick = { haptics.tap(); confirmDelete = true }) {") &&
+      !chat.includes("KpSheetRow(Icons.Filled.DeleteForever, ") &&
+      !chat.includes("Delete for everyone"),
+  );
+  check(
+    "r68-8: the answer splits the gesture — ticked = the server delete for the rows that exist, unticked = hide them here; a sending echo has no id and leaves locally either way",
+    chat.includes("fun deleteChosen(alsoForThem: Boolean) {") &&
+      chat.includes("val rows = selectedMessages()") &&
+      chat.includes("val onServer = rows.filterNot { pendingEchoOf(it) }") &&
+      chat.includes("if (alsoForThem && onServer.isNotEmpty()) {") &&
+      chat.includes("unsendSelected()") &&
+      chat.includes("echoes.forEach { ScreenStore.hideMessage(it) }") &&
+      chat.includes("deleteForMe()"),
+  );
+  check(
+    "r68-8: the message popup asks exactly the owner's question ('Delete message' / 'Are you sure…'), plural for a multi-select",
+    chat.includes('title = "Delete message"') &&
+      chat.includes('"Are you sure you want to delete these ${rows.size} messages?"') &&
+      chat.includes('"Are you sure you want to delete this message?"') &&
+      chat.includes('confirmLabel = "Delete",'),
+  );
+  check(
     "r68-7: the chat popup carries the peer's avatar + 'Delete Chat' + 'Permanently delete the chat with {name}?' and the same checkbox",
     chat.includes('title = "Delete Chat"') &&
       chat.includes('question = "Permanently delete the chat with $name?"') &&
@@ -321,6 +452,24 @@ const bodies = (rows) => JSON.stringify(rows.map((m) => m.body));
     chat.includes(
       '"cleared" ->\n                    if (ev.optString("conversationId") == convId) {\n                        refreshMessages(forceNetwork = true)\n                    }',
     ),
+  );
+  check(
+    "r68-8: the viewers ask the same question — the photo viewer gets the label from its host (it is generic), the two route screens read the open chat from the store",
+    mv.includes("deleteAlsoLabel: String? = null") &&
+      mv.includes("alsoLabel = if (onDeleteForEveryone != null) deleteAlsoLabel else null,") &&
+      mv.includes("if (also) onDeleteForEveryone?.invoke() else onDeleteForMe?.invoke()") &&
+      mv.includes("val canUnsend = canDeleteForEveryone(ScreenStore.activeConvId, m)") &&
+      doc.includes("val canUnsend = canDeleteForEveryone(ScreenStore.activeConvId, m)") &&
+      doc.includes("alsoLabel = if (canUnsend) deleteAlsoLabelForActiveChat() else null,") &&
+      !mv.includes("internal fun KpDeleteSheet("),
+  );
+  check(
+    "r68-8: the chat publishes itself for those routes, and the store keeps the published name",
+    store.includes('var activeConvId: String = ""') &&
+      store.includes('var activePeerName: String = ""') &&
+      chat.includes("ScreenStore.activeConvId = convId") &&
+      chat.includes("ScreenStore.activePeerName = rawTitle") &&
+      ui.includes("internal fun deleteAlsoLabelForActiveChat(): String?"),
   );
   check(
     "r68-7/8: the DELETE call can carry a body now (the checkbox's answer)",

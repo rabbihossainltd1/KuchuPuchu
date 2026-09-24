@@ -134,7 +134,9 @@ fun DocViewerScreen(nav: NavController, b64: String) {
     // goes to the chat through ScreenStore and the viewer closes — the chat
     // runs its own delete, exactly as if the bubble had been long-pressed.
     var confirmDelete by remember { mutableStateOf(false) }
-    val canUnsend = m != null && !isEchoMsg(m) && m.optString("senderId") == Store.myId()
+    // r68-8: the chat's own predicate (1:1 lets either side delete either message).
+    // This screen is a ROUTE, so it reads the chat that opened it from the store.
+    val canUnsend = canDeleteForEveryone(ScreenStore.activeConvId, m)
     fun raiseDelete(everyone: Boolean) {
         val id = m?.optString("id").orEmpty()
         if (id.isNotBlank()) ScreenStore.viewerDelete.value = ScreenStore.ViewerDelete(id, everyone)
@@ -204,11 +206,18 @@ fun DocViewerScreen(nav: NavController, b64: String) {
         }
     }
     if (confirmDelete) {
-        KpDeleteSheet(
-            canUnsend = canUnsend,
+        // r68-8: same popup as the chat and the viewers — one option, checkbox
+        // decides the scope.
+        KpDeleteDialog(
+            title = "Delete message",
+            question = "Are you sure you want to delete this message?",
+            alsoLabel = if (canUnsend) deleteAlsoLabelForActiveChat() else null,
+            confirmLabel = "Delete",
             onDismiss = { confirmDelete = false },
-            onDeleteForMe = { confirmDelete = false; raiseDelete(everyone = false) },
-            onDeleteForEveryone = { confirmDelete = false; raiseDelete(everyone = true) },
+            onConfirm = { also ->
+                confirmDelete = false
+                raiseDelete(everyone = also)
+            },
         )
     }
     if (forwarding && m != null) {

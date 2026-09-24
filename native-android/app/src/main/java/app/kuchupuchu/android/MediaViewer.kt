@@ -43,7 +43,6 @@ import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
@@ -183,6 +182,10 @@ fun KpPhotoViewer(
     // Both null = the sheet keeps its old shape.
     onDeleteForMe: (() -> Unit)? = null,
     onDeleteForEveryone: (() -> Unit)? = null,
+    // r68-8: the checkbox line for this chat ("Also delete for <peer>"). The
+    // viewer is generic — only its host knows who the other person is — and a
+    // null label simply means this delete has no other side to speak of.
+    deleteAlsoLabel: String? = null,
     // Owner round 32 (item 17): fired once the picture is on screen (a failed
     // load never fires it) — the chat uses it to spend a view-once opening.
     onShown: (() -> Unit)? = null,
@@ -480,40 +483,19 @@ fun KpPhotoViewer(
         )
     }
     if (confirmDelete) {
-        KpDeleteSheet(
-            canUnsend = onDeleteForEveryone != null,
+        // r68-8: the viewer's delete is the SAME popup the chat uses — one
+        // option, and the checkbox decides whether the other side is affected.
+        KpDeleteDialog(
+            title = "Delete message",
+            question = "Are you sure you want to delete this message?",
+            alsoLabel = if (onDeleteForEveryone != null) deleteAlsoLabel else null,
+            confirmLabel = "Delete",
             onDismiss = { confirmDelete = false },
-            onDeleteForMe = { confirmDelete = false; onDeleteForMe?.invoke() },
-            onDeleteForEveryone = { confirmDelete = false; onDeleteForEveryone?.invoke() },
+            onConfirm = { also ->
+                confirmDelete = false
+                if (also) onDeleteForEveryone?.invoke() else onDeleteForMe?.invoke()
+            },
         )
-    }
-}
-
-/**
- * v166 (owner: "… okhane Save, Forward, Delete"): the Delete step behind every
- * viewer's ⋮. Deleting media is destructive and reads differently depending on
- * who sent it, so this asks the two questions the chat's own long-press sheet
- * asks — with the same words, so the outcome is identical wherever the user
- * deletes from.
- */
-@Composable
-internal fun KpDeleteSheet(
-    canUnsend: Boolean,
-    onDismiss: () -> Unit,
-    onDeleteForMe: () -> Unit,
-    onDeleteForEveryone: () -> Unit,
-) {
-    KpSheet(onDismiss = onDismiss) {
-        if (canUnsend) {
-            KpSheetRow(Icons.Filled.DeleteForever, "Delete for everyone", tint = Red) {
-                onDismiss()
-                onDeleteForEveryone()
-            }
-        }
-        KpSheetRow(Icons.Filled.Delete, "Delete for me", tint = Red) {
-            onDismiss()
-            onDeleteForMe()
-        }
     }
 }
 
@@ -628,7 +610,11 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
     // player closes; the chat runs its own delete exactly as if the user had
     // long-pressed the bubble.
     var confirmDelete by remember { mutableStateOf(false) }
-    val canUnsend = m != null && !isEchoMsg(m) && m.optString("senderId") == Store.myId()
+    // r68-8: the gate is the chat's own predicate — in a personal chat the
+    // OTHER person's message can be deleted for everyone too. This screen is a
+    // ROUTE (it has no conversation of its own), so it reads the chat that
+    // opened it from the store; no chat, no checkbox.
+    val canUnsend = canDeleteForEveryone(ScreenStore.activeConvId, m)
     fun raiseDelete(everyone: Boolean) {
         val id = m?.optString("id").orEmpty()
         if (id.isNotBlank()) ScreenStore.viewerDelete.value = ScreenStore.ViewerDelete(id, everyone)
@@ -699,11 +685,16 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
         )
     }
     if (confirmDelete) {
-        KpDeleteSheet(
-            canUnsend = canUnsend,
+        KpDeleteDialog(
+            title = "Delete message",
+            question = "Are you sure you want to delete this message?",
+            alsoLabel = if (canUnsend) deleteAlsoLabelForActiveChat() else null,
+            confirmLabel = "Delete",
             onDismiss = { confirmDelete = false },
-            onDeleteForMe = { confirmDelete = false; raiseDelete(everyone = false) },
-            onDeleteForEveryone = { confirmDelete = false; raiseDelete(everyone = true) },
+            onConfirm = { also ->
+                confirmDelete = false
+                raiseDelete(everyone = also)
+            },
         )
     }
     if (forwarding && m != null) {

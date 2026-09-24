@@ -1139,7 +1139,7 @@ const convBetween = (db, a, b) =>
       !chat.includes("replyThreshold * 1.8f, 0f)\n                                    } else {"),
   );
   check(
-    "r17-13/r31-8: long-press opens ONE action sheet — reaction row on top ('+' = full emoji sheet), then Reply/Copy/Forward/Edit/Unsend/Delete/Select; reacting deselects; no floating bar",
+    "r17-13/r31-8 (r68-8): long-press opens ONE action sheet — reaction row on top ('+' = full emoji sheet), then Reply/Copy/Forward/Edit/Delete/Select — ONE Delete, its scope asked by the shared popup; reacting deselects; no floating bar",
     !chat.includes("listState.layoutInfo.visibleItemsInfo.firstOrNull") &&
       chat.includes("if (mid in selected) selected.remove(mid)") &&
       chat.includes("ModalBottomSheet(") &&
@@ -1148,17 +1148,12 @@ const convBetween = (db, a, b) =>
       chat.includes("actionFor?.let { m ->") &&
       chat.includes('listOf("👍", "❤️", "😂", "😮", "😢", "🙏").forEach { e ->') &&
       // r32-16: "Unsend" is "Delete for everyone" now.
-      [
-        '"Reply"',
-        '"Copy"',
-        '"Forward"',
-        '"Edit"',
-        '"Delete for everyone"',
-        '"Delete for me"',
-        '"Select"',
-      ].every((l) =>
+      // r68-8 moved the scope question into the popup, so the sheet carries ONE
+      // Delete (and the selection bar one icon) for own AND the other side's
+      // messages alike.
+      ['"Reply"', '"Copy"', '"Forward"', '"Edit"', '"Delete"', '"Select"'].every((l) =>
         chat.includes(
-          `KpSheetRow(Icons.${l === '"Reply"' ? "AutoMirrored.Filled.Reply" : l === '"Forward"' ? "AutoMirrored.Filled.Send" : l === '"Copy"' ? "Filled.ContentCopy" : l === '"Edit"' ? "Filled.Edit" : l === '"Delete for everyone"' ? "Filled.DeleteForever" : l === '"Delete for me"' ? "Filled.Delete" : "Filled.CheckCircle"}, ${l}`,
+          `KpSheetRow(Icons.${l === '"Reply"' ? "AutoMirrored.Filled.Reply" : l === '"Forward"' ? "AutoMirrored.Filled.Send" : l === '"Copy"' ? "Filled.ContentCopy" : l === '"Edit"' ? "Filled.Edit" : l === '"Delete"' ? "Filled.Delete" : "Filled.CheckCircle"}, ${l}`,
         ),
       ) &&
       // r31-29: text, photo, video AND the grouped photo bubble (4 sites);
@@ -4230,7 +4225,9 @@ const convBetween = (db, a, b) =>
         ) &&
         chat.includes("photos.chunked(4).forEach { row ->") &&
         chat.includes('val albumIds = albumPhotos(m).map { it.optString("id") }') &&
-        (chat.match(/selected\.addAll\(albumIds\)/g) || []).length === 3 &&
+        // r68-8: Forward + Delete (the two Delete rows became one) — Select
+        // still adds per id.
+        (chat.match(/selected\.addAll\(albumIds\)/g) || []).length === 2 &&
         chat.includes("if (ids.first() in selected) selected.removeAll(ids.toSet())"),
     );
 
@@ -5087,7 +5084,8 @@ const convBetween = (db, a, b) =>
       !settings.includes('"Share audio via screen share"'),
   );
   // Items 15 + 16: no "edited" marker anywhere; "Unsend" wording is gone —
-  // the action is "Delete for everyone" (sheet row + selection bar).
+  // and r68-8 collapsed the two Delete rows / icons into ONE, whose scope is
+  // the popup's checkbox.
   const chat1516 = kt("ChatScreen.kt");
   const emo = kt("EmojiAnim.kt");
   check(
@@ -5100,14 +5098,19 @@ const convBetween = (db, a, b) =>
       !chat1516.includes('!m.optBoolean("edited")) emojiOnlyCount'),
   );
   check(
-    "r32-16: the own-message action reads 'Delete for everyone' (long-press sheet + selection bar); no user-facing 'Unsend' string remains",
-    chat1516.includes(
-      'KpSheetRow(Icons.Filled.DeleteForever, "Delete for everyone", tint = Red) {',
-    ) &&
+    "r32-16 / r68-8: ONE Delete everywhere (long-press sheet + selection bar) — the popup asks the scope ('Also delete for {name}', default unticked); no 'Unsend' / 'Delete for everyone' / 'Delete for me' string remains",
+    chat1516.includes('KpSheetRow(Icons.Filled.Delete, "Delete", tint = Red) {') &&
+      chat1516.includes("IconButton(onClick = { haptics.tap(); confirmDelete = true }) {") &&
       chat1516.includes(
-        'Icon(Icons.Filled.DeleteForever, "Delete for everyone", tint = Red, modifier = Modifier.size(21.dp))',
+        'Icon(Icons.Filled.Delete, "Delete", tint = Red, modifier = Modifier.size(21.dp))',
       ) &&
-      !/"Unsend[^"]*"/.test(chat1516),
+      chat1516.includes('title = "Delete message"') &&
+      chat1516.includes(
+        'alsoLabel = if (canAlso) "Also delete for ${deleteOtherLabel(convId)}" else null,',
+      ) &&
+      chat1516.includes("deleteChosen(also)") &&
+      !/"Unsend[^"]*"/.test(chat1516) &&
+      !/"Delete for everyone"|"Delete for me"/.test(chat1516),
   );
   // Item 21: a status reply used to arrive as "> null\n<text>" (the client
   // prefixed the status caption, null for a photo). The reply now carries
@@ -5367,7 +5370,7 @@ const convBetween = (db, a, b) =>
     const chat = kt("ChatScreen.kt");
     const tab = kt("ChatMediaScreen.kt");
     check(
-      "r32-46: viewer ⋮ → sheet = Save / Forward / Edit (player: Save / Forward; v166: + Delete everywhere, both directions); one IO forward helper (forwardMessageTo) used by chat select, photo viewer, video player and the media tab",
+      "r32-46 (r68-8): viewer ⋮ → sheet = Save / Forward / Edit (player: Save / Forward; v166: + Delete everywhere, both directions — one Delete opening the shared KpDeleteDialog); one IO forward helper (forwardMessageTo) used by chat select, photo viewer, video player and the media tab",
       mv.includes("internal fun MediaMenuSheet(") &&
         mv.includes(
           'if (onSave != null) KpSheetRow(Icons.Filled.Download, "Save", onClick = onSave)',
@@ -5379,14 +5382,15 @@ const convBetween = (db, a, b) =>
           'if (onEdit != null) KpSheetRow(Icons.Filled.Brush, "Edit", onClick = onEdit)',
         ) &&
         // v166 (owner: "okhane Save, Forward, Delete"): the Delete row joins
-        // the sheet for every surface — it opens the shared confirm
-        // (KpDeleteSheet), whose wording is the chat's own.
+        // the sheet for every surface — r68-8 makes it the shared
+        // KpDeleteDialog (ONE option + the checkbox), not a two-row confirm.
         mv.includes(
           'if (onDelete != null) KpSheetRow(Icons.Filled.Delete, "Delete", tint = Red, onClick = onDelete)',
         ) &&
-        // 4 in the action sheet + the 2 in the shared delete confirm
-        // 4 in the action sheet + 2 in the delete confirm + v167's Dismiss
-        (mv.match(/KpSheetRow\(/g) || []).length === 7 &&
+        mv.includes("KpDeleteDialog(") &&
+        !mv.includes("internal fun KpDeleteSheet(") &&
+        // 4 in the action sheet + v167's Dismiss (the confirm's 2 rows are gone)
+        (mv.match(/KpSheetRow\(/g) || []).length === 5 &&
         // Only the photo viewer passes onEdit (the player relies on the null default).
         (mv.match(/onEdit = /g) || []).length === 1 &&
         mv.includes("onEdit = onEdit?.let { e -> { menuOpen = false; e() } },") &&
@@ -6965,13 +6969,14 @@ const convBetween = (db, a, b) =>
         settings.includes("if (available == true) haptics.tap() else haptics.reject()"),
     );
     check(
-      "r32-40: chat — the reply swipe taps once when it ARMS (all five bubble kinds), the select bar's actions buzz (copy confirms, delete-for-everyone / delete-for-me thud), the ⋮ taps, an error line rejects once when it appears, schedule-sheet chips / steppers / theme swatches tap, a parked message's X thuds, voice play taps",
+      "r32-40: chat — the reply swipe taps once when it ARMS (all five bubble kinds), the select bar's actions buzz (copy confirms; r68-8: the single Delete taps, and the popup's own Delete thuds), the ⋮ taps, an error line rejects once when it appears, schedule-sheet chips / steppers / theme swatches tap, a parked message's X thuds, voice play taps",
       (chat.match(/if \(!wasArmed && kotlin\.math\.abs\(replyDrag\) >= /g) || []).length === 5 &&
         chat.includes(
           'cm.setPrimaryClip(android.content.ClipData.newPlainText("KuchuPuchu", text))\n                        haptics.confirm()',
         ) &&
-        chat.includes("IconButton(onClick = { haptics.heavy(); unsendSelected() })") &&
-        chat.includes("IconButton(onClick = { haptics.heavy(); deleteForMe() })") &&
+        chat.includes("IconButton(onClick = { haptics.tap(); confirmDelete = true })") &&
+        // the popup's Delete (Ui.kt) is the one that thuds
+        kt("Ui.kt").includes("haptics.heavy()\n                            onConfirm(also)") &&
         chat.includes("IconButton(onClick = { haptics.tap(); forwarding = true })") &&
         chat.includes(
           "IconButton(onClick = { requestAttachExit { haptics.tap(); menuOpen = true } }, modifier = Modifier.size(36.dp))",

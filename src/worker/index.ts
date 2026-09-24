@@ -8858,7 +8858,27 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   if (msgDeleteMatch && method === "DELETE") {
     const row = await one<MsgRow>(db, "SELECT * FROM messages WHERE id = ?", msgDeleteMatch[1]!);
     if (!row) fail(404, "Message not found.");
-    if (row.sender_id !== uid) fail(403, "You can only delete your own messages.");
+    if (row.sender_id !== uid) {
+      // r68-8 (owner: "1:1 chat a user tar massage delete korte geleo ei popup
+      // abar opponent er massage delete korte geleo ei popup mane se opponent
+      // er massage o delete korte parbe everyone"). In a PERSONAL chat either
+      // side may delete either message for everyone — the same popup serves
+      // both cases, so the server has to allow the other half too. Groups keep
+      // the old rule (your own messages only; the tombstone in a group chat
+      // would be a moderator-free delete of someone else's words), and the two
+      // bot accounts stay out of it: their transcripts are the product.
+      const { conv: delConv } = await requireMember(db, row.conv_id, uid);
+      const botPresent =
+        delConv.kind !== "SOLO" ||
+        (await one<{ id: string }>(
+          db,
+          "SELECT user_id AS id FROM members WHERE conv_id = ? AND user_id IN (?, ?) LIMIT 1",
+          row.conv_id,
+          AI_BOT_ID,
+          OFFICIAL_BOT_ID,
+        )) !== null;
+      if (botPresent) fail(403, "You can only delete your own messages.");
+    }
     // v163 (owner): delete-for-everyone is PERMANENT now. The soft tombstone
     // stayed in D1 forever (body/media/meta blanked, kind='DELETED'), which is
     // exactly the row the owner asked to be rid of — and it kept the media key

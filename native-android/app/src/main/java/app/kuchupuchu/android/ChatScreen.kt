@@ -79,7 +79,6 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.CallMissed
-import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Edit
 
 import androidx.compose.material.icons.filled.Search
@@ -305,8 +304,12 @@ fun ChatScreen(nav: NavController, convId: String) {
     // AND raises the quick-emoji bar; "+" opens the full emoji sheet.
     var reactionFor by remember { mutableStateOf<JSONObject?>(null) }
     var showEmojiSheet by remember { mutableStateOf(false) }
-    // r68-7: the chat-delete popup's own state — the thread's ⋮ and the block
-    // wall's Delete chat pill both raise it.
+    // r68-8 (owner: "ekhon theke delete option just ektai hobe 2 ta na ... ei
+    // popup"): ONE delete step in this chat. It serves the long-press sheet,
+    // the multi-select bar, the viewers (through ScreenStore.viewerDelete below)
+    // and the wall's Delete chat — the scope question ("Also delete for X") is
+    // asked in the popup, so the sheet no longer carries two delete rows.
+    var confirmDelete by remember { mutableStateOf(false) }
     var confirmDeleteChat by remember { mutableStateOf(false) }
     // Owner round 31: long-press opens ONE bottom sheet — the reaction emoji
     // row on top, every message action under it. (No floating bar, no
@@ -2437,6 +2440,30 @@ fun ChatScreen(nav: NavController, convId: String) {
         ScreenStore.latchDust(ids)
     }
 
+    /**
+     * r68-8: the popup's answer. Ticked = delete for the other side too (the
+     * server allows either side to do that in a personal chat now); unticked =
+     * only this phone hides them. A row that is still a sending echo has no
+     * server id to delete, so it is dropped locally either way.
+     */
+    fun deleteChosen(alsoForThem: Boolean) {
+        val rows = selectedMessages()
+        val onServer = rows.filterNot { pendingEchoOf(it) }.map { it.optString("id") }.filter { it.isNotBlank() }
+        val echoes = rows.filter { pendingEchoOf(it) }.map { it.optString("id") }
+        selected.clear()
+        if (alsoForThem && onServer.isNotEmpty()) {
+            selected.addAll(onServer)
+            // The server delete + the vanish show + the dust latch, unchanged.
+            unsendSelected()
+            // …and the echoes that were part of the same gesture still leave
+            // this phone (nothing to tell the server about).
+            echoes.forEach { ScreenStore.hideMessage(it) }
+        } else {
+            selected.addAll(onServer + echoes)
+            deleteForMe()
+        }
+    }
+
     // v166 (owner: "… kothaw 3 dot nei … Save, Forward, Delete"): a Delete
     // raised in a full-screen surface (photo viewer, clip player, document
     // viewer). Those screens have no list, so they only name the message; the
@@ -2456,7 +2483,9 @@ fun ChatScreen(nav: NavController, convId: String) {
             if (ids.isEmpty()) return@collect
             selected.clear()
             selected.addAll(ids)
-            if (req.everyone && !pendingEchoOf(row)) unsendSelected() else deleteForMe()
+            // r68-8: the viewer's Delete asks the same question (its own
+            // checkbox) and lands here with the answer.
+            deleteChosen(req.everyone)
         }
     }
 
@@ -2651,6 +2680,12 @@ fun ChatScreen(nav: NavController, convId: String) {
         if (nearBottom) runCatching { listState.scrollToItem(info.totalItemsCount - 1) }
     }
 
+    // r68-8: publish this chat for the route screens (video / document viewer),
+    // whose delete popup must name the same person this chat's does.
+    LaunchedEffect(convId, rawTitle) {
+        ScreenStore.activeConvId = convId
+        ScreenStore.activePeerName = rawTitle
+    }
     // Owner round 43 (item 7): a reply can take 25s+ (image gen) — longer
     // than the screen timeout, so the phone slept mid-reply (fade to black).
     // Owner round 45 (item 1): keying the hold on aiTyping flipped the
@@ -3012,13 +3047,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                         Icon(Icons.Filled.Edit, "Edit", tint = ActionBlueDeep, modifier = Modifier.size(21.dp))
                     }
                 }
-                if (single && singleMsg != null && singleMsg.optString("senderId") == Store.myId() && !pendingEchoOf(singleMsg)) {
-                    IconButton(onClick = { haptics.heavy(); unsendSelected() }) {
-                        Icon(Icons.Filled.DeleteForever, "Delete for everyone", tint = Red, modifier = Modifier.size(21.dp))
-                    }
-                }
-                IconButton(onClick = { haptics.heavy(); deleteForMe() }) {
-                    Icon(Icons.Filled.Delete, "Delete for me", tint = Red, modifier = Modifier.size(21.dp))
+                // r68-8: one Delete for the whole selection (single or many,
+                // own or the other side's) — the popup's checkbox decides.
+                IconButton(onClick = { haptics.tap(); confirmDelete = true }) {
+                    Icon(Icons.Filled.Delete, "Delete", tint = Red, modifier = Modifier.size(21.dp))
                 }
             }
         } else {
@@ -3932,26 +3964,43 @@ fun ChatScreen(nav: NavController, convId: String) {
                         editing = m
                     }
                 }
-                if (mineMsg && !echo) {
-                    // Owner round 32 (item 16): the proper name for it.
-                    KpSheetRow(Icons.Filled.DeleteForever, "Delete for everyone", tint = Red) {
-                        close()
-                        selected.clear()
-                        selected.addAll(albumIds)
-                        unsendSelected()
-                    }
-                }
-                KpSheetRow(Icons.Filled.Delete, "Delete for me", tint = Red) {
+                // Owner round 32 (item 16) had two rows here — delete for
+                // everyone, delete for me; r68-8 (owner: "delete option just
+                // ektai hobe 2 ta na") merged them: ONE Delete, and the popup
+                // asks the scope with the checkbox — which is also what makes
+                // deleting the OTHER person's message possible at all.
+                KpSheetRow(Icons.Filled.Delete, "Delete", tint = Red) {
                     close()
                     selected.clear()
                     selected.addAll(albumIds)
-                    deleteForMe()
+                    confirmDelete = true
                 }
                 KpSheetRow(Icons.Filled.CheckCircle, "Select") {
                     close()
                     albumIds.forEach { if (it !in selected) selected.add(it) }
                 }
             }
+        }
+
+        /* ---------------- the delete popup (r68-7 / r68-8) ----------------
+           ONE step for every delete in this chat. The checkbox is the whole
+           question: ticked = for BOTH sides, unticked = only this phone. */
+        if (confirmDelete) {
+            val rows = selectedMessages()
+            val canAlso = rows.isNotEmpty() && rows.any { canDeleteForEveryone(convId, it) }
+            KpDeleteDialog(
+                title = "Delete message",
+                question =
+                    if (rows.size > 1) "Are you sure you want to delete these ${rows.size} messages?"
+                    else "Are you sure you want to delete this message?",
+                alsoLabel = if (canAlso) "Also delete for ${deleteOtherLabel(convId)}" else null,
+                confirmLabel = "Delete",
+                onDismiss = { confirmDelete = false },
+                onConfirm = { also ->
+                    confirmDelete = false
+                    deleteChosen(also)
+                },
+            )
         }
 
         if (confirmDeleteChat) {
@@ -3972,7 +4021,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                 },
             )
         }
-
 
         /* ---------------- composer (doubles as the recording bar) ---------------- */
         // Owner round 32 (item 18): the chat's parked "send later" rows.
@@ -4543,17 +4591,20 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // page being looked at is the target (an album pages through
                 // them), and the request rides ScreenStore back to this chat,
                 // which owns the whole delete show.
+                // r68-8: the checkbox line for the popup this viewer raises —
+                // the chat knows the peer's name; the viewer does not.
+                deleteAlsoLabel = if (canDeleteForEveryone(convId, m)) "Also delete for ${deleteOtherLabel(convId)}" else null,
                 onDeleteForMe = {
                     val delMsg = viewerPhotos.getOrNull(viewerAt.coerceIn(viewerPhotos.indices))
                     viewerPhotos = emptyList()
                     val id = delMsg?.optString("id").orEmpty()
                     if (id.isNotBlank()) ScreenStore.viewerDelete.value = ScreenStore.ViewerDelete(id, false)
                 },
-                // The gate is the CHAT sheet's own gate (mine && not an echo)
-                // — private chats and view-once included, so the same button
-                // that unsends from the long-press sheet unsends from here.
+                // r68-8: the gate is the chat's own predicate — in a personal
+                // chat the OTHER person's message can go for everyone too, and
+                // in a group only your own can (the server enforces the same).
                 onDeleteForEveryone =
-                    if (m.optString("senderId") == Store.myId() && !isEchoMsg(m)) {
+                    if (canDeleteForEveryone(convId, m)) {
                         {
                             val delMsg = viewerPhotos.getOrNull(viewerAt.coerceIn(viewerPhotos.indices))
                             viewerPhotos = emptyList()
