@@ -40,7 +40,6 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -435,10 +434,23 @@ fun AttachPanel(
             .height(panelH)
             .nestedScroll(gridScroll)
             .background(Color.Transparent)
-            // Owner round 40 (item 3): the caption field's keyboard must
-            // push the selection bar up instead of burying it — the grid
-            // (weight) yields the space.
-            .imePadding(),
+            // Owner round 40 (item 3): the caption field's keyboard must push
+            // the selection bar up instead of burying it — the grid (weight)
+            // yields the space.
+            // r68-1 (owner: "caption bar open korle sothik position a ashe na
+            // keyboard er upore ashe na onek upore ashe ar half attach screen a
+            // to caption bar dekhai jai na"): ONE lift, and it is the same
+            // value the composer rides (rememberImeGlidePx — the mechanism
+            // this screen has proved on the device; `WindowInsets.ime` does
+            // not resolve on this BOM). The panel used to take TWO: this
+            // `.imePadding()` AND the selection bar's own `imeGlideDp`
+            // padding, so the bar floated a whole keyboard too high, and in
+            // the 40% panel the double lift pushed it clean out of the top
+            // (that is why the half panel showed no caption bar at all).
+            // Padding the panel (not its height) is what puts the content's
+            // bottom edge exactly on the keyboard's top edge: the box still
+            // reaches the screen floor, the content does not.
+            .padding(bottom = imeGlideDp),
     ) {
         /* drag handle — tap OR swipe up = fullscreen; swipe down = back.
            (The grid's own swipe-up does the same; see gridScroll.) */
@@ -695,7 +707,7 @@ fun AttachPanel(
                             start = 2.dp,
                             end = 2.dp,
                             top = 2.dp,
-                            bottom = if (sel.isNotEmpty()) (68.dp + imeGlideDp) else 4.dp,
+                            bottom = if (sel.isNotEmpty()) 76.dp else 4.dp,
                         ),
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -760,7 +772,7 @@ fun AttachPanel(
                             start = 2.dp,
                             end = 2.dp,
                             top = 2.dp,
-                            bottom = if (sel.isNotEmpty()) (68.dp + imeGlideDp) else 4.dp,
+                            bottom = if (sel.isNotEmpty()) 76.dp else 4.dp,
                         ),
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -797,8 +809,6 @@ fun AttachPanel(
                             // Owner round 43 (item 3): the bar drags like the header
                             // — down past 70 folds to the collapsed half panel.
                             .barDragDetect()
-                            .padding(bottom = imeGlideDp)
-                            .background(Color.Transparent)
                             .padding(horizontal = 10.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {

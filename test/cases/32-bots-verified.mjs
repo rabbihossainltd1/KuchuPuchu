@@ -6697,7 +6697,12 @@ const convBetween = (db, a, b) =>
         // Owner round 41 (item 4): the HD pill carries no border.
         !attach.includes(".border(1.dp, if (hdOn)") &&
         // Owner round 40 (item 3): the keyboard pushes the bar up.
-        attach.includes(".imePadding(),") &&
+        // r68-1 (owner: "caption bar open korle sothik position a ashe na
+        // keyboard er upore ashe na onek upore ashe"): ONE lift — the panel
+        // pads by the shared glide value the composer rides; the bar used to
+        // take a second one of its own and floated a keyboard too high.
+        attach.includes(".padding(bottom = imeGlideDp),") &&
+        !attach.includes(".imePadding(),") &&
         !attach.includes("PreviewPane") &&
         !attach.includes("previewUri") &&
         !attach.includes('"${sel.size} selected"') &&
