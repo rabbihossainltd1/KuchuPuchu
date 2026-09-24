@@ -98,9 +98,12 @@ const main = (f) => read(`${ANDROID}/${f}`);
   const seal = main("PushSeal.kt");
   const push = main("KpPush.kt");
   check(
-    "r67-2: the worker MARKS a sealed push and rides the envelope when it fits the FCM budget",
-    worker.includes('...(sealedBody ? { kp_e2ee: "1" } : {})') &&
-      worker.includes("...(sealedBody && sealedBody.length <= E2EE_PUSH_ENV_MAX") &&
+    "r67-2: the worker MARKS a sealed push and rides the envelope when it fits the FCM budget — r72-20: never for a view-once row, which carries its masked label and the kp_once marker instead",
+    worker.includes('...(sealedBody && !message.viewOnce ? { kp_e2ee: "1" } : {})') &&
+      worker.includes(
+        "...(sealedBody && !message.viewOnce && sealedBody.length <= E2EE_PUSH_ENV_MAX",
+      ) &&
+      worker.includes('...(message.viewOnce ? { kp_once: "1" } : {}),') &&
       worker.includes("const E2EE_PUSH_ENV_MAX = 3_000;"),
   );
   check(

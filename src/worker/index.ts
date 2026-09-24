@@ -8916,8 +8916,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           // fits the FCM data budget (a data message is capped at 4 KB); a
           // longer message skips kp_env and the app fetches its own row, which
           // is what keeps this from ever truncating ciphertext.
-          ...(sealedBody ? { kp_e2ee: "1" } : {}),
-          ...(sealedBody && sealedBody.length <= E2EE_PUSH_ENV_MAX ? { kp_env: sealedBody } : {}),
+          // r72-20 (owner item 20: "notification ei text show hoye jacche"): a
+          // VIEW-ONCE row is never handed to the card — no envelope, no e2ee
+          // marker — because the phone printed what it opened. Its label
+          // ("Message · View once" / "Photo · View once") is the whole card, and
+          // kp_once says so explicitly for a client that reads the marker.
+          ...(sealedBody && !message.viewOnce ? { kp_e2ee: "1" } : {}),
+          ...(sealedBody && !message.viewOnce && sealedBody.length <= E2EE_PUSH_ENV_MAX
+            ? { kp_env: sealedBody }
+            : {}),
+          ...(message.viewOnce ? { kp_once: "1" } : {}),
         },
         recipientAlert(memberId, preview, me.display_name, live),
       );

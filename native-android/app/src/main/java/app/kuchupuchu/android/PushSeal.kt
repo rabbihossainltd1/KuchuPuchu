@@ -28,7 +28,15 @@ import org.json.JSONObject
  */
 internal object PushSeal {
     /** What the push payload says about this message. */
-    data class Plan(val sealed: Boolean, val envelope: String?)
+    data class Plan(val sealed: Boolean, val envelope: String?, val once: Boolean = false)
+
+    /**
+     * r72-20 (owner: "notification ei text show hoye jacche"): the worker labels
+     * a view-once push instead of describing it — "Message · View once", "Photo ·
+     * View once", "Voice · View once". That label is the whole card for such a
+     * row, so this is the one thing the phone must not improve on.
+     */
+    fun isOnceLabel(s: String?): Boolean = s?.trim()?.endsWith("View once") == true
 
     /** The worker's placeholder for a sealed body (mirrors the server's preview). */
     const val LOCK = "\uD83D\uDD12"
@@ -39,8 +47,12 @@ internal object PushSeal {
      * reads a neutral label, and the reply action below it still works.
      */
     fun cardText(plan: Plan, opened: String?, body: String?): String {
-        if (!opened.isNullOrBlank()) return opened
         val raw = body.orEmpty().trim()
+        // r72-20: a view-once label WINS over the plaintext this phone could
+        // open — the card (and the list row it feeds) must not print the words
+        // the row itself is hiding.
+        if (plan.once || isOnceLabel(raw)) return raw.ifBlank { "New message" }
+        if (!opened.isNullOrBlank()) return opened
         if (raw.isEmpty()) return "New message"
         if (plan.sealed && (raw == LOCK || E2eeMsg.isEnvelope(raw))) return "New message"
         return raw
@@ -57,12 +69,14 @@ internal object PushSeal {
         val env = kpEnv?.trim()?.takeIf { E2eeMsg.isEnvelope(it) }
         val bodyEnv = body?.trim()?.takeIf { E2eeMsg.isEnvelope(it) }
         val sealed = kpE2ee == "1" || env != null || bodyEnv != null
-        return Plan(sealed, env ?: bodyEnv)
+        // r72-20: a view-once push spends nothing here — there is nothing the
+        // card may print, so [open] / [openBounded] answer null for it.
+        return Plan(sealed, env ?: bodyEnv, isOnceLabel(body))
     }
 
     /** The plaintext for the card, or null when this payload is not sealed / cannot be opened. */
     fun open(ctx: Context, convoId: String, mid: String?, plan: Plan): String? {
-        if (!plan.sealed) return null
+        if (!plan.sealed || plan.once) return null
         return runCatching { openInner(ctx, convoId, mid, plan) }.getOrNull()
     }
 
@@ -76,7 +90,7 @@ internal object PushSeal {
      * A late result is discarded; the next list refresh carries the text.
      */
     fun openBounded(ctx: Context, convoId: String, mid: String?, plan: Plan, budgetMs: Long): String? {
-        if (!plan.sealed) return null
+        if (!plan.sealed || plan.once) return null
         if (plan.envelope != null) return open(ctx, convoId, mid, plan)
         val holder = java.util.concurrent.atomic.AtomicReference<String?>(null)
         val t =

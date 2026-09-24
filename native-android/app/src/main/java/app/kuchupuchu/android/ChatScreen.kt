@@ -7842,109 +7842,134 @@ private fun OnceTextRow(
         bottomStart = if (mine) 16.dp else 5.dp,
         bottomEnd = if (mine) 5.dp else 16.dp,
     )
+    // r72-20 (owner: "once view text massage er massage bubble massage onujai
+    // hocche na"): the bubble is the app's OWN text bubble — the same width cap
+    // as every other message (never a private 260 dp rule), the same fill, the
+    // same lift, and the stamp under it in the same ink.
+    val bubbleMax =
+        maxOf(
+            240.dp,
+            minOf(420.dp, (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp * 0.70f).dp) - 5.dp,
+        )
+    val stampInk =
+        when {
+            theme == "darkblue" -> if (KpThemeMode.darkBlue) Color(0xFFA9C4F2) else Color(0xFF5B7FC7)
+            !mine && theme == "night" -> Color(0xFFA9B4CC)
+            else -> Muted
+        }
     val veil = !mine && !revealed
     Row(
         Modifier.fillMaxWidth().padding(vertical = 3.dp),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
-        Box(
-            Modifier
-                .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
-                .widthIn(max = 260.dp)
-                .requiredWidthIn(min = if (mine) 70.dp else 52.dp)
-                .clip(shape)
-                .background(if (mine) chatMineFill(theme) else chatOtherFill(theme))
-                .pointerInput(id) {
-                    detectHorizontalDragGestures(
-                        onHorizontalDrag = { change, dragAmount ->
-                            change.consume()
-                            val wasArmed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
-                            replyDrag =
-                                if (mine) (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.4f, 0f)
-                                else (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.4f)
-                            if (!wasArmed && kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f) haptics.tap()
-                        },
-                        onDragEnd = {
-                            val armed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
-                            replyDrag = 0f
-                            if (armed) {
-                                runCatching { KpSounds.replySwipe(ctx) }
-                                onReply(m)
-                            }
-                        },
-                        onDragCancel = { replyDrag = 0f },
-                    )
-                }
-                .combinedClickable(
-                    onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
-                    onClick = {
-                        when {
-                            pendingEcho -> {}
-                            selectedIds.isNotEmpty() -> onToggleSelect(m)
-                            // The far side's tap IS the opening (and starts the
-                            // five seconds); mine just reads what I wrote.
-                            !mine && !revealed -> {
-                                haptics.tap()
-                                revealed = true
-                            }
-                            else -> {}
-                        }
-                    },
-                    onLongClick = {
-                        if (!pendingEcho) {
-                            haptics.tap()
-                            if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)
-                        }
-                    },
-                )
-                .padding(horizontal = 10.dp, vertical = 7.dp),
-        ) {
-            Column {
-                Box {
-                    Text(
-                        // Below API 31 Compose's blur is a no-op — the words are
-                        // replaced by shaped marks instead of being left readable.
-                        if (veil && android.os.Build.VERSION.SDK_INT < 31) veiledText(body) else body,
-                        fontSize = 14.5.sp,
-                        lineHeight = 19.sp,
-                        color = if (veil) Ink.copy(alpha = 0.75f) else Ink,
-                        modifier =
-                            if (veil && android.os.Build.VERSION.SDK_INT >= 31) {
-                                Modifier.blur(7.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
-                            } else {
-                                Modifier
+        // r72-20: the bubble and its stamp ride one column — the bubble on
+        // top, the stamp under it — like every other message row.
+        Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
+            Box(
+                Modifier
+                    .offset { IntOffset(replyOffset.roundToInt(), 0) }
+                    .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
+                    .widthIn(max = bubbleMax)
+                    .wrapContentWidth()
+                    .requiredWidthIn(min = if (mine) 70.dp else 52.dp)
+                    .kpLift(2.dp, shape)
+                    .clip(shape)
+                    .background(if (mine) chatMineFill(theme) else chatOtherFill(theme))
+                    .pointerInput(id) {
+                        detectHorizontalDragGestures(
+                            onHorizontalDrag = { change, dragAmount ->
+                                change.consume()
+                                val wasArmed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
+                                replyDrag =
+                                    if (mine) (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.4f, 0f)
+                                    else (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.4f)
+                                if (!wasArmed && kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f) haptics.tap()
                             },
+                            onDragEnd = {
+                                val armed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
+                                replyDrag = 0f
+                                if (armed) {
+                                    runCatching { KpSounds.replySwipe(ctx) }
+                                    onReply(m)
+                                }
+                            },
+                            onDragCancel = { replyDrag = 0f },
+                        )
+                    }
+                    .combinedClickable(
+                        onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
+                        onClick = {
+                            when {
+                                pendingEcho -> {}
+                                selectedIds.isNotEmpty() -> onToggleSelect(m)
+                                // The far side's tap IS the opening (and starts the
+                                // five seconds); mine just reads what I wrote.
+                                !mine && !revealed -> {
+                                    haptics.tap()
+                                    revealed = true
+                                }
+                                else -> {}
+                            }
+                        },
+                        onLongClick = {
+                            if (!pendingEcho) {
+                                haptics.tap()
+                                if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)
+                            }
+                        },
                     )
-                    if (veil) {
-                        // The 1 mark + the hint sit ON the veil, so the row
-                        // reads as "something is here, tap it".
-                        Box(Modifier.matchParentSize(), contentAlignment = Alignment.Center) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                CenteredOnceIcon(26.dp)
-                                Spacer(Modifier.width(6.dp))
-                                Text("Tap to view", color = Ink, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+            ) {
+                Column {
+                    Box {
+                        Text(
+                            // Below API 31 Compose's blur is a no-op — the words are
+                            // replaced by shaped marks instead of being left readable.
+                            if (veil && android.os.Build.VERSION.SDK_INT < 31) veiledText(body) else body,
+                            fontSize = 14.5.sp,
+                            lineHeight = 19.sp,
+                            color = if (veil) Ink.copy(alpha = 0.75f) else Ink,
+                            modifier =
+                                if (veil && android.os.Build.VERSION.SDK_INT >= 31) {
+                                    Modifier.blur(7.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+                                } else {
+                                    Modifier
+                                },
+                        )
+                        if (veil) {
+                            // The 1 mark + the hint sit ON the veil, so the row
+                            // reads as "something is here, tap it".
+                            Box(Modifier.matchParentSize(), contentAlignment = Alignment.Center) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CenteredOnceIcon(26.dp)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Tap to view", color = Ink, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+                                }
                             }
                         }
                     }
                 }
-                // stamp line: the time + ticks, and while revealed the countdown
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                    if (!mine && revealed) {
-                        Text("${((leftMs + 999) / 1000)}s", color = Red, fontSize = 10.sp)
-                        Spacer(Modifier.width(4.dp))
-                    }
-                    Text(msgStamp(m.optString("createdAt")), fontSize = 10.sp, color = Muted)
-                    if (mine) {
-                        Spacer(Modifier.width(3.dp))
-                        TickIcon(m, pendingEcho, otherReadAt)
-                    }
-                }
+                if (rowSelected) Box(Modifier.matchParentSize().background(ActionBlue.copy(alpha = 0.35f)))
             }
-            if (rowSelected) Box(Modifier.matchParentSize().background(ActionBlue.copy(alpha = 0.35f)))
+            // v169 + r72-20: the stamp sits UNDER the bubble, end-aligned for mine
+            // and start-aligned for theirs — exactly where every other row puts it —
+            // and the reveal countdown rides on that same line.
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 1.dp, start = 2.dp, end = 2.dp),
+                horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (!mine && revealed) {
+                    Text("${((leftMs + 999) / 1000)}s", color = Red, fontSize = 10.sp)
+                    Spacer(Modifier.width(4.dp))
+                }
+                BubbleStamp(m, mine, pendingEcho, otherReadAt, 0, stampInk)
+            }
         }
-        MessageReactions(m)
     }
+    MessageReactions(m)
 }
 
 /**

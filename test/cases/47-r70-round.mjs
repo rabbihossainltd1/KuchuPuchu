@@ -161,9 +161,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
       ui.includes("import androidx.compose.ui.draw.shadow"),
   );
   check(
-    'r72-16: applied app-wide (owner scope: "পুরো app জুড়ে") — all 21 surfaces r71-16 stripped wear it again: 8 in the chat (bubble / photo / video / view-once / album / owner card / send circle / mic), 4 in the editor (rail seat + ✕ / undo / redo), 4 in the call screens, 3 in the chat list, 1 in the calls tab, 1 on the profile — while an emoji-only bubble stays bare',
+    'r72-16: applied app-wide (owner scope: "পুরো app জুড়ে") — every surface r71-16 stripped wears it again: 9 in the chat (bubble / photo / video / view-once / album / owner card / send circle / mic, plus r72-20\'s once-view text bubble), 4 in the editor (rail seat + ✕ / undo / redo), 4 in the call screens, 3 in the chat list, 1 in the calls tab, 1 on the profile — while an emoji-only bubble stays bare',
     [
-      ["ChatScreen.kt", 8],
+      ["ChatScreen.kt", 9],
       ["MediaEditScreen.kt", 4],
       ["CallScreens.kt", 4],
       ["ChatListScreen.kt", 3],
@@ -454,6 +454,44 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes("if (isViewOnce(replyTo)) onceQuoteLabel(replyTo)") &&
       chat.includes("if (q != null && isViewOnce(q)) onceQuoteLabel(q)") &&
       list.includes('if (t == "Message · View once") return t'),
+  );
+  /* ---- the r72 redo of 20 (owner: "once view text massage er massage bubble
+     massage onujai hocche na. ar notification ei text show hoye jacche") ---- */
+  const seal = main("PushSeal.kt");
+  const push = main("KpPush.kt");
+  const worker = read("src/worker/index.ts");
+  check(
+    "r72-20: the once-view text bubble IS the app's own text bubble — the same width rule as every message, the same wrap, the same lift, and the stamp riding UNDER it (never a private 260 dp box with the stamp crammed inside)",
+    chat.includes("val bubbleMax =") &&
+      chat.includes(".widthIn(max = bubbleMax)") &&
+      chat.includes(".wrapContentWidth()") &&
+      chat.includes(".kpLift(2.dp, shape)") &&
+      chat.includes("BubbleStamp(m, mine, pendingEcho, otherReadAt, 0, stampInk)") &&
+      !chat.includes(".widthIn(max = 260.dp)") &&
+      // the same stamp ink the other bubbles compute, and the countdown on the
+      // same line as the stamp
+      chat.includes(
+        'theme == "darkblue" ->\n            if (KpThemeMode.darkBlue) Color(0xFFA9C4F2) else Color(0xFF5B7FC7)',
+      ) &&
+      chat.includes('Text("${((leftMs + 999) / 1000)}s", color = Red, fontSize = 10.sp)') &&
+      // and the bubble + its stamp share one column, so the stamp sits below it
+      chat.includes("Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {"),
+  );
+  check(
+    "r72-20: the notification can never show the once-view text — the worker sends no envelope and no e2ee marker for such a row (only kp_once and its masked label), and the phone refuses to open or print one: the label beats any plaintext, for the card AND for the list row it feeds",
+    worker.includes('...(sealedBody && !message.viewOnce ? { kp_e2ee: "1" } : {})') &&
+      worker.includes('...(message.viewOnce ? { kp_once: "1" } : {}),') &&
+      seal.includes(
+        'fun isOnceLabel(s: String?): Boolean = s?.trim()?.endsWith("View once") == true',
+      ) &&
+      seal.includes(
+        "data class Plan(val sealed: Boolean, val envelope: String?, val once: Boolean = false)",
+      ) &&
+      seal.includes("return Plan(sealed, env ?: bodyEnv, isOnceLabel(body))") &&
+      seal.includes("if (!plan.sealed || plan.once) return null") &&
+      seal.includes('if (plan.once || isOnceLabel(raw)) return raw.ifBlank { "New message" }') &&
+      push.includes('PushSeal.cardText(plan, opened, data["body"])') &&
+      push.includes('PushSeal.plan(data["kp_e2ee"], data["kp_env"], data["body"])'),
   );
 }
 

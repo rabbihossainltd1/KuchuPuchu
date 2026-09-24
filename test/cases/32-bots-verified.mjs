@@ -7111,12 +7111,13 @@ const convBetween = (db, a, b) =>
         chat.includes(".padding(horizontal = 7.dp, vertical = 3.dp)") &&
         chat.includes("platformStyle = PlatformTextStyle(includeFontPadding = false)") &&
         !chat.includes(".shadow(2.dp, captionShape)") &&
-        // Owner round 42 (item 3): every media column hugs MY side.
+        // Owner round 42 (item 3): every media column hugs MY side — r72-20
+        // gives the once-view text row the same wrapper (bubble + its stamp).
         (
           chat.match(
             /Column\(horizontalAlignment = if \(mine\) Alignment\.End else Alignment\.Start\) \{/g,
           ) || []
-        ).length === 5 &&
+        ).length === 6 &&
         // r64 E2EE: the four forwards carry bodyOut (re-sealed per target
         // key); the ImageBubble copy still reads the opened row body as-is.
         (chat.match(/\.put\("body", bodyOut\)/g) || []).length === 4,
@@ -9763,8 +9764,8 @@ const convBetween = (db, a, b) =>
       );
     }
     check(
-      "E8: every message item fits in 70% of the screen — text bubbles, the owner card and albums all cap at 0.70 of the width",
-      (chat.match(/screenWidthDp \* 0\.70f/g) || []).length === 3 &&
+      "E8: every message item fits in 70% of the screen — text bubbles, the owner card, albums and (r72-20) the once-view text bubble all cap at 0.70 of the width",
+      (chat.match(/screenWidthDp \* 0\.70f/g) || []).length === 4 &&
         !chat.includes("0.82f") &&
         !chat.includes("0.92f") &&
         chat.includes("val albumW = minOf(albumWidth,"),
