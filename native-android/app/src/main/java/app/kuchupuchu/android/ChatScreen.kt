@@ -1457,8 +1457,15 @@ fun ChatScreen(nav: NavController, convId: String) {
         // the plaintext, so the optimistic bubble reads as typed.
         val payload = JSONObject().put("kind", kind).put("body", if (kind == "TEXT") sealOut(body) else body).put("clientId", clientId)
         // Owner round 13: attach the quoted message when replying.
-        replyTo?.optString("id")?.takeIf { it.isNotBlank() }?.let { payload.put("replyTo", it) }
+        // r70-13 (owner: "send sending sent a ekhono problem ache jemon reply
+        // massage send korle first a normal vabe jai tarpor reply massage
+        // hisabe jai"): the quote must be on the OPTIMISTIC ECHO too. It rode
+        // only the payload before, so the bubble was born unquoted and BECAME
+        // a reply the moment the server row replaced it — the send changed
+        // shape a beat after it had landed. One [replyId], written to both.
+        val replyId = replyTo?.optString("id")?.takeIf { it.isNotBlank() }
         replyTo = null
+        replyId?.let { payload.put("replyTo", it) }
         bornKeys.add(clientId)
         LiveArrivals.markLive(clientId)
         pending.add(
@@ -1468,6 +1475,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .put("senderId", Store.myId())
                 .put("kind", kind)
                 .put("body", body)
+                .also { if (replyId != null) it.put("replyTo", replyId) }
                 .put("createdAt", java.time.Instant.now().toString()),
         )
         // Owner round 32 (item 48): scroll in its own coroutine — a newer
@@ -1530,8 +1538,11 @@ fun ChatScreen(nav: NavController, convId: String) {
             // r64 E2EE: the scheduled body is sealed like any other TEXT —
             // the cron later posts the stored envelope through the same path.
             JSONObject().put("kind", "TEXT").put("body", sealOut(body)).put("clientId", clientId).put("sendAt", at.toString())
-        replyTo?.optString("id")?.takeIf { it.isNotBlank() }?.let { payload.put("replyTo", it) }
+        // r70-13: the same one-value shape as every other send — a send-later
+        // text answers its quote as well (it already did) and clears the bar.
+        val replyId = replyTo?.optString("id")?.takeIf { it.isNotBlank() }
         replyTo = null
+        replyId?.let { payload.put("replyTo", it) }
         scope.launch {
             runCatching { KpSounds.send(ctx) }
             try {
@@ -1580,6 +1591,12 @@ fun ChatScreen(nav: NavController, convId: String) {
         w: Int = 0,
         h: Int = 0,
     ) {
+        // r70-13: the quote a photo (or a scheduled photo) is answering — the
+        // same one-value-two-writes rule as sendText. A reply sent as a photo
+        // used to arrive as a plain photo (the payload never carried it) and
+        // left the quote bar open behind it.
+        val replyId = replyTo?.optString("id")?.takeIf { it.isNotBlank() }
+        replyTo = null
         // Owner round 32 (item 19): a photo picked for LATER uploads now and
         // parks on the server (item 18) — no bubble, the clock chip shows it.
         if (sendAt != null) {
@@ -1606,6 +1623,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                             .put("body", sealOut(caption))
                             .put("clientId", "c_${java.util.UUID.randomUUID()}")
                             .put("sendAt", sendAt.toString())
+                            // r70-13: a photo sent for LATER answers its quote too.
+                            .also { if (replyId != null) it.put("replyTo", replyId) }
                     // E3f: scheduled posts skip the outbox, so no stamper adds the
                     // box — measure the bytes here or the fired row fakes its
                     // ratio until the thumb decodes, like live sends used to.
@@ -1672,6 +1691,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .also { row -> if (w > 0 && h > 0) row.put("mediaW", w).put("mediaH", h) }
                 .also { row -> metaWith(w, h)?.let { row.put("meta", it) } }
                 .also { row -> if (viewOnce) row.put("viewOnce", true) }
+                // r70-13: the photo's own echo carries the quote from frame one.
+                .also { row -> if (replyId != null) row.put("replyTo", replyId) }
                 .put("createdAt", java.time.Instant.now().toString()),
         )
         // Owner round 32 (item 48): the jump-to-bottom is its own coroutine.
@@ -1730,6 +1751,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // r64 E2EE: the caption is sealed; the media bytes stay token-gated.
                     .put("body", sealOut(caption))
                     .put("clientId", clientId)
+                    // r70-13: the quote rides the payload, so the server row that
+                    // replaces the echo is the same reply the echo already was.
+                    .also { if (replyId != null) it.put("replyTo", replyId) }
             metaWith(shotW, shotH)?.let { payload.put("meta", it) }
             Uploads.sendPhoto(ctx, convId, clientId, jpeg, payload) { outcome ->
                 // Owner round 21: photo send has its own sound.
@@ -1764,6 +1788,11 @@ fun ChatScreen(nav: NavController, convId: String) {
         h: Int = 0,
         durMs: Long = 0L,
     ) {
+        // r70-13: the quote a clip / document (or a scheduled one) is answering
+        // — captured once, consumed here, and written to the payload AND the
+        // echo, so a reply never arrives as a plain file.
+        val replyId = replyTo?.optString("id")?.takeIf { it.isNotBlank() }
+        replyTo = null
         // v163 (owner's new rules): the ceiling depends on WHAT it is —
         // image 100 MB, video 2 GB, voice 100 MB, anything else (documents)
         // 5 GB. Checked here so a huge file is refused before a single byte
@@ -1792,6 +1821,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                             .put("body", sealOut(caption))
                             .put("clientId", "c_${java.util.UUID.randomUUID()}")
                             .put("sendAt", sendAt.toString())
+                        // r70-13: a scheduled clip / document answers its quote too.
+                        .also { if (replyId != null) it.put("replyTo", replyId) }
                     // E3f: scheduled posts skip the outbox stamper — carry the box
                     // here (the caller's facts, else one measure on IO) or the
                     // fired row fakes its ratio until the thumb decodes.
@@ -1886,7 +1917,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .put("createdAt", java.time.Instant.now().toString())
                 .also { if (facts.first > 0 && facts.second > 0) it.put("mediaW", facts.first).put("mediaH", facts.second) }
                 .also { if (clipMeta.length() > 0) it.put("meta", clipMeta) }
-                .also { if (viewOnce && !asDocument) it.put("viewOnce", true) },
+                .also { if (viewOnce && !asDocument) it.put("viewOnce", true) }
+                // r70-13: the file's own echo carries the quote from frame one.
+                .also { if (replyId != null) it.put("replyTo", replyId) },
         )
         scope.launch { runCatching { listState.animateScrollToItem(msgs.size + pending.size - 1) } }
         runCatching { KpSounds.send(ctx) }
@@ -1913,6 +1946,8 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // payload as-is, so the seal travels with it).
                     .put("body", sealOut(caption))
                     .put("clientId", clientId)
+                    // r70-13: the quote a captioned clip is answering.
+                    .also { if (replyId != null) it.put("replyTo", replyId) }
                     .also { if (docMeta != null) it.put("meta", if (clipMeta.length() > 0) clipMeta else docMeta) }
             }
         // The outcome callback is the same on both arms — only the body differs.
@@ -1921,7 +1956,17 @@ fun ChatScreen(nav: NavController, convId: String) {
         // docMeta's keys in) — same as the captioned arm below — instead of
         // the bare flag, so the server row has mediaW/mediaH from frame one.
         if (captionPayload == null) {
-            Uploads.sendFile(convId, clientId, name, mime, file, if (clipMeta.length() > 0) clipMeta else docMeta) { outcome ->
+            // r70-13: the uncaptioned arm still answers its quote.
+            fun plainPayload() =
+                JSONObject()
+                    .put("kind", "FILE")
+                    .put("fileName", name)
+                    .put("fileType", mime)
+                    .put("fileSize", file.length())
+                    .put("clientId", clientId)
+                    .also { if (clipMeta.length() > 0) it.put("meta", clipMeta) else docMeta?.let { d -> it.put("meta", d) } }
+                    .also { if (replyId != null) it.put("replyTo", replyId) }
+            Uploads.sendFile(convId, clientId, name, mime, file, if (clipMeta.length() > 0) clipMeta else docMeta, plainPayload()) { outcome ->
                 outcome.onSuccess { runCatching { KpSounds.sent(ctx) } }
                 if (!alive.get()) return@sendFile false
                 outcome.onSuccess { row -> paintSent(row) }
