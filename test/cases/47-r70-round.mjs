@@ -198,6 +198,67 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+/* ------------- 19. the voice lock (r71) ------------- */
+{
+  const chat = main("ChatScreen.kt");
+  const comp = chat.slice(
+    chat.indexOf("private fun Composer("),
+    chat.indexOf("private val VIDEO_NAME_EXT"),
+  );
+  const mic = chat.slice(
+    chat.indexOf("private fun HoldMicButton("),
+    chat.indexOf("private val VIDEO_NAME_EXT"),
+  );
+  check(
+    "r71-19: the mic gesture grows a vertical axis — slide UP past 58 dp arms the lock (badge hollow on the way up, filled on arm) and releasing there LOCKS the recording; a plain tap (< 300 ms, no slide) locks too; slide-left still cancels; any other release sends",
+    mic.includes("val lockDist = with(density) { 58.dp.toPx() }") &&
+      mic.includes("val tapSlop = with(density) { 12.dp.toPx() }") &&
+      mic.includes("var dragY by remember { mutableStateOf(0f) }") &&
+      mic.includes("if (dy != 0f) dragY = (dragY + dy).coerceIn(-lockDist * 1.6f, 0f)") &&
+      mic.includes("val lockArmed = dragY <= -lockDist") &&
+      mic.includes("val tapped =") &&
+      mic.includes("android.os.SystemClock.uptimeMillis() - downAt < 300 &&") &&
+      /when \{[\s\S]{0,200}?cancelled -> onFinishRecord\(true\)[\s\S]{0,80}?lock \|\| tapped -> onLockRecord\(\)[\s\S]{0,60}?else -> onFinishRecord\(false\)/.test(
+        mic,
+      ) &&
+      // the badge is a SIBLING of the mic (the mic circle clips its children)
+      mic.includes("if (lockAlpha > 0.01f) {") &&
+      mic.includes('if (lockArmed) "Release to lock" else "Slide up to lock"') &&
+      // the import is at the top of the FILE, not inside the slice
+      chat.includes("import androidx.compose.material.icons.filled.Lock"),
+  );
+  check(
+    "r71-19: the locked strip is a different animal — the mic seat becomes Send (a locked recording has no finger on the mic), ✕ drops the note, the lock glyph says why the strip is up, and the unlocked strip keeps its slide-to-cancel hint",
+    comp.includes("if (!input.isBlank() || selectCount > 0 || locked) {") &&
+      comp.includes("locked -> onSendVoice()") &&
+      comp.includes("if (locked) {") &&
+      comp.includes(
+        'Icon(Icons.Filled.Close, "Cancel recording", tint = Red, modifier = Modifier.size(16.dp))',
+      ) &&
+      comp.includes(
+        'Icon(Icons.Filled.Lock, "Locked", tint = accent, modifier = Modifier.size(14.dp))',
+      ) &&
+      comp.includes('Text("Locked", color = accent, fontSize = 12.5.sp, maxLines = 1)') &&
+      comp.includes('Text("‹ Slide to cancel", color = Red, fontSize = 12.5.sp, maxLines = 1)') &&
+      comp.includes("locked: Boolean = false,") &&
+      comp.includes("onLockRecord: () -> Unit = {},"),
+  );
+  check(
+    "r71-19: the chat owns the locked state — set by lockRecording (with its confirm buzz), cleared the moment the take starts and the moment it ends, and a locked note that the user then SENDS is never swallowed by the sub-second slip rule in silence",
+    chat.includes("var voiceLocked by remember { mutableStateOf(false) }") &&
+      chat.includes("fun lockRecording() {") &&
+      chat.includes("if (!recording) return") &&
+      chat.includes("voiceLocked = true") &&
+      (chat.match(/voiceLocked = false/g) || []).length === 2 &&
+      chat.includes("val wasLocked = voiceLocked") &&
+      chat.includes('if (wasLocked) error = "That voice note is too short."') &&
+      chat.includes("locked = voiceLocked,") &&
+      chat.includes("onLockRecord = { lockRecording() },") &&
+      chat.includes("onSendVoice = { finishRecording(cancelled = false) },") &&
+      chat.includes("onCancelVoice = { finishRecording(cancelled = true) },"),
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`r70-round: ${lines.length - broken} ok / ${broken} broken`);

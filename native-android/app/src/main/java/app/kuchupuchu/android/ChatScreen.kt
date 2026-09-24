@@ -63,6 +63,7 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
@@ -269,6 +270,12 @@ fun ChatScreen(nav: NavController, convId: String) {
     var showScheduleMedia by remember { mutableStateOf(false) }
     val scheduledRows = remember { mutableStateListOf<JSONObject>() }
     var recording by remember { mutableStateOf(false) }
+    // r71-19 (owner: "voice message a lock system add korte hobe video player
+    // er moto ... mic ta hold kore rekhe upore swipe korle lock icon asbe ...
+    // lock hoye gele hold korte hobe na ... mic a ekbar click korleo lock hoye
+    // jabe"): a LOCKED recording keeps running with the finger off the mic —
+    // the strip stays up and the mic seat becomes Send.
+    var voiceLocked by remember { mutableStateOf(false) }
     var recMs by remember { mutableStateOf(0) }
     var voiceBinNonce by remember { mutableStateOf(0) }
     // Owner round 33 (item 11b): rows that appeared AFTER the chat opened
@@ -2381,6 +2388,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                 if (VoiceNote.start(ctx)) {
                     recMs = 0
                     recording = true
+                    voiceLocked = false
                     // r56 item 2: ping voice immediately on recording start
                     scope.launch {
                         runCatching {
@@ -2399,6 +2407,11 @@ fun ChatScreen(nav: NavController, convId: String) {
     fun finishRecording(cancelled: Boolean) {
         if (!recording) return
         recording = false
+        // r71-19: a locked note was ended by an explicit Send, so the old
+        // "sub-second tap is a slip, cancel silently" rule must not swallow it
+        // without a word — it says why instead.
+        val wasLocked = voiceLocked
+        voiceLocked = false
         // r56 item 2: clear voice indicator immediately when recording finishes or cancels
         scope.launch {
             runCatching {
@@ -2417,8 +2430,11 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
         if (VoiceNote.elapsedMs() < 1000) {
             // Owner round 13: a sub-second tap is a slip, not an error —
-            // cancel silently instead of scolding.
+            // cancel silently instead of scolding. (A locked note that the
+            // user then sent is a different thing: they asked for it, so it
+            // gets a line instead of silence — r71-19.)
             VoiceNote.cancel()
+            if (wasLocked) error = "That voice note is too short."
             return
         }
         val take = VoiceNote.stop()
@@ -2448,6 +2464,17 @@ fun ChatScreen(nav: NavController, convId: String) {
             }
             delay(100)
         }
+    }
+
+    /**
+     * r71-19: the recording is locked — the finger is off the mic (a swipe up
+     * onto the lock, or a plain tap on the mic) and the note keeps rolling
+     * until Send. The mic seat is a Send circle from here on.
+     */
+    fun lockRecording() {
+        if (!recording) return
+        voiceLocked = true
+        runCatching { haptics.confirm() }
     }
 
     /* ---- selection actions: unsend (everyone) / delete (me) / edit / forward ---- */
@@ -4516,6 +4543,12 @@ fun ChatScreen(nav: NavController, convId: String) {
             onSendSelection = {
                 sendSelectedMedia()
             },
+            // r71-19: the lock — a swipe up (or a plain tap) leaves the finger
+            // free while the note keeps recording; Send closes it.
+            locked = voiceLocked,
+            onLockRecord = { lockRecording() },
+            onSendVoice = { finishRecording(cancelled = false) },
+            onCancelVoice = { finishRecording(cancelled = true) },
         )
         }
 
@@ -4873,6 +4906,12 @@ private fun Composer(
     micEnabled: Boolean = true,
     onStartRecord: () -> Unit,
     onFinishRecord: (cancelled: Boolean) -> Unit,
+    // r71-19: the locked recording — the finger is off the mic, the strip
+    // stays, the mic seat is Send, and ✕ in the strip drops the note.
+    locked: Boolean = false,
+    onLockRecord: () -> Unit = {},
+    onSendVoice: () -> Unit = {},
+    onCancelVoice: () -> Unit = {},
     // Owner round 33 (item 11b): counts up on every cancelled recording —
     // the strip plays the bin drop for that many ms before the pill returns.
     voiceBinNonce: Int = 0,
@@ -5044,7 +5083,23 @@ private fun Composer(
                 // timer + hint with the whole middle blank.
                 LiveVoiceWave(color = accent, modifier = Modifier.weight(1f).height(22.dp))
                 Spacer(Modifier.width(10.dp))
-                Text("‹ Slide to cancel", color = Red, fontSize = 12.5.sp, maxLines = 1)
+                if (locked) {
+                    // r71-19: locked — the finger is free, so the hint is not
+                    // "slide to cancel" any more: the mic seat is Send, and the
+                    // ✕ here is the way out. The lock glyph says why the strip
+                    // is still there with nothing held down.
+                    IconButton(
+                        onClick = { onCancelVoice() },
+                        Modifier.size(28.dp),
+                    ) {
+                        Icon(Icons.Filled.Close, "Cancel recording", tint = Red, modifier = Modifier.size(16.dp))
+                    }
+                    Icon(Icons.Filled.Lock, "Locked", tint = accent, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Locked", color = accent, fontSize = 12.5.sp, maxLines = 1)
+                } else {
+                    Text("‹ Slide to cancel", color = Red, fontSize = 12.5.sp, maxLines = 1)
+                }
             }
         }
         Spacer(Modifier.width(6.dp))
@@ -5052,8 +5107,10 @@ private fun Composer(
         /* mic/send circle. Text typed OR chat media selected (forward) ->
            it's SEND; otherwise a HOLD button: press = record, slide = cancel.
            Owner round 32 (item 19): a gallery pick no longer takes this slot
-           — the attach panel has its own Send under the mic. */
-        if (!input.isBlank() || selectCount > 0) {
+           — the attach panel has its own Send under the mic.
+           r71-19: a LOCKED recording takes it too — the finger is off the mic
+           and this circle (Send) is what closes the note. */
+        if (!input.isBlank() || selectCount > 0 || locked) {
             val sendInteraction = remember { MutableInteractionSource() }
             val sendPressed by sendInteraction.collectIsPressedAsState()
             Box(
@@ -5072,7 +5129,13 @@ private fun Composer(
                         indication = null,
                         onLongClick = if (input.isNotBlank()) onScheduleSend else null,
                     ) {
-                        if (input.isNotBlank()) onSend() else onSendSelection()
+                        when {
+                            input.isNotBlank() -> onSend()
+                            // r71-19: nothing typed, a note is locked and
+                            // waiting — Send closes (and sends) it.
+                            locked -> onSendVoice()
+                            else -> onSendSelection()
+                        }
                     },
                 contentAlignment = Alignment.Center,
             ) {
@@ -5109,12 +5172,24 @@ private fun HoldMicButton(
     accent: Color = Gold,
     onStartRecord: () -> Unit,
     onFinishRecord: (cancelled: Boolean) -> Unit,
+    // r71-19: up past [lockDist] arms the lock — the finger can let go and the
+    // note keeps recording; a plain TAP on the mic does the same (owner: "mic a
+    // ekbar click korleo lock hoye jabe").
+    onLockRecord: () -> Unit = {},
 ) {
     val haptics = rememberHaptics()
     val density = LocalDensity.current
     val cancelDist = with(density) { 88.dp.toPx() }
+    val lockDist = with(density) { 58.dp.toPx() }
+    val tapSlop = with(density) { 12.dp.toPx() }
     var dragX by remember { mutableStateOf(0f) }
+    var dragY by remember { mutableStateOf(0f) }
     val cancelArmed = dragX <= -cancelDist
+    val lockArmed = dragY <= -lockDist
+    // The badge shows as soon as the finger heads up (it is the target), and
+    // fills once it is reached.
+    val lockShowing = dragY <= -12f
+    val lockAlpha by animateFloatAsState(if (lockShowing) 1f else 0f, tween(120), label = "lockalpha")
     val animX by animateFloatAsState(if (recording) dragX else 0f, spring(stiffness = 900f), label = "micdrag")
 
     Box(
@@ -5142,22 +5217,44 @@ private fun HoldMicButton(
                         return@awaitEachGesture
                     }
                     dragX = 0f
+                    dragY = 0f
                     var armed = false
+                    var lockHad = false
+                    val downAt = android.os.SystemClock.uptimeMillis()
                     onStartRecord()
                     while (true) {
                         val event = awaitPointerEvent()
                         val change = event.changes.firstOrNull() ?: break
                         val dx = change.positionChange().x
+                        val dy = change.positionChange().y
                         if (dx != 0f) dragX = (dragX + dx).coerceIn(-cancelDist * 1.5f, 0f)
+                        // r71-19: up is the lock (the mic only ever slid left
+                        // before, so the vertical axis was free).
+                        if (dy != 0f) dragY = (dragY + dy).coerceIn(-lockDist * 1.6f, 0f)
                         val nowArmed = dragX <= -cancelDist
                         if (nowArmed && !armed) haptics.heavy()
                         armed = nowArmed
+                        val nowLocked = dragY <= -lockDist
+                        if (nowLocked && !lockHad) haptics.confirm()
+                        lockHad = nowLocked
                         event.changes.forEach { it.consume() }
                         if (event.changes.all { !it.pressed }) break
                     }
                     val cancelled = dragX <= -cancelDist
+                    val lock = dragY <= -lockDist
+                    // A plain tap (no slide at all, finger up quickly) locks the
+                    // recording instead of the old silent cancel — the owner's
+                    // "mic a ekbar click korleo lock hoye jabe".
+                    val tapped =
+                        android.os.SystemClock.uptimeMillis() - downAt < 300 &&
+                            dragX > -tapSlop && dragY > -tapSlop
                     dragX = 0f
-                    onFinishRecord(cancelled)
+                    dragY = 0f
+                    when {
+                        cancelled -> onFinishRecord(true)
+                        lock || tapped -> onLockRecord()
+                        else -> onFinishRecord(false)
+                    }
                 }
             },
         contentAlignment = Alignment.Center,
@@ -5168,6 +5265,29 @@ private fun HoldMicButton(
             tint = if (!enabled) Muted else if (cancelArmed) Red else accent,
             modifier = Modifier.size(20.dp),
         )
+    }
+    // r71-19: the lock target, left of the mic (the finger slides UP, maybe a
+    // little left, to reach it) — hollow while the finger is heading up, filled
+    // once it is there. It is a SIBLING of the mic on purpose: the mic's own
+    // circle clips its children, and the badge rides outside that clip.
+    if (lockAlpha > 0.01f) {
+        Box(
+            Modifier
+                .offset { IntOffset(-40.dp.toPx().roundToInt(), 6.dp.toPx().roundToInt()) }
+                .size(30.dp)
+                .alpha(lockAlpha)
+                .clip(CircleShape)
+                .background(if (lockArmed) accent else Color(0xEEFFFFFF))
+                .border(1.5.dp, if (lockArmed) accent else Line, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Filled.Lock,
+                if (lockArmed) "Release to lock" else "Slide up to lock",
+                tint = if (lockArmed) AmberInk else Ink,
+                modifier = Modifier.size(15.dp),
+            )
+        }
     }
 }
 

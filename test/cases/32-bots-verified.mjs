@@ -6760,8 +6760,13 @@ const convBetween = (db, a, b) =>
         // the composer's circle is the MIC while a gallery pick is active
         !chat.includes("gridSelCount") &&
         !chat.includes("onSendGrid") &&
-        chat.includes("if (!input.isBlank() || selectCount > 0) {") &&
-        chat.includes("if (input.isNotBlank()) onSend() else onSendSelection()"),
+        // r71-19: a LOCKED recording takes the seat too (it is Send then).
+        chat.includes("if (!input.isBlank() || selectCount > 0 || locked) {") &&
+        // r71-19: the seat's action became a `when` — text, then a locked
+        // voice note, then the selection send.
+        chat.includes("input.isNotBlank() -> onSend()") &&
+        chat.includes("locked -> onSendVoice()") &&
+        chat.includes("else -> onSendSelection()"),
     );
     check(
       "r32-19: chat — the panel's hold opens item 18's ScheduleSheet for the batch (sendAttachSelection(sendAt)); a scheduled photo / video / document uploads now and parks on the server with sendAt (no bubble, the clock chip lists it); Edit clears the pick and opens mediaedit/{conv}/0/{arg} (unarmed; once is the editor\u2019s own toggle)",
