@@ -568,6 +568,17 @@ async function main() {
     // Now hide one chat: the watermark is rowid-based, so THIS chat needs the
     // newest-rowid probe — and it must still be asked for exactly the one chat.
     const cid0 = plain.json.items[0].id;
+    // r70: this delete is UNTICKED (a time watermark at "now"), and the round-13
+    // guard keeps a row created at that exact millisecond visible on purpose —
+    // so the fixture must be clearly older or the chat can survive its own
+    // deletion on a fast machine (CI caught this class in cases 44 and 02).
+    const aged = new Date(Date.now() - 90_000).toISOString();
+    await h.env.DB.prepare("UPDATE messages SET created_at = ? WHERE conv_id = ? AND kind = 'TEXT'")
+      .bind(aged, cid0)
+      .run();
+    await h.env.DB.prepare("UPDATE conversations SET last_message_at = ? WHERE id = ?")
+      .bind(aged, cid0)
+      .run();
     await h.call("DELETE", `/api/conversations/${cid0}`, undefined, A.token);
     mark = h.traced.length;
     const after = await h.call("GET", "/api/conversations", undefined, A.token);

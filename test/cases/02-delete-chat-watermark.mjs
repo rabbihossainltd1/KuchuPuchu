@@ -58,7 +58,23 @@ async function mk() {
     ((await call("GET", "/api/conversations", undefined, a.token)).json.items || []).map(
       (c) => c.id,
     );
-  return { db, call, reg, solo, send, msgs, list };
+  // r70: an UNTICKED delete hides the chat behind a TIME watermark — the
+  // delete's own instant — and the round-13 guard deliberately keeps a row
+  // created AT that instant visible (data-loss protection: case 6 below is that
+  // rule on purpose). On a fast machine the delete can share the last message's
+  // millisecond, the row survives and the chat comes back: CI caught exactly
+  // that in this file's twin-delete block. Every fixture that deletes unticked
+  // moves its rows clearly into the past first.
+  const ageRows = async (cid, ms = 90_000) => {
+    const aged = new Date(Date.now() - ms).toISOString();
+    await db._db
+      .prepare("UPDATE messages SET created_at = ? WHERE conv_id = ? AND kind = 'TEXT'")
+      .run(aged, cid);
+    await db._db
+      .prepare("UPDATE conversations SET last_message_at = ? WHERE id = ?")
+      .run(aged, cid);
+  };
+  return { db, call, reg, solo, send, msgs, list, ageRows };
 }
 
 // ---- 1. deleting a chat, then a new message: only the new message returns ----
@@ -222,8 +238,10 @@ async function mk() {
   const B = await k.reg("zb@x.com", "zb");
   const cid = await k.solo(A, B.user.id);
   await k.send(A, cid, "one");
+  await k.ageRows(cid);
   await k.call("DELETE", `/api/conversations/${cid}`, undefined, B.token);
   await k.send(A, cid, "two");
+  await k.ageRows(cid);
   await k.call("DELETE", `/api/conversations/${cid}`, undefined, B.token);
   check(
     "deleting again re-hides the chat",
@@ -246,6 +264,7 @@ async function mk() {
   const B = await k.reg("vb@x.com", "vb");
   const cid = await k.solo(A, B.user.id);
   for (let i = 0; i < 60; i++) await k.send(A, cid, `m${i}`);
+  await k.ageRows(cid);
   await k.call("DELETE", `/api/conversations/${cid}`, undefined, B.token);
   for (let i = 0; i < 3; i++) await k.send(A, cid, `after${i}`);
   const page = await k.msgs(B, cid);
