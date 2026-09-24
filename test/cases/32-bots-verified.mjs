@@ -10405,10 +10405,11 @@ const convBetween = (db, a, b) =>
         ) &&
         !attach.includes(".border(2.dp, ActionBlue, CircleShape)") &&
         attach.includes(".height(barH)") &&
-        attach.includes("val barH = 40.dp") &&
+        // r70-14: 34 dp (the owner asked for a slimmer bar); ONE constant, every control riding it.
+        attach.includes("val barH = 34.dp") &&
         // r68-5: the ground is the bar's one capsule (shape form), not a fill
         // on the pill or the pen.
-        attach.includes(".background(Color(0x80000000), RoundedCornerShape(barH / 2 + 8.dp))") &&
+        attach.includes(".background(Color(0x66000000), RoundedCornerShape(barH / 2 + 8.dp))") &&
         attach.includes(".size(barH)"),
     );
   }
@@ -10456,7 +10457,7 @@ const convBetween = (db, a, b) =>
     );
     check(
       'r66-2: 50% dim-black controls (r67-5: all four — pen, pill, view-once seat, send seat) — r68-5 (owner: "individual background shob buttons mile ektai rounded type background Hobe") merged them into ONE rounded ground behind the whole bar, so the count is 1 now; the caption boundary still encloses a full-size blue-on view-once glyph, with no separate view-once border or panel-height change',
-      (attach66.match(/Color\(0x80000000\)/g) || []).length === 1 &&
+      (attach66.match(/Color\(0x(80|66)000000\)/g) || []).length === 1 &&
         caption66.includes("BasicTextField(") &&
         // r67-1: same glyph, pinned into the 40 dp pill (seat = barH - 8).
         caption66.includes(

@@ -73,6 +73,31 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+/* ------------- 14. the caption bar: slimmer, longer, lighter ------------- */
+{
+  const attach = main("AttachSheet.kt");
+  check(
+    "r70-14: the bar is 34 dp (was 40) and the pencil seat rides the SAME constant — no 40 dp literal is left in the row",
+    attach.includes("val barH = 34.dp") &&
+      attach.includes(".size(barH)") &&
+      !attach.includes(".size(40.dp)") &&
+      attach.includes(".height(barH)"),
+  );
+  check(
+    "r70-14: it runs almost the whole width — 4 dp of side air (it was 10) — and both grids reserve its real 70 dp of ink",
+    attach.includes(".padding(horizontal = 4.dp, vertical = 8.dp)") &&
+      (attach.match(/bottom = if \(sel\.isNotEmpty\(\)\) 70\.dp else 4\.dp,/g) || []).length ===
+        2 &&
+      !attach.includes("76.dp else 4.dp"),
+  );
+  check(
+    "r70-14: the ground is lighter — 40% black, ONE capsule for the whole bar (it was 50%)",
+    (attach.match(/Color\(0x66000000\)/g) || []).length === 1 &&
+      attach.includes(".background(Color(0x66000000), RoundedCornerShape(barH / 2 + 8.dp))") &&
+      !attach.includes("Color(0x80000000)"),
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`r70-round: ${lines.length - broken} ok / ${broken} broken`);

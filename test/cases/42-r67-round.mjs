@@ -38,7 +38,11 @@ const main = (f) => read(`${ANDROID}/${f}`);
 /* ---------------- 1. one slim bar, everything in sync ---------------- */
 {
   const attach = main("AttachSheet.kt");
-  check("r67-1: the selection bar has ONE height constant", attach.includes("val barH = 40.dp"));
+  check(
+    // r70-14: the constant moved to 34 dp — the guarantee is ONE constant, not the number.
+    "r67-1: the selection bar has ONE height constant",
+    attach.includes("val barH = 34.dp"),
+  );
   check(
     "r67-1: the caption pill is that height (it was 52 dp) and its radius follows it",
     attach.includes(".height(barH)") &&
@@ -61,8 +65,10 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
   check(
     // r68-5 collapsed the per-control fills into one capsule, so the count is 1.
-    "r67-1/r68-5: the bar still carries the 50% dim (one rounded ground now)",
-    (attach.match(/Color\(0x80000000\)/g) || []).length === 1,
+    // r70-14: the ground itself is lighter now (0x66000000); what this pin
+    // guards is that it is still ONE fill, not 0x80000000 specifically.
+    "r67-1/r68-5: the bar still carries the dim (one rounded ground now)",
+    (attach.match(/Color\(0x(80|66)000000\)/g) || []).length === 1,
   );
 }
 
@@ -75,13 +81,14 @@ const main = (f) => read(`${ANDROID}/${f}`);
   // the 50% dim still exists exactly ONCE and covers the whole row; the shape
   // of that merge is pinned in case 43.
   check(
-    "r67-5/r68-5: the 50% dim survives as ONE ground for the whole bar",
-    (attach.match(/Color\(0x80000000\)/g) || []).length === 1 &&
-      attach.includes(".background(Color(0x80000000), RoundedCornerShape(barH / 2 + 8.dp))"),
+    "r67-5/r68-5: the dim survives as ONE ground for the whole bar",
+    (attach.match(/Color\(0x(80|66)000000\)/g) || []).length === 1 &&
+      attach.includes(".background(Color(0x66000000), RoundedCornerShape(barH / 2 + 8.dp))"),
   );
   check(
     "r67-5/r68-5: no control keeps a fill of its own",
-    !attach.includes(".background(Color(0x80000000), CircleShape)"),
+    !attach.includes(".background(Color(0x66000000), CircleShape)") &&
+      !attach.includes(".background(Color(0x80000000), CircleShape)"),
   );
 }
 

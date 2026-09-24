@@ -734,7 +734,9 @@ fun AttachPanel(
                             start = 2.dp,
                             end = 2.dp,
                             top = 2.dp,
-                            bottom = if (sel.isNotEmpty()) 76.dp else 4.dp,
+                            // r70-14: the bar's own ink is 70 dp now (8 + 8 +
+                            // 38 + 8 + 8 — the seat is barH + 4 dp for the badge).
+                            bottom = if (sel.isNotEmpty()) 70.dp else 4.dp,
                         ),
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -799,7 +801,9 @@ fun AttachPanel(
                             start = 2.dp,
                             end = 2.dp,
                             top = 2.dp,
-                            bottom = if (sel.isNotEmpty()) 76.dp else 4.dp,
+                            // r70-14: the bar's own ink is 70 dp now (8 + 8 +
+                            // 38 + 8 + 8 — the seat is barH + 4 dp for the badge).
+                            bottom = if (sel.isNotEmpty()) 70.dp else 4.dp,
                         ),
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -835,7 +839,12 @@ fun AttachPanel(
                 // buttons beside it. Everything in this row is [barH], and the
                 // view-once glyph is pinned INSIDE the pill (barH - 8) so it
                 // can never push the pill back up again.
-                val barH = 40.dp
+                // r70-14 (owner: "attach panel a caption bar ta ar halka chikon
+                // ar lomba Hobe"): 40 -> 34 dp, and the pencil seat follows the
+                // same constant (it was the last 40 dp literal left in the row).
+                // Slimmer means the whole bar, not one control — the r67-1 rule
+                // ("everything in this row is [barH]") is what keeps it honest.
+                val barH = 34.dp
                 // r68-5 (owner: "individual background shob buttons mile ektai
                 // rounded type background Hobe. ar ei caption bar egula asbar
                 // somoy niche theke upore asbe animate hoye"): the bar is ONE
@@ -861,18 +870,23 @@ fun AttachPanel(
                             // — down past 70 folds to the collapsed half panel.
                             .barDragDetect()
                             // 8 dp of air around the capsule, then the capsule,
-                            // then 8 dp inside it: 76 dp of ink in total, which
+                            // then 8 dp inside it: 70 dp of ink in total, which
                             // is exactly what both grids reserve below their last
                             // row (contentPadding) so nothing hides under it.
-                            .padding(horizontal = 10.dp, vertical = 8.dp)
-                            .background(Color(0x80000000), RoundedCornerShape(barH / 2 + 8.dp))
+                            // r70-14: the side air is 4 dp (it was 10) so the bar
+                            // runs almost the whole width — "lomba" — and the
+                            // ground is 40% black (it was 50%) — "halka".
+                            .padding(horizontal = 4.dp, vertical = 8.dp)
+                            .background(Color(0x66000000), RoundedCornerShape(barH / 2 + 8.dp))
                             .padding(horizontal = 8.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        // Edit (pencil) button — r63-4: 40.dp seat, 20.dp glyph.
+                        // Edit (pencil) button — r63-4: a round seat, 20.dp glyph.
+                        // r70-14: the seat IS [barH] now (the 40 dp literal was
+                        // the only control not riding the constant).
                         Box(
                             Modifier
-                                .size(40.dp)
+                                .size(barH)
                                 .clip(CircleShape)
                                 .border(1.dp, Color(0x44FFFFFF), CircleShape)
                                 .clickable {

@@ -47,8 +47,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
     !attach.includes(".padding(bottom = imeGlideDp)\n"),
   );
   check(
-    "r68-1: both grids reserve the bar's real height (76 dp), not the IME's",
-    (attach.match(/bottom = if \(sel\.isNotEmpty\(\)\) 76\.dp else 4\.dp,/g) || []).length === 2 &&
+    // r70-14: the bar's ink is 70 dp now that barH is 34 (was 76 at 40 dp).
+    "r68-1: both grids reserve the bar's real height (70 dp), not the IME's",
+    (attach.match(/bottom = if \(sel\.isNotEmpty\(\)\) 70\.dp else 4\.dp,/g) || []).length === 2 &&
       !attach.includes("68.dp + imeGlideDp"),
   );
   check(
@@ -85,13 +86,15 @@ const main = (f) => read(`${ANDROID}/${f}`);
 {
   const attach = main("AttachSheet.kt");
   check(
+    // r70-14: the same capsule, now 40% black (owner: "ar halka ... Hobe").
     "r68-5: ONE rounded ground behind the whole bar (not one fill per control)",
-    attach.includes(".background(Color(0x80000000), RoundedCornerShape(barH / 2 + 8.dp))") &&
-      (attach.match(/Color\(0x80000000\)/g) || []).length === 1,
+    attach.includes(".background(Color(0x66000000), RoundedCornerShape(barH / 2 + 8.dp))") &&
+      (attach.match(/Color\(0x66000000\)/g) || []).length === 1,
   );
   check(
     "r68-5: the per-control fills are gone (pen, pill, once seat, send seat)",
-    !attach.includes(".background(Color(0x80000000))\n") &&
+    !attach.includes(".background(Color(0x66000000))\n") &&
+      !attach.includes(".background(Color(0x80000000))\n") &&
       !attach.includes(".size(barH - 8.dp)\n                                    .background(") &&
       !attach.includes(".size(barH + 4.dp)\n                                .background("),
   );
@@ -108,7 +111,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
   check(
     "r68-5: the bar height constant is still ONE value above the animation",
-    attach.includes("val barH = 40.dp") && attach.includes(".height(barH)"),
+    // r70-14: 34 dp now (the owner asked for "ar halka chikon"); the pin is
+    // that the constant exists and the pill rides it.
+    attach.includes("val barH = 34.dp") && attach.includes(".height(barH)"),
   );
 }
 
