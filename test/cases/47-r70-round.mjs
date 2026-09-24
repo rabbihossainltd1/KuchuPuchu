@@ -449,14 +449,12 @@ const main = (f) => read(`${ANDROID}/${f}`);
         'viewerPhotos.getOrNull(viewerAt)?.optString("senderId") == Store.myId() || peerSaveOk',
       ) &&
       media.includes('val peerSaveOk = convSnap?.optBoolean("peerSave", true) != false') &&
-      media.includes(
-        'canSave = !privateChat && (m.optString("senderId") == Store.myId() || peerSaveOk)',
-      ) &&
+      media.includes('(!privateChat && (m.optString("senderId") == Store.myId() || peerSaveOk))') &&
       chat.includes('.also { if (!isMe && !peerSaveOk) it.put("kpNoSave", true) }') &&
       viewer.includes('val noSaveClip = m?.optBoolean("kpNoSave") == true') &&
-      viewer.includes("!privateClip && !noSaveClip && !saved") &&
+      viewer.includes("(KpSecure.amOwner() || (!privateClip && !noSaveClip))") &&
       doc.includes('val noSaveDoc = m?.optBoolean("kpNoSave") == true') &&
-      doc.includes("if (!privateDoc && !noSaveDoc && !saved && state == 1)"),
+      doc.includes("(KpSecure.amOwner() || (!privateDoc && !noSaveDoc)) && !saved && state == 1"),
   );
 }
 
@@ -487,6 +485,33 @@ const main = (f) => read(`${ANDROID}/${f}`);
       worker.includes('"took a screenshot of this chat"') &&
       worker.includes('kind === "rec" ? "Screen recording alert" : "Screenshot alert"') &&
       worker.includes('channel: "kp_messages_v2",'),
+  );
+}
+
+/* ------------- 17. the owner's account is exempt (r71) ------------- */
+{
+  const secure = main("KpSecure.kt");
+  const profile = main("ProfileScreen.kt");
+  const chat = main("ChatScreen.kt");
+  const media = main("ChatMediaScreen.kt");
+  const viewer = main("MediaViewer.kt");
+  const doc = main("DocViewerScreen.kt");
+  check(
+    "r71-17: @Rabbihossainltd is exempt — one place says who he is, Block AND Report stay off his profile, and his own save rule is the only thing that lifts the view-once / withheld-media gate",
+    secure.includes('const val OWNER_USERNAME = "rabbihossainltd"') &&
+      secure.includes(
+        'fun ownerUser(u: JSONObject?): Boolean = u?.optText("username") == OWNER_USERNAME',
+      ) &&
+      secure.includes("fun amOwner(): Boolean = ownerUser(Store.me)") &&
+      profile.includes("val unblockable = isMe || isKpBot(userId) || KpSecure.ownerUser(user)") &&
+      profile.includes(
+        'if (!unblockable) {\n                    KpSheetRow(Icons.Filled.Flag, "Report", tint = Red) {',
+      ) &&
+      profile.includes("if (!unblockable) {\n                    KpSheetRow(Icons.Filled.Block,") &&
+      chat.includes("canSave = KpSecure.amOwner() ||") &&
+      media.includes("canSave = KpSecure.amOwner() ||") &&
+      viewer.includes("(KpSecure.amOwner() || (!privateClip && !noSaveClip))") &&
+      doc.includes("(KpSecure.amOwner() || (!privateDoc && !noSaveDoc))"),
   );
 }
 

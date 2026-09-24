@@ -29,6 +29,19 @@ import org.json.JSONObject
 object KpSecure {
     private val holds = HashMap<Window, Int>()
 
+    /**
+     * r71-17 (owner item 17): @Rabbihossainltd is exempt from the security
+     * rules — he may save a view-once photo / video / voice note (the rest of
+     * the app cannot), nobody may block him and nobody may report him (both
+     * walls are also enforced server-side, so a raw POST is refused too).
+     */
+    const val OWNER_USERNAME = "rabbihossainltd"
+
+    fun ownerUser(u: JSONObject?): Boolean = u?.optText("username") == OWNER_USERNAME
+
+    /** Am I the owner? His own rules never bind him. */
+    fun amOwner(): Boolean = ownerUser(Store.me)
+
     /** Is this user shape (server `user` object) a private profile? */
     fun privateUser(u: JSONObject?): Boolean = u?.optBoolean("privateProfile") == true
 

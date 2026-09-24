@@ -4848,8 +4848,11 @@ fun ChatScreen(nav: NavController, convId: String) {
                     },
                 // r71-18: their "Media Save permission" withholds MY save of
                 // what THEY send (my own photos stay mine).
-                canSave = !privateChat && !once &&
-                    (viewerPhotos.getOrNull(viewerAt)?.optString("senderId") == Store.myId() || peerSaveOk),
+                // r71-17: the owner's own rule — he may keep a view-once photo
+                // (nobody else in the app can) and no switch binds him.
+                canSave = KpSecure.amOwner() ||
+                    (!privateChat && !once &&
+                        (viewerPhotos.getOrNull(viewerAt)?.optString("senderId") == Store.myId() || peerSaveOk)),
                 secure = privateChat || once,
                 // Owner round 39 (item 1): Edit — same gate as Forward
                 // (private chats + view-once never expose it). The current

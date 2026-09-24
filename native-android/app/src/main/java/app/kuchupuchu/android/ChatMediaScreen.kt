@@ -91,7 +91,9 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
             subtitle = viewerStamp(m.optString("createdAt")),
             onClose = { viewer = null },
             onForward = if (privateChat) null else ({ viewer = null; forwardMsg = m }),
-            canSave = !privateChat && (m.optString("senderId") == Store.myId() || peerSaveOk),
+            // r71-17: the owner saves anything he is sent.
+            canSave = KpSecure.amOwner() ||
+                (!privateChat && (m.optString("senderId") == Store.myId() || peerSaveOk)),
             secure = privateChat,
         )
     }

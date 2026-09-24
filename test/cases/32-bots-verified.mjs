@@ -640,10 +640,8 @@ const convBetween = (db, a, b) =>
   );
   check(
     "owner account cannot be blocked from its profile (r32-25: the guard is on the ⋮ Block row; the worker refuses the POST too)",
-    readFileSync(
-      "native-android/app/src/main/java/app/kuchupuchu/android/ProfileScreen.kt",
-      "utf8",
-    ).includes('user?.optText("username") == "rabbihossainltd"') &&
+    readFileSync("native-android/app/src/main/java/app/kuchupuchu/android/ProfileScreen.kt", "utf8") // r71-17: the owner is identified in one place (KpSecure.ownerUser).
+      .includes("KpSecure.ownerUser(user)") &&
       src.includes('if (ownerRow) fail(403, "This account can\'t be blocked.", "OWNER_ACCOUNT");'),
   );
   check(
@@ -3108,7 +3106,9 @@ const convBetween = (db, a, b) =>
         chat.includes("KpSecure.Guard(privateChat)") &&
         // r32-17: a view-once photo / video rides the same guards.
         chat.includes("if (!echo && !privateChat && !isViewOnce(m)) {") &&
-        chat.includes("canSave = !privateChat && !once &&") &&
+        // r71-17/18: the owner's own rule comes first, then the once/peer gate.
+        chat.includes("canSave = KpSecure.amOwner() ||") &&
+        chat.includes("(!privateChat && !once &&") &&
         chat.includes(
           'viewerPhotos.getOrNull(viewerAt)?.optString("senderId") == Store.myId() || peerSaveOk',
         ) &&
@@ -3131,7 +3131,7 @@ const convBetween = (db, a, b) =>
         // r71-18: a clip whose sender withheld saving keeps the ⋮ but never
         // gets its Save row (noSaveClip).
         kt("MediaViewer.kt").includes(
-          "if (m != null && !privateClip && !noSaveClip && !saved) {",
+          "if (m != null && !saved && (KpSecure.amOwner() || (!privateClip && !noSaveClip))) {",
         ) &&
         kt("MediaViewer.kt").includes("if (dest.exists() && dest.length() > 0L) {") &&
         kt("MediaViewer.kt").includes(
@@ -5351,6 +5351,10 @@ const convBetween = (db, a, b) =>
         'KpSheetRow(Icons.Filled.Block, if (blocked) "Unblock" else "Block", tint = Red) {',
       ) &&
       menu32.includes("if (!unblockable) {") &&
+      // r71-17: the Report row is inside the same guard as Block.
+      menu32.includes(
+        'if (!unblockable) {\n                    KpSheetRow(Icons.Filled.Flag, "Report", tint = Red) {',
+      ) &&
       menu32.includes(
         'KpSheetRow(Icons.Filled.VisibilityOff, if (hidden) "Unhide" else "Hide") {',
       ) &&
@@ -5362,9 +5366,8 @@ const convBetween = (db, a, b) =>
       menu32.includes('KpSheetRow(Icons.Filled.Flag, "Report", tint = Red) {') &&
       profile32.includes('title = "Report this account?",') &&
       profile32.includes('Api.post("/api/reports", JSONObject().put("userId", userId))') &&
-      profile32.includes(
-        'val unblockable = isMe || isKpBot(userId) || user?.optText("username") == "rabbihossainltd"',
-      ) &&
+      // r71-17: the owner test moved into KpSecure (one place says who he is).
+      profile32.includes("val unblockable = isMe || isKpBot(userId) || KpSecure.ownerUser(user)") &&
       !profile32.includes(
         "androidx.compose.material3.TextButton(\n                    onClick = {\n                        scope.launch {\n                            runCatching {\n                                val res = withContext(Dispatchers.IO) {\n                                    if (blocked) Api.delete",
       ) &&
@@ -6558,7 +6561,9 @@ const convBetween = (db, a, b) =>
         chat.includes(".fold(onSuccess = { true }, onFailure = { terminal(it) })") &&
         chat.includes("if (!ok) spent.remove(messageId)") &&
         chat.includes('onShown = if (once) ({ ViewOnce.spend(m.optString("id")) }) else null,') &&
-        chat.includes("canSave = !privateChat && !once &&") &&
+        // r71-17/18: the owner's own rule comes first, then the once/peer gate.
+        chat.includes("canSave = KpSecure.amOwner() ||") &&
+        chat.includes("(!privateChat && !once &&") &&
         chat.includes(
           'viewerPhotos.getOrNull(viewerAt)?.optString("senderId") == Store.myId() || peerSaveOk',
         ) &&

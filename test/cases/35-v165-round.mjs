@@ -170,7 +170,8 @@ check(
     viewer.includes("onSave =") &&
     // r71-18: a clip the sender withheld saving for keeps its ⋮ and loses
     // only the Save row.
-    viewer.includes("!privateClip && !noSaveClip && !saved") &&
+    // r71-17: the owner's own rule sits in front of it.
+    viewer.includes("(KpSecure.amOwner() || (!privateClip && !noSaveClip))") &&
     !viewer.includes(
       "} else if (m != null && !privateClip) {\n                    IconButton(onClick = { menuOpen = true })",
     ) &&

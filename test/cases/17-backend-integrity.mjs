@@ -299,6 +299,27 @@ async function main() {
         Number(ownerRows?.n ?? 0) === 0,
       `${ownerBlock.status} ${JSON.stringify(ownerBlock.json)} rows=${ownerRows?.n}`,
     );
+    // r71-17: the same account cannot be REPORTED either — refused, and no
+    // row reaches error_log.
+    const ownerReport = await h.call(
+      "POST",
+      "/api/reports",
+      { userId: B.user.id, reason: "spam" },
+      A.token,
+    );
+    const ownerReportRows = await h
+      .q(
+        "SELECT COUNT(*) AS n FROM error_log WHERE stack LIKE 'REPORT%' AND stack LIKE ?",
+        `%${B.user.id.slice(0, 8)}%`,
+      )
+      .first();
+    check(
+      "r71-17: POST /api/reports against the owner's account is refused (403 OWNER_ACCOUNT) and writes nothing",
+      ownerReport.status === 403 &&
+        (ownerReport.json.error?.code ?? ownerReport.json.code) === "OWNER_ACCOUNT" &&
+        Number(ownerReportRows?.n ?? 0) === 0,
+      `${ownerReport.status} ${JSON.stringify(ownerReport.json)} rows=${ownerReportRows?.n}`,
+    );
     await h.q("UPDATE users SET username = 'ib-b' WHERE id = ?", B.user.id).run();
     // r32-6: Report lands one throttled row in error_log.
     const rep = await h.call(

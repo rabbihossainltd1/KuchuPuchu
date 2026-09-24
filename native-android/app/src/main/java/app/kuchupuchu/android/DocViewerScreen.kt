@@ -202,7 +202,8 @@ fun DocViewerScreen(nav: NavController, b64: String) {
                     KpSheetRow(Icons.Filled.Code, "Code") { menuOpen = false; showCode = true }
                 }
             }
-            if (!privateDoc && !noSaveDoc && !saved && state == 1) KpSheetRow(Icons.Filled.Download, "Save") { menuOpen = false; saveDoc() }
+            // r71-17: the owner saves anything he is sent.
+            if ((KpSecure.amOwner() || (!privateDoc && !noSaveDoc)) && !saved && state == 1) KpSheetRow(Icons.Filled.Download, "Save") { menuOpen = false; saveDoc() }
             if (canForward) KpSheetRow(Icons.AutoMirrored.Filled.Send, "Forward") { menuOpen = false; forwarding = true }
             if (!privateDoc && state == 1) KpSheetRow(Icons.AutoMirrored.Filled.OpenInNew, "Open with") { menuOpen = false; openWith() }
             KpSheetRow(Icons.Filled.Delete, "Delete", tint = Red) { menuOpen = false; confirmDelete = true }

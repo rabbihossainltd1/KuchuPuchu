@@ -359,7 +359,9 @@ check(
     ) &&
     (viewer.match(/Icons\.Filled\.MoreVert, "More"/g) || []).length === 2 &&
     // r71-18: the Save row also goes when the sender withheld saving.
-    viewer.includes("if (m != null && !privateClip && !noSaveClip && !saved) {") &&
+    viewer.includes(
+      "if (m != null && !saved && (KpSecure.amOwner() || (!privateClip && !noSaveClip))) {",
+    ) &&
     viewer.includes("if (dest.exists() && dest.length() > 0L) {") &&
     viewer.includes('KpSheetRow(Icons.Filled.Close, "Dismiss") { onDismiss() }'),
 );

@@ -6827,6 +6827,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     const reason = String(body.reason || "").slice(0, 60);
     const exists = await one<{ id: string }>(db, "SELECT id FROM users WHERE id = ?", target);
     if (!exists) fail(404, "User not found.");
+    // r71-17 (owner item 17): @Rabbihossainltd is exempt from the security
+    // rules — nobody can block him (the POST /api/blocks wall) and nobody can
+    // report him. The profile hides the row; this is the wall behind it, so a
+    // raw POST is refused too.
+    const ownerTarget = await one<{ id: string }>(
+      db,
+      "SELECT id FROM users WHERE id = ? AND username = 'rabbihossainltd' LIMIT 1",
+      target,
+    );
+    if (ownerTarget) fail(403, "This account can't be reported.", "OWNER_ACCOUNT");
     await run(
       db,
       "INSERT INTO error_log (id, stack, created_at) VALUES (?, ?, ?)",

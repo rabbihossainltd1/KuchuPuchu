@@ -679,7 +679,7 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
             // fetches it and then saves, instead of the old gate silently
             // leaving the row out.
             onSave =
-                if (m != null && !privateClip && !noSaveClip && !saved) {
+                if (m != null && !saved && (KpSecure.amOwner() || (!privateClip && !noSaveClip))) {
                     ({ menuOpen = false; saveClip() })
                 } else {
                     null

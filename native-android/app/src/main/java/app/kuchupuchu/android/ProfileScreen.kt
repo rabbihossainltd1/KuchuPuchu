@@ -134,7 +134,10 @@ fun ProfileScreen(nav: NavController, userId: String) {
         var askMute by remember { mutableStateOf(false) }
         val ctx = LocalContext.current
         val peerConvForMenu = ScreenStore.convs.firstOrNull { !it.optBoolean("isGroup") && it.optJSONObject("other")?.optString("id") == userId }
-        val unblockable = isMe || isKpBot(userId) || user?.optText("username") == "rabbihossainltd"
+        // r71-17: the owner's account (and the bots, and me) has no Block and
+        // no Report anywhere — the server refuses both, this only hides the
+        // rows (an owner row would only ever produce a 403).
+        val unblockable = isMe || isKpBot(userId) || KpSecure.ownerUser(user)
         fun withConv(block: (String) -> Unit) {
             val cached = peerConvForMenu?.optString("id") ?: ScreenStore.convIdForUser[userId]
             if (cached != null) {
@@ -257,9 +260,11 @@ fun ProfileScreen(nav: NavController, userId: String) {
                     moreOpen = false
                     askMute = true
                 }
-                KpSheetRow(Icons.Filled.Flag, "Report", tint = Red) {
-                    moreOpen = false
-                    confirmReport = true
+                if (!unblockable) {
+                    KpSheetRow(Icons.Filled.Flag, "Report", tint = Red) {
+                        moreOpen = false
+                        confirmReport = true
+                    }
                 }
             }
         }

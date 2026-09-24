@@ -126,10 +126,13 @@ check(
     // the peer rule survives untouched
     // r71-18: the viewer's Save gate grew the peer's switch; the peer rule
     // itself is the same one r31-21 built.
-    chat.includes("canSave = !privateChat && !once &&") &&
+    // r71-17/18: the owner's rule is first, then the once/peer gate.
+    chat.includes("canSave = KpSecure.amOwner() ||") &&
     chat.includes("KpSecure.Guard(privateChat)") &&
     viewer.includes("KpSecure.Guard(secure || !canSave)") &&
-    viewer.includes("if (m != null && !privateClip && !noSaveClip && !saved) {"),
+    viewer.includes(
+      "if (m != null && !saved && (KpSecure.amOwner() || (!privateClip && !noSaveClip))) {",
+    ),
 );
 
 /* 5 — the AI reply starts sooner and types word by word */
