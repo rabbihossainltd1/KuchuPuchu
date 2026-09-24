@@ -66,6 +66,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -1378,9 +1379,15 @@ private fun MediaEditItemScreen(
         // v170 (owner: "edit options gular border background remove hobe
         // just icon tahkbe"): bare glyphs - no circle, no border; a seat
         // that cannot fire just dims.
+        // r70-16 (owner: "media edit a buttons gula shadow add korte hobe noile
+        // white meda edit er somo buttons gula dekha jabe na"): the seat keeps
+        // the bare glyph the owner asked for and gains a soft BLACK halo
+        // instead — over a white photo the white glyph now sits on its own
+        // shadow, so no fill (v170) and no border come back.
         Box(
             Modifier
                 .size(40.dp)
+                .shadow(8.dp, CircleShape)
                 .alpha(if (can) 1f else 0.35f)
                 .clickable(enabled = can) { onClick() },
             contentAlignment = Alignment.Center,
@@ -1850,7 +1857,7 @@ private fun MediaEditItemScreen(
                     .padding(horizontal = 4.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = { if (cropping) exitCrop() else nav.popBackStack() }, modifier = Modifier.size(36.dp)) {
+                IconButton(onClick = { if (cropping) exitCrop() else nav.popBackStack() }, modifier = Modifier.size(36.dp).shadow(6.dp, CircleShape)) {
                     Icon(Icons.Filled.Close, "Close", tint = Color.White, modifier = Modifier.size(20.dp))
                 }
                 // v170 (owner: "done button left side a thakbe"): Done rides
@@ -1887,7 +1894,7 @@ private fun MediaEditItemScreen(
                 // side by side, plain glyphs - no circle, no border.
                 Spacer(Modifier.weight(1f))
                 if (shot != null || clip != null) {
-                    IconButton(onClick = { haptics.tap(); undoEdit() }, enabled = canUndo, modifier = Modifier.size(32.dp)) {
+                    IconButton(onClick = { haptics.tap(); undoEdit() }, enabled = canUndo, modifier = Modifier.size(32.dp).shadow(6.dp, CircleShape)) {
                         Icon(
                             Icons.AutoMirrored.Filled.Undo,
                             "Undo",
@@ -1895,7 +1902,7 @@ private fun MediaEditItemScreen(
                             modifier = Modifier.size(20.dp),
                         )
                     }
-                    IconButton(onClick = { haptics.tap(); redoEdit() }, enabled = canRedo, modifier = Modifier.size(32.dp)) {
+                    IconButton(onClick = { haptics.tap(); redoEdit() }, enabled = canRedo, modifier = Modifier.size(32.dp).shadow(6.dp, CircleShape)) {
                         Icon(
                             Icons.AutoMirrored.Filled.Redo,
                             "Redo",

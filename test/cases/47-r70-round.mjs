@@ -120,6 +120,30 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+/* ---------- 16. editor buttons: a halo, not a white-on-white glyph ---------- */
+{
+  const edit = main("MediaEditScreen.kt");
+  check(
+    "r70-16: the rail's bare glyphs (v170: no circle, no border) get a soft black halo instead — visible over white media without a fill coming back",
+    edit.includes("import androidx.compose.ui.draw.shadow") &&
+      edit.includes(
+        ".size(40.dp)\n                .shadow(8.dp, CircleShape)\n                .alpha(if (can) 1f else 0.35f)",
+      ) &&
+      edit.includes('// r70-16 (owner: "media edit a buttons gula shadow add korte hobe noile') &&
+      // the seat itself: no fill and no border of its own (v170) — the halo is
+      // the whole change (the 18 dp red badge's white border is another control).
+      !/fun StageHistory[\s\S]{0,900}?\.border\(/.test(edit) &&
+      !/fun StageHistory[\s\S]{0,900}?\.background\(/.test(edit),
+  );
+  check(
+    "r70-16: the top bar's ✕ / undo / redo ride the same halo (their sizes — 36 / 32 — are untouched, so the v169 geometry holds)",
+    edit.includes("modifier = Modifier.size(36.dp).shadow(6.dp, CircleShape)") &&
+      edit.includes("modifier = Modifier.size(32.dp).shadow(6.dp, CircleShape))") &&
+      (edit.match(/modifier = Modifier\.size\(32\.dp\)\.shadow\(6\.dp, CircleShape\)\) \{/g) || [])
+        .length === 2,
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`r70-round: ${lines.length - broken} ok / ${broken} broken`);
