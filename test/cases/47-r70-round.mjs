@@ -124,7 +124,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
-/* ---------- 16 (r71): the owner rejected the shadow type outright ---------- */
+/* ---------- 16 (r72): the removal stays, a NEW adaptive lift goes in ---------- */
 {
   const app = "native-android/app/src/main/java/app/kuchupuchu/android/";
   const srcs = [
@@ -135,18 +135,48 @@ const main = (f) => read(`${ANDROID}/${f}`);
     "MediaEditScreen.kt",
     "ProfileScreen.kt",
   ];
+  // r71-16's own order stands (owner, r72: "thik ache"): no screen carries its
+  // own inline `.shadow(...)` step or the `draw.shadow` import any more.
   const withShadow = srcs.filter((f) => readFileSync(app + f, "utf8").includes(".shadow("));
   check(
-    'r71-16: the drop shadow the owner rejected ("ekhon je type er shadow ta implement korecho ... ei shadow ta amar ekdomi valo lage na change koro") is GONE from the whole app — bubbles, call buttons, chat list, profile, media editor, and the import too',
+    "r71-16 (kept by r72-16): the rejected inline shadow type stays gone from every screen — every lift now routes through one centralised helper",
     withShadow.length === 0 &&
       srcs.every(
         (f) => !readFileSync(app + f, "utf8").includes("import androidx.compose.ui.draw.shadow"),
       ),
     withShadow.join(", "),
   );
+  // r72-16 (owner: "shadow o add koro black hole white show white hole black
+  // shadow"): the lift is back, and its COLOUR reads the theme it falls on.
+  const ui = readFileSync(app + "Ui.kt", "utf8");
+  check(
+    "r72-16: Modifier.kpLift is the only lift and it is theme-adaptive — a WHITE halo on the dark-blue theme, a BLACK one on the light theme (rim softer than the spot), so the shadow never drowns in the surface behind it",
+    ui.includes("fun Modifier.kpLift(elevation: Dp, shape: Shape): Modifier =") &&
+      ui.includes(
+        "ambientColor = if (KpThemeMode.darkBlue) Color(0x38FFFFFF) else Color(0x38000000)",
+      ) &&
+      ui.includes(
+        "spotColor = if (KpThemeMode.darkBlue) Color(0x70FFFFFF) else Color(0x70000000)",
+      ) &&
+      ui.includes("import androidx.compose.ui.draw.shadow"),
+  );
+  check(
+    'r72-16: applied app-wide (owner scope: "পুরো app জুড়ে") — all 21 surfaces r71-16 stripped wear it again: 8 in the chat (bubble / photo / video / view-once / album / owner card / send circle / mic), 4 in the editor (rail seat + ✕ / undo / redo), 4 in the call screens, 3 in the chat list, 1 in the calls tab, 1 on the profile — while an emoji-only bubble stays bare',
+    [
+      ["ChatScreen.kt", 8],
+      ["MediaEditScreen.kt", 4],
+      ["CallScreens.kt", 4],
+      ["ChatListScreen.kt", 3],
+      ["CallsTabScreen.kt", 1],
+      ["ProfileScreen.kt", 1],
+    ].every(([f, n]) => (readFileSync(app + f, "utf8").match(/\.kpLift\(/g) || []).length === n) &&
+      readFileSync(app + "ChatScreen.kt", "utf8").includes(
+        ".then(if (noBubble) Modifier else Modifier.kpLift(2.dp, bubbleShape))",
+      ),
+  );
   const edit = main("MediaEditScreen.kt");
   check(
-    "r71-16: without a shadow the editor reads the MEDIA instead — the rail samples its own column and flips the glyphs between white and near-black, so white media no longer swallows them",
+    "r71-16 + r72-16: the editor still reads the MEDIA instead of trusting the shadow — the rail samples its own column and flips the glyphs between white and near-black over bright media",
     edit.includes("val chromeInk by") &&
       edit.includes("produceState(Color.White, shot, clip, thumbs.firstOrNull())") &&
       edit.includes("android.graphics.Bitmap.createScaledBitmap(src, 24, 24, false)") &&
@@ -158,11 +188,15 @@ const main = (f) => read(`${ANDROID}/${f}`);
       edit.includes('Text("Aa", color = chromeInk, fontSize = 15.sp'),
   );
   check(
-    "r71-16: the top bar keeps white ink on purpose (it sits on the dark top scrim) — the ✕ / undo / redo were NOT flipped",
+    "r71-16 + r72-16: the top bar keeps white ink on purpose (it sits on the dark top scrim, so it needs no halo) — the ✕ / undo / redo stay white and only take the shared lift",
     edit.includes(
       'Icon(Icons.Filled.Close, "Close", tint = Color.White, modifier = Modifier.size(20.dp))',
     ) &&
-      (edit.match(/tint = Color\.White\.copy\(alpha = if \(can(Undo|Redo)\)/g) || []).length === 2,
+      (edit.match(/tint = Color\.White\.copy\(alpha = if \(can(Undo|Redo)\)/g) || []).length ===
+        2 &&
+      edit.includes("modifier = Modifier.size(36.dp).kpLift(6.dp, CircleShape))") &&
+      (edit.match(/modifier = Modifier\.size\(32\.dp\)\.kpLift\(6\.dp, CircleShape\)\)/g) || [])
+        .length === 2,
   );
 }
 

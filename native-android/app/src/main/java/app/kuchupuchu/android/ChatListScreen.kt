@@ -456,6 +456,7 @@ fun ChatListScreen(nav: NavController) {
                     .navigationBarsPadding()
                     .padding(20.dp)
                     .size(52.dp)
+                    .kpLift(8.dp, CircleShape),
             ) {
                 Icon(
                     Icons.Filled.DriveFileRenameOutline,
@@ -1200,6 +1201,7 @@ private fun SwipeConvRow(
             Modifier
                 .offset { IntOffset(-offset.roundToInt(), 0) }
                 .fillMaxSize()
+                .kpLift(2.dp, RoundedCornerShape(16.dp))
                 .clip(RoundedCornerShape(16.dp))
                 .background(Card)
                 .pointerInput(conv.optString("id")) {
@@ -1873,6 +1875,7 @@ private fun PeekAction(icon: ImageVector, label: String, onClick: () -> Unit) {
         Modifier
             .padding(horizontal = 10.dp)
             .size(50.dp)
+            .kpLift(5.dp, CircleShape)
             .clip(CircleShape)
             .background(circleButtonFill())
             .border(1.dp, CircleButtonEdge, CircleShape)

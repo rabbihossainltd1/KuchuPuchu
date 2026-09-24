@@ -746,9 +746,10 @@ const convBetween = (db, a, b) =>
       ).includes("KpSounds.inApp(this)"),
   );
   check(
-    // r71-16 (owner: "ei shadow ta amar ekdomi valo lage na change koro"): the
-    // 3D drop shadows are gone app-wide — the pin now states the ABSENCE.
-    "no drop shadows anywhere in the app sources (owner order, r71-16) — the bubbles' lift was removed with the rest",
+    // r71-16 removed the 3D drop shadows app-wide; r72-16 brought ONE
+    // adaptive lift back (Modifier.kpLift in Ui.kt), so the pin now states
+    // "no raw shadow step left in ChatScreen" instead of "no lift at all".
+    "no raw drop shadow in the chat sources (r72-16: the lift lives in the theme-adaptive Modifier.kpLift helper now)",
     !chat.includes(".shadow(") && !chat.includes("import androidx.compose.ui.draw.shadow"),
   );
   check(
@@ -997,7 +998,7 @@ const convBetween = (db, a, b) =>
       !chat.includes("at least 1 second to record"),
   );
   check(
-    "mic button: fully transparent (round 15: shadow removed too), ring stays",
+    "mic button: fully transparent (round 15: no shadow step of its own; r72-16 gives it the shared adaptive lift), ring stays",
     !chat.includes("shadow(2.dp, CircleShape") &&
       chat.includes("1.5.dp, if (cancelArmed) Red else accent") &&
       !chat.includes(".background(if (cancelArmed) Color.White else Gold)"),
@@ -1643,7 +1644,7 @@ const convBetween = (db, a, b) =>
       chat.includes("showChatSearch = true"),
   );
   check(
-    "15: composer bar + mic fully transparent, header takes the chat theme",
+    "15: composer bar + mic fully transparent (r72-16: the lift comes from Modifier.kpLift, not an inline shadow), header takes the chat theme",
     !chat.includes(".shadow(2.dp, CircleShape") &&
       chat.includes(".background(chatWallpaper(chatTheme))"),
   );
@@ -5296,7 +5297,7 @@ const convBetween = (db, a, b) =>
   // minimum); the stamp sits in the band under the glyph in the wallpaper's
   // ink, and the ticks follow that ink so they never vanish on a light theme.
   check(
-    "r32-8 + N3a + N3r: emoji-only TEXT (+ STICKER now) → transparent bubble (r71-16: and since then NO bubble carries a shadow at all), glyph row keeps the 2dp side room for the stamp/ticks, stamp + ticks use the wallpaper ink",
+    "r32-8 + N3a + N3r: emoji-only TEXT (+ STICKER now) → transparent bubble (r71-16: no inline shadow since then; r72-16: the bubble lift is the theme-adaptive Modifier.kpLift), glyph row keeps the 2dp side room for the stamp/ticks, stamp + ticks use the wallpaper ink",
     chat1516.includes(".then(if (noBubble) Modifier else Modifier.requiredWidthIn") &&
       chat1516.includes(
         "noBubble -> Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))",
@@ -7101,7 +7102,8 @@ const convBetween = (db, a, b) =>
         chat.includes("onDismiss = {\n                    attachSel.clear()") &&
         chat.includes("attachExit.confirm {") &&
         // Owner round 44 (item 6): the caption is its own bubble now.
-        // Owner round 45 (item 6): compact — 7x3 padding, 12.sp, no shadow.
+        // Owner round 45 (item 6): compact — 7x3 padding, 12.sp, and no
+        // inline shadow (r72-16 lifts it through Modifier.kpLift like the rest).
         chat.includes("private fun MediaCaption(body: String, mine: Boolean, theme: String)") &&
         chat.includes("val captionShape =") &&
         chat.includes(".padding(horizontal = 7.dp, vertical = 3.dp)") &&
@@ -8586,8 +8588,9 @@ const convBetween = (db, a, b) =>
         // the paused-only play glyph is a 32 dp icon in a 56 dp seat; the 26
         // dp pair (attach checkbox + pen chips) and the one 36 dp close
         // survive.
-        // r71-16: the undo / redo IconButtons lost their inline `.shadow(...)`,
-        // so the 32 dp chain is unchanged but each one still exists.
+        // r71-16: the undo / redo IconButtons lost their inline `.shadow(...)`
+        // (r72-16 puts the shared `Modifier.kpLift` there), so the 32 dp chain
+        // is unchanged but each one still exists.
         (edit.match(/\.size\(32\.dp\)/g) || []).length === 4 &&
         (edit.match(/\.size\(36\.dp\)/g) || []).length === 1 &&
         (edit.match(/\.size\(26\.dp\)/g) || []).length === 2 &&
@@ -9728,12 +9731,12 @@ const convBetween = (db, a, b) =>
     {
       const cs = kt("CallScreens.kt");
       check(
-        "N1r: inactive call buttons are truly bare — no translucent disc behind CallAction / StripAction (danger + active keep their fills; r71-16: their drop shadows are gone too)",
+        "N1r: inactive call buttons are truly bare — no translucent disc behind CallAction / StripAction (danger + active keep their fills; r72-16: their lift is the shared Modifier.kpLift, so no inline shadow step remains)",
         !cs.includes("0x42FFFFFF") &&
           !cs.includes("0x3DFFFFFF") &&
           !cs.includes(".shadow(") &&
           // the two bare-button branches (CallAction + StripAction) survive;
-          // only their shadow step is gone.
+          // only their inline shadow step is gone.
           (cs.match(/if \(danger \|\| active\) \{/g) || []).length === 2,
       );
     }
@@ -9790,7 +9793,7 @@ const convBetween = (db, a, b) =>
       );
     }
     check(
-      "N3a: sticker-emoji messages float on the wallpaper like text emoji-only — no min width, no lift (r71-16: no bubble carries one now), no fill, wallpaper-ink ticks, both sides",
+      "N3a: sticker-emoji messages float on the wallpaper like text emoji-only — no min width, no lift (r71-16: no inline shadow; r72-16: no lift either for a bubble-less glyph), no fill, wallpaper-ink ticks, both sides",
       chat.includes('val noBubble = emojiOnly > 0 || kind == "STICKER"') &&
         !chat.includes(".shadow(") &&
         chat.includes(

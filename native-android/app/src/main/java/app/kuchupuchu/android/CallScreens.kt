@@ -415,6 +415,8 @@ fun SwipeCallCircle(
                     androidx.compose.ui.unit.IntOffset(0, (-(settle) + idleBob).toInt())
                 }
                 .size(70.dp)
+                // r72-16: the soft lift is back, its colour read from the theme.
+                .kpLift(7.dp, CircleShape)
                 .clip(CircleShape)
                 .background(
                     Brush.verticalGradient(
@@ -697,9 +699,11 @@ private fun CallAction(
         Box(
             Modifier
                 .size(64.dp)
-                // N1r: an inactive button is truly bare — no fill, no
-                // shadow, no ring. (N1 only dropped the 1dp border, but the
-                // translucent disc underneath still read as a faint circle.)
+                // N1r: an inactive button is truly bare — no fill, no ring.
+                // (N1 only dropped the 1dp border, but the translucent disc
+                // underneath still read as a faint circle.) r72-16: the
+                // ACTIVE one gets the lift back.
+                .then(if (danger || active) Modifier.kpLift(6.dp, CircleShape) else Modifier)
                 .clip(CircleShape)
                 .then(
                     if (danger || active) {
@@ -1371,6 +1375,7 @@ private fun CallCircle(
     Box(
         Modifier
             .size(size)
+            .kpLift(7.dp, CircleShape)
             .clip(CircleShape)
             .background(
                 Brush.verticalGradient(
@@ -1408,6 +1413,8 @@ private fun StripAction(
         Modifier
             .size(46.dp)
             // N1r: inactive strip buttons are bare icons too (same faint disc).
+            // r72-16: the active one carries the lift again.
+            .then(if (danger || active) Modifier.kpLift(5.dp, CircleShape) else Modifier)
             .clip(CircleShape)
             .then(
                 if (danger || active) {
