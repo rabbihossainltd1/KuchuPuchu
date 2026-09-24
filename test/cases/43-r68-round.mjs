@@ -62,16 +62,16 @@ const main = (f) => read(`${ANDROID}/${f}`);
   const emo = main("EmojiAnim.kt");
   const chat = main("ChatScreen.kt");
   check(
-    "r68-4: the decision is one pure function (foreground + THIS route), so it can be asserted off-device",
+    'r68-4 / r69-4: the decision is one pure function over THIS route (owner: "only chat screen a thaklei hobe eita"), so it can be asserted off-device',
     emo.includes("internal object EmojiFxPolicy") &&
-      emo.includes(
-        "fun mirrorsOnScreen(foreground: Boolean, route: String, convId: String): Boolean",
-      ) &&
+      emo.includes("fun mirrorsOnScreen(route: String, convId: String): Boolean") &&
+      !emo.includes("fun mirrorsOnScreen(foreground") &&
       emo.includes('return route == "chat/$convId" || route.startsWith("chat/$convId?")'),
   );
   check(
-    "r68-4: the replay is enqueued only through it — a pocketed phone no longer buzzes for an unseen dance",
-    chat.includes("EmojiFxPolicy.mirrorsOnScreen(Store.foreground, Store.route, convId)") &&
+    "r68-4 / r69-4: the replay is enqueued only through it — being ON that chat screen is the condition (the app-level foreground flag is no longer consulted)",
+    chat.includes("EmojiFxPolicy.mirrorsOnScreen(Store.route, convId)") &&
+      !chat.includes("EmojiFxPolicy.mirrorsOnScreen(Store.foreground") &&
       (chat.match(/emojiFxReplays\.add\(/g) || []).length === 1,
   );
   check(

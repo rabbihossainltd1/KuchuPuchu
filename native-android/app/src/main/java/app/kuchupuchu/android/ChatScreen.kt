@@ -1163,7 +1163,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // user is looking at (foreground + this route) — otherwise
                     // the other phone buzzed for an animation nobody saw.
                     if (ev.optString("conversationId") == convId &&
-                        EmojiFxPolicy.mirrorsOnScreen(Store.foreground, Store.route, convId)
+                        EmojiFxPolicy.mirrorsOnScreen(Store.route, convId)
                     ) {
                         ev.optString("mid").takeIf { it.isNotBlank() }?.let { emojiFxReplays.add(it) }
                     }

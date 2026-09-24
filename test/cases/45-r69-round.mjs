@@ -9,7 +9,7 @@ const check = (name, cond, detail) =>
 const kt = (f) =>
   readFileSync(`native-android/app/src/main/java/app/kuchupuchu/android/${f}`, "utf8");
 
-// ── C. app: the r69 crash guard ─────────────────────────────────────────────
+// ── C. app: the r69 crash guard + the emoji-fx route rule ───────────────────
 {
   const kt = (f) =>
     readFileSync(`native-android/app/src/main/java/app/kuchupuchu/android/${f}`, "utf8");
@@ -27,6 +27,12 @@ const kt = (f) =>
       attach.includes("val allOnce = barOnce") &&
       attach.includes('"$barCount",') &&
       !attach.includes('"${sel.size}"'),
+  );
+  check(
+    "r69-4: the mirror buzz is chat-screen-ONLY — the pure policy takes the route alone (the app-level foreground flag is not part of the decision)",
+    emo.includes("fun mirrorsOnScreen(route: String, convId: String): Boolean") &&
+      !emo.includes("foreground: Boolean") &&
+      chat.includes("EmojiFxPolicy.mirrorsOnScreen(Store.route, convId)"),
   );
 }
 

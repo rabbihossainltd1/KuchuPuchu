@@ -330,6 +330,16 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        // r69: the flag now drives whether a FOREGROUND message/call still
+        // notifies (a muted chat must stay silent while the app is not in
+        // front), so it is true only while this activity really has focus —
+        // onPause also fires for a system dialog / the app switcher, and the
+        // old "did any activity start" test would have kept it true and
+        // suppressed the notification.
+        // r69 item 4 REVERSES last round's rule: the mirror buzz is no longer
+        // gated on `Store.foreground` at all (owner: "only chat screen a
+        // thaklei hobe" = being on the chat screen is the condition) — see
+        // EmojiFxPolicy.mirrorsOnScreen, which takes a route alone.
         Store.foreground = false
         super.onPause()
     }
