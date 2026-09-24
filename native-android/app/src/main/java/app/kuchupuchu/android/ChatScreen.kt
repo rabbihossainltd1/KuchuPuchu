@@ -943,6 +943,33 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
+    /**
+     * r71-4 — the owner, a third round on the same buzz: "ami chat screen e
+     * nei, tobu amar phone buzz kore".
+     *
+     * The route test alone was never the whole truth. The photo viewer and the
+     * album viewer are drawn BY this screen (they have no nav route of their
+     * own), and every sheet the chat opens — attach, stickers, schedule, theme,
+     * disappear, mute, delete confirms, forward, member add, search, the long
+     * press action/reaction sheets, the editor hand-off — paints over the
+     * thread while `Store.route` still reads `chat/<id>`. So a phone staring at
+     * a photo (the owner's most common "not on the chat screen") looked exactly
+     * like a phone reading the chat, and the mirrored reaction buzzed a person
+     * who could not see the dance.
+     *
+     * "The chat screen is in front" now means the THREAD is actually readable:
+     * the app in the foreground, on this chat's route — and none of this
+     * screen's own covers on top of it.
+     */
+    fun threadCovered(): Boolean =
+        viewerPhotos.isNotEmpty() || albumMsg != null ||
+            showAttach || showStickers || showSchedule || showScheduled ||
+            showScheduleMedia || showEmojiSheet || reactionFor != null ||
+            actionFor != null || confirmDelete || showMuteSheet ||
+            confirmDeleteChat || confirmLeave || menuOpen || showAddMembers ||
+            showChatSearch || showDisappear || showTheme || showDeselect ||
+            editing != null || forwarding
+
     // v3.7 realtime: the chat socket delivers message/read/typing events the
     // instant they happen. The ticker below is a FALLBACK only: it forces a
     // refresh (a) right after the app returns to the foreground and (b) on a
@@ -1188,9 +1215,20 @@ fun ChatScreen(nav: NavController, convId: String) {
                     if (ev.optString("conversationId") == convId &&
                         ev.optBoolean("fromChat", true) &&
                         Store.foreground &&
-                        EmojiFxPolicy.mirrorsOnScreen(Store.route, convId)
+                        EmojiFxPolicy.mirrorsOnScreen(Store.route, convId) &&
+                        // r71-4: …and the thread is not hidden behind one of
+                        // this screen's own covers (the photo viewer above all).
+                        !threadCovered()
                     ) {
-                        ev.optString("mid").takeIf { it.isNotBlank() }?.let { emojiFxReplays.add(it) }
+                        ev.optString("mid").takeIf { it.isNotBlank() }?.let {
+                            // r71-4: stamp the arrival — a mirrored dance is
+                            // only worth playing while it is still NOW (the
+                            // row it names may not be composed yet, and a
+                            // replayed tap from minutes ago must never buzz a
+                            // screen that never saw the tap).
+                            emojiFxReplays.add(it)
+                            emojiFxAt[it] = System.currentTimeMillis()
+                        }
                     }
                 // GROUPS are the exception: blue ticks mean EVERY member has
                 // read (the server's MIN()/all-read rule). One member's read

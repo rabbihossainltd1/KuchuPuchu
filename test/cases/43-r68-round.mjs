@@ -80,9 +80,45 @@ const main = (f) => read(`${ANDROID}/${f}`);
       (chat.match(/emojiFxReplays\.add\(/g) || []).length === 1,
   );
   check(
-    "r68-4: the local tap still buzzes (the user IS looking at the screen) and still posts /fx on every tap (r70-4 adds the tap's own `onChat` state to that POST)",
+    // r71-4 (the owner, third round: "ami chat screen e nei, tobu amar phone
+    // buzz kore"): the route alone was never the whole truth — the photo
+    // viewer and the album viewer are drawn BY the chat screen (no route of
+    // their own) and every sheet paints over the thread while the route still
+    // reads chat/<id>, so a phone staring at a photo looked like a phone
+    // reading the chat. "In front" now means the THREAD is readable.
+    "r71-4: the mirror ALSO refuses while one of the chat's own covers (photo viewer, album viewer, any sheet) sits on top of the thread",
+    chat.includes("fun threadCovered(): Boolean =") &&
+      chat.includes("viewerPhotos.isNotEmpty() || albumMsg != null ||") &&
+      chat.includes("showAttach || showStickers || showSchedule || showScheduled ||") &&
+      chat.includes("showChatSearch || showDisappear || showTheme || showDeselect ||") &&
+      chat.includes("editing != null || forwarding") &&
+      // the gate itself, in that order: conv, fromChat, foreground, route, covers
+      /if \(ev\.optString\("conversationId"\) == convId &&[\s\S]{0,400}?mirrorsOnScreen\(Store\.route, convId\) &&[\s\S]{0,200}?!threadCovered\(\)[\s\S]{0,40}?\) \{/.test(
+        chat,
+      ) &&
+      // and the covers really are composed by this screen (a nav route would
+      // have been caught by the route test — these were the hole)
+      chat.includes("if (viewerPhotos.isNotEmpty()) {") &&
+      !chat.includes('nav.navigate("photoviewer') &&
+      chat.includes("albumMsg?.let { m ->"),
+  );
+  check(
+    "r71-4: a mirrored frame is stamped on arrival and only replayed while it is still fresh (3 s) — a dance whose row was not composed at the time must not buzz a screen that scrolled past it later",
+    emo.includes("internal val emojiFxAt = HashMap<String, Long>()") &&
+      emo.includes("internal const val MIRROR_FRESH_MS = 3_000L") &&
+      chat.includes("emojiFxAt[it] = System.currentTimeMillis()") &&
+      emo.includes("val at = emojiFxAt.remove(mid) ?: 0L") &&
+      emo.includes(
+        "if (System.currentTimeMillis() - at in 0..MIRROR_FRESH_MS) replay(local = false)",
+      ) &&
+      // still exactly one enqueue site (case 43's other pin counts it)
+      (chat.match(/emojiFxReplays\.add\(/g) || []).length === 1,
+  );
+  check(
+    "r68-4: the local tap still buzzes (the user IS looking at the screen) and still posts /fx on every tap (r70-4 adds the tap's own `onChat` state to that POST; r71-4 leaves the sender's half alone — the tap happens ON a bubble, so it stays the pair `foreground + chat/` and the mirror never dies)",
     emo.includes("if (isSingle) replay(local = true) else haptics.tap()") &&
-      emo.includes('Api.post("/api/messages/$mid/fx", JSONObject().put("onChat", onChatNow))'),
+      emo.includes('Api.post("/api/messages/$mid/fx", JSONObject().put("onChat", onChatNow))') &&
+      emo.includes('val onChatNow = Store.foreground && Store.route.startsWith("chat/")'),
   );
 }
 

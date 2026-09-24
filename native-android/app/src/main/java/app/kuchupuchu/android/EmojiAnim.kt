@@ -41,6 +41,18 @@ import org.json.JSONObject
 
 internal val emojiFxReplays = SnapshotStateList<String>()
 
+/**
+ * r71-4: when each pending mirror arrived. The row a frame names is often not
+ * composed at that instant (it can be scrolled off, or the chat may not even be
+ * the screen in front) — the replay used to wait in the list and then bite
+ * whoever scrolled past that row later. A dance is worth playing only while it
+ * is still now; [MIRROR_FRESH_MS] is that window.
+ */
+internal val emojiFxAt = HashMap<String, Long>()
+
+/** r71-4: how long a mirrored replay stays worth playing. */
+internal const val MIRROR_FRESH_MS = 3_000L
+
 /** r71-21: how close two taps have to be to count as the "double tap = ❤️". */
 internal const val DOUBLE_TAP_HEART_MS = 320L
 
@@ -284,7 +296,10 @@ private fun NotoEmojiGlyph(
 
     if (mid.isNotBlank() && emojiFxReplays.contains(mid)) {
         if (emojiFxReplays.remove(mid)) {
-            replay(local = false)
+            // r71-4: drop a stale one instead of buzzing for a tap from a
+            // screen that has since gone away (and keep the map in step).
+            val at = emojiFxAt.remove(mid) ?: 0L
+            if (System.currentTimeMillis() - at in 0..MIRROR_FRESH_MS) replay(local = false)
         }
     }
 
