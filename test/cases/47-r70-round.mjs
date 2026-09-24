@@ -472,7 +472,7 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes("val veil = !mine && !revealed") &&
       chat.includes("!mine && !revealed -> {") &&
       chat.includes(
-        'Text("Tap to view", color = Ink, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)',
+        '"Tap to view",\n                                    color = Ink,\n                                    fontSize = 11.5.sp,\n                                    fontWeight = FontWeight.Medium,',
       ) &&
       chat.includes('Text("${((leftMs + 999) / 1000)}s", color = Red, fontSize = 10.sp)'),
   );
@@ -514,6 +514,13 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes('Text("${((leftMs + 999) / 1000)}s", color = Red, fontSize = 10.sp)') &&
       // and the bubble + its stamp share one column, so the stamp sits below it
       chat.includes("Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {"),
+  );
+  check(
+    'r73-20 (owner: "view once text bubble thik ache but 1 icon ta middle a nai"): the 1 mark is centred in the bubble on its OWN layer now — it rode the hint as one Row before, so the words pushed it off the middle — and the hint sits at the bubble\'s bottom edge',
+    chat.includes("CenteredOnceIcon(28.dp)") &&
+      /contentAlignment = Alignment.Center\) \{\n\s+CenteredOnceIcon\(28\.dp\)/.test(chat) &&
+      /contentAlignment = Alignment.BottomCenter\) \{\n\s+Text\(\n\s+"Tap to view",/.test(chat) &&
+      !chat.includes("CenteredOnceIcon(26.dp)"),
   );
   check(
     "r72-20: the notification can never show the once-view text — the worker sends no envelope and no e2ee marker for such a row (only kp_once and its masked label), and the phone refuses to open or print one: the label beats any plaintext, for the card AND for the list row it feeds",

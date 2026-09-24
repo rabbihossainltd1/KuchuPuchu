@@ -8003,14 +8003,21 @@ private fun OnceTextRow(
                                 },
                         )
                         if (veil) {
-                            // The 1 mark + the hint sit ON the veil, so the row
-                            // reads as "something is here, tap it".
+                            // r73-20 (owner: "view once text bubble thik ache but
+                            // 1 icon ta middle a nai"): the mark is CENTRED in the
+                            // bubble on its own now — it rode the hint as one Row
+                            // before, so the words pushed it off the middle.
                             Box(Modifier.matchParentSize(), contentAlignment = Alignment.Center) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    CenteredOnceIcon(26.dp)
-                                    Spacer(Modifier.width(6.dp))
-                                    Text("Tap to view", color = Ink, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
-                                }
+                                CenteredOnceIcon(28.dp)
+                            }
+                            Box(Modifier.matchParentSize(), contentAlignment = Alignment.BottomCenter) {
+                                Text(
+                                    "Tap to view",
+                                    color = Ink,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.padding(bottom = 1.dp),
+                                )
                             }
                         }
                     }
