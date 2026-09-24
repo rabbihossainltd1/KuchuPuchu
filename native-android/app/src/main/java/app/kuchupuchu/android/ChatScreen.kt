@@ -505,9 +505,13 @@ fun ChatScreen(nav: NavController, convId: String) {
     val alive = remember(convId) { java.util.concurrent.atomic.AtomicBoolean(true) }
     // r71-18: this chat is the one on screen — a screenshot or a screen
     // recording taken HERE is ours to report (Android 14 / 15 tell an app
-    // about its own capture; below that there is no signal and nothing is
-    // claimed). The server alerts the members who asked to be told.
-    DisposableEffect(convId) {
+    // about its own capture). The server alerts the members who asked to be
+    // told.
+    // r72-18: on Android 12/13 there is no callback, so the same watch reads
+    // the system's Screenshots folder instead — which the Photos permission
+    // gates, hence the nonce: the answer to that prompt re-arms the watch.
+    var capturePermNonce by remember { mutableStateOf(0) }
+    DisposableEffect(convId, capturePermNonce) {
         KpCapture.watch(MainActivity.current, convId)
         onDispose { KpCapture.stop() }
     }
@@ -4814,8 +4818,23 @@ fun ChatScreen(nav: NavController, convId: String) {
             shot = privShot,
             rec = privRec,
             save = privSave,
+            // r72-18: below Android 14 the screenshot alert reads the system's
+            // Screenshots folder, so that row tells the truth about the Photos
+            // permission it needs.
+            folderWatch = KpCapture.folderPermission() != null,
+            folderGranted = KpCapture.folderGranted(ctx),
             onClose = { showChatPrivacy = false },
-            onShot = { setChatPrivacy(shot = it) },
+            onShot = { on ->
+                setChatPrivacy(shot = on)
+                // The owner's Q&A (r72): ask for the Photos / Storage permission
+                // the moment the switch goes ON — once answered, the watch
+                // re-arms above and the folder side goes live.
+                val perm = KpCapture.folderPermission()
+                val act = MainActivity.current
+                if (on && perm != null && act != null) {
+                    act.ensurePermissions(listOf(perm)) { capturePermNonce++ }
+                }
+            },
             onRec = { setChatPrivacy(rec = it) },
             onSave = { setChatPrivacy(save = it) },
         )
@@ -9939,19 +9958,34 @@ private fun ChatPrivacySheet(
     shot: Boolean,
     rec: Boolean,
     save: Boolean,
+    // r72-18: true on Android 12/13, where the alert is read from the system's
+    // Screenshots folder and therefore needs the Photos / Storage permission.
+    folderWatch: Boolean = false,
+    folderGranted: Boolean = true,
     onClose: () -> Unit,
     onShot: (Boolean) -> Unit,
     onRec: (Boolean) -> Unit,
     onSave: (Boolean) -> Unit,
 ) {
-    val captureOk = android.os.Build.VERSION.SDK_INT >= 34
+    // r72-18 (owner: "screenshot alert ta android 14 newer keno ami to Snapchat
+    // a dekhchi eita hocche Android 13/12 a o"): Android 14+ answers with the
+    // OS capture callback; Android 12/13 answer by watching the system's own
+    // Screenshots folder, which needs the Photos permission the switch asks for.
+    // The screen-recording row stays Android 15+ — a recording leaves no file
+    // to read, so claiming it below that would be a lie.
     KpSheet(onDismiss = onClose, title = "Chat privacy") {
         PrivacyToggle(
             icon = Icons.Filled.Lock,
             label = "Screenshot alert",
-            sub = if (captureOk) "Alert me when they screenshot this chat" else "Android 14 or newer",
+            sub =
+                when {
+                    folderWatch && folderGranted ->
+                        "Alert me when they screenshot this chat (via your Screenshots folder)"
+                    folderWatch -> "Allow Photos so screenshots can be spotted"
+                    else -> "Alert me when they screenshot this chat"
+                },
             checked = shot,
-            enabled = captureOk,
+            enabled = true,
             onChange = onShot,
         )
         PrivacyToggle(

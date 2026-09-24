@@ -485,8 +485,12 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes("Alert me when they record this chat") &&
       chat.includes("They may save the media I send here") &&
       chat.includes("They cannot save the media I send here") &&
-      chat.includes('else "Android 14 or newer"') &&
-      chat.includes('else "Android 15 or newer"'),
+      // r72-18: the screenshot row is no longer "Android 14 or newer" — the
+      // 12/13 folder watch covers the versions below it, so the row is live
+      // everywhere; the screen-recording row keeps its honest floor.
+      chat.includes('else "Android 15 or newer"') &&
+      chat.includes("folderWatch = KpCapture.folderPermission() != null,") &&
+      chat.includes("folderGranted = KpCapture.folderGranted(ctx),"),
   );
   check(
     "r71-18: the alerts are wired to the OS callbacks — Android 14's ScreenCaptureCallback and Android 15's screen-recording state — reported only while that chat is the one on screen",
@@ -501,6 +505,36 @@ const main = (f) => read(`${ANDROID}/${f}`);
       cap.includes('Api.post("/api/conversations/$id/capture"') &&
       chat.includes("KpCapture.watch(MainActivity.current, convId)") &&
       chat.includes("onDispose { KpCapture.stop() }"),
+  );
+  check(
+    "r72-18 (owner: \"screenshot alert ta android 14 newer keno ami to Snapchat a dekhchi eita hocche Android 13/12 a o\"): below Android 14 the same alert reads the system's OWN Screenshots folder — the permission the switch asks for, a watermark set from today's newest shot, a MediaStore observer plus a slow poll while the chat is on screen, and a two-minute freshness rule so a late media scan never fakes an alert",
+    // the permission: READ_MEDIA_IMAGES on 13, READ_EXTERNAL_STORAGE below
+    cap.includes("fun folderPermission(): String?") &&
+      cap.includes("android.Manifest.permission.READ_MEDIA_IMAGES") &&
+      cap.includes("android.Manifest.permission.READ_EXTERNAL_STORAGE") &&
+      cap.includes("fun folderGranted(ctx: android.content.Context?): Boolean") &&
+      // the folder read: only Screenshots buckets / names, newest first
+      cap.includes("MediaStore.Images.Media.EXTERNAL_CONTENT_URI") &&
+      cap.includes('bucket.contains("screenshot")') &&
+      cap.includes('name.startsWith("screencap")') &&
+      cap.includes('MediaStore.Images.Media._ID + " DESC"') &&
+      // the watermark + the freshness window + the poll
+      cap.includes("watermark = newest.first") &&
+      cap.includes("val age = System.currentTimeMillis() / 1000 - addedSec") &&
+      cap.includes('if (age in 0..120) report("shot")') &&
+      cap.includes("registerContentObserver(") &&
+      cap.includes("h.postDelayed(this, 5_000)") &&
+      cap.includes("stopFolder()") &&
+      // armed only where the callback is missing, and only with the permission
+      cap.includes(
+        "if (folderPermission() != null && folderGranted(activity)) startFolder(activity)",
+      ) &&
+      // the switch asks for it (owner Q&A: on the switch, not at launch)
+      chat.includes("act.ensurePermissions(listOf(perm)) { capturePermNonce++ }") &&
+      chat.includes("DisposableEffect(convId, capturePermNonce) {") &&
+      chat.includes("var capturePermNonce by remember { mutableStateOf(0) }") &&
+      chat.includes("Alert me when they screenshot this chat (via your Screenshots folder)") &&
+      chat.includes("Allow Photos so screenshots can be spotted"),
   );
   check(
     "r71-18: the switches are the server's (read from the conversation, written back one at a time) and a capture alert lands as a red chip with one buzz",
