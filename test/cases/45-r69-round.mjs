@@ -346,10 +346,12 @@ const detail = (k, who, convId) =>
       !attach.includes('"${sel.size}"'),
   );
   check(
-    "r69-4: the mirror buzz is chat-screen-ONLY — the pure policy takes the route alone (the app-level foreground flag is not part of the decision)",
+    "r69-4 → r70-4: the policy is still the pure route test, and the CALL SITE now pairs it with the app's own foreground flag and with the tapper's `fromChat` proof — the owner's r70 finding was that a backgrounded or buried chat screen still buzzed (r70-4 put the flag back the r69 fix had dropped; case 47 and case 09 pin the rest)",
     emo.includes("fun mirrorsOnScreen(route: String, convId: String): Boolean") &&
       !emo.includes("foreground: Boolean") &&
-      chat.includes("EmojiFxPolicy.mirrorsOnScreen(Store.route, convId)"),
+      chat.includes("EmojiFxPolicy.mirrorsOnScreen(Store.route, convId)") &&
+      chat.includes('ev.optBoolean("fromChat", true)') &&
+      chat.includes("Store.foreground &&"),
   );
 }
 

@@ -70,15 +70,19 @@ const main = (f) => read(`${ANDROID}/${f}`);
       emo.includes('return route == "chat/$convId" || route.startsWith("chat/$convId?")'),
   );
   check(
-    "r68-4 / r69-4: the replay is enqueued only through it — being ON that chat screen is the condition (the app-level foreground flag is no longer consulted)",
+    // r70-4: the foreground flag is back (a backgrounded app is not on the chat
+    // screen) — the policy stays the pure route test, the call site pairs it
+    // with `Store.foreground` and the tapper's `fromChat`.
+    "r68-4 / r69-4 / r70-4: the replay is enqueued only through it — being ON that chat screen is the condition, now with the foreground flag and the frame's `fromChat` proof (a buried or backgrounded chat screen must not buzz)",
     chat.includes("EmojiFxPolicy.mirrorsOnScreen(Store.route, convId)") &&
-      !chat.includes("EmojiFxPolicy.mirrorsOnScreen(Store.foreground") &&
+      chat.includes("Store.foreground &&") &&
+      chat.includes('ev.optBoolean("fromChat", true)') &&
       (chat.match(/emojiFxReplays\.add\(/g) || []).length === 1,
   );
   check(
-    "r68-4: the local tap still buzzes (the user IS looking at the screen) and still posts /fx on every tap",
+    "r68-4: the local tap still buzzes (the user IS looking at the screen) and still posts /fx on every tap (r70-4 adds the tap's own `onChat` state to that POST)",
     emo.includes("if (isSingle) replay(local = true) else haptics.tap()") &&
-      emo.includes('Api.post("/api/messages/$mid/fx")'),
+      emo.includes('Api.post("/api/messages/$mid/fx", JSONObject().put("onChat", onChatNow))'),
   );
 }
 

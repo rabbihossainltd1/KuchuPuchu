@@ -850,7 +850,10 @@ fun ChatScreen(nav: NavController, convId: String) {
     /* instant paint + first refresh */
     LaunchedEffect(convId) {
         KpCrash.mark("chat-open")
-        Store.route = "chat/$convId"
+        // r70-4: Store.route is written by KpApp from the nav back stack now
+        // (one writer) — a chat screen that kept reporting itself while it sat
+        // under the media viewer or the app was backgrounded was the reason the
+        // mirrored reaction buzzed a phone nobody was looking at.
         // r64 E2EE: once per process — publish our public key when it changed
         // (fresh install / reinstall), so the peer can seal back to us.
         scope.launch { E2eeMsg.ensureOnce(ctx) }
@@ -1160,11 +1163,18 @@ fun ChatScreen(nav: NavController, convId: String) {
                         refreshMessages(forceNetwork = true)
                     }
                 "emoji_fx" ->
-                    // r68-4: the far side's buzz is a shared moment, so the
-                    // replay is enqueued ONLY while this chat is the screen the
-                    // user is looking at (foreground + this route) — otherwise
-                    // the other phone buzzed for an animation nobody saw.
+                    // r68-4 / r70-4: the far side's buzz is a shared moment and
+                    // it needs BOTH phones on the chat screen. This phone's half
+                    // is "the chat is really in front" — the app in the
+                    // foreground AND the nav-observed route (the same pair the
+                    // notification path has always used; r69 dropped the flag
+                    // and a backgrounded / buried chat screen buzzed again).
+                    // The other phone's half rides the frame itself: [fromChat]
+                    // is what the tapper's screen was when the reaction was
+                    // tapped (older clients send no body, so it defaults true).
                     if (ev.optString("conversationId") == convId &&
+                        ev.optBoolean("fromChat", true) &&
+                        Store.foreground &&
                         EmojiFxPolicy.mirrorsOnScreen(Store.route, convId)
                     ) {
                         ev.optString("mid").takeIf { it.isNotBlank() }?.let { emojiFxReplays.add(it) }
@@ -3117,7 +3127,6 @@ fun ChatScreen(nav: NavController, convId: String) {
         ) {
             IconButton(
                 onClick = { requestAttachExit {
-                    Store.route = ""
                     player.stop()
                     nav.popBackStack()
                 } },
@@ -4056,7 +4065,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                     haptics.confirm()
                     ScreenStore.dropConv(convId)
                     ScreenStore.pokeInbox()
-                    Store.route = ""
                     nav.popBackStack()
                 } else {
                     error = "Could not delete the chat. Try again."

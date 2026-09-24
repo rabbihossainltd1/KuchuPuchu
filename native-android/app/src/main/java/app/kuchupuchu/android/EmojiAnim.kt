@@ -37,26 +37,28 @@ import com.airbnb.lottie.compose.rememberLottieComposition
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 internal val emojiFxReplays = SnapshotStateList<String>()
 
 /**
  * r68-4 (owner: "ei haptic ta just tokhoni kaj korbe jokhon 2 ta user e same chat
  * screen a thakbe all time na") / r69-4 (owner, on the first fix: "maybe not
- * fixed (only chat screen a thaklei hobe eita)").
+ * fixed (only chat screen a thaklei hobe eita)") / r70-4 (owner, after r69:
+ * "peer chat screen a na thake ... amar phone e buzz kore").
  *
  * The mirrored reaction is a shared moment: the other phone replays the dance
- * AND buzzes — but only while ITS user has this chat open. r68-4 asked for the
- * foreground flag as well; the owner's clarification says the route IS the
- * condition — "only chat screen a thaklei hobe" — so the flag is no longer part
- * of the decision (and it could only ever suppress a mirror that should have
- * played: a stale false, a system dialog, the app switcher).
+ * AND buzzes — but only while ITS user has this chat open. "Open" is the route
+ * test below; the call sites pair it with `Store.foreground` (r70-4 put the
+ * flag back: a backgrounded app is not on the chat screen) and with the
+ * `fromChat` proof the tapper's own phone sends inside the frame, so the mirror
+ * needs BOTH sides to have been on the chat screen.
  *
- * Being on the chat screen is what the route already means: the same boundary
- * safe test the notification path uses (`chat/<id>` or `chat/<id>?...`), so a
- * chat screen buried under the media viewer, another route, or no route at all
- * never mirrors. Pure, so the decision is asserted off-device in
- * EmojiFxPolicyTest.
+ * The route test itself is the boundary-safe shape the notification path uses
+ * (`chat/<id>` or `chat/<id>?...`), and since r70-4 the route comes from the
+ * nav back stack, so a chat screen buried under the media viewer, another
+ * route, or no route at all never mirrors. Pure, so the decision is asserted
+ * off-device in EmojiFxPolicyTest.
  */
 internal object EmojiFxPolicy {
     fun mirrorsOnScreen(route: String, convId: String): Boolean {
@@ -254,9 +256,15 @@ private fun NotoEmojiGlyph(
         replayKey++
 
         if (local && mid.isNotBlank() && !mid.startsWith("c_")) {
+            // r70-4: the frame carries the tapper's own half of the condition —
+            // the tap happened while a chat screen was really in front. The
+            // receiving phone mirrors only when BOTH halves are true.
+            val onChatNow = Store.foreground && Store.route.startsWith("chat/")
             scope.launch {
                 runCatching {
-                    withContext(Dispatchers.IO) { Api.post("/api/messages/$mid/fx") }
+                    withContext(Dispatchers.IO) {
+                        Api.post("/api/messages/$mid/fx", JSONObject().put("onChat", onChatNow))
+                    }
                 }
             }
         }

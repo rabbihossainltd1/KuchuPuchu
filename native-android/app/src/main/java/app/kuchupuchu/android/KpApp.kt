@@ -18,6 +18,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.compose.foundation.layout.Box
@@ -177,6 +178,27 @@ fun KpApp() {
                       .fillMaxSize()
                       .then(if (bannerUp) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier),
               ) {
+            // r70-4 (owner, on the r69 fix: "jodi [peer] chat screen a na
+            // thake ... amar phone e buzz kore"): ONE writer for Store.route —
+            // the nav back stack itself. The chat screen used to set the route
+            // when it opened and clear it when the back arrow was tapped, so a
+            // chat buried under the media viewer / clip player / doc viewer, or
+            // an app that went to the background, kept reporting "chat/<id>"
+            // and the mirrored reaction buzzed a phone nobody was looking at.
+            // Every reader (the notification path, the in-app sound, the unread
+            // merge, the mirror) now sees what is really in front.
+            val navEntry by nav.currentBackStackEntryAsState()
+            LaunchedEffect(navEntry) {
+                val e = navEntry
+                val dest = e?.destination?.route
+                Store.route =
+                    when {
+                        dest == null -> ""
+                        dest == "chat/{id}" -> "chat/" + (e.arguments?.getString("id") ?: "")
+                        else -> dest
+                    }
+            }
+
             NavHost(
                 navController = nav,
                 startDestination = "main",

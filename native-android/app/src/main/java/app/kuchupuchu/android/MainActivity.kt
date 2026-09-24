@@ -336,10 +336,12 @@ class MainActivity : ComponentActivity() {
         // onPause also fires for a system dialog / the app switcher, and the
         // old "did any activity start" test would have kept it true and
         // suppressed the notification.
-        // r69 item 4 REVERSES last round's rule: the mirror buzz is no longer
-        // gated on `Store.foreground` at all (owner: "only chat screen a
-        // thaklei hobe" = being on the chat screen is the condition) — see
-        // EmojiFxPolicy.mirrorsOnScreen, which takes a route alone.
+        // r70-4: the flag IS part of the mirror again. r69 dropped it on the
+        // owner's "only chat screen a thaklei hobe", and the r70 report showed
+        // why it was needed: a chat screen behind the media viewer or an app in
+        // the background still counted as "on the chat screen" and the far
+        // phone buzzed for a reaction nobody could see. The mirror now wants
+        // foreground + the nav-observed route + the tapper's own `fromChat`.
         Store.foreground = false
         super.onPause()
     }

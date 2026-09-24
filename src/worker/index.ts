@@ -9590,11 +9590,19 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     if (row.kind !== "TEXT" && row.kind !== "STICKER")
       fail(400, "Only emoji rows replay.", "NOT_EMOJI");
     const now = Date.now();
+    // r70-4: the tapper's own half of "both users are on the chat screen".
+    // The app posts `onChat` (its foreground flag + its nav route at the moment
+    // of the tap); the frame carries it as `fromChat` so the receiving phone
+    // can require BOTH halves before it replays the dance and buzzes. A body
+    // that carries no flag (an older build) relays as `true` — the client keeps
+    // the behaviour it had.
+    const fromChat = typeof body.onChat === "boolean" ? body.onChat : true;
     ctx.waitUntil(
       broadcastRoomEvent(env, row.conv_id, {
         type: "emoji_fx",
         conversationId: row.conv_id,
         mid: row.id,
+        fromChat,
         at: nowIso(),
       }),
     );

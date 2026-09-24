@@ -9625,7 +9625,8 @@ const convBetween = (db, a, b) =>
         emo.includes("LottieCompositionSpec.Asset") &&
         emo.includes("noto-emoji") &&
         emo.includes("emojiFxReplays") &&
-        emo.includes('Api.post("/api/messages/$mid/fx")') &&
+        // r70-4: the tap now carries the tapper's own screen state.
+        emo.includes('Api.post("/api/messages/$mid/fx", JSONObject().put("onChat", onChatNow))') &&
         emo.includes("emojiFxReplays.remove(mid)") &&
         emo.includes("fun EmojiGlyphRow") &&
         chat.includes('"emoji_fx"') &&

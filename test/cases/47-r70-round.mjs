@@ -144,6 +144,35 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+/* ---- 4. the mirror needs BOTH phones on the chat screen (again) ---- */
+{
+  const app = main("KpApp.kt");
+  const chat = main("ChatScreen.kt");
+  const emo = main("EmojiAnim.kt");
+  const worker = read("src/worker/index.ts");
+  check(
+    "r70-4: Store.route has ONE writer again — the nav back stack (a chat buried under the media viewer / clip player / doc viewer, or a backgrounded app, used to keep claiming chat/<id>)",
+    app.includes("import androidx.navigation.compose.currentBackStackEntryAsState") &&
+      app.includes("val navEntry by nav.currentBackStackEntryAsState()") &&
+      app.includes('dest == "chat/{id}" -> "chat/" + (e.arguments?.getString("id") ?: "")') &&
+      !chat.includes('Store.route = "chat/$convId"') &&
+      !chat.includes('Store.route = ""'),
+  );
+  check(
+    "r70-4: this phone's half is \"really in front\" — the foreground flag AND the route (the same pair the notification path uses), plus the tapper's `fromChat` proof from the frame",
+    chat.includes('ev.optBoolean("fromChat", true)') &&
+      chat.includes("Store.foreground &&") &&
+      chat.includes("EmojiFxPolicy.mirrorsOnScreen(Store.route, convId)"),
+  );
+  check(
+    "r70-4: the tapper's app posts its own screen state with the tap (`onChat`), and the worker relays it as `fromChat` (a body-less tap keeps the old behaviour)",
+    emo.includes('Api.post("/api/messages/$mid/fx", JSONObject().put("onChat", onChatNow))') &&
+      emo.includes('val onChatNow = Store.foreground && Store.route.startsWith("chat/")') &&
+      worker.includes('const fromChat = typeof body.onChat === "boolean" ? body.onChat : true;') &&
+      worker.includes("fromChat,"),
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`r70-round: ${lines.length - broken} ok / ${broken} broken`);

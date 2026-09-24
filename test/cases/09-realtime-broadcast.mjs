@@ -456,6 +456,35 @@ async function mk(withDo, pokeSent = 0) {
   const o = await k.reg("n3rc@x.com", "n3rc");
   const r3 = await k.call("POST", `/api/messages/${m}/fx`, {}, o.token);
   check("N3r: a non-member cannot replay (403)", r3.status === 403, String(r3.status));
+
+  // r70-4 (owner, on the r69 mirror: "peer chat screen a na thake ... amar
+  // phone e buzz kore"): the frame now carries the TAPPER's half of "both users
+  // are on the chat screen", so the receiving phone can require both halves
+  // before it replays the dance and buzzes.
+  k.broadcasts.length = 0;
+  const tapOff = await k.call("POST", `/api/messages/${m}/fx`, { onChat: false }, a.token);
+  const off = k.broadcasts.find((x) => x.body.type === "emoji_fx");
+  check(
+    "r70-4: a tap from OFF the chat screen relays fromChat:false (the far phone must not mirror it)",
+    tapOff.status === 200 && !!off && off.body.fromChat === false,
+    JSON.stringify(off?.body),
+  );
+  k.broadcasts.length = 0;
+  const tapOn = await k.call("POST", `/api/messages/${m}/fx`, { onChat: true }, a.token);
+  const on = k.broadcasts.find((x) => x.body.type === "emoji_fx");
+  check(
+    "r70-4: a tap from the chat screen relays fromChat:true (both halves true ⇒ the mirror plays)",
+    tapOn.status === 200 && !!on && on.body.fromChat === true,
+    JSON.stringify(on?.body),
+  );
+  k.broadcasts.length = 0;
+  const tapBare = await k.call("POST", `/api/messages/${m}/fx`, {}, a.token);
+  const bare = k.broadcasts.find((x) => x.body.type === "emoji_fx");
+  check(
+    "r70-4: a body-less tap (an older installed build) relays fromChat:true — the behaviour it already had, never a silent mute",
+    tapBare.status === 200 && !!bare && bare.body.fromChat === true,
+    JSON.stringify(bare?.body),
+  );
 }
 
 console.log(lines.join("\n"));
