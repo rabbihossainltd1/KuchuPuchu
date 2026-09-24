@@ -76,6 +76,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -315,6 +316,28 @@ fun AttachPanel(
             folder == null -> pool.take(80)
             else -> pool.filter { it.bucket == folder }.take(80)
         }
+    // r69 (owner's crash report: java.lang.IndexOutOfBoundsException: index 0,
+    // size 0 inside AttachPanel): AnimatedVisibility composes its content ONE
+    // MORE TIME while it animates OUT — and by then `sel` is already empty
+    // (the last tile was untapped, or the batch was sent). Every read in the
+    // bar that indexed the list (`sel[0]`, the count badge) therefore hit an
+    // empty list and took the app down. The bar now paints a MIRROR of the last
+    // real state for that exit pass, written in SideEffect (after composition,
+    // never during it) so nothing writes state mid-composition.
+    var exitCount by remember { mutableStateOf(0) }
+    var exitCaption by remember { mutableStateOf("") }
+    var exitOnce by remember { mutableStateOf(false) }
+    SideEffect {
+        if (sel.isNotEmpty()) {
+            exitCount = sel.size
+            exitCaption = sel.firstOrNull()?.caption.orEmpty()
+            exitOnce = sel.all { it.once }
+        }
+    }
+    // Live while the bar is up, the mirror while it slides away.
+    val barCount = if (sel.isNotEmpty()) sel.size else exitCount
+    val barOnce = if (sel.isNotEmpty()) sel.all { it.once } else exitOnce
+
     // Owner round 39 (item 6): the batch's HD state (or the armed default
     // for the next taps) — the pill and every tick read the same value.
     val hdOn = if (sel.isEmpty()) hdArm else sel.all { it.hd }
@@ -873,10 +896,15 @@ fun AttachPanel(
                                 .padding(start = 12.dp, end = 2.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            val cap = sel[0].caption
+                            val cap = if (sel.isNotEmpty()) sel[0].caption else exitCaption
                             BasicTextField(
                                 value = cap,
-                                onValueChange = { t -> sel[0] = sel[0].copy(caption = t.take(1000)) },
+                                // r69: guarded — during the exit pass there is no
+                                // row to write to, and the field is on its way
+                                // out anyway.
+                                onValueChange = { t ->
+                                    if (sel.isNotEmpty()) sel[0] = sel[0].copy(caption = t.take(1000))
+                                },
                                 singleLine = true,
                                 textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
                                 cursorBrush = SolidColor(Color.White),
@@ -889,7 +917,7 @@ fun AttachPanel(
                                 },
                             )
                             Spacer(Modifier.size(6.dp))
-                            val allOnce = sel.all { it.once }
+                            val allOnce = barOnce
                             Box(
                                 Modifier
                                     .size(barH - 8.dp)
@@ -960,7 +988,7 @@ fun AttachPanel(
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text(
-                                    "${sel.size}",
+                                    "$barCount",
                                     color = ActionBlueInk,
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Bold,

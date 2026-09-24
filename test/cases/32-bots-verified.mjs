@@ -6691,7 +6691,10 @@ const convBetween = (db, a, b) =>
         attach.includes("onScheduleBatch()") &&
         attach.includes("onSendBatch()") &&
         // Owner round 42 (item 2): blue badge, white number, pinned center.
-        attach.includes('"${sel.size}"') &&
+        // r69: the badge reads the mirror count now — AnimatedVisibility
+        // composes its content once while it animates OUT, and `sel` is empty
+        // by then (that read was the owner's crash report).
+        attach.includes('"$barCount"') &&
         attach.includes("textAlign = TextAlign.Center") &&
         // Owner round 43 (item 2): the glyph itself centers (no font pad).
         attach.includes("PlatformTextStyle(includeFontPadding = false)") &&
