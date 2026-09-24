@@ -98,6 +98,28 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+/* -------- 15. the pencil seat wears the first ticked item's thumb -------- */
+{
+  const attach = main("AttachSheet.kt");
+  check(
+    "r70-15: the edit seat shows the FIRST ticked media's own thumbnail (same decode path as the grid), with a smaller pencil over a scrim — never a bare white glyph",
+    attach.includes("val editFirst = sel.firstOrNull()") &&
+      attach.includes("initialValue = editFirst?.let { ThumbCache.get(it.uri) },") &&
+      attach.includes("key1 = editFirst?.uri,") &&
+      attach.includes("ThumbDecodeGate.decode(one.uri, ctx, one.isVideo)") &&
+      !attach.includes("sel.lastOrNull()?.uri]"),
+  );
+  check(
+    "r70-15: it is still the editor's door — a tap opens the LAST ticked item in the editor, and the pencil is 16 dp (the seat is barH)",
+    attach.includes("sel.lastOrNull()?.let(onEdit)") &&
+      attach.includes('Icons.Filled.Edit,\n                                "Edit",') &&
+      attach.includes("modifier = Modifier.size(16.dp),") &&
+      !attach.includes(
+        'Icon(Icons.Filled.Edit, "Edit", tint = Color.White, modifier = Modifier.size(20.dp))',
+      ),
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`r70-round: ${lines.length - broken} ok / ${broken} broken`);

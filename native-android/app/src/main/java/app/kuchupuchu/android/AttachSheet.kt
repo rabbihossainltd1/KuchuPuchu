@@ -884,6 +884,29 @@ fun AttachPanel(
                         // Edit (pencil) button — r63-4: a round seat, 20.dp glyph.
                         // r70-14: the seat IS [barH] now (the 40 dp literal was
                         // the only control not riding the constant).
+                        // r70-15 (owner: "attach Panel a edit button tar rounded
+                        // circle background a selected phone/video ta dekha jabe
+                        // multiple holeo first neda ta dekha jabe chotto kore"):
+                        // the seat wears the FIRST ticked item's own thumbnail
+                        // behind a smaller pencil, so the button says what it
+                        // edits. Same decode path as the grid cell (process LRU
+                        // first, then the gated decode) — a visible cell is
+                        // already cached, so this costs nothing extra.
+                        val editFirst = sel.firstOrNull()
+                        val editThumb by
+                            produceState<ImageBitmap?>(
+                                initialValue = editFirst?.let { ThumbCache.get(it.uri) },
+                                key1 = editFirst?.uri,
+                            ) {
+                                val one = editFirst ?: return@produceState
+                                if (value == null) {
+                                    value =
+                                        withContext(Dispatchers.IO) {
+                                            ThumbCache.get(one.uri)
+                                                ?: ThumbDecodeGate.decode(one.uri, ctx, one.isVideo)?.also { b -> ThumbCache.put(one.uri, b) }
+                                        }
+                                }
+                            }
                         Box(
                             Modifier
                                 .size(barH)
@@ -895,7 +918,23 @@ fun AttachPanel(
                                 },
                             contentAlignment = Alignment.Center,
                         ) {
-                            Icon(Icons.Filled.Edit, "Edit", tint = Color.White, modifier = Modifier.size(20.dp))
+                            editThumb?.let { bmp ->
+                                Image(
+                                    bmp,
+                                    contentDescription = null,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop,
+                                )
+                                // A light scrim so the pencil stays readable over a
+                                // white photo (the owner's item 16 worry, same shape).
+                                Box(Modifier.fillMaxSize().background(Color(0x59000000)))
+                            }
+                            Icon(
+                                Icons.Filled.Edit,
+                                "Edit",
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp),
+                            )
                         }
                         Spacer(Modifier.size(8.dp))
                         // r66: one long caption pill contains the view-once
