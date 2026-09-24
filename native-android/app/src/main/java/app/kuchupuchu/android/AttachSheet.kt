@@ -14,7 +14,6 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -819,7 +818,14 @@ fun AttachPanel(
                 // somoy niche theke upore asbe animate hoye"): the bar is ONE
                 // rounded ground now — every control's own fill is gone — and
                 // it rises from below instead of appearing on a frame boundary.
-                AnimatedVisibility(
+                // The bare `AnimatedVisibility` here is the top-level one, NOT
+                // the ColumnScope extension: this Box sits inside a Column, and
+                // Kotlin resolves the scoped overload through the outer implicit
+                // receiver first (K2: "can't be called in this context by
+                // implicit receiver"). It has to be the one that takes a
+                // Modifier, because the seat is `Modifier.align` — a BoxScope
+                // call.
+                androidx.compose.animation.AnimatedVisibility(
                     visible = sel.isNotEmpty(),
                     enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
                     exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
