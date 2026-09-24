@@ -367,11 +367,14 @@ const bodies = (rows) => JSON.stringify(rows.map((m) => m.body));
   const api = main("Api.kt");
 
   check(
-    "r68-7/8: ONE shared dialog carries both popups — optional avatar + bold title, the question, the checkbox row (default UNTICKED), Cancel blue / Delete red",
+    "r68-7/8 (r69 geometry): ONE shared dialog carries both popups — optional avatar + bold title, the question, the checkbox row (default UNTICKED), Cancel blue / Delete red. r69 rebuilt the box to the owner's screenshot: usePlatformDefaultWidth = false + 16 dp side margins (the fat left-right gap was his complaint), 10 dp corners, 24/14/12 dp padding",
     ui.includes("fun KpDeleteDialog(") &&
       ui.includes("alsoDefault: Boolean = false") &&
       ui.includes("var also by remember { mutableStateOf(alsoDefault) }") &&
-      ui.includes(".border(2.dp, if (also) ActionBlue else Muted, RoundedCornerShape(6.dp))") &&
+      ui.includes("usePlatformDefaultWidth = false") &&
+      ui.includes("padding(horizontal = 16.dp)") &&
+      ui.includes("RoundedCornerShape(10.dp)") &&
+      ui.includes(".border(2.dp, if (also) ActionBlue else Muted, RoundedCornerShape(5.dp))") &&
       ui.includes(
         'Text("Cancel", color = ActionBlue, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)',
       ) &&

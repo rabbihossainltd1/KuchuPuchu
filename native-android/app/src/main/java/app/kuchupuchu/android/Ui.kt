@@ -830,48 +830,66 @@ fun KpDeleteDialog(
 ) {
     val haptics = rememberHaptics()
     var also by remember { mutableStateOf(alsoDefault) }
-    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+    // r69 (owner: "popup box ta mota hoye geche left right a jaiga rekhe mota
+    // keno korla screenshot a dekhcho koto sundor"): the box was fatter than his
+    // reference and its width came from the PLATFORM dialog default, which
+    // varies per device and theme. The geometry is now the reference measured
+    // off that screenshot (1080 px / 2.75 = a 393 dp screen):
+    //
+    //   card     screen - 32 dp  (16 dp margin each side), 10 dp corner
+    //   padding  24 dp sides, 14 dp top / 12 dp bottom
+    //   title    21 sp bold (34 dp avatar beside it, 12 dp gap)
+    //   body     16 sp, 21 sp line height
+    //   checkbox 20 dp seat, 2 dp border, 5 dp corner, 12 dp gap to its label
+    //   buttons  16 sp semibold, right-aligned, 12 dp apart
+    //
+    // …so the card can no longer drift with a device's dialog defaults: it is
+    // the full window width minus exactly 32 dp on every phone.
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
         Column(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 18.dp)
-                .clip(RoundedCornerShape(20.dp))
+                .padding(horizontal = 16.dp)
+                .clip(RoundedCornerShape(10.dp))
                 .background(Card)
-                .padding(horizontal = 20.dp, vertical = 18.dp),
+                .padding(start = 24.dp, end = 24.dp, top = 14.dp, bottom = 12.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (avatarUrl != null || avatarRef != null) {
-                    KpAvatar(avatarName, avatarUrl, 40.dp, avatarRef = avatarRef)
+                    KpAvatar(avatarName, avatarUrl, 34.dp, avatarRef = avatarRef)
                     Spacer(Modifier.width(12.dp))
                 }
                 Text(
                     title,
                     color = Ink,
-                    fontSize = 20.sp,
+                    fontSize = 21.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 2,
                 )
             }
             Spacer(Modifier.height(10.dp))
-            Text(question, color = Ink, fontSize = 15.sp, lineHeight = 21.sp)
+            Text(question, color = Ink, fontSize = 16.sp, lineHeight = 21.sp)
             if (alsoLabel != null) {
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(20.dp))
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(8.dp))
                         .clickable {
                             haptics.toggle(!also)
                             also = !also
                         }
-                        .padding(vertical = 6.dp),
+                        .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Box(
                         Modifier
-                            .size(22.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .border(2.dp, if (also) ActionBlue else Muted, RoundedCornerShape(6.dp))
+                            .size(20.dp)
+                            .clip(RoundedCornerShape(5.dp))
+                            .border(2.dp, if (also) ActionBlue else Muted, RoundedCornerShape(5.dp))
                             .background(if (also) ActionBlue else Color.Transparent),
                         contentAlignment = Alignment.Center,
                     ) {
@@ -880,15 +898,15 @@ fun KpDeleteDialog(
                                 Icons.Filled.Check,
                                 contentDescription = null,
                                 tint = ActionBlueInk,
-                                modifier = Modifier.size(15.dp),
+                                modifier = Modifier.size(14.dp),
                             )
                         }
                     }
                     Spacer(Modifier.width(12.dp))
-                    Text(alsoLabel, color = Ink, fontSize = 15.sp, maxLines = 2)
+                    Text(alsoLabel, color = Ink, fontSize = 16.sp, maxLines = 2)
                 }
             }
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(26.dp))
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
@@ -896,24 +914,24 @@ fun KpDeleteDialog(
             ) {
                 Box(
                     Modifier
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(8.dp))
                         .clickable {
                             haptics.tap()
                             onDismiss()
                         }
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
                 ) {
                     Text("Cancel", color = ActionBlue, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 }
-                Spacer(Modifier.width(10.dp))
+                Spacer(Modifier.width(12.dp))
                 Box(
                     Modifier
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(8.dp))
                         .clickable {
                             haptics.heavy()
                             onConfirm(also)
                         }
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
                 ) {
                     Text(confirmLabel, color = Red, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 }
