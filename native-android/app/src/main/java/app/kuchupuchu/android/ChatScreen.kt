@@ -3982,6 +3982,37 @@ fun ChatScreen(nav: NavController, convId: String) {
             }
         }
 
+        /* ---------------- deleting a chat (r68-7) ----------------
+           The DELETE itself lives here, in the screen's own scope, because the
+           answer comes from the popup below and the block wall's pill only
+           RAISES that popup. A local fun declared inside the wall's `if` would
+           be invisible from here (and Kotlin resolves local functions by
+           source order). */
+        var deletingChat by remember { mutableStateOf(false) }
+        fun deleteWallChat(forEveryone: Boolean) {
+            deletingChat = true
+            scope.launch {
+                val gone = runCatching {
+                    withContext(Dispatchers.IO) {
+                        Api.delete(
+                            "/api/conversations/$convId",
+                            JSONObject().put("forEveryone", forEveryone),
+                        )
+                    }
+                }.getOrNull()?.let { !it.has("error") } == true
+                deletingChat = false
+                if (gone) {
+                    haptics.confirm()
+                    ScreenStore.dropConv(convId)
+                    ScreenStore.pokeInbox()
+                    Store.route = ""
+                    nav.popBackStack()
+                } else {
+                    error = "Could not delete the chat. Try again."
+                }
+            }
+        }
+
         /* ---------------- the delete popup (r68-7 / r68-8) ----------------
            ONE step for every delete in this chat. The checkbox is the whole
            question: ticked = for BOTH sides, unticked = only this phone. */
@@ -4079,7 +4110,6 @@ fun ChatScreen(nav: NavController, convId: String) {
             var askedSent by remember { mutableStateOf(false) }
             var asking by remember { mutableStateOf(false) }
             var unblocking by remember { mutableStateOf(false) }
-            var deleting by remember { mutableStateOf(false) }
             // One small pill seat for all three actions — same size as
             // every other button in the app, never fat (owner rule).
             @Composable
@@ -4101,29 +4131,6 @@ fun ChatScreen(nav: NavController, convId: String) {
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                     )
-                }
-            }
-            fun deleteWallChat(forEveryone: Boolean) {
-                deleting = true
-                scope.launch {
-                    val gone = runCatching {
-                        withContext(Dispatchers.IO) {
-                            Api.delete(
-                                "/api/conversations/$convId",
-                                JSONObject().put("forEveryone", forEveryone),
-                            )
-                        }
-                    }.getOrNull()?.let { !it.has("error") } == true
-                    deleting = false
-                    if (gone) {
-                        haptics.confirm()
-                        ScreenStore.dropConv(convId)
-                        ScreenStore.pokeInbox()
-                        Store.route = ""
-                        nav.popBackStack()
-                    } else {
-                        error = "Could not delete the chat. Try again."
-                    }
                 }
             }
             Column(
@@ -4179,7 +4186,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 }
                             }
                         }
-                        wallPill(if (deleting) "Deleting…" else "Delete chat", deleting, true) {
+                        wallPill(if (deletingChat) "Deleting…" else "Delete chat", deletingChat, true) {
                             confirmDeleteChat = true
                         }
                     }

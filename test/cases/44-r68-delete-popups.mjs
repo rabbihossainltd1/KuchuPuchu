@@ -434,9 +434,8 @@ const bodies = (rows) => JSON.stringify(rows.map((m) => m.body));
     chat.includes("confirmDeleteChat = true") &&
       chat.includes("deleteWallChat(also)") &&
       chat.includes("fun deleteWallChat(forEveryone: Boolean)") &&
-      chat.includes(
-        '"/api/conversations/$convId",\n                                JSONObject().put("forEveryone", forEveryone),',
-      ) &&
+      chat.includes('"/api/conversations/$convId",') &&
+      chat.includes('JSONObject().put("forEveryone", forEveryone),') &&
       cl.includes("KpDeleteDialog(") &&
       cl.includes('title = "Delete Chat"') &&
       cl.includes('Api.delete("/api/conversations/$id", JSONObject().put("forEveryone", also))'),

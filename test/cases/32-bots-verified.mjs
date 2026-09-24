@@ -8080,13 +8080,17 @@ const convBetween = (db, a, b) =>
         wall38.includes("fun wallPill(") &&
         wall38.includes("else if (red) Red else ActionBlue") &&
         wall38.includes('"Delete chat"') &&
-        wall38.includes("fun deleteWallChat(forEveryone: Boolean)") &&
-        wall38.includes('"Delete chat", deleting, true) {') &&
+        // r68-7: the wall's pill only RAISES the popup — the DELETE itself moved
+        // to the screen's own scope (the popup's answer is what calls it, and a
+        // local fun inside this `if` would be invisible from there), so its body
+        // is asserted against the whole file, not this slice.
+        wall38.includes('"Delete chat", deletingChat, true) {') &&
         wall38.includes("confirmDeleteChat = true") &&
-        wall38.includes('"/api/conversations/$convId",') &&
-        wall38.includes('JSONObject().put("forEveryone", forEveryone),') &&
-        wall38.includes("ScreenStore.dropConv(convId)") &&
-        wall38.includes("nav.popBackStack()") &&
+        chatW38.includes("fun deleteWallChat(forEveryone: Boolean)") &&
+        chatW38.includes('"/api/conversations/$convId",') &&
+        chatW38.includes('JSONObject().put("forEveryone", forEveryone),') &&
+        chatW38.includes("ScreenStore.dropConv(convId)") &&
+        chatW38.includes("nav.popBackStack()") &&
         wall38.indexOf('"Delete chat"') < wall38.indexOf('"This User Is Unavailable"'),
     );
   }
