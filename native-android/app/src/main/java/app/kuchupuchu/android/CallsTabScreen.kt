@@ -261,7 +261,6 @@ internal fun CallRow(call: JSONObject, onOpenChat: () -> Unit) {
                 Modifier
                     .padding(horizontal = 3.dp)
                     .size(40.dp)
-                    .kpLift(4.dp, CircleShape)
                     .clip(CircleShape)
                     .background(circleButtonFill())
                     .border(1.dp, CircleButtonEdge, CircleShape)

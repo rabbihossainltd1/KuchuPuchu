@@ -1381,14 +1381,11 @@ private fun MediaEditItemScreen(
         // that cannot fire just dims.
         // v170: the seat keeps the bare glyph (no fill, no border).
         // r70-16 asked for a halo over white media; r71-16 swapped it for the
-        // media-reading ink, and r72-16 ("shadow o add koro black hole white
-        // show white hole black shadow") brings the halo back on top of it —
-        // tinted by the theme, so it is white on the dark-blue theme and black
-        // on the light one.
+        // media-reading ink; r73-16 (owner: "ei shadow use na korte") keeps the
+        // halo out too — the glyphs read the media, nothing is drawn behind it.
         Box(
             Modifier
                 .size(40.dp)
-                .kpLift(8.dp, CircleShape)
                 .alpha(if (can) 1f else 0.35f)
                 .clickable(enabled = can) { onClick() },
             contentAlignment = Alignment.Center,
@@ -1899,7 +1896,7 @@ private fun MediaEditItemScreen(
                     .padding(horizontal = 4.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = { if (cropping) exitCrop() else nav.popBackStack() }, modifier = Modifier.size(36.dp).kpLift(6.dp, CircleShape)) {
+                IconButton(onClick = { if (cropping) exitCrop() else nav.popBackStack() }, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.Filled.Close, "Close", tint = Color.White, modifier = Modifier.size(20.dp))
                 }
                 // v170 (owner: "done button left side a thakbe"): Done rides
@@ -1936,7 +1933,7 @@ private fun MediaEditItemScreen(
                 // side by side, plain glyphs - no circle, no border.
                 Spacer(Modifier.weight(1f))
                 if (shot != null || clip != null) {
-                    IconButton(onClick = { haptics.tap(); undoEdit() }, enabled = canUndo, modifier = Modifier.size(32.dp).kpLift(6.dp, CircleShape)) {
+                    IconButton(onClick = { haptics.tap(); undoEdit() }, enabled = canUndo, modifier = Modifier.size(32.dp)) {
                         Icon(
                             Icons.AutoMirrored.Filled.Undo,
                             "Undo",
@@ -1944,7 +1941,7 @@ private fun MediaEditItemScreen(
                             modifier = Modifier.size(20.dp),
                         )
                     }
-                    IconButton(onClick = { haptics.tap(); redoEdit() }, enabled = canRedo, modifier = Modifier.size(32.dp).kpLift(6.dp, CircleShape)) {
+                    IconButton(onClick = { haptics.tap(); redoEdit() }, enabled = canRedo, modifier = Modifier.size(32.dp)) {
                         Icon(
                             Icons.AutoMirrored.Filled.Redo,
                             "Redo",

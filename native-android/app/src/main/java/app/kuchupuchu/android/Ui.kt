@@ -62,10 +62,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
@@ -1600,20 +1598,3 @@ fun KpKeepTop(listState: LazyListState, headKey: Any?) {
         if (nearTop) listState.requestScrollToItem(0)
     }
 }
-
-/**
- * r72-16 (owner: "shadow o add koro black hole white show white hole black
- * shadow"): the soft 3D lift r71-16 removed comes back, and its COLOUR reads the
- * surface it falls on — on the dark-blue theme the shadow is WHITE, on the light
- * (cream) theme it is BLACK, so the lift never drowns in the background under it
- * and a white surface gets a shadow you can actually see. Below API 28 the
- * platform ignores the ambient/spot tints; the elevation still reads as a plain
- * shadow there, which is why nothing about the shape changes.
- */
-fun Modifier.kpLift(elevation: Dp, shape: Shape): Modifier =
-    shadow(
-        elevation = elevation,
-        shape = shape,
-        ambientColor = if (KpThemeMode.darkBlue) Color(0x38FFFFFF) else Color(0x38000000),
-        spotColor = if (KpThemeMode.darkBlue) Color(0x70FFFFFF) else Color(0x70000000),
-    )

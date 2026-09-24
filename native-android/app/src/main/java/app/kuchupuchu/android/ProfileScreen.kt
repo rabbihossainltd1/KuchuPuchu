@@ -784,7 +784,6 @@ private fun ProfileHeaderCallBtn(onClick: () -> Unit, icon: @Composable () -> Un
         Modifier
             .padding(horizontal = 3.dp)
             .size(50.dp)
-            .kpLift(5.dp, CircleShape)
             .clip(CircleShape)
             .background(circleButtonFill())
             .border(1.dp, CircleButtonEdge, CircleShape)

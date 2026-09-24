@@ -5337,9 +5337,8 @@ private fun Composer(
                         .fxMicAnchor()
                         .pressScale(sendInteraction)
                         // Owner round 10: the send/mic circles carry the same 3D
-                        // lift as the header call buttons now. r72-16: the lift
-                        // is back, tinted from the theme.
-                        .kpLift(4.dp, CircleShape)
+                        // lift as the header call buttons now. r73-16 (owner,
+                        // again): no shadow anywhere — the fill carries it.
                         .clip(CircleShape)
                         .background(accent)
                         // Owner round 32 (item 18): tap = send, hold = "send
@@ -5430,9 +5429,8 @@ private fun HoldMicButton(
         Modifier
             .size(42.dp)
             .offset { IntOffset((if (recording) animX else 0f).roundToInt(), 0) }
-            // r72-16: the lift is back, and its colour reads the theme —
-            // dark-blue shows a white shadow, the light theme a black one.
-            .kpLift(3.dp, CircleShape)
+            // r71-16 (owner: "ei shadow ta amar ekdomi valo lage na"): the
+            // 3D-lift drop shadow stays gone. The ring + fill carry the button.
             .clip(CircleShape)
             .alpha(if (enabled) 1f else 0.4f)
             // Owner round 14: the ring was transparent unless cancel was
@@ -5618,8 +5616,8 @@ private fun PulsingDot() {
 
 
 /**
- * Small raised 3D circle for the header call icons: top-lit gradient,
- * drop shadow, hairline bevel.
+ * Small raised 3D circle for the header call icons: top-lit gradient and a
+ * hairline bevel (no drop shadow — r73-16).
  */
 @Composable
 private fun HeaderCallBtn(onClick: () -> Unit, icon: @Composable () -> Unit) {
@@ -6963,13 +6961,12 @@ private fun MessageRow(
                     // r60 (owner: "short massage bubble size to ami kom korchilam maybe 78/79 but receive short massage er size kom hoini eitaw set koro"):
                     // compact 52.dp minimum width applies to received short messages (and 70.dp for sent).
                     .then(if (noBubble) Modifier else Modifier.requiredWidthIn(min = if (!mine) 52.dp else 70.dp)) // .then(if (emojiOnly > 0) Modifier else Modifier.requiredWidthIn(min = 79.dp))
-                    // r72-16: the bubbles float again — the lift's colour is
-                    // read from the theme (white on dark-blue, black on light),
-                    // so the fill + hairline border still do the drawing.
+                    // r71-16 (owner: "ei shadow ta amar ekdomi valo lage na"):
+                    // the bubbles' drop shadow is gone — the fill + the hairline
+                    // border carry the bubble on the wallpaper now.
                     // Owner round 32 (item 8): an emoji-only message has NO
                     // bubble at all — no lift, no fill — the glyph sits on the
                     // wallpaper with its stamp under it.
-                    .then(if (noBubble) Modifier else Modifier.kpLift(2.dp, bubbleShape))
                     .clip(bubbleShape)
                     .background(
                         when {
@@ -7662,7 +7659,6 @@ private fun VideoMessageRow(
         Box(
             Modifier
                 .offset { IntOffset(replyOffset.roundToInt(), 0) }
-                .kpLift(2.dp, RoundedCornerShape(12.dp))
                 .clip(RoundedCornerShape(12.dp))
                 .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
                 .background(Color(0xFF0B1220))
@@ -7938,7 +7934,6 @@ private fun OnceTextRow(
                     .widthIn(max = bubbleMax)
                     .wrapContentWidth()
                     .requiredWidthIn(min = if (mine) 70.dp else 52.dp)
-                    .kpLift(2.dp, shape)
                     .clip(shape)
                     .background(if (mine) chatMineFill(theme) else chatOtherFill(theme))
                     .pointerInput(id) {
@@ -8286,7 +8281,6 @@ private fun ViewOnceRow(
                                 .height(138.dp)
                         },
                     )
-                    .kpLift(2.dp, bubbleShape)
                     .clip(bubbleShape)
                     .background(Color(0xFF1B1E26))
                     .border(
@@ -8579,9 +8573,8 @@ private fun ImageMessageRow(
                 .offset { IntOffset(replyOffset.roundToInt(), 0) }
                 .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
                 .widthIn(max = 120.dp) // Owner round 25 / 32 item 29 / 33 item 18: smaller inline preview
-                // r72-16: photos keep the round-8 frame and the lift is back.
+                // r71-16: photos keep the round-8 frame with NO drop shadow.
                 // thin border.
-                .kpLift(2.dp, RoundedCornerShape(12.dp))
                 .clip(RoundedCornerShape(12.dp))
                 // Owner round 8/16: thin photo border — gray-BLUE on dark-blue,
                 // gray-BLACK on cream, so the frame matches the app theme.
@@ -8924,7 +8917,6 @@ private fun AlbumMessageRow(
                     .offset { IntOffset(replyOffset.roundToInt(), 0) }
                     .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
                     .width(albumW)
-                    .kpLift(2.dp, shape)
                     .clip(shape)
                     .border(
                         1.dp,
@@ -10512,7 +10504,6 @@ private fun OwnerCardBubble(m: JSONObject, onMessageOwner: (String) -> Unit) {
         Column(
             Modifier
                 .width(cardMax)
-                .kpLift(4.dp, RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 5.dp, bottomEnd = 16.dp))
                 .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 5.dp, bottomEnd = 16.dp))
                 .background(Brush.linearGradient(listOf(Card, Card))),
         ) {
