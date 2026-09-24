@@ -189,6 +189,19 @@ const bodies = (rows) => JSON.stringify(rows.map((m) => m.body));
   const cid = await k.solo(A, B.user.id);
   await k.send(A, cid, "needle-untick-one");
   await k.send(B, cid, "needle-untick-two");
+  // Both TEXT fixtures are aged like the photo below: the unticked delete writes
+  // a TIME watermark, and the round-13 data-loss guard deliberately keeps a row
+  // whose created_at is EQUAL to the watermark visible. On a fast machine the
+  // delete can land in the same millisecond as the second send, that row then
+  // survives, and it revives the chat in the list — the fixture must be clearly
+  // older than the delete, so it ages it here (CI caught this, not the sandbox).
+  const aged = new Date(Date.now() - 90_000).toISOString();
+  await k.db._db
+    .prepare("UPDATE messages SET created_at = ? WHERE conv_id = ? AND kind = 'TEXT'")
+    .run(aged, cid);
+  await k.db._db
+    .prepare("UPDATE conversations SET last_message_at = ? WHERE id = ?")
+    .run(aged, cid);
   // A photo row (the media tab's own path): a real object in the bucket + the
   // IMAGE row pointing at it.
   await k.db._db

@@ -161,6 +161,18 @@ async function mk() {
   const cid = await k.solo(A, B.user.id);
   await k.send(A, cid, "m1");
   await k.send(B, cid, "m2");
+  // r69: age both rows before the unticked delete. The watermark is the delete's
+  // instant and the round-13 guard keeps a row created AT that instant visible
+  // (data-loss protection) — on a fast machine the delete can share the second
+  // message's millisecond and the row then survives, reviving the chat. The
+  // fixture must be clearly older than the delete (CI caught this on case 44).
+  const aged = new Date(Date.now() - 90_000).toISOString();
+  await k.db._db
+    .prepare("UPDATE messages SET created_at = ? WHERE conv_id = ? AND kind = 'TEXT'")
+    .run(aged, cid);
+  await k.db._db
+    .prepare("UPDATE conversations SET last_message_at = ? WHERE id = ?")
+    .run(aged, cid);
   const del = await k.call("DELETE", `/api/conversations/${cid}`, { forEveryone: false }, B.token);
   check(
     "r68-7 (unticked): the answer says so",
