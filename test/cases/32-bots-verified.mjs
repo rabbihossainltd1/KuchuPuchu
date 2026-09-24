@@ -3517,8 +3517,9 @@ const convBetween = (db, a, b) =>
           check(
             "r33-6: worker — members.hidden_key migration, MEMBER_COLS carries it, /hide writes hidden + hidden_key in one UPDATE (key only on a hide, trimmed, ≤128), the detail exposes hiddenKey for the caller only, the marker moves with it, /api/search joins members with hidden = 0",
             w.includes("`ALTER TABLE members ADD COLUMN hidden_key TEXT`,") &&
+              w.includes("const MEMBER_COLS =") &&
               w.includes(
-                'const MEMBER_COLS = "conv_id, user_id, role, muted, unread, last_read_at, hidden, hidden_key";',
+                '"conv_id, user_id, role, muted, unread, last_read_at, hidden, hidden_key, muted_call, muted_msg";',
               ) &&
               w.includes(
                 '"UPDATE members SET hidden = ?, hidden_key = ? WHERE conv_id = ? AND user_id = ?",',
@@ -3689,11 +3690,11 @@ const convBetween = (db, a, b) =>
             search.includes('item { SectionLabel("Calls") }'),
         );
         check(
-          "r31-26: app — no notification card, no in-app tone, no list alert for a hidden chat (push handler drops it; the tone + list paths use isSilenced = muted || hidden)",
+          "r31-26 (r69): app — no notification card, no in-app tone, no list alert for a hidden chat (push handler drops it; the tone + list paths use isSilenced = MSG mute || hidden — a chat muted for calls only still notifies)",
           kt("KpPush.kt").includes("if (ScreenStore.isHidden(convoId)) {") &&
             kt("KpApp.kt").includes("!ScreenStore.isSilenced(cid)") &&
             kt("ScreenStore.kt").includes(
-              "fun isSilenced(convId: String): Boolean = isMuted(convId) || isHidden(convId)",
+              "fun isSilenced(convId: String): Boolean = isMsgMuted(convId) || isHidden(convId)",
             ) &&
             kt("ScreenStore.kt").includes("if (isSilenced(convId)) return false") &&
             kt("ScreenStore.kt").includes("append(c.optBoolean(\"hidden\")).append('|')"),
@@ -5199,7 +5200,7 @@ const convBetween = (db, a, b) =>
     profile32.indexOf("if (confirmReport) {"),
   );
   check(
-    "r32-6: profile ⋮ → KpSheet with Add contact (only when !inBook) / Block-Unblock (never for owner or bots) / Hide-Unhide / Mute-Unmute / Report (confirm sheet → POST /api/reports)",
+    "r32-6 (r69): profile ⋮ → KpSheet with Add contact (only when !inBook) / Block-Unblock (never for owner or bots) / Hide-Unhide / Mute (opens the call/message chooser) / Report (confirm sheet → POST /api/reports)",
     profile32.includes('Icon(Icons.Filled.MoreVert, "More", tint = Ink)') &&
       menu32.includes("KpSheet(onDismiss = { moreOpen = false }) {") &&
       menu32.includes(
@@ -5213,8 +5214,10 @@ const convBetween = (db, a, b) =>
         'KpSheetRow(Icons.Filled.VisibilityOff, if (hidden) "Unhide" else "Hide") {',
       ) &&
       menu32.includes(
-        'KpSheetRow(Icons.Filled.NotificationsOff, if (muted) "Unmute" else "Mute") {',
+        'KpSheetRow(Icons.Filled.NotificationsOff, if (muted) "Unmute…" else "Mute…") {',
       ) &&
+      menu32.includes("askMute = true") &&
+      menu32.includes("ScreenStore.setMutedAspects(cid, callOff, msgOff)") &&
       menu32.includes('KpSheetRow(Icons.Filled.Flag, "Report", tint = Red) {') &&
       profile32.includes('title = "Report this account?",') &&
       profile32.includes('Api.post("/api/reports", JSONObject().put("userId", userId))') &&
@@ -5466,7 +5469,8 @@ const convBetween = (db, a, b) =>
     );
     const order = [
       'KpSheetRow(Icons.Filled.Delete, "Delete", tint = Red)',
-      'if (allMuted) "Unmute" else "Mute",',
+      // r69: the mute row opens the two-row chooser (call mute / message mute).
+      'if (allMuted) "Unmute…" else "Mute…",',
       'KpSheetRow(Icons.Filled.PushPin, if (allPinned) "Unpin" else "Pin")',
       'KpSheetRow(Icons.Filled.GroupAdd, "Create group with $handle")',
       'KpSheetRow(Icons.Filled.CheckCircle, "Select")',
@@ -5492,7 +5496,13 @@ const convBetween = (db, a, b) =>
         // r68-7: Delete / Mute / Pin / Create group / Select — the helper row
         // sits outside this slice (before the popup it was the same five).
         (sheet.match(/KpSheetRow\(/g) || []).length === 5 &&
-        sheet.includes('if (allMuted) "Unmute" else "Mute",') &&
+        sheet.includes('if (allMuted) "Unmute…" else "Mute…"') &&
+        // r69: the sheet hands the mute to the LIST-level chooser (its own state
+        // dies with the sheet), which is where KpMuteChooser + the write live.
+        sheet.includes("ListSelect.muteFor = target") &&
+        cl.includes("ListSelect.muteFor?.let { target ->") &&
+        cl.includes("KpMuteChooser(") &&
+        cl.includes("muteIds.forEach { muteAspectsNow(scope, it, callOff, msgOff) }") &&
         sheet.includes('KpSheetRow(Icons.Filled.PushPin, if (allPinned) "Unpin" else "Pin")') &&
         sheet.includes('KpSheetRow(Icons.Filled.GroupAdd, "Create group with $handle")') &&
         sheet.includes('nav.navigate("newgroup?with=${peers.joinToString(",")}")') &&
@@ -5862,7 +5872,9 @@ const convBetween = (db, a, b) =>
         ) &&
         chat.includes('val requestPending = !isGroup && c?.optBoolean("requestPending") == true') &&
         chat.includes("val requestOpen = requestPending || requestSent") &&
-        chat.includes("if (!isGroup && c != null && !botChat && !requestOpen && !blockWall) {") &&
+        chat.includes(
+          "if (!isGroup && c != null && !botChat && !requestOpen && !blockWall && !callMuted) {",
+        ) &&
         chat.includes('requestOpen -> " "') &&
         chat.includes(
           'if (!requestOpen) {\n                            KpSheetRow(Icons.Filled.PermMedia, "Media, links, and docs")',
@@ -6042,11 +6054,13 @@ const convBetween = (db, a, b) =>
       '"Group Media"',
       '"Theme"',
       '"Search"',
-      'if (muted) "Unmute" else "Mute"',
+      // r69: the Mute row opens the two-row chooser (call mute / message
+      // mute) instead of flipping one flag.
+      'if (muted) "Unmute…" else "Mute…"',
       '"Leave Group"',
     ];
     check(
-      "r32-5a: the chat ⋮ is a KpSheet (no DropdownMenu anywhere in the chat); a group's list is exactly Add Members (admin, open group) / Group Media (open group) / Theme / Search / Mute-Unmute / Leave Group (confirm sheet → DELETE members/me) in that order",
+      "r32-5a (r69): the chat ⋮ is a KpSheet (no DropdownMenu anywhere in the chat); a group's list is exactly Add Members (admin, open group) / Group Media (open group) / Theme / Search / Mute-Unmute (opens the call/message chooser) / Leave Group (confirm sheet → DELETE members/me) in that order",
       !chat.includes("DropdownMenu") &&
         chat.includes("KpSheet(onDismiss = { menuOpen = false }) {") &&
         order.every(
@@ -6163,7 +6177,10 @@ const convBetween = (db, a, b) =>
       chat.includes(
         'CallEngine.instance?.startGroupCall(convId, "AUDIO", title, avatarRef ?: "")',
       ) &&
-        chat.includes("if (isGroup && c != null) {\n                HeaderCallBtn(onClick = {") &&
+        // r69: …and they are withheld entirely while the chat's CALLS are muted.
+        chat.includes(
+          "if (isGroup && c != null && !callMuted) {\n                HeaderCallBtn(onClick = {",
+        ) &&
         calls.includes("internal fun ParticipantRow(call: CallUi) {") &&
         calls.includes(
           "internal fun CallAvatar(call: CallUi, size: androidx.compose.ui.unit.Dp) {",

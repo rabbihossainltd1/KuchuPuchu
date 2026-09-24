@@ -131,6 +131,8 @@ fun ProfileScreen(nav: NavController, userId: String) {
         var confirmReport by remember { mutableStateOf(false) }
         // Owner round 33 (item 6): Hide asks for the secret key in its own sheet.
         var askHideKey by remember { mutableStateOf(false) }
+        // r69: the mute chooser (call mute / message mute) for this peer's chat.
+        var askMute by remember { mutableStateOf(false) }
         val ctx = LocalContext.current
         val peerConvForMenu = ScreenStore.convs.firstOrNull { !it.optBoolean("isGroup") && it.optJSONObject("other")?.optString("id") == userId }
         val unblockable = isMe || isKpBot(userId) || user?.optText("username") == "rabbihossainltd"
@@ -249,23 +251,43 @@ fun ProfileScreen(nav: NavController, userId: String) {
                         askHideKey = true
                     }
                 }
-                KpSheetRow(Icons.Filled.NotificationsOff, if (muted) "Unmute" else "Mute") {
+                KpSheetRow(Icons.Filled.NotificationsOff, if (muted) "Unmute…" else "Mute…") {
+                    // r69: the profile menu's Mute opens the SAME two-row chooser
+                    // as the chat and the chat list (call mute / message mute) —
+                    // no entry point keeps its own blind toggle.
                     moreOpen = false
-                    withConv { cid ->
-                        val next = !muted
-                        ScreenStore.setMuted(cid, next)
-                        scope.launch {
-                            runCatching {
-                                withContext(Dispatchers.IO) { Api.post("/api/conversations/$cid/mute", JSONObject().put("muted", next)) }
-                            }.onFailure { ScreenStore.setMuted(cid, !next) }
-                        }
-                    }
+                    askMute = true
                 }
                 KpSheetRow(Icons.Filled.Flag, "Report", tint = Red) {
                     moreOpen = false
                     confirmReport = true
                 }
             }
+        }
+        if (askMute) {
+            val pc = peerConvForMenu
+            KpMuteChooser(
+                callMuted = pc?.optBoolean("mutedCall") == true,
+                msgMuted = pc?.optBoolean("mutedMsg") == true,
+                onPick = { callOff, msgOff ->
+                    askMute = false
+                    val cid = pc?.optString("id").orEmpty()
+                    if (cid.isNotBlank()) {
+                        ScreenStore.setMutedAspects(cid, callOff, msgOff)
+                        scope.launch {
+                            runCatching {
+                                withContext(Dispatchers.IO) {
+                                    Api.post(
+                                        "/api/conversations/$cid/mute",
+                                        JSONObject().put("call", callOff).put("msg", msgOff),
+                                    )
+                                }
+                            }.onFailure { ScreenStore.setMutedAspects(cid, !callOff, !msgOff) }
+                        }
+                    }
+                },
+                onDismiss = { askMute = false },
+            )
         }
         if (askHideKey) {
             HideKeySheet(onDismiss = { askHideKey = false }) { key ->

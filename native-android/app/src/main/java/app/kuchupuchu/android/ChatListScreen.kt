@@ -391,6 +391,26 @@ fun ChatListScreen(nav: NavController) {
                     onDismiss = { ListSelect.sheetFor = null },
                 )
             }
+            // r69: the mute chooser for the ticked rows (or the single row the
+            // sheet was opened from) — see KpMuteChooser.
+            ListSelect.muteFor?.let { target ->
+                val muteIds =
+                    ListSelect.ids.toList().ifEmpty { listOf(target.optString("id")) }
+                val muteRows =
+                    muteIds.mapNotNull { id -> convs.firstOrNull { it.optString("id") == id } }
+                        .ifEmpty { listOf(target) }
+                KpMuteChooser(
+                    callMuted = muteRows.all { it.optBoolean("mutedCall") },
+                    msgMuted = muteRows.all { it.optBoolean("mutedMsg") },
+                    onPick = { callOff, msgOff ->
+                        ListSelect.muteFor = null
+                        haptics.confirm()
+                        muteIds.forEach { muteAspectsNow(scope, it, callOff, msgOff) }
+                        ListSelect.clear()
+                    },
+                    onDismiss = { ListSelect.muteFor = null },
+                )
+            }
 
             /* ---------- big top tabs ---------- */
             // Owner round 31 (item 26): hidden chats do not count — a badge
@@ -459,14 +479,18 @@ internal object ListSelect {
     val ids = mutableStateListOf<String>()
     var active by mutableStateOf(false)
     var sheetFor by mutableStateOf<JSONObject?>(null)
+    // r69: which row's Mute chooser is up. The chooser cannot live inside
+    // ChatRowSheet — that composable leaves the tree the moment the row's
+    // sheet closes, and its remember{} would take the chooser with it.
+    var muteFor by mutableStateOf<JSONObject?>(null)
 
     fun clear() {
         ids.clear()
         active = false
         sheetFor = null
+        // NOT muteFor: clearing the selection (or the sheet) must not kill a
+        // chooser the user is answering.
     }
-
-
 
     fun toggle(id: String) {
         if (id in ids) ids.remove(id) else ids.add(id)
@@ -976,6 +1000,9 @@ private fun SwipeConvRow(
     // r69: the swipe's Delete raises the chat-delete popup (the same one the
     // long-press sheet and the multi-select bar use) instead of deleting on the
     // spot. Confirm = the row shrinks away (r33-11b) and the shared delete runs.
+    var askDelete by remember { mutableStateOf(false) }
+    // r69: the swipe Mute slot asks the same two-row chooser (call / messages).
+    var askMute by remember { mutableStateOf(false) }
     fun hide(key: String) {
         haptics.confirm()
         val id = conv.optString("id")
@@ -1000,7 +1027,6 @@ private fun SwipeConvRow(
     LaunchedEffect(SwipeOpen.id) {
         if (SwipeOpen.id != convId && dragged != 0f) dragged = 0f
     }
-    var askDelete by remember { mutableStateOf(false) }
     if (askKey) {
         HideKeySheet(onDismiss = { askKey = false }) { key ->
             askKey = false
@@ -1031,6 +1057,21 @@ private fun SwipeConvRow(
             },
         )
     }
+    if (askMute) {
+        KpMuteChooser(
+            callMuted = conv.optBoolean("mutedCall"),
+            msgMuted = conv.optBoolean("mutedMsg"),
+            onPick = { callOff, msgOff ->
+                askMute = false
+                haptics.confirm()
+                muteAspectsNow(scope, convId, callOff, msgOff)
+            },
+            onDismiss = {
+                askMute = false
+                dragged = 0f
+            },
+        )
+    }
 
     Box(Modifier.fillMaxWidth().height(76.dp).vanishOut(vanishing) {}.then(swipeFocusTouch(convId))) {
         /* revealed actions: delete/mute sit on the RIGHT of the card,
@@ -1051,18 +1092,13 @@ private fun SwipeConvRow(
                         tint = ActionBlueDeep,
                         label = if (conv.optBoolean("muted")) "Unmute" else "Mute",
                     ) {
-                        haptics.confirm()
-                        val id = conv.optString("id")
-                        val next = !conv.optBoolean("muted")
-                        ScreenStore.setMuted(id, next)
+                        // r69 (owner: "mute korte gele 2 ta option asbe call mute
+                        // massage mute jeta korbe otay mute hobe"): the swipe Mute
+                        // opens the same two-row chooser as the sheet — one blind
+                        // flag is what the old shortcut did.
+                        haptics.tap()
                         dragged = 0f
-                        scope.launch {
-                            runCatching {
-                                withContext(Dispatchers.IO) {
-                                    Api.post("/api/conversations/$id/mute", JSONObject().put("muted", next))
-                                }
-                            }.onFailure { ScreenStore.setMuted(id, !next) }
-                        }
+                        askMute = true
                     }
                     ActionSlot(
                         icon = Icons.Filled.Delete,
@@ -1135,18 +1171,13 @@ private fun SwipeConvRow(
                         tint = ActionBlueDeep,
                         label = if (conv.optBoolean("muted")) "Unmute" else "Mute",
                     ) {
-                        haptics.confirm()
-                        val id = conv.optString("id")
-                        val next = !conv.optBoolean("muted")
-                        ScreenStore.setMuted(id, next)
+                        // r69 (owner: "mute korte gele 2 ta option asbe call mute
+                        // massage mute jeta korbe otay mute hobe"): the swipe Mute
+                        // opens the same two-row chooser as the sheet — one blind
+                        // flag is what the old shortcut did.
+                        haptics.tap()
                         dragged = 0f
-                        scope.launch {
-                            runCatching {
-                                withContext(Dispatchers.IO) {
-                                    Api.post("/api/conversations/$id/mute", JSONObject().put("muted", next))
-                                }
-                            }.onFailure { ScreenStore.setMuted(id, !next) }
-                        }
+                        askMute = true
                     }
                     ActionSlot(
                         icon = Icons.Filled.Delete,
@@ -1623,6 +1654,30 @@ internal fun deleteChatsNow(
     after()
 }
 
+/**
+ * r69: the mute for a chat, in one place, with the chooser's two answers —
+ * `mutedCall` / `mutedMsg` on the local row (the glyph, the hidden call
+ * buttons and the silent paths all read them) and the same pair on the server.
+ */
+internal fun muteAspectsNow(
+    scope: kotlinx.coroutines.CoroutineScope,
+    id: String,
+    callOff: Boolean,
+    msgOff: Boolean,
+) {
+    ScreenStore.setMutedAspects(id, callOff, msgOff)
+    scope.launch {
+        runCatching {
+            withContext(Dispatchers.IO) {
+                Api.post(
+                    "/api/conversations/$id/mute",
+                    JSONObject().put("call", callOff).put("msg", msgOff),
+                )
+            }
+        }.onFailure { ScreenStore.setMutedAspects(id, !callOff, !msgOff) }
+    }
+}
+
 private fun ChatRowSheet(
     target: JSONObject,
     nav: NavController,
@@ -1669,19 +1724,15 @@ private fun ChatRowSheet(
         KpSheetRow(Icons.Filled.Delete, "Delete", tint = Red) { confirmDelete = true }
         KpSheetRow(
             if (allMuted) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
-            if (allMuted) "Unmute" else "Mute",
+            if (allMuted) "Unmute…" else "Mute…",
         ) {
-            haptics.confirm()
-            val next = !allMuted
-            ids.forEach { ScreenStore.setMuted(it, next) }
-            ListSelect.clear()
-            scope.launch {
-                for (id in ids) {
-                    runCatching {
-                        withContext(Dispatchers.IO) { Api.post("/api/conversations/$id/mute", JSONObject().put("muted", next)) }
-                    }.onFailure { ScreenStore.setMuted(id, !next) }
-                }
-            }
+            // r69: never one blind flag — the two-row chooser (call / messages)
+            // decides which half of every ticked chat is muted. It is hosted by
+            // the LIST (through ListSelect.muteFor), because this sheet is gone
+            // by the time the answer arrives.
+            haptics.tap()
+            ListSelect.muteFor = target
+            onDismiss()
         }
         KpSheetRow(Icons.Filled.PushPin, if (allPinned) "Unpin" else "Pin") {
             haptics.confirm()

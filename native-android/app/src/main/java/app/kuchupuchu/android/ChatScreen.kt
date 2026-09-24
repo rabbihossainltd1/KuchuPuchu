@@ -310,6 +310,8 @@ fun ChatScreen(nav: NavController, convId: String) {
     // and the wall's Delete chat — the scope question ("Also delete for X") is
     // asked in the popup, so the sheet no longer carries two delete rows.
     var confirmDelete by remember { mutableStateOf(false) }
+    // r69: the mute chooser (call mute / message mute) — see the ⋮ menu.
+    var showMuteSheet by remember { mutableStateOf(false) }
     var confirmDeleteChat by remember { mutableStateOf(false) }
     // Owner round 31: long-press opens ONE bottom sheet — the reaction emoji
     // row on top, every message action under it. (No floating bar, no
@@ -2561,6 +2563,10 @@ fun ChatScreen(nav: NavController, convId: String) {
     val avatarUrl = if (isGroup) c?.optIso("avatarUrl") else c?.optJSONObject("other")?.optIso("avatarUrl")
     // The ref is what makes the header paint without re-fetching: pass it too.
     val avatarRef = if (isGroup) c?.optIso("avatarRef") else c?.optJSONObject("other")?.optIso("avatarRef")
+    // r69: the mute's two halves for this chat — the header glyph, the hidden
+    // call buttons and the chooser all read the same pair.
+    val callMuted = c?.optBoolean("mutedCall") == true
+    val msgMuted = c?.optBoolean("mutedMsg") == true
     val otherTyping = System.currentTimeMillis() - otherTypingAt < 4_000L && otherTypingKind != null
     val online = !isGroup && (otherTyping || c?.optJSONObject("other")?.optBoolean("online") == true)
     // Official notification account: one-way (owner rule) — no composer.
@@ -3106,6 +3112,17 @@ fun ChatScreen(nav: NavController, convId: String) {
                         overflow = TextOverflow.Ellipsis,
                     )
                     if (!isGroup) UserBadges(other)
+                    // r69: a muted chat says so right beside the name — one
+                    // small bell-off, whichever half (or both) is muted.
+                    if (callMuted || msgMuted) {
+                        Spacer(Modifier.width(6.dp))
+                        Icon(
+                            Icons.Filled.NotificationsOff,
+                            contentDescription = if (callMuted && msgMuted) "Muted" else if (callMuted) "Calls muted" else "Messages muted",
+                            tint = Muted,
+                            modifier = Modifier.size(15.dp),
+                        )
+                    }
                 }
                 Text(
                     when {
@@ -3130,7 +3147,7 @@ fun ChatScreen(nav: NavController, convId: String) {
             }
             // Owner round 32 (items 5b/5c): a GROUP gets voice + video call
             // buttons — the whole group rings.
-            if (isGroup && c != null) {
+            if (isGroup && c != null && !callMuted) {
                 HeaderCallBtn(onClick = { requestAttachExit {
                     gateMicCamera(video = false) {
                         CallEngine.instance?.startGroupCall(convId, "AUDIO", title, avatarRef ?: "")
@@ -3146,7 +3163,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                     Icon(Icons.Filled.Videocam, "Group video call", tint = chatAccent(chatTheme), modifier = Modifier.size(21.dp))
                 }
             }
-            if (!isGroup && c != null && !botChat && !requestOpen && !blockWall) {
+            // r69: a call-muted chat has no call buttons at all ("mute korle
+            // chat screen a ekhon kichui dekhai na") — the glyph by the name is
+            // the only trace, and the chooser is where it is undone.
+            if (!isGroup && c != null && !botChat && !requestOpen && !blockWall && !callMuted) {
                 if (otherId.isNotBlank()) {
                     HeaderCallBtn(onClick = { requestAttachExit {
                         gateMicCamera(video = false) {
@@ -3178,27 +3198,13 @@ fun ChatScreen(nav: NavController, convId: String) {
 
         if (menuOpen) {
             val muted = c?.optBoolean("muted") == true
-            val toggleMute: () -> Unit = {
+            // r69 (owner: "mute korte gele 2 ta option asbe call mute massage
+            // mute jeta korbe otay mute hobe"): the ⋮'s Mute row no longer
+            // flips one global flag — it opens the two-row chooser below, and
+            // each row sets its OWN half on the server.
+            val openMuteChooser: () -> Unit = {
                 menuOpen = false
-                val snap = conv.value ?: c
-                val next = snap?.optBoolean("muted") != true
-                val copy = JSONObject((snap ?: JSONObject()).toString()).put("muted", next)
-                conv.value = copy
-                ScreenStore.setMuted(convId, next)
-                muteInFlight = true
-                scope.launch {
-                    val ok =
-                        runCatching {
-                            withContext(Dispatchers.IO) {
-                                Api.post("/api/conversations/$convId/mute", JSONObject().put("muted", next))
-                            }
-                        }.isSuccess
-                    if (!ok) {
-                        conv.value = JSONObject(copy.toString()).put("muted", !next)
-                        ScreenStore.setMuted(convId, !next)
-                    }
-                    muteInFlight = false
-                }
+                showMuteSheet = true
             }
             KpSheet(onDismiss = { menuOpen = false }) {
                 when {
@@ -3211,7 +3217,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         }
                         KpSheetRow(Icons.Filled.Schedule, "History") { menuOpen = false; nav.navigate("aihistory") }
                         KpSheetRow(Icons.AutoMirrored.Filled.Chat, "New chat") { menuOpen = false; resetAiSession() }
-                        KpSheetRow(Icons.Filled.NotificationsOff, if (muted) "Unmute notifications" else "Mute notifications", onClick = toggleMute)
+                        KpSheetRow(Icons.Filled.NotificationsOff, if (muted) "Unmute…" else "Mute…", onClick = openMuteChooser)
                         KpSheetRow(Icons.Filled.Palette, "Chat theme") { menuOpen = false; showTheme = true }
                         KpSheetRow(Icons.Filled.VisibilityOff, if (aiIncognito) "Close incognito mode" else "Incognito mode") {
                             menuOpen = false
@@ -3263,7 +3269,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         }
                         KpSheetRow(Icons.Filled.Palette, "Theme") { menuOpen = false; showTheme = true }
                         KpSheetRow(Icons.Filled.Search, "Search") { menuOpen = false; showChatSearch = true }
-                        KpSheetRow(Icons.Filled.NotificationsOff, if (muted) "Unmute" else "Mute", onClick = toggleMute)
+                        KpSheetRow(Icons.Filled.NotificationsOff, if (muted) "Unmute…" else "Mute…", onClick = openMuteChooser)
                         KpSheetRow(Icons.AutoMirrored.Filled.Logout, "Leave Group", tint = Red) { menuOpen = false; confirmLeave = true }
                     }
                     else -> {
@@ -3295,7 +3301,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                         if (!requestOpen) {
                             KpSheetRow(Icons.Filled.PermMedia, "Media, links, and docs") { menuOpen = false; nav.navigate("chatmedia/$convId") }
                         }
-                        KpSheetRow(Icons.Filled.NotificationsOff, if (muted) "Unmute notifications" else "Mute notifications", onClick = toggleMute)
+                        KpSheetRow(Icons.Filled.NotificationsOff, if (muted) "Unmute…" else "Mute…", onClick = openMuteChooser)
                         KpSheetRow(Icons.Filled.Timer, "Disappearing messages") { menuOpen = false; showDisappear = true }
                         KpSheetRow(Icons.Filled.Palette, "Chat theme") { menuOpen = false; showTheme = true }
                     }
@@ -4011,6 +4017,57 @@ fun ChatScreen(nav: NavController, convId: String) {
                     error = "Could not delete the chat. Try again."
                 }
             }
+        }
+
+        /* r69: the mute writer lives in the SCREEN's own scope — the chooser
+           below calls it, and a lambda declared inside the ⋮ menu's `if` would
+           be invisible from here (the same source-order trap as the wall's
+           delete). `callOff` / `msgOff` are the two answers the chooser gives. */
+        val setMuteAspect: (Boolean, Boolean) -> Unit = { callOff, msgOff ->
+            val snap = conv.value ?: c
+            val copy =
+                JSONObject((snap ?: JSONObject()).toString())
+                    .put("muted", callOff || msgOff)
+                    .put("mutedCall", callOff)
+                    .put("mutedMsg", msgOff)
+            conv.value = copy
+            ScreenStore.setMutedAspects(convId, callOff, msgOff)
+            muteInFlight = true
+            scope.launch {
+                val ok =
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            Api.post(
+                                "/api/conversations/$convId/mute",
+                                JSONObject().put("call", callOff).put("msg", msgOff),
+                            )
+                        }
+                    }.isSuccess
+                if (!ok) {
+                    val back = JSONObject(copy.toString()).put("mutedCall", !callOff).put("mutedMsg", !msgOff)
+                    conv.value = back
+                    ScreenStore.setMutedAspects(convId, !callOff, !msgOff)
+                }
+                muteInFlight = false
+            }
+        }
+
+        /* ---------------- the mute chooser (r69) ----------------
+           TWO answers, because a chat's notifications and its calls are not the
+           same thing (owner: "mute korte gele 2 ta option asbe call mute
+           massage mute jeta korbe otay mute hobe"). Muting CALLS drops the ring
+           (relay + push + the engine's own poll) and hides the header's call
+           buttons; muting MESSAGES drops the card, the tone and the badge. */
+        if (showMuteSheet) {
+            KpMuteChooser(
+                callMuted = callMuted,
+                msgMuted = msgMuted,
+                onPick = { callOff, msgOff ->
+                    haptics.confirm()
+                    setMuteAspect(callOff, msgOff)
+                },
+                onDismiss = { showMuteSheet = false },
+            )
         }
 
         /* ---------------- the delete popup (r68-7 / r68-8) ----------------

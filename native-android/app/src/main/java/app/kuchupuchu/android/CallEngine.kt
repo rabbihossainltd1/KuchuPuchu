@@ -770,7 +770,23 @@ class CallEngine(private val app: Application) {
                 return
             }
         netFailStreak = 0
-        val items = data.arr("items").objects().filter { !ignoredCalls.contains(it.optString("id")) }
+        val items =
+            data.arr("items").objects()
+                .filter { !ignoredCalls.contains(it.optString("id")) }
+                // r69: the engine polls /active, so a ring must also respect the
+                // chat's CALL mute here — the relay AND the push are skipped
+                // server-side, but this list still names the ringing call. Only
+                // an INCOMING, still-RINGING call is dropped, and only when the
+                // payload names its conversation (older payloads simply have no
+                // conversationId and keep their old behaviour).
+                .filter { call ->
+                    val conv = call.optIso("conversationId").orEmpty()
+                    if (conv.isBlank() || !call.optBoolean("incoming")) return@filter true
+                    if (call.optString("status") != "RINGING") return@filter true
+                    val muted = ScreenStore.isCallMuted(conv)
+                    if (muted) ignoredCalls.add(call.optString("id"))
+                    !muted
+                }
         val current = active
         var next = items.firstOrNull()
         if (current != null && !current.id.startsWith("pending")) {

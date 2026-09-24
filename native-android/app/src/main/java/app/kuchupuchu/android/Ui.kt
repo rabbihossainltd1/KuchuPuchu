@@ -16,7 +16,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -987,6 +991,42 @@ internal fun canDeleteForEveryone(convId: String, m: JSONObject?): Boolean {
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
+/**
+ * r69 (owner: "mute korte gele 2 ta option asbe call mute massage mute jeta
+ * korbe otay mute hobe"): ONE mute chooser for every place a chat can be
+ * muted — the chat's ⋮ menu, the chat-list long-press sheet, the chat-list's
+ * swipe Mute slot and the profile menu. Two rows, and each row flips ONLY its
+ * own aspect: calls (the ring: relay, push and the engine's own poll, plus the
+ * header's call buttons) and messages (the card, the tone, the badge).
+ *
+ * The labels read the state they will produce, so a half-muted chat can mute
+ * or unmute either half without touching the other.
+ */
+@Composable
+internal fun KpMuteChooser(
+    callMuted: Boolean,
+    msgMuted: Boolean,
+    onPick: (callOff: Boolean, msgOff: Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    KpSheet(onDismiss = onDismiss) {
+        KpSheetRow(
+            if (callMuted) Icons.Filled.CallEnd else Icons.Filled.Call,
+            if (callMuted) "Unmute calls" else "Mute calls",
+        ) {
+            onDismiss()
+            onPick(!callMuted, msgMuted)
+        }
+        KpSheetRow(
+            if (msgMuted) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
+            if (msgMuted) "Unmute messages" else "Mute messages",
+        ) {
+            onDismiss()
+            onPick(callMuted, !msgMuted)
+        }
+    }
+}
+
 fun KpSheet(
     onDismiss: () -> Unit,
     title: String? = null,

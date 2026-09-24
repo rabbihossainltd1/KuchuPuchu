@@ -347,6 +347,16 @@ class KpPushService : FirebaseMessagingService() {
         val engine = CallEngine.instance
         if (callId.isNullOrBlank()) return
         if (callId in CallEngine.ignoredCalls) return
+        // r69 (owner: "mute chat thakleo notification ashe call ashe"): the chat
+        // is muted for CALLS — never ring for it. The worker already withholds
+        // the push (and the relay) for a call-muted member; this covers a push
+        // that was already in flight when the user tapped Mute, and every group
+        // ring that names a conversation we can resolve.
+        val muteConv = data["convId"] ?: data["conversationId"] ?: data["kp_chat"]
+        if (!muteConv.isNullOrBlank() && ScreenStore.isCallMuted(muteConv)) {
+            CallEngine.ignoredCalls.add(callId)
+            return
+        }
         // Owner round 16: mount the FULLSCREEN call UI immediately — an
         // instant poll beats waiting for the next timer tick, so the call
         // screen pops instead of "just a notification".
@@ -427,7 +437,9 @@ class KpPushService : FirebaseMessagingService() {
         // with the recipient's flag, and we also re-check the locally cached
         // conversation (covers a push sent between the user tapping Mute and
         // the next list refresh — the flag the server saw was already stale).
-        val muted = data["muted"] == "1" || ScreenStore.isMuted(convoId)
+        // r69: the MESSAGE half governs a message card — a chat muted for calls
+        // only still notifies normally.
+        val muted = data["muted"] == "1" || ScreenStore.isMsgMuted(convoId)
         // Owner round 31 (item 26): a HIDDEN chat is silent on this device —
         // no card, no tone, no badge flash (the worker already skips the push
         // once it knows; this covers a push racing the hide).
@@ -481,6 +493,13 @@ class KpPushService : FirebaseMessagingService() {
         // Background (process alive): message card WITH Reply / Like / Mark-as-read.
         // Badge jumps instantly; the next list refresh confirms the same number.
         ScreenStore.bumpUnread(convoId, cardText)
+        // r69 (owner: "mute kore rekhechi tokhono notification ashe"): a muted
+        // chat posts NO card at all. The old path only moved it to the silent
+        // channel — the card still appeared in the shade, with a badge and a
+        // locked-screen line, which reads as "notification ashe". The unread
+        // count and the list row still move (bumpUnread above), so nothing is
+        // lost: the trace lives in the app, not on the lock screen.
+        if (muted) return
         // Owner round 32 (item 35): a photo message's push names the picture
         // (kp_media, an authorized API path); the card shows the photo itself
         // instead of "photo.jpg". The fetch is bounded (FCM gives this handler

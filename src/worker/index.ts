@@ -3087,6 +3087,13 @@ async function ensureSchema(db: D1Database) {
     `ALTER TABLE conversations ADD COLUMN theme TEXT`,
     // Owner round 31 (item 26): "Hide chat" — per-member, like `muted`.
     `ALTER TABLE members ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`,
+    // r69 (owner: "mute korte gele 2 ta option asbe call mute massage mute jeta
+    // korbe otay mute hobe"): muting now has TWO aspects — silencing a chat must
+    // not be the same switch as silencing its CALLS. `muted` stays as the
+    // derived OR of both (every existing reader keeps working); these two say
+    // which half the user actually chose.
+    `ALTER TABLE members ADD COLUMN muted_call INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE members ADD COLUMN muted_msg INTEGER NOT NULL DEFAULT 0`,
     // Owner round 33 (item 6): the hidden chat's secret key — the SHA-256 the
     // app computed, never the key itself; NULL once unhidden. Lives here so
     // every device of the account (and a reinstall) can match it.
@@ -3677,15 +3684,18 @@ function recipientAlert(
 async function membersOf(db: D1Database, convId: string) {
   // `muted` rides along: the send handler needs each recipient's mute flag
   // to route their push to a silent channel (one extra column, same query).
+  // r69: `muted_msg` too — it is the MESSAGE half that silences a message
+  // push, so a chat muted for calls only still rings the message tone.
   return all<{
     user_id: string;
     muted: number;
+    muted_msg: number | null;
     hidden: number | null;
     last_active: string | null;
     priv_messages: string | null;
   }>(
     db,
-    `SELECT user_id, muted, hidden,
+    `SELECT user_id, muted, muted_msg, hidden,
             (SELECT last_active_at FROM users WHERE id = members.user_id) AS last_active,
             (SELECT priv_messages FROM users WHERE id = members.user_id) AS priv_messages
        FROM members WHERE conv_id = ?`,
@@ -4705,6 +4715,18 @@ async function notifyMissedCall(
   const caller = await one<UserRow>(db, "SELECT * FROM users WHERE id = ?", row.caller_id);
   const name = caller?.display_name ?? "KuchuPuchu";
   const body = row.kind === "VIDEO" ? "Missed video call" : "Missed voice call";
+  // r69: the chat is muted for CALLS — the ring was withheld, so a "Missed
+  // call" card would be the same intrusion arriving late. The call still sits
+  // in the callee's Calls tab (the row is written either way).
+  if (row.callee_id) {
+    const muteRow = await one<{ muted_call: number | null }>(
+      db,
+      "SELECT muted_call FROM members WHERE conv_id = ? AND user_id = ?",
+      pairId(row.caller_id, row.callee_id),
+      row.callee_id,
+    );
+    if (muteRow?.muted_call === 1) return;
+  }
   const live = await pokeUserConversation(
     env,
     row.callee_id,
@@ -4887,6 +4909,15 @@ async function ringGroupMember(
   groupName: string,
   memberId: string,
 ) {
+  // r69: same rule as the 1:1 ring — a member who muted this chat's CALLS is
+  // not rung (neither the relay nor the push).
+  const mutedRow = await one<{ muted_call: number | null }>(
+    db,
+    "SELECT muted_call FROM members WHERE conv_id = ? AND user_id = ?",
+    convId,
+    memberId,
+  );
+  if (mutedRow?.muted_call === 1) return;
   await broadcastRoomEvent(env, `user:${memberId}`, {
     type: "call",
     callId,
@@ -7577,14 +7608,33 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
   const muteMatch = path.match(/^\/api\/conversations\/([^/]+)\/mute$/);
   if (muteMatch && method === "POST") {
     await requireMember(db, muteMatch[1]!, uid);
-    await run(
+    // r69: two aspects. `call` / `msg` set one half each (what the new two-row
+    // chooser sends); a bare `muted` still sets BOTH — that is what an older
+    // installed app and the chat-list row's own toggle send.
+    const before = await one<{ muted_call: number | null; muted_msg: number | null }>(
       db,
-      "UPDATE members SET muted = ? WHERE conv_id = ? AND user_id = ?",
-      body.muted ? 1 : 0,
+      "SELECT muted_call, muted_msg FROM members WHERE conv_id = ? AND user_id = ?",
       muteMatch[1]!,
       uid,
     );
-    return json({ ok: true });
+    let call = before?.muted_call === 1;
+    let msg = before?.muted_msg === 1;
+    if (typeof body.call === "boolean") call = body.call;
+    if (typeof body.msg === "boolean") msg = body.msg;
+    if (typeof body.call !== "boolean" && typeof body.msg !== "boolean") {
+      call = body.muted === true;
+      msg = body.muted === true;
+    }
+    await run(
+      db,
+      "UPDATE members SET muted = ?, muted_call = ?, muted_msg = ? WHERE conv_id = ? AND user_id = ?",
+      call || msg ? 1 : 0,
+      call ? 1 : 0,
+      msg ? 1 : 0,
+      muteMatch[1]!,
+      uid,
+    );
+    return json({ ok: true, muted: call || msg, mutedCall: call, mutedMsg: msg });
   }
 
   if (convMatch && method === "DELETE") {
@@ -8726,7 +8776,10 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           fromName: me.display_name,
           body: preview.slice(0, 120),
           kp_chat: convId,
-          muted: memberId.muted === 1 ? "1" : "0",
+          // r69: the MESSAGE half silences a message card — a chat muted for
+          // calls only keeps its message tone (owner: "jeta korbe otay mute
+          // hobe"). `members.muted` stays the OR of both for icons/lists.
+          muted: memberId.muted_msg === 1 ? "1" : "0",
           ...(pictureUrl ? { kp_media: pictureUrl } : {}),
           // r67-2 (owner: "massage phone a asha matroi decrypt hoye jabe"): a
           // sealed 1:1 body is opaque to the server, so the phone must open it
@@ -9668,6 +9721,17 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           callId,
         );
         if (!fresh || fresh.status !== "RINGING") return;
+        // r69 (owner: "mute chat thakleo notification ashe call ashe"): a chat
+        // muted for CALLS never rings this phone — no relay, no push. The call
+        // row stays RINGING, so the caller keeps seeing "Ringing…" and the call
+        // times out exactly like an unanswered one.
+        const calleeRow = await one<{ muted_call: number | null }>(
+          db,
+          "SELECT muted_call FROM members WHERE conv_id = ? AND user_id = ?",
+          pairId(uid, other),
+          other,
+        );
+        if (calleeRow?.muted_call === 1) return;
         // Instant foreground path: the callee's always-on user channel rings
         // them the same moment FCM fires, under the SAME still-RINGING gate.
         await broadcastRoomEvent(env, `user:${other}`, {
@@ -9698,6 +9762,11 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
             kind,
             fromName: me.display_name,
             fromId: uid,
+            // r69: the pair conversation this ring belongs to — the callee's
+            // app checks its CALL mute against it before making a sound (the
+            // server already withholds this push for a call-muted member; this
+            // covers a push that was in flight when the mute was tapped).
+            kp_chat: pairId(uid, other),
             // delivered as a launch-intent extra when the system notification
             // is tapped -> MainActivity jumps straight to the ringing screen
             kp_call: callId,
@@ -10828,6 +10897,10 @@ function callFrom(row: CallRow, uid: string, other: UserRow | null, light = fals
     kind: row.kind,
     status: row.status,
     incoming: row.callee_id === uid,
+    // r69: the pair conversation this call belongs to. The callee's app checks
+    // its CALL mute against it — the engine's poll of /active is a second road
+    // to a ring besides the relay + push.
+    conversationId: row.conv_id,
     callerId: row.caller_id,
     calleeId: row.callee_id,
     offerSdp: row.offer_sdp,
@@ -11091,6 +11164,9 @@ type ConvMemberRow = {
   user_id: string;
   role: string;
   muted: number;
+  // r69: which half of the mute the member chose (see the mute route).
+  muted_call?: number | null;
+  muted_msg?: number | null;
   unread: number;
   last_read_at: string | null;
   hidden?: number | null;
@@ -11099,7 +11175,8 @@ type ConvMemberRow = {
 
 const CONV_COLS =
   "id, kind, title, owner_id, created_at, last_message_at, last_message, disappear_seconds, theme, hidden_json, avatar_url, avatar_version, request_from, private_group";
-const MEMBER_COLS = "conv_id, user_id, role, muted, unread, last_read_at, hidden, hidden_key";
+const MEMBER_COLS =
+  "conv_id, user_id, role, muted, unread, last_read_at, hidden, hidden_key, muted_call, muted_msg";
 
 /** r66: preview uses the existing newest-row query, never one fetch per chat. */
 type ConvPreviewRow = Pick<
@@ -11555,6 +11632,11 @@ function buildConvDetail(
   const members = [];
   let other = null;
   let meMuted = false;
+  // r69: the two halves of the mute (see the mute route) — they ride the row
+  // so the app can draw the glyph, hide the call buttons and open its chooser
+  // on the right state.
+  let meMutedCall = false;
+  let meMutedMsg = false;
   let meHidden = false;
   let meHiddenKey: string | null = null;
   let unread = 0;
@@ -11604,6 +11686,10 @@ function buildConvDetail(
     if (row.user_id !== uid && solo) other = memberUser;
     if (row.user_id === uid) {
       meMuted = row.muted === 1;
+      // r69: both halves ride the row (the header's glyph, the hidden call
+      // buttons and the chooser's own state read them).
+      meMutedCall = (row.muted_call ?? 0) === 1;
+      meMutedMsg = (row.muted_msg ?? 0) === 1;
       meHidden = Number(row.hidden ?? 0) === 1;
       meHiddenKey = meHidden ? (row.hidden_key ?? null) : null;
       unread = row.unread;
@@ -11640,6 +11726,8 @@ function buildConvDetail(
     other,
     members,
     muted: meMuted,
+    mutedCall: meMutedCall,
+    mutedMsg: meMutedMsg,
     // Owner round 31 (item 26): the caller hid this chat (their flag only).
     hidden: meHidden,
     // Owner round 33 (item 6): the hash of the key that reveals it (theirs only).

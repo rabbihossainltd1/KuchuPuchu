@@ -161,7 +161,9 @@ object ScreenStore {
         convs.filter { it.optBoolean("hidden", false) && it.optIso("hiddenKey") == hash }
 
     /** True when the chat must stay silent: muted OR hidden. */
-    fun isSilenced(convId: String): Boolean = isMuted(convId) || isHidden(convId)
+    // r69: "silenced" for a MESSAGE means the message half (or hidden) — a chat
+    // muted for calls only still shows its card and plays its tone.
+    fun isSilenced(convId: String): Boolean = isMsgMuted(convId) || isHidden(convId)
 
     /** Owner round 32 (item 23): a call row belongs to a hidden chat when the
      *  1:1 conversation with its other party is hidden. */
@@ -431,6 +433,27 @@ object ScreenStore {
         // bell icon looked correct while the behaviour was not.
         val c = convs[i]
         return c.optBoolean("muted", false) || c.optInt("muted", 0) == 1
+    }
+
+    /**
+     * r69 (owner: "mute korte gele 2 ta option asbe call mute massage mute jeta
+     * korbe otay mute hobe"): the mute has two halves. A chat muted for CALLS
+     * must not ring while its messages still arrive (and the other way round),
+     * so the row carries `mutedCall` / `mutedMsg` and this reads the one that
+     * belongs to the moment. An older row (or an older worker) only has
+     * `muted`, which is then read as covering both halves — the honest
+     * direction: a device that cannot tell the halves apart stays silent.
+     */
+    fun isCallMuted(convId: String): Boolean {
+        val c = convs.firstOrNull { it.optString("id") == convId } ?: return false
+        if (c.has("mutedCall")) return c.optBoolean("mutedCall", false)
+        return isMuted(convId)
+    }
+
+    fun isMsgMuted(convId: String): Boolean {
+        val c = convs.firstOrNull { it.optString("id") == convId } ?: return false
+        if (c.has("mutedMsg")) return c.optBoolean("mutedMsg", false)
+        return isMuted(convId)
     }
 
     fun shouldNotifyChat(convId: String, lastAt: String, unread: Int): Boolean {
@@ -745,7 +768,29 @@ object ScreenStore {
     @Synchronized
     fun setMuted(convId: String, muted: Boolean) {
         val i = convs.indexOfFirst { it.optString("id") == convId }
-        if (i >= 0) convs[i] = JSONObject(convs[i].toString()).put("muted", muted)
+        if (i >= 0) {
+            // A bare mute (the chat-list row's toggle, an older screen) covers
+            // BOTH halves, exactly like the old one-column behaviour.
+            convs[i] =
+                JSONObject(convs[i].toString())
+                    .put("muted", muted)
+                    .put("mutedCall", muted)
+                    .put("mutedMsg", muted)
+        }
+        persist()
+    }
+
+    /** r69: one half at a time (the chat's two-row chooser). */
+    @Synchronized
+    fun setMutedAspects(convId: String, call: Boolean, msg: Boolean) {
+        val i = convs.indexOfFirst { it.optString("id") == convId }
+        if (i >= 0) {
+            convs[i] =
+                JSONObject(convs[i].toString())
+                    .put("muted", call || msg)
+                    .put("mutedCall", call)
+                    .put("mutedMsg", msg)
+        }
         persist()
     }
 
