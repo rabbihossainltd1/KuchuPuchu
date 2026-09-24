@@ -1250,8 +1250,16 @@ fun ChatScreen(nav: NavController, convId: String) {
                             // row it names may not be composed yet, and a
                             // replayed tap from minutes ago must never buzz a
                             // screen that never saw the tap).
-                            emojiFxReplays.add(it)
-                            emojiFxAt[it] = System.currentTimeMillis()
+                            // r72: this listener runs on OkHttp's socket
+                            // thread while the row reads the same list during
+                            // composition; the enqueue is hopped to the main
+                            // thread so both the snapshot list and the plain
+                            // [emojiFxAt] map are only ever touched from one
+                            // thread (and never from inside composition).
+                            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                emojiFxReplays.add(it)
+                                emojiFxAt[it] = System.currentTimeMillis()
+                            }
                         }
                     }
                 // GROUPS are the exception: blue ticks mean EVERY member has

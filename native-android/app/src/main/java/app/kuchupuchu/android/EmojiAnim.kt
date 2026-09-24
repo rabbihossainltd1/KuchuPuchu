@@ -297,8 +297,17 @@ private fun NotoEmojiGlyph(
         }
     }
 
-    if (mid.isNotBlank() && emojiFxReplays.contains(mid)) {
-        if (emojiFxReplays.remove(mid)) {
+    // r72 (the owner's crash report): "Unsupported concurrent change during
+    // composition — a state object was modified by composition as well as being
+    // modified outside composition". [emojiFxReplays] is a SnapshotStateList the
+    // socket thread adds to; removing from it HERE, in the composable body, was
+    // the write-by-composition half of that pair and the recomposer kills the
+    // process for it. The READ stays (it is what makes this row recompose when
+    // the mirror lands — the same read the crash did not object to), and the
+    // consume moves into the effect, which runs outside composition.
+    val mirrorPending = mid.isNotBlank() && emojiFxReplays.contains(mid)
+    LaunchedEffect(mirrorPending) {
+        if (mirrorPending && emojiFxReplays.remove(mid)) {
             // r71-4: drop a stale one instead of buzzing for a tap from a
             // screen that has since gone away (and keep the map in step).
             val at = emojiFxAt.remove(mid) ?: 0L
