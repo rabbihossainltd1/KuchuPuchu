@@ -1283,6 +1283,8 @@ internal fun friendlyPreview(raw: String): String {
     // r71-19b: a view-once VOICE note passes through the same way.
     if (t == "Photo · View once" || t == "Video · View once") return t
     if (t == "Voice message · View once") return t
+    // r71-20: a view-once TEXT reads the same way in the list and in the push.
+    if (t == "Message · View once") return t
     if (EmojiRepo.isCustomId(t)) return "Sticker"
     // A link or a sentence is text even when it ends like a file name.
     val fileLike = !t.contains("://") && !t.contains('\n')

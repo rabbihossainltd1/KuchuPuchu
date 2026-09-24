@@ -114,7 +114,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.focusRequester
@@ -1517,13 +1519,16 @@ fun ChatScreen(nav: NavController, convId: String) {
         }
     }
 
-    fun sendText(body: String, kind: String = "TEXT") {
+    fun sendText(body: String, kind: String = "TEXT", once: Boolean = false) {
         if (body.isBlank()) return
         val clientId = "c_${java.util.UUID.randomUUID()}"
         // r64 E2EE: the PAYLOAD carries the sealed envelope (TEXT only —
         // stickers are local ids, never sealed); the pending echo below keeps
         // the plaintext, so the optimistic bubble reads as typed.
         val payload = JSONObject().put("kind", kind).put("body", if (kind == "TEXT") sealOut(body) else body).put("clientId", clientId)
+        // r71-20: a view-once text — the flag rides in meta (the sealed body
+        // stays sealed; the worker only needs the flag).
+        if (once) payload.put("meta", JSONObject().put("viewOnce", true)).put("viewOnce", true)
         // Owner round 13: attach the quoted message when replying.
         // r70-13 (owner: "send sending sent a ekhono problem ache jemon reply
         // massage send korle first a normal vabe jai tarpor reply massage
@@ -1543,6 +1548,9 @@ fun ChatScreen(nav: NavController, convId: String) {
                 .put("senderId", Store.myId())
                 .put("kind", kind)
                 .put("body", body)
+                // r71-20: the echo is a once-text from its first frame — veiled
+                // for the far side, plain for me (I wrote it).
+                .also { if (once) it.put("viewOnce", true).put("meta", JSONObject().put("viewOnce", true)) }
                 .also { if (replyId != null) it.put("replyTo", replyId) }
                 .put("createdAt", java.time.Instant.now().toString()),
         )
@@ -4518,6 +4526,15 @@ fun ChatScreen(nav: NavController, convId: String) {
                 sendText(input)
                 input = ""
             } },
+            // r71-20: double-tap Send with text typed → the message goes out
+            // veiled (its body is revealed only by the far side's tap).
+            onSendTextOnce = { requestAttachExit {
+                haptics.confirm()
+                showAttach = false
+                showStickers = false
+                sendText(input, once = true)
+                input = ""
+            } },
             // Owner round 32 (item 18): hold Send → pick a time.
             onScheduleSend = { requestAttachExit { haptics.tap(); showSchedule = true } },
             recording = recording,
@@ -4907,6 +4924,9 @@ private fun Composer(
     onAttach: () -> Unit,
     onSticker: () -> Unit,
     onSend: () -> Unit,
+    // r71-20: the second tap of a double tap on Send with text typed — the
+    // message goes out as view-once.
+    onSendTextOnce: () -> Unit = {},
     // Owner round 32 (item 18): long-press on Send (text typed) → schedule.
     onScheduleSend: () -> Unit = {},
     recording: Boolean,
@@ -5142,7 +5162,13 @@ private fun Composer(
                         // already holds onClick for the double-tap window, so
                         // a plain tap still sends immediately-ish and the
                         // second tap upgrades it.
-                        onDoubleClick = if (locked && input.isBlank() && selectCount == 0) onSendVoiceOnce else null,
+                        onDoubleClick =
+                            when {
+                                // r71-20: text typed + a second tap = view-once.
+                                input.isNotBlank() -> onSendTextOnce
+                                locked && selectCount == 0 -> onSendVoiceOnce
+                                else -> null
+                            },
                         onLongClick = if (input.isNotBlank()) onScheduleSend else null,
                     ) {
                         when {
@@ -6307,7 +6333,7 @@ private fun ReplyQuoteBar(replyTo: JSONObject?, theme: String, onCancel: () -> U
                 }
                 append("  ")
                 append(
-                    if (isViewOnce(replyTo)) (if (fileLooksVideo(replyTo)) "Video · View once" else "Photo · View once")
+                    if (isViewOnce(replyTo)) onceQuoteLabel(replyTo)
                     else if (quoteKind(replyTo) == "Voice message") "Voice message" else quoteText(replyTo).take(80),
                 )
             },
@@ -6535,7 +6561,14 @@ private fun MessageRow(
     // for everyone, so there is no opened state left to render.
     if (isViewOnce(m)) {
         Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine)) {
-            ViewOnceRow(m, mine, pendingEcho, otherReadAt, player, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme, onDoubleTapHeart)
+            // r71-20: a view-once TEXT is its own bubble (veiled, one tap to
+            // reveal, five seconds, then gone for both) — the photo / video /
+            // voice flavours keep the tile.
+            if (kind == "TEXT" && m.optText("body").isNotBlank()) {
+                OnceTextRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, theme, onDoubleTapHeart)
+            } else {
+                ViewOnceRow(m, mine, pendingEcho, otherReadAt, player, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme, onDoubleTapHeart)
+            }
         }
         return
     }
@@ -6780,7 +6813,7 @@ private fun MessageRow(
                             if (q?.optString("senderId") == myId) "You"
                             else (q?.optText("senderName") ?: "").ifBlank { "Original" }
                         val what =
-                            if (q != null && isViewOnce(q)) (if (fileLooksVideo(q)) "Video · View once" else "Photo · View once")
+                            if (q != null && isViewOnce(q)) onceQuoteLabel(q)
                             else q?.let { qq -> if (quoteKind(qq) == "Voice message") "Voice message" else quoteText(qq).take(48) } ?: "Original message"
                         // Owner round 33 (item 17): a media original gets a small
                         // content card beside the words (never for a view-once).
@@ -7573,6 +7606,178 @@ private fun VideoMessageRow(
     }
 }
 
+/** r71-20: how long a revealed view-once text stays on screen. */
+internal const val ONCE_TEXT_REVEAL_MS = 5_000L
+
+/** r71-20: the veiled stand-in for a view-once text body — same shape, no
+ *  content (used below API 31, where Compose's real blur is a no-op). */
+internal fun veiledText(body: String): String =
+    body.map { if (it == '\n') '\n' else '▒' }.joinToString("")
+
+/**
+ * r71-20 (owner: "text er khetre o hobe ... double tap korle text ta blur hoye
+ * jabe ... tap korle reveal hobe ... 5 second por delete hoye jabe"): a
+ * view-once TEXT bubble.
+ *
+ * The far side gets the body VEILED — a real blur where the platform has one
+ * (API 31+), and the same shape in placeholder marks where it does not, so the
+ * words are unreadable either way. Tapping it reveals the text for five
+ * seconds (a countdown sits on the stamp line), and the fifth second spends the
+ * opening: POST /api/messages/:id/view deletes the row for BOTH sides — the
+ * owner's pick — and every open chat plays the vanish show.
+ *
+ * My own copy shows what I wrote (I typed it; there is nothing to hide from
+ * me) and is spent the same way the moment the far side opens it.
+ */
+@Composable
+@OptIn(ExperimentalFoundationApi::class)
+private fun OnceTextRow(
+    m: JSONObject,
+    mine: Boolean,
+    pendingEcho: Boolean,
+    otherReadAt: String?,
+    selectedIds: List<String>,
+    onToggleSelect: (JSONObject) -> Unit,
+    onReply: (JSONObject) -> Unit,
+    onLongPress: (JSONObject) -> Unit,
+    theme: String,
+    onDoubleTapHeart: (JSONObject) -> Unit = {},
+) {
+    val ctx = LocalContext.current
+    val haptics = rememberHaptics()
+    val id = m.optString("id")
+    val body = m.optText("body")
+    val rowSelected = id in selectedIds
+    var revealed by remember(id) { mutableStateOf(false) }
+    var leftMs by remember(id) { mutableStateOf(0L) }
+    // r71-20: five seconds from the tap, then the row is spent for everyone —
+    // the countdown is painted on the stamp line so the reader knows how long
+    // the words are theirs.
+    LaunchedEffect(revealed) {
+        if (!revealed) return@LaunchedEffect
+        val t0 = android.os.SystemClock.uptimeMillis()
+        while (true) {
+            val left = ONCE_TEXT_REVEAL_MS - (android.os.SystemClock.uptimeMillis() - t0)
+            leftMs = left.coerceAtLeast(0L)
+            if (left <= 0L) break
+            delay(200)
+        }
+        ViewOnce.spend(id)
+    }
+    var replyDrag by remember { mutableStateOf(0f) }
+    val replyOffset by animateFloatAsState(replyDrag, spring(stiffness = 1400f), label = "oncetextreply")
+    val replyThreshold = with(LocalDensity.current) { 36.dp.toPx() }
+    val shape = RoundedCornerShape(
+        topStart = 16.dp,
+        topEnd = 16.dp,
+        bottomStart = if (mine) 16.dp else 5.dp,
+        bottomEnd = if (mine) 5.dp else 16.dp,
+    )
+    val veil = !mine && !revealed
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 3.dp),
+        horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
+    ) {
+        Box(
+            Modifier
+                .offset { IntOffset(replyOffset.roundToInt(), 0) }
+                .onGloballyPositioned { DeleteGeoms.put(m, it.boundsInWindow()) }
+                .widthIn(max = 260.dp)
+                .requiredWidthIn(min = if (mine) 70.dp else 52.dp)
+                .clip(shape)
+                .background(if (mine) chatMineFill(theme) else chatOtherFill(theme))
+                .pointerInput(id) {
+                    detectHorizontalDragGestures(
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            val wasArmed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
+                            replyDrag =
+                                if (mine) (replyDrag + dragAmount).coerceIn(-replyThreshold * 1.4f, 0f)
+                                else (replyDrag + dragAmount).coerceIn(0f, replyThreshold * 1.4f)
+                            if (!wasArmed && kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f) haptics.tap()
+                        },
+                        onDragEnd = {
+                            val armed = kotlin.math.abs(replyDrag) >= replyThreshold * 1.4f
+                            replyDrag = 0f
+                            if (armed) {
+                                runCatching { KpSounds.replySwipe(ctx) }
+                                onReply(m)
+                            }
+                        },
+                        onDragCancel = { replyDrag = 0f },
+                    )
+                }
+                .combinedClickable(
+                    onDoubleClick = { if (!pendingEcho) onDoubleTapHeart(m) },
+                    onClick = {
+                        when {
+                            pendingEcho -> {}
+                            selectedIds.isNotEmpty() -> onToggleSelect(m)
+                            // The far side's tap IS the opening (and starts the
+                            // five seconds); mine just reads what I wrote.
+                            !mine && !revealed -> {
+                                haptics.tap()
+                                revealed = true
+                            }
+                            else -> {}
+                        }
+                    },
+                    onLongClick = {
+                        if (!pendingEcho) {
+                            haptics.tap()
+                            if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)
+                        }
+                    },
+                )
+                .padding(horizontal = 10.dp, vertical = 7.dp),
+        ) {
+            Column {
+                Box {
+                    Text(
+                        // Below API 31 Compose's blur is a no-op — the words are
+                        // replaced by shaped marks instead of being left readable.
+                        if (veil && android.os.Build.VERSION.SDK_INT < 31) veiledText(body) else body,
+                        fontSize = 14.5.sp,
+                        lineHeight = 19.sp,
+                        color = if (veil) Ink.copy(alpha = 0.75f) else Ink,
+                        modifier =
+                            if (veil && android.os.Build.VERSION.SDK_INT >= 31) {
+                                Modifier.blur(7.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+                            } else {
+                                Modifier
+                            },
+                    )
+                    if (veil) {
+                        // The 1 mark + the hint sit ON the veil, so the row
+                        // reads as "something is here, tap it".
+                        Box(Modifier.matchParentSize(), contentAlignment = Alignment.Center) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CenteredOnceIcon(26.dp)
+                                Spacer(Modifier.width(6.dp))
+                                Text("Tap to view", color = Ink, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                    }
+                }
+                // stamp line: the time + ticks, and while revealed the countdown
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                    if (!mine && revealed) {
+                        Text("${((leftMs + 999) / 1000)}s", color = Red, fontSize = 10.sp)
+                        Spacer(Modifier.width(4.dp))
+                    }
+                    Text(msgStamp(m.optString("createdAt")), fontSize = 10.sp, color = Muted)
+                    if (mine) {
+                        Spacer(Modifier.width(3.dp))
+                        TickIcon(m, pendingEcho, otherReadAt)
+                    }
+                }
+            }
+            if (rowSelected) Box(Modifier.matchParentSize().background(ActionBlue.copy(alpha = 0.35f)))
+        }
+        MessageReactions(m)
+    }
+}
+
 /**
  * r71-19b (owner: "lock hoye gele ... double tap korle voice ta view once hisebe
  * jabe ... ekbar play hobe"): a view-once VOICE note. The card is the voice
@@ -8294,6 +8499,18 @@ internal fun albumIdOf(m: JSONObject): String {
 /** Owner round 32 (item 17): a view-once photo / video (meta.viewOnce). */
 internal fun isViewOnce(m: JSONObject): Boolean =
     m.optBoolean("viewOnce") || m.optJSONObject("meta")?.optBoolean("viewOnce") == true
+
+/**
+ * r71-20: what a quoted view-once message reads as — the kind, never a byte of
+ * the content. A once-text used to fall through to "Photo · View once".
+ */
+internal fun onceQuoteLabel(m: JSONObject): String =
+    when {
+        isViewOnce(m) && m.optString("kind") == "TEXT" -> "Message · View once"
+        fileLooksVideo(m) -> "Video · View once"
+        fileLooksVoice(m) -> "Voice message · View once"
+        else -> "Photo · View once"
+    }
 
 /**
  * Owner round 32 (item 17): reports the single opening to the server (POST

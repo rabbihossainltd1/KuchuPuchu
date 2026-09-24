@@ -10707,8 +10707,14 @@ function viewOnceFlag(
   fileType: string,
   meta: Record<string, unknown>,
 ): boolean {
-  if (meta.viewOnce !== true || !hasMedia) return false;
+  if (meta.viewOnce !== true) return false;
   if (meta.document === true) return false;
+  // r71-20 (owner: "text er khetre o hobe ... double tap korle text ta blur
+  // hoye jabe, tap korle reveal hobe, 5 second por delete"): a TEXT row may be
+  // view-once too — it arrives veiled, one tap reveals it for five seconds and
+  // then it is gone for BOTH sides. Nothing to fetch, so no media is needed.
+  if (kind === "TEXT") return meta.voice !== true;
+  if (!hasMedia) return false;
   // r71-19b (owner: "lock hoye gele ... double tap korle voice ta view once
   // hisebe jabe ... ekbar play hobe"): a VOICE note may be view-once too — it
   // plays exactly once and is then gone for everyone, the same one-opening
@@ -11500,6 +11506,10 @@ function previewOf(row: MsgRow): string {
   // Owner round 32 (item 17): a view-once photo / video says so in the chat
   // list and in the push — never a caption, never a thumbnail.
   const once = meta.viewOnce === true ? " · View once" : "";
+  // r71-20: a view-once TEXT never shows its body — the chat list and the push
+  // say "Message · View once" instead (a list preview would reveal it without
+  // the tap the whole feature is built on).
+  if (once && row.kind === "TEXT") return `Message${once}`;
   switch (row.kind) {
     case "STICKER":
       return "Sticker";

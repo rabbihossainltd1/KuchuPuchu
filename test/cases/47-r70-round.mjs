@@ -35,8 +35,12 @@ const main = (f) => read(`${ANDROID}/${f}`);
     chat.includes('val replyId = replyTo?.optString("id")?.takeIf { it.isNotBlank() }') &&
       chat.includes('replyId?.let { payload.put("replyTo", it) }') &&
       chat.includes('// r70-13 (owner: "send sending sent a ekhono problem ache jemon reply') &&
+      // r71-20: the once flag rides its own `.also` between them.
       chat.includes(
-        '.put("body", body)\n                .also { if (replyId != null) it.put("replyTo", replyId) }',
+        '.put("body", body)\n                // r71-20: the echo is a once-text from its first frame — veiled',
+      ) &&
+      chat.includes(
+        '.also { if (replyId != null) it.put("replyTo", replyId) }\n                .put("createdAt", java.time.Instant.now().toString()),',
       ),
   );
   check(
@@ -178,11 +182,13 @@ const main = (f) => read(`${ANDROID}/${f}`);
       (chat.match(/applyReaction\(it, e\)/g) || []).length === 1,
   );
   check(
-    "r71-21: EVERY bubble kind hearts on a double tap — the text/emoji bubble, the image, video, album, view-once and call/status rows all carry `onDoubleClick`, and MessageRow hands them the callback",
+    "r71-21: EVERY bubble kind hearts on a double tap — the text/emoji bubble, the image, video, album, view-once, once-text (r71-20) and call/status rows all carry `onDoubleClick`, and MessageRow hands them the callback",
+    // r71-20 added the once-text bubble to the family — six rows now.
     (chat.match(/onDoubleClick = \{ if \(!pendingEcho\) onDoubleTapHeart\(m\) \}/g) || [])
-      .length === 5 &&
+      .length === 6 &&
       chat.includes("onDoubleTapHeart: (JSONObject) -> Unit = {},") &&
-      (chat.match(/onDoubleTapHeart: \(JSONObject\) -> Unit = \{\},/g) || []).length === 5 &&
+      // five tiles + the r71-20 once-text bubble
+      (chat.match(/onDoubleTapHeart: \(JSONObject\) -> Unit = \{\},/g) || []).length === 6 &&
       (chat.match(/onDoubleTapHeart = ::heartReact,/g) || []).length === 3,
   );
   check(
@@ -266,8 +272,9 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     "r71-19b: the locked seat's SECOND tap is the view-once send — combinedClickable's own double-tap window holds the plain tap, so one tap still sends a normal note and two send it once",
     chat.includes("onSendVoiceOnce: () -> Unit = {},") &&
-      chat.includes(
-        "onDoubleClick = if (locked && input.isBlank() && selectCount == 0) onSendVoiceOnce else null,",
+      // r71-20 branches the seat's double tap with a `when` (text first).
+      /onDoubleClick =\n\s+when \{[\s\S]{0,240}?locked && selectCount == 0 -> onSendVoiceOnce[\s\S]{0,80}?else -> null/.test(
+        chat,
       ) &&
       chat.includes("onSendVoiceOnce = { finishRecording(cancelled = false, once = true) },") &&
       chat.includes("fun finishRecording(cancelled: Boolean, once: Boolean = false) {") &&
@@ -308,6 +315,72 @@ const main = (f) => read(`${ANDROID}/${f}`);
   check(
     "r71-19b: the chat list passes the worker's 'Voice message · View once' through instead of folding it into a plain voice bubble",
     list.includes('if (t == "Voice message · View once") return t'),
+  );
+}
+
+/* ------------- 20. the once-view text (r71) ------------- */
+{
+  const chat = main("ChatScreen.kt");
+  const list = main("ChatListScreen.kt");
+  check(
+    "r71-20: text typed + a second tap on Send = the message goes out view-once — the seat's double tap branches on what is being sent, and `sendText` takes the flag through the meta, the payload and the optimistic echo",
+    chat.includes("onSendTextOnce: () -> Unit = {},") &&
+      /onDoubleClick =\n\s+when \{[\s\S]{0,220}?input\.isNotBlank\(\) -> onSendTextOnce[\s\S]{0,160}?locked && selectCount == 0 -> onSendVoiceOnce[\s\S]{0,80}?else -> null/.test(
+        chat,
+      ) &&
+      chat.includes("onSendTextOnce = { requestAttachExit {") &&
+      chat.includes("sendText(input, once = true)") &&
+      chat.includes('fun sendText(body: String, kind: String = "TEXT", once: Boolean = false) {') &&
+      chat.includes(
+        'if (once) payload.put("meta", JSONObject().put("viewOnce", true)).put("viewOnce", true)',
+      ) &&
+      chat.includes(
+        '.also { if (once) it.put("viewOnce", true).put("meta", JSONObject().put("viewOnce", true)) }',
+      ),
+  );
+  check(
+    "r71-20: the once-text row is dispatched to its own bubble (never the blurred-photo tile), and that row keeps the reply swipe, the long press and the heart",
+    chat.includes('if (kind == "TEXT" && m.optText("body").isNotBlank()) {') &&
+      chat.includes(
+        "OnceTextRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, theme, onDoubleTapHeart)",
+      ) &&
+      chat.includes(
+        "@Composable\n@OptIn(ExperimentalFoundationApi::class)\nprivate fun OnceTextRow(",
+      ) &&
+      chat.includes("detectHorizontalDragGestures(") &&
+      chat.includes("if (selectedIds.isNotEmpty()) onToggleSelect(m) else onLongPress(m)"),
+  );
+  check(
+    "r71-20: the veil is real on every device — a Compose blur where the platform has one (API 31+), the same shape in placeholder marks where it does not — and the far side's tap starts the visible five seconds",
+    chat.includes("internal const val ONCE_TEXT_REVEAL_MS = 5_000L") &&
+      chat.includes("internal fun veiledText(body: String): String =") &&
+      chat.includes(
+        "if (veil && android.os.Build.VERSION.SDK_INT < 31) veiledText(body) else body",
+      ) &&
+      chat.includes("Modifier.blur(7.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)") &&
+      chat.includes("val veil = !mine && !revealed") &&
+      chat.includes("!mine && !revealed -> {") &&
+      chat.includes(
+        'Text("Tap to view", color = Ink, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)',
+      ) &&
+      chat.includes('Text("${((leftMs + 999) / 1000)}s", color = Red, fontSize = 10.sp)'),
+  );
+  check(
+    "r71-20: the fifth second spends the opening (ViewOnce.spend → the row is deleted for BOTH sides), and my own copy is never veiled from me",
+    chat.includes("delay(ONCE_TEXT_REVEAL_MS)") === false &&
+      chat.includes("ViewOnce.spend(id)") &&
+      /while \(true\) \{[\s\S]{0,200}?leftMs = left\.coerceAtLeast\(0L\)[\s\S]{0,120}?delay\(200\)/.test(
+        chat,
+      ) &&
+      chat.includes("var leftMs by remember(id) { mutableStateOf(0L) }"),
+  );
+  check(
+    "r71-20: nothing leaks the body outside the bubble — the quote of a once-text reads 'Message · View once' (the shared label), and the list passes the worker's preview through",
+    chat.includes("internal fun onceQuoteLabel(m: JSONObject): String =") &&
+      chat.includes('isViewOnce(m) && m.optString("kind") == "TEXT" -> "Message · View once"') &&
+      chat.includes("if (isViewOnce(replyTo)) onceQuoteLabel(replyTo)") &&
+      chat.includes("if (q != null && isViewOnce(q)) onceQuoteLabel(q)") &&
+      list.includes('if (t == "Message · View once") return t'),
   );
 }
 

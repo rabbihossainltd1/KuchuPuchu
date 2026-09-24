@@ -1750,11 +1750,11 @@ async function main() {
     const asText = await h.call(
       "POST",
       `/api/conversations/${conv.id}/messages`,
-      { kind: "TEXT", body: "hello", meta: { viewOnce: true } },
+      { kind: "TEXT", body: "hello" },
       A.token,
     );
     check(
-      "r32-17 + E3f: meta.viewOnce is stored only on a photo / video message — the row publishes viewOnce:true, no album, WITH dimensions (two numbers leak nothing past the blur); the chat-list preview reads 'Photo · View once'; a document / text with the flag stays an ordinary message",
+      "r32-17 + E3f: meta.viewOnce is stored only on a photo / video message — the row publishes viewOnce:true, no album, WITH dimensions (two numbers leak nothing past the blur); the chat-list preview reads 'Photo · View once'; a document with the flag stays an ordinary message, and so does a text without it (r71-20: a TEXT *with* the flag is a view-once message — asserted below)",
       sent.status === 201 &&
         m?.viewOnce === true &&
         m?.hasImage === true &&
@@ -2052,6 +2052,36 @@ async function main() {
         delUnopened: delUnopened.status,
         notOnce: notOnce.status,
         code: notOnce.json.error?.code,
+      }),
+    );
+    // ----- r71-20: a TEXT with the flag IS view once (owner item 20) -----
+    const onceText = await h.call(
+      "POST",
+      `/api/conversations/${conv.id}/messages`,
+      { kind: "TEXT", body: "meet me at 9", meta: { viewOnce: true } },
+      A.token,
+    );
+    const onceTextId = onceText.json.message?.id;
+    const onceTextList = await h.call("GET", "/api/conversations", undefined, B.token);
+    const onceTextRow = (onceTextList.json.items ?? []).find((c) => c.id === conv.id);
+    const onceTextSpend = await h.call("POST", `/api/messages/${onceTextId}/view`, {}, B.token);
+    const onceTextAfter = await h.call(
+      "GET",
+      `/api/conversations/${conv.id}/messages`,
+      undefined,
+      A.token,
+    );
+    check(
+      "r71-20: worker — a TEXT with the flag IS a view-once message: the row publishes viewOnce, the preview reads 'Message · View once' (never the body), the recipient's single opening spends it (200) and the row is gone for the sender too",
+      onceText.status === 201 &&
+        onceText.json.message?.viewOnce === true &&
+        onceTextRow?.lastMessage === "Message · View once" &&
+        onceTextSpend.status === 200 &&
+        !(onceTextAfter.json.items ?? []).some((x) => x.id === onceTextId),
+      JSON.stringify({
+        sent: onceText.status,
+        list: onceTextRow?.lastMessage,
+        spend: onceTextSpend.status,
       }),
     );
   }

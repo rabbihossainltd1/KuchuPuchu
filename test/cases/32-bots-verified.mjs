@@ -9,6 +9,9 @@ import { makeReg, installGoogleStub, phoneFrom, fakeIdToken } from "../helpers/p
 
 installGoogleStub();
 
+const SEAT_DOUBLE_TAP =
+  /onDoubleClick =\n\s+when \{\n\s+\/\/ r71-20[^\n]*\n\s+input\.isNotBlank\(\) -> onSendTextOnce\n\s+locked && selectCount == 0 -> onSendVoiceOnce\n\s+else -> null\n\s+\},/;
+
 const WORKER = new URL("../../src/worker/index.ts", import.meta.url).href;
 let n = 0;
 const freshWorker = async () => (await import(`${WORKER}?v=${n++}`)).default;
@@ -1223,8 +1226,8 @@ const convBetween = (db, a, b) =>
     chat.indexOf("MessageReactions(m)") <
       chat.indexOf("Live upload fractions keyed by message clientId") &&
       // r31-29: text, photo, video + the grouped photo bubble (4 sites);
-      // r32-17: + the view-once card (5).
-      chat.split("MessageReactions(m)").length - 1 === 5,
+      // r32-17: + the view-once card (5); r71-20: + the once-text bubble (6).
+      chat.split("MessageReactions(m)").length - 1 === 6,
   );
   check(
     "r18-3/r25: unsent messages VANISH (no tombstone) — filtered before render (r38-4: except mid-vanish, so the dust plays out)",
@@ -2349,6 +2352,63 @@ const convBetween = (db, a, b) =>
     check(
       "r71-19b: worker — a second fetch cannot replay it (the bytes are gone, the row too)",
       (await call("GET", `/api/messages/${mid}/media`, undefined, b.token)).status !== 200,
+    );
+  }
+
+  /* r71-20: a view-once TEXT — the body must never surface before the tap,
+       and the tap's fifth second deletes it for BOTH sides. */
+  {
+    const onceText = await call(
+      "POST",
+      `/api/conversations/${cab}/messages`,
+      { kind: "TEXT", body: "meet me at 9", meta: { viewOnce: true } },
+      a.token,
+    );
+    const tid = onceText.json.message.id;
+    const tmeta = JSON.parse(
+      db._db.prepare("SELECT meta_json FROM messages WHERE id = ?").get(tid).meta_json,
+    );
+    check(
+      "r71-20: worker — a TEXT row is admitted as view once (no media involved)",
+      onceText.status < 300 && tmeta.viewOnce === true,
+      JSON.stringify(tmeta),
+    );
+    const tlist = await call("GET", "/api/conversations", undefined, b.token);
+    const tconv = (tlist.json.items || []).find((c) => c.id === cab);
+    check(
+      "r71-20: worker — the list (and the push) say 'Message · View once', never the body",
+      tconv?.lastMessage === "Message · View once",
+      String(tconv?.lastMessage),
+    );
+    const tBefore = await call("GET", `/api/conversations/${cab}/messages`, undefined, b.token);
+    const tRow = (tBefore.json.items || []).find((m) => m.id === tid);
+    check(
+      "r71-20: worker — the recipient's row carries the body + the flag (the veil is the app's, the reveal is local)",
+      tRow?.viewOnce === true && tRow?.body === "meet me at 9",
+      JSON.stringify({ v: tRow?.viewOnce, b: tRow?.body }),
+    );
+    const ownView = await call("POST", `/api/messages/${tid}/view`, undefined, a.token);
+    check(
+      "r71-20: worker — the SENDER cannot spend their own once-text (403 OWN_MESSAGE)",
+      ownView.status === 403 && ownView.json?.error?.code === "OWN_MESSAGE",
+      `${ownView.status} ${JSON.stringify(ownView.json)}`,
+    );
+    const spent = await call("POST", `/api/messages/${tid}/view`, undefined, b.token);
+    const tAfterB = await call("GET", `/api/conversations/${cab}/messages`, undefined, b.token);
+    const tAfterA = await call("GET", `/api/conversations/${cab}/messages`, undefined, a.token);
+    check(
+      "r71-20: worker — the fifth second deletes it for BOTH sides (the owner's pick)",
+      spent.status === 200 &&
+        spent.json?.vanished === true &&
+        !(tAfterB.json.items || []).some((m) => m.id === tid) &&
+        !(tAfterA.json.items || []).some((m) => m.id === tid),
+      `${spent.status} ${JSON.stringify(spent.json)}`,
+    );
+    check(
+      "r71-20: worker — a second opening is refused (the row is gone)",
+      [404, 410].includes(
+        (await call("POST", `/api/messages/${tid}/view`, undefined, b.token)).status,
+      ),
     );
   }
 
@@ -4977,7 +5037,7 @@ const convBetween = (db, a, b) =>
     chat32.indexOf("fun handleImagePicked("),
   );
   const sendTextBody = chat32.slice(
-    chat32.indexOf('fun sendText(body: String, kind: String = "TEXT") {'),
+    chat32.indexOf('fun sendText(body: String, kind: String = "TEXT", once: Boolean = false) {'),
     chat32.indexOf("fun sendImage("),
   );
   check(
@@ -6337,8 +6397,9 @@ const convBetween = (db, a, b) =>
     check(
       "r32-17 (+ r71-19b): worker — viewOnceFlag admits the flag on an IMAGE / image-or-video FILE / a VOICE note (audio FILE) that is not a document; a view-once row stores no album but DOES store dims (E3f — no 1 s fake ratio); the preview reads 'Photo · View once' / 'Video · View once' / 'Voice message · View once'; the push carries no kp_media for it; the gallery skips it; msgFrom hides fileKey / mediaUrl / hasImage once spent and publishes viewOnce / viewedAt / viewedBy; the page marker folds viewedAt in",
       src.includes("function viewOnceFlag(") &&
-        src.includes("if (meta.viewOnce !== true || !hasMedia) return false;") &&
+        src.includes("if (meta.viewOnce !== true) return false;") &&
         src.includes("if (meta.document === true) return false;") &&
+        src.includes('if (kind === "TEXT") return meta.voice !== true;') &&
         // r71-19b: the voice arm — one play, then gone for everyone.
         src.includes(
           'if (meta.voice === true) return kind === "FILE" && fileType.startsWith("audio/");',
@@ -6419,8 +6480,9 @@ const convBetween = (db, a, b) =>
     );
     check(
       "r34-16a: app — a view-once message renders ViewOnceRow: the photo at its original ratio (ImageRatios-cached) blurred past recognition via ViewOnceBlur, the ViewOnceOneIcon mark in the middle, a dark tile for video / uploads; the recipient opens it (sender's tap does nothing), reply-drag + long-press intact, no 'Opened' state anywhere; the album fold, resend and the media grid never take it",
+      // r71-20: the once-TEXT bubble sits in front of the tile.
       chat.includes(
-        "if (isViewOnce(m)) {\n        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine)) {\n            ViewOnceRow(m, mine, pendingEcho, otherReadAt, player, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme, onDoubleTapHeart)",
+        'if (isViewOnce(m)) {\n        Box(Modifier.fxSlotOpen(fxFresh).fxFlyIn(fxFresh, 700, isSent = mine)) {\n            // r71-20: a view-once TEXT is its own bubble (veiled, one tap to\n            // reveal, five seconds, then gone for both) — the photo / video /\n            // voice flavours keep the tile.\n            if (kind == "TEXT" && m.optText("body").isNotBlank()) {\n                OnceTextRow(m, mine, pendingEcho, otherReadAt, selectedIds, onToggleSelect, onReply, onLongPress, theme, onDoubleTapHeart)\n            } else {\n                ViewOnceRow(m, mine, pendingEcho, otherReadAt, player, selectedIds, onToggleSelect, onOpenImage, onOpenVideo, onReply, onLongPress, theme, onDoubleTapHeart)\n            }',
       ) &&
         chat.indexOf("if (isViewOnce(m)) {") <
           chat.indexOf(
@@ -6488,13 +6550,15 @@ const convBetween = (db, a, b) =>
         chat.includes('.also { if (once) it.put("kpOnce", true) }') &&
         chat.includes("if (!echo && !privateChat && !isViewOnce(m)) {") &&
         chat.includes("if (!privateChat && selectedMessages().none { isViewOnce(it) }) {") &&
-        chat.includes(
-          'if (q != null && isViewOnce(q)) (if (fileLooksVideo(q)) "Video · View once" else "Photo · View once")',
-        ) &&
-        chat.includes(
-          'if (isViewOnce(replyTo)) (if (fileLooksVideo(replyTo)) "Video · View once" else "Photo · View once")',
-        ) &&
-        list.includes('if (t == "Photo · View once" || t == "Video · View once") return t'),
+        // r71-20: the quote label is shared (a once-TEXT reads "Message ·
+        // View once", a once-voice "Voice message · View once") — the literal
+        // Photo/Video pair moved into onceQuoteLabel.
+        chat.includes("internal fun onceQuoteLabel(m: JSONObject): String =") &&
+        chat.includes('isViewOnce(m) && m.optString("kind") == "TEXT" -> "Message · View once"') &&
+        chat.includes("if (q != null && isViewOnce(q)) onceQuoteLabel(q)") &&
+        chat.includes("if (isViewOnce(replyTo)) onceQuoteLabel(replyTo)") &&
+        list.includes('if (t == "Photo · View once" || t == "Video · View once") return t') &&
+        list.includes('if (t == "Message · View once") return t'),
     );
   }
   // r32-18: hold Send → "send later" (scheduled messages).
@@ -6583,9 +6647,8 @@ const convBetween = (db, a, b) =>
         chat.includes(
           ".combinedClickable(\n                        interactionSource = sendInteraction,\n                        indication = null,",
         ) &&
-        chat.includes(
-          "onDoubleClick = if (locked && input.isBlank() && selectCount == 0) onSendVoiceOnce else null,",
-        ) &&
+        // r71-20: the branch is a `when` now — text typed upgrades too.
+        SEAT_DOUBLE_TAP.test(chat) &&
         chat.includes(
           "onLongClick = if (input.isNotBlank()) onScheduleSend else null,\n                    ) {",
         ) &&
@@ -6731,7 +6794,9 @@ const convBetween = (db, a, b) =>
         // and painted by the same five paths (text, photo, file/clip, voice,
         // batch) — a land-in-place animation must never cost a send.
         (chat.match(/pending\.add\(/g) || []).length >= 4 &&
-        chat.includes('fun sendText(body: String, kind: String = "TEXT") {') &&
+        chat.includes(
+          'fun sendText(body: String, kind: String = "TEXT", once: Boolean = false) {',
+        ) &&
         chat.includes("suspend fun sendFile(") &&
         chat.includes("fun sendImage(") &&
         chat.includes("bornKeys.add(clientId)") &&
@@ -7083,7 +7148,8 @@ const convBetween = (db, a, b) =>
     );
     check(
       "r32-40: chat — the reply swipe taps once when it ARMS (all five bubble kinds), the select bar's actions buzz (copy confirms; r68-8: the single Delete taps, and the popup's own Delete thuds), the ⋮ taps, an error line rejects once when it appears, schedule-sheet chips / steppers / theme swatches tap, a parked message's X thuds, voice play taps",
-      (chat.match(/if \(!wasArmed && kotlin\.math\.abs\(replyDrag\) >= /g) || []).length === 5 &&
+      // r71-20: the once-text bubble is the sixth kind with the same arming tap.
+      (chat.match(/if \(!wasArmed && kotlin\.math\.abs\(replyDrag\) >= /g) || []).length === 6 &&
         chat.includes(
           'cm.setPrimaryClip(android.content.ClipData.newPlainText("KuchuPuchu", text))\n                        haptics.confirm()',
         ) &&
@@ -7276,7 +7342,7 @@ const convBetween = (db, a, b) =>
     );
     const chat33 = kt("ChatScreen.kt");
     const sendText33 = chat33.slice(
-      chat33.indexOf('fun sendText(body: String, kind: String = "TEXT") {'),
+      chat33.indexOf('fun sendText(body: String, kind: String = "TEXT", once: Boolean = false) {'),
       chat33.indexOf("fun loadScheduled() {"),
     );
     const flush33 = cache.slice(
@@ -9494,8 +9560,8 @@ const convBetween = (db, a, b) =>
         ui.includes("} else {\n            // Owner round 34 (item 3)") &&
         ui.includes("t.snapTo(1f)") &&
         // Owner round 44 (item 6): frames carry their own capture again
-        // (5: text + video + photo + album + view-once).
-        (chat.match(/DeleteGeoms\.put\(m, it\.boundsInWindow\(\)\)/g) || []).length === 5 &&
+        // (r71-20: 6 — text + video + photo + album + view-once + once-text).
+        (chat.match(/DeleteGeoms\.put\(m, it\.boundsInWindow\(\)\)/g) || []).length === 6 &&
         kt("DeleteAnim.kt").includes("const val SWEEP_MS = 1200") &&
         kt("DeleteAnim.kt").includes("const val GRACE_MS = 3200L") &&
         kt("DeleteAnim.kt").includes("const val COLLAPSE_MS = 220") &&
