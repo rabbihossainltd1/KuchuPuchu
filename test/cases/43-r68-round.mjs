@@ -57,6 +57,30 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+/* ---------- 4. the mirrored reaction belongs to a shared screen ---------- */
+{
+  const emo = main("EmojiAnim.kt");
+  const chat = main("ChatScreen.kt");
+  check(
+    "r68-4: the decision is one pure function (foreground + THIS route), so it can be asserted off-device",
+    emo.includes("internal object EmojiFxPolicy") &&
+      emo.includes(
+        "fun mirrorsOnScreen(foreground: Boolean, route: String, convId: String): Boolean",
+      ) &&
+      emo.includes('return route == "chat/$convId" || route.startsWith("chat/$convId?")'),
+  );
+  check(
+    "r68-4: the replay is enqueued only through it — a pocketed phone no longer buzzes for an unseen dance",
+    chat.includes("EmojiFxPolicy.mirrorsOnScreen(Store.foreground, Store.route, convId)") &&
+      (chat.match(/emojiFxReplays\.add\(/g) || []).length === 1,
+  );
+  check(
+    "r68-4: the local tap still buzzes (the user IS looking at the screen) and still posts /fx on every tap",
+    emo.includes("if (isSingle) replay(local = true) else haptics.tap()") &&
+      emo.includes('Api.post("/api/messages/$mid/fx")'),
+  );
+}
+
 console.log(lines.join("\n"));
 console.log(
   `r68 round: ${lines.filter((l) => l.includes("OK")).length} ok / ${lines.filter((l) => l.includes("BROKEN")).length} broken`,

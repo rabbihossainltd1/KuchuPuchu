@@ -40,6 +40,27 @@ import kotlinx.coroutines.withContext
 
 internal val emojiFxReplays = SnapshotStateList<String>()
 
+/**
+ * r68-4 (owner: "ei haptic ta just tokhoni kaj korbe jokhon 2 ta user e same chat
+ * screen a thakbe all time na").
+ *
+ * The mirrored reaction is a shared moment: the other phone replays the dance
+ * AND buzzes — but only when that user is actually looking at this chat. The
+ * app used to enqueue the replay whenever the socket frame arrived for a live
+ * chat screen, which includes the case where the phone is in a pocket with the
+ * app backgrounded (the composition survives, the screen is dark) — so the far
+ * side felt a buzz for an animation nobody could see. Both halves are required:
+ * the app must be in front, and the route must be THIS conversation (a chat
+ * screen can stay composed under a pushed screen, e.g. the media viewer).
+ * Pure, so the decision is asserted off-device in EmojiFxPolicyTest.
+ */
+internal object EmojiFxPolicy {
+    fun mirrorsOnScreen(foreground: Boolean, route: String, convId: String): Boolean {
+        if (!foreground || convId.isBlank()) return false
+        return route == "chat/$convId" || route.startsWith("chat/$convId?")
+    }
+}
+
 /** Top 50 bundled codepoints — Smileys pack (2.7M total). */
 internal object NotoBundled {
     val set = setOf(

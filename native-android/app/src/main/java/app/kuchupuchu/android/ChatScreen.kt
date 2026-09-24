@@ -1144,7 +1144,13 @@ fun ChatScreen(nav: NavController, convId: String) {
                 // N3r: the other side tapped an emoji row — it replays HERE
                 // too (the row consumes its own id exactly once).
                 "emoji_fx" ->
-                    if (ev.optString("conversationId") == convId) {
+                    // r68-4: the far side's buzz is a shared moment, so the
+                    // replay is enqueued ONLY while this chat is the screen the
+                    // user is looking at (foreground + this route) — otherwise
+                    // the other phone buzzed for an animation nobody saw.
+                    if (ev.optString("conversationId") == convId &&
+                        EmojiFxPolicy.mirrorsOnScreen(Store.foreground, Store.route, convId)
+                    ) {
                         ev.optString("mid").takeIf { it.isNotBlank() }?.let { emojiFxReplays.add(it) }
                     }
                 // GROUPS are the exception: blue ticks mean EVERY member has
