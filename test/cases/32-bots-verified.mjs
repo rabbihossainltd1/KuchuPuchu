@@ -5458,6 +5458,12 @@ const convBetween = (db, a, b) =>
       cl.indexOf("private fun ChatRowSheet("),
       cl.indexOf("private fun HomeMenuItem("),
     );
+    // r69: the popup + the DELETE live in the shared pair now — the chat row,
+    // the multi-select bar and the two swipe slots all call into it.
+    const delPopup = cl.slice(
+      cl.indexOf("internal fun ChatDeleteDialog("),
+      cl.indexOf("private fun ChatRowSheet("),
+    );
     const order = [
       'KpSheetRow(Icons.Filled.Delete, "Delete", tint = Red)',
       'if (allMuted) "Unmute" else "Mute",',
@@ -5490,15 +5496,19 @@ const convBetween = (db, a, b) =>
         sheet.includes('KpSheetRow(Icons.Filled.PushPin, if (allPinned) "Unpin" else "Pin")') &&
         sheet.includes('KpSheetRow(Icons.Filled.GroupAdd, "Create group with $handle")') &&
         sheet.includes('nav.navigate("newgroup?with=${peers.joinToString(",")}")') &&
-        sheet.includes('title = "Delete Chat",') &&
-        sheet.includes('if (multi) "Permanently delete these ${ids.size} chats?"') &&
-        sheet.includes('"Permanently delete the chat with $name?"') &&
-        sheet.includes(
-          'alsoLabel = if (multi) "Also delete for everyone" else "Also delete for $name",',
+        delPopup.includes('else -> "Delete Chat"') &&
+        delPopup.includes('multi -> "Permanently delete these ${convs.size} chats?"') &&
+        delPopup.includes('else -> "Permanently delete the chat with $name?"') &&
+        delPopup.includes(
+          'alsoLabel =\n            when {\n                multi -> "Also delete for everyone"',
         ) &&
-        sheet.includes(
-          'Api.delete("/api/conversations/$id", JSONObject().put("forEveryone", also))',
+        // r69: the swipe slots raise this same popup (they used to delete on
+        // the spot), and the shrink + the server call run on its answer.
+        delPopup.includes(
+          'Api.delete("/api/conversations/$id", JSONObject().put("forEveryone", alsoForThem))',
         ) &&
+        delPopup.includes("ids.forEach { ScreenStore.dropConv(it) }") &&
+        (cl.match(/askDelete = true/g) || []).length === 2 &&
         cl.includes('.sortedByDescending { if (it.optString("id") in pinned) 1 else 0 }') &&
         store.includes("val pinnedConvIds = mutableStateListOf<String>()") &&
         store.includes('pinnedFile = File(ctx.filesDir, "kp-pinned.json")') &&
@@ -9652,13 +9662,15 @@ const convBetween = (db, a, b) =>
         chat.includes("import androidx.compose.animation.core.Animatable"),
     );
     check(
-      "r33-11b: chat list — a swiped-away chat shrinks (vanishOut on the 76 dp row, 190 ms) before dropConv in both delete slots; status viewer route slides up on enter and down on pop",
+      "r33-11b (r69): chat list — a swiped-away chat shrinks (vanishOut on the 76 dp row, 190 ms) before it leaves; BOTH swipe delete slots now ask the chat-delete popup first and the shared deleteChatsNow does the dropConv + server call; status viewer route slides up on enter and down on pop",
       cl.includes("var vanishing by remember { mutableStateOf(false) }") &&
-        (
-          cl.match(
-            /vanishing = true\n\s+delay\(190\)\n\s+ScreenStore\.dropConv\(conv\.optString\("id"\)\)/g,
-          ) || []
-        ).length === 2 &&
+        // r69: both swipe slots RAISE the shared popup instead of deleting on
+        // the spot; the shrink (190 ms) happens once, on that popup's answer,
+        // and deleteChatsNow does the drop + the server call.
+        (cl.match(/askDelete = true/g) || []).length === 2 &&
+        (cl.match(/vanishing = true\n\s+delay\(190\)/g) || []).length === 1 &&
+        cl.includes("deleteChatsNow(scope, listOf(convId), also)") &&
+        cl.includes("ids.forEach { ScreenStore.dropConv(it) }") &&
         cl.includes(
           "Box(Modifier.fillMaxWidth().height(76.dp).vanishOut(vanishing) {}.then(swipeFocusTouch(convId))) {",
         ) &&

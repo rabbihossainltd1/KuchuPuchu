@@ -433,15 +433,24 @@ const bodies = (rows) => JSON.stringify(rows.map((m) => m.body));
       chat.includes('avatarUrl = otherJ?.optIso("avatarUrl")'),
   );
   check(
-    "r68-7: every chat-delete entry point lands on that popup and sends the answer (thread ⋮, chat-list row, chat-list multi-select, block wall)",
+    "r68-7 (r69: all FIVE entry points): every chat-delete entry point lands on that popup and sends the answer — thread ⋮, chat-list row, chat-list multi-select, block wall, and the chat-list swipe",
     chat.includes("confirmDeleteChat = true") &&
       chat.includes("deleteWallChat(also)") &&
       chat.includes("fun deleteWallChat(forEveryone: Boolean)") &&
       chat.includes('"/api/conversations/$convId",') &&
       chat.includes('JSONObject().put("forEveryone", forEveryone),') &&
       cl.includes("KpDeleteDialog(") &&
-      cl.includes('title = "Delete Chat"') &&
-      cl.includes('Api.delete("/api/conversations/$id", JSONObject().put("forEveryone", also))'),
+      cl.includes('else -> "Delete Chat"') &&
+      cl.includes('"Permanently delete the chat with $name?"') &&
+      // r69: ONE delete helper for the list (rows + swipe slots) — the swipe
+      // used to delete on the spot with no popup (owner item 10).
+      cl.includes("internal fun deleteChatsNow(") &&
+      cl.includes("ids.forEach { ScreenStore.dropConv(it) }") &&
+      (cl.match(/askDelete = true/g) || []).length === 2 &&
+      cl.includes("deleteChatsNow(scope, listOf(convId), also)") &&
+      cl.includes(
+        'Api.delete("/api/conversations/$id", JSONObject().put("forEveryone", alsoForThem))',
+      ),
   );
   check(
     "r68-7: a chat the server calls hidden for me is dropped, never re-added by the one-conversation poke merge",

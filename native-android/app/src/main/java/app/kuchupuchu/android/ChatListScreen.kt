@@ -466,6 +466,8 @@ internal object ListSelect {
         sheetFor = null
     }
 
+
+
     fun toggle(id: String) {
         if (id in ids) ids.remove(id) else ids.add(id)
     }
@@ -971,6 +973,9 @@ private fun SwipeConvRow(
     // Owner round 33 (item 6): the Hide slot opens the key sheet; the hide
     // itself carries the key's hash (server + every device of the account).
     var askKey by remember { mutableStateOf(false) }
+    // r69: the swipe's Delete raises the chat-delete popup (the same one the
+    // long-press sheet and the multi-select bar use) instead of deleting on the
+    // spot. Confirm = the row shrinks away (r33-11b) and the shared delete runs.
     fun hide(key: String) {
         haptics.confirm()
         val id = conv.optString("id")
@@ -995,11 +1000,36 @@ private fun SwipeConvRow(
     LaunchedEffect(SwipeOpen.id) {
         if (SwipeOpen.id != convId && dragged != 0f) dragged = 0f
     }
+    var askDelete by remember { mutableStateOf(false) }
     if (askKey) {
         HideKeySheet(onDismiss = { askKey = false }) { key ->
             askKey = false
             hide(key)
         }
+    }
+    if (askDelete) {
+        ChatDeleteDialog(
+            convs = listOf(conv),
+            onDismiss = {
+                askDelete = false
+                dragged = 0f
+            },
+            onConfirm = { also ->
+                askDelete = false
+                haptics.heavy()
+                scope.launch {
+                    // Shrink first, then leave — no popup used to mean the row
+                    // was gone before anyone could answer.
+                    vanishing = true
+                    delay(190)
+                    dragged = 0f
+                    deleteChatsNow(scope, listOf(convId), also) {
+                        android.widget.Toast.makeText(ctx, "Chat deleted", android.widget.Toast.LENGTH_SHORT).show()
+                        onChange()
+                    }
+                }
+            },
+        )
     }
 
     Box(Modifier.fillMaxWidth().height(76.dp).vanishOut(vanishing) {}.then(swipeFocusTouch(convId))) {
@@ -1040,24 +1070,12 @@ private fun SwipeConvRow(
                         tint = Red,
                         label = "Delete",
                     ) {
-                        scope.launch {
-                            haptics.heavy()
-                            // Vanish NOW — the server delete runs behind. The old
-                            // flow waited for the next poll, so the row sat there
-                            // long enough to look like "delete hoi na".
-                            // Owner round 33 (item 11b): 180 ms shrink first.
-                            vanishing = true
-                            delay(190)
-                            ScreenStore.dropConv(conv.optString("id"))
-                            android.widget.Toast.makeText(ctx, "Chat deleted", android.widget.Toast.LENGTH_SHORT).show()
-                            dragged = 0f
-                            onChange()
-                            runCatching {
-                                withContext(Dispatchers.IO) {
-                                    Api.delete("/api/conversations/${conv.optString("id")}")
-                                }
-                            }
-                        }
+                        // r69 (owner: "swipe right kore delete korlam kono popup
+                        // asheni auto delete hoye geche"): the swipe asks the
+                        // SAME question the long-press sheet asks — this slot only
+                        // raises the screen's shared popup now.
+                        haptics.tap()
+                        askDelete = true
                     }
                 }
                 if (offset < 0f && !archivedMode) {
@@ -1136,24 +1154,12 @@ private fun SwipeConvRow(
                         tint = Red,
                         label = "Delete",
                     ) {
-                        scope.launch {
-                            haptics.heavy()
-                            // Vanish NOW — the server delete runs behind. The old
-                            // flow waited for the next poll, so the row sat there
-                            // long enough to look like "delete hoi na".
-                            // Owner round 33 (item 11b): 180 ms shrink first.
-                            vanishing = true
-                            delay(190)
-                            ScreenStore.dropConv(conv.optString("id"))
-                            android.widget.Toast.makeText(ctx, "Chat deleted", android.widget.Toast.LENGTH_SHORT).show()
-                            dragged = 0f
-                            onChange()
-                            runCatching {
-                                withContext(Dispatchers.IO) {
-                                    Api.delete("/api/conversations/${conv.optString("id")}")
-                                }
-                            }
-                        }
+                        // r69 (owner: "swipe right kore delete korlam kono popup
+                        // asheni auto delete hoye geche"): the swipe asks the
+                        // SAME question the long-press sheet asks — this slot only
+                        // raises the screen's shared popup now.
+                        haptics.tap()
+                        askDelete = true
                     }
                 }
             }
@@ -1527,6 +1533,96 @@ private fun ConvCard(conv: JSONObject, nav: NavController, revealed: Boolean = f
  * with all ticked 1:1 peers; "Select" keeps the list in select mode.
  */
 @Composable
+/* ---------------- the chat-delete popup (r68-7, r69) ----------------
+   ONE popup and ONE delete for this whole screen. The row's long-press sheet,
+   the multi-select bar AND both swipe slots (main list + archive) raise THIS.
+
+   r69 (owner: "ami jelono kichu implement korle ota kothai kothai ache ki ki
+   buttons ache check kore shob jaigay implement na kore shortcut use koro
+   keno?") — the swipe slots used to delete on the spot, with no popup at all
+   ("swipe right kore delete korlam kono popup asheni auto delete hoye geche").
+   That was a shortcut: the same action must ask the same question wherever it
+   lives. */
+
+/** r69: the delete popup, fed by the row's JSON exactly as every other caller. */
+@Composable
+internal fun ChatDeleteDialog(
+    convs: List<JSONObject>,
+    onDismiss: () -> Unit,
+    onConfirm: (alsoForThem: Boolean) -> Unit,
+) {
+    val multi = convs.size > 1
+    val one = convs.firstOrNull()
+    val group = !multi && one?.optBoolean("isGroup") == true
+    val other = one?.optJSONObject("other")
+    val name =
+        when {
+            multi -> "everyone"
+            group -> one?.optText("title").orEmpty().ifBlank { "Group" }
+            else ->
+                other?.optText("displayName").orEmpty()
+                    .ifBlank { other?.optText("username").orEmpty() }
+                    .ifBlank { "this chat" }
+        }
+    KpDeleteDialog(
+        title =
+            when {
+                multi -> "Delete Chats"
+                group -> "Leave group?"
+                else -> "Delete Chat"
+            },
+        question =
+            when {
+                multi -> "Permanently delete these ${convs.size} chats?"
+                // A group is never deleted for everyone — the server makes the
+                // member LEAVE it — so the popup says that, with no checkbox.
+                group -> "You will no longer receive messages from this group."
+                else -> "Permanently delete the chat with $name?"
+            },
+        alsoLabel =
+            when {
+                multi -> "Also delete for everyone"
+                group -> null
+                else -> "Also delete for $name"
+            },
+        confirmLabel =
+            when {
+                multi -> "Delete Chats"
+                group -> "Leave group"
+                else -> "Delete Chat"
+            },
+        avatarName = name,
+        avatarUrl = if (multi) null else if (group) one?.optIso("avatarUrl") else other?.optIso("avatarUrl"),
+        avatarRef = if (multi) null else if (group) one?.optIso("avatarRef") else other?.optIso("avatarRef"),
+        onDismiss = onDismiss,
+        onConfirm = onConfirm,
+    )
+}
+
+/**
+ * r69: the chat DELETE itself, in one place — the row leaves the list at once
+ * and the server call follows with the checkbox's answer. Every caller of
+ * [ChatDeleteDialog] uses this, so the two can never drift apart.
+ */
+internal fun deleteChatsNow(
+    scope: kotlinx.coroutines.CoroutineScope,
+    ids: List<String>,
+    alsoForThem: Boolean,
+    after: () -> Unit = {},
+) {
+    ids.forEach { ScreenStore.dropConv(it) }
+    scope.launch {
+        ids.forEach { id ->
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    Api.delete("/api/conversations/$id", JSONObject().put("forEveryone", alsoForThem))
+                }
+            }
+        }
+    }
+    after()
+}
+
 private fun ChatRowSheet(
     target: JSONObject,
     nav: NavController,
@@ -1546,40 +1642,24 @@ private fun ChatRowSheet(
     val canGroup = !target.optBoolean("isGroup") && otherId.isNotBlank() && !isKpBot(otherId)
     var confirmDelete by remember { mutableStateOf(false) }
     if (confirmDelete) {
-        // r68-7 (owner: "ekhon theke full chat delete korte gele emon popup
-        // asbe user jodi check box ta tick kore delete kore duijoner thekei
-        // chat delete hoye jabe shob permanently tick na korle just tar kache
-        // thekei delete Hobe je koreche"): the checkbox is the whole question.
-        // Ticked = the rows go for BOTH members (the worker takes the other
-        // member's watermark too), unticked = only my copy disappears.
-        val multi = ids.size > 1
-        val name = handle.ifBlank { if (multi) "everyone" else "this chat" }
-        KpDeleteDialog(
-            title = "Delete Chat",
-            question =
-                if (multi) "Permanently delete these ${ids.size} chats?"
-                else "Permanently delete the chat with $name?",
-            alsoLabel = if (multi) "Also delete for everyone" else "Also delete for $name",
-            confirmLabel = if (multi) "Delete Chats" else "Delete Chat",
-            avatarName = name,
-            avatarUrl = if (multi) null else other?.optIso("avatarUrl"),
-            avatarRef = if (multi) null else other?.optIso("avatarRef"),
+        // r68-7: the checkbox is the whole question ("tick korle duijoner thekei
+        // chat delete hoye jabe shob permanently, tick na korle just tar kache
+        // theke delete Hobe je koreche"); r69: the popup and the DELETE are the
+        // screen's shared pair (see ChatDeleteDialog above) — the swipe slots
+        // raise the very same dialog now.
+        val rowsToDelete =
+            ids.mapNotNull { id -> ScreenStore.convs.firstOrNull { it.optString("id") == id } }
+                .ifEmpty { listOf(target) }
+        ChatDeleteDialog(
+            convs = rowsToDelete,
             onDismiss = { confirmDelete = false },
             onConfirm = { also ->
                 confirmDelete = false
                 haptics.heavy()
-                ids.forEach { ScreenStore.dropConv(it) }
-                android.widget.Toast.makeText(ctx, if (multi) "Chats deleted" else "Chat deleted", android.widget.Toast.LENGTH_SHORT).show()
-                ListSelect.clear()
-                onChange()
-                scope.launch {
-                    for (id in ids) {
-                        runCatching {
-                            withContext(Dispatchers.IO) {
-                                Api.delete("/api/conversations/$id", JSONObject().put("forEveryone", also))
-                            }
-                        }
-                    }
+                deleteChatsNow(scope, ids, also) {
+                    android.widget.Toast.makeText(ctx, if (ids.size > 1) "Chats deleted" else "Chat deleted", android.widget.Toast.LENGTH_SHORT).show()
+                    ListSelect.clear()
+                    onChange()
                 }
             },
         )
