@@ -286,6 +286,9 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onResume() {
+        // r73-18b: a chat that was left open while the app went away is in front
+        // again — re-arm its capture watch (a no-op when there is no chat).
+        KpCapture.resume()
         // Owner round 20: the update check only ran on COLD starts — a
         // release published while the app sat alive in memory never popped
         // the dialog. Re-check on every resume, throttled to 30 minutes.
@@ -330,6 +333,10 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        // r73-18b (owner: "screenshot chat er baire nileo alert jai"): this
+        // screen is not in front of anyone any more — a screenshot taken in
+        // another app must not be reported as one of this chat's.
+        KpCapture.pause()
         // r69: the flag now drives whether a FOREGROUND message/call still
         // notifies (a muted chat must stay silent while the app is not in
         // front), so it is true only while this activity really has focus —

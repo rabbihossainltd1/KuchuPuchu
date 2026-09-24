@@ -41,16 +41,43 @@ object KpCapture {
     private var recCallback: java.util.function.Consumer<Int>? = null
     private var lastShot = 0L
 
+    /** Is a watch currently registered with the OS? */
+    private var armed = false
+
     /** Start (or move) the watch — called from the chat that is on screen. */
     fun watch(activity: Activity?, conv: String) {
         if (activity == null || conv.isBlank()) {
             stop()
             return
         }
-        if (watched === activity && convId == conv) return
-        stop()
+        if (watched === activity && convId == conv && armed) return
+        teardown()
         watched = activity
         convId = conv
+        arm()
+    }
+
+    /**
+     * r73-18b (owner: "screenshot chat er baire nileo alert jai"): the chat is
+     * composed but NOT the screen in front of anyone — home screen, another app,
+     * the app switcher. Every registration is dropped and, when the chat comes
+     * back, [arm] starts from a FRESH watermark, so the screenshots taken
+     * meanwhile belong to whoever took them and never to this chat.
+     */
+    fun pause() {
+        teardown()
+    }
+
+    /** The chat is in front again — arm it exactly like a fresh watch. */
+    fun resume() {
+        if (watched == null || convId.isBlank() || armed) return
+        arm()
+    }
+
+    /** Register the OS callbacks and the folder watch for the current chat. */
+    private fun arm() {
+        val activity = watched ?: return
+        armed = true
         if (Build.VERSION.SDK_INT >= 34) {
             val cb = Activity.ScreenCaptureCallback { report("shot") }
             runCatching {
@@ -75,12 +102,19 @@ object KpCapture {
         }
     }
 
-    /** The chat left the screen — nothing to report for it any more. */
+    /** The chat left the composition — nothing to report for it any more. */
     fun stop() {
-        stopFolder()
-        val a = watched
+        teardown()
         watched = null
         convId = ""
+    }
+
+    /** Drop every registration, keeping [watched] / [convId] for a later [arm]. */
+    private fun teardown() {
+        if (!armed) return
+        armed = false
+        stopFolder()
+        val a = watched
         if (a != null && Build.VERSION.SDK_INT >= 34) {
             shotCallback?.let { cb -> runCatching { a.unregisterScreenCaptureCallback(cb) } }
         }

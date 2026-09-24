@@ -613,6 +613,32 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes("Allow Photos so screenshots can be spotted"),
   );
   check(
+    'r73-18b (owner: "screenshot chat er baire nileo alert jai"): the watch follows the ACTIVITY, not the composition — [pause] tears every registration down when the screen loses focus, [resume] re-arms it, and arming always starts from a FRESH watermark, so a screenshot taken in another app can never be attributed to this chat',
+    cap.includes("fun pause() {") &&
+      cap.includes("fun resume() {") &&
+      cap.includes("private fun teardown() {") &&
+      cap.includes("if (!armed) return") &&
+      cap.includes("armed = false") &&
+      cap.includes("private var armed = false") &&
+      /fun resume\(\) \{\n        if \(watched == null \|\| convId.isBlank\(\) \|\| armed\) return\n        arm\(\)/.test(
+        cap,
+      ) &&
+      // the watermark is taken at ARM time (today's newest shot), not at boot
+      cap.includes("watermark = newest.first") &&
+      // and the activity drives it
+      read("native-android/app/src/main/java/app/kuchupuchu/android/MainActivity.kt").includes(
+        "KpCapture.resume()",
+      ) &&
+      read("native-android/app/src/main/java/app/kuchupuchu/android/MainActivity.kt").includes(
+        "KpCapture.pause()",
+      ) &&
+      // the tiny alert: one line of red text, no chip around it
+      chat.includes('r73-18c (owner: "alert eto boro kore ekdom choto kore jabe background') &&
+      chat.includes("fontSize = 10.5.sp,") &&
+      chat.includes("color = Red.copy(alpha = 0.9f),") &&
+      chat.includes("textAlign = TextAlign.Center,"),
+  );
+  check(
     "r71-18: the switches are the server's (read from the conversation, written back one at a time) and a capture alert lands as a red chip with one buzz",
     chat.includes('c?.optJSONObject("privacy")') &&
       chat.includes(
@@ -622,7 +648,8 @@ const main = (f) => read(`${ANDROID}/${f}`);
       chat.includes("internal fun captureAlertOf(m: JSONObject): String?") &&
       chat.includes('b.endsWith("took a screenshot of this chat") -> "shot"') &&
       chat.includes('b.endsWith("started a screen recording of this chat") -> "rec"') &&
-      chat.includes("Icons.Filled.Videocam else Icons.Filled.VisibilityOff") &&
+      // r73-18c: the alert is a single small line of red text on the wallpaper.
+      !chat.includes("Icons.Filled.Videocam else Icons.Filled.VisibilityOff") &&
       chat.includes("if (fresh) h.reject()"),
   );
   check(

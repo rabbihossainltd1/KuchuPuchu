@@ -518,6 +518,12 @@ fun ChatScreen(nav: NavController, convId: String) {
         KpCapture.watch(MainActivity.current, convId)
         onDispose { KpCapture.stop() }
     }
+    // r73-18b (owner: "screenshot chat er baire nileo alert jai"): the screen
+    // staying composed is not the same as the screen being IN FRONT — a chat
+    // merely alive behind the home screen kept watching the Screenshots folder.
+    // The watch follows the ACTIVITY now (MainActivity.onPause/onResume): it is
+    // torn down the moment this screen loses focus and re-armed, with a fresh
+    // watermark, when it comes back.
     androidx.compose.runtime.DisposableEffect(convId) {
         onDispose {
             alive.set(false)
@@ -6732,23 +6738,19 @@ private fun MessageRow(
             }.getOrDefault(false)
             if (fresh) h.reject()
         }
-        Box(Modifier.fillMaxWidth().padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
-            Row(
-                Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Red.copy(alpha = 0.14f))
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    if (captureAlert == "rec") Icons.Filled.Videocam else Icons.Filled.VisibilityOff,
-                    null,
-                    tint = Red,
-                    modifier = Modifier.size(14.dp),
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(m.optString("body"), fontSize = 12.sp, color = Red, fontWeight = FontWeight.Medium)
-            }
+        // r73-18c (owner: "alert eto boro kore ekdom choto kore jabe background
+        // border thakbe na just text"): the alert is one small line of red text
+        // on the wallpaper — no chip, no border, no icon.
+        Box(Modifier.fillMaxWidth().padding(vertical = 2.dp), contentAlignment = Alignment.Center) {
+            Text(
+                m.optString("body"),
+                fontSize = 10.5.sp,
+                lineHeight = 13.sp,
+                color = Red.copy(alpha = 0.9f),
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 18.dp),
+            )
         }
         return
     }
