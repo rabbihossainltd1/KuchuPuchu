@@ -44,6 +44,15 @@ object VoiceNote {
     var isRecording: Boolean = false
         private set
 
+    // r73-19 (the owner's screenshots show Telegram's locked row with a Pause
+    // button): a locked note can be paused and picked up again. The clock and
+    // the peak sampler stop with it, so the take's length and its wave are the
+    // words that were actually spoken.
+    private var pausedAt = 0L
+    private var pausedTotal = 0L
+    var isPaused: Boolean = false
+        private set
+
     /** Owner round 32 (item 45): the newest peaks (0..100, [VoiceWaveform.LIVE_BARS]
      *  wide, silence padded on the left) while the finger is down — the composer
      *  paints them as a live wave next to the timer. Empty when not recording. */
@@ -67,6 +76,9 @@ object VoiceNote {
             recorder = r
             file = f
             startedAt = System.currentTimeMillis()
+            pausedAt = 0L
+            pausedTotal = 0L
+            isPaused = false
             isRecording = true
             amps.clear()
             livePeaks = emptyList()
@@ -75,16 +87,52 @@ object VoiceNote {
             true
         }.getOrDefault(false)
 
-    /** Recording elapsed time in ms (for the min-1-second rule). */
-    fun elapsedMs(): Long = if (isRecording) System.currentTimeMillis() - startedAt else 0L
+    /** Recording elapsed time in ms (for the min-1-second rule) — a pause stops it. */
+    fun elapsedMs(): Long =
+        if (!isRecording) {
+            0L
+        } else {
+            (if (isPaused) pausedAt else System.currentTimeMillis()) - startedAt - pausedTotal
+        }
+
+    /** Pause the take (r73-19). Returns false when there was nothing to pause. */
+    fun pause(): Boolean =
+        runCatching {
+            if (!isRecording || isPaused) return@runCatching false
+            recorder?.pause()
+            pausedAt = System.currentTimeMillis()
+            isPaused = true
+            true
+        }.getOrDefault(false)
+
+    /** Pick the take up again (r73-19) — the clock and the wave follow. */
+    fun resume(): Boolean =
+        runCatching {
+            if (!isRecording || !isPaused) return@runCatching false
+            recorder?.resume()
+            pausedTotal += System.currentTimeMillis() - pausedAt
+            isPaused = false
+            handler.removeCallbacks(sampler)
+            handler.postDelayed(sampler, SAMPLE_MS)
+            true
+        }.getOrDefault(false)
 
     /** Stops and returns the take (file, seconds, waveform bars) or null on failure. */
     fun stop(): VoiceTake? {
         if (!isRecording) return null
+        // The length is what was SPOKEN: read it while the paused clock still
+        // knows where it stopped.
+        val secs = (elapsedMs() / 1000).toInt()
         isRecording = false
         handler.removeCallbacks(sampler)
         val f = file
-        val secs = ((System.currentTimeMillis() - startedAt) / 1000).toInt()
+        // A paused MediaRecorder must be resumed before stop() (the platform
+        // documents stop() only for a recording that is running).
+        if (isPaused) {
+            runCatching { recorder?.resume() }
+            pausedTotal += System.currentTimeMillis() - pausedAt
+            isPaused = false
+        }
         runCatching { recorder?.stop() }
         runCatching { recorder?.release() }
         recorder = null
@@ -98,6 +146,9 @@ object VoiceNote {
     fun cancel() {
         if (!isRecording) return
         isRecording = false
+        pausedAt = 0L
+        pausedTotal = 0L
+        isPaused = false
         handler.removeCallbacks(sampler)
         amps.clear()
         livePeaks = emptyList()

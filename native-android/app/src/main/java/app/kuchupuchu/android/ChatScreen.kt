@@ -63,6 +63,7 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -287,6 +288,8 @@ fun ChatScreen(nav: NavController, convId: String) {
     // the recorder really starts.
     var lockPending by remember { mutableStateOf(false) }
     var recStarting by remember { mutableStateOf(false) }
+    // r73-19: the locked strip's Pause / Resume (VoiceNote keeps the clock).
+    var recPaused by remember { mutableStateOf(false) }
     var recMs by remember { mutableStateOf(0) }
     var voiceBinNonce by remember { mutableStateOf(0) }
     // Owner round 33 (item 11b): rows that appeared AFTER the chat opened
@@ -2465,6 +2468,7 @@ fun ChatScreen(nav: NavController, convId: String) {
                     // the mic seat is the Send circle from the first frame.
                     voiceLocked = lockPending
                     lockPending = false
+                    recPaused = false
                     // r56 item 2: ping voice immediately on recording start
                     scope.launch {
                         runCatching {
@@ -2490,6 +2494,7 @@ fun ChatScreen(nav: NavController, convId: String) {
         val wasLocked = voiceLocked
         voiceLocked = false
         lockPending = false
+        recPaused = false
         // r56 item 2: clear voice indicator immediately when recording finishes or cancels
         scope.launch {
             runCatching {
@@ -2542,6 +2547,24 @@ fun ChatScreen(nav: NavController, convId: String) {
             }
             delay(100)
         }
+    }
+
+    /**
+     * r73-19: Pause / Resume the locked take — the strip's transport button.
+     * The clock and the wave hold still while it is paused (VoiceNote.pause
+     * stops the recorder itself, so nothing is lost).
+     */
+    fun toggleRecPause() {
+        if (!recording) return
+        recPaused =
+            if (recPaused) {
+                VoiceNote.resume()
+                false
+            } else {
+                VoiceNote.pause()
+                true
+            }
+        runCatching { haptics.tap() }
     }
 
     /**
@@ -4660,6 +4683,8 @@ fun ChatScreen(nav: NavController, convId: String) {
             // r71-19: the lock — a swipe up (or a plain tap) leaves the finger
             // free while the note keeps recording; Send closes it.
             locked = voiceLocked,
+            paused = recPaused,
+            onTogglePause = { toggleRecPause() },
             onLockRecord = { lockRecording() },
             onSendVoice = { finishRecording(cancelled = false) },
             // r71-19b: while a note is locked, a DOUBLE tap on Send sends it
@@ -5059,6 +5084,9 @@ private fun Composer(
     // r71-19: the locked recording — the finger is off the mic, the strip
     // stays, the mic seat is Send, and ✕ in the strip drops the note.
     locked: Boolean = false,
+    // r73-19: the locked strip's Pause / Resume.
+    paused: Boolean = false,
+    onTogglePause: () -> Unit = {},
     onLockRecord: () -> Unit = {},
     onSendVoice: () -> Unit = {},
     // r71-19b: the locked seat's second tap — the note goes as view-once.
@@ -5220,11 +5248,27 @@ private fun Composer(
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                PulsingDot()
-                Spacer(Modifier.width(8.dp))
+                if (locked) {
+                    // r73-19 (the owner's screenshots show Telegram's locked
+                    // row): with the finger free this is a real transport — the
+                    // bin on the left throws the note away, the clock and the
+                    // live wave stay in the middle, and Pause / Resume sits next
+                    // to the Send circle on the right.
+                    IconButton(onClick = { onCancelVoice() }, Modifier.size(30.dp)) {
+                        Icon(
+                            Icons.Filled.Delete,
+                            "Delete recording",
+                            tint = Red,
+                            modifier = Modifier.size(17.dp),
+                        )
+                    }
+                } else {
+                    PulsingDot()
+                    Spacer(Modifier.width(8.dp))
+                }
                 Text(
                     "%d:%02d".format(recMs / 1000 / 60, recMs / 1000 % 60),
-                    color = Ink,
+                    color = if (locked && paused) Muted else Ink,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                 )
@@ -5236,19 +5280,31 @@ private fun Composer(
                 LiveVoiceWave(color = accent, modifier = Modifier.weight(1f).height(22.dp))
                 Spacer(Modifier.width(10.dp))
                 if (locked) {
-                    // r71-19: locked — the finger is free, so the hint is not
-                    // "slide to cancel" any more: the mic seat is Send, and the
-                    // ✕ here is the way out. The lock glyph says why the strip
-                    // is still there with nothing held down.
-                    IconButton(
-                        onClick = { onCancelVoice() },
-                        Modifier.size(28.dp),
+                    // r73-19: the transport's other half — a paused note says so
+                    // and the clock holds still (VoiceNote stops with it).
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color(0xE614181F))
+                            .clickable { onTogglePause() }
+                            .padding(horizontal = 12.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(Icons.Filled.Close, "Cancel recording", tint = Red, modifier = Modifier.size(16.dp))
+                        Icon(
+                            if (paused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
+                            if (paused) "Resume" else "Pause",
+                            tint = Color.White,
+                            modifier = Modifier.size(15.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            if (paused) "Resume" else "Pause",
+                            color = Color.White,
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                        )
                     }
-                    Icon(Icons.Filled.Lock, "Locked", tint = accent, modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Locked", color = accent, fontSize = 12.5.sp, maxLines = 1)
                 } else {
                     Text("‹ Slide to cancel", color = Red, fontSize = 12.5.sp, maxLines = 1)
                 }
@@ -5357,9 +5413,10 @@ private fun HoldMicButton(
     var dragY by remember { mutableStateOf(0f) }
     val cancelArmed = dragX <= -cancelDist
     val lockArmed = dragY <= -lockDist
-    // The badge shows as soon as the finger heads up (it is the target), and
-    // fills once it is reached.
-    val lockShowing = dragY <= -12f
+    // r73-19 (the owner's screenshots show Telegram's affordance): the target
+    // is up from the moment the recording starts — it is what the finger is
+    // aiming at — and it fills once the finger is there.
+    val lockShowing = recording || dragY <= -12f
     val lockAlpha by animateFloatAsState(if (lockShowing) 1f else 0f, tween(120), label = "lockalpha")
     val animX by animateFloatAsState(if (recording) dragX else 0f, spring(stiffness = 900f), label = "micdrag")
 
@@ -5441,25 +5498,32 @@ private fun HoldMicButton(
     // reach it) — hollow while the finger is heading up, filled once it is
     // there.
     if (lockAlpha > 0.01f) {
-        Box(
+        Column(
             Modifier
-                // r72-19 (owner: "lock icon ta upore thakbe side a na"): the
-                // goal sits ABOVE the mic now, not to its left. The finger
-                // still travels up to reach it; it is a SIBLING of the mic on
-                // purpose (the mic's circle clips its children, the badge rides
-                // outside that clip).
-                .offset { IntOffset(0, -(34.dp.toPx()).roundToInt()) }
-                .size(30.dp)
+                // r72-19 + r73-19: the goal sits ABOVE the mic (owner: "lock
+                // icon ta upore thakbe side a na") and now looks like the one in
+                // his screenshots — a small dark pill with the lock over an
+                // up-arrow. It is a SIBLING of the mic on purpose: the mic's
+                // circle clips its children, and the badge rides outside it.
+                .offset { IntOffset(0, -(58.dp.toPx()).roundToInt()) }
+                .size(width = 30.dp, height = 54.dp)
                 .alpha(lockAlpha)
-                .clip(CircleShape)
-                .background(if (lockArmed) accent else Color(0xEEFFFFFF))
-                .border(1.5.dp, if (lockArmed) accent else Line, CircleShape),
-            contentAlignment = Alignment.Center,
+                .clip(RoundedCornerShape(15.dp))
+                .background(Color(0xE614181F))
+                .border(1.5.dp, if (lockArmed) accent else Color(0x33FFFFFF), RoundedCornerShape(15.dp)),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
         ) {
             Icon(
                 Icons.Filled.Lock,
                 if (lockArmed) "Release to lock" else "Slide up to lock",
-                tint = if (lockArmed) AmberInk else Ink,
+                tint = if (lockArmed) accent else Color.White,
+                modifier = Modifier.size(15.dp),
+            )
+            Icon(
+                Icons.Filled.KeyboardArrowUp,
+                null,
+                tint = if (lockArmed) accent else Color(0x99FFFFFF),
                 modifier = Modifier.size(15.dp),
             )
         }

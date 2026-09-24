@@ -272,13 +272,11 @@ const main = (f) => read(`${ANDROID}/${f}`);
     comp.includes("if (!input.isBlank() || selectCount > 0 || locked) {") &&
       comp.includes("locked -> onSendVoice()") &&
       comp.includes("if (locked) {") &&
-      comp.includes(
-        'Icon(Icons.Filled.Close, "Cancel recording", tint = Red, modifier = Modifier.size(16.dp))',
-      ) &&
-      comp.includes(
-        'Icon(Icons.Filled.Lock, "Locked", tint = accent, modifier = Modifier.size(14.dp))',
-      ) &&
-      comp.includes('Text("Locked", color = accent, fontSize = 12.5.sp, maxLines = 1)') &&
+      // r73-19: the ✕ + "Locked" label became Telegram's transport — a bin on
+      // the left and a Pause / Resume pill beside the Send circle.
+      comp.includes('"Delete recording",') &&
+      comp.includes("if (paused) Icons.Filled.PlayArrow else Icons.Filled.Pause,") &&
+      comp.includes('if (paused) "Resume" else "Pause",') &&
       comp.includes('Text("‹ Slide to cancel", color = Red, fontSize = 12.5.sp, maxLines = 1)') &&
       comp.includes("locked: Boolean = false,") &&
       comp.includes("onLockRecord: () -> Unit = {},"),
@@ -304,8 +302,11 @@ const main = (f) => read(`${ANDROID}/${f}`);
   const app = "native-android/app/src/main/java/app/kuchupuchu/android/";
   const ui = readFileSync(app + "Ui.kt", "utf8");
   check(
-    'r72-19: the lock goal sits ABOVE the mic now (owner: "lock icon ta upore thakbe side a na") — still a SIBLING of the mic circle (that circle clips its children) and still hollow → filled as the finger arrives',
-    mic.includes(".offset { IntOffset(0, -(34.dp.toPx()).roundToInt()) }") &&
+    'r72-19 + r73-19: the lock goal sits ABOVE the mic (owner: "lock icon ta upore thakbe side a na") as the dark pill of his screenshots — lock over an up-arrow — a SIBLING of the mic circle (that circle clips its children), up from the moment the recording starts',
+    mic.includes(".offset { IntOffset(0, -(58.dp.toPx()).roundToInt()) }") &&
+      mic.includes(".size(width = 30.dp, height = 54.dp)") &&
+      mic.includes("Icons.Filled.KeyboardArrowUp,") &&
+      mic.includes("val lockShowing = recording || dragY <= -12f") &&
       mic.includes("if (lockAlpha > 0.01f) {") &&
       mic.includes('if (lockArmed) "Release to lock" else "Slide up to lock"'),
   );
@@ -326,6 +327,43 @@ const main = (f) => read(`${ANDROID}/${f}`);
       /val wasLocked = voiceLocked\n        voiceLocked = false\n        lockPending = false/.test(
         chat,
       ),
+  );
+  /* ---- r73-19: the owner's screenshots — the locked row is a transport ---- */
+  const vn = main("VoiceNote.kt");
+  check(
+    'r73-19 (owner: "dekho tap hol korle kemom hobe ar lock korle kemon kore record korbe"): the locked strip is Telegram\'s transport — a red bin on the left, the clock and the live wave in the middle, Pause / Resume beside the Send circle — while the unlocked strip keeps the pulsing dot and "‹ Slide to cancel"',
+    comp.includes("IconButton(onClick = { onCancelVoice() }, Modifier.size(30.dp))") &&
+      comp.includes('"Delete recording",') &&
+      comp.includes(".clickable { onTogglePause() }") &&
+      comp.includes("if (paused) Icons.Filled.PlayArrow else Icons.Filled.Pause,") &&
+      comp.includes("color = if (locked && paused) Muted else Ink,") &&
+      comp.includes("comp_pulse_placeholder") === false &&
+      comp.includes("PulsingDot()") &&
+      comp.includes('Text("‹ Slide to cancel", color = Red, fontSize = 12.5.sp, maxLines = 1)') &&
+      // the composer's new contract + the chat's state
+      comp.includes("paused: Boolean = false,") &&
+      comp.includes("onTogglePause: () -> Unit = {},") &&
+      chat.includes("paused = recPaused,") &&
+      chat.includes("onTogglePause = { toggleRecPause() },") &&
+      chat.includes("var recPaused by remember { mutableStateOf(false) }") &&
+      chat.includes("fun toggleRecPause() {") &&
+      chat.includes("VoiceNote.pause()") &&
+      chat.includes("VoiceNote.resume()"),
+  );
+  check(
+    "r73-19: Pause is a REAL pause — MediaRecorder.pause/resume with the clock and the peak sampler stopped, so the take's length and its wave are the words actually spoken (a paused recorder is resumed before stop())",
+    vn.includes("fun pause(): Boolean =") &&
+      vn.includes("recorder?.pause()") &&
+      vn.includes("fun resume(): Boolean =") &&
+      vn.includes("recorder?.resume()") &&
+      vn.includes("pausedTotal += System.currentTimeMillis() - pausedAt") &&
+      vn.includes(
+        "(if (isPaused) pausedAt else System.currentTimeMillis()) - startedAt - pausedTotal",
+      ) &&
+      vn.includes("val secs = (elapsedMs() / 1000).toInt()") &&
+      /if \(isPaused\) \{\n            runCatching \{ recorder\?\.resume\(\) \}/.test(vn) &&
+      vn.includes("isPaused = false") &&
+      vn.includes("var isPaused: Boolean = false"),
   );
   check(
     "r72-19: the composer's Send seat runs in the owner's 0.45 s double-tap window (the platform's ~0.3 s was too tight for the once-send) — one seat-local ViewConfiguration, everything else inherited",
