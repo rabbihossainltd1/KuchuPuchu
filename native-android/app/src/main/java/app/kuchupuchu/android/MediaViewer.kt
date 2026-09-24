@@ -562,6 +562,10 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
     // capture, no Save (the chat passes `kpPrivate` along in the argument).
     val privateClip = m?.optBoolean("kpPrivate") == true
     KpSecure.Guard(privateClip)
+    // r71-18: the chat's "Media Save permission" — this clip was sent by
+    // someone who withheld saving, so the Save row goes and the capture guard
+    // stays off (they may look, they may not keep a copy).
+    val noSaveClip = m?.optBoolean("kpNoSave") == true
     // Owner round 32 (item 17): a view-once clip — the opening is spent the
     // moment the clip is on screen; kpPrivate already withholds Save / Forward.
     val onceClip = m?.optBoolean("kpOnce") == true
@@ -675,7 +679,7 @@ fun VideoPlayerScreen(nav: NavController, b64: String) {
             // fetches it and then saves, instead of the old gate silently
             // leaving the row out.
             onSave =
-                if (m != null && !privateClip && !saved) {
+                if (m != null && !privateClip && !noSaveClip && !saved) {
                     ({ menuOpen = false; saveClip() })
                 } else {
                     null

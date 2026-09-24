@@ -98,6 +98,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -421,6 +422,11 @@ fun ChatScreen(nav: NavController, convId: String) {
     var showChatSearch by remember { mutableStateOf(false) }
     var showDisappear by remember { mutableStateOf(false) }
     var showTheme by remember { mutableStateOf(false) }
+    // r71-18 (owner item 18): ⋮ → "Chat privacy" — three per-member switches.
+    var showChatPrivacy by remember { mutableStateOf(false) }
+    var privShot by remember(convId) { mutableStateOf(false) }
+    var privRec by remember(convId) { mutableStateOf(false) }
+    var privSave by remember(convId) { mutableStateOf(true) }
     var muteInFlight by remember { mutableStateOf(false) }
     var searchQ by remember { mutableStateOf("") }
     var searchHits by remember { mutableStateOf(listOf<JSONObject>()) }
@@ -489,6 +495,14 @@ fun ChatScreen(nav: NavController, convId: String) {
     // Owner round 33 (item 3): a send's reply may land after this screen is
     // gone — its state must not be painted into a dead composition.
     val alive = remember(convId) { java.util.concurrent.atomic.AtomicBoolean(true) }
+    // r71-18: this chat is the one on screen — a screenshot or a screen
+    // recording taken HERE is ours to report (Android 14 / 15 tell an app
+    // about its own capture; below that there is no signal and nothing is
+    // claimed). The server alerts the members who asked to be told.
+    DisposableEffect(convId) {
+        KpCapture.watch(MainActivity.current, convId)
+        onDispose { KpCapture.stop() }
+    }
     androidx.compose.runtime.DisposableEffect(convId) {
         onDispose {
             alive.set(false)
@@ -1515,6 +1529,28 @@ fun ChatScreen(nav: NavController, convId: String) {
             scope.launch {
                 val total = msgs.size + pending.size
                 if (total > 0) runCatching { listState.animateScrollToItem(total - 1) }
+            }
+        }
+    }
+
+    /** r71-18: one switch of "Chat privacy" — optimistic locally, and the
+     *  conversation poke brings the server's answer back. */
+    fun setChatPrivacy(shot: Boolean? = null, rec: Boolean? = null, save: Boolean? = null) {
+        if (shot != null) privShot = shot
+        if (rec != null) privRec = rec
+        if (save != null) privSave = save
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    Api.post(
+                        "/api/conversations/$convId/privacy",
+                        JSONObject().apply {
+                            shot?.let { put("shot", it) }
+                            rec?.let { put("rec", it) }
+                            save?.let { put("save", it) }
+                        },
+                    )
+                }
             }
         }
     }
@@ -2665,6 +2701,16 @@ fun ChatScreen(nav: NavController, convId: String) {
     val single = selected.size == 1
     val singleMsg = if (single) selectedMessages().firstOrNull() else null
     val c = conv.value
+    // r71-18: the sheet's three switches ride the conversation payload (a poke
+    // or a reopen re-reads them), and "Media Save permission" is the OTHER
+    // side's switch — it decides whether I may save what THEY send here.
+    LaunchedEffect(c?.optJSONObject("privacy")?.toString()) {
+        val pr = c?.optJSONObject("privacy") ?: return@LaunchedEffect
+        privShot = pr.optBoolean("shot")
+        privRec = pr.optBoolean("rec")
+        privSave = pr.optBoolean("save", true)
+    }
+    val peerSaveOk = c?.optBoolean("peerSave", true) != false
     val isGroup = c?.optBoolean("isGroup") == true
     val otherUserId = c?.optJSONObject("other")?.optString("id") ?: ""
     // System accounts: full name in the header (no call buttons there, so
@@ -3429,15 +3475,22 @@ fun ChatScreen(nav: NavController, convId: String) {
                             // Owner round 33 (item 14): their number in the book counts too.
                             val inBook = PhoneBook.entries.any { it.user?.optString("id") == otherUserId } ||
                                 PhoneBook.hasNumber(c?.optJSONObject("other")?.optText("phone"))
-                            KpSheetRow(if (inBook) Icons.Filled.Person else Icons.Filled.PersonAdd, if (inBook) "View contact" else "Add contact") {
-                                menuOpen = false
-                                if (inBook) {
+                            // r71-18 (owner item 18): the "Add contact" row is
+                            // gone from this menu. A person already in the book
+                            // keeps "View contact" — a different row: it opens
+                            // them, it never adds.
+                            if (inBook) {
+                                KpSheetRow(Icons.Filled.Person, "View contact") {
+                                    menuOpen = false
                                     nav.navigate("profile/$otherUserId")
-                                } else {
-                                    val n = android.net.Uri.encode(rawTitle.trim())
-                                    val p = android.net.Uri.encode(c?.optJSONObject("other")?.optText("phone").orEmpty())
-                                    nav.navigate("newcontact?name=$n&phone=$p")
                                 }
+                            }
+                            // r71-18: this chat's own privacy — be told when
+                            // THEY capture it, and decide what they may do with
+                            // the media I send here.
+                            KpSheetRow(Icons.Filled.Lock, "Chat privacy") {
+                                menuOpen = false
+                                showChatPrivacy = true
                             }
                         }
                         // Owner round 15: this opened the GLOBAL search —
@@ -3757,12 +3810,16 @@ fun ChatScreen(nav: NavController, convId: String) {
                                 val isMe = msg.optString("senderId") == Store.myId()
                                 val arg =
                                     JSONObject(msg.toString()).put("kpTitle", who).put("kpPrivate", privateChat || once)
-                                        .also { if (once && !isMe) it.put("kpOnce", true) } // .also { if (once) it.put("kpOnce", true) }
+                                        .also { if (once && !isMe) it.put("kpOnce", true) }
+                                        // r71-18: their Save permission for the
+                                        // clips THEY send (mine always save).
+                                        .also { if (!isMe && !peerSaveOk) it.put("kpNoSave", true) }
                                 nav.navigate("videoplayer/${mediaArg(arg)}")
                             },
                             // Owner round 32 (item 33): documents → the app's own viewer.
                             onOpenDoc = { msg ->
                                 val arg = JSONObject(msg.toString()).put("kpPrivate", privateChat)
+                                    .also { if (msg.optString("senderId") != Store.myId() && !peerSaveOk) it.put("kpNoSave", true) }
                                 nav.navigate("docviewer/${mediaArg(arg)}")
                             },
                             revealChars = if (m.optString("id") == aiRevealId) aiRevealChars else null,
@@ -4722,6 +4779,15 @@ fun ChatScreen(nav: NavController, convId: String) {
                 }
             },
         )
+        if (showChatPrivacy) ChatPrivacySheet(
+            shot = privShot,
+            rec = privRec,
+            save = privSave,
+            onClose = { showChatPrivacy = false },
+            onShot = { setChatPrivacy(shot = it) },
+            onRec = { setChatPrivacy(rec = it) },
+            onSave = { setChatPrivacy(save = it) },
+        )
         if (showTheme) ThemeDialog(
             current = chatTheme,
             onClose = { showTheme = false },
@@ -4780,7 +4846,10 @@ fun ChatScreen(nav: NavController, convId: String) {
                             forwarding = true
                         }
                     },
-                canSave = !privateChat && !once,
+                // r71-18: their "Media Save permission" withholds MY save of
+                // what THEY send (my own photos stay mine).
+                canSave = !privateChat && !once &&
+                    (viewerPhotos.getOrNull(viewerAt)?.optString("senderId") == Store.myId() || peerSaveOk),
                 secure = privateChat || once,
                 // Owner round 39 (item 1): Edit — same gate as Forward
                 // (private chats + view-once never expose it). The current
@@ -6519,6 +6588,40 @@ private fun MessageRow(
     // "sent" line instead of buttons.
     if (kind == "UNBLOCK_ASK") {
         UnblockAskCard(m, mine, askName, onUnblockAsk, onIgnoreAsk)
+        return
+    }
+    // r71-18: a capture alert is not a group event — it reads as a warning,
+    // and it buzzes once when it lands while I am looking at this chat.
+    val captureAlert = captureAlertOf(m)
+    if (captureAlert != null) {
+        val h = rememberHaptics()
+        LaunchedEffect(m.optString("id")) {
+            val fresh = runCatching {
+                java.time.Duration.between(
+                    java.time.Instant.parse(m.optString("createdAt")),
+                    java.time.Instant.now(),
+                ).seconds < 60
+            }.getOrDefault(false)
+            if (fresh) h.reject()
+        }
+        Box(Modifier.fillMaxWidth().padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Red.copy(alpha = 0.14f))
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    if (captureAlert == "rec") Icons.Filled.Videocam else Icons.Filled.VisibilityOff,
+                    null,
+                    tint = Red,
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(m.optString("body"), fontSize = 12.sp, color = Red, fontWeight = FontWeight.Medium)
+            }
+        }
         return
     }
     if (kind == "SYSTEM" && !isCallLog(m)) {
@@ -9756,6 +9859,107 @@ private fun ChatSearchSheet(
                 Text("No matches in this chat", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(10.dp))
             }
         }
+    }
+}
+
+/**
+ * r71-18: is this SYSTEM row one of the chat-privacy capture alerts? The three
+ * phrases are the only ones the worker writes for them, so the chip and the
+ * buzz can never fire on a group event.
+ */
+internal fun captureAlertOf(m: JSONObject): String? {
+    if (m.optString("kind") != "SYSTEM") return null
+    val b = m.optString("body")
+    return when {
+        b.endsWith("took a screenshot of this chat") -> "shot"
+        b.endsWith("started a screen recording of this chat") -> "rec"
+        else -> null
+    }
+}
+
+/**
+ * r71-18 (owner item 18): ⋮ → "Chat privacy". Three switches, all of them real:
+ * the two alerts listen on Android 14 / 15 (the only versions that tell an app
+ * its own screen was captured — below that the switch says so instead of
+ * pretending), and "Media Save permission" is enforced on the other phone,
+ * which reads it from the conversation before it draws a Save button.
+ */
+@Composable
+private fun ChatPrivacySheet(
+    shot: Boolean,
+    rec: Boolean,
+    save: Boolean,
+    onClose: () -> Unit,
+    onShot: (Boolean) -> Unit,
+    onRec: (Boolean) -> Unit,
+    onSave: (Boolean) -> Unit,
+) {
+    val captureOk = android.os.Build.VERSION.SDK_INT >= 34
+    KpSheet(onDismiss = onClose, title = "Chat privacy") {
+        PrivacyToggle(
+            icon = Icons.Filled.Lock,
+            label = "Screenshot alert",
+            sub = if (captureOk) "Alert me when they screenshot this chat" else "Android 14 or newer",
+            checked = shot,
+            enabled = captureOk,
+            onChange = onShot,
+        )
+        PrivacyToggle(
+            icon = Icons.Filled.Videocam,
+            label = "Screen record alert",
+            sub = if (android.os.Build.VERSION.SDK_INT >= 35) "Alert me when they record this chat" else "Android 15 or newer",
+            checked = rec,
+            enabled = android.os.Build.VERSION.SDK_INT >= 35,
+            onChange = onRec,
+        )
+        PrivacyToggle(
+            icon = Icons.Filled.PermMedia,
+            label = "Media Save permission",
+            sub = if (save) "They may save the media I send here" else "They cannot save the media I send here",
+            checked = save,
+            enabled = true,
+            onChange = onSave,
+        )
+    }
+}
+
+/** One row of the Chat privacy sheet: switch, label, and what it does. */
+@Composable
+private fun PrivacyToggle(
+    icon: ImageVector,
+    label: String,
+    sub: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onChange: (Boolean) -> Unit,
+) {
+    val haptics = rememberHaptics()
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, label, tint = if (enabled) ActionBlueDeep else Muted, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(label, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(sub, color = Muted, fontSize = 12.sp)
+        }
+        Switch(
+            checked = checked,
+            enabled = enabled,
+            onCheckedChange = { on ->
+                haptics.toggle(on)
+                onChange(on)
+            },
+            colors = androidx.compose.material3.SwitchDefaults.colors(
+                checkedThumbColor = ActionBlueInk,
+                checkedTrackColor = ActionBlue,
+                checkedBorderColor = ActionBlue,
+            ),
+            modifier = Modifier.scale(0.85f),
+        )
     }
 }
 

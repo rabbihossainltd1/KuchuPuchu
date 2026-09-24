@@ -59,6 +59,15 @@ const PERMISSION_EVIDENCE: Record<string, RegExp> = {
   // Owner round 28: the phone book is read for All contacts / search matching
   // (PhoneBook.kt) — asked in-context on the contacts screen, never at launch.
   "android.permission.READ_CONTACTS": /ContactsContract\.CommonDataKinds\.Phone/,
+  // r71-18: the chat's "Screenshot alert" / "Screen record alert" switches
+  // (KpCapture.kt). Both are install-time, and each one is the ONLY way to
+  // learn a capture happened: Android 14's per-activity ScreenCaptureCallback
+  // for a screenshot of our own window, Android 15's WindowManager
+  // screen-recording callback for a recording we are visible in. Nothing else
+  // in the app reads either permission, and both switches are off by default.
+  "android.permission.DETECT_SCREEN_CAPTURE": /registerScreenCaptureCallback|ScreenCaptureCallback/,
+  "android.permission.DETECT_SCREEN_RECORDING":
+    /addScreenRecordingCallback|ScreenRecordingCallback/,
 };
 
 /** Service types and the permission each one requires (Android 14 rule). */

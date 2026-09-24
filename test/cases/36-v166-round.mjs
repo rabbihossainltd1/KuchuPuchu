@@ -358,7 +358,8 @@ check(
       'Icon(Icons.Filled.MoreVert, "More", tint = Color.White, modifier = Modifier.size(22.dp))',
     ) &&
     (viewer.match(/Icons\.Filled\.MoreVert, "More"/g) || []).length === 2 &&
-    viewer.includes("if (m != null && !privateClip && !saved) {") &&
+    // r71-18: the Save row also goes when the sender withheld saving.
+    viewer.includes("if (m != null && !privateClip && !noSaveClip && !saved) {") &&
     viewer.includes("if (dest.exists() && dest.length() > 0L) {") &&
     viewer.includes('KpSheetRow(Icons.Filled.Close, "Dismiss") { onDismiss() }'),
 );

@@ -384,6 +384,112 @@ const main = (f) => read(`${ANDROID}/${f}`);
   );
 }
 
+/* ------------- 18. the chat's privacy sheet (r71) ------------- */
+{
+  const chat = main("ChatScreen.kt");
+  const cap = main("KpCapture.kt");
+  const media = main("ChatMediaScreen.kt");
+  const viewer = main("MediaViewer.kt");
+  const doc = main("DocViewerScreen.kt");
+  const manifest = read("native-android/app/src/main/AndroidManifest.xml");
+  check(
+    "r71-18: the ⋮ loses its Add contact row (a person already in the book keeps View contact) and gains Chat privacy",
+    // the ROW is gone (the words survive in a comment saying so); the
+    // navigation it used to offer is gone with it
+    !chat.includes('Icons.Filled.PersonAdd, "Add contact"') &&
+      !chat.includes('"newcontact?name=') &&
+      chat.includes('KpSheetRow(Icons.Filled.Person, "View contact")') &&
+      chat.includes('KpSheetRow(Icons.Filled.Lock, "Chat privacy")') &&
+      chat.includes("showChatPrivacy = true"),
+  );
+  check(
+    "r71-18: three REAL switches in the sheet — the two capture alerts and the save permission, each one saying what it does (and a version that cannot be told says so instead of pretending)",
+    chat.includes("private fun ChatPrivacySheet(") &&
+      chat.includes('label = "Screenshot alert"') &&
+      chat.includes('label = "Screen record alert"') &&
+      chat.includes('label = "Media Save permission"') &&
+      chat.includes("Alert me when they screenshot this chat") &&
+      chat.includes("Alert me when they record this chat") &&
+      chat.includes("They may save the media I send here") &&
+      chat.includes("They cannot save the media I send here") &&
+      chat.includes('else "Android 14 or newer"') &&
+      chat.includes('else "Android 15 or newer"'),
+  );
+  check(
+    "r71-18: the alerts are wired to the OS callbacks — Android 14's ScreenCaptureCallback and Android 15's screen-recording state — reported only while that chat is the one on screen",
+    manifest.includes("android.permission.DETECT_SCREEN_CAPTURE") &&
+      manifest.includes("android.permission.DETECT_SCREEN_RECORDING") &&
+      cap.includes('Activity.ScreenCaptureCallback { report("shot") }') &&
+      cap.includes("registerScreenCaptureCallback(activity.mainExecutor, cb)") &&
+      cap.includes("addScreenRecordingCallback(activity.mainExecutor, cb)") &&
+      cap.includes("WindowManager.SCREEN_RECORDING_STATE_VISIBLE") &&
+      cap.includes("unregisterScreenCaptureCallback") &&
+      cap.includes("removeScreenRecordingCallback") &&
+      cap.includes('Api.post("/api/conversations/$id/capture"') &&
+      chat.includes("KpCapture.watch(MainActivity.current, convId)") &&
+      chat.includes("onDispose { KpCapture.stop() }"),
+  );
+  check(
+    "r71-18: the switches are the server's (read from the conversation, written back one at a time) and a capture alert lands as a red chip with one buzz",
+    chat.includes('c?.optJSONObject("privacy")') &&
+      chat.includes(
+        "fun setChatPrivacy(shot: Boolean? = null, rec: Boolean? = null, save: Boolean? = null)",
+      ) &&
+      chat.includes('"/api/conversations/$convId/privacy"') &&
+      chat.includes("internal fun captureAlertOf(m: JSONObject): String?") &&
+      chat.includes('b.endsWith("took a screenshot of this chat") -> "shot"') &&
+      chat.includes('b.endsWith("started a screen recording of this chat") -> "rec"') &&
+      chat.includes("Icons.Filled.Videocam else Icons.Filled.VisibilityOff") &&
+      chat.includes("if (fresh) h.reject()"),
+  );
+  check(
+    "r71-18: the save permission is enforced where media is opened — their switch withholds MY save (photo viewer, gallery, clip, document) and never my own media",
+    chat.includes('val peerSaveOk = c?.optBoolean("peerSave", true) != false') &&
+      chat.includes(
+        'viewerPhotos.getOrNull(viewerAt)?.optString("senderId") == Store.myId() || peerSaveOk',
+      ) &&
+      media.includes('val peerSaveOk = convSnap?.optBoolean("peerSave", true) != false') &&
+      media.includes(
+        'canSave = !privateChat && (m.optString("senderId") == Store.myId() || peerSaveOk)',
+      ) &&
+      chat.includes('.also { if (!isMe && !peerSaveOk) it.put("kpNoSave", true) }') &&
+      viewer.includes('val noSaveClip = m?.optBoolean("kpNoSave") == true') &&
+      viewer.includes("!privateClip && !noSaveClip && !saved") &&
+      doc.includes('val noSaveDoc = m?.optBoolean("kpNoSave") == true') &&
+      doc.includes("if (!privateDoc && !noSaveDoc && !saved && state == 1)"),
+  );
+}
+
+/* ------------- 18b. the worker half of the chat-privacy switches ------------- */
+{
+  const worker = read("src/worker/index.ts");
+  check(
+    "r71-18: worker — the switches live on the MEMBER row (defaults: no alerts, saving allowed), one partial-update route writes them, and the payload carries mine plus the peer's save answer",
+    worker.includes("ALTER TABLE members ADD COLUMN priv_shot INTEGER NOT NULL DEFAULT 0") &&
+      worker.includes("ALTER TABLE members ADD COLUMN priv_rec INTEGER NOT NULL DEFAULT 0") &&
+      worker.includes("ALTER TABLE members ADD COLUMN priv_save INTEGER NOT NULL DEFAULT 1") &&
+      worker.includes("path.match(/^\\/api\\/conversations\\/([^/]+)\\/privacy$/)") &&
+      worker.includes(
+        "UPDATE members SET priv_shot = ?, priv_rec = ?, priv_save = ? WHERE conv_id = ? AND user_id = ?",
+      ) &&
+      worker.includes("privacy: { shot: meShot, rec: meRec, save: meSave },") &&
+      worker.includes("peerSave: solo ? (otherSave ?? true) : true,"),
+  );
+  check(
+    "r71-18: worker — the capture route alerts only the members whose OWN switch is on, folds a burst into one row per 20 s, writes a real SYSTEM chip and pushes it message-shaped (so a closed app still hears)",
+    worker.includes("path.match(/^\\/api\\/conversations\\/([^/]+)\\/capture$/)") &&
+      worker.includes(
+        'kind === "rec" ? Number(m.priv_rec ?? 0) === 1 : Number(m.priv_shot ?? 0) === 1',
+      ) &&
+      worker.includes("Date.now() - Date.parse(last.created_at) < 20_000") &&
+      // the two phrases, separately: prettier may re-wrap the ternary line.
+      worker.includes('"started a screen recording of this chat"') &&
+      worker.includes('"took a screenshot of this chat"') &&
+      worker.includes('kind === "rec" ? "Screen recording alert" : "Screenshot alert"') &&
+      worker.includes('channel: "kp_messages_v2",'),
+  );
+}
+
 console.log(lines.join("\n"));
 const broken = lines.filter((l) => l.includes("BROKEN")).length;
 console.log(`r70-round: ${lines.length - broken} ok / ${broken} broken`);

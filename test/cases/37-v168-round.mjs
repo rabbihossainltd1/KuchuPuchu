@@ -124,10 +124,12 @@ check(
     calls.includes("KpSecure.Guard(call.otherPrivate)") &&
     profile.includes("val privatePerson = !isMe && KpSecure.privateUser(u)") &&
     // the peer rule survives untouched
-    chat.includes("canSave = !privateChat && !once,") &&
+    // r71-18: the viewer's Save gate grew the peer's switch; the peer rule
+    // itself is the same one r31-21 built.
+    chat.includes("canSave = !privateChat && !once &&") &&
     chat.includes("KpSecure.Guard(privateChat)") &&
     viewer.includes("KpSecure.Guard(secure || !canSave)") &&
-    viewer.includes("if (m != null && !privateClip && !saved) {"),
+    viewer.includes("if (m != null && !privateClip && !noSaveClip && !saved) {"),
 );
 
 /* 5 — the AI reply starts sooner and types word by word */

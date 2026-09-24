@@ -2494,6 +2494,160 @@ async function main() {
     }
   }
 
+  // ── r71-18. Chat privacy: the two capture alerts + the save permission ─────
+  {
+    const h = await mk();
+    const { A, B, cid } = await pair(h, "priv");
+    const conv = async (who) =>
+      (await h.call("GET", `/api/conversations/${cid}`, undefined, who.token)).json.conversation;
+    const rows = async () =>
+      await h.env.DB.prepare(
+        "SELECT body FROM messages WHERE conv_id = ? AND kind = 'SYSTEM' ORDER BY created_at",
+      )
+        .bind(cid)
+        .all();
+
+    const fresh = await conv(B);
+    check(
+      "r71-18: a conversation that never touched the switches publishes the defaults — no alerts, saving allowed — for both sides",
+      fresh?.privacy?.shot === false &&
+        fresh?.privacy?.rec === false &&
+        fresh?.privacy?.save === true &&
+        fresh?.peerSave === true,
+      JSON.stringify({ mine: fresh?.privacy, peer: fresh?.peerSave }),
+    );
+
+    // B turns BOTH alerts on and denies saving; A keeps everything off.
+    const flipped = await h.call(
+      "POST",
+      `/api/conversations/${cid}/privacy`,
+      { shot: true, rec: true, save: false },
+      B.token,
+    );
+    const bSees = await conv(B);
+    const aSees = await conv(A);
+    check(
+      "r71-18: the switches are PER MEMBER — B's three land on B's row (privacy + peerSave read back on both phones), and A's own row is untouched",
+      flipped.status === 200 &&
+        flipped.json.privacy?.shot === true &&
+        flipped.json.privacy?.rec === true &&
+        flipped.json.privacy?.save === false &&
+        bSees?.privacy?.shot === true &&
+        bSees?.privacy?.save === false &&
+        // A's own switches: still the defaults, and A now sees that B denies
+        // saving — that is what A's Save buttons read.
+        aSees?.privacy?.shot === false &&
+        aSees?.privacy?.save === true &&
+        aSees?.peerSave === false,
+      JSON.stringify({
+        flipped: flipped.json,
+        b: bSees?.privacy,
+        a: aSees?.privacy,
+        peer: aSees?.peerSave,
+      }),
+    );
+
+    // A partial update keeps the names it did not mention.
+    const partial = await h.call(
+      "POST",
+      `/api/conversations/${cid}/privacy`,
+      { save: true },
+      B.token,
+    );
+    check(
+      "r71-18: a partial update keeps the switches it did not mention (an older app that only knows one of them cannot clear the others)",
+      partial.status === 200 &&
+        partial.json.privacy?.shot === true &&
+        partial.json.privacy?.rec === true &&
+        partial.json.privacy?.save === true,
+      JSON.stringify(partial.json),
+    );
+
+    // B has both alerts ON now — A captures the chat twice.
+    const shot1 = await h.call(
+      "POST",
+      `/api/conversations/${cid}/capture`,
+      { kind: "shot" },
+      A.token,
+    );
+    const after1 = await rows();
+    const shot2 = await h.call(
+      "POST",
+      `/api/conversations/${cid}/capture`,
+      { kind: "shot" },
+      A.token,
+    );
+    const after2 = await rows();
+    check(
+      "r71-18: a capture the other side asked to hear about becomes a real row in the thread — exactly one per burst (the 20 s throttle), and the second report is a no-op",
+      shot1.status === 200 &&
+        shot1.json.alerted === 1 &&
+        after1.results.length === 1 &&
+        String(after1.results[0].body).endsWith("took a screenshot of this chat") &&
+        shot2.json.throttled === true &&
+        shot2.json.alerted === 0 &&
+        after2.results.length === 1,
+      JSON.stringify({ first: shot1.json, second: shot2.json, rows: after1.results.length }),
+    );
+
+    // the alert reaches the chat LIST (its preview is what a closed app shows)
+    const preview = await h.call("GET", "/api/conversations", undefined, B.token);
+    const rowB = preview.json.items?.find((c) => c.id === cid);
+    check(
+      "r71-18: the alert's text is the chat's preview too — a list, a push and a thread that all say the same thing",
+      String(rowB?.lastMessage ?? "").endsWith("took a screenshot of this chat"),
+      String(rowB?.lastMessage),
+    );
+
+    // A recording is its own switch and its own phrase.
+    const rec = await h.call("POST", `/api/conversations/${cid}/capture`, { kind: "rec" }, A.token);
+    const afterRec = await rows();
+    check(
+      "r71-18: screen recording is its own switch — a different phrase, its own row, and the same one-per-burst rule",
+      rec.status === 200 &&
+        rec.json.alerted === 1 &&
+        afterRec.results.length === 2 &&
+        String(afterRec.results[1].body).endsWith("started a screen recording of this chat"),
+      JSON.stringify({ rec: rec.json, rows: afterRec.results.map((r) => r.body) }),
+    );
+
+    // Nobody asked to be told: A turns A's own switches on and captures —
+    // B hears nothing (the switch that matters is the LISTENER's).
+    await h.call("POST", `/api/conversations/${cid}/privacy`, { shot: true, rec: true }, A.token);
+    await h.call("POST", `/api/conversations/${cid}/privacy`, { shot: false, rec: false }, B.token);
+    const quiet = await h.call(
+      "POST",
+      `/api/conversations/${cid}/capture`,
+      { kind: "shot" },
+      A.token,
+    );
+    const afterQuiet = await rows();
+    check(
+      "r71-18: no listener, no alert — a capture is only reported to members whose own switch is on (nothing is written when nobody asked)",
+      quiet.status === 200 && quiet.json.alerted === 0 && afterQuiet.results.length === 2,
+      JSON.stringify({ quiet: quiet.json, rows: afterQuiet.results.length }),
+    );
+
+    const bad = await h.call(
+      "POST",
+      `/api/conversations/${cid}/capture`,
+      { kind: "nope" },
+      A.token,
+    );
+    const stranger = await h.reg("privx");
+    const wall = await h.call(
+      "POST",
+      `/api/conversations/${cid}/privacy`,
+      { shot: true },
+      stranger.token,
+    );
+    check(
+      "r71-18: neither route takes a guess — an unknown kind is refused, and a non-member cannot touch another chat's privacy",
+      bad.status === 400 && bad.json.error?.code === "BAD_KIND" && wall.status === 403,
+      JSON.stringify({ bad: bad.status, code: bad.json.error?.code, wall: wall.status }),
+    );
+  }
+
   process.stdout.write(lines.join("\n") + "\n");
   const broken = lines.filter((l) => l.startsWith("  BROKEN")).length;
   process.exit(broken ? 1 : 0);

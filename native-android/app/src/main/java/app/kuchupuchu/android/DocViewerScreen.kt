@@ -120,6 +120,9 @@ fun DocViewerScreen(nav: NavController, b64: String) {
         m?.optText("fileKey")?.takeIf { it.isNotBlank() }
             ?: m?.optText("mediaUrl")?.takeIf { it.startsWith("/") || it.startsWith("http") } ?: ""
     val privateDoc = m?.optBoolean("kpPrivate") == true
+    // r71-18: the sender's "Media Save permission" — the file may be read here,
+    // not kept (the chat passes kpNoSave for documents THEY sent under it).
+    val noSaveDoc = m?.optBoolean("kpNoSave") == true
     KpSecure.Guard(privateDoc)
     val sub = m?.let { viewerStamp(it.optText("createdAt")) } ?: ""
 
@@ -199,7 +202,7 @@ fun DocViewerScreen(nav: NavController, b64: String) {
                     KpSheetRow(Icons.Filled.Code, "Code") { menuOpen = false; showCode = true }
                 }
             }
-            if (!privateDoc && !saved && state == 1) KpSheetRow(Icons.Filled.Download, "Save") { menuOpen = false; saveDoc() }
+            if (!privateDoc && !noSaveDoc && !saved && state == 1) KpSheetRow(Icons.Filled.Download, "Save") { menuOpen = false; saveDoc() }
             if (canForward) KpSheetRow(Icons.AutoMirrored.Filled.Send, "Forward") { menuOpen = false; forwarding = true }
             if (!privateDoc && state == 1) KpSheetRow(Icons.AutoMirrored.Filled.OpenInNew, "Open with") { menuOpen = false; openWith() }
             KpSheetRow(Icons.Filled.Delete, "Delete", tint = Red) { menuOpen = false; confirmDelete = true }

@@ -168,7 +168,9 @@ check(
   ) &&
     viewer.includes("if (dest.exists() && dest.length() > 0L) {") &&
     viewer.includes("onSave =") &&
-    viewer.includes("!privateClip && !saved") &&
+    // r71-18: a clip the sender withheld saving for keeps its ⋮ and loses
+    // only the Save row.
+    viewer.includes("!privateClip && !noSaveClip && !saved") &&
     !viewer.includes(
       "} else if (m != null && !privateClip) {\n                    IconButton(onClick = { menuOpen = true })",
     ) &&

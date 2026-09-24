@@ -3110,6 +3110,14 @@ async function ensureSchema(db: D1Database) {
     // Owner round 32 (item 5): "Private group" — admin switch that closes the
     // shared-media gallery, call recording and new-member additions.
     `ALTER TABLE conversations ADD COLUMN private_group INTEGER NOT NULL DEFAULT 0`,
+    // r71-18 (owner item 18): the chat's ⋮ → "Chat privacy". Three PER-MEMBER
+    // switches, because all three are about ME in this chat: alert me when THEY
+    // screenshot it, alert me when THEY record it, and whether THEY may save
+    // the media I send here. Defaults keep today's behaviour (no alerts, saving
+    // allowed) for every row that already exists.
+    `ALTER TABLE members ADD COLUMN priv_shot INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE members ADD COLUMN priv_rec INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE members ADD COLUMN priv_save INTEGER NOT NULL DEFAULT 1`,
     `ALTER TABLE messages ADD COLUMN client_id TEXT`,
     // Bumped whenever the profile photo changes; it backs the lightweight
     // avatarRef token in list responses so clients cache avatars per version.
@@ -7637,6 +7645,116 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     return json({ ok: true, muted: call || msg, mutedCall: call, mutedMsg: msg });
   }
 
+  // r71-18 (owner item 18): the chat's ⋮ → "Chat privacy". One partial update:
+  // whatever the sheet sends arrives together, and a name the sheet did not
+  // mention keeps its stored value (an older app only sends `save`, say).
+  const privacyMatch = path.match(/^\/api\/conversations\/([^/]+)\/privacy$/);
+  if (privacyMatch && method === "POST") {
+    const convId = privacyMatch[1]!;
+    await requireMember(db, convId, uid);
+    const before = await one<{
+      priv_shot: number | null;
+      priv_rec: number | null;
+      priv_save: number | null;
+    }>(
+      db,
+      "SELECT priv_shot, priv_rec, priv_save FROM members WHERE conv_id = ? AND user_id = ?",
+      convId,
+      uid,
+    );
+    const shot = typeof body.shot === "boolean" ? body.shot : Number(before?.priv_shot ?? 0) === 1;
+    const rec = typeof body.rec === "boolean" ? body.rec : Number(before?.priv_rec ?? 0) === 1;
+    const save = typeof body.save === "boolean" ? body.save : Number(before?.priv_save ?? 1) === 1;
+    await run(
+      db,
+      "UPDATE members SET priv_shot = ?, priv_rec = ?, priv_save = ? WHERE conv_id = ? AND user_id = ?",
+      shot ? 1 : 0,
+      rec ? 1 : 0,
+      save ? 1 : 0,
+      convId,
+      uid,
+    );
+    // The peer may be looking at this chat's header/media right now — a chat
+    // poke makes both sides re-read the conversation (the save gate is read
+    // from it, so it must move without waiting for a poll).
+    ctx.waitUntil(fanOutConversationChange(env, db, convId));
+    return json({ ok: true, privacy: { shot, rec, save } });
+  }
+
+  // r71-18: a device reports a capture of the chat IT is showing — its own
+  // screenshot (Android 14's ScreenCaptureCallback) or its own screen recording
+  // (Android 15's screen-recording state) — and only the members who asked to
+  // be told about that kind get the alert. The alert is a real row in the
+  // thread (a SYSTEM chip, the same shape group events use) plus a push, so it
+  // lands whether the other phone is in the chat, on the list, or closed.
+  const captureMatch = path.match(/^\/api\/conversations\/([^/]+)\/capture$/);
+  if (captureMatch && method === "POST") {
+    const convId = captureMatch[1]!;
+    const { conv } = await requireMember(db, convId, uid);
+    const kind = body.kind === "rec" ? "rec" : body.kind === "shot" ? "shot" : null;
+    if (!kind) fail(400, "kind must be 'shot' or 'rec'.", "BAD_KIND");
+    const others = await all<{
+      user_id: string;
+      priv_shot: number | null;
+      priv_rec: number | null;
+    }>(
+      db,
+      "SELECT user_id, priv_shot, priv_rec FROM members WHERE conv_id = ? AND user_id != ?",
+      convId,
+      uid,
+    );
+    const listeners = others.filter((m) =>
+      kind === "rec" ? Number(m.priv_rec ?? 0) === 1 : Number(m.priv_shot ?? 0) === 1,
+    );
+    if (!listeners.length) return json({ ok: true, alerted: 0 });
+    const phrase =
+      kind === "rec" ? "started a screen recording of this chat" : "took a screenshot of this chat";
+    // One alert per kind per chat per 20 seconds: four quick screenshots are
+    // one event, not four chips (and never a push storm).
+    const last = await one<{ created_at: string }>(
+      db,
+      "SELECT created_at FROM messages WHERE conv_id = ? AND kind = 'SYSTEM' AND body LIKE ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+      convId,
+      `%${phrase}`,
+    );
+    if (last && Date.now() - Date.parse(last.created_at) < 20_000) {
+      return json({ ok: true, alerted: 0, throttled: true });
+    }
+    const mid = await systemMessage(db, convId, `${me.display_name} ${phrase}`);
+    // The push is shaped like a message push on purpose: the alert has a real
+    // row behind it (mid), so tapping the card opens the chat on the chip —
+    // and the app's own rich card can draw it while the app is alive.
+    for (const m of listeners) {
+      ctx.waitUntil(
+        pushMessageUnlessHidden(
+          env,
+          db,
+          m.user_id,
+          convId,
+          {
+            type: "message",
+            convoId: convId,
+            mid,
+            kind: conv.kind,
+            fromName: me.display_name,
+            body: `${me.display_name} ${phrase}`,
+            kp_chat: convId,
+            muted: "0",
+          },
+          {
+            title: kind === "rec" ? "Screen recording alert" : "Screenshot alert",
+            body: `${me.display_name} ${phrase}`,
+            channel: "kp_messages_v2",
+          },
+        ),
+      );
+    }
+    ctx.waitUntil(
+      afterMessageChanged(env, db, convId, { id: mid, senderId: "", kind: "SYSTEM", alert: kind }),
+    );
+    return json({ ok: true, alerted: listeners.length, messageId: mid });
+  }
+
   if (convMatch && method === "DELETE") {
     const convId = convMatch[1]!;
     const { conv } = await requireMember(db, convId, uid);
@@ -11190,12 +11308,16 @@ type ConvMemberRow = {
   last_read_at: string | null;
   hidden?: number | null;
   hidden_key?: string | null;
+  // r71-18: the chat-privacy switches (see the schema comment).
+  priv_shot?: number | null;
+  priv_rec?: number | null;
+  priv_save?: number | null;
 };
 
 const CONV_COLS =
   "id, kind, title, owner_id, created_at, last_message_at, last_message, disappear_seconds, theme, hidden_json, avatar_url, avatar_version, request_from, private_group";
 const MEMBER_COLS =
-  "conv_id, user_id, role, muted, unread, last_read_at, hidden, hidden_key, muted_call, muted_msg";
+  "conv_id, user_id, role, muted, unread, last_read_at, hidden, hidden_key, muted_call, muted_msg, priv_shot, priv_rec, priv_save";
 
 /** r66: preview uses the existing newest-row query, never one fetch per chat. */
 type ConvPreviewRow = Pick<
@@ -11664,6 +11786,12 @@ function buildConvDetail(
   let meMutedMsg = false;
   let meHidden = false;
   let meHiddenKey: string | null = null;
+  // r71-18: my own three switches, plus — for a 1:1 chat — whether THEY allow
+  // me to save what they send here (their `priv_save`).
+  let meShot = false;
+  let meRec = false;
+  let meSave = true;
+  let otherSave: boolean | null = null;
   let unread = 0;
   // Owner round 30: in a 1:1 chat the two ARE contacts (privacy view), and a
   // switched-off read receipt (either side) hides the peer's read mark.
@@ -11709,6 +11837,7 @@ function buildConvDetail(
         solo && row.user_id !== uid && (!meReceipts || !receiptsOn(user)) ? null : row.last_read_at,
     });
     if (row.user_id !== uid && solo) other = memberUser;
+    if (row.user_id !== uid && solo) otherSave = Number(row.priv_save ?? 1) === 1;
     if (row.user_id === uid) {
       meMuted = row.muted === 1;
       // r69: both halves ride the row (the header's glyph, the hidden call
@@ -11717,6 +11846,9 @@ function buildConvDetail(
       meMutedMsg = (row.muted_msg ?? 0) === 1;
       meHidden = Number(row.hidden ?? 0) === 1;
       meHiddenKey = meHidden ? (row.hidden_key ?? null) : null;
+      meShot = Number(row.priv_shot ?? 0) === 1;
+      meRec = Number(row.priv_rec ?? 0) === 1;
+      meSave = Number(row.priv_save ?? 1) === 1;
       unread = row.unread;
     }
   }
@@ -11753,6 +11885,11 @@ function buildConvDetail(
     muted: meMuted,
     mutedCall: meMutedCall,
     mutedMsg: meMutedMsg,
+    // r71-18: the ⋮ → "Chat privacy" switches. `privacy` is MINE (what the
+    // sheet draws); `peerSave` is whether the other side lets me save the media
+    // they send here — what my Save buttons read.
+    privacy: { shot: meShot, rec: meRec, save: meSave },
+    peerSave: solo ? (otherSave ?? true) : true,
     // Owner round 31 (item 26): the caller hid this chat (their flag only).
     hidden: meHidden,
     // Owner round 33 (item 6): the hash of the key that reveals it (theirs only).

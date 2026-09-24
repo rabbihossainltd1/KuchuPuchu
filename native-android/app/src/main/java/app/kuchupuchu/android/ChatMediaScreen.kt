@@ -77,6 +77,9 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
         KpSecure.privatePeer(convSnap) ||
             (convSnap?.optBoolean("isGroup") == true && convSnap.optBoolean("privateGroup"))
     KpSecure.Guard(privateChat)
+    // r71-18: their "Media Save permission" withholds MY save of what THEY
+    // send here (my own uploads stay mine to save).
+    val peerSaveOk = convSnap?.optBoolean("peerSave", true) != false
     // Owner round 32 (item 46): the viewer's ⋮ sheet offers Forward here too.
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -88,7 +91,7 @@ fun ChatMediaScreen(nav: NavController, convId: String) {
             subtitle = viewerStamp(m.optString("createdAt")),
             onClose = { viewer = null },
             onForward = if (privateChat) null else ({ viewer = null; forwardMsg = m }),
-            canSave = !privateChat,
+            canSave = !privateChat && (m.optString("senderId") == Store.myId() || peerSaveOk),
             secure = privateChat,
         )
     }

@@ -2703,10 +2703,17 @@ const convBetween = (db, a, b) =>
     "utf8",
   );
   check(
-    "r30-1: chat ⋮ says View contact only for a phone-book person, else Add contact (prefilled)",
-    chat.includes('if (inBook) "View contact" else "Add contact"') &&
+    // r71-18 (owner item 18): the row never offers to ADD any more — a person
+    // in the phone book keeps "View contact", and the row beside it is Chat
+    // privacy. The newcontact route still exists for the profile screen.
+    "r30-1 → r71-18: the chat ⋮ opens a phone-book person (View contact) and offers Chat privacy — no Add contact row",
+    chat.includes(
+      'if (inBook) {\n                                KpSheetRow(Icons.Filled.Person, "View contact") {',
+    ) &&
       chat.includes('PhoneBook.entries.any { it.user?.optString("id") == otherUserId }') &&
-      chat.includes('nav.navigate("newcontact?name=$n&phone=$p")') &&
+      chat.includes('KpSheetRow(Icons.Filled.Lock, "Chat privacy") {') &&
+      !chat.includes('"Add contact"\n') &&
+      chat.includes("fun inBook") === false &&
       kpapp.includes('"newcontact?name={name}&phone={phone}"'),
   );
   const calls = readFileSync(
@@ -3101,7 +3108,10 @@ const convBetween = (db, a, b) =>
         chat.includes("KpSecure.Guard(privateChat)") &&
         // r32-17: a view-once photo / video rides the same guards.
         chat.includes("if (!echo && !privateChat && !isViewOnce(m)) {") &&
-        chat.includes("canSave = !privateChat && !once,") &&
+        chat.includes("canSave = !privateChat && !once &&") &&
+        chat.includes(
+          'viewerPhotos.getOrNull(viewerAt)?.optString("senderId") == Store.myId() || peerSaveOk',
+        ) &&
         chat.includes('.put("kpPrivate", privateChat)') &&
         kt("CallScreens.kt").includes("KpSecure.Guard(call.otherPrivate)") &&
         // r32-5b: a group call reads privateGroup instead — same field, two sources.
@@ -3118,7 +3128,11 @@ const convBetween = (db, a, b) =>
         // STILL gets neither Save nor Forward, and Delete stays reachable for
         // it because the ⋮ is a fixed bar seat now instead of a floating twin
         // the auto-hiding chrome could leave behind.
-        kt("MediaViewer.kt").includes("if (m != null && !privateClip && !saved) {") &&
+        // r71-18: a clip whose sender withheld saving keeps the ⋮ but never
+        // gets its Save row (noSaveClip).
+        kt("MediaViewer.kt").includes(
+          "if (m != null && !privateClip && !noSaveClip && !saved) {",
+        ) &&
         kt("MediaViewer.kt").includes("if (dest.exists() && dest.length() > 0L) {") &&
         kt("MediaViewer.kt").includes(
           'Icon(Icons.Filled.MoreVert, "More", tint = Color.White, modifier = Modifier.size(22.dp))',
@@ -3643,8 +3657,9 @@ const convBetween = (db, a, b) =>
             "r33-6: worker — members.hidden_key migration, MEMBER_COLS carries it, /hide writes hidden + hidden_key in one UPDATE (key only on a hide, trimmed, ≤128), the detail exposes hiddenKey for the caller only, the marker moves with it, /api/search joins members with hidden = 0",
             w.includes("`ALTER TABLE members ADD COLUMN hidden_key TEXT`,") &&
               w.includes("const MEMBER_COLS =") &&
+              // r71-18: the list gained the three chat-privacy columns.
               w.includes(
-                '"conv_id, user_id, role, muted, unread, last_read_at, hidden, hidden_key, muted_call, muted_msg";',
+                '"conv_id, user_id, role, muted, unread, last_read_at, hidden, hidden_key, muted_call, muted_msg, priv_shot, priv_rec, priv_save";',
               ) &&
               w.includes(
                 '"UPDATE members SET hidden = ?, hidden_key = ? WHERE conv_id = ? AND user_id = ?",',
@@ -6543,11 +6558,17 @@ const convBetween = (db, a, b) =>
         chat.includes(".fold(onSuccess = { true }, onFailure = { terminal(it) })") &&
         chat.includes("if (!ok) spent.remove(messageId)") &&
         chat.includes('onShown = if (once) ({ ViewOnce.spend(m.optString("id")) }) else null,') &&
-        chat.includes("canSave = !privateChat && !once,") &&
+        chat.includes("canSave = !privateChat && !once &&") &&
+        chat.includes(
+          'viewerPhotos.getOrNull(viewerAt)?.optString("senderId") == Store.myId() || peerSaveOk',
+        ) &&
         chat.includes("secure = privateChat || once,") &&
         chat.includes("if (privateChat || once) {\n                        null") &&
         chat.includes('.put("kpPrivate", privateChat || once)') &&
-        chat.includes('.also { if (once) it.put("kpOnce", true) }') &&
+        // the sender's own copy never needs kpOnce — the RECIPIENT's opening
+        // is what spends the row (the older `if (once)` shape the comment
+        // recorded is gone with the comment).
+        chat.includes('.also { if (once && !isMe) it.put("kpOnce", true) }') &&
         chat.includes("if (!echo && !privateChat && !isViewOnce(m)) {") &&
         chat.includes("if (!privateChat && selectedMessages().none { isViewOnce(it) }) {") &&
         // r71-20: the quote label is shared (a once-TEXT reads "Message ·
